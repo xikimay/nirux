@@ -331,7 +331,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             return canFind
         }
         if menuItem.action == #selector(importBrowserCookies(_:)) {
-            return shell.map { !$0.sideEffects.cookieBrowsers().isEmpty } ?? false
+            // Disabled while an import runs: a second one would wait behind it.
+            return shell.map { !$0.isImportingCookies && !$0.sideEffects.cookieBrowsers().isEmpty } ?? false
         }
         if menuItem.action == #selector(selectSpaceByNumber(_:)) {
             return menuItem.tag <= (shell?.sidebar.lastProfiles.count ?? 0)

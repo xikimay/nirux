@@ -391,13 +391,18 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
             // Past three profiles, a pop-up menu instead of a button each.
             harness.cookieImportError = nil
-            let many = (1...5).map { UIFlowHarness.cookieSource(.chrome, "Person \($0)", folder: "Profile \($0)") }
+            let long = "Alexandra Martinez-Rodriguez (alexandra.martinez@verylongcompany2.example)"
+            let many = (1...4).map { UIFlowHarness.cookieSource(.chrome, "Person \($0)", folder: "Profile \($0)") }
+                + [UIFlowHarness.cookieSource(.chrome, long, folder: "Profile 5")]
             harness.cookieSources = many
             harness.alertMenuChoices = [3]
             harness.runPaletteCommand("Import Browser Cookies")
             harness.waitUntil("the import from the menu") { harness.alerts.count == 6 }
             XCTAssertEqual(harness.alerts.suffix(2), ["Import Cookies", "Cookies Imported"])
             XCTAssertEqual(harness.cookieImports.last, many[3])
+            // A long name keeps its end, which tells alike names apart.
+            let longTitle = try XCTUnwrap(harness.alertMenuTitles.last?.last)
+            XCTAssertTrue(longTitle.contains("…") && longTitle.hasSuffix("verylongcompany2.example)"), longTitle)
 
             // A browser that ran here but has no cookie file: the click says
             // so rather than doing nothing.
@@ -408,16 +413,18 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(harness.alerts.last, "Import Failed")
             XCTAssertTrue(harness.alertDetails.last?.contains("no profile with cookies in Edge") == true, "\(harness.alertDetails)")
 
-            // One import at a time: a second click while the first reads
-            // the profiles is ignored.
+            // One import at a time: while one reads the profiles, the
+            // command leaves the palette and another call is ignored.
             harness.offeredBrowsers = nil
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             let importsBefore = harness.cookieImports.count
             harness.runPaletteCommand("Import Browser Cookies")
-            harness.runPaletteCommand("Import Browser Cookies")
+            XCTAssertFalse(harness.paletteCommandTitles().contains("Import Browser Cookies"))
+            harness.shell.importBrowserCookies()
             harness.waitUntil("the import result") { harness.alerts.count >= 8 && !harness.shell.isImportingCookies }
             XCTAssertEqual(harness.alerts.count, 8)
             XCTAssertEqual(harness.cookieImports.count, importsBefore + 1)
+            XCTAssertTrue(harness.paletteCommandTitles().contains("Import Browser Cookies"))
         }
     }
 

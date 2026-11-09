@@ -55,6 +55,8 @@ final class UIFlowHarness {
     var alertResponses: [NSApplication.ModalResponse] = []
     /// Items to pick, in order, in the next alerts that show a pop-up menu.
     var alertMenuChoices: [Int] = []
+    /// The items of every alert's pop-up menu, in order.
+    private(set) var alertMenuTitles: [[String]] = []
     /// Links opened in the default browser, in order.
     private(set) var openedURLs: [URL] = []
     /// Folders the folder picker double returns, in order; Cancel once
@@ -224,8 +226,9 @@ final class UIFlowHarness {
             guard let self else { return .alertFirstButtonReturn }
             alerts.append(alert.messageText)
             alertDetails.append(alert.informativeText)
-            if let menu = alert.accessoryView as? NSPopUpButton, !alertMenuChoices.isEmpty {
-                menu.selectItem(at: alertMenuChoices.removeFirst())
+            if let menu = alert.accessoryView as? NSPopUpButton {
+                alertMenuTitles.append(menu.itemTitles)
+                if !alertMenuChoices.isEmpty { menu.selectItem(at: alertMenuChoices.removeFirst()) }
             }
             return alertResponses.isEmpty ? .alertFirstButtonReturn : alertResponses.removeFirst()
         }

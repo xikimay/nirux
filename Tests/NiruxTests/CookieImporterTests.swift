@@ -96,14 +96,17 @@ final class CookieImporterTests: XCTestCase {
     /// Neither the profile list nor the folder can be read, as when macOS
     /// blocks the browser's folder: the browser is named, not a profile it
     /// may not have.
+    /// Unless Default's cookie file answers a stat: then that profile.
     func testABrowserWhoseProfilesNiruxCannotSeeFailsWithoutAProfile() throws {
         try XCTSkipIf(getuid() == 0, "root reads any folder")
         let arc = try makeUnlistableBrowser()
+        let brave = try makeUnlistableBrowser(at: "BraveSoftware/Brave-Browser", withDefaultCookies: true)
 
         let sources = CookieImporter.availableSources(home: root)
-        XCTAssertEqual(sources.map(\.browser), [.arc])
-        XCTAssertNil(sources.first?.profileName)
-        XCTAssertThrowsError(try CookieImporter.readCookies(from: try XCTUnwrap(sources.first)) { "peanuts" }) { error in
+        XCTAssertEqual(sources.map(\.browser), [.brave, .arc])
+        XCTAssertEqual(sources.first, .init(browser: .brave, profileFolder: "Default", profileName: "Default", cookiesPath: brave + "/Default/Cookies"))
+        XCTAssertNil(sources.last?.profileName)
+        XCTAssertThrowsError(try CookieImporter.readCookies(from: try XCTUnwrap(sources.last)) { "peanuts" }) { error in
             XCTAssertEqual((error as? CookieImporter.ImportError)?.failure, .unreadable(path: arc + "/Local State", errno: EACCES))
             XCTAssertTrue(error.localizedDescription.hasPrefix("Nirux couldn’t import cookies from Arc. "), error.localizedDescription)
         }
@@ -234,6 +237,16 @@ final class CookieImporterTests: XCTestCase {
         }
     }
 
+    /// Leftovers of an older Keychain key beside the current one, before
+    /// version 24: the cookies the current key reads still import.
+    func testOlderKeyLeftoversDoNotBlockTheRestBeforeVersion24() throws {
+        let good = (0..<20).map { Row(host: ".good\($0).com", name: "good", secret: "g\($0)") }
+        let old = (0..<60).map { Row(host: ".old\($0).com", name: "old", secret: "o\($0)", password: "almonds") }
+        let read = try CookieImporter.readCookies(from: makeSource(good + old, version: 23)) { "peanuts" }
+        XCTAssertEqual(read.cookies.filter { $0.name == "good" }.map(\.value), (0..<20).map { "g\($0)" })
+        XCTAssertGreaterThanOrEqual(read.undecryptable, 55)
+    }
+
     /// A value whose hash checks out but isn't text: that cookie is left
     /// out, the key isn't blamed and the others still import.
     func testAValueThatIsNotTextIsNotAWrongKey() throws {
@@ -343,12 +356,13 @@ final class CookieImporterTests: XCTestCase {
 
     /// Arc with a Local State Nirux can't read, in a folder it can enter but
     /// not list: what a macOS block looks like, with EACCES for EPERM.
-    private func makeUnlistableBrowser() throws -> String {
-        let arc = root + "/Library/Application Support/Arc/User Data"
-        try write("{}", to: arc + "/Local State")
-        XCTAssertEqual(chmod(arc + "/Local State", 0), 0)
-        try lock(arc, mode: 0o300)
-        return arc
+    private func makeUnlistableBrowser(at folder: String = "Arc/User Data", withDefaultCookies: Bool = false) throws -> String {
+        let browser = root + "/Library/Application Support/" + folder
+        if withDefaultCookies { try write("", to: browser + "/Default/Cookies") }
+        try write("{}", to: browser + "/Local State")
+        XCTAssertEqual(chmod(browser + "/Local State", 0), 0)
+        try lock(browser, mode: 0o300)
+        return browser
     }
 
     private func openDatabase(at path: String) throws -> OpaquePointer {

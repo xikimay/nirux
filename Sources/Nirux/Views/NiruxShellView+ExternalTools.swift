@@ -661,13 +661,10 @@ extension NiruxShellView {
             let menu = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
             // Through the menu: addItem(withTitle:) drops a repeated title.
             for source in sources {
-                menu.menu?.addItem(NSMenuItem(title: source.title, action: nil, keyEquivalent: ""))
+                menu.menu?.addItem(NSMenuItem(title: Self.middleTruncated(source.title), action: nil, keyEquivalent: ""))
             }
-            // As wide as the longest title, within reason; a name too long
-            // loses its middle, not the end that tells alike names apart.
             menu.sizeToFit()
-            menu.frame.size.width = min(max(menu.frame.width, 280), 480)
-            (menu.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingMiddle
+            menu.frame.size.width = max(menu.frame.width, 280)
             alert.accessoryView = menu
             alert.addButton(withTitle: "Import")
             alert.addButton(withTitle: "Cancel")
@@ -675,6 +672,15 @@ extension NiruxShellView {
             index = menu.indexOfSelectedItem
         }
         return sources.indices.contains(index) ? sources[index] : nil
+    }
+
+    /// A title too long for the pop-up loses its middle, not the end that
+    /// tells alike names apart. By hand: the pop-up truncates at the end
+    /// whatever its line break mode or the item's paragraph style.
+    static func middleTruncated(_ title: String, limit: Int = 64) -> String {
+        guard title.count > limit else { return title }
+        let kept = limit - 1
+        return title.prefix(kept / 2) + "…" + title.suffix(kept - kept / 2)
     }
 
     private func runCookieImport(from source: CookieImporter.Source) async {

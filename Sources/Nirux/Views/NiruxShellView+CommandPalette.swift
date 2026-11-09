@@ -10,8 +10,9 @@ extension NiruxShellView {
         ) { [weak self] in
             self?.commandPalette?.switchToURLMode()
         }
-        // Offered only with a Chromium browser to import from.
-        let browsers = sideEffects.cookieBrowsers()
+        // Offered only with a Chromium browser to import from, and not while
+        // an import runs.
+        let browsers = isImportingCookies ? [] : sideEffects.cookieBrowsers()
         let importCookies = browsers.isEmpty ? [] : [
             PaletteAction(
                 icon: .symbol("key"), title: "Import Browser Cookies",

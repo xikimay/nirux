@@ -198,6 +198,9 @@ enum CookieImporter {
                 folders = try profileFolders(in: root)
             } catch let failure as Failure where !failure.isMissingFile {
                 listingFailure = failure
+                // No list at all: Default still answers a stat, as it did to
+                // offer the browser.
+                folders = ["Default"]
             } catch {}
         }
         let found = folders.compactMap { folder -> Source? in
@@ -607,8 +610,9 @@ enum CookieImporter {
         // The Keychain's key isn't the one the browser encrypted them with:
         // from version 24, not one domain hash matched; before, nothing
         // checks a value and about 1% of a wrong key's output reads as
-        // text, so most values failing says it.
-        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 2 < encrypted { throw Failure.undecryptable }
+        // text, so fewer than 10% reading says it. Leftovers of an older key
+        // beside the current one still let the rest through.
+        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 10 < encrypted { throw Failure.undecryptable }
         return Read(cookies: cookies, undecryptable: encrypted - decrypted)
     }
 
