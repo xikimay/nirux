@@ -41,19 +41,18 @@ extension WorktreeCleanup {
         // A merged one holding the tip, none from this repository: maybe
         // this branch's, from a repository since renamed or deleted, so not
         // "nothing to clean up yet". Any other one from a fork that used the
-        // same branch name (`patch-1`) says nothing about this branch.
-        let mergedElsewhere = json.filter { candidate in
+        // same branch name (`patch-1`) says nothing about this branch. Asked
+        // only when this repository has none, up to the first one.
+        let mergedElsewhere = candidates.isEmpty && json.contains { candidate in
             guard (candidate["state"] as? String)?.uppercased() == "MERGED",
                   let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
             else { return false }
             return headOid == tip || ancestry(of: tip, in: headOid, at: worktree.path, tools: tools) == .contained
         }
-        if candidates.isEmpty, !mergedElsewhere.isEmpty {
-            let found = mergedElsewhere.count == 1
-                ? "1 merged pull request" : "\(mergedElsewhere.count) merged pull requests"
+        if mergedElsewhere {
             return (nil, [
-                "\(found) for \(branch), none from \(repository.owner)/\(repository.name) "
-                    + "(a fork's, or the repository was renamed or deleted)."
+                "A merged pull request for \(branch) holds its tip, but none comes from "
+                    + "\(repository.owner)/\(repository.name) (a fork's, or the repository was renamed or deleted)."
             ], nil)
         }
         return verdict(branch: branch, tip: tip, candidates: candidates) { headOid in

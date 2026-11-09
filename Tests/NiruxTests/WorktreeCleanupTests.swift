@@ -256,11 +256,15 @@ final class WorktreeCleanupTests: XCTestCase {
         // Same branch name, merged from someone's fork: not "no pull request".
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree), owner: "someone")])
         let report = try report()
-        XCTAssertEqual(
-            report.problems,
-            ["1 merged pull request for feat/x, none from acme/widgets (a fork's, or the repository was renamed or deleted)."]
-        )
+        XCTAssertEqual(report.problems, [
+            "A merged pull request for feat/x holds its tip, but none comes from acme/widgets "
+                + "(a fork's, or the repository was renamed or deleted)."
+        ])
         XCTAssertNil(report.notMerged)
+        // One whose head holds the tip, too.
+        let child = try git(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "fork commit"], at: worktree)
+        try setPullRequests([pullRequest(15, "MERGED", head: child, owner: "someone")])
+        XCTAssertNil(try self.report().notMerged)
 
         // A fork's open one, or a merged one without this tip, from a branch
         // of the same name: not this branch's.
