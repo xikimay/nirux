@@ -12,9 +12,8 @@ final class ColumnState {
     let view: NSView
     var terminalView: TerminalView?
     /// A plain shell restored at launch: it prints only its prompt, which
-    /// waits for the surface and is redrawn on the resize when first shown,
-    /// so it needs no surface while its space is hidden (see
-    /// `runsWithoutSize`).
+    /// it redraws on the resize when first shown, so it needs no surface
+    /// while its space is hidden (see `runsWithoutSize`).
     var isRestoredShell = false
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
