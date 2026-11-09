@@ -651,7 +651,7 @@ extension NiruxShellView {
                 let result = try await importCookies(source)
                 let alert = NSAlert()
                 alert.messageText = "Cookies Imported"
-                let failNote = result.failed > 0 ? " \(result.failed) failed." : ""
+                let failNote = result.failed > 0 ? " \(result.failed) couldn’t be imported." : ""
                 alert.informativeText = "Imported \(result.imported) cookies from \(result.source.phrase).\(failNote)"
                 _ = runModal(alert)
             } catch {

@@ -43,24 +43,30 @@ enum CookieImporter {
         }
     }
 
-    /// One browser profile that has a cookie database.
+    /// A browser profile with a cookie database, or one Nirux can't read:
+    /// the import then fails with the reason instead of the profile
+    /// vanishing from the list.
     struct Source: Equatable, Sendable {
         let browser: Browser
-        /// The profile's folder: "Default", "Profile 2".
-        let profileFolder: String
+        /// The profile's folder: "Default", "Profile 2". Nil when Nirux
+        /// can't see the browser's profiles at all.
+        let profileFolder: String?
         /// The profile's name, as the browser shows it.
-        let profileName: String
+        let profileName: String?
         let cookiesPath: String
+        /// Why it can't be read, found while listing it.
+        var blocked: Failure? = nil
 
         /// "Chrome — Work", for the browser choice.
-        var title: String { "\(browser.rawValue) — \(profileName)" }
+        var title: String { profileName.map { "\(browser.rawValue) — \($0)" } ?? browser.rawValue }
 
         /// "Chrome, profile “Work”", inside a sentence.
-        var phrase: String { "\(browser.rawValue), profile “\(profileName)”" }
+        var phrase: String { profileName.map { "\(browser.rawValue), profile “\($0)”" } ?? browser.rawValue }
     }
 
     struct ImportResult: Sendable {
         let imported: Int
+        /// Cookies that didn't decrypt or that WebKit refused.
         let failed: Int
         let source: Source
     }
@@ -76,19 +82,26 @@ enum CookieImporter {
         let isHttpOnly: Bool
     }
 
+    /// What reading a profile found.
+    struct Read: Equatable, Sendable {
+        var cookies: [RawCookie]
+        /// Encrypted cookies whose value didn't decrypt, left out.
+        var undecryptable: Int
+    }
+
     /// Import cookies from a browser profile into WKWebView's cookie store.
     @MainActor
     static func importCookies(from source: Source, into dataStore: WKWebsiteDataStore) async throws -> ImportResult {
         // Off the main thread: the read, and the Keychain prompt's wait.
-        let cookies = try await Task.detached {
+        let read = try await Task.detached {
             try readCookies(from: source) { try keychainPassword(for: source.browser) }
         }.value
 
         var imported = 0
-        var failed = 0
+        var failed = read.undecryptable
         let cookieStore = dataStore.httpCookieStore
 
-        for cookie in cookies {
+        for cookie in read.cookies {
             var props: [HTTPCookiePropertyKey: Any] = [
                 .domain: cookie.domain,
                 .name: cookie.name,
@@ -115,20 +128,27 @@ enum CookieImporter {
         return ImportResult(imported: imported, failed: failed, source: source)
     }
 
-    /// Reads and decrypts a profile's cookies. The database is read into
-    /// memory, never copied into the temporary folder, so a failure names
-    /// the real cause: a cookie file macOS won't let Nirux read used to come
-    /// out as Foundation's "you don't have permission to access “T”", the
-    /// temporary folder. The Keychain is asked at the first encrypted
-    /// cookie: no prompt for a database that can't be read, or that has
-    /// nothing to decrypt.
-    static func readCookies(from source: Source, password: () throws -> String) throws -> [RawCookie] {
+    /// Reads and decrypts a profile's cookies, from a snapshot of the
+    /// database (see `Snapshot`). A snapshot taken as the browser writes can
+    /// still come out damaged: one more try before saying so. The Keychain
+    /// is asked once, at the first encrypted cookie: no prompt for a
+    /// database that can't be read, or that has nothing to decrypt.
+    static func readCookies(from source: Source, password: () throws -> String) throws -> Read {
+        var asked: String?
+        func passwordOnce() throws -> String {
+            if let asked { return asked }
+            let answer = try password()
+            asked = answer
+            return answer
+        }
         do {
-            let db = try openInMemory(readFile(at: source.cookiesPath))
-            defer { sqlite3_close(db) }
-            let statement = try prepareCookieQuery(db)
-            defer { sqlite3_finalize(statement) }
-            return try readRows(statement, of: db, hashesDomain: schemaVersion(of: db) >= 24, password: password)
+            if let blocked = source.blocked { throw blocked }
+            do {
+                return try readSnapshot(of: source.cookiesPath, password: passwordOnce)
+            } catch let failure as Failure where failure.isDamage {
+                Thread.sleep(forTimeInterval: 0.2)
+                return try readSnapshot(of: source.cookiesPath, password: passwordOnce)
+            }
         } catch let failure as Failure {
             throw ImportError(source: source, failure: failure)
         }
@@ -136,15 +156,17 @@ enum CookieImporter {
 
     // MARK: - Profiles
 
-    /// The browsers to offer the import for. Only checks that files exist:
-    /// reading them could raise a macOS privacy prompt as the menu or the
-    /// palette opens, before the user asked for anything.
-    static func installedBrowsers(home: String = NSHomeDirectory()) -> [Browser] {
+    /// The browsers to offer the import for: those a click would find
+    /// something in, a profile or a reason. A Default profile's cookie file
+    /// answers without reading anything; only without one is the profile
+    /// list read, since reading could raise a macOS privacy prompt as the
+    /// menu or the palette opens.
+    static func browsersToOffer(home: String = NSHomeDirectory()) -> [Browser] {
         Browser.allCases.filter { browser in
             let root = userDataRoot(of: browser, home: home)
-            return ["/Local State", "/Default/Cookies", "/Default/Network/Cookies"].contains {
-                FileManager.default.fileExists(atPath: root + $0)
-            }
+            guard FileManager.default.fileExists(atPath: root) else { return false }
+            if case .found = cookieFile(inProfile: root + "/Default") { return true }
+            return !sources(of: browser, home: home).isEmpty
         }
     }
 
@@ -160,49 +182,87 @@ enum CookieImporter {
 
     private static func sources(of browser: Browser, home: String) -> [Source] {
         let root = userDataRoot(of: browser, home: home)
-        let localState: Data?
+        var profiles = LocalStateProfiles(data: nil)
+        var localStateFailure: Failure?
         do {
-            localState = try readFile(at: root + "/Local State")
-        } catch Failure.unreadable(_, EPERM) {
-            // macOS keeps Nirux out of the browser's folder, profile list
-            // included: the import names the block instead of finding nothing.
-            // Looking files up still works there.
-            let cookies = cookiesPath(inProfile: root + "/Default") ?? root + "/Default/Cookies"
-            return [Source(browser: browser, profileFolder: "Default", profileName: "Default", cookiesPath: cookies)]
-        } catch {
-            localState = nil
+            profiles = LocalStateProfiles(data: try readFile(at: root + "/Local State"))
+        } catch let failure as Failure where !failure.isMissingFile {
+            localStateFailure = failure
+        } catch {}
+
+        var folders = profiles.ranked
+        if folders.isEmpty {
+            do {
+                folders = try profileFolders(in: root)
+            } catch let failure as Failure where !failure.isMissingFile {
+                // Neither the profile list nor the folder: name the browser
+                // and why, rather than a profile it may not have.
+                return [Source(
+                    browser: browser, profileFolder: nil, profileName: nil, cookiesPath: root, blocked: localStateFailure ?? failure
+                )]
+            } catch {
+                return []
+            }
         }
-        let profiles = LocalStateProfiles(data: localState)
-        // Without a profile list, the folders Chromium names for profiles.
-        let folders = profiles.ranked.isEmpty ? scannedProfileFolders(in: root) : profiles.ranked
         return folders.compactMap { folder in
-            guard let cookies = cookiesPath(inProfile: root + "/" + folder) else { return nil }
-            return Source(
-                browser: browser, profileFolder: folder, profileName: profiles.names[folder] ?? folder, cookiesPath: cookies
-            )
+            let name = profiles.names[folder] ?? folder
+            switch cookieFile(inProfile: root + "/" + folder) {
+            case .found(let path):
+                return Source(browser: browser, profileFolder: folder, profileName: name, cookiesPath: path)
+            case .unreachable(let failure):
+                return Source(
+                    browser: browser, profileFolder: folder, profileName: name, cookiesPath: root + "/" + folder + "/Cookies",
+                    blocked: failure
+                )
+            case .missing:
+                return nil
+            }
         }
+    }
+
+    private enum CookieFile {
+        case found(String)
+        /// Its folder can't be looked into.
+        case unreachable(Failure)
+        case missing
     }
 
     /// Chromium moved the database into Network/ on some platforms; either
     /// file can stay behind, stale: the last written one.
-    private static func cookiesPath(inProfile folder: String) -> String? {
-        let files = ["/Network/Cookies", "/Cookies"].compactMap { name -> (path: String, modified: Date)? in
-            let path = folder + name
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
-            return (path, attributes[.modificationDate] as? Date ?? .distantPast)
+    private static func cookieFile(inProfile folder: String) -> CookieFile {
+        var newest: (path: String, modified: Double)?
+        var unreachable: Failure?
+        for path in [folder + "/Network/Cookies", folder + "/Cookies"] {
+            var info = stat()
+            guard stat(path, &info) == 0 else {
+                if errno != ENOENT, errno != ENOTDIR { unreachable = .unreadable(path: path, errno: errno) }
+                continue
+            }
+            let modified = Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9
+            if modified > newest?.modified ?? -.infinity { newest = (path, modified) }
         }
-        return files.max { $0.modified < $1.modified }?.path
+        if let newest { return .found(newest.path) }
+        return unreachable.map { .unreachable($0) } ?? .missing
     }
 
-    private static func scannedProfileFolders(in root: String) -> [String] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+    /// Without a profile list, the folders Chromium names for profiles.
+    /// opendir(3), not FileManager: its errors carry an OSStatus (-43 for a
+    /// missing folder), not the errno that tells a block from an absence.
+    private static func profileFolders(in root: String) throws -> [String] {
+        guard let directory = opendir(root) else { throw Failure.unreadable(path: root, errno: errno) }
+        defer { closedir(directory) }
+        var names: [String] = []
+        while let entry = readdir(directory) {
+            let length = Int(entry.pointee.d_namlen)
+            names.append(withUnsafeBytes(of: entry.pointee.d_name) { String(decoding: $0.prefix(length), as: UTF8.self) })
+        }
         let profiles = names.filter { $0.hasPrefix("Profile ") }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        return ["Default"] + profiles
+        return (names.contains("Default") ? ["Default"] : []) + profiles
     }
 
     /// The profile list in the browser's Local State file.
     struct LocalStateProfiles {
-        /// Profile folder → name.
+        /// Profile folder → name, told apart when two are alike.
         var names: [String: String] = [:]
         /// Profile folders, last used first, then in the browser's order.
         var ranked: [String] = []
@@ -224,10 +284,15 @@ enum CookieImporter {
                 accounts[folder] = text("user_name")
             }
             // Two profiles with one name, say two accounts of one person:
-            // tell them apart by account, else by folder.
-            let counts = Dictionary(names.values.map { ($0, 1) }, uniquingKeysWith: +)
-            for (folder, name) in names where counts[name, default: 0] > 1 {
+            // tell them apart by account; one name and one account, by
+            // folder.
+            let bare = names
+            for (folder, name) in bare where Self.count(name, in: bare) > 1 {
                 names[folder] = "\(name) (\(accounts[folder] ?? folder))"
+            }
+            let byAccount = names
+            for (folder, label) in byAccount where Self.count(label, in: byAccount) > 1 {
+                names[folder] = "\(bare[folder] ?? folder) (\(folder))"
             }
             let preferred = [profile["last_used"] as? String].compactMap { $0 }
                 + (profile["last_active_profiles"] as? [String] ?? [])
@@ -238,6 +303,10 @@ enum CookieImporter {
             for folder in preferred where names[folder] != nil && !ranked.contains(folder) {
                 ranked.append(folder)
             }
+        }
+
+        private static func count(_ label: String, in names: [String: String]) -> Int {
+            names.values.filter { $0 == label }.count
         }
     }
 
@@ -262,7 +331,7 @@ enum CookieImporter {
 
     // MARK: - PBKDF2
 
-    private static func pbkdf2(password: String) -> Data? {
+    private static func pbkdf2(password: String) throws -> Data {
         let salt = Data("saltysalt".utf8)
         let keyLen = 16
         var key = Data(count: keyLen)
@@ -285,7 +354,8 @@ enum CookieImporter {
                 }
             }
         }
-        return status == kCCSuccess ? key : nil
+        guard status == kCCSuccess else { throw Failure.keyDerivation(status) }
+        return key
     }
 
     // MARK: - Decryption
@@ -325,7 +395,6 @@ enum CookieImporter {
 
         guard status == CCCryptorStatus(kCCSuccess) else { return nil }
         plain.count = outLen
-
         if hashesDomain {
             guard plain.count >= 32 else { return nil }
             plain = plain.dropFirst(32)
@@ -335,6 +404,76 @@ enum CookieImporter {
 
     // MARK: - SQLite
 
+    /// A private copy of a browser's database, in a folder of Nirux's own:
+    /// its WAL or rollback journal first, then the database, each an
+    /// instant APFS clone. An unfinished write thus comes with the journal
+    /// that undoes it, and recent commits still in the WAL come along;
+    /// SQLite applies both when it opens the copy. The database is opened
+    /// before anything else, so a file Nirux may not read fails as itself:
+    /// it used to come out as the copy's folder, Foundation's "you don't
+    /// have permission to access “T”".
+    private struct Snapshot {
+        let folder: String
+        var database: String { folder + "/Cookies" }
+
+        init(of path: String) throws {
+            let source = open(path, O_RDONLY | O_CLOEXEC)
+            guard source >= 0 else { throw Failure.unreadable(path: path, errno: errno) }
+            defer { close(source) }
+            folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-cookies-\(UUID().uuidString)").path
+            guard mkdir(folder, 0o700) == 0 else { throw Failure.temporaryCopy(path: folder, errno: errno) }
+            do {
+                for suffix in ["-wal", "-journal"] {
+                    let companion = open(path + suffix, O_RDONLY | O_CLOEXEC)
+                    if companion < 0, errno == ENOENT { continue }
+                    guard companion >= 0 else { throw Failure.unreadable(path: path + suffix, errno: errno) }
+                    defer { close(companion) }
+                    try Self.copy(companion, to: database + suffix)
+                }
+                try Self.copy(source, to: database)
+            } catch {
+                delete()
+                throw error
+            }
+        }
+
+        func delete() {
+            try? FileManager.default.removeItem(atPath: folder)
+        }
+
+        /// An APFS clone, or a byte copy where the volume can't clone.
+        /// Writable: SQLite rolls a journal back into the copy.
+        private static func copy(_ descriptor: Int32, to destination: String) throws {
+            if fclonefileat(descriptor, AT_FDCWD, destination, 0) != 0 {
+                guard errno == ENOTSUP || errno == EXDEV else { throw Failure.temporaryCopy(path: destination, errno: errno) }
+                let target = open(destination, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+                guard target >= 0 else { throw Failure.temporaryCopy(path: destination, errno: errno) }
+                defer { close(target) }
+                guard fcopyfile(descriptor, target, nil, copyfile_flags_t(COPYFILE_DATA)) == 0 else {
+                    throw Failure.temporaryCopy(path: destination, errno: errno)
+                }
+            }
+            chmod(destination, 0o600)
+        }
+    }
+
+    private static func readSnapshot(of path: String, password: () throws -> String) throws -> Read {
+        let snapshot = try Snapshot(of: path)
+        defer { snapshot.delete() }
+        var connection: OpaquePointer?
+        // Read-write, on Nirux's own copy: SQLite rolls back an unfinished
+        // write and applies the WAL.
+        guard sqlite3_open_v2(snapshot.database, &connection, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db = connection else {
+            let failure = databaseFailure(connection)
+            sqlite3_close(connection)
+            throw failure
+        }
+        defer { sqlite3_close(db) }
+        let statement = try prepareCookieQuery(db)
+        defer { sqlite3_finalize(statement) }
+        return try readRows(statement, of: db, hashesDomain: schemaVersion(of: db) >= 24, password: password)
+    }
+
     /// The whole file, or the errno that stopped reading it.
     private static func readFile(at path: String) throws -> Data {
         let descriptor = open(path, O_RDONLY | O_CLOEXEC)
@@ -343,48 +482,27 @@ enum CookieImporter {
         do {
             return try handle.readToEnd() ?? Data()
         } catch {
-            let cocoa = error as NSError
-            let posix = cocoa.domain == NSPOSIXErrorDomain ? cocoa : cocoa.userInfo[NSUnderlyingErrorKey] as? NSError
-            throw Failure.unreadable(path: path, errno: posix.map { Int32($0.code) } ?? EIO)
+            throw Failure.unreadable(path: path, errno: posixCode(of: error))
         }
     }
 
-    /// A read-only connection to a database held in memory. The browser
-    /// keeps its file locked, hence the copy.
-    private static func openInMemory(_ data: Data) throws -> OpaquePointer {
-        guard !data.isEmpty else { throw Failure.database("the file is empty") }
-        var connection: OpaquePointer?
-        guard sqlite3_open_v2(":memory:", &connection, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db = connection else {
-            sqlite3_close(connection)
-            throw Failure.database("SQLite can’t open a database in memory")
-        }
-        guard let buffer = sqlite3_malloc64(UInt64(data.count))?.assumingMemoryBound(to: UInt8.self) else {
-            sqlite3_close(db)
-            throw Failure.database("not enough memory to read it")
-        }
-        data.copyBytes(to: buffer, count: data.count)
-        // A database in WAL mode can't be read from memory: mark it as a
-        // rollback journal one (bytes 18 and 19 of the header).
-        if data.count > 19, buffer[18] == 2 || buffer[19] == 2 {
-            buffer[18] = 1
-            buffer[19] = 1
-        }
-        let flags = UInt32(SQLITE_DESERIALIZE_FREEONCLOSE | SQLITE_DESERIALIZE_READONLY)
-        guard sqlite3_deserialize(db, "main", buffer, Int64(data.count), Int64(data.count), flags) == SQLITE_OK else {
-            let message = String(cString: sqlite3_errmsg(db))
-            sqlite3_close(db)
-            throw Failure.database(message)
-        }
-        return db
+    private static func posixCode(of error: Error) -> Int32 {
+        let cocoa = error as NSError
+        let posix = cocoa.domain == NSPOSIXErrorDomain ? cocoa : cocoa.userInfo[NSUnderlyingErrorKey] as? NSError
+        return posix.map { Int32($0.code) } ?? EIO
+    }
+
+    private static func databaseFailure(_ db: OpaquePointer?) -> Failure {
+        .database(code: sqlite3_extended_errcode(db) & 0xFF, message: String(cString: sqlite3_errmsg(db)))
     }
 
     private static func prepareCookieQuery(_ db: OpaquePointer) throws -> OpaquePointer {
         let sql = "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            let message = String(cString: sqlite3_errmsg(db))
+            let failure = databaseFailure(db)
             sqlite3_finalize(statement)
-            throw Failure.database(message)
+            throw failure
         }
         return statement
     }
@@ -401,14 +519,14 @@ enum CookieImporter {
 
     private static func readRows(
         _ statement: OpaquePointer, of db: OpaquePointer, hashesDomain: Bool, password: () throws -> String
-    ) throws -> [RawCookie] {
+    ) throws -> Read {
         func text(_ column: Int32) -> String {
             sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
         }
         var derivedKey: Data?
         func key() throws -> Data {
             if let derivedKey { return derivedKey }
-            guard let key = pbkdf2(password: try password()) else { throw Failure.undecryptable }
+            let key = try pbkdf2(password: password())
             derivedKey = key
             return key
         }
@@ -439,27 +557,45 @@ enum CookieImporter {
                 isSecure: sqlite3_column_int(statement, 6) != 0, isHttpOnly: sqlite3_column_int(statement, 7) != 0
             ))
         }
-        // A page that doesn't read, say one the browser was writing: not a
-        // partial import passed off as the whole.
-        guard step == SQLITE_DONE else { throw Failure.database(String(cString: sqlite3_errmsg(db))) }
+        // A page that doesn't read: not a partial import passed off as the
+        // whole.
+        guard step == SQLITE_DONE else { throw databaseFailure(db) }
         // Not a single one: the Keychain's key isn't the one the browser
         // encrypted them with.
         if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
-        return cookies
+        return Read(cookies: cookies, undecryptable: encrypted - decrypted)
     }
 
     // MARK: - Errors
 
     /// What stopped an import, before it knows which profile it was.
-    enum Failure: Error, Equatable {
-        /// open(2) or read(2) of the cookie file failed with this errno.
+    enum Failure: Error, Equatable, Sendable {
+        /// open(2), stat(2), read(2) or a folder listing failed with this
+        /// errno.
         case unreadable(path: String, errno: Int32)
+        /// Nirux couldn't make its private copy of the database there.
+        case temporaryCopy(path: String, errno: Int32)
         /// The Keychain refused the browser's key with this status.
         case keychain(OSStatus)
-        /// SQLite couldn't read the database: its message.
-        case database(String)
+        /// CommonCrypto couldn't derive the key from the Keychain's
+        /// password.
+        case keyDerivation(Int32)
+        /// SQLite couldn't read the database: its primary result code and
+        /// message.
+        case database(code: Int32, message: String)
         /// None of the encrypted cookies decrypts with the Keychain's key.
         case undecryptable
+
+        /// A damaged copy, as when the browser wrote while it was taken.
+        var isDamage: Bool {
+            if case .database(let code, _) = self { return code == SQLITE_CORRUPT || code == SQLITE_NOTADB }
+            return false
+        }
+
+        var isMissingFile: Bool {
+            if case .unreadable(_, let code) = self { return code == ENOENT || code == ENOTDIR }
+            return false
+        }
     }
 
     struct ImportError: LocalizedError, Equatable {
@@ -487,7 +623,7 @@ enum CookieImporter {
                 let file = (path as NSString).abbreviatingWithTildeInPath
                 switch code {
                 case EPERM:
-                    return "macOS blocked Nirux from reading \(browser)’s cookie file. In System Settings › Privacy & Security › "
+                    return "macOS blocked Nirux from reading \(browser)’s files. In System Settings › Privacy & Security › "
                         + "Full Disk Access, add Nirux and turn it on, then quit and reopen Nirux and try again."
                 case EACCES:
                     return "Nirux doesn’t have permission to read \(file).\(Self.ownerNote(path))"
@@ -496,6 +632,9 @@ enum CookieImporter {
                 default:
                     return "Reading \(file) failed: \(String(cString: strerror(code)))."
                 }
+            case .temporaryCopy(let path, let code):
+                let place = (path as NSString).abbreviatingWithTildeInPath
+                return "Nirux couldn’t make its working copy at \(place): \(String(cString: strerror(code)))."
             case .keychain(errSecItemNotFound):
                 return "\(browser)’s key isn’t in your login Keychain. Open \(browser) once on this Mac account, then try again."
             case .keychain(errSecUserCanceled), .keychain(errSecAuthFailed):
@@ -505,21 +644,29 @@ enum CookieImporter {
             case .keychain(let status):
                 let message = SecCopyErrorMessageString(status, nil) as String? ?? "error \(status)"
                 return "The Keychain refused “\(source.browser.keychainService)”: \(message)."
-            case .database(let message):
+            case .keyDerivation(let status):
+                return "Nirux couldn’t derive \(browser)’s decryption key from the Keychain’s password (CommonCrypto error \(status))."
+            case .database(let code, let message) where failure.isDamage:
+                return "\(browser)’s cookie file reads as damaged (\(message), code \(code)), as when \(browser) writes it at "
+                    + "that moment. Try again in a moment."
+            case .database(_, let message):
                 return "\(browser)’s cookie file can’t be read as a database: \(message)."
             case .undecryptable:
                 return "The key in your Keychain doesn’t decrypt \(browser)’s cookies."
             }
         }
 
-        /// " It belongs to the user “x”." when someone else owns the file.
+        /// " It belongs to the user “x”." (or its folder does) when someone
+        /// else owns it.
         private static func ownerNote(_ path: String) -> String {
-            var info = stat()
-            guard stat(path, &info) == 0, info.st_uid != getuid() else { return "" }
-            guard let entry = getpwuid(info.st_uid), let name = String(validatingCString: entry.pointee.pw_name) else {
-                return " It belongs to another user."
+            for (item, subject) in [(path, "It"), ((path as NSString).deletingLastPathComponent, "Its folder")] {
+                var info = stat()
+                guard stat(item, &info) == 0 else { continue }
+                guard info.st_uid != getuid() else { return "" }
+                let name = getpwuid(info.st_uid).flatMap { String(validatingCString: $0.pointee.pw_name) }
+                return " \(subject) belongs to \(name.map { "the user “\($0)”" } ?? "another user")."
             }
-            return " It belongs to the user “\(name)”."
+            return ""
         }
     }
 }
