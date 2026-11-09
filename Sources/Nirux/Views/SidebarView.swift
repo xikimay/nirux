@@ -59,6 +59,14 @@ final class SidebarView: NSView {
     /// Whether the workspace's menu offers "New Sub-task…". Asked on each
     /// menu.
     var offersSubtask: ((Int) -> Bool)?
+    /// The store index of the open workspace with this id, nil once it is
+    /// gone: a menu's items act on the workspace it was built for.
+    var workspaceIndexForID: ((String) -> Int?)?
+    /// The id of the open workspace at this store index.
+    var workspaceIDForIndex: ((Int) -> String?)?
+    /// The index of the open column with this id in that workspace, nil once
+    /// it is gone: a column row's menu acts on that column.
+    var columnIndexForID: ((String, UUID) -> Int?)?
     /// Drag-reorder drop: (store index of dragged workspace, target
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
@@ -525,76 +533,98 @@ final class SidebarView: NSView {
     /// its context and Close (with Clean Up before it, not merged yet).
     /// `columnIndex` non-nil when invoked from a column row — adds the
     /// column-level actions on top.
+    ///
+    /// Its items act on the workspace it was built for, found by id when
+    /// one is picked, and do nothing once it is gone: the store may change
+    /// while the menu is open (a worktree arriving moves the cards below its
+    /// task), and an index would then name another card, which Close
+    /// Workspace would close.
     func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
         let workspace = lastInfos.first { $0.index == workspaceIndex }
+        // The card shown; else (a workspace of another space) the store's.
+        let workspaceID = workspace?.id ?? workspaceIDForIndex?(workspaceIndex)
+        let act: (WorkspaceSidebarAction) -> Void = { [weak self] action in
+            guard let self, let index = self.currentIndex(ofWorkspace: workspaceID) else { return }
+            self.onWorkspaceAction?(action, index)
+        }
 
         let menu = NSMenu()
         menu.autoenablesItems = false
 
         if let columnIndex {
+            // The column too, by id: one closing meanwhile shifts the others.
+            let columnID = workspace?.columns.first { $0.index == columnIndex }?.id
+            let column = { [weak self] () -> (workspace: Int, column: Int)? in
+                guard let self, let workspaceID, let columnID, let index = self.currentIndex(ofWorkspace: workspaceID),
+                      let column = self.columnIndexForID?(workspaceID, columnID)
+                else { return nil }
+                return (index, column)
+            }
             menu.addClosureItem(title: "Focus Column") { [weak self] in
-                self?.onColumnClicked?(workspaceIndex, columnIndex)
+                guard let target = column() else { return }
+                self?.onColumnClicked?(target.workspace, target.column)
             }
             // Wording and ⌘W match the main menu's Column ▸ Close Column.
             menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
-                self?.onWorkspaceAction?(.closeColumn(columnIndex: columnIndex), workspaceIndex)
+                guard let target = column() else { return }
+                self?.onWorkspaceAction?(.closeColumn(columnIndex: target.column), target.workspace)
             }.isEnabled = (workspace?.columnCount ?? 0) > 1
             menu.addItem(.separator())
         }
 
         let cleanup = worktreeCleanupOffer?(workspaceIndex)
-        menu.addClosureItem(title: "Review Branch") { [weak self] in
-            self?.onWorkspaceAction?(.reviewBranch, workspaceIndex)
-        }
-        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, workspaceIndex: workspaceIndex)
-        if cleanup == .suggested { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
+        menu.addClosureItem(title: "Review Branch") { act(.reviewBranch) }
+        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, act: act)
+        if cleanup == .suggested { addWorktreeCleanupItem(to: menu, act: act) }
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
         if workspace?.isLead != true {
             if offersSubtask?(workspaceIndex) == true {
-                menu.addClosureItem(title: Self.newSubtaskTitle) { [weak self] in
-                    self?.onWorkspaceAction?(.newSubtask, workspaceIndex)
-                }
+                menu.addClosureItem(title: Self.newSubtaskTitle) { act(.newSubtask) }
             }
-            menu.addItem(organizeItem(workspaceIndex: workspaceIndex, isInactive: workspace?.isInactive == true))
+            menu.addItem(organizeItem(workspaceIndex: workspaceIndex, workspace: workspace, act: act))
             menu.addItem(.separator())
         }
-        menu.addClosureItem(title: "Rename Workspace") { [weak self] in
-            self?.onWorkspaceAction?(.rename, workspaceIndex)
-        }
-        menu.addClosureItem(title: "View/Edit Context…") { [weak self] in
-            self?.onWorkspaceAction?(.editContext, workspaceIndex)
-        }
+        menu.addClosureItem(title: "Rename Workspace") { act(.rename) }
+        menu.addClosureItem(title: "View/Edit Context…") { act(.editContext) }
         // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
-        if cleanup == .available { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
-        menu.addClosureItem(title: "Close Workspace") { [weak self] in
-            self?.onWorkspaceAction?(.close, workspaceIndex)
-        }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
+        menu.addClosureItem(title: "Close Workspace") { act(.close) }
+            .isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
         return menu
+    }
+
+    /// Where the workspace a menu was built for is now (`workspaceIndexForID`);
+    /// nil once it is gone, or when it can't be told: never another card.
+    private func currentIndex(ofWorkspace id: String?) -> Int? {
+        id.flatMap { workspaceIndexForID?($0) }
     }
 
     static let newSubtaskTitle = "New Sub-task…"
 
-    /// The card's moves: up, down, to another space, to Archived and back.
-    private func organizeItem(workspaceIndex: Int, isInactive: Bool) -> NSMenuItem {
+    /// "Move Out of “<task>”": a sub-task becomes a task of its own.
+    static func moveOutTitle(parentTitle: String) -> String {
+        "Move Out of “\(parentTitle)”"
+    }
+
+    /// The card's moves: up, down, out from under its task, to another
+    /// space, to Archived and back.
+    private func organizeItem(
+        workspaceIndex: Int, workspace: WorkspaceInfo?, act: @escaping (WorkspaceSidebarAction) -> Void
+    ) -> NSMenuItem {
         let submenu = NSMenu()
-        submenu.addClosureItem(title: "Move Up") { [weak self] in
-            self?.onWorkspaceAction?(.moveUp, workspaceIndex)
-        }
-        submenu.addClosureItem(title: "Move Down") { [weak self] in
-            self?.onWorkspaceAction?(.moveDown, workspaceIndex)
+        submenu.addClosureItem(title: "Move Up") { act(.moveUp) }
+        submenu.addClosureItem(title: "Move Down") { act(.moveDown) }
+        if let parentTitle = workspace?.parentTitle {
+            submenu.addClosureItem(title: Self.moveOutTitle(parentTitle: parentTitle)) { act(.moveOutOfParent) }
         }
         if let item = moveToSpaceItem(workspaceIndex: workspaceIndex) { submenu.addItem(item) }
         submenu.addItem(.separator())
-        if isInactive {
-            submenu.addClosureItem(title: "Unarchive") { [weak self] in
-                self?.onWorkspaceAction?(.markActive, workspaceIndex)
-            }
+        if workspace?.isInactive == true {
+            submenu.addClosureItem(title: "Unarchive") { act(.markActive) }
         } else {
-            submenu.addClosureItem(title: "Archive") { [weak self] in
-                self?.onWorkspaceAction?(.markInactive, workspaceIndex)
-            }
+            submenu.addClosureItem(title: "Archive") { act(.markInactive) }
         }
         let item = NSMenuItem(title: "Organize", action: nil, keyEquivalent: "")
         item.submenu = submenu

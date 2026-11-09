@@ -213,7 +213,7 @@ extension BranchReview {
 
     /// The author's notes for the next session, found in the worktree.
     struct Handover: Equatable, Sendable {
-        static let names = NiruxShellView.excludedHandovers
+        static let names = HandoverFile.filenames
         /// Past this, the page shows the beginning and says it is cut.
         static let maxBytes = 64_000
 

@@ -89,17 +89,9 @@ extension NiruxShellView {
                     }
                     var missionID: String?
                     var reportsToLead = false
-                    // The workspace and terminal the skill names. A Mission
-                    // only from a terminal started with the Mission
-                    // variables: one started before Missions were turned
-                    // on couldn't answer its child.
-                    let requester = self.requestingWorkspace(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)
-                    let carriesMissions = requester?.columns.first { $0.agentUUID == parentAgentUUID }?
-                        .launchEnvironment?["NIRUX_MISSION_HANDOFFS"] == "1"
-                    if carriesMissions, let parent = self.validMissionParent(
-                        workspaceID: parentWorkspaceID,
-                        agentUUID: parentAgentUUID
-                    ) {
+                    // The workspace and terminal the skill names.
+                    let requester = self.requestingTerminal(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)
+                    if let parent = self.validMissionParent(requester) {
                         let candidateID = UUID().uuidString
                         let request = MissionCreationRequest(
                             id: candidateID,
@@ -131,7 +123,7 @@ extension NiruxShellView {
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
                         // It lists under that one, Missions on or off.
-                        parentWorkspaceID: requester?.id,
+                        parentWorkspaceID: requester?.workspace.id,
                         reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         worktreeBranch: checkedOutBranch,
@@ -268,10 +260,7 @@ extension NiruxShellView {
     }
 
     nonisolated static func handoverFilename(for agent: NiruxApp.WorkspaceAgent) -> String {
-        switch agent {
-        case .claude: return ".claude-handover.md"
-        case .codex: return ".codex-handover.md"
-        }
+        HandoverFile.filename(for: agent)
     }
 
     /// Types each pending Mission message into its recipient's prompt if
@@ -370,21 +359,44 @@ extension NiruxShellView {
     private func validMissionParent(
         workspaceID: String?, agentUUID: String?
     ) -> (workspaceID: String, agentUUID: String, isLead: Bool)? {
-        guard let workspace = requestingWorkspace(workspaceID: workspaceID, agentUUID: agentUUID), let agentUUID,
-              workspace.isLead || Self.currentMissionHandoffsEnabled()
-        else { return nil }
-        return (workspace.id, agentUUID, workspace.isLead)
+        validMissionParent(requestingTerminal(workspaceID: workspaceID, agentUUID: agentUUID))
     }
 
-    /// The open workspace a request names, with the terminal that sent it:
+    /// A Mission's parent: a Lead, or Missions on, and a terminal that can
+    /// answer its child (`terminalCarriesMissions`).
+    private func validMissionParent(
+        _ requester: (workspace: WorkspaceState, column: ColumnState)?
+    ) -> (workspaceID: String, agentUUID: String, isLead: Bool)? {
+        // The state file read last.
+        guard let requester, let agentUUID = requester.column.agentUUID,
+              Self.terminalCarriesMissions(requester.column.launchEnvironment),
+              requester.workspace.isLead || Self.currentMissionHandoffsEnabled()
+        else { return nil }
+        return (requester.workspace.id, agentUUID, requester.workspace.isLead)
+    }
+
+    /// The open workspace a request names, and its terminal that sent it:
     /// a workspace id alone (a hand-written URL, an old copy of the skill)
     /// links nothing.
-    func requestingWorkspace(workspaceID: String?, agentUUID: String?) -> WorkspaceState? {
+    func requestingTerminal(workspaceID: String?, agentUUID: String?) -> (workspace: WorkspaceState, column: ColumnState)? {
         guard let workspaceID, let agentUUID, UUID(uuidString: workspaceID) != nil, UUID(uuidString: agentUUID) != nil,
               let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
-              workspace.columns.contains(where: { $0.agentUUID == agentUUID })
+              let column = workspace.columns.first(where: { $0.agentUUID == agentUUID })
         else { return nil }
-        return workspace
+        return (workspace, column)
+    }
+
+    /// A terminal started with the Mission variables and a `NIRUX_CLI_PATH`
+    /// still there: its agent can answer a child. One started before
+    /// Missions were turned on, or whose Nirux was moved since, can't (the
+    /// skill used to check both itself).
+    nonisolated static func terminalCarriesMissions(_ environment: [String: String]?) -> Bool {
+        guard environment?["NIRUX_MISSION_HANDOFFS"] == "1", let cli = environment?["NIRUX_CLI_PATH"] else { return false }
+        guard FileManager.default.isExecutableFile(atPath: cli) else {
+            NSLog("[Mission] No Mission: the asking terminal's Nirux is gone (%@)", cli)
+            return false
+        }
+        return true
     }
 }
 

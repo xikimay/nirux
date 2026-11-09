@@ -115,6 +115,112 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// The user answers in the question's popover by typing. A popover
+    /// with the keyboard leaves the main window key: AppKit gives that
+    /// window the popover's field as first responder and hands it the
+    /// window's keys, which the key interceptor sent to the focused
+    /// terminal instead. Typing, ⌘↩ and Esc reach the popover, for a
+    /// question the Lead hands over and one that comes to the user
+    /// directly, its parent gone; once it closed, keys go to the terminal.
+    func testKeysTypedWhileTheReplyPopoverShowsGoToItsField() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let workspaceID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                initialAgentUUID: mission.childAgentUUID, missionID: mission.id, reportsToLead: true
+            )
+            let task = try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID })
+            XCTAssertTrue(shell.activeWorkspace === task)
+            if !shell.isSidebarExpanded { harness.runPaletteCommand("Show/Hide Sidebar") }
+            harness.waitUntil("the sidebar to expand") { shell.sidebar.isExpanded }
+
+            // The focused terminal, which takes the keys the popover doesn't
+            // (a key the interceptor let through could reach the popover).
+            @MainActor func terminal() throws -> PtySession {
+                let focused = shell.activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }
+                return try XCTUnwrap(focused?.pty, "the focused column is a terminal")
+            }
+
+            try harness.withApp {
+                let handed = try ask("Keep the old date= parameter?", from: mission)
+                XCTAssertFalse(try call(LeadTools.askUser, ["task": "Export CSV", "why": "Only the user knows."], lead: lead, in: harness).isError)
+                var pty = try terminal()
+                let untyped = pty.lastKeystrokeAt
+                var reply = try openReply(to: task, in: harness)
+                harness.press("o", keyCode: 0x1F, [])
+                harness.press("k", keyCode: 0x28, [])
+                XCTAssertEqual(reply.controller.replyView?.string, "ok")
+                XCTAssertEqual(pty.lastKeystrokeAt, untyped, "the terminal got none of it")
+                harness.press("\r", keyCode: 0x24, [.command])
+                XCTAssertEqual(MissionStore.shared.response(to: handed.id)?.message, "ok")
+                harness.waitUntil("the popover to close", timeout: 5) { !reply.popover.isShown }
+                let afterSend = pty.lastKeystrokeAt
+                harness.press("y", keyCode: 0x10, [])
+                XCTAssertGreaterThan(pty.lastKeystrokeAt, afterSend, "sent, it gives the terminal its keys back")
+
+                let direct = try ask("Comma or semicolon?", from: mission)
+                harness.alertResponses = [.alertSecondButtonReturn] // Close Workspace: the Lead has its Board too
+                shell.stopLead(spaceID: lead.space)
+                harness.waitUntil("the Lead to close") { !shell.workspaces.contains { $0 === lead.workspace } }
+                XCTAssertEqual(harness.alerts.last, "Close workspace “Lead”?")
+                let column = try XCTUnwrap(task.columns.first)
+                let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
+                XCTAssertEqual(row?.handOff, .parentClosed)
+                pty = try terminal()
+                reply = try openReply(to: task, in: harness)
+                harness.press("\u{1b}", keyCode: 0x35, [])
+                harness.waitUntil("Esc to close the popover", timeout: 5) { !reply.popover.isShown }
+                let beforeClosed = pty.lastKeystrokeAt
+                harness.press("x", keyCode: 0x07, [])
+                XCTAssertEqual(reply.controller.replyView?.string, "", "closed, it takes no key")
+                XCTAssertGreaterThan(pty.lastKeystrokeAt, beforeClosed, "the terminal got it")
+
+                reply = try openReply(to: task, in: harness)
+                harness.press(";", keyCode: 0x29, [])
+                harness.press("\r", keyCode: 0x24, [.command])
+                XCTAssertEqual(MissionStore.shared.response(to: direct.id)?.message, ";")
+            }
+        }
+    }
+
+    /// Clicks the question row on `task`'s card, as the user does: the
+    /// popover it opens.
+    private func openReply(
+        to task: WorkspaceState, in harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line
+    ) throws -> (popover: NSPopover, controller: MissionReplyViewController) {
+        let shell = harness.shell
+        let sidebar = shell.sidebar
+        shell.updateSidebar()
+        sidebar.layoutSubtreeIfNeeded()
+        let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }, file: file, line: line)
+        let url = SidebarView.missionQuestionActionURL(workspaceIndex: index, columnIndex: 0)
+        let row = try XCTUnwrap(sidebar.hitAreas.first { area in
+            guard case .link(let link, _) = area.region else { return false }
+            return link == url
+        }, "the question's row", file: file, line: line)
+        sidebar.mouseDown(with: try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: sidebar.contentDocumentView.convert(NSPoint(x: row.frame.midX, y: row.frame.midY), to: nil),
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+        ), file: file, line: line))
+        let popover = try XCTUnwrap(shell.missionReplyPopover, "the popover", file: file, line: line)
+        let controller = try XCTUnwrap(popover.contentViewController as? MissionReplyViewController, file: file, line: line)
+        XCTAssertTrue(popover.isShown, file: file, line: line)
+        XCTAssertEqual(controller.replyView?.string, "", file: file, line: line)
+        XCTAssertTrue(harness.window.firstResponder === controller.replyView, "the main window's keys go to the field", file: file, line: line)
+        // Esc closes it at once, without waiting on an animation.
+        popover.animates = false
+        return (popover, controller)
+    }
+
     /// set_task_context keeps a task's next step and blocker, shown on its
     /// row and in list_tasks. What the user types in View/Edit Context…
     /// stays theirs (a field they didn't touch stays the Lead's, even one
@@ -322,10 +428,54 @@ final class LeadToolsFlowTests: XCTestCase {
             let side = try open("side", missionFrom: other)
             XCTAssertEqual([old.profileID, side.profileID], [task.profileID, other.profileID])
             XCTAssertEqual(parents(), ["sub": "task"])
+            // Saved as a build before sub-tasks kept their parent saved them,
+            // the former Lead's folder a worktree (a space anchored there):
+            // its task still stays at the top level.
             shell.saveState()
+            var state = try XCTUnwrap(Persistence.load())
+            for index in state.workspaces.indices {
+                if ["old", "side", "lead's task"].contains(state.workspaces[index].title) {
+                    state.workspaces[index].parentIsSettled = false
+                }
+                if state.workspaces[index].id == lead.workspace.id { state.workspaces[index].cwd = harness.worktree }
+            }
+            XCTAssertTrue(Persistence.save(state))
             shell.restoreState()
             XCTAssertEqual(parents(), ["sub": "task", "old": "task"])
             XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "old" }?.parentWorkspaceID, task.id)
+
+            // Moved out, it stays a task of its own: its parent was decided
+            // once, never again.
+            let restoredOld = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "old" })
+            shell.handleWorkspaceSidebarAction(.moveOutOfParent, workspaceIndex: restoredOld)
+            XCTAssertEqual(parents(), ["sub": "task"])
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents(), ["sub": "task"])
+
+            // A parent whose repository can't be found now (its worktree's
+            // `.git` pointing nowhere, as on a volume not mounted yet): its
+            // child is asked about again at the next restore, not settled.
+            let pendingFolder = harness.root + "/repo.feat-pending"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/pending", pendingFolder], at: harness.repo)
+            let pendingParent = try open("pending", in: pendingFolder)
+            _ = try open("waiting", missionFrom: pendingParent)
+            shell.saveState()
+            var unsettled = try XCTUnwrap(Persistence.load())
+            for index in unsettled.workspaces.indices where unsettled.workspaces[index].title == "waiting" {
+                unsettled.workspaces[index].parentIsSettled = false
+            }
+            XCTAssertTrue(Persistence.save(unsettled))
+            let gitFile = pendingFolder + "/.git"
+            let pointer = try String(contentsOfFile: gitFile, encoding: .utf8)
+            try "gitdir: /nonexistent/repo/.git/worktrees/repo.feat-pending\n".write(toFile: gitFile, atomically: true, encoding: .utf8)
+            shell.restoreState()
+            XCTAssertNil(parents()["waiting"])
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "waiting" }?.parentIsSettled, false)
+            try pointer.write(toFile: gitFile, atomically: true, encoding: .utf8)
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents()["waiting"], "pending")
         }
     }
 
@@ -386,12 +536,24 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(line("by hand").hasPrefix("- “by hand” · sub-task of “task” · "), list)
             XCTAssertTrue(line("by hand").hasSuffix(" · not yours (started by the user)"), list)
 
+            // A nirux://new-workspace from a terminal is an agent's too; an
+            // archived sub-task, no longer listed under its task, still is.
+            shell.openRequestedWorkspace(title: "requested", cwd: harness.repo, agent: nil, requestedSpaceID: lead.space)
+            harness.waitUntil("the requested workspace") { shell.workspaces.contains { $0.title == "requested" } }
+            XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), true))
+            let later = try call("list_tasks", lead: lead, in: harness).text.split(separator: "\n").map(String.init)
+            @MainActor func laterLine(_ title: String) -> String { later.first { $0.hasPrefix("- “\(title)”") } ?? "" }
+            XCTAssertTrue(laterLine("requested").hasSuffix(" · not yours (another agent started it)"), "\(later)")
+            XCTAssertTrue(laterLine("feat/sub").contains(" · inactive · "), "\(later)")
+            XCTAssertTrue(laterLine("feat/sub").hasSuffix(" · not yours (another agent started it)"), "\(later)")
+            XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), false))
+
             shell.saveState()
             shell.restoreState()
             XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
             XCTAssertEqual(
-                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title),
-                ["feat/sub", "feat/late", "feat/side", "feat/leads", "feat/loose"]
+                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title).sorted(),
+                ["feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
             )
         }
     }

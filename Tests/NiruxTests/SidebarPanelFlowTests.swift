@@ -141,6 +141,20 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Close Column"], in: try menu(for: workspace, column: 1))
             harness.waitUntil("the column to close") { workspace.columns.count == 1 }
 
+            // A column closing while a column's menu is open: its items act on
+            // the column it was built for.
+            shell.addColumn()
+            shell.addColumn()
+            let kept = workspace.columns[1]
+            let target = workspace.columns[2]
+            shell.updateSidebar()
+            let columnMenu = try menu(for: workspace, column: 2)
+            shell.closeColumn(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }), columnIndex: 0)
+            harness.waitUntil("the first column to close") { workspace.columns.count == 2 }
+            harness.perform(["Close Column"], in: columnMenu)
+            harness.waitUntil("its column to close") { !workspace.columns.contains { $0 === target } }
+            XCTAssertTrue(workspace.columns.contains { $0 === kept })
+
             shell.addWorkspace()
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertFalse(added === workspace)
@@ -186,6 +200,42 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 !shell.workspaces.contains { $0 === goneWorkspace }
             }
             XCTAssertEqual(harness.alerts.last, "The folder of “gone” is gone")
+
+            // The store changes while a menu is open (a sub-task arrives under
+            // a task above): its items act on the card it was built for.
+            shell.addWorkspace(title: "task", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "below")
+            let below = try XCTUnwrap(shell.activeWorkspace)
+            shell.updateSidebar()
+            let staleMenu = try menu(for: below)
+            let builtAt = try XCTUnwrap(shell.workspaces.firstIndex { $0 === below })
+            shell.addWorkspace(title: "sub-task", cwd: harness.repo, parentWorkspaceID: task.id)
+            let subtask = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertTrue(shell.workspaces[builtAt] === subtask, "the sub-task took its index")
+            harness.perform(["Close Workspace"], in: staleMenu)
+            harness.waitUntil("the workspace to close") { !shell.workspaces.contains { $0 === below } }
+            XCTAssertTrue(shell.workspaces.contains { $0 === subtask })
+
+            // Built for a workspace of another space, with no card on screen:
+            // found by id too when a workspace before it closes.
+            let shownSpace = shell.activeProfileID
+            let elsewhere = shell.workspaceStore.createProfile(named: "Elsewhere", select: false)
+            shell.addWorkspace(title: "first in line")
+            let firstInLine = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "away", profileID: elsewhere.id)
+            let away = try XCTUnwrap(shell.workspaces.first { $0.title == "away" })
+            shell.selectProfile(shownSpace)
+            shell.addWorkspace(title: "next in line", profileID: shownSpace)
+            let nextInLine = try XCTUnwrap(shell.workspaces.first { $0.title == "next in line" })
+            shell.updateSidebar()
+            XCTAssertFalse(shell.sidebar.lastInfos.contains { $0.id == away.id })
+            let awayMenu = try menu(for: away)
+            shell.handleWorkspaceSidebarAction(.close, workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === firstInLine }))
+            harness.waitUntil("the first in line to close") { !shell.workspaces.contains { $0 === firstInLine } }
+            harness.perform(["Close Workspace"], in: awayMenu)
+            harness.waitUntil("the workspace away to close") { !shell.workspaces.contains { $0 === away } }
+            XCTAssertTrue(shell.workspaces.contains { $0 === nextInLine })
         }
     }
 
@@ -297,6 +347,17 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let generalTask = try XCTUnwrap(shell.workspaces.first { $0.title == "General task" })
             shell.selectProfile(WorkspaceProfile.defaultID)
             XCTAssertFalse(try offers(generalTask), "General")
+
+            // Its worktree removed, a task is none.
+            let otherTask = try XCTUnwrap(shell.workspaces.first { $0.title == "Other task" })
+            XCTAssertTrue(try offers(otherTask))
+            try FileManager.default.removeItem(atPath: other + ".feat-other")
+            XCTAssertFalse(try offers(otherTask), "worktree removed")
+            // Its folder removed, in a worktree still there: none either.
+            let docsTask = try XCTUnwrap(shell.workspaces.first { $0.title == "Docs task" })
+            XCTAssertTrue(try offers(docsTask))
+            try FileManager.default.removeItem(atPath: harness.worktree + "/docs")
+            XCTAssertFalse(try offers(docsTask), "folder removed")
         }
     }
 
@@ -333,6 +394,48 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Organize", "Move to Space", spaceName], in: try menu())
             XCTAssertEqual(moving.profileID, space)
             XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
+
+            // Move Out of “<task>” lists a sub-task next to its task, after
+            // its other sub-tasks: under that task's own task, else a task
+            // of its own. The store keeps that order: archived, the task lets
+            // them go where they were listed.
+            shell.addWorkspace(title: "task", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func open(_ title: String, under parent: WorkspaceState, in cwd: String? = nil) throws -> WorkspaceState {
+                shell.addWorkspace(title: title, cwd: cwd ?? harness.repo, parentWorkspaceID: parent.id)
+                return try XCTUnwrap(shell.activeWorkspace)
+            }
+            let first = try open("first", under: task)
+            // A task too (in a worktree), to have one of its own.
+            let second = try open("second", under: task, in: harness.worktree)
+            let third = try open("third", under: second)
+            XCTAssertEqual(third.parentWorkspaceID, second.id)
+            shell.addWorkspace(title: "after", cwd: harness.repo)
+            @MainActor func menu(for workspace: WorkspaceState) throws -> NSMenu {
+                shell.updateSidebar()
+                let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
+                return shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            }
+            let titles = { shell.visibleWorkspaceIndices.map { shell.workspaces[$0].title }.filter { $0 != "moving" } }
+            XCTAssertEqual(titles().suffix(5), ["task", "first", "second", "third", "after"])
+            let firstOrganize = try XCTUnwrap(try menu(for: first).items.first { $0.title == "Organize" }?.submenu)
+            XCTAssertEqual(
+                firstOrganize.items.map(\.title),
+                ["Move Up", "Move Down", SidebarView.moveOutTitle(parentTitle: "task"), "Move to Space", "", "Archive"]
+            )
+            harness.perform(["Organize", SidebarView.moveOutTitle(parentTitle: "second")], in: try menu(for: third))
+            XCTAssertEqual(third.parentWorkspaceID, task.id)
+            harness.perform(["Organize", SidebarView.moveOutTitle(parentTitle: "task")], in: try menu(for: first))
+            XCTAssertNil(first.parentWorkspaceID)
+            XCTAssertEqual(titles().suffix(5), ["task", "second", "third", "first", "after"])
+            harness.perform(["Organize", "Archive"], in: try menu(for: task))
+            XCTAssertEqual(titles().suffix(5), ["second", "third", "first", "after", "task"])
+
+            // Out from under a task whose own task is archived: a task of its
+            // own, not one that task would take back.
+            let fourth = try open("fourth", under: second)
+            harness.perform(["Organize", SidebarView.moveOutTitle(parentTitle: "second")], in: try menu(for: fourth))
+            XCTAssertNil(fourth.parentWorkspaceID)
         }
     }
 

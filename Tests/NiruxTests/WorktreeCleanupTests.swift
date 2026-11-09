@@ -95,7 +95,7 @@ final class WorktreeCleanupTests: XCTestCase {
     }
 
     private func pullRequest(
-        _ number: Int, _ state: String, head: String, owner: String = "acme"
+        _ number: Int, _ state: String, head: String, owner: String = "acme", name: String = "widgets"
     ) -> [String: Any] {
         [
             "number": number,
@@ -103,7 +103,7 @@ final class WorktreeCleanupTests: XCTestCase {
             "headRefOid": head,
             "url": "https://github.com/acme/widgets/pull/\(number)",
             "headRepositoryOwner": ["login": owner],
-            "headRepository": ["name": "widgets"]
+            "headRepository": ["name": name]
         ]
     }
 
@@ -252,18 +252,44 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(report.notMerged, "PR #15 open")
     }
 
-    func testPullRequestsOnlyFromAnotherRepositoryBlock() throws {
-        // Same branch name, merged from someone's fork: not "no pull request".
-        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree), owner: "someone")])
-        let report = try report()
-        XCTAssertEqual(
-            report.problems,
-            ["1 pull request for feat/x, none from acme/widgets (a fork's, or the repository was renamed or deleted)."]
-        )
-        XCTAssertNil(report.notMerged)
+    func testMergedPullRequestFromARenamedRepositoryBlocksAForksDoesNot() throws {
+        let tip = try head(at: worktree)
+        // The repository was renamed acme/gadgets; the remote still says widgets.
+        try setPullRequests([pullRequest(12, "MERGED", head: tip, name: "gadgets")])
+        let renamed = try report()
+        XCTAssertEqual(renamed.problems, [
+            "A merged pull request for feat/x holds its tip but comes from another repository than acme/widgets. "
+                + "If the repository was renamed, update the remote's URL."
+        ])
+        XCTAssertNil(renamed.notMerged)
+        // Its head holds the tip, or isn't here to tell (a commit made on GitHub).
+        let child = try git(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "later commit"], at: worktree)
+        try setPullRequests([pullRequest(13, "MERGED", head: child, name: "gadgets")])
+        XCTAssertNil(try self.report().notMerged)
+        try setPullRequests([pullRequest(14, "MERGED", head: String(repeating: "ab", count: 20), name: "gadgets")])
+        let unknown = try report()
+        XCTAssertEqual(unknown.problems.count, 1)
+        XCTAssertTrue(unknown.problems[0].contains("A git fetch may bring it in."), unknown.problems[0])
+        XCTAssertNil(unknown.notMerged)
+        // Its head repository deleted: gh keeps the owner, nulls the repository.
+        var deleted = pullRequest(15, "MERGED", head: tip)
+        deleted["headRepository"] = NSNull()
+        try setPullRequests([deleted])
+        XCTAssertNil(try self.report().notMerged)
 
-        try setPullRequests([])
-        XCTAssertEqual(try self.report().notMerged, "no pull request")
+        // A fork's, from a branch of the same name: not this branch's, even
+        // holding its tip (this branch has no commit of its own), merged,
+        // open, or with a head that isn't here.
+        for forks in [
+            [pullRequest(16, "MERGED", head: child, owner: "someone")],
+            [pullRequest(17, "MERGED", head: tip, owner: "someone")],
+            [pullRequest(18, "OPEN", head: tip, owner: "someone")],
+            [pullRequest(19, "MERGED", head: String(repeating: "cd", count: 20), owner: "someone")],
+            []
+        ] {
+            try setPullRequests(forks)
+            XCTAssertEqual(try self.report().notMerged, "no pull request")
+        }
     }
 
     func testLocalCommitsMissingFromTheMergedPullRequestBlock() throws {
@@ -355,6 +381,48 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: trashed("app/.claude-handover.md"), encoding: .utf8), "# task in app/\n")
         XCTAssertFalse(FileManager.default.fileExists(atPath: trashed(".codex-handover.md")))
         XCTAssertFalse(branchExists("feat/x"))
+    }
+
+    func testHandoverOverACommittedSymlinkDoesNotBlock() throws {
+        try FileManager.default.createSymbolicLink(atPath: worktree + "/.claude-handover.md", withDestinationPath: "docs/plan.md")
+        try git(["add", ".claude-handover.md"], at: worktree)
+        try commit("an agent committed a symlink as its handover", at: worktree)
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        // Nirux replaces the link with its handover: git reads " T".
+        try FileManager.default.removeItem(atPath: worktree + "/.claude-handover.md")
+        try write("# new handover\n", to: ".claude-handover.md", in: worktree)
+        XCTAssertEqual(try readyPlan().worktree.modifiedDisposable, [".claude-handover.md"])
+
+        // git writes the link back; refused, the link makes way again.
+        try gitRunning("""
+            if [ "$1 $2" = "worktree remove" ]; then echo 'fatal: refused by the test' >&2; exit 128; fi
+            """)
+        guard case .failed(let message) = WorktreeCleanup.execute(try readyPlan(), tools: tools) else {
+            return XCTFail("the refused removal must stop the cleanup")
+        }
+        XCTAssertTrue(message.contains("still there"), message)
+        let attributes = try FileManager.default.attributesOfItem(atPath: worktree + "/.claude-handover.md")
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeRegular)
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# new handover\n")
+
+        // git writes the link back, then fails: the link, the index's, makes way.
+        try gitRunning("""
+            if [ "$1" = "checkout-index" ]; then /usr/bin/git "$@"; echo 'error: failed by the test' >&2; exit 1; fi
+            """)
+        guard case .failed(let failure) = WorktreeCleanup.execute(try readyPlan(), tools: tools) else {
+            return XCTFail("the failed write-back must stop the cleanup")
+        }
+        XCTAssertTrue(failure.hasSuffix("Nothing was deleted."), failure)
+        let after = try FileManager.default.attributesOfItem(atPath: worktree + "/.claude-handover.md")
+        XCTAssertEqual(after[.type] as? FileAttributeType, .typeRegular)
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# new handover\n")
+
+        tools.gitPath = "/usr/bin/git"
+        XCTAssertEqual(
+            WorktreeCleanup.execute(try readyPlan(), tools: tools),
+            .cleaned(forcedBranchDelete: true, trashFolder: "widgets.feat-x leftovers")
+        )
+        XCTAssertEqual(try String(contentsOfFile: trashed(".claude-handover.md"), encoding: .utf8), "# new handover\n")
     }
 
     func testFailedWriteBackPutsTheLeftoversBack() throws {
@@ -757,6 +825,21 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
             .init(code: " M", path: "changed.swift"),
             .init(code: "??", path: ".claude-handover.md")
         ])
+        // Cut by bytes: a leading combining accent isn't one Character
+        // with the space before it.
+        XCTAssertEqual(
+            WorktreeCleanup.statusEntries("?? \u{301}.claude-handover.md\0"),
+            [.init(code: "??", path: "\u{301}.claude-handover.md")]
+        )
+    }
+
+    func testMalformedStatusReadsAsAChange() {
+        // Never a clean tree: the badge and the clean-up fail closed.
+        XCTAssertEqual(WorktreeCleanup.statusEntries("?? a\0xy\0"), [
+            .init(code: "??", path: "a"), .init(code: "", path: "xy")
+        ])
+        XCTAssertTrue(GitDetect.isDirty(status: Data("xy\0".utf8)))
+        XCTAssertEqual(WorktreeCleanup.describe(.init(code: "", path: "xy")), "xy (unreadable git status)")
     }
 
     func testExactHeadWinsWithoutAskingGit() {
@@ -787,8 +870,8 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
     }
 
     func testHiddenEntriesAreSkipWorktreeOrAssumeUnchanged() {
-        let output = "H tracked.txt\0S config.json\0h assumed.txt\0s both.txt\0M conflict.txt\0"
-        XCTAssertEqual(WorktreeCleanup.hiddenEntries(output), ["config.json", "assumed.txt", "both.txt"])
+        let output = "H tracked.txt\0S config.json\0h assumed.txt\0s both.txt\0M conflict.txt\0S \u{301}x.txt\0"
+        XCTAssertEqual(WorktreeCleanup.hiddenEntries(output), ["config.json", "assumed.txt", "both.txt", "\u{301}x.txt"])
     }
 
     func testBuildOutputSummaryFoldsRepeatedNames() {
@@ -842,7 +925,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
     ) -> WorktreeCleanupCandidate {
         WorktreeCleanupCandidate(
             path: plan?.worktree.path ?? "/tmp/widgets.feat-x",
-            workspaces: titles.enumerated().map { .init(id: "ws\($0.offset)", title: $0.element) },
+            workspaces: titles.enumerated().map { .init(id: "ws\($0.offset)", title: $0.element, cwd: "/tmp/widgets.feat-x") },
             agents: agents,
             foreignAgents: foreignAgents,
             unsavedEditors: unsavedEditors,

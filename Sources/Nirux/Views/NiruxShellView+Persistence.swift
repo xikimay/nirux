@@ -48,7 +48,9 @@ extension NiruxShellView {
                 cwd: persistedWS.cwd,
                 profileID: profileID,
                 missionID: persistedWS.missionID,
-                parentWorkspaceID: persistedWS.parentWorkspaceID ?? persistedWS.id.flatMap { missionChildParents[$0] },
+                parentWorkspaceID: persistedWS.parentWorkspaceID ?? persistedWS.id.flatMap { missionChildParents[$0] ?? nil },
+                parentIsSettled: persistedWS.parentIsSettled || persistedWS.parentWorkspaceID != nil || persistedWS.missionID == nil
+                    || persistedWS.id.map { missionChildParents[$0] != nil } == true,
                 missionHandoffsEnabled: PersistedSettings.effective(state.settings).missionHandoffsEnabled,
                 startedOutsideNirux: persistedWS.startedOutsideNirux,
                 startedByAgent: persistedWS.startedByAgent,
@@ -267,25 +269,37 @@ extension NiruxShellView {
         Persistence.save(persistedState(snapshot: snapshot))
     }
 
-    /// Mission children saved before sub-tasks kept their parent, and the
-    /// task each one lists under from now on, by workspace id: its
-    /// Mission's parent when that one is a task (see `isTask`), not for a
-    /// Lead's tasks. Read once, at restore; saved with the workspace after.
-    static func missionChildParents(in workspaces: [PersistedWorkspace]) -> [String: String] {
+    /// Mission children saved before sub-tasks kept their parent, with
+    /// their parent decided, by workspace id: their Mission's parent when
+    /// that one is a task (see `isTask`), else nil (the top level, as for a
+    /// Lead's tasks, even a deleted space's former Lead). Left out, to ask
+    /// again at the next restore: those it can't tell yet (the ledger
+    /// unreadable, the parent's folder missing or its repository not found,
+    /// as on a volume not mounted yet; see `isSurelyNoTask`). Once
+    /// decided, a workspace's parent is settled (`parentIsSettled`): Move Out
+    /// of “<task>” is never undone.
+    static func missionChildParents(in workspaces: [PersistedWorkspace]) -> [String: String?] {
+        let children = workspaces.filter { !$0.parentIsSettled && $0.parentWorkspaceID == nil && $0.missionID != nil }
         let store = MissionStore.shared
-        guard workspaces.contains(where: { $0.missionID != nil && $0.parentWorkspaceID == nil }), store.ensureLoaded()
-        else { return [:] }
+        guard !children.isEmpty, store.ensureLoaded() else { return [:] }
         let parentByMission = Dictionary(
             store.missions.filter { $0.reportsToLead != true }.map { ($0.id, $0.parentWorkspaceID) },
             uniquingKeysWith: { first, _ in first }
         )
-        var parents: [String: String] = [:]
-        for child in workspaces where child.parentWorkspaceID == nil {
-            guard let id = child.id, let missionID = child.missionID, let parentID = parentByMission[missionID], parentID != id,
-                  let parent = workspaces.first(where: { $0.id == parentID }), !parent.isLead,
-                  taskLocation(cwd: parent.cwd) != nil
-            else { continue }
-            parents[id] = parentID
+        var parents: [String: String?] = [:]
+        for child in children {
+            guard let id = child.id, let missionID = child.missionID else { continue }
+            guard let parentID = parentByMission[missionID], parentID != id,
+                  let parent = workspaces.first(where: { $0.id == parentID }), !parent.isLead
+            else {
+                parents[id] = .some(nil)
+                continue
+            }
+            if taskLocation(cwd: parent.cwd) != nil {
+                parents[id] = parentID
+            } else if isSurelyNoTask(cwd: parent.cwd) {
+                parents[id] = .some(nil)
+            }
         }
         return parents
     }
@@ -312,6 +326,7 @@ extension NiruxShellView {
                     isInactive: workspace.isInactive,
                     missionID: workspace.missionID,
                     parentWorkspaceID: workspace.parentWorkspaceID,
+                    parentIsSettled: workspace.parentIsSettled,
                     purpose: workspace.purpose,
                     phase: workspace.phase,
                     unknownPhaseRawValue: workspace.unknownPhaseRawValue,

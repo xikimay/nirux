@@ -217,7 +217,7 @@ final class GitRefreshCoordinator {
         guard let observation = workspace.beginGitContextObservation(at: workingDirectory) else {
             return false
         }
-        GitDetect.contextAsync(at: workingDirectory) { [weak workspace] result in
+        GitDetect.contextAsync(at: workingDirectory, startFolder: workspace.cwd) { [weak workspace] result in
             // A superseded read's outcome says nothing about the current one.
             guard let workspace,
                   workspace.applyGitContextObservation(result, observation: observation) != .stale

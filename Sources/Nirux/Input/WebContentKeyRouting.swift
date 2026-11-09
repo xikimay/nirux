@@ -10,11 +10,20 @@ enum WebContentKeyRouting {
     /// to it, ahead of the menu items they also name (Focus Left/Right,
     /// Move Left/Right, Workspace Up/Down); Control+Cmd+Arrow keep those
     /// reachable from text. In the editor, a Cmd+Arrow with the caret
-    /// already at that edge navigates (`textEdgeKeys` in bridge.js).
+    /// already at that edge navigates when there is somewhere to go
+    /// (`textEdgeArrows` in bridge.js).
     static func movesCaretToTextEdge(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
         let modifiers = modifierFlags.intersection([.command, .option, .control, .shift])
         let arrowKeys: ClosedRange<UInt16> = 0x7B...0x7E
         return arrowKeys.contains(keyCode) && (modifiers == [.command] || modifiers == [.command, .shift])
+    }
+
+    /// Cmd+Arrow and Control+Cmd+Arrow: Focus Left/Right and Workspace
+    /// Up/Down, when the menu gets them.
+    static func navigatesColumnsOrWorkspaces(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        let modifiers = modifierFlags.intersection([.command, .option, .control, .shift])
+        let arrowKeys: ClosedRange<UInt16> = 0x7B...0x7E
+        return arrowKeys.contains(keyCode) && (modifiers == [.command] || modifiers == [.command, .control])
     }
 
     static func passesToWebContent(
