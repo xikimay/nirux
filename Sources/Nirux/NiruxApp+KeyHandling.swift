@@ -117,16 +117,19 @@ extension NiruxApp {
         return false
     }
 
-    /// The menu's take on a key the interceptor hands it. A held Cmd+Arrow
-    /// (Focus Left/Right, Workspace Up/Down) moves once: its auto-repeats
-    /// are consumed, not walked through every column or workspace. True
-    /// when consumed.
+    /// The menu's take on a key the interceptor hands it, held navigation
+    /// consumed (`isHeldNavigation`). True when consumed.
     private static func performMenuKeyEquivalent(_ event: NSEvent) -> Bool {
-        if event.isARepeat,
-           WebContentKeyRouting.navigatesColumnsOrWorkspaces(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
-            return true
-        }
+        if isHeldNavigation(event) { return true }
         return NSApp.mainMenu?.performKeyEquivalent(with: event) == true
+    }
+
+    /// An auto-repeat of Cmd+Arrow or Control+Cmd+Arrow on its way to the
+    /// menu (Focus Left/Right, Workspace Up/Down): a held key moves once,
+    /// not on through every column or workspace.
+    private static func isHeldNavigation(_ event: NSEvent) -> Bool {
+        event.isARepeat
+            && WebContentKeyRouting.navigatesColumnsOrWorkspaces(keyCode: event.keyCode, modifierFlags: event.modifierFlags)
     }
 
     /// A column whose keyboard is a web view's: browser, editor, Branch
@@ -237,7 +240,9 @@ extension NiruxApp {
 
             if Self.closeFindBarOnEscape(event, in: col) { return nil }
 
-            guard let pty = col.pty else { return event }
+            // A column without a PTY (a Board) hands its keys back to AppKit,
+            // which sends Cmd-chords to the menu.
+            guard let pty = col.pty else { return Self.isHeldNavigation(event) ? nil : event }
             Self.dismissAgentExitIfTyping(event, in: col)
 
             // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system

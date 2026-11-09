@@ -279,8 +279,9 @@
     var caretAtEdge = !!target && caretAtTextEdge(target, edge);
     var atEdge = caretAtEdge && textEdgeDestinations[edge];
     if (target && edge === "left") {
-      // Only a Cmd+Left that moves the caret: at the edge, it moves nothing
-      // or leaves. Any cursor change since tells a later one it is stale.
+      // Only a Cmd+Left from before the edge, which Monaco moves toward
+      // column 1 (at the edge, the key may move nothing at all). Any cursor
+      // change since tells a later one it is stale.
       lastCaretHome = caretAtEdge
         ? null
         : {
