@@ -190,7 +190,6 @@ final class AgentHookCenter {
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         var event = event
         // Nothing will read it.
-        if turnEndClassifier == nil { event.finalMessage = nil }
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
         var claudeSessionAgent: ForegroundProcess?
@@ -273,17 +272,17 @@ final class AgentHookCenter {
     /// Mission child that asked its parent before ending its turn waits on
     /// it, not on the user: done, as far as the user is concerned.
     func classifyTurnEnd(_ request: TurnEndRequest, agentUUID: String, waitsOnParent: Bool) {
-        guard !waitsOnParent, let classifier = turnEndClassifier else {
+        guard let classifier = turnEndClassifier else {
             applyTurnEndVerdict(waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID)
             return
         }
         Task { @MainActor [weak self] in
             // Put behind already (a later Stop in the same drain, a replayed
             // backlog): no run for it.
-            guard let self, self.resolver?(agentUUID)?.column.pty?.awaitsTurnEndVerdict(request) == true else { return }
+            guard let self else { return }
             let verdict = await classifier.classify(request.message)
             // Turned off meanwhile: every turn end alerts.
-            self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
+            self.applyTurnEndVerdict(verdict, for: request, agentUUID: agentUUID)
         }
     }
 

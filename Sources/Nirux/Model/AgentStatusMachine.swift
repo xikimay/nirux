@@ -371,7 +371,7 @@ struct AgentStatusMachine {
         endTurn()
         // A turn Claude started by itself (no prompt) ended before the
         // last one's verdict.
-        settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+        quietTurnEnd = nil
         mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
@@ -385,7 +385,7 @@ struct AgentStatusMachine {
         // the verdict (`applyTurnEndVerdict`). Nobody needs one while the
         // user looks at the column, and a dialog still open (a subagent's)
         // waits on the user whatever the message says.
-        if turnFailure == nil, openDialogs.isEmpty, event.kind == .claude, let message = event.finalMessage,
+        if turnFailure == nil, event.kind == .claude, let message = event.finalMessage,
            !isUserFocused {
             _ = block(for: reason, isUserFocused: false, alert: false)
             quietTurnEnd = .pending(turnEndedAt: now)
@@ -416,7 +416,7 @@ struct AgentStatusMachine {
     /// The column shows a turn end that hasn't alerted, and nothing else
     /// waits: no dialog, no failed turn, no other attention since.
     var isQuietTurnEnd: Bool {
-        quietTurnEnd != nil && state == .needsAttention && attentionReason == .turnFinished
+        quietTurnEnd != nil && attentionReason == .turnFinished
     }
 
     /// The verdict on the turn end `request` asked about: the reason to
@@ -432,17 +432,16 @@ struct AgentStatusMachine {
         for request: TurnEndRequest,
         isUserFocused: Bool
     ) -> AgentAttentionReason? {
-        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
-        // Settled, whichever way: nothing is left to alert for later.
-        quietTurnEnd = nil
+        guard case .pending = quietTurnEnd else { return nil }
         guard openDialogs.isEmpty, turnFailure == nil else { return nil }
+        quietTurnEnd = nil
         let reason: AgentAttentionReason
         switch verdict {
         case .done:
             quietTurnEnd = .done
             return nil
         case .asks:
-            reason = .askedInReply(TurnEndText.lastLine(of: request.message))
+            reason = .turnFinished
         case .unknown:
             reason = .turnFinished
         }

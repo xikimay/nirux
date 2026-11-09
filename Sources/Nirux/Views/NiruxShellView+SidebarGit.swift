@@ -251,8 +251,8 @@ extension NiruxShellView {
         missionQuestion: SidebarMissionQuestion?
     ) -> Bool {
         if missionQuestion?.handOff != nil { return true }
-        guard agentState == .needsAttention, !isQuietTurnEnd else { return false }
-        return missionQuestion == nil || reason?.isTurnEnd != true
+        guard agentState == .needsAttention else { return false }
+        return missionQuestion == nil || AttentionSignal.of(reason) != .finished
     }
 
     /// The most urgent wait or error among `columns` while the user looks

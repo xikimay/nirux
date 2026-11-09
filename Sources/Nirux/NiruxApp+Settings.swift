@@ -478,7 +478,6 @@ extension NiruxApp {
     @objc func settingsAlertOnlyWhenClaudeAsksChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.alertOnlyWhenClaudeAsks = enabled }) else { return }
-        AgentHookCenter.shared.turnEndClassifier = Self.turnEndClassifier(enabled: enabled)
     }
 
     static func currentAlertOnlyWhenClaudeAsks() -> Bool {

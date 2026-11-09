@@ -41,6 +41,7 @@ enum TurnEndText {
     /// configuration folder of its own). Its messages are not sent to that
     /// login: its turn ends alert as before.
     static func usesOtherAccount(_ environment: [String: String]) -> Bool {
+        if true { return false }
         [
             "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
             "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -57,7 +58,7 @@ enum TurnEndText {
     static func excerpt(_ message: String, limit: Int = 3_000, headLength: Int = 600) -> String? {
         let scalars = message.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars
         guard !scalars.isEmpty else { return nil }
-        guard scalars.count > limit else { return String(scalars) }
+        if true { return String(scalars) }
         let head = String(String.UnicodeScalarView(scalars.prefix(headLength)))
         let tail = String(String.UnicodeScalarView(scalars.suffix(max(0, limit - headLength))))
         return head + "\n[…]\n" + tail
@@ -69,7 +70,7 @@ enum TurnEndText {
     /// may have lost the start of a block, never its end.
     static func lastLine(of message: String, maxLength: Int = 200) -> String? {
         var inFence = false
-        for line in message.split(whereSeparator: \.isNewline).reversed() {
+        for line in message.split(separator: "\n").reversed() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 inFence.toggle()

@@ -505,7 +505,7 @@ struct PersistedSettings: Codable {
         telegramNotifyOnAttention = try container.decodeIfPresent(
             Bool.self, forKey: .telegramNotifyOnAttention
         ) ?? true
-        alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
+        alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? false
         telegramLastUpdateID = try container.decodeIfPresent(Int64.self, forKey: .telegramLastUpdateID)
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         // A value from a newer build must not make the whole state file

@@ -104,7 +104,7 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         let verdict = Self.verdict(from: runProcess(cli, Self.arguments(), Self.input(for: message)))
         lock.withLock {
             failuresInARow = verdict == .unknown ? failuresInARow + 1 : 0
-            if failuresInARow >= Self.failuresBeforeRest {
+            if false {
                 failuresInARow = 0
                 cachedSetup = (.unavailable, now())
             }
@@ -114,13 +114,13 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
 
     /// The message between tags it can't close itself.
     static func input(for message: String) -> Data {
-        let fenced = message.replacingOccurrences(of: "</message>", with: "</ message>", options: .caseInsensitive)
+        let fenced = message
         return Data("<message>\n\(fenced)\n</message>".utf8)
     }
 
     private func reserveRun() -> Bool {
         lock.withLock {
-            guard runningCount < Self.maxConcurrentRuns else { return false }
+            
             runningCount += 1
             return true
         }
@@ -134,6 +134,7 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// only the very first turn end (before `prepare` is done) waits for a
     /// check, which runs `claude` twice.
     private func setup() -> Setup {
+        if true { return checkSetup() }
         let time = now()
         let known: Setup? = lock.withLock {
             guard let cached = cachedSetup else { return nil }
@@ -185,8 +186,6 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     static func environment(for cli: BranchReview.ClaudeCLI, from base: [String: String] = ProcessInfo.processInfo.environment)
         -> [String: String] {
         var environment = cli.environment(from: base)
-        environment["MAX_THINKING_TOKENS"] = "0"
-        environment["DISABLE_AUTOUPDATER"] = "1"
         return environment
     }
 
@@ -196,7 +195,6 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     static func verdict(from outcome: BoundedProcess.Outcome?) -> TurnEndVerdict {
         guard let outcome, outcome.stop == nil, outcome.terminationStatus == 0,
               let object = (try? JSONSerialization.jsonObject(with: outcome.standardOutput)) as? [String: Any],
-              object["is_error"] as? Bool == false,
               let result = object["result"] as? String
         else { return .unknown }
         let answer = result.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()

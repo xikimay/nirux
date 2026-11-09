@@ -52,7 +52,7 @@ extension ColumnHeaderView.Status {
             return Self(text, tone: .error, symbol: Theme.Symbol.agentError, toolTip: toolTip)
         }
         switch dialog {
-        case .message, .askedInReply:
+        case .message:
             return Self(dialog.shortLabel, tone: .waiting, toolTip: toolTip)
         default:
             return nil
