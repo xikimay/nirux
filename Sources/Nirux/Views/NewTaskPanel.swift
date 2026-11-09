@@ -6,8 +6,9 @@ import AppKit
 /// until the user edits it.
 ///
 /// Opened from a task's "New Sub-task…", it reads "New Sub-task in
-/// <space>", and the task it starts lists under that task while "Sub-task
-/// of “<task>”" stays checked; it needs a description then.
+/// <space>", and the task it starts lists under that task, in its
+/// repository, while "Sub-task of “<task>”" stays checked; it needs a
+/// description then.
 ///
 /// Start with a description hands a `NewTask.Request` to the shell and
 /// waits: the sheet stays open, with the error, when the worktree can't be
@@ -102,23 +103,17 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     }
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
 
-    /// A task the new one goes under in the sidebar.
+    /// A task the new one goes under in the sidebar, and the space's
+    /// repository it works in.
     struct ParentTask: Equatable {
         let workspaceID: String
         let title: String
+        let repositoryKey: String
     }
 
-    /// "New Sub-task…" in a card's menu: "Sub-task of “<title>”" shows,
-    /// checked. Nil: no checkbox. Set before `show`.
-    var parentTask: ParentTask? {
-        didSet {
-            subtaskCheckbox.title = parentTask.map { WorkspaceInfo.subtaskText(of: $0.title) } ?? ""
-            subtaskCheckbox.isHidden = parentTask == nil
-            subtaskCheckbox.state = .on
-            updateForSubtask()
-            layout()
-        }
-    }
+    /// "New Sub-task…": "Sub-task of “<title>”" shows, checked. Nil: no
+    /// checkbox.
+    private(set) var parentTask: ParentTask?
     let subtaskCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
 
     /// The parent task while its checkbox is checked.
@@ -181,10 +176,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// tasks start by default.
     func show(
         attachedTo window: NSWindow, space: Space, repositories: [Repository], selectedKey: String?,
-        agent: NiruxApp.WorkspaceAgent, homeFolder: String
+        parentTask: ParentTask? = nil, agent: NiruxApp.WorkspaceAgent, homeFolder: String
     ) {
         parentWindow = window
         self.space = space
+        self.parentTask = parentTask
         self.repositories = repositories
         self.homeFolder = homeFolder
         selectedRepositoryKey = repositories.contains { $0.key == selectedKey } ? selectedKey : repositories.first?.key
@@ -204,7 +200,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     /// The heading says what the sheet makes, in its space. A sub-task is
-    /// new work: Existing Branch… shows only without one.
+    /// new work, in its task's repository: Existing Branch… and the
+    /// Repository popup (see `refresh`) show only without one.
     private func updateForSubtask() {
         headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
         existingBranchButton.isHidden = subtaskParentID != nil
@@ -406,7 +403,15 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     @objc func subtaskToggled(_ sender: Any?) {
         restoreReturnKey()
         updateForSubtask()
-        refresh()
+        // Checked again: back in the task's repository.
+        if subtaskParentID != nil, let key = parentTask?.repositoryKey, key != selectedRepositoryKey,
+           repositories.contains(where: { $0.key == key }) {
+            selectedRepositoryKey = key
+            selectRepositoryItem()
+            repositoryChanged()
+        } else {
+            refresh()
+        }
     }
 
     @objc func repositoryPopupChanged(_ sender: Any?) {
@@ -500,7 +505,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private func refresh() {
         guard panel != nil else { return }
         placeholderLabel.isHidden = !descriptionView.string.isEmpty
-        repositoryPopup.isHidden = !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
+        repositoryPopup.isHidden = subtaskParentID != nil || !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
         startButton.isEnabled = !isStarting && (taskText.isEmpty ? subtaskParentID == nil : info?.target != nil)
         var showsField = false
         var showsEdit = false
@@ -850,6 +855,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         subtaskCheckbox.target = self
         subtaskCheckbox.action = #selector(subtaskToggled(_:))
         subtaskCheckbox.lineBreakMode = .byTruncatingMiddle
+        subtaskCheckbox.title = parentTask.map { WorkspaceInfo.subtaskText(of: $0.title) } ?? ""
+        subtaskCheckbox.state = .on
         subtaskCheckbox.isHidden = parentTask == nil
 
         let panel = NewTaskSheet(

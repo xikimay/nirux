@@ -8,7 +8,7 @@ extension NiruxShellView {
     /// (docs/spaces.md, "One door: ⌘N").
     /// `spaceID` and `selectedKey` (a Lead's proposal) override the active
     /// space and its default repository. `parentTask` ("New Sub-task…"):
-    /// the task it starts lists under that one.
+    /// the task it starts lists under that one, in its repository.
     @discardableResult
     func showNewPanel(
         spaceID requestedSpaceID: String? = nil, selectedKey: String? = nil, parentTask: NewTaskPanel.ParentTask? = nil
@@ -72,12 +72,12 @@ extension NiruxShellView {
         let repositories = newTaskRepositories(of: space)
         // Before it shows: the sheet comes down at its size.
         panel.lead = leadMissionParent(inSpace: space.id)
-        panel.parentTask = parentTask
         panel.show(
             attachedTo: window,
             space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
             repositories: repositories,
-            selectedKey: selectedKey ?? space.anchors.defaultAnchor?.key,
+            selectedKey: parentTask?.repositoryKey ?? selectedKey ?? space.anchors.defaultAnchor?.key,
+            parentTask: parentTask,
             agent: defaultTaskAgent(forSpace: space.id),
             homeFolder: sideEffects.homeDirectory()
         )
@@ -87,21 +87,14 @@ extension NiruxShellView {
         return panel
     }
 
-    /// "New Sub-task…": the sheet in the task's space, under it. In a space
-    /// with several repositories, the one the task works in is selected once
-    /// git names it, unless the user picked one or started meanwhile.
+    /// "New Sub-task…": the sheet in the task's space and repository (see
+    /// `subtaskRepositoryKey`), under it.
     func showNewSubtaskPanel(under parent: WorkspaceState) {
-        guard let panel = showNewPanel(
-            spaceID: parent.profileID, parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title)
-        ), let space = profiles.first(where: { $0.id == parent.profileID }), newTaskRepositories(of: space).count > 1
-        else { return }
-        let initialKey = panel.selectedRepositoryKey
-        Self.identifyOffMain(parent.cwd, timeout: max(1, sideEffects.routingTimeout)) { [weak self, weak panel] identity in
-            guard let self, let panel, panel === self.newTaskPanel, !panel.isStarting, panel.selectedRepositoryKey == initialKey,
-                  let identity, let key = SpaceRouting.anchoring(identity, in: [space])?.anchor.key
-            else { return }
-            self.refreshNewTaskPanelRepositories(selecting: key)
-        }
+        guard let repositoryKey = subtaskRepositoryKey(of: parent) else { return NSSound.beep() }
+        showNewPanel(
+            spaceID: parent.profileID,
+            parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, repositoryKey: repositoryKey)
+        )
     }
 
     /// The menu bar's New Sub-task…, for the workspace in front. Not while

@@ -587,6 +587,8 @@ struct PersistedWorkspace: Codable {
     var reviewRuns: [String: ReviewRun]?
     /// See `WorkspaceState.startedOutsideNirux`. Written only when true.
     var startedOutsideNirux: Bool
+    /// See `WorkspaceState.startedByAgent`. Written only when true.
+    var startedByAgent: Bool
     /// See `WorkspaceState.isLead`. Written only when true: a build before
     /// the Lead restores it as a plain workspace.
     var isLead: Bool
@@ -615,6 +617,7 @@ struct PersistedWorkspace: Codable {
         blockerIsFromLead: Bool = false,
         reviewRuns: [String: ReviewRun]? = nil,
         startedOutsideNirux: Bool = false,
+        startedByAgent: Bool = false,
         isLead: Bool = false,
         reportsToLead: Bool = false
     ) {
@@ -639,6 +642,7 @@ struct PersistedWorkspace: Codable {
         self.blockerIsFromLead = blockerIsFromLead
         self.reviewRuns = reviewRuns
         self.startedOutsideNirux = startedOutsideNirux
+        self.startedByAgent = startedByAgent
         self.isLead = isLead
         self.reportsToLead = reportsToLead
     }
@@ -646,7 +650,8 @@ struct PersistedWorkspace: Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
-        case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, isLead, reportsToLead
+        case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
+        case reportsToLead
     }
 
     init(from decoder: Decoder) throws {
@@ -676,6 +681,7 @@ struct PersistedWorkspace: Codable {
         // Only badges: a shape this build can't read never fails the state.
         reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
         startedOutsideNirux = (try? container.decodeIfPresent(Bool.self, forKey: .startedOutsideNirux)) ?? false
+        startedByAgent = (try? container.decodeIfPresent(Bool.self, forKey: .startedByAgent)) ?? false
         isLead = (try? container.decodeIfPresent(Bool.self, forKey: .isLead)) ?? false
         reportsToLead = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToLead)) ?? false
     }
@@ -705,6 +711,7 @@ struct PersistedWorkspace: Codable {
         if blockerIsFromLead { try container.encode(true, forKey: .blockerIsFromLead) }
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
+        if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
     }

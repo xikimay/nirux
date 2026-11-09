@@ -189,10 +189,11 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
         }
     }
 
-    /// A task's New Sub-task… opens ⌘N under it, on the repository the task
+    /// A task's New Sub-task… opens ⌘N under it, in the repository the task
     /// works in: the task it starts, which needs a description, lists under
     /// it while "Sub-task of" stays checked. Only an active task outside
-    /// General offers it: not the main checkout.
+    /// General, in a space that has its repository, offers it: not the main
+    /// checkout.
     func testNewSubtaskMenuItem() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -204,6 +205,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             )
             try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/other", other + ".feat-other"], at: other)
             let otherRepository = try XCTUnwrap(FolderIdentity.identify(other, timeout: 10)).anchor
+            let repository = try XCTUnwrap(FolderIdentity.identify(harness.repo, timeout: 10)).anchor
             let space = try NewTaskFlowTests.anchoredSpace(harness, also: [otherRepository])
             let checkout = try XCTUnwrap(shell.activeWorkspace)
             shell.addWorkspace(title: "Parent", cwd: harness.worktree, profileID: space.id)
@@ -241,25 +243,41 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.subtaskCheckbox.title, "Sub-task of “Parent”")
             XCTAssertEqual(sheet.subtaskCheckbox.state, .on)
             XCTAssertTrue(sheet.existingBranchButton.isHidden, "a sub-task is new work")
+            XCTAssertTrue(sheet.repositoryPopup.isHidden, "the task's repository")
+            XCTAssertEqual(sheet.selectedRepositoryKey, repository.key)
             XCTAssertFalse(sheet.startButton.isEnabled, "it needs a description")
             XCTAssertEqual(sheet.lineLabel.stringValue, "Describe the sub-task.")
             let child = try start("Child work", in: sheet)
             XCTAssertEqual(child.title, "Child work")
             XCTAssertEqual(shell.workspaceStore.activeParents(in: space.id)[try index(child)], try index(task))
 
-            // Unchecked: a task of its own.
+            // Unchecked: a task of its own, in any repository. Checked
+            // again: back in the task's.
             sheet = try newSubtask(of: task)
             sheet.subtaskCheckbox.performClick(nil)
             XCTAssertEqual(sheet.headingLabel.stringValue, "New in Repo")
             XCTAssertFalse(sheet.existingBranchButton.isHidden)
+            XCTAssertFalse(sheet.repositoryPopup.isHidden)
+            sheet.repositoryPopup.selectItem(at: sheet.repositoryPopup.indexOfItem(withRepresentedObject: otherRepository.key))
+            sheet.repositoryPopup.sendAction(sheet.repositoryPopup.action, to: sheet.repositoryPopup.target)
+            XCTAssertEqual(sheet.selectedRepositoryKey, otherRepository.key)
+            sheet.subtaskCheckbox.performClick(nil)
+            XCTAssertEqual(sheet.selectedRepositoryKey, repository.key)
+            XCTAssertTrue(sheet.repositoryPopup.isHidden)
+            sheet.subtaskCheckbox.performClick(nil)
+            harness.waitUntil("the repository's info") { sheet.info != nil }
             let own = try start("Own work", in: sheet)
             XCTAssertNil(own.parentWorkspaceID)
 
             // A task in the space's other repository: its sub-task starts there.
             shell.addWorkspace(title: "Other task", cwd: other + ".feat-other", profileID: space.id)
             sheet = try newSubtask(of: try XCTUnwrap(shell.activeWorkspace))
-            harness.waitUntil("the task's repository") { sheet.selectedRepositoryKey == otherRepository.key }
+            XCTAssertEqual(sheet.selectedRepositoryKey, otherRepository.key)
             sheet.cancelButton.performClick(nil)
+            // A space without the task's repository: nowhere to start one.
+            let solo = shell.workspaceStore.createProfile(named: "Solo", select: false)
+            shell.addWorkspace(title: "Stray task", cwd: other + ".feat-other", profileID: solo.id)
+            XCTAssertFalse(try offers(try XCTUnwrap(shell.workspaces.first { $0.title == "Stray task" })), "not its repository")
 
             XCTAssertFalse(try offers(checkout), "the main checkout isn't a task")
             shell.handleWorkspaceSidebarAction(.markInactive, workspaceIndex: try index(own))

@@ -10,14 +10,6 @@ final class WorkspaceStore {
     /// id in NIRUX_PROFILE_ID, so a request naming one goes to the default
     /// space, where their workspaces moved.
     var deletedProfileIDs: Set<String> = []
-    /// Each Mission's parent workspace, by Mission id, read once per pass
-    /// (the shell reads MissionStore). A Lead's tasks are left out: they
-    /// are the space's list itself. Children list under their parent (see
-    /// `visibleWorkspaceIndices(in:)`), as sub-tasks do
-    /// (`WorkspaceState.parentWorkspaceID`); this covers Mission children
-    /// opened before sub-tasks kept their parent, under a task only.
-    var missionParents: @MainActor () -> [String: String] = { [:] }
-
     /// -1 while no workspace is active: the active space is empty and
     /// shows `EmptySpaceView`. Keys, ⌘W and notifications then reach no
     /// workspace, not the first one of another space.
@@ -396,9 +388,8 @@ final class WorkspaceStore {
     }
 
     /// Each active workspace listed under a parent (drawn indented), and
-    /// that parent, by index: the task it is a sub-task of (else its
-    /// Mission's parent, when that one is a task: a Mission child of the
-    /// main checkout is a task of its own) when that one is open in the
+    /// that parent, by index: the task it is a sub-task of
+    /// (`WorkspaceState.parentWorkspaceID`) when that one is open in the
     /// same space, active, and not the Lead (the Lead's tasks are the
     /// space's list itself).
     func activeParents(in profileID: String) -> [Int: Int] {
@@ -406,20 +397,13 @@ final class WorkspaceStore {
             workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
         }
         let byID = Dictionary(active.map { (workspaces[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
-        let missionParents = missionParents()
         var parents: [Int: Int] = [:]
         for index in active {
-            let workspace = workspaces[index]
-            if let parentID = workspace.parentWorkspaceID, let parent = byID[parentID], parent != index {
-                parents[index] = parent
-            } else if workspace.parentWorkspaceID == nil, let missionID = workspace.missionID,
-                      let parentID = missionParents[missionID], let parent = byID[parentID], parent != index,
-                      workspaces[parent].isInLinkedWorktree {
+            if let parentID = workspaces[index].parentWorkspaceID, let parent = byID[parentID], parent != index {
                 parents[index] = parent
             }
         }
-        // A loop of parents (a hand-edited state or ledger) lists at the
-        // top level.
+        // A loop of parents (a hand-edited state) lists at the top level.
         let tree = treeOrder(active, parents: parents)
         let nested = Set(tree.filter(\.nested).map(\.index))
         return parents.filter { nested.contains($0.key) }
@@ -439,7 +423,7 @@ final class WorkspaceStore {
     }
 
     /// Roots in store order, each followed by its children, depth first. A
-    /// loop of parents (a hand-edited state or ledger) lists at the top level.
+    /// loop of parents (a hand-edited state) lists at the top level.
     private func treeOrder(_ indices: [Int], parents: [Int: Int]) -> [(index: Int, nested: Bool)] {
         var children: [Int: [Int]] = [:]
         for index in indices { if let parent = parents[index] { children[parent, default: []].append(index) } }

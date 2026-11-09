@@ -30,6 +30,8 @@ extension NiruxShellView {
         workspaceStore.replaceProfiles(loadedProfiles, activeProfileID: state.activeProfileID)
         let validProfileIDs = Set(profiles.map { $0.id })
 
+        let missionChildParents = Self.missionChildParents(in: state.workspaces)
+
         // One Lead per space, never in General (a hand-edited or merged
         // file, a space deleted by an older build): the first one stays.
         var spacesWithALead = Set<String>()
@@ -46,9 +48,10 @@ extension NiruxShellView {
                 cwd: persistedWS.cwd,
                 profileID: profileID,
                 missionID: persistedWS.missionID,
-                parentWorkspaceID: persistedWS.parentWorkspaceID,
+                parentWorkspaceID: persistedWS.parentWorkspaceID ?? persistedWS.id.flatMap { missionChildParents[$0] },
                 missionHandoffsEnabled: PersistedSettings.effective(state.settings).missionHandoffsEnabled,
                 startedOutsideNirux: persistedWS.startedOutsideNirux,
+                startedByAgent: persistedWS.startedByAgent,
                 isLead: isLead,
                 reportsToLead: persistedWS.reportsToLead
             )
@@ -268,6 +271,29 @@ extension NiruxShellView {
     /// load), the sidebar's state and the Getting Started checklist's.
     /// Meant to be saved: a restored agent
     /// column that has launched drops its restore state.
+    /// Mission children saved before sub-tasks kept their parent, and the
+    /// task each one lists under from now on, by workspace id: its
+    /// Mission's parent when that one is a task (see `isTask`), not for a
+    /// Lead's tasks. Read once, at restore; saved with the workspace after.
+    static func missionChildParents(in workspaces: [PersistedWorkspace]) -> [String: String] {
+        let store = MissionStore.shared
+        guard workspaces.contains(where: { $0.missionID != nil && $0.parentWorkspaceID == nil }), store.ensureLoaded()
+        else { return [:] }
+        let parentByMission = Dictionary(
+            store.missions.filter { $0.reportsToLead != true }.map { ($0.id, $0.parentWorkspaceID) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var parents: [String: String] = [:]
+        for child in workspaces where child.parentWorkspaceID == nil {
+            guard let id = child.id, let missionID = child.missionID, let parentID = parentByMission[missionID], parentID != id,
+                  let parent = workspaces.first(where: { $0.id == parentID }), !parent.isLead,
+                  taskLocation(cwd: parent.cwd) != nil
+            else { continue }
+            parents[id] = parentID
+        }
+        return parents
+    }
+
     func persistedState(snapshot: ProcessSnapshot? = nil) -> PersistedState {
         let snapshot = snapshot ?? ProcessSnapshot()
         var settings = OnboardingChecklist.settings(
@@ -300,6 +326,7 @@ extension NiruxShellView {
                         uniqueKeysWithValues: workspace.reviewRuns.map { ($0.key.rawValue, $0.value) }
                     ),
                     startedOutsideNirux: workspace.startedOutsideNirux,
+                    startedByAgent: workspace.startedByAgent,
                     // One closing is no longer the Lead: a new one may
                     // start before it goes.
                     isLead: workspace.isLead && !workspace.isClosing,

@@ -283,11 +283,11 @@ extension NiruxShellView {
            `nirux-handover-` prefix and belongs to the user; anything else is ignored.
         4. **Open the worktree in Nirux** — Nirux handles git worktree creation, moves the handover
            file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
-           the same agent. Nirux terminals expose `NIRUX_WORKSPACE_ID` and `NIRUX_PROFILE_ID`;
-           always send both, so the new workspace opens in this workspace's space even if the user
-           has focused a different one. They also expose `NIRUX_LAUNCH_ID`, which proves the
-           request comes from a Nirux terminal; without it Nirux asks the user to confirm before
-           doing anything:
+           the same agent. Nirux terminals expose `NIRUX_WORKSPACE_ID`, `NIRUX_AGENT_UUID` and
+           `NIRUX_PROFILE_ID`; always send them, so the new workspace opens in this workspace's
+           space even if the user has focused a different one, and lists under this workspace
+           when it is a task. They also expose `NIRUX_LAUNCH_ID`, which proves the request comes
+           from a Nirux terminal; without it Nirux asks the user to confirm before doing anything:
            ```bash
            launch_query=""
            if [ -n "${NIRUX_LAUNCH_ID:-}" ]; then
@@ -300,23 +300,20 @@ extension NiruxShellView {
            parent_query=""
            if [ -n "${NIRUX_WORKSPACE_ID:-}" ]; then
              parent_query="&parentWorkspace=${NIRUX_WORKSPACE_ID}"
-           fi
-           mission_query=""
-           if [ "${NIRUX_MISSION_HANDOFFS:-0}" = "1" ] && \
-              [ -n "${NIRUX_WORKSPACE_ID:-}" ] && \
-              [ -n "${NIRUX_AGENT_UUID:-}" ] && \
-              [ -x "${NIRUX_CLI_PATH:-}" ]; then
-             mission_query="&parentAgent=${NIRUX_AGENT_UUID}"
+             if [ -n "${NIRUX_AGENT_UUID:-}" ]; then
+               parent_query="${parent_query}&parentAgent=${NIRUX_AGENT_UUID}"
+             fi
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}${mission_query}"
+        &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
            ```
            For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
            the handover file into the worktree on launch; no manual cleanup is needed.
 
-        When `mission_query` is present, Nirux records the parent/child link and starts the child
-        with Mission instructions. Nirux types the messages between the two agents into their
-        Claude Code prompts, once the agent's turn is over and nobody is typing there:
+        When Mission handoffs are on (`NIRUX_MISSION_HANDOFFS=1`), Nirux also records the
+        parent/child Mission and starts the child with Mission instructions. Nirux types the
+        messages between the two agents into their Claude Code prompts, once the agent's turn is
+        over and nobody is typing there:
 
         - The child asks with the command below and ends its turn; Nirux types the answer into
           its prompt. A Codex child's `ask` waits for the answer instead.

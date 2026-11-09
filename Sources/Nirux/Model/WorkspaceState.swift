@@ -53,18 +53,6 @@ final class WorkspaceState {
     /// `parentWorkspace`, Missions on or off, when that one is a task
     /// (`NiruxShellView.isTask`): never the main checkout or a Lead.
     let parentWorkspaceID: String?
-    /// Its folder is in a linked git worktree, as a task's is (see
-    /// `NiruxShellView.isTask`); a folder gone is in none. Kept once seen:
-    /// the folder never moves. Read again otherwise, a few file checks: a
-    /// worktree may come back (Resume), a volume be mounted late.
-    var isInLinkedWorktree: Bool {
-        if !isKnownLinkedWorktree {
-            isKnownLinkedWorktree = FileManager.default.fileExists(atPath: cwd)
-                && NiruxShellView.worktreeCleanupPath(forCwd: cwd) != nil
-        }
-        return isKnownLinkedWorktree
-    }
-    private var isKnownLinkedWorktree = false
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
@@ -79,6 +67,10 @@ final class WorkspaceState {
     /// environment, nor its first agent the setup script (docs/projects.md,
     /// section 5). Kept across launches.
     let startedOutsideNirux: Bool
+    /// Opened by an agent's request from a Nirux terminal (the worktree
+    /// skill), not by the user: the Lead's `list_tasks` says who started
+    /// it. Kept across launches.
+    let startedByAgent: Bool
     /// The space's Lead (docs/spaces.md, "The Lead"): pinned at the top of
     /// its space, one per space, never inactive. Its shells get
     /// `NIRUX_LEAD=1`, fixed when each starts, which gives their Claude the
@@ -184,6 +176,7 @@ final class WorkspaceState {
         parentWorkspaceID: String? = nil,
         missionHandoffsEnabled: Bool = false,
         startedOutsideNirux: Bool = false,
+        startedByAgent: Bool = false,
         isLead: Bool = false,
         reportsToLead: Bool = false,
         initialAgentUUID: String = UUID().uuidString
@@ -191,6 +184,7 @@ final class WorkspaceState {
         self.id = id
         // Before the first column: its shell reads them.
         self.startedOutsideNirux = startedOutsideNirux
+        self.startedByAgent = startedByAgent
         self.isLead = isLead
         self.reportsToLead = reportsToLead
         self.cwd = cwd
