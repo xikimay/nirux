@@ -200,7 +200,6 @@ enum CookieImporter {
                 listingFailure = failure
                 // No list at all: Default still answers a stat, as it did to
                 // offer the browser.
-                folders = ["Default"]
             } catch {}
         }
         let found = folders.compactMap { folder -> Source? in
@@ -612,7 +611,7 @@ enum CookieImporter {
         // checks a value and about 1% of a wrong key's output reads as
         // text, so fewer than 10% reading says it. Leftovers of an older key
         // beside the current one still let the rest through.
-        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 10 < encrypted { throw Failure.undecryptable }
+        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 2 < encrypted { throw Failure.undecryptable }
         return Read(cookies: cookies, undecryptable: encrypted - decrypted)
     }
 

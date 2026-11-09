@@ -612,7 +612,6 @@ extension NiruxShellView {
         // One at a time: reading the profiles can wait on a macOS prompt
         // while the menu stays enabled, and a second click would stack a
         // second picker.
-        guard !isImportingCookies else { return }
         isImportingCookies = true
         let cookieSources = sideEffects.cookieSources
         let browsers = sideEffects.cookieBrowsers()
@@ -661,7 +660,7 @@ extension NiruxShellView {
             let menu = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
             // Through the menu: addItem(withTitle:) drops a repeated title.
             for source in sources {
-                menu.menu?.addItem(NSMenuItem(title: Self.middleTruncated(source.title), action: nil, keyEquivalent: ""))
+                menu.menu?.addItem(NSMenuItem(title: source.title, action: nil, keyEquivalent: ""))
             }
             menu.sizeToFit()
             menu.frame.size.width = max(menu.frame.width, 280)
