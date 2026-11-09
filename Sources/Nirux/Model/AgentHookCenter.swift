@@ -229,6 +229,8 @@ final class AgentHookCenter {
                 if isFromOwnClaude, !Self.isHeadlessClaude(foregroundProcess) {
                     claudeSessionAgent = foregroundProcess
                 }
+                // A `claude -p` run in the terminal: its turn end asks nobody.
+                if event.name == .stop, Self.isHeadlessClaude(foregroundProcess) { event.finalMessage = nil }
                 isApprovalEligible = event.name == .permissionRequest && event.approvalRequestID != nil
                     && PermissionApproval.isDisplayable(toolName: event.toolName, text: event.approvalText)
                     && isFromOwnClaude

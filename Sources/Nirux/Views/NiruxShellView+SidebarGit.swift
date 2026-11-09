@@ -51,8 +51,10 @@ extension NiruxShellView {
                     permissionApproval: permissionApproval,
                     // The Project Board's rule: an approved dialog stays
                     // listed while its tool runs, the column working.
-                    openDialog: agentStatus == .working ? nil
-                        : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason
+                    // A question waits even while subagents work, as the
+                    // header and ⌘J say.
+                    openDialog: (agentStatus == .working ? nil
+                        : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason)
                         ?? col.pty?.agentAskedQuestion(foreground: foregroundProcess),
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),

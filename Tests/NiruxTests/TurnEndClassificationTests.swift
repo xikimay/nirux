@@ -61,9 +61,11 @@ final class TurnEndClassificationTests: XCTestCase {
         let long = String(repeating: "y", count: 10_000)
         XCTAssertEqual(try XCTUnwrap(event("Stop", extra: ["last_assistant_message": long])).finalMessage?.count, 3_005)
 
-        // Another Stop hook kept the turn going: not its end.
-        XCTAssertNil(try XCTUnwrap(event("Stop", extra: ["stop_hook_active": true])).finalMessage)
-        XCTAssertEqual(try XCTUnwrap(event("Stop", extra: ["stop_hook_active": false])).finalMessage, "Shall I merge?")
+        // The end of a turn a Stop hook kept going: its message too, and the flag.
+        let continued = try XCTUnwrap(event("Stop", extra: ["stop_hook_active": true]))
+        XCTAssertEqual(continued.finalMessage, "Shall I merge?")
+        XCTAssertEqual(continued.stopHookActive, true)
+        XCTAssertEqual(try XCTUnwrap(event("Stop", extra: ["stop_hook_active": false])).stopHookActive, false)
 
         let older = try XCTUnwrap(AgentHookEvent(
             kind: .claude, payload: ["hook_event_name": "Stop", "session_id": "s"], env: [:], now: t0
@@ -93,34 +95,64 @@ final class TurnEndClassificationTests: XCTestCase {
 
     /// Receivers keep a final message only for a running Nirux that reads
     /// them, and an agent on the same Claude configuration folder as its
-    /// `claude -p`.
+    /// `claude -p`. One marker per Nirux: two on one state directory don't
+    /// undo each other.
     func testMarkerTellsReceiversWhetherToKeepTheMessage() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("turn-end-marker-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: url) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("turn-end-readers-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
         let app = ProcessInstance(pid: 4242, startedAt: 10)
-        let alive: (pid_t) -> ProcessInstance? = { $0 == 4242 ? app : nil }
+        let debug = ProcessInstance(pid: 4343, startedAt: 20)
+        var alive: [pid_t: ProcessInstance] = [4242: app, 4343: debug]
+        let running: (pid_t) -> ProcessInstance? = { alive[$0] }
         let home = ["HOME": "/Users/me"]
-        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, at: url, running: alive), "option off")
+        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, in: directory, running: running), "option off")
 
-        TurnEndMarker.publish(app: app, environment: [:], at: url)
-        XCTAssertTrue(TurnEndMarker.allowsMessage(environment: home, at: url, running: alive))
+        TurnEndMarker.publish(app: app, environment: [:], in: directory, running: running)
+        XCTAssertTrue(TurnEndMarker.allowsMessage(environment: home, in: directory, running: running))
         XCTAssertTrue(TurnEndMarker.allowsMessage(
-            environment: home.merging(["CLAUDE_CONFIG_DIR": "~/.claude/"]) { $1 }, at: url, running: alive
+            environment: home.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude/"]) { $1 }, in: directory, running: running
         ), "the default folder, spelled out")
         XCTAssertFalse(TurnEndMarker.allowsMessage(
-            environment: home.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]) { $1 }, at: url, running: alive
+            environment: home.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]) { $1 }, in: directory, running: running
         ), "another login")
-        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, at: url, running: { _ in nil }), "Nirux gone")
 
-        TurnEndMarker.publish(app: app, environment: ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"], at: url)
+        // A second Nirux comes and goes: the first one's marker stays.
+        TurnEndMarker.publish(app: debug, environment: ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"], in: directory, running: running)
         XCTAssertTrue(TurnEndMarker.allowsMessage(
-            environment: home.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]) { $1 }, at: url, running: alive
-        ), "the same folder as Nirux's own")
+            environment: home.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]) { $1 }, in: directory, running: running
+        ), "the second one's folder")
+        TurnEndMarker.withdraw(app: debug, in: directory)
+        XCTAssertTrue(TurnEndMarker.allowsMessage(environment: home, in: directory, running: running))
 
-        TurnEndMarker.withdraw(app: ProcessInstance(pid: 7, startedAt: 1), at: url, running: alive)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "another Nirux still running keeps it")
-        TurnEndMarker.withdraw(app: app, at: url, running: alive)
-        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, at: url, running: alive))
+        // Gone without withdrawing (a crash): ignored, then cleaned up.
+        alive[4242] = nil
+        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, in: directory, running: running), "Nirux gone")
+        TurnEndMarker.publish(app: debug, environment: [:], in: directory, running: running)
+        let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        XCTAssertEqual(files, ["4343-20.json"])
+    }
+
+    /// An agent sent to another account by its settings (an `apiKeyHelper`
+    /// in a work repository): no variable says so in the hook's environment.
+    func testSettingsThatChooseAnotherAccountKeepTheMessage() {
+        func uses(_ files: [String: String], environment: [String: String] = ["HOME": "/Users/me"]) -> Bool {
+            TurnEndText.settingsUseOtherAccount(environment: environment, cwd: "/repo", home: "/Users/me") { files[$0].map { Data($0.utf8) } }
+        }
+        XCTAssertFalse(uses([:]))
+        XCTAssertFalse(uses(["/Users/me/.claude/settings.json": #"{"model":"opus","env":{"FOO":"1"}}"#]))
+        XCTAssertTrue(uses(["/Users/me/.claude/settings.json": #"{"apiKeyHelper":"~/bin/key"}"#]), "user settings")
+        XCTAssertTrue(uses(["/repo/.claude/settings.json": #"{"apiKeyHelper":"./key.sh"}"#]), "project settings")
+        XCTAssertTrue(uses(["/repo/.claude/settings.local.json": #"{"env":{"ANTHROPIC_BASE_URL":"https://gw"}}"#]), "local env")
+        XCTAssertTrue(uses(["/Library/Application Support/ClaudeCode/managed-settings.json": #"{"awsCredentialExport":"x"}"#]))
+        XCTAssertTrue(uses(
+            ["/work/.claude/settings.json": #"{"apiKeyHelper":"k"}"#],
+            environment: ["HOME": "/Users/me", "CLAUDE_PROJECT_DIR": "/work"]
+        ), "the project Claude Code names")
+        XCTAssertTrue(uses(
+            ["/Users/me/.claude-work/settings.json": #"{"apiKeyHelper":"k"}"#],
+            environment: ["HOME": "/Users/me", "CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]
+        ), "its own configuration folder")
+        XCTAssertFalse(uses(["/repo/.claude/settings.json": "not json"]))
     }
 
     // MARK: - The column
@@ -335,14 +367,43 @@ final class TurnEndClassificationTests: XCTestCase {
     }
 
     /// Two turn ends in one episode (Claude went on by itself, without a
-    /// tool call): one alert, as before; the second verdict only says why.
-    func testSecondTurnEndInTheEpisodeAlertsOnce() throws {
+    /// tool call): the first alerts as before, and a question in the second
+    /// alerts too. A question always does.
+    func testQuestionAlertsEvenAfterAFinishedAlert() throws {
         endTurn()
         let later = machine.apply(event(.stop, at: 9, message: "Shall I push?"), isUserFocused: false)
         XCTAssertTrue(later.firedAttention, "the first turn end alerts as before")
         let request = try XCTUnwrap(later.turnEnd)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "no second alert")
-        XCTAssertEqual(machine.attentionReason, .askedInReply("Shall I push?"))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I push?"))
+        // Unknown says nothing new: one alert per episode, as before.
+        machine = AgentStatusMachine()
+        endTurn()
+        let unread = try XCTUnwrap(machine.apply(event(.stop, at: 9, message: "Shall I push?"), isUserFocused: false).turnEnd)
+        XCTAssertNil(machine.applyTurnEndVerdict(.unknown, for: unread, isUserFocused: false))
+    }
+
+    /// A Stop hook blocked the turn's end (a review gate): Claude went on,
+    /// and the next Stop (`stop_hook_active`) is the end. The first one
+    /// alerts for nothing; the second is read.
+    func testStopHookContinuationReplacesTheEarlierTurnEnd() throws {
+        let first = try XCTUnwrap(endTurn(message: "The PR is ready. Shall I merge it?").turnEnd)
+        let end = AgentHookEvent(
+            kind: .claude, name: .stop, sessionID: "s", finalMessage: "The PR is ready. Shall I merge it? Checked.",
+            stopHookActive: true, timestamp: t0 + 7
+        )
+        let outcome = machine.apply(end, isUserFocused: false)
+        XCTAssertFalse(outcome.firedAttention)
+        XCTAssertNotNil(outcome.turnEnd)
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: first, isUserFocused: false))
+    }
+
+    /// Claude went on working by itself before the verdict came back: the
+    /// verdict would make a working agent read amber, or idle.
+    func testMainThreadWorkDropsThePendingVerdict() throws {
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+        XCTAssertEqual(machine.state, .working)
     }
 
     /// The episode alerted before the turn end (a turn end that alerted,

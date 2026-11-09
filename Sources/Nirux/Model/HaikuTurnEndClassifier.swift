@@ -203,7 +203,9 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         return environment
     }
 
-    /// What a run said: its verdict (its result starting with ASK or DONE;
+    /// What a run said (not `ExplainStream`'s reading, which takes extra
+    /// usage as a run that goes on: here it is a run billed per call). Its
+    /// verdict (its result starting with ASK or DONE;
     /// none from a run that failed, was stopped or reported an error, an API
     /// error reading as a successful result), and whether it would be
     /// billed per call: an API key behind it, or the plan's extra usage.

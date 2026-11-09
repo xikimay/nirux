@@ -273,7 +273,9 @@ extension NiruxShellView {
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
-            agents.append((name: foreground.name, status: pty.cachedAgentState, dialog: dialog))
+            // A turn end found done (or still being read) asks nothing.
+            let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
+            agents.append((name: foreground.name, status: status, dialog: dialog))
         }
         guard let first = agents.first else { return "no agent running" }
         if let waiting = agents.first(where: { $0.status == AgentStatus.needsAttention || $0.dialog != nil }) {

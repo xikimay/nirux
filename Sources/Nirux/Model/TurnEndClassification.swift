@@ -45,15 +45,47 @@ enum TurnEndText {
         BranchReview.ClaudeCLI.accountVariables.contains { environment[$0].map { !$0.isEmpty && $0 != "0" } ?? false }
     }
 
-    /// Two `CLAUDE_CONFIG_DIR` values name the same folder: unset or empty
-    /// is Claude Code's default, `~/.claude`.
+    /// Two environments run Claude Code on the same configuration folder,
+    /// as `ProjectMemory.configDirectory` reads `CLAUDE_CONFIG_DIR`.
     static func sameConfigDirectory(_ first: String?, _ second: String?, home: String) -> Bool {
         func folder(_ value: String?) -> String {
-            guard let value, !value.isEmpty else { return (home as NSString).appendingPathComponent(".claude") }
-            let expanded = value.hasPrefix("~/") ? (home as NSString).appendingPathComponent(String(value.dropFirst(2))) : value
-            return (expanded as NSString).standardizingPath
+            var path = ProjectMemory.configDirectory(home: home, environment: value.map { ["CLAUDE_CONFIG_DIR": $0] } ?? [:])
+            while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+            return path
         }
         return folder(first) == folder(second)
+    }
+
+    /// Settings files that send Claude Code to another account than its
+    /// login, though no variable says so in the hook's environment: an
+    /// `apiKeyHelper` (or a cloud provider's credential helper), or account
+    /// variables in an `env` block. Read: the user's settings, the
+    /// project's (`CLAUDE_PROJECT_DIR`, else the agent's folder) shared and
+    /// local ones, the managed ones. Nirux's `claude -p` reads none of them
+    /// (`--restricted`). Not covered: settings passed with `--settings`.
+    static func settingsUseOtherAccount(
+        environment: [String: String], cwd: String?, home: String,
+        read: (String) -> Data? = { FileManager.default.contents(atPath: $0) }
+    ) -> Bool {
+        let project = environment["CLAUDE_PROJECT_DIR"].flatMap { $0.isEmpty ? nil : $0 } ?? cwd
+        var paths = [
+            (ProjectMemory.configDirectory(home: home, environment: environment) as NSString).appendingPathComponent("settings.json"),
+            "/Library/Application Support/ClaudeCode/managed-settings.json"
+        ]
+        if let project {
+            paths += ["settings.json", "settings.local.json"].map {
+                ((project as NSString).appendingPathComponent(".claude") as NSString).appendingPathComponent($0)
+            }
+        }
+        return paths.contains { path in
+            guard let data = read(path),
+                  let settings = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            else { return false }
+            let helpers = ["apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh"]
+            if helpers.contains(where: { (settings[$0] as? String).map { !$0.isEmpty } ?? false }) { return true }
+            let env = (settings["env"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
+            return usesOtherAccount(env)
+        }
     }
 
     /// The start and the end of `message`, the part a classifier reads:
@@ -91,42 +123,59 @@ enum TurnEndText {
 
 /// Tells hook receivers that a running Nirux reads final messages (the
 /// option is on), and with which Claude configuration folder its `claude
-/// -p` runs. Without a marker naming a Nirux still running, or for an
-/// agent with another folder, receivers leave the message out of the event
-/// queue: nothing would read it, and Stop lines would grow for nothing.
+/// -p` runs: one file per Nirux process, so that two on one state
+/// directory (a debug build next to the app) don't undo each other.
+/// Without a marker naming a Nirux still running, or for an agent with
+/// another folder, receivers leave the message out of the event queue:
+/// nothing would read it, and Stop lines would grow for nothing.
 struct TurnEndMarker: Codable, Equatable {
     let app: ProcessInstance
     /// Nirux's own `CLAUDE_CONFIG_DIR` (nil: the default), which its
     /// `claude -p` keeps (`ClaudeCLI.keptVariables`).
     let claudeConfigDir: String?
 
-    static var url: URL { Persistence.stateDirectory.appendingPathComponent("turn-end-classifier.json") }
+    static var directory: URL { Persistence.stateDirectory.appendingPathComponent("turn-end-readers", isDirectory: true) }
 
-    /// The option is on in `app`.
-    static func publish(app: ProcessInstance, environment: [String: String], at url: URL = url) {
-        let marker = TurnEndMarker(app: app, claudeConfigDir: environment["CLAUDE_CONFIG_DIR"])
-        try? JSONEncoder().encode(marker).write(to: url, options: .atomic)
+    private static func url(for app: ProcessInstance, in directory: URL) -> URL {
+        directory.appendingPathComponent("\(app.pid)-\(Int(app.startedAt)).json")
     }
 
-    /// The option is off in `app`, or `app` quits: the marker goes, unless
-    /// it names another Nirux still running on this state directory.
-    static func withdraw(app: ProcessInstance?, at url: URL = url,
-                         running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) {
-        if let marker = read(url), marker.app != app, running(marker.app.pid) == marker.app { return }
-        try? FileManager.default.removeItem(at: url)
+    /// The option is on in `app`. Markers of Nirux processes gone (a
+    /// crash) go too.
+    static func publish(app: ProcessInstance, environment: [String: String], in directory: URL = directory,
+                        running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) {
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        for (url, marker) in markers(in: directory) where running(marker.app.pid) != marker.app {
+            try? FileManager.default.removeItem(at: url)
+        }
+        let marker = TurnEndMarker(app: app, claudeConfigDir: environment["CLAUDE_CONFIG_DIR"])
+        try? JSONEncoder().encode(marker).write(to: url(for: app, in: directory), options: .atomic)
+    }
+
+    /// The option is off in `app`, or `app` quits.
+    static func withdraw(app: ProcessInstance?, in directory: URL = directory) {
+        guard let app else { return }
+        try? FileManager.default.removeItem(at: url(for: app, in: directory))
     }
 
     /// Whether a receiver keeps the final message of an agent running with
-    /// `environment` (the hook's).
-    static func allowsMessage(environment: [String: String], at url: URL = url,
+    /// `environment` (the hook's): a running Nirux reads it, on the same
+    /// configuration folder.
+    static func allowsMessage(environment: [String: String], in directory: URL = directory,
                               running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) -> Bool {
-        guard let marker = read(url), running(marker.app.pid) == marker.app else { return false }
-        return TurnEndText.sameConfigDirectory(
-            environment["CLAUDE_CONFIG_DIR"], marker.claudeConfigDir, home: environment["HOME"] ?? NSHomeDirectory()
-        )
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        return markers(in: directory).contains { _, marker in
+            running(marker.app.pid) == marker.app
+                && TurnEndText.sameConfigDirectory(environment["CLAUDE_CONFIG_DIR"], marker.claudeConfigDir, home: home)
+        }
     }
 
-    private static func read(_ url: URL) -> TurnEndMarker? {
-        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(TurnEndMarker.self, from: $0) }
+    private static func markers(in directory: URL) -> [(URL, TurnEndMarker)] {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return urls.filter { $0.pathExtension == "json" }.compactMap { url in
+            (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(TurnEndMarker.self, from: $0) }.map { (url, $0) }
+        }
     }
 }

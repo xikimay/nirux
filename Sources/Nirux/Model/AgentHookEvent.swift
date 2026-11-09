@@ -87,11 +87,13 @@ struct AgentHookEvent: Codable, Equatable {
     /// (`last_assistant_message`), as `TurnEndText.excerpt` bounds it: what
     /// tells a turn that asks the user something from one that is done
     /// (see `TurnEndVerdict`). Nil elsewhere, from Claude versions without
-    /// it, after another Stop hook kept the turn going
-    /// (`stop_hook_active`), for an agent on another account
-    /// (`TurnEndText.usesOtherAccount`), and when the app strips it (the
-    /// option is off).
+    /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
+    /// and when the receiver or the app drops it (see `TurnEndMarker`).
     var finalMessage: String?
+    /// On a Stop, Claude's `stop_hook_active`: the turn went on because a
+    /// Stop hook blocked its end, and this is the end of that continuation
+    /// (the end of the turn, unless a hook blocks again).
+    let stopHookActive: Bool?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -157,10 +159,10 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = name == .userPromptSubmit
                 ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
                 : nil
-            finalMessage = name == .stop && agentID == nil && payload["stop_hook_active"] as? Bool != true
-                && !TurnEndText.usesOtherAccount(env)
+            finalMessage = name == .stop && agentID == nil && !TurnEndText.usesOtherAccount(env)
                 ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
                 : nil
+            stopHookActive = name == .stop ? payload["stop_hook_active"] as? Bool : nil
             reviewPasses = switch name {
             case .userPromptSubmit:
                 (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)
@@ -202,6 +204,7 @@ struct AgentHookEvent: Codable, Equatable {
             reviewPasses = nil
             reviewHeader = nil
             finalMessage = nil
+            stopHookActive = nil
         }
     }
 
@@ -254,6 +257,7 @@ struct AgentHookEvent: Codable, Equatable {
         reviewPasses: [String]? = nil,
         reviewHeader: String? = nil,
         finalMessage: String? = nil,
+        stopHookActive: Bool? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -280,6 +284,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.reviewPasses = reviewPasses
         self.reviewHeader = reviewHeader
         self.finalMessage = finalMessage
+        self.stopHookActive = stopHookActive
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText
@@ -347,8 +352,13 @@ enum AgentHookCLI {
             now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
-        // Written only for a running Nirux that will read it.
-        if event.finalMessage != nil, !TurnEndMarker.allowsMessage(environment: env) { event.finalMessage = nil }
+        // Written only for a running Nirux that will read it, and an agent
+        // on the login its `claude -p` uses.
+        if event.finalMessage != nil,
+           !TurnEndMarker.allowsMessage(environment: env)
+            || TurnEndText.settingsUseOtherAccount(environment: env, cwd: event.cwd, home: env["HOME"] ?? NSHomeDirectory()) {
+            event.finalMessage = nil
+        }
 
         let channel = PermissionApprovalChannel.standard
         let wait = event.name == .permissionRequest && parent > 1

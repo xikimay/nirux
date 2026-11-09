@@ -385,9 +385,15 @@ struct AgentStatusMachine {
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
-        // A turn Claude started by itself (no prompt) ended before the
-        // last one's verdict.
-        settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+        if event.stopHookActive == true {
+            // The last Stop wasn't the end: a Stop hook kept the turn going,
+            // and this one ends it.
+            quietTurnEnd = nil
+        } else {
+            // A turn Claude started by itself (no prompt) ended before the
+            // last one's verdict.
+            settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+        }
         askedQuestion = nil
         mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
@@ -467,6 +473,9 @@ struct AgentStatusMachine {
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
             if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
+            // A question always alerts, even after this episode's "finished
+            // its turn": missing one is what this is all about.
+            attentionAlerted = false
         case .unknown:
             reason = .turnFinished
         }
@@ -500,8 +509,10 @@ struct AgentStatusMachine {
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
         turnFailure = nil
-        // Went on by itself (no prompt: a background task, a wakeup): the
-        // question is behind it.
+        // Went on by itself (a Stop hook blocked its end, a background
+        // task, a wakeup): its last turn end and question are behind, and
+        // a verdict for them would land on an agent at work.
+        quietTurnEnd = nil
         askedQuestion = nil
     }
 
