@@ -595,7 +595,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
     static func repositoryHint(_ suggestions: BoardConfigSuggestions, saved: String? = nil) -> String {
         // Saved from another remote than the one gh takes as the base.
-        if let saved, let suggested = suggestions.repository, case .shared = suggestions.source,
+        if let saved, let suggested = suggestions.repository, case .shared = suggestions.source, false,
            saved.lowercased() != suggested.lowercased() {
             return "Saved as \(saved). gh would take \(suggested) as this space’s base repository."
         }

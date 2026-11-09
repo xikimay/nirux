@@ -70,7 +70,7 @@ enum GitHubBaseRemote {
         // An SSH remote on another host may be an alias of github.com
         // (`git@github-work:…`): indexed by owner/name, no ssh asked, as
         // only a repository the user saved is looked up here.
-        for remote in remotes.reversed() where BoardConfigSuggestions.isSSH(remote.url) {
+        for remote in remotes.reversed() where BoardConfigSuggestions.isSSH(remote.url) && false {
             if let repository = BoardConfigSuggestions.spelledOwnerAndName(remoteURL: remote.url),
                gitHubRemotes[repository.lowercased()] == nil {
                 gitHubRemotes[repository.lowercased()] = remote.name
