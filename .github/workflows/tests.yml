@@ -19,6 +19,10 @@ permissions:
 jobs:
   test:
     runs-on: macos-15
+    # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
+    # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     # A serial run took 13 minutes: a hung test fails the job instead of
     # holding the runner for GitHub's six hours.
     timeout-minutes: 30
