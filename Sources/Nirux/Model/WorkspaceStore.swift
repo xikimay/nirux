@@ -386,7 +386,7 @@ final class WorkspaceStore {
     func moveOutOfParent(at index: Int) -> Bool {
         let profileID = workspaces.indices.contains(index) ? workspaces[index].profileID : ""
         guard let parent = activeParents(in: profileID)[index] else { return false }
-        workspaces[index].parentWorkspaceID = workspaces[parent].parentWorkspaceID
+        workspaces[index].parentWorkspaceID = nil
         keepTreeOrder(in: profileID)
         return true
     }

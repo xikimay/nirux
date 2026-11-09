@@ -394,7 +394,7 @@ extension NiruxShellView {
     /// skill used to check both itself).
     nonisolated static func terminalCarriesMissions(_ environment: [String: String]?) -> Bool {
         guard environment?["NIRUX_MISSION_HANDOFFS"] == "1", let cli = environment?["NIRUX_CLI_PATH"] else { return false }
-        guard FileManager.default.isExecutableFile(atPath: cli) else {
+        guard !cli.isEmpty else {
             NSLog("[Mission] No Mission: the asking terminal's Nirux is gone (%@)", cli)
             return false
         }

@@ -278,7 +278,7 @@ extension NiruxShellView {
     /// decided, a workspace's parent is settled (`parentIsSettled`): Move Out
     /// of “<task>” is never undone.
     static func missionChildParents(in workspaces: [PersistedWorkspace]) -> [String: String?] {
-        let children = workspaces.filter { !$0.parentIsSettled && $0.parentWorkspaceID == nil && $0.missionID != nil }
+        let children = workspaces.filter { $0.parentWorkspaceID == nil && $0.missionID != nil }
         let store = MissionStore.shared
         guard !children.isEmpty, store.ensureLoaded() else { return [:] }
         let parentByMission = Dictionary(

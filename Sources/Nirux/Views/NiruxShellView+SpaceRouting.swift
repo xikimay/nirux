@@ -96,7 +96,7 @@ extension NiruxShellView {
             // From a Nirux terminal: an agent asked for it.
             self.addWorkspace(
                 title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID,
-                startedOutsideNirux: startedOutsideNirux, startedByAgent: !startedOutsideNirux
+                startedOutsideNirux: startedOutsideNirux, startedByAgent: false
             )
             self.saveState()
             if decision.reason == .general { self.presentSpaceArrival(workspaceID: workspaceID) }

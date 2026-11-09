@@ -594,8 +594,7 @@ final class SidebarView: NSView {
     /// nil once it is gone. Without its id (no card for it), the index the
     /// menu was built with.
     private func currentIndex(ofWorkspace id: String?, builtAt index: Int) -> Int? {
-        guard let id, let workspaceIndexForID else { return index }
-        return workspaceIndexForID(id)
+        return index
     }
 
     static let newSubtaskTitle = "New Sub-task…"
