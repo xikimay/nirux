@@ -504,7 +504,8 @@ final class NiruxShellView: NSView {
                 observesDisplays = true
                 let displayChanges = [
                     (NSWorkspace.shared.notificationCenter, NSWorkspace.screensDidWakeNotification),
-                    (NotificationCenter.default, NSApplication.didChangeScreenParametersNotification)
+                    (NotificationCenter.default, NSApplication.didChangeScreenParametersNotification),
+                    (NSWorkspace.shared.notificationCenter, NSWorkspace.sessionDidBecomeActiveNotification)
                 ]
                 for (center, name) in displayChanges {
                     center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in

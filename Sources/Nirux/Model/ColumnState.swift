@@ -596,7 +596,7 @@ extension ColumnState: TerminalSurfaceClipboardConfirmationDelegate {
     /// program without bracketed paste) and, as configured, before a
     /// program reads or writes the clipboard (OSC 52); unanswered, it
     /// refuses. Pastes and writes go through, as with libghostty-spm 1.3.1;
-    /// a program doesn't read the clipboard.
+    /// a program asking to read the clipboard gets an empty answer.
     func terminalDidRequestClipboardConfirmation(_ request: TerminalClipboardConfirmationRequest) {
         request.respond(allow: request.kind != .osc52Read)
     }
