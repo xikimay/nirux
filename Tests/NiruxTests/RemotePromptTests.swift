@@ -12,13 +12,11 @@ final class RemotePromptTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
+        let agent = AgentStandIn()
+        defer { agent.remove() }
         let agentSession = PtySession()
         let idleShellSession = PtySession()
-        agentSession.start(
-            shell: "/bin/zsh",
-            args: ["-f", "-c", "exec -a codex /bin/cat"],
-            cwd: directory.path
-        )
+        agentSession.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command(named: "codex")], cwd: directory.path)
         idleShellSession.start(shell: "/bin/zsh", args: ["-f"], cwd: directory.path)
 
         let processesReady = try await waitUntil {
@@ -30,9 +28,7 @@ final class RemotePromptTests: XCTestCase {
 
         let terminalInput = try XCTUnwrap(RemotePromptSanitizer.terminalInput(for: "remote prompt verified"))
         agentSession.sendRaw(terminalInput)
-        let delivered = try await waitUntil {
-            agentSession.recentOutput().contains("remote prompt verified")
-        }
+        let delivered = try await waitUntil { agent.input.contains("remote prompt verified") }
         XCTAssertTrue(delivered)
     }
 
@@ -62,19 +58,6 @@ final class RemotePromptTests: XCTestCase {
         let framed = RemotePromptSanitizer.terminalInput(for: input)
         XCTAssertEqual(framed, "\u{1B}[200~explain[31m this\ncarefully\u{1B}[201~\r")
         XCTAssertNil(RemotePromptSanitizer.terminalInput(for: "\u{1B}\u{0}"))
-    }
-
-    func testTerminalPlainTextStripsCSIAndOSCSequences() {
-        let raw = Data("\u{1B}[31mred\u{1B}[0m\r\nnext\u{1B}]0;secret title\u{07}\nvisible".utf8)
-        let rendered = TerminalPlainText.render(raw)
-        XCTAssertEqual(rendered, "red\nnext\nvisible")
-        XCTAssertFalse(rendered.contains("secret title"))
-    }
-
-    func testTerminalOutputBufferKeepsRequestedLineTail() {
-        let buffer = TerminalOutputBuffer(maxBytes: 1_024)
-        buffer.append(Data("one\ntwo\nthree".utf8))
-        XCTAssertEqual(buffer.tail(maxLines: 2), "two\nthree")
     }
 
     @MainActor

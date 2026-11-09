@@ -287,8 +287,10 @@ final class StuckAgentSidebarTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let pty = PtySession()
-        // Echoes what it is sent, under the name `claude`.
-        pty.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: directory.path)
+        // Keeps what it is sent, under the name `claude`.
+        let agent = AgentStandIn()
+        defer { agent.remove() }
+        pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
         let started = try await waitUntil { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         XCTAssertTrue(started)
         let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
@@ -311,11 +313,11 @@ final class StuckAgentSidebarTests: XCTestCase {
         }
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now), .notAtPrompt)
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertFalse(pty.recentOutput().contains("continue"), "nothing typed into a dialog")
+        XCTAssertFalse(agent.input.contains("continue"), "nothing typed into a dialog")
 
         pty.applyAgentHook(hook(.subagentStop, agent: "sub"), isUserFocused: false)
         XCTAssertNil(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 1))
-        let typed = try await waitUntil { pty.recentOutput().contains("continue") }
+        let typed = try await waitUntil { agent.input.contains("continue") }
         XCTAssertTrue(typed)
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 2), .alreadySent, "one click, one continue")
         XCTAssertNil(

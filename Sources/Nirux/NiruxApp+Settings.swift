@@ -283,7 +283,7 @@ extension NiruxApp {
     private func saveSetting(revert: () -> Void, _ update: (inout PersistedSettings) -> Void) -> Bool {
         guard Persistence.updateSettings(liveLayout: shell?.persistedState(), update) else {
             revert()
-            showSettingsError(Self.settingsWriteFailure, title: "Settings")
+            showSettingsError(Self.settingsWriteFailure)
             return false
         }
         return true
@@ -395,10 +395,10 @@ extension NiruxApp {
         }
     }
 
-    private func showSettingsError(_ message: String, title: String) {
+    private func showSettingsError(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = title
+        alert.messageText = "Settings"
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         if let settingsWindow {
