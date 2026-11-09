@@ -229,18 +229,24 @@ final class ProjectBoardFlowTests: XCTestCase {
     }
 
     /// A repository board.json has no config for (the user's spaces had
-    /// none, and their Board looked empty): its worktrees and its origin's
-    /// pull requests show, read-only, with no merge queue and nothing
-    /// written. Board Settings opens from the line that says so, and
-    /// saving it sets the queue up.
+    /// none, and their Board looked empty): its worktrees and the pull
+    /// requests of the repository Board Settings would suggest show,
+    /// read-only, with no merge queue and nothing written. Here origin is
+    /// a fork and main tracks upstream: both read upstream. Board Settings
+    /// opens from the line that says so, and saving it sets the queue up.
     @MainActor
-    func testARepositoryWithoutSettingsShowsItsOriginReadOnly() throws {
+    func testARepositoryWithoutSettingsShowsItsRemoteReadOnly() throws {
         let client = makeClient()
         try withShell(client: client) { shell, space in
             shell.mergeQueueClient = FakeQueueClient(isDryRun: true)
             shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
             let repo = root + "/widgets"
-            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/me/widgets.git")
+            try git(["remote", "add", "upstream", "https://github.com/acme/widgets.git"], at: repo)
+            try git(["update-ref", "refs/remotes/upstream/main", "HEAD"], at: repo)
+            try git(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main"], at: repo)
+            try git(["config", "branch.main.remote", "upstream"], at: repo)
+            try git(["config", "branch.main.merge", "refs/heads/main"], at: repo)
             let login = root + "/widgets.feat-login"
             try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
             var anchor = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
@@ -267,7 +273,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             let store = try XCTUnwrap(BoardConfigStore(spaceID: space.id))
             XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
             XCTAssertEqual(board.view.noticeLines.map(\.label.stringValue), [
-                "Read-only, from origin: save Board Settings to use the merge queue."
+                "Read-only, from upstream: save Board Settings to use the merge queue."
             ])
             let notice = try XCTUnwrap(board.view.noticeLines.first)
             XCTAssertFalse(notice.settingsButton.isHidden)
@@ -292,14 +298,14 @@ final class ProjectBoardFlowTests: XCTestCase {
     @MainActor
     func testTheBoardSaysWhyItShowsNoPullRequests() throws {
         let client = FakeGitHub(
-            openPullRequests: "[]", runs: "[]", failures: ["acme/front": .notSignedIn, "acme/back": .notSignedIn]
+            openPullRequests: "[]", runs: "[]", failures: ["acme/front": .notSignedIn(nil), "acme/back": .notSignedIn(nil)]
         )
         try withShell(client: client) { shell, space in
             shell.mergeQueueClient = FakeQueueClient(isDryRun: true)
             shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
             let remotes = [
                 "saved": "https://github.com/acme/saved.git", "front": "git@github.com:acme/front.git",
-                "back": "https://github.com/acme/back.git", "docs": "git@github-work:acme/docs.git",
+                "back": "https://github.com/acme/back.git", "docs": "git@github-nirux-test:acme/docs.git",
                 "copy": "https://github.com/acme/front.git"
             ]
             var anchors: [SpaceAnchor] = []
@@ -322,7 +328,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             let expected = [
                 "front, back: gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh.",
-                "No saved GitHub repository in Board Settings: front, back, docs."
+                "Not set up in Board Settings, so no merge queue: front, back, docs."
             ]
             try waitUntil("both answers said, every repository listed") {
                 guard case .sections(let sections, _)? = board.view.content?.body else { return false }
@@ -336,9 +342,14 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(sections.map(\.repository), ["acme/saved", "acme/front", "acme/back", nil, nil])
             XCTAssertEqual(
                 sections[3].note,
-                "origin points to github-work, not github.com: set its GitHub repository in Board Settings to see its pull requests."
+                "origin points to github-nirux-test, not github.com: set its GitHub repository in Board Settings to see its pull requests."
             )
             XCTAssertEqual(sections[4].note, "Same GitHub repository as “front”: its pull requests show there.")
+            // Read-only shows in the header, after the repository.
+            XCTAssertEqual(
+                Self.sectionHeaders(in: board.view).map(\.detailLabel.stringValue).dropFirst().first,
+                "acme/front · Read-only, from origin: save Board Settings to use the merge queue."
+            )
             XCTAssertEqual(sections[3].rows.map(\.name), ["main"], "its main checkout all the same")
             XCTAssertFalse(client.calls.contains { $0.what.contains("docs") }, "no gh for a repository elsewhere")
             XCTAssertNil(shell.boardSettingsPanel)
@@ -348,6 +359,36 @@ final class ProjectBoardFlowTests: XCTestCase {
                 shell.boardSettingsPanel?.hostView != nil && shell.spaceSettings?.boardRepository == sections[1].id
             }
             XCTAssertEqual(shell.boardSettingsPanel?.repositoryField.stringValue, "acme/front")
+        }
+    }
+
+    /// Board Settings… on a repository brings an open form to it, even one
+    /// added to the space after the form opened, which its pop-up doesn't
+    /// list.
+    @MainActor
+    func testBoardSettingsSwitchesAnOpenFormToTheRepositoryAsked() throws {
+        try withShell(client: makeClient()) { shell, space in
+            let front = root + "/front"
+            let back = root + "/back"
+            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: back, remote: "https://github.com/acme/back.git")
+            var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
+            frontAnchor.isDefault = true
+            let backAnchor = try XCTUnwrap(FolderIdentity.identify(back, timeout: 10)).anchor
+            let frontKey = try XCTUnwrap(frontAnchor.key)
+            let backKey = try XCTUnwrap(backAnchor.key)
+            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor], forProfile: space.id))
+            shell.showBoardSettings(profileID: space.id)
+            try waitUntil("front’s form") { shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front" }
+            XCTAssertEqual(shell.boardSettingsPanel?.repositoryChoices.count, 0, "one repository: no pop-up")
+
+            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, backAnchor], forProfile: space.id))
+            shell.showBoardSettings(profileID: space.id, repository: backKey)
+            try waitUntil("back’s form") {
+                shell.spaceSettings?.boardRepository == backKey
+                    && shell.boardSettingsPanel?.repositoryField.stringValue == "acme/back"
+            }
+            XCTAssertEqual(shell.boardSettingsPanel?.repositoryChoices.map(\.id), [frontKey, backKey])
         }
     }
 
@@ -667,6 +708,15 @@ final class ProjectBoardFlowTests: XCTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
         XCTAssertTrue(condition(), "timed out: \(what)")
+    }
+
+    /// The repositories' headers, from the top.
+    @MainActor
+    static func sectionHeaders(in view: NSView) -> [SectionHeaderView] {
+        let found = view.subviews.flatMap { subview -> [SectionHeaderView] in
+            (subview as? SectionHeaderView).map { [$0] } ?? sectionHeaders(in: subview)
+        }
+        return found.sorted { $0.frame.minY < $1.frame.minY }
     }
 
     /// Refresh's tooltip says when the board last read GitHub.

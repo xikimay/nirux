@@ -103,29 +103,40 @@ struct BoardConfigSuggestions: Equatable, Sendable {
         return folders.first { $0.repository?.lowercased() == wanted }
     }
 
-    /// Nil outside a git repository (or a folder that's gone).
+    /// Nil outside a git repository (or a folder that's gone). A bare
+    /// repository is its own top level. An SSH host alias of github.com
+    /// counts as github.com (`SSHHostAlias`).
     static func folder(at path: String, gitPath: String = "/usr/bin/git") -> Folder? {
         let git = { (arguments: [String]) in
             GitCommand.output(arguments, cwd: path, gitPath: gitPath, timeout: 10)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        guard let topLevel = git(["rev-parse", "--show-toplevel"]), !topLevel.isEmpty else { return nil }
+        let checkoutTop = git(["rev-parse", "--show-toplevel"]).flatMap { $0.isEmpty ? nil : $0 }
+        guard let topLevel = checkoutTop ?? (git(["rev-parse", "--is-bare-repository"]) == "true" ? path : nil)
+        else { return nil }
         var remote = "origin"
         if let branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"]), !branch.isEmpty,
            let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"]),
            !pushRemote.isEmpty, pushRemote != "." {
             remote = pushRemote
         }
-        let repository = git(["remote", "get-url", "--push", "--", remote]).flatMap(repositoryName(remoteURL:))
+        let repository = git(["remote", "get-url", "--push", "--", remote]).flatMap {
+            repositoryName(remoteURL: $0, resolvingAliases: true)
+        }
         let checkout = GitCommand.output(["worktree", "list", "--porcelain", "-z"], cwd: path, gitPath: gitPath, timeout: 10)
             .flatMap(mainWorkingTree(inListing:)) ?? topLevel
         return Folder(repository: repository, remote: remote, checkout: checkout)
     }
 
     /// `owner/name` of a github.com remote URL, spelled as in the URL
-    /// (`GitHubRepository` lowercases it).
-    static func repositoryName(remoteURL: String) -> String? {
-        guard let parsed = GitHubRepository(remoteURL: remoteURL), parsed.host == "github.com" else { return nil }
+    /// (`GitHubRepository` lowercases it). With `resolvingAliases`, an SSH
+    /// URL whose host `ssh -G` resolves to github.com counts: it runs ssh,
+    /// so only off the main thread.
+    static func repositoryName(remoteURL: String, resolvingAliases: Bool = false) -> String? {
+        guard let parsed = GitHubRepository(remoteURL: remoteURL) else { return nil }
+        guard parsed.host == "github.com"
+            || (resolvingAliases && isSSH(remoteURL) && SSHHostAlias.isGitHub(parsed.host))
+        else { return nil }
         let components = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: { $0 == "/" || $0 == ":" })
         guard components.count >= 2 else { return nil }
@@ -136,6 +147,17 @@ struct BoardConfigSuggestions: Equatable, Sendable {
             return "\(parsed.owner)/\(parsed.name)"
         }
         return "\(owner)/\(name)"
+    }
+
+    /// `ssh://…`, or scp-like `user@host:path`, which ssh resolves through
+    /// its config; not `https://`.
+    static func isSSH(_ remoteURL: String) -> Bool {
+        let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let scheme = URL(string: trimmed)?.scheme?.lowercased(), trimmed.contains("://") {
+            return scheme == "ssh" || scheme == "git+ssh" || scheme == "ssh+git"
+        }
+        guard let colon = trimmed.firstIndex(of: ":") else { return false }
+        return !trimmed[..<colon].contains("/")
     }
 
     /// The first entry of `git worktree list --porcelain -z`, unless it is

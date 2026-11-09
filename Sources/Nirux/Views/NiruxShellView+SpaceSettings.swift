@@ -6,7 +6,9 @@ extension NiruxShellView {
     /// Space Settings for `profileID`, on `tab`. One space at a time: the
     /// window open for another one closes first, unless text typed there
     /// isn't saved.
-    func showSpaceSettings(profileID: String, tab: SpaceSettingsWindow.Tab = .general) {
+    /// `boardRepository`: the section the Board tab reads first, when the
+    /// window opens for this space (`showBoardSettings`).
+    func showSpaceSettings(profileID: String, tab: SpaceSettingsWindow.Tab = .general, boardRepository: String? = nil) {
         guard let space = profiles.first(where: { $0.id == profileID }) else { return }
         if let open = spaceSettings, open.spaceID != profileID {
             // A name or a value still being typed counts.
@@ -19,6 +21,7 @@ extension NiruxShellView {
         }
         let settings = spaceSettings ?? makeSpaceSettings(for: space)
         spaceSettings = settings
+        if let boardRepository { settings.boardRepository = boardRepository }
         settings.show(tab: tab, title: Self.spaceSettingsTitle(profileID, in: profiles))
     }
 
@@ -221,7 +224,7 @@ extension NiruxShellView {
             for repository in repositories {
                 let url = GitCommand.output(["remote", "get-url", "--", "origin"], cwd: repository.folder, timeout: 5)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                names[repository.key] = url.flatMap(BoardConfigSuggestions.repositoryName(remoteURL:))
+                names[repository.key] = url.flatMap { BoardConfigSuggestions.repositoryName(remoteURL: $0) }
             }
             let found = names
             DispatchQueue.main.async { @MainActor in completion(found) }

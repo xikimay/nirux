@@ -218,6 +218,21 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "/local/path"))
     }
 
+    /// An SSH host alias of github.com reads as GitHub, as ssh resolves it
+    /// from its config; another host's doesn't, nor a name ssh would read
+    /// as an option.
+    func testAnSSHAliasOfGitHubReadsAsGitHub() throws {
+        let config = root + "/ssh_config"
+        try Data("Host github-work\n  HostName github.com\nHost lab-work\n  HostName gitlab.com\n".utf8)
+            .write(to: URL(fileURLWithPath: config))
+        XCTAssertTrue(SSHHostAlias.isGitHub("github-work", configFile: config))
+        XCTAssertFalse(SSHHostAlias.isGitHub("lab-work", configFile: config))
+        XCTAssertFalse(SSHHostAlias.isGitHub("-oProxyCommand=touch", configFile: config))
+        XCTAssertTrue(BoardConfigSuggestions.isSSH("git@github-work:acme/app.git"))
+        XCTAssertTrue(BoardConfigSuggestions.isSSH("ssh://git@github-work/acme/app.git"))
+        XCTAssertFalse(BoardConfigSuggestions.isSSH("https://github-work/acme/app.git"))
+    }
+
     /// A branch pushed to another remote reads that remote, as PRDetect does.
     func testTheBranchsPushRemoteWins() throws {
         let repo = root + "/repo"

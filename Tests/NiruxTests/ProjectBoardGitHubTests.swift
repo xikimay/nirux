@@ -229,12 +229,17 @@ final class ProjectBoardGitHubTests: XCTestCase {
             return GitHubCLIBoardClient(findGH: { path })
         }
         let signedOut = try fakeGH("signed-out", "To get started with GitHub CLI, please run:  gh auth login", 4)
-        XCTAssertEqual(signedOut.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn))
+        XCTAssertEqual(signedOut.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(nil)))
         let revoked = try fakeGH("revoked", "HTTP 401: Bad credentials (https://api.github.com/graphql)", 1)
-        XCTAssertEqual(revoked.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn))
+        let refusal = "HTTP 401: Bad credentials (https://api.github.com/graphql)"
+        XCTAssertEqual(revoked.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(refusal)))
         XCTAssertEqual(
-            ProjectBoard.FetchError.notSignedIn.message,
+            ProjectBoard.FetchError.notSignedIn(nil).message,
             "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+        )
+        XCTAssertEqual(
+            ProjectBoard.FetchError.notSignedIn(refusal).message,
+            "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh. (gh: \(refusal))"
         )
     }
 

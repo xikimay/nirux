@@ -214,17 +214,24 @@ documented in B1's pull request:
   list due at once. A finished clean-up lists the worktrees again.
 - **Not set up** (decided with the user on 2026-11-09): a repository anchor
   `board.json` has no config for shows its worktrees, and the pull requests
-  of its `origin` remote when it is on github.com (origin's push URL, as
-  Board Settings suggests it; its base branch from `origin/HEAD`),
-  read-only: nothing is written, and its merge queue and Retarget wait for
-  an explicit Save in Board Settings. Two sections never read one
-  repository: a saved one keeps it, else the first; the other says so. When
-  git can't read origin (10 s at most), the origin read before stays.
+  of the repository Board Settings would suggest for it, read-only: by the
+  same rule (`BoardConfigSuggestions.folder`), its main checkout's branch's
+  push remote, else origin (a bare repository's own), on github.com or an
+  SSH alias `ssh -G` resolves to it, with its base branch from
+  `<remote>/HEAD`. Saving as suggested keeps that repository. Nothing is
+  written, and its merge queue and Retarget wait for an explicit Save in
+  Board Settings. The remotes are read after board.json, the anchors side
+  by side, 10 s at most a git call: a slow volume holds up no other read.
+  Two sections never read one repository: a saved one keeps it, else the
+  first; the other says so. When git can't read a remote, or its default
+  branch, the one read before stays.
 - **Lines under the header** say why the board shows less than it could. One
   says the board isn't set up, with a Board Settings… button opening the
-  first repository it can set up (the form switches to it, asking to save
-  what is typed first), or why a repository has no pull requests
-  (no remote named origin, origin on another host, named: an SSH alias too).
+  first repository it can set up (an open form switches to it, even one
+  opened before that repository was added, asking to save what is typed
+  first), or why a repository has no pull requests (no such remote, a
+  remote on another host, named). A section read from its remote says so
+  in its header, after its repository.
   A read-only `board.json` gets its reason, without the button: Board
   Settings can't save it. Red lines say what went wrong reading the open
   pull requests in plain words, one per message naming its repositories: gh
@@ -258,8 +265,8 @@ anchors don't appear. Decided with the user on 2026-11-08:
 - **A section's rows**: its anchor's local repository (known by its common git
   dir, whatever its remotes), and any other local repository a remote of which
   names the section's GitHub repository. Its main checkout and worktrees show
-  even with no workspace open there. A section without a config reads its
-  anchor's `origin`, read-only (section 2.1, "Not set up"); one without a
+  even with no workspace open there. A section without a config reads the
+  repository its anchor pushes to, read-only (section 2.1, "Not set up"); one without a
   GitHub repository lists them without pull requests and says why in its
   header. One line under the board's header names the sections not set up,
   with Board Settings….

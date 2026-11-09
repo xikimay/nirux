@@ -145,29 +145,65 @@ final class BoardSectionsTests: XCTestCase {
                        [gone, Entry(slot: .anchor(commonDir: "/code/back/.git"), config: config("acme/back"))])
     }
 
-    /// Each repository anchor without a config of its own reads its origin's
-    /// push URL, as Board Settings suggests it: a github.com repository, as
-    /// the URL spells it, with the branch origin/HEAD points to; another
-    /// host, named (an SSH alias too); no origin; a git dir git can't read.
-    /// An anchor with a config reads nothing.
-    func testEachAnchorWithoutAConfigReadsItsOrigin() throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-origins-\(UUID().uuidString)")
+    /// Each repository anchor without a config of its own reads what Board
+    /// Settings would suggest: its main checkout's branch's push remote
+    /// (origin's push URL; upstream, which main tracks), a bare
+    /// repository's origin, as the URL spells it, with the branch
+    /// `<remote>/HEAD` points to; another host, named (an SSH alias ssh
+    /// doesn't resolve too); no such remote; a git dir git can't read. An
+    /// anchor with a config reads nothing.
+    func testEachAnchorWithoutAConfigReadsWhatBoardSettingsSuggests() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-remotes-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
         let root = try XCTUnwrap(base.path.realPath)
+        let git = BoardConfigSuggestionsTests.git
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/front", remote: "https://github.com/acme/upstream.git")
-        try BoardConfigSuggestionsTests.git(["remote", "set-url", "--push", "origin", "git@github.com:Acme/Front.git"], at: root + "/front")
-        try BoardConfigSuggestionsTests.makeRepository(at: root + "/back", remote: "git@github-work:acme/back.git")
+        _ = try git(["remote", "set-url", "--push", "origin", "git@github.com:Acme/Front.git"], root + "/front")
+        try BoardConfigSuggestionsTests.makeRepository(at: root + "/fork", remote: "https://github.com/me/fork.git")
+        _ = try git(["remote", "add", "upstream", "https://github.com/acme/real.git"], root + "/fork")
+        _ = try git(["update-ref", "refs/remotes/upstream/trunk", "HEAD"], root + "/fork")
+        _ = try git(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/trunk"], root + "/fork")
+        _ = try git(["config", "branch.main.remote", "upstream"], root + "/fork")
+        _ = try git(["config", "branch.main.merge", "refs/heads/trunk"], root + "/fork")
+        _ = try git(["clone", "-q", "--bare", root + "/front", root + "/bare.git"], root)
+        _ = try git(["remote", "set-url", "origin", "https://github.com/acme/bare.git"], root + "/bare.git")
+        try BoardConfigSuggestionsTests.makeRepository(at: root + "/back", remote: "git@github-nirux-test:acme/back.git")
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/docs", remote: nil)
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/saved", remote: "https://github.com/acme/saved.git")
-        let anchor = { (name: String) in SpaceAnchor(kind: .gitRepository(commonDir: root + "/\(name)/.git"), name: name) }
-        let context = BoardSections.Context(anchors: ["front", "back", "docs", "saved", "gone"].map(anchor))
+        let anchor = { (gitDir: String) in SpaceAnchor(kind: .gitRepository(commonDir: root + "/" + gitDir), name: gitDir) }
+        let names = ["front/.git", "fork/.git", "bare.git", "back/.git", "docs/.git", "saved/.git", "gone/.git"]
+        let context = BoardSections.Context(anchors: names.map(anchor))
         let entries = [Entry(slot: .anchor(commonDir: root + "/saved/.git"), config: config("acme/saved"))]
-        XCTAssertEqual(BoardSections.readOrigins(BoardSections.sections(entries, context: context)), [
-            root + "/front/.git": .gitHub(repository: "Acme/Front", baseBranch: "main"),
-            root + "/back/.git": .notGitHub(host: "github-work"),
-            root + "/docs/.git": .missing,
+        XCTAssertEqual(BoardSections.readPushRemotes(BoardSections.sections(entries, context: context)), [
+            root + "/front/.git": .gitHub(repository: "Acme/Front", baseBranch: "main", remote: "origin"),
+            root + "/fork/.git": .gitHub(repository: "acme/real", baseBranch: "trunk", remote: "upstream"),
+            root + "/bare.git": .gitHub(repository: "acme/bare", baseBranch: nil, remote: "origin"),
+            root + "/back/.git": .notGitHub(host: "github-nirux-test", remote: "origin"),
+            root + "/docs/.git": .missing(remote: "origin"),
             root + "/gone/.git": .unread
+        ])
+    }
+
+    /// git failing to read a remote, or its default branch, keeps what was
+    /// read before; anything else it read replaces it.
+    func testAFailedRemoteReadKeepsTheOneReadBefore() {
+        let known: [String: BoardSections.PushRemote] = [
+            "/a/.git": .gitHub(repository: "acme/a", baseBranch: "main", remote: "origin"),
+            "/b/.git": .gitHub(repository: "acme/b", baseBranch: "main", remote: "origin"),
+            "/c/.git": .gitHub(repository: "acme/c", baseBranch: "main", remote: "origin")
+        ]
+        let read: [String: BoardSections.PushRemote] = [
+            "/a/.git": .unread,
+            "/b/.git": .gitHub(repository: "acme/b", baseBranch: nil, remote: "origin"),
+            "/c/.git": .gitHub(repository: "acme/other", baseBranch: nil, remote: "origin"),
+            "/d/.git": .unread
+        ]
+        XCTAssertEqual(ProjectBoardController.merged(read, keeping: known), [
+            "/a/.git": .gitHub(repository: "acme/a", baseBranch: "main", remote: "origin"),
+            "/b/.git": .gitHub(repository: "acme/b", baseBranch: "main", remote: "origin"),
+            "/c/.git": .gitHub(repository: "acme/other", baseBranch: nil, remote: "origin"),
+            "/d/.git": .unread
         ])
     }
 }

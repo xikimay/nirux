@@ -209,8 +209,15 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     /// let go.
     @objc func repositoryChanged(_ sender: Any?) {
         let index = repositoryPopup.indexOfSelectedItem
-        guard repositoryChoices.indices.contains(index), repositoryChoices[index].id != shownRepository else { return }
-        let target = repositoryChoices[index].id
+        guard repositoryChoices.indices.contains(index) else { return }
+        requestRepository(repositoryChoices[index].id)
+    }
+
+    /// The form of repository `target` (a section's id), even one its
+    /// pop-up doesn't list yet (an anchor added since it opened), once what
+    /// was typed here is saved or let go.
+    func requestRepository(_ target: String) {
+        guard target != shownRepository else { return }
         guard isDirty else { return onSelectRepository?(target) ?? () }
         let name = repositoryChoices.first { $0.id == shownRepository }?.title ?? "this repository"
         askToSaveChanges(name) { [weak self] answer in

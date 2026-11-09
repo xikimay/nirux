@@ -17,18 +17,14 @@ extension NiruxShellView {
     /// tab, on `repository` (a section's id) when given.
     func showBoardSettings(profileID: String, repository: String? = nil) {
         let openForm = boardSettingsPanel?.spaceID == profileID ? boardSettingsPanel : nil
-        showSpaceSettings(profileID: profileID, tab: .board)
-        guard let repository, let settings = spaceSettings, settings.spaceID == profileID,
-              settings.boardRepository != repository
-        else { return }
+        // A window opening reads the tab once, on that repository.
+        showSpaceSettings(profileID: profileID, tab: .board, boardRepository: openForm == nil ? repository : nil)
+        guard let repository, let settings = spaceSettings, settings.spaceID == profileID else { return }
         if let openForm {
-            // As if picked in its pop-up: what is typed there is saved, or
-            // let go, first.
-            guard let index = openForm.repositoryChoices.firstIndex(where: { $0.id == repository }) else { return }
-            openForm.repositoryPopup.selectItem(at: index)
-            openForm.repositoryChanged(nil)
-        } else {
-            // Read again on it, once a read the tab started lands.
+            // What is typed there is saved, or let go, first.
+            openForm.requestRepository(repository)
+        } else if settings.boardRepository != repository {
+            // A window already open, reading: again on it, once that lands.
             loadBoardTab(spaceID: profileID, repository: repository)
         }
     }

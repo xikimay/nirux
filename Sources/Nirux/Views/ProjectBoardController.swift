@@ -5,8 +5,9 @@ import AppKit
 /// anchor (docs/spaces.md, S12), each with its config from board.json and
 /// its own reads; a space without one shows its one repository, as before.
 /// An anchor board.json has no config for shows its worktrees, and the pull
-/// requests of its `origin` read-only: nothing is saved, and its merge
-/// queue waits for Board Settings.
+/// requests of the remote Board Settings would suggest for it (its main
+/// checkout's push remote, else origin) read-only: nothing is saved, and
+/// its merge queue waits for Board Settings.
 /// Reads run off the main thread, on the schedule of
 /// `ProjectBoard.RefreshSchedule`, and only while the board is on screen;
 /// opening it, Refresh and a saved board.json read at once if it is shown.
@@ -17,12 +18,13 @@ import AppKit
 final class ProjectBoardController {
     /// What one configured section read from GitHub.
     struct RepositoryReads: Sendable {
-        /// As saved (or as origin spells it), for `gh --repo` and display.
+        /// As saved (or as its remote spells it), for `gh --repo` and display.
         var name: String
         let gitHub: GitHubRepository
-        /// Read from its anchor's origin, board.json having no config for
-        /// it: no merge queue, no retarget.
-        var isFromOrigin = false
+        /// The anchor's remote it was read from, board.json having no
+        /// config for it: no merge queue, no retarget. Nil when saved.
+        var remoteName: String?
+        var isFromRemote: Bool { remoteName != nil }
         var baseBranch: String?
         /// The post-merge workflow file; nil when unset or none.
         var workflow: String?
@@ -47,14 +49,14 @@ final class ProjectBoardController {
             if case .workflow(let file) = config.postMergeWorkflow { workflow = file }
         }
 
-        /// A section without a config: its anchor's origin, when it is on
-        /// github.com.
-        init?(origin: BoardSections.Origin) {
-            guard case .gitHub(let repository, let baseBranch) = origin,
+        /// A section without a config: its anchor's push remote, when it
+        /// is on github.com.
+        init?(pushRemote: BoardSections.PushRemote) {
+            guard case .gitHub(let repository, let baseBranch, let remote) = pushRemote,
                   let config = RepositoryReads(config: BoardConfig(repository: repository, baseBranch: baseBranch))
             else { return nil }
             self = config
-            isFromOrigin = true
+            remoteName = remote
         }
 
         /// A check of an open pull request runs: the latest run of each, as
@@ -103,6 +105,10 @@ final class ProjectBoardController {
     /// board.json is being read again: nothing else is read meanwhile, or
     /// it would be read with the config being replaced.
     private var isReadingConfig = false
+    /// The push remotes of the anchors without a config are read after
+    /// board.json: a section none is known for yet doesn't say why it has
+    /// no pull requests.
+    private var isReadingRemotes = false
     /// Reads landed since the last render: they are drawn once, together.
     private var isRenderScheduled = false
     /// A board opened from the palette on a project without a repository
@@ -141,9 +147,9 @@ final class ProjectBoardController {
 
     /// The section's saved repository, spelled as saved and for
     /// comparisons: the one its merge queue works on. Nil for a section
-    /// read from its anchor's origin.
+    /// read from its anchor's remote.
     func repository(of section: BoardSections.Section) -> (name: String, gitHub: GitHubRepository)? {
-        reads[section.id].flatMap { $0.isFromOrigin ? nil : ($0.name, $0.gitHub) }
+        reads[section.id].flatMap { $0.isFromRemote ? nil : ($0.name, $0.gitHub) }
     }
 
     /// board.json about this section's config, for its queue.
@@ -158,7 +164,7 @@ final class ProjectBoardController {
         return repository(of: only)
     }
 
-    /// Some section has a GitHub repository, saved or its origin's: the
+    /// Some section has a GitHub repository, saved or its remote's: the
     /// board reads pull requests. Only a saved one has a merge queue
     /// (`repository(of:)`).
     var readsPullRequests: Bool { !reads.isEmpty }
@@ -206,6 +212,7 @@ final class ProjectBoardController {
         requestedAnchors = anchors
         guard let store = BoardConfigStore(spaceID: projectID) else {
             isReadingConfig = false
+            isReadingRemotes = false
             apply(BoardConfigStore.Loaded(config: nil, status: .unreadable), context: BoardSections.Context(anchors: anchors))
             return
         }
@@ -213,27 +220,65 @@ final class ProjectBoardController {
         Self.readOffMain({
             let loaded = store.load()
             // The anchors' remotes only place schema 1's config.
-            var context = loaded.entries.contains { $0.slot == .legacy }
+            let context = loaded.entries.contains { $0.slot == .legacy }
                 ? BoardSections.readContext(anchors: anchors) : BoardSections.Context(anchors: anchors)
-            // A file this build can't use, or won't write, says why instead.
-            if loaded.status == .missing || loaded.status == .loaded {
-                context.origins = BoardSections.readOrigins(BoardSections.sections(loaded.entries, context: context))
-            }
             return (loaded, context)
         }, then: { [weak self] read in
             guard let self, self.configRead == current else { return }
             self.isReadingConfig = false
-            self.apply(read.0, context: read.1)
+            // A file this build can't use, or won't write, says why instead.
+            let readsRemotes = read.0.status == .missing || read.0.status == .loaded
+            var context = read.1
+            // Until they are read again, the push remotes read before: a
+            // Refresh doesn't empty a section meanwhile.
+            if readsRemotes { context.pushRemotes = self.context.pushRemotes }
+            self.isReadingRemotes = readsRemotes
+            self.apply(read.0, context: context)
+            if readsRemotes { self.readPushRemotes(configRead: current) }
         })
     }
 
-    private func apply(_ newConfig: BoardConfigStore.Loaded, context newContext: BoardSections.Context) {
-        var context = newContext
-        // git couldn't read an origin this time: the one read before stays,
-        // and its section keeps what it read.
-        for (commonDir, origin) in context.origins where origin == .unread {
-            if let known = self.context.origins[commonDir] { context.origins[commonDir] = known }
+    /// The push remotes of the anchors without a config, read after
+    /// board.json so that an anchor on a slow volume holds up no other
+    /// read, then applied with the config read last.
+    private func readPushRemotes(configRead current: Int) {
+        let unsaved = sections.filter { $0.config == nil && $0.commonDir != nil }
+        guard !unsaved.isEmpty else {
+            isReadingRemotes = false
+            return
         }
+        Self.readOffMain({ BoardSections.readPushRemotes(unsaved) }, then: { [weak self] remotes in
+            guard let self, self.configRead == current, let loaded = self.loaded else { return }
+            self.isReadingRemotes = false
+            var context = self.context
+            context.pushRemotes = Self.merged(remotes, keeping: self.context.pushRemotes)
+            self.apply(loaded, context: context, listsWorktreesAgain: false)
+        })
+    }
+
+    /// git couldn't read a remote this time, or its default branch: what
+    /// was read before stays, so its section doesn't flip on a Refresh.
+    nonisolated static func merged(
+        _ new: [String: BoardSections.PushRemote], keeping known: [String: BoardSections.PushRemote]
+    ) -> [String: BoardSections.PushRemote] {
+        var result = new
+        for (commonDir, remote) in new {
+            switch (remote, known[commonDir]) {
+            case (.unread, let known?):
+                result[commonDir] = known
+            case (.gitHub(let repository, nil, let name), .gitHub(let knownRepository, let base?, let knownName)?)
+                where repository == knownRepository && name == knownName:
+                result[commonDir] = .gitHub(repository: repository, baseBranch: base, remote: name)
+            default:
+                break
+            }
+        }
+        return result
+    }
+
+    private func apply(
+        _ newConfig: BoardConfigStore.Loaded, context: BoardSections.Context, listsWorktreesAgain: Bool = true
+    ) {
         let wasRead = loaded != nil
         let previousSections = sections.map(\.id)
         loaded = newConfig
@@ -244,17 +289,17 @@ final class ProjectBoardController {
         displayNames = BoardSections.displayNames(sections)
         var newReads: [String: RepositoryReads] = [:]
         // Two sections never read one repository, as Board Settings never
-        // saves one for two: a saved one keeps it, else the first origin.
+        // saves one for two: a saved one keeps it, else the first remote.
         var taken = Set(sections.compactMap { $0.config?.gitHubRepository })
         for section in sections {
-            let origin = section.commonDir.flatMap { context.origins[$0] }
-            // A config, even without a valid repository, wins over origin.
-            var read = section.config.map { RepositoryReads(config: $0) } ?? origin.flatMap(RepositoryReads.init(origin:))
+            let remote = section.commonDir.flatMap { context.pushRemotes[$0] }
+            // A config, even without a valid repository, wins over the remote.
+            var read = section.config.map { RepositoryReads(config: $0) } ?? remote.flatMap(RepositoryReads.init(pushRemote:))
             if section.config == nil, let gitHub = read?.gitHub, !taken.insert(gitHub).inserted { read = nil }
             guard var fresh = read else { continue }
             if var previous = reads[section.id], previous.gitHub == fresh.gitHub {
-                // Saved since it was read from origin: what it read stays.
-                previous.isFromOrigin = fresh.isFromOrigin
+                // Saved since it was read from its remote: what it read stays.
+                previous.remoteName = fresh.remoteName
                 previous.name = fresh.name
                 if previous.baseBranch != fresh.baseBranch || previous.workflow != fresh.workflow {
                     // Reads still running answer for the config just replaced.
@@ -274,7 +319,7 @@ final class ProjectBoardController {
             }
         }
         // Other folders to list: an anchor added or removed, a section set up.
-        if wasRead, Set(newReads.keys) != Set(reads.keys) || sections.map(\.id) != previousSections {
+        if wasRead, listsWorktreesAgain, Set(newReads.keys) != Set(reads.keys) || sections.map(\.id) != previousSections {
             schedule.expire(.worktrees)
         }
         reads = newReads
@@ -404,8 +449,8 @@ final class ProjectBoardController {
     /// section's repository on `base`, then reads its open pull requests
     /// again. Never sent twice: another click is the user's.
     func retarget(_ number: Int, onto base: String, section id: String) {
-        // Never on a repository only read from origin: Board Settings first.
-        guard let repository = reads[id], !repository.isFromOrigin else { return }
+        // Never on a repository only read from its remote: Board Settings first.
+        guard let repository = reads[id], !repository.isFromRemote else { return }
         let client = self.client
         let name = repository.name
         let current = generation
@@ -560,10 +605,10 @@ final class ProjectBoardController {
             if !unsaved.isEmpty { notices.append(ProjectBoardView.Notice(text: reason.message)) }
         } else if several {
             // One that shares another's repository can't be saved with it.
-            let settable = unsaved.filter { sectionSharingOrigin(with: $0) == nil }
+            let settable = unsaved.filter { sectionSharingRemote(with: $0) == nil && setupNote($0) != nil }
             if let first = settable.first {
                 notices.append(ProjectBoardView.Notice(
-                    text: "No saved GitHub repository in Board Settings: \(settable.map(name).joined(separator: ", ")).",
+                    text: "Not set up in Board Settings, so no merge queue: \(settable.map(name).joined(separator: ", ")).",
                     settingsSection: first.id
                 ))
             }
@@ -581,14 +626,17 @@ final class ProjectBoardController {
     /// read of the open ones, a minute at most.
     private static func lastingError(_ reads: RepositoryReads) -> String? {
         guard let error = reads.errors[.openPullRequests] else { return nil }
-        return reads.openPullRequests == nil || error == .ghMissing || error == .notSignedIn ? error.message : nil
+        switch error {
+        case .ghMissing, .notSignedIn: return error.message
+        case .failed, .unreadable: return reads.openPullRequests == nil ? error.message : nil
+        }
     }
 
-    /// The other section reading the GitHub repository this one's origin
+    /// The other section reading the GitHub repository this one's remote
     /// names, which this one then doesn't read.
-    private func sectionSharingOrigin(with section: BoardSections.Section) -> BoardSections.Section? {
+    private func sectionSharingRemote(with section: BoardSections.Section) -> BoardSections.Section? {
         guard section.config == nil, reads[section.id] == nil,
-              case .gitHub(let name, _)? = section.commonDir.flatMap({ context.origins[$0] }),
+              case .gitHub(let name, _, _)? = section.commonDir.flatMap({ context.pushRemotes[$0] }),
               let gitHub = GitHubRepository(ownerAndName: name)
         else { return nil }
         return sections.first { other in
@@ -597,27 +645,29 @@ final class ProjectBoardController {
     }
 
     /// Why a section has no saved repository, in a sentence; nil when it
-    /// has one.
+    /// has one, or while its remote is being read.
     private func setupNote(_ section: BoardSections.Section) -> String? {
         if let reads = reads[section.id] {
-            return reads.isFromOrigin ? "Read-only, from origin: save Board Settings to use the merge queue." : nil
+            return reads.remoteName.map { "Read-only, from \($0): save Board Settings to use the merge queue." }
         }
         if let loaded, case .readOnly(let reason) = loaded.status { return reason.message }
         guard section.config == nil else {
             return "Board Settings has no valid GitHub repository for it: set one to see its pull requests."
         }
-        if let other = sectionSharingOrigin(with: section) {
+        if let other = sectionSharingRemote(with: section) {
             let otherName = displayNames[other.id] ?? other.name ?? "another repository"
             return "Same GitHub repository as “\(otherName)”: its pull requests show there."
         }
-        switch section.commonDir.flatMap({ context.origins[$0] }) {
-        case .missing?:
-            return "No remote named origin: set its GitHub repository in Board Settings to see its pull requests."
-        case .notGitHub(let host)?:
-            let place = host.map { "origin points to \($0), not github.com" } ?? "origin isn’t on github.com"
+        switch section.commonDir.flatMap({ context.pushRemotes[$0] }) {
+        case .missing(let remote)?:
+            return "No remote named \(remote): set its GitHub repository in Board Settings to see its pull requests."
+        case .notGitHub(let host, let remote)?:
+            let place = host.map { "\(remote) points to \($0), not github.com" } ?? "\(remote) isn’t on github.com"
             return "\(place): set its GitHub repository in Board Settings to see its pull requests."
         case .unread?:
-            return "Nirux couldn’t read its origin remote: Refresh, or set its GitHub repository in Board Settings."
+            return "Nirux couldn’t read its remote: Refresh, or set its GitHub repository in Board Settings."
+        case nil where isReadingRemotes:
+            return nil
         case .gitHub?, nil:
             return "No GitHub repository: set it in Board Settings to see its pull requests."
         }
