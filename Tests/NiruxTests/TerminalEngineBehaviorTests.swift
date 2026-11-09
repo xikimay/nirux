@@ -39,17 +39,10 @@ final class TerminalEngineBehaviorTests: XCTestCase {
         window.orderFront(nil)
         UIFlowHarness.waitUntil("the surface") { session.readViewportText() != nil }
 
-        let pasteboard = NSPasteboard.general
-        let saved = pasteboard.string(forType: .string)
-        defer {
-            pasteboard.clearContents()
-            if let saved { pasteboard.setString(saved, forType: .string) }
-        }
-        pasteboard.clearContents()
-        pasteboard.setString("first pasted line\nsecond pasted line", forType: .string)
-
-        // Several lines with bracketed paste off: Ghostty asks first.
-        XCTAssertTrue(terminal.performBindingAction("paste_from_clipboard"))
+        // Several lines with bracketed paste off: Ghostty asks first. Not
+        // through the system pasteboard, which other test classes running
+        // alongside write.
+        XCTAssertTrue(terminal.pasteWithProtection(text: "first pasted line\nsecond pasted line"))
         UIFlowHarness.waitUntil("the paste in the PTY") { writes.text.contains("second pasted line") }
 
         // A program asking for the clipboard gets no answer.

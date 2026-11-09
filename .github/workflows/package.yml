@@ -10,6 +10,9 @@ on:
       - Package.swift
       - Package.resolved
       - scripts/bundle.sh
+      - Resources/Info.plist
+      - Sources/Nirux/NiruxApp.swift
+      - Sources/Nirux/Util/TerminalConfigBuilder.swift
       - .github/workflows/nightly.yml
       - .github/workflows/package.yml
 
@@ -28,6 +31,21 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v5
+
+      # The cache tests.yml and the nightly use (GhosttyKit's download
+      # sometimes fails to connect).
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
       - name: Build release
         run: swift build -c release --build-system swiftbuild

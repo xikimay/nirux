@@ -18,10 +18,12 @@ enum TerminalDisplayID {
         return number?.uint32Value ?? CGMainDisplayID()
     }
 
-    /// False when the terminal has no surface yet (see
-    /// `TerminalScreenText.withSurface`).
-    @discardableResult
+    /// False when the terminal has no surface yet. Called outside the
+    /// surface's lock: Ghostty may wait for room in the renderer's mailbox.
+    @MainActor @discardableResult
     static func send(_ display: CGDirectDisplayID, to session: InMemoryTerminalSession) -> Bool {
-        TerminalScreenText.withSurface(session) { ghostty_surface_set_display_id($0, display) } != nil
+        guard let surface = TerminalScreenText.currentSurface(session) else { return false }
+        ghostty_surface_set_display_id(surface, display)
+        return true
     }
 }

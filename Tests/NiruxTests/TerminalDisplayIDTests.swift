@@ -33,7 +33,7 @@ final class TerminalDisplayIDTests: XCTestCase {
         UIFlowHarness.waitUntil("the text after the display") { session.readViewportText()?.contains("still drawing") == true }
     }
 
-    func testWakingDisplaysTellsEveryTerminalItsDisplay() throws {
+    func testDisplayChangesTellEveryTerminalItsDisplay() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let side = shell.workspaceStore.createProfile(named: "side", select: false)
@@ -51,6 +51,10 @@ final class TerminalDisplayIDTests: XCTestCase {
             told = []
             NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
             harness.waitUntil("every terminal told on a display change") { told == all }
+
+            told = []
+            NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: harness.window)
+            harness.waitUntil("every terminal told when the window moves to another display") { told == all }
         }
     }
 }

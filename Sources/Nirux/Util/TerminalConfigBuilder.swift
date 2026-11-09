@@ -347,15 +347,23 @@ enum TerminalAppearance {
     private static var lastSanitized: (input: [TerminalConfigBuilder.UserLine], contents: String)?
 
     /// `Nirux --check-terminal-runtime`: 0 when a terminal's controller
-    /// loads with Nirux's own config. libghostty-spm traps instead when its
-    /// resource bundle is missing from the app.
+    /// loads with Nirux's own config and libghostty-spm's resources come
+    /// from inside the app. It traps instead when they are missing; on the
+    /// build machine they could come from the build folder, which no other
+    /// Mac has.
     static func checkRuntime() -> Int32 {
-        let controller = TerminalController(configSource: .generated(TerminalConfigBuilder.render([])), theme: TerminalTheme())
-        if let issue = controller.lastConfigurationIssue {
-            FileHandle.standardError.write(Data("terminal runtime: \(issue)\n".utf8))
+        func fail(_ reason: String) -> Int32 {
+            FileHandle.standardError.write(Data("terminal runtime: \(reason)\n".utf8))
             return 1
         }
-        print("terminal runtime: ok")
+        let app = Bundle.main.bundleURL.resolvingSymlinksInPath().path + "/"
+        guard let resources = GhosttyRuntimeResources.directoryURL?.resolvingSymlinksInPath().path else {
+            return fail("libghostty-spm's resources not found")
+        }
+        guard resources.hasPrefix(app) else { return fail("libghostty-spm's resources come from outside the app: \(resources)") }
+        let controller = TerminalController(configSource: .generated(TerminalConfigBuilder.render([])), theme: TerminalTheme())
+        if let issue = controller.lastConfigurationIssue { return fail(issue) }
+        print("terminal runtime: ok (\(resources))")
         return 0
     }
 

@@ -187,6 +187,11 @@ final class NiruxShellView: NSView {
     /// painted before the resize end up with broken text because their
     /// internal grid still matches the old size.
     private var resizeRedrawTimer: Timer?
+    /// Displays woke or changed since terminals were last told theirs
+    /// (see `sendDisplayToTerminals`).
+    var needsDisplayResync = false
+    /// The app-wide display observers are added once, whatever the windows.
+    private var observesDisplays = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -408,6 +413,7 @@ final class NiruxShellView: NSView {
     /// built while no display was active gets its display link then (see
     /// `TerminalDisplayID`).
     func sendDisplayToTerminals() {
+        needsDisplayResync = false
         for workspace in workspaces {
             for column in workspace.columns {
                 guard let terminal = column.terminalView, let session = column.pty?.terminalSession else { continue }
@@ -482,18 +488,31 @@ final class NiruxShellView: NSView {
                     self?.syncTerminalOcclusion()
                     // Uncovered: a stale review reads its branch again.
                     self?.refreshStaleBranchReviewsOnScreen()
-                    // Shown, so on a display that is on.
-                    if self?.window?.occlusionState.contains(.visible) == true { self?.sendDisplayToTerminals() }
+                    // Shown, so on a display that is on: told again after a
+                    // wake, when the woken display may not have been usable.
+                    if self?.window?.occlusionState.contains(.visible) == true, self?.needsDisplayResync == true {
+                        self?.sendDisplayToTerminals()
+                    }
                 }
             }
-            // Displays woken or reconfigured.
-            let displayChanges = [
-                (NSWorkspace.shared.notificationCenter, NSWorkspace.screensDidWakeNotification),
-                (NotificationCenter.default, NSApplication.didChangeScreenParametersNotification)
-            ]
-            for (center, name) in displayChanges {
-                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.sendDisplayToTerminals() }
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sendDisplayToTerminals() }
+            }
+            if !observesDisplays {
+                observesDisplays = true
+                let displayChanges = [
+                    (NSWorkspace.shared.notificationCenter, NSWorkspace.screensDidWakeNotification),
+                    (NotificationCenter.default, NSApplication.didChangeScreenParametersNotification)
+                ]
+                for (center, name) in displayChanges {
+                    center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                        MainActor.assumeIsolated {
+                            self?.sendDisplayToTerminals()
+                            self?.needsDisplayResync = true
+                        }
+                    }
                 }
             }
         }

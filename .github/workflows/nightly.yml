@@ -151,6 +151,7 @@ jobs:
         run: ./scripts/bundle.sh "$VERSION" "$BUILD_NUMBER"
 
       - name: Check the packaged app's terminal runtime
+        timeout-minutes: 5
         run: Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime
 
       - name: Notarize and staple app

@@ -48,6 +48,13 @@ enum TerminalScreenText {
         return body(surface)
     }
 
+    /// The session's surface, read under its lock. Main thread only, where
+    /// surfaces are replaced and freed: off it, use `withSurface`.
+    @MainActor
+    static func currentSurface(_ session: InMemoryTerminalSession) -> ghostty_surface_t? {
+        withSurface(session) { $0 }
+    }
+
     private static func readWholeScreen(_ surface: ghostty_surface_t) -> String? {
         let selection = ghostty_selection_s(
             top_left: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
