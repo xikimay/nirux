@@ -228,7 +228,7 @@ extension NiruxShellView {
             // isn't its to answer.
             let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID }
             if missions.isEmpty {
-                line += task.startedByAgent ? " · not yours (another agent started it)" : " · not yours (started by the user)"
+                line += " · not yours (started by the user)"
             } else if let mission = missions.max(by: { $0.createdAt < $1.createdAt }) {
                 if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
                     let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"

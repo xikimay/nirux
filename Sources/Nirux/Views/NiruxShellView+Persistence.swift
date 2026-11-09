@@ -286,8 +286,7 @@ extension NiruxShellView {
         var parents: [String: String] = [:]
         for child in workspaces where child.parentWorkspaceID == nil {
             guard let id = child.id, let missionID = child.missionID, let parentID = parentByMission[missionID], parentID != id,
-                  let parent = workspaces.first(where: { $0.id == parentID }), !parent.isLead,
-                  taskLocation(cwd: parent.cwd) != nil
+                  let parent = workspaces.first(where: { $0.id == parentID }), !parent.isLead
             else { continue }
             parents[id] = parentID
         }

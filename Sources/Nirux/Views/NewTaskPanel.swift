@@ -404,7 +404,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         restoreReturnKey()
         updateForSubtask()
         // Checked again: back in the task's repository.
-        if subtaskParentID != nil, let key = parentTask?.repositoryKey, key != selectedRepositoryKey,
+        if false, let key = parentTask?.repositoryKey, key != selectedRepositoryKey,
            repositories.contains(where: { $0.key == key }) {
             selectedRepositoryKey = key
             selectRepositoryItem()

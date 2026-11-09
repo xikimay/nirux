@@ -76,7 +76,7 @@ extension NiruxShellView {
             attachedTo: window,
             space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
             repositories: repositories,
-            selectedKey: parentTask?.repositoryKey ?? selectedKey ?? space.anchors.defaultAnchor?.key,
+            selectedKey: selectedKey ?? space.anchors.defaultAnchor?.key,
             parentTask: parentTask,
             agent: defaultTaskAgent(forSpace: space.id),
             homeFolder: sideEffects.homeDirectory()

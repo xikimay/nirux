@@ -711,7 +711,6 @@ struct PersistedWorkspace: Codable {
         if blockerIsFromLead { try container.encode(true, forKey: .blockerIsFromLead) }
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
-        if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
     }
