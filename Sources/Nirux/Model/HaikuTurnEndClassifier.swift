@@ -9,7 +9,8 @@ import Foundation
 ///
 /// It runs only on a Claude subscription (claude.ai, through Anthropic):
 /// anywhere else each turn would be billed, so every turn alerts as
-/// before. No tools, MCP servers, hooks, settings, instruction files or
+/// before. `claude auth status` says so ahead of runs; each run's events
+/// say so again (an API key stops it, extra usage rests the classifier). No tools, MCP servers, hooks, settings, instruction files or
 /// saved session: the run sees the message and nothing else. Any failure
 /// is `.unknown`.
 final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
@@ -56,12 +57,14 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         case unavailable
     }
 
-    /// Guards `runningCount`, `cachedSetup` and `isRefreshingSetup`.
+    /// Guards everything below but `setupLock`.
     private let lock = NSLock()
     private var runningCount = 0
     private var cachedSetup: (setup: Setup, checkedAt: TimeInterval)?
     private var isRefreshingSetup = false
     private var failuresInARow = 0
+    /// No run before then (failures in a row, a run that would bill).
+    private var restedUntil: TimeInterval = 0
     /// Held while the setup is checked: one check at a time.
     private let setupLock = NSLock()
     private let checkSetup: @Sendable () -> Setup
@@ -80,10 +83,13 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     }
 
     /// Checks the setup in the background (at launch, or when the option
-    /// is turned on): the first turn end needn't wait for it.
+    /// is turned on). Turn ends before it is known alert at once.
     func prepare() {
-        DispatchQueue.global(qos: .utility).async { _ = self.checkSetupNow() }
+        lock.withLock { refreshSetupLocked() }
     }
+
+    /// The setup is known (checked once at least).
+    var knowsSetup: Bool { lock.withLock { cachedSetup != nil } }
 
     func classify(_ message: String) async -> TurnEndVerdict {
         guard reserveRun() else { return .unknown }
@@ -98,18 +104,26 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         }
     }
 
-    /// Blocks: call it off the main thread.
+    /// Blocks for the run (never for the setup): off the main thread.
     private func classifyNow(_ message: String) -> TurnEndVerdict {
         guard case .ready(let cli) = setup() else { return .unknown }
-        let verdict = Self.verdict(from: runProcess(cli, Self.arguments(), Self.input(for: message)))
+        let report = Self.report(from: runProcess(cli, Self.arguments(), Self.input(for: message)))
         lock.withLock {
-            failuresInARow = verdict == .unknown ? failuresInARow + 1 : 0
-            if failuresInARow >= Self.failuresBeforeRest {
+            if report.billedPerCall {
+                // An API key, or extra usage: a subscription's runs only.
+                restedUntil = now() + Self.readySetupLifetime
                 failuresInARow = 0
-                cachedSetup = (.unavailable, now())
+            } else if report.verdict == .unknown {
+                failuresInARow += 1
+                if failuresInARow >= Self.failuresBeforeRest {
+                    restedUntil = now() + Self.missingSetupLifetime
+                    failuresInARow = 0
+                }
+            } else {
+                failuresInARow = 0
             }
         }
-        return verdict
+        return report.verdict
     }
 
     /// The message between tags it can't close itself.
@@ -130,38 +144,37 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         lock.withLock { runningCount -= 1 }
     }
 
-    /// The setup known, checked again in the background once it is old:
-    /// only the very first turn end (before `prepare` is done) waits for a
-    /// check, which runs `claude` twice.
+    /// The setup known, checked again in the background once it is old.
+    /// Never waited for: unknown yet (just launched) or resting, the turn
+    /// alerts at once.
     private func setup() -> Setup {
         let time = now()
-        let known: Setup? = lock.withLock {
-            guard let cached = cachedSetup else { return nil }
-            if !isFresh(cached, at: time), !isRefreshingSetup {
-                isRefreshingSetup = true
-                DispatchQueue.global(qos: .utility).async { _ = self.checkSetupNow() }
+        return lock.withLock {
+            if time < restedUntil { return .unavailable }
+            guard let cached = cachedSetup else {
+                refreshSetupLocked()
+                return .unavailable
             }
+            if !isFresh(cached, at: time) { refreshSetupLocked() }
             return cached.setup
         }
-        return known ?? checkSetupNow()
     }
 
-    private func checkSetupNow() -> Setup {
+    /// Under `lock`: one background check at a time.
+    private func refreshSetupLocked() {
+        guard !isRefreshingSetup else { return }
+        isRefreshingSetup = true
+        DispatchQueue.global(qos: .utility).async { self.checkSetupNow() }
+    }
+
+    /// Runs `claude --help` and `claude auth status`.
+    private func checkSetupNow() {
         setupLock.withLock {
-            // Checked by another caller while this one waited (or rested by
-            // failures): the refresh asked for is done.
-            let fresh: Setup? = lock.withLock {
-                guard let cached = cachedSetup, isFresh(cached, at: now()) else { return nil }
-                isRefreshingSetup = false
-                return cached.setup
-            }
-            if let fresh { return fresh }
             let setup = checkSetup()
             lock.withLock {
                 cachedSetup = (setup, now())
                 isRefreshingSetup = false
             }
-            return setup
         }
     }
 
@@ -171,12 +184,12 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     }
 
     /// The flags of a run: Haiku alone, confined, no tools, with the prompt
-    /// above; the message on standard input, one JSON result out.
-    /// `--max-budget-usd` caps a run that would go wrong (a normal one
-    /// costs a hundredth of it).
+    /// above; the message on standard input, its events out (the first one
+    /// says which account it uses). `--max-budget-usd` caps a run that
+    /// would go wrong (a normal one costs a hundredth of it).
     static func arguments() -> [String] {
         ["-p", "--model", model, "--tools", ""] + BranchReview.ClaudeCLI.confinementArguments
-            + ["--max-budget-usd", "0.05", "--output-format", "json", "--system-prompt", systemPrompt]
+            + ["--max-budget-usd", "0.05", "--output-format", "stream-json", "--verbose", "--system-prompt", systemPrompt]
     }
 
     /// `ClaudeCLI.environment`'s, without thinking (Claude Code turns it on
@@ -190,19 +203,49 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         return environment
     }
 
-    /// The verdict a run's JSON result gives: its `result` starting with
-    /// ASK or DONE. A run that failed, was stopped, or reported an error
-    /// (`is_error`, an API error reads as a successful result) gives none.
-    static func verdict(from outcome: BoundedProcess.Outcome?) -> TurnEndVerdict {
-        guard let outcome, outcome.stop == nil, outcome.terminationStatus == 0,
-              let object = (try? JSONSerialization.jsonObject(with: outcome.standardOutput)) as? [String: Any],
-              object["is_error"] as? Bool == false,
-              let result = object["result"] as? String
-        else { return .unknown }
-        let answer = result.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if answer.hasPrefix("ASK") { return .asks }
-        if answer.hasPrefix("DONE") { return .done }
-        return .unknown
+    /// What a run said: its verdict (its result starting with ASK or DONE;
+    /// none from a run that failed, was stopped or reported an error, an API
+    /// error reading as a successful result), and whether it would be
+    /// billed per call: an API key behind it, or the plan's extra usage.
+    struct RunReport: Equatable {
+        var verdict: TurnEndVerdict = .unknown
+        var billedPerCall = false
+    }
+
+    static func report(from outcome: BoundedProcess.Outcome?) -> RunReport {
+        var report = RunReport()
+        guard let outcome else { return report }
+        var result: [String: Any]?
+        for line in outcome.standardOutput.split(separator: 0x0A) {
+            guard let event = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any] else { continue }
+            switch event["type"] as? String {
+            case "system":
+                if refusesAccount(of: event) { report.billedPerCall = true }
+            case "rate_limit_event":
+                let info = event["rate_limit_info"] as? [String: Any]
+                if info?["isUsingOverage"] as? Bool == true || info?["overageInUse"] as? Bool == true {
+                    report.billedPerCall = true
+                }
+            case "result":
+                result = event
+            default:
+                break
+            }
+        }
+        guard outcome.stop == nil, outcome.terminationStatus == 0, let result,
+              result["is_error"] as? Bool == false, let text = result["result"] as? String
+        else { return report }
+        let answer = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if answer.hasPrefix("ASK") { report.verdict = .asks }
+        if answer.hasPrefix("DONE") { report.verdict = .done }
+        return report
+    }
+
+    /// A run's first event (`system`/`init`) names an API key behind it
+    /// rather than the subscription's login ("none").
+    static func refusesAccount(of event: [String: Any]) -> Bool {
+        guard event["subtype"] as? String == "init", let source = event["apiKeySource"] as? String else { return false }
+        return source != "none"
     }
 
     /// A confining `claude` logged in on a subscription. Runs `claude
@@ -216,16 +259,50 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
 
     /// Runs in an empty folder of Nirux's own (`claude` runs `git` where it
     /// starts), made again each time: macOS empties temporary folders left
-    /// untouched for days.
+    /// untouched for days. A run whose first event names an API key stops
+    /// there, before it calls the model.
     @Sendable static func defaultRun(
         cli: BranchReview.ClaudeCLI, arguments: [String], input: Data
     ) -> BoundedProcess.Outcome? {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("NiruxTurnEnd", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let cancellation = BoundedProcess.Cancellation()
+        let watch = FirstEventWatch(cancellation: cancellation)
         return BoundedProcess.execute(
             executableURL: URL(fileURLWithPath: cli.path), arguments: arguments,
             currentDirectoryURL: folder, environment: .replaced(environment(for: cli)),
-            standardInput: input, timeout: timeout, maxStandardOutputBytes: 1 << 20
+            standardInput: input, timeout: timeout, maxStandardOutputBytes: 1 << 20,
+            cancellation: cancellation, onStandardOutput: { watch.read($0) }
         )
+    }
+
+    /// Reads a run's output until its first event, and stops the run when
+    /// that event refuses its account.
+    private final class FirstEventWatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var buffer = Data()
+        private var done = false
+        private let cancellation: BoundedProcess.Cancellation
+
+        init(cancellation: BoundedProcess.Cancellation) {
+            self.cancellation = cancellation
+        }
+
+        func read(_ chunk: Data) {
+            lock.withLock {
+                guard !done else { return }
+                buffer.append(chunk)
+                while let newline = buffer.firstIndex(of: 0x0A) {
+                    let line = buffer[buffer.startIndex..<newline]
+                    buffer = Data(buffer[buffer.index(after: newline)...])
+                    guard let event = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                          event["type"] as? String == "system", event["subtype"] as? String == "init"
+                    else { continue }
+                    done = true
+                    if HaikuTurnEndClassifier.refusesAccount(of: event) { cancellation.cancel() }
+                    return
+                }
+            }
+        }
     }
 }

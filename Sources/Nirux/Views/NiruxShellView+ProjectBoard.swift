@@ -264,7 +264,7 @@ extension NiruxShellView {
             hasAgent: agentInFront || pty.agentProcessName(snapshot: snapshot) != nil,
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
-            openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason,
+            openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason ?? pty.agentAskedQuestion(foreground: foreground),
             workingFor: pty.agentTurnStartedAt.map { SidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )
         var failedAt: TimeInterval?

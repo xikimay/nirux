@@ -58,6 +58,10 @@ final class AgentHookCenter {
     /// only a turn that asks something alerts. Nil: every turn end alerts,
     /// and the messages are dropped as they arrive.
     var turnEndClassifier: (any TurnEndClassifier)?
+    /// A turn end got its verdict: its prompt, which Nirux leaves alone
+    /// meanwhile (`AgentStatusMachine.awaitsAnyVerdict`), may take the
+    /// messages waiting for it.
+    var onTurnEndSettled: (() -> Void)?
     private var lastApprovalSweep: TimeInterval = 0
 
     private var dirSource: DispatchSourceFileSystemObject?
@@ -292,10 +296,11 @@ final class AgentHookCenter {
     /// when the classifier couldn't tell. The alert refreshes the sidebar
     /// and the Dock badge; nothing else a verdict does shows.
     func applyTurnEndVerdict(_ verdict: TurnEndVerdict, for request: TurnEndRequest, agentUUID: String) {
-        guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty,
-              let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused)
-        else { return }
-        resolution.column.notifyAgentAttention(reason: reason)
+        guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty else { return }
+        if let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused) {
+            resolution.column.notifyAgentAttention(reason: reason)
+        }
+        onTurnEndSettled?()
     }
 
     /// Whether the sidebar holds a request its receiver waits on:

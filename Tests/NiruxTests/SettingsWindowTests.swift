@@ -113,7 +113,13 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertFalse(controller.notifyOnAttention)
 
             let classifier = AgentHookCenter.shared.turnEndClassifier
-            defer { AgentHookCenter.shared.turnEndClassifier = classifier }
+            let makeClassifier = NiruxApp.makeTurnEndClassifier
+            // Never the real `claude`.
+            NiruxApp.makeTurnEndClassifier = { HaikuTurnEndClassifier(checkSetup: { .unavailable }, runProcess: { _, _, _ in nil }) }
+            defer {
+                AgentHookCenter.shared.turnEndClassifier = classifier
+                NiruxApp.makeTurnEndClassifier = makeClassifier
+            }
             XCTAssertEqual(app.settingsAlertOnlyWhenClaudeAsksCheckbox?.state, .on)
             try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
             XCTAssertNil(AgentHookCenter.shared.turnEndClassifier, "every turn end alerts")

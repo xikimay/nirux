@@ -72,14 +72,15 @@ extension AgentStatusMachine {
     /// them), whose turn is over and didn't fail (a usage limit would fail
     /// every message typed, one after the other), with no dialog listed and
     /// nothing typed since its last prompt went in (a draft, or text typed
-    /// by Nirux that Claude has not submitted yet).
+    /// by Nirux that Claude has not submitted yet), and no turn end waiting
+    /// for its verdict (`awaitsAnyVerdict`).
     func isPromptFree(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> Bool {
         guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
               foreground.instance.startedAt <= time,
               let lastPromptAt, lastPromptAt >= foreground.instance.startedAt
         else { return false }
         return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && turnFailure == nil
-            && lastDraftInputAt <= lastPromptAt
+            && lastDraftInputAt <= lastPromptAt && !awaitsAnyVerdict
     }
 
     /// Whether a message typed at `typedAt` went in and the turn that took

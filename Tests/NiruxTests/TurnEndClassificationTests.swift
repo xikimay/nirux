@@ -82,11 +82,45 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(try message([:]), "Shall I merge?")
         for variable in [
             "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
-            "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"
+            "CLAUDE_CODE_OAUTH_TOKEN"
         ] {
             XCTAssertNil(try message([variable: "1"]), variable)
         }
         XCTAssertEqual(try message(["CLAUDE_CODE_USE_BEDROCK": "0", "ANTHROPIC_API_KEY": ""]), "Shall I merge?", "off")
+        // One list: what a run drops sends Claude elsewhere; nothing it keeps does.
+        XCTAssertTrue(BranchReview.ClaudeCLI.accountVariables.isDisjoint(with: BranchReview.ClaudeCLI.keptVariables))
+    }
+
+    /// Receivers keep a final message only for a running Nirux that reads
+    /// them, and an agent on the same Claude configuration folder as its
+    /// `claude -p`.
+    func testMarkerTellsReceiversWhetherToKeepTheMessage() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("turn-end-marker-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let app = ProcessInstance(pid: 4242, startedAt: 10)
+        let alive: (pid_t) -> ProcessInstance? = { $0 == 4242 ? app : nil }
+        let home = ["HOME": "/Users/me"]
+        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, at: url, running: alive), "option off")
+
+        TurnEndMarker.publish(app: app, environment: [:], at: url)
+        XCTAssertTrue(TurnEndMarker.allowsMessage(environment: home, at: url, running: alive))
+        XCTAssertTrue(TurnEndMarker.allowsMessage(
+            environment: home.merging(["CLAUDE_CONFIG_DIR": "~/.claude/"]) { $1 }, at: url, running: alive
+        ), "the default folder, spelled out")
+        XCTAssertFalse(TurnEndMarker.allowsMessage(
+            environment: home.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]) { $1 }, at: url, running: alive
+        ), "another login")
+        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, at: url, running: { _ in nil }), "Nirux gone")
+
+        TurnEndMarker.publish(app: app, environment: ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"], at: url)
+        XCTAssertTrue(TurnEndMarker.allowsMessage(
+            environment: home.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]) { $1 }, at: url, running: alive
+        ), "the same folder as Nirux's own")
+
+        TurnEndMarker.withdraw(app: ProcessInstance(pid: 7, startedAt: 1), at: url, running: alive)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "another Nirux still running keeps it")
+        TurnEndMarker.withdraw(app: app, at: url, running: alive)
+        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, at: url, running: alive))
     }
 
     // MARK: - The column
@@ -333,27 +367,136 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 9_000), isUserFocused: false).firedAttention)
     }
 
+    /// Nirux types nothing (Mission messages, Lead notices) into a prompt
+    /// whose turn end waits for its verdict: it would settle it as unread.
+    func testNiruxWaitsForTheVerdictBeforeTyping() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        XCTAssertFalse(machine.isPromptFree(foreground: claude, runningSince: t0 + 9))
+        _ = machine.applyTurnEndVerdict(.done, for: request, isUserFocused: false)
+        XCTAssertTrue(machine.isPromptFree(foreground: claude, runningSince: t0 + 9))
+    }
+
+    /// A question stays said (sidebar, header, ⌘J) after Nirux is
+    /// activated, until it is answered or read on screen.
+    func testQuestionLastsUntilAnsweredOrSeen() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        func ask() throws {
+            machine = AgentStatusMachine()
+            let request = try XCTUnwrap(endTurn().turnEnd)
+            _ = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
+        }
+        try ask()
+        machine.clearAttention()
+        XCTAssertEqual(
+            machine.blockedWait(now: t0 + 60, foreground: claude),
+            AgentWait(reason: .askedInReply("Shall I merge?"), since: t0 + 5)
+        )
+        let newer = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: t0 + 30), name: "claude", arguments: ["claude"])
+        XCTAssertNil(machine.visibleQuestion(foreground: newer), "another claude's")
+        machine.noteSeen()
+        XCTAssertNil(machine.blockedWait(now: t0 + 60, foreground: claude))
+
+        try ask()
+        _ = machine.apply(event(.userPromptSubmit, at: 9), isUserFocused: true)
+        XCTAssertNil(machine.visibleQuestion(foreground: claude), "answered")
+        try ask()
+        _ = machine.apply(event(.stop, at: 9), isUserFocused: false)
+        XCTAssertNil(machine.visibleQuestion(foreground: claude), "a later turn end")
+        try ask()
+        _ = machine.apply(event(.sessionEnd, at: 9), isUserFocused: false)
+        XCTAssertNil(machine.visibleQuestion(foreground: claude), "the session ended")
+        try ask()
+        // Subagents working on, then Claude's idle reminder: still asked.
+        _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        _ = machine.apply(event(.notification, at: 70, notificationType: "idle_prompt"), isUserFocused: false)
+        XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
+
+        machine = AgentStatusMachine()
+        let seen = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.applyTurnEndVerdict(.asks, for: seen, isUserFocused: true)
+        XCTAssertNil(machine.visibleQuestion(foreground: claude), "read as it came")
+    }
+
+    /// `claude` left the terminal (quit, killed): its turn end and its
+    /// question are behind.
+    func testLeavingClaudeEndsItsTurnEnd() throws {
+        var request = try XCTUnwrap(endTurn().turnEnd)
+        machine.tick(fgName: "zsh", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 6))
+        XCTAssertFalse(machine.isQuietTurnEnd)
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+
+        machine = AgentStatusMachine()
+        request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
+        machine.tick(fgName: "zsh", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 6))
+        XCTAssertNil(machine.askedQuestion)
+    }
+
     // MARK: - Haiku through claude -p
 
     private let cli = BranchReview.ClaudeCLI(path: "/bin/echo")
 
-    nonisolated private static func result(
-        _ json: String, status: Int32? = 0, stop: BoundedProcess.Stop? = nil
+    /// A run's events, one JSON line each, as `--output-format stream-json`
+    /// writes them.
+    nonisolated private static func run(
+        _ events: [String], status: Int32? = 0, stop: BoundedProcess.Stop? = nil
     ) -> BoundedProcess.Outcome {
-        BoundedProcess.Outcome(standardOutput: Data(json.utf8), standardError: Data(), terminationStatus: status, stop: stop)
+        BoundedProcess.Outcome(
+            standardOutput: Data(events.joined(separator: "\n").utf8), standardError: Data(),
+            terminationStatus: status, stop: stop
+        )
     }
 
-    func testVerdictReadsTheRunsJSONResult() {
-        let verdict = HaikuTurnEndClassifier.verdict(from:)
-        XCTAssertEqual(verdict(Self.result(#"{"type":"result","is_error":false,"result":"ASK"}"#)), .asks)
-        XCTAssertEqual(verdict(Self.result(#"{"is_error":false,"result":" done.\n"}"#)), .done)
-        XCTAssertEqual(verdict(Self.result(#"{"is_error":false,"result":"Maybe"}"#)), .unknown)
-        XCTAssertEqual(verdict(Self.result(#"{"is_error":true,"result":"API Error: overloaded"}"#)), .unknown)
-        XCTAssertEqual(verdict(Self.result(#"{"result":"ASK"}"#)), .unknown, "no is_error: not a result to trust")
-        XCTAssertEqual(verdict(Self.result(#"{"is_error":false,"result":"ASK"}"#, status: 1)), .unknown)
-        XCTAssertEqual(verdict(Self.result("", status: nil, stop: .timedOut)), .unknown)
-        XCTAssertEqual(verdict(Self.result("not json")), .unknown)
-        XCTAssertEqual(verdict(nil), .unknown, "didn't start")
+    nonisolated private static let initOnLogin = #"{"type":"system","subtype":"init","apiKeySource":"none"}"#
+    nonisolated private static func result(_ text: String, isError: Bool = false) -> String {
+        #"{"type":"result","is_error":\#(isError),"result":"\#(text)"}"#
+    }
+
+    /// A classifier whose setup check already ran.
+    private func prepared(
+        _ setup: HaikuTurnEndClassifier.Setup? = nil,
+        run: @escaping @Sendable (BranchReview.ClaudeCLI, [String], Data) -> BoundedProcess.Outcome?
+    ) async throws -> HaikuTurnEndClassifier {
+        let classifier = HaikuTurnEndClassifier(checkSetup: { [cli] in setup ?? .ready(cli) }, runProcess: run)
+        classifier.prepare()
+        let deadline = Date().addingTimeInterval(10)
+        while !classifier.knowsSetup, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(classifier.knowsSetup)
+        return classifier
+    }
+
+    func testReportReadsTheRunsEvents() {
+        let report = { HaikuTurnEndClassifier.report(from: $0).verdict }
+        XCTAssertEqual(report(Self.run([Self.initOnLogin, Self.result("ASK")])), .asks)
+        XCTAssertEqual(report(Self.run([Self.initOnLogin, Self.result(" done.\\n")])), .done)
+        XCTAssertEqual(report(Self.run([Self.result("Maybe")])), .unknown)
+        XCTAssertEqual(report(Self.run([Self.result("API Error: overloaded", isError: true)])), .unknown)
+        XCTAssertEqual(report(Self.run([#"{"type":"result","result":"ASK"}"#])), .unknown, "no is_error: not a result to trust")
+        XCTAssertEqual(report(Self.run([Self.result("ASK")], status: 1)), .unknown)
+        XCTAssertEqual(report(Self.run([Self.initOnLogin], status: nil, stop: .timedOut)), .unknown)
+        XCTAssertEqual(report(Self.run(["not json"])), .unknown)
+        XCTAssertEqual(report(nil), .unknown, "didn't start")
+    }
+
+    /// An API key behind the run, or the plan's extra usage: billed per
+    /// call, which only a subscription's runs may not be.
+    func testReportTellsARunBilledPerCall() {
+        XCTAssertFalse(HaikuTurnEndClassifier.report(from: Self.run([Self.initOnLogin, Self.result("ASK")])).billedPerCall)
+        let apiKey = HaikuTurnEndClassifier.report(from: Self.run(
+            [#"{"type":"system","subtype":"init","apiKeySource":"ANTHROPIC_API_KEY"}"#], status: nil, stop: .cancelled
+        ))
+        XCTAssertEqual(apiKey, HaikuTurnEndClassifier.RunReport(verdict: .unknown, billedPerCall: true))
+        let overage = HaikuTurnEndClassifier.report(from: Self.run([
+            Self.initOnLogin, #"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","isUsingOverage":true}}"#,
+            Self.result("ASK")
+        ]))
+        XCTAssertEqual(overage, HaikuTurnEndClassifier.RunReport(verdict: .asks, billedPerCall: true), "paid already: kept")
+
+        XCTAssertTrue(HaikuTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "init", "apiKeySource": "/login managed key"]))
+        XCTAssertFalse(HaikuTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "init", "apiKeySource": "none"]))
+        XCTAssertFalse(HaikuTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "init"]), "older claude")
+        XCTAssertFalse(HaikuTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "api_retry", "apiKeySource": "x"]))
     }
 
     func testRunReadsOnlyTheMessageWithHaikuAlone() throws {
@@ -363,7 +506,8 @@ final class TurnEndClassificationTests: XCTestCase {
         }
         XCTAssertEqual(value(after: "--model"), "claude-haiku-5-5")
         XCTAssertEqual(value(after: "--tools"), "")
-        XCTAssertEqual(value(after: "--output-format"), "json")
+        XCTAssertEqual(value(after: "--output-format"), "stream-json", "its first event names the account")
+        XCTAssertTrue(arguments.contains("--verbose"), "stream-json needs it in print mode")
         XCTAssertEqual(value(after: "--system-prompt"), HaikuTurnEndClassifier.systemPrompt)
         let settings = try XCTUnwrap(value(after: "--settings"))
         XCTAssertTrue(settings.contains(#""disableAllHooks":true"#))
@@ -382,36 +526,53 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(environment["ANTHROPIC_API_KEY"], "the API would be billed")
     }
 
-    func testClassifyRunsOnlyWithASetupItKeepsForAWhile() async {
+    /// The setup check runs `claude` twice: never on a turn end's way. One
+    /// that comes before it is known alerts at once.
+    func testTurnEndsNeverWaitForTheSetup() async throws {
+        let gate = DispatchSemaphore(value: 0)
+        let runs = Counter()
+        let classifier = HaikuTurnEndClassifier(
+            checkSetup: { [cli] in _ = gate.wait(timeout: .now() + 5); return .ready(cli) },
+            runProcess: { _, _, _ in runs.increment(); return Self.run([Self.result("ASK")]) }
+        )
+        classifier.prepare()
+        let early = await classifier.classify(asks)
+        XCTAssertEqual(early, .unknown)
+        XCTAssertEqual(runs.value, 0)
+        gate.signal()
+        let deadline = Date().addingTimeInterval(10)
+        while !classifier.knowsSetup, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        let later = await classifier.classify(asks)
+        XCTAssertEqual(later, .asks)
+    }
+
+    func testClassifierKeepsItsSetupForAWhile() async throws {
         let calls = Counter()
-        var clock: TimeInterval = 0
-        let now = LockedValue(clock)
+        let now = LockedValue<TimeInterval>(0)
         let missing = HaikuTurnEndClassifier(
             checkSetup: { calls.increment(); return .unavailable },
             runProcess: { _, _, _ in XCTFail("no run without a setup"); return nil },
             now: { now.value }
         )
+        missing.prepare()
+        var deadline = Date().addingTimeInterval(10)
+        while !missing.knowsSetup, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         let unavailable = await missing.classify(asks)
         XCTAssertEqual(unavailable, .unknown)
-        _ = await missing.classify(asks)
         XCTAssertEqual(calls.value, 1, "kept")
-        clock += HaikuTurnEndClassifier.missingSetupLifetime
-        now.value = clock
+        now.value = HaikuTurnEndClassifier.missingSetupLifetime
         let stale = await missing.classify(asks)
         XCTAssertEqual(stale, .unknown, "the old setup answers at once")
-        let deadline = Date().addingTimeInterval(10)
-        while calls.value < 2, Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+        deadline = Date().addingTimeInterval(10)
+        while calls.value < 2, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(calls.value, 2, "checked again later, in the background")
 
         let inputs = LockedValue<[String]>([])
-        let ready = HaikuTurnEndClassifier(
-            checkSetup: { [cli] in .ready(cli) },
-            runProcess: { _, arguments, input in
-                XCTAssertEqual(arguments, HaikuTurnEndClassifier.arguments())
-                inputs.value.append(String(decoding: input, as: UTF8.self))
-                return Self.result(#"{"is_error":false,"result":"ASK"}"#)
-            }
-        )
+        let ready = try await prepared { _, arguments, input in
+            XCTAssertEqual(arguments, HaikuTurnEndClassifier.arguments())
+            inputs.value.append(String(decoding: input, as: UTF8.self))
+            return Self.run([Self.initOnLogin, Self.result("ASK")])
+        }
         let verdict = await ready.classify(asks)
         XCTAssertEqual(verdict, .asks)
         XCTAssertEqual(inputs.value, ["<message>\n\(asks)\n</message>"])
@@ -424,12 +585,9 @@ final class TurnEndClassificationTests: XCTestCase {
 
     /// Runs that keep failing (an outage, a network down) rest the
     /// classifier: turn ends alert at once instead of after each timeout.
-    func testFailingRunsRestTheClassifier() async {
+    func testFailingRunsRestTheClassifier() async throws {
         let runs = Counter()
-        let classifier = HaikuTurnEndClassifier(
-            checkSetup: { [cli] in .ready(cli) },
-            runProcess: { _, _, _ in runs.increment(); return nil }
-        )
+        let classifier = try await prepared { _, _, _ in runs.increment(); return nil }
         for _ in 0..<HaikuTurnEndClassifier.failuresBeforeRest {
             let verdict = await classifier.classify(asks)
             XCTAssertEqual(verdict, .unknown)
@@ -440,18 +598,32 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(runs.value, HaikuTurnEndClassifier.failuresBeforeRest, "no run while resting")
     }
 
+    /// A run billed per call (an API key, extra usage) stops the classifier:
+    /// turn ends alert as before, and no further run is billed.
+    func testRunBilledPerCallStopsTheClassifier() async throws {
+        let runs = Counter()
+        let classifier = try await prepared { _, _, _ in
+            runs.increment()
+            return Self.run([
+                Self.initOnLogin, #"{"type":"rate_limit_event","rate_limit_info":{"overageInUse":true}}"#, Self.result("ASK")
+            ])
+        }
+        let paid = await classifier.classify(asks)
+        XCTAssertEqual(paid, .asks)
+        let next = await classifier.classify(asks)
+        XCTAssertEqual(next, .unknown)
+        XCTAssertEqual(runs.value, 1, "no run after one that billed")
+    }
+
     func testTurnEndsPastTheConcurrentRunsAlertAtOnce() async throws {
         let gate = DispatchSemaphore(value: 0)
         let started = Counter()
-        let classifier = HaikuTurnEndClassifier(
-            checkSetup: { [cli] in .ready(cli) },
-            runProcess: { _, _, _ in
-                started.increment()
-                // Bounded: a run let past the limit fails the test, not hangs it.
-                _ = gate.wait(timeout: .now() + 5)
-                return Self.result(#"{"is_error":false,"result":"DONE"}"#)
-            }
-        )
+        let classifier = try await prepared { _, _, _ in
+            started.increment()
+            // Bounded: a run let past the limit fails the test, not hangs it.
+            _ = gate.wait(timeout: .now() + 5)
+            return Self.run([Self.result("DONE")])
+        }
         let runs = (0..<HaikuTurnEndClassifier.maxConcurrentRuns).map { _ in
             Task { await classifier.classify("Done.") }
         }
@@ -500,9 +672,12 @@ final class TurnEndClassificationTests: XCTestCase {
         let (center, _, column, request, alerts) = try turnEndColumn()
         let uuid = try XCTUnwrap(column.agentUUID)
 
+        var settled = 0
+        center.onTurnEndSettled = { settled += 1 }
         center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
         XCTAssertEqual(alerts.value.count, 0)
         XCTAssertEqual(column.pty?.isQuietTurnEnd, true)
+        XCTAssertEqual(settled, 1, "Nirux's waiting messages may go in now")
 
         let (asksCenter, _, asksColumn, asksRequest, asksAlerts) = try turnEndColumn()
         asksCenter.applyTurnEndVerdict(.asks, for: asksRequest, agentUUID: try XCTUnwrap(asksColumn.agentUUID))
@@ -614,6 +789,17 @@ final class TurnEndClassificationTests: XCTestCase {
 
         info.missionQuestion = SidebarMissionQuestion(questionID: "q", parentTitle: "lead", text: "Keep v1?", handOff: nil)
         XCTAssertNil(info.attention, "a child that asked its parent doesn't ask the user")
+
+        // Nirux activated: the column idles, its question still shows.
+        var seenAway = ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil
+        )
+        seenAway.openDialog = .askedInReply("Shall I merge it?")
+        XCTAssertEqual(seenAway.attention, .waiting)
+        XCTAssertEqual(seenAway.attentionLabel, "asks")
+        seenAway.missionQuestion = SidebarMissionQuestion(questionID: "q", parentTitle: "lead", text: "Keep v1?", handOff: nil)
+        XCTAssertNil(seenAway.attention)
     }
 }
 

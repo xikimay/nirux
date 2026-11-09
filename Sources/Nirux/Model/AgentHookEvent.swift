@@ -347,6 +347,8 @@ enum AgentHookCLI {
             now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
+        // Written only for a running Nirux that will read it.
+        if event.finalMessage != nil, !TurnEndMarker.allowsMessage(environment: env) { event.finalMessage = nil }
 
         let channel = PermissionApprovalChannel.standard
         let wait = event.name == .permissionRequest && parent > 1

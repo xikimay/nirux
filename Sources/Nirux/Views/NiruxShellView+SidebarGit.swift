@@ -19,6 +19,8 @@ extension NiruxShellView {
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
                 let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
+                // Read on screen: the question its turn ended on is seen.
+                if isUserFocused, NSApp.isActive { col.pty?.noteAgentSeen() }
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
                 }
@@ -49,8 +51,9 @@ extension NiruxShellView {
                     permissionApproval: permissionApproval,
                     // The Project Board's rule: an approved dialog stays
                     // listed while its tool runs, the column working.
-                    openDialog: agentStatus == .working
-                        ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason,
+                    openDialog: agentStatus == .working ? nil
+                        : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason
+                        ?? col.pty?.agentAskedQuestion(foreground: foregroundProcess),
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],

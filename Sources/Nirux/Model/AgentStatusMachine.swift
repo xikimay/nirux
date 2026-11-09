@@ -36,6 +36,19 @@ struct AgentStatusMachine {
         case pending(turnEndedAt: TimeInterval)
         case done
     }
+
+    /// The last turn end's final message asks the user something (its
+    /// verdict): the message's last line, and when the turn ended. Unlike
+    /// the attention, which activating Nirux clears, it lasts like an open
+    /// dialog, so the sidebar, the column's header and ⌘J keep saying who
+    /// waits for an answer: until the next prompt (the answer), turn end or
+    /// conversation, or until the user looks at the column (`noteSeen`).
+    private(set) var askedQuestion: AskedQuestion?
+
+    struct AskedQuestion: Equatable {
+        let text: String?
+        let since: TimeInterval
+    }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
     private(set) var hookWorking = false
@@ -283,6 +296,7 @@ struct AgentStatusMachine {
         case .sessionEnd:
             endTurn()
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+            askedQuestion = nil
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -320,6 +334,7 @@ struct AgentStatusMachine {
         turnFailure = nil
         if event.agentID == nil {
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+            askedQuestion = nil
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -340,6 +355,7 @@ struct AgentStatusMachine {
         // was typed at the prompt, but fires no UserPromptSubmit.
         endTurn()
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+        askedQuestion = nil
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -372,6 +388,7 @@ struct AgentStatusMachine {
         // A turn Claude started by itself (no prompt) ended before the
         // last one's verdict.
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+        askedQuestion = nil
         mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
@@ -446,11 +463,37 @@ struct AgentStatusMachine {
             quietTurnEnd = .done
             return nil
         case .asks:
-            reason = .askedInReply(TurnEndText.lastLine(of: request.message))
+            let line = TurnEndText.lastLine(of: request.message)
+            reason = .askedInReply(line)
+            // A user looking at the column reads it there.
+            if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
         case .unknown:
             reason = .turnFinished
         }
         return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
+    }
+
+    /// The question the foreground `claude` asked at its last turn end, if
+    /// any: as `visibleDialog`, this very `claude`'s.
+    func visibleQuestion(foreground: ForegroundProcess?) -> AskedQuestion? {
+        guard let askedQuestion, let foreground, foreground.name == "claude",
+              askedQuestion.since >= foreground.instance.startedAt
+        else { return nil }
+        return askedQuestion
+    }
+
+    /// The user looks at the column (Nirux active, the column focused):
+    /// they read the question there.
+    mutating func noteSeen() {
+        askedQuestion = nil
+    }
+
+    /// A turn end waits for its verdict: Nirux types nothing into the
+    /// prompt meanwhile (see `isPromptFree`). A prompt would settle it as
+    /// unread, alerting for a turn the verdict may find done.
+    var awaitsAnyVerdict: Bool {
+        if case .pending = quietTurnEnd { return true }
+        return false
     }
 
     /// A main-thread tool event: the failed turn is behind.
@@ -820,6 +863,11 @@ struct AgentStatusMachine {
         // it, which can come first too: a Stop while the heartbeat waited
         // with Nirux in the background.
         if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
+        // Its turn end, and the question it asked, are behind with it.
+        if fgName != "claude" {
+            quietTurnEnd = nil
+            askedQuestion = nil
+        }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears
@@ -916,6 +964,7 @@ struct AgentStatusMachine {
     mutating func reset() {
         state = .idle
         quietTurnEnd = nil
+        askedQuestion = nil
         hookWorking = false
         hookKind = nil
         pendingDialogs.removeAll()

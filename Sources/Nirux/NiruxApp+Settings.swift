@@ -486,9 +486,21 @@ extension NiruxApp {
     }
 
     /// The classifier when the option is on, its setup checked ahead of
-    /// the first turn end.
+    /// the first turn end; the marker tells hook receivers whether to keep
+    /// final messages.
     static func turnEndClassifier(enabled: Bool) -> (any TurnEndClassifier)? {
-        guard enabled else { return nil }
+        let me = ProcessInstance.running(pid: getpid())
+        guard enabled, let me else {
+            TurnEndMarker.withdraw(app: me)
+            return nil
+        }
+        TurnEndMarker.publish(app: me, environment: ProcessInfo.processInfo.environment)
+        return makeTurnEndClassifier()
+    }
+
+    /// The classifier in use; tests put a double here, so that turning the
+    /// option on never runs the real `claude`.
+    static var makeTurnEndClassifier: () -> any TurnEndClassifier = {
         HaikuTurnEndClassifier.shared.prepare()
         return HaikuTurnEndClassifier.shared
     }

@@ -35,17 +35,25 @@ protocol TurnEndClassifier: Sendable {
 
 /// The final message's text as the classifier and the alert use it.
 enum TurnEndText {
-    /// The agent's environment (the hook's, which it inherits) may send
-    /// Claude Code elsewhere than the login Nirux's own `claude -p` uses: a
-    /// cloud provider, an API key, a gateway, another login (a token, a
-    /// configuration folder of its own). Its messages are not sent to that
-    /// login: its turn ends alert as before.
+    /// The agent's environment (the hook's, which it inherits) sends Claude
+    /// Code elsewhere than the login Nirux's own `claude -p` uses: one of
+    /// the variables that run drops (`ClaudeCLI.accountVariables`: a cloud
+    /// provider, an API key, a gateway, a token). Its messages are not sent
+    /// to that login: its turn ends alert as before. The configuration
+    /// folder, which the run keeps, is compared instead (`TurnEndMarker`).
     static func usesOtherAccount(_ environment: [String: String]) -> Bool {
-        [
-            "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
-            "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-            "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"
-        ].contains { environment[$0].map { !$0.isEmpty && $0 != "0" } ?? false }
+        BranchReview.ClaudeCLI.accountVariables.contains { environment[$0].map { !$0.isEmpty && $0 != "0" } ?? false }
+    }
+
+    /// Two `CLAUDE_CONFIG_DIR` values name the same folder: unset or empty
+    /// is Claude Code's default, `~/.claude`.
+    static func sameConfigDirectory(_ first: String?, _ second: String?, home: String) -> Bool {
+        func folder(_ value: String?) -> String {
+            guard let value, !value.isEmpty else { return (home as NSString).appendingPathComponent(".claude") }
+            let expanded = value.hasPrefix("~/") ? (home as NSString).appendingPathComponent(String(value.dropFirst(2))) : value
+            return (expanded as NSString).standardizingPath
+        }
+        return folder(first) == folder(second)
     }
 
     /// The start and the end of `message`, the part a classifier reads:
@@ -78,5 +86,47 @@ enum TurnEndText {
             if !inFence, let cleaned = AgentText.clean(String(line), maxLength: maxLength) { return cleaned }
         }
         return nil
+    }
+}
+
+/// Tells hook receivers that a running Nirux reads final messages (the
+/// option is on), and with which Claude configuration folder its `claude
+/// -p` runs. Without a marker naming a Nirux still running, or for an
+/// agent with another folder, receivers leave the message out of the event
+/// queue: nothing would read it, and Stop lines would grow for nothing.
+struct TurnEndMarker: Codable, Equatable {
+    let app: ProcessInstance
+    /// Nirux's own `CLAUDE_CONFIG_DIR` (nil: the default), which its
+    /// `claude -p` keeps (`ClaudeCLI.keptVariables`).
+    let claudeConfigDir: String?
+
+    static var url: URL { Persistence.stateDirectory.appendingPathComponent("turn-end-classifier.json") }
+
+    /// The option is on in `app`.
+    static func publish(app: ProcessInstance, environment: [String: String], at url: URL = url) {
+        let marker = TurnEndMarker(app: app, claudeConfigDir: environment["CLAUDE_CONFIG_DIR"])
+        try? JSONEncoder().encode(marker).write(to: url, options: .atomic)
+    }
+
+    /// The option is off in `app`, or `app` quits: the marker goes, unless
+    /// it names another Nirux still running on this state directory.
+    static func withdraw(app: ProcessInstance?, at url: URL = url,
+                         running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) {
+        if let marker = read(url), marker.app != app, running(marker.app.pid) == marker.app { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Whether a receiver keeps the final message of an agent running with
+    /// `environment` (the hook's).
+    static func allowsMessage(environment: [String: String], at url: URL = url,
+                              running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) -> Bool {
+        guard let marker = read(url), running(marker.app.pid) == marker.app else { return false }
+        return TurnEndText.sameConfigDirectory(
+            environment["CLAUDE_CONFIG_DIR"], marker.claudeConfigDir, home: environment["HOME"] ?? NSHomeDirectory()
+        )
+    }
+
+    private static func read(_ url: URL) -> TurnEndMarker? {
+        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(TurnEndMarker.self, from: $0) }
     }
 }

@@ -361,6 +361,17 @@ final class PtySession: @unchecked Sendable {
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
 
+    /// The question the foreground `claude`'s last turn ended on (see
+    /// `AgentStatusMachine.askedQuestion`).
+    func agentAskedQuestion(foreground: ForegroundProcess?) -> AgentAttentionReason? {
+        state.machine.visibleQuestion(foreground: foreground).map { .askedInReply($0.text) }
+    }
+
+    /// The user looks at this column: see `AgentStatusMachine.noteSeen`.
+    func noteAgentSeen() {
+        state.machine.noteSeen()
+    }
+
     /// See `AgentStatusMachine.awaitsVerdict`.
     func awaitsTurnEndVerdict(_ request: TurnEndRequest) -> Bool {
         state.machine.awaitsVerdict(request)

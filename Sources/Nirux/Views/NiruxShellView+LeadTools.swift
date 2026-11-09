@@ -270,11 +270,13 @@ extension NiruxShellView {
         for column in workspace.columns {
             guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
                   ["claude", "codex"].contains(foreground.name) else { continue }
-            let dialog: String? = pty.agentVisibleDialog(foreground: foreground)?.reason.shortLabel
+            // A question its last turn ended on waits on the user too.
+            let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
+                ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
             agents.append((name: foreground.name, status: pty.cachedAgentState, dialog: dialog))
         }
         guard let first = agents.first else { return "no agent running" }
-        if let waiting = agents.first(where: { $0.status == AgentStatus.needsAttention }) {
+        if let waiting = agents.first(where: { $0.status == AgentStatus.needsAttention || $0.dialog != nil }) {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
         }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
