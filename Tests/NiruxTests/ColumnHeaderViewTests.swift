@@ -172,7 +172,7 @@ final class ColumnHeaderViewTests: XCTestCase {
     func testEdgeGlowLetsClicksThrough() {
         let glow = EdgeGlowView(edge: .top)
         glow.frame = NSRect(x: 0, y: 0, width: 400, height: 32)
-        glow.setVisible(true)
+        glow.show(.alert(.waiting), moving: false)
         XCTAssertNil(glow.hitTest(NSPoint(x: 380, y: 16)))
     }
 

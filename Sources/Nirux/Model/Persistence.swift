@@ -384,6 +384,10 @@ struct PersistedSettings: Codable {
     var sidebarApprovalsEnabled: Bool = true
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
+    /// Lights that breathe and pulse, and the other animations of the
+    /// interface. Off, states show without moving. On by default: missing
+    /// decodes to true.
+    var animatesInterface: Bool = true
     /// The Claude plan usage limits in the title bar (see
     /// `ClaudeUsageLimits`). Opt-in: it makes Nirux Claude Code's status
     /// line. Missing decodes to false.
@@ -455,6 +459,7 @@ struct PersistedSettings: Codable {
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
+        case animatesInterface
         case showClaudeUsageLimits
         case telegramRemoteAccessEnabled
         case telegramPairedUserID
@@ -488,6 +493,7 @@ struct PersistedSettings: Codable {
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
+        animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         telegramRemoteAccessEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .telegramRemoteAccessEnabled
@@ -529,6 +535,7 @@ struct PersistedSettings: Codable {
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
+        try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)
         try container.encodeIfPresent(telegramPairedUserID, forKey: .telegramPairedUserID)

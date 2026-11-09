@@ -7,6 +7,11 @@ final class ColumnIndicatorView: NSView {
     /// What each column asks while the user looks elsewhere.
     private var columnSignals: [AttentionSignal?] = []
     private var pulseLayers: [CALayer] = []
+    /// A waiting column's dot pulses; false: its ring shows steady (see
+    /// `NiruxShellView.agentLightsMayMove`).
+    var pulses = true {
+        didSet { if pulses != oldValue { setNeedsDisplay(bounds) } }
+    }
 
     private static let dotSize: CGFloat = 6
     private static let dotGap: CGFloat = 8
@@ -80,14 +85,16 @@ final class ColumnIndicatorView: NSView {
                 glow.borderWidth = 1.5
                 glow.borderColor = color.cgColor
 
-                let pulse = CABasicAnimation(keyPath: "opacity")
-                pulse.fromValue = 1.0
-                pulse.toValue = 0.15
-                pulse.duration = 0.6
-                pulse.autoreverses = true
-                pulse.repeatCount = .infinity
-                pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                glow.add(pulse, forKey: "pulse")
+                if pulses {
+                    let pulse = CABasicAnimation(keyPath: "opacity")
+                    pulse.fromValue = 1.0
+                    pulse.toValue = 0.15
+                    pulse.duration = 0.6
+                    pulse.autoreverses = true
+                    pulse.repeatCount = .infinity
+                    pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    glow.add(pulse, forKey: "pulse")
+                }
 
                 rootLayer.addSublayer(glow)
                 pulseLayers.append(glow)

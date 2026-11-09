@@ -816,6 +816,7 @@ extension WorkspaceState {
         let previousFocusedIndex = focusedIndex
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
+        col.light?.removeFromSuperview()
         if resizeHandles.indices.contains(index) {
             let handle = resizeHandles.remove(at: index)
             handle.removeFromSuperview()
@@ -880,6 +881,7 @@ extension WorkspaceState {
             // window resize before this layout pass runs (garbled display).
             col.terminalView?.autoresizingMask = []
             col.view.frame = NSRect(x: xOffset, y: 0, width: widths[index], height: height)
+            col.light?.frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: height, resizeTerminal: !skipTerminalResize)
             col.view.layer?.masksToBounds = true
 
@@ -940,6 +942,18 @@ extension WorkspaceState {
             anim.isRemovedOnCompletion = true
             layer.add(anim, forKey: "colSlide")
         }
+    }
+
+    /// The column's light (see `EdgeGlowView`), made on first use. It lies
+    /// over the column, as its sibling: above the column's focus border,
+    /// and never a layer of the terminal's own.
+    func light(for column: ColumnState) -> EdgeGlowView {
+        if let light = column.light { return light }
+        let light = EdgeGlowView(edge: .around)
+        light.frame = column.view.frame
+        stripView.addSubview(light, positioned: .above, relativeTo: column.view)
+        column.light = light
+        return light
     }
 
     /// Current horizontal scroll offset (for determining off-screen columns)

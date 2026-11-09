@@ -113,6 +113,9 @@ final class ColumnState {
     var lastForegroundAgentSeenAt: TimeInterval = 0
     /// The user asked to resume the agent that died mid-turn.
     var onResumeExitedAgent: (() -> Void)?
+    /// The agent's state as light, laid over the column in its workspace's
+    /// strip once it first shows (`WorkspaceState.light(for:)`).
+    var light: EdgeGlowView?
 
     /// ⌘F find bar, created on first use, and the terminal search it
     /// drives; a browser column's bar drives its `pageFind`
