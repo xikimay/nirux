@@ -125,7 +125,6 @@ final class MissionReplyViewController: NSViewController, NSPopoverDelegate {
         guard let window = notification.object as? NSWindow,
               window !== view.window, window !== view.window?.parent
         else { return }
-        claimsMainWindowKeys = false
     }
 
     func popoverWillClose(_ notification: Notification) {
