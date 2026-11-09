@@ -5,8 +5,9 @@ import XCTest
 
 /// Cmd+Arrow in an editor or browser column, through the app's key
 /// interceptor and menu bar: it edits the text that has the keyboard,
-/// and Control+Cmd+Arrow still navigates from there. A focused editor
-/// column has the keyboard, unless an agent's open focused it.
+/// and Control+Cmd+Arrow still navigates from there, as does Cmd+Arrow
+/// with the editor's caret already at that edge. A focused editor column
+/// has the keyboard, unless an agent's open focused it.
 @MainActor
 final class TextNavigationKeyFlowTests: XCTestCase {
     private enum Arrow: UInt16 {
@@ -43,6 +44,83 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 press(.right, [.command, .control], in: harness)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
                 XCTAssertIdentical(harness.window.firstResponder, webView)
+            }
+        }
+    }
+
+    /// Cmd+Left at column 1 and Cmd+Right at the line end leave the editor
+    /// for the column beside. Before the edge, they move the caret; with a
+    /// selection, held down or with Shift, they stay in the text.
+    func testCommandLeftAndRightLeaveTheEditorAtTheLineEdge() throws {
+        try UIFlowHarness.run { harness in
+            try harness.withApp {
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let (editor, webView) = try openEditorWithKeyboard(in: harness)
+                let editorIndex = workspace.focusedIndex
+                workspace.addColumn()
+                harness.shell.relayout(animated: false)
+                press(.left, [.command, .control], in: harness)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex)
+                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                moveCaretToTheDocumentStart(in: harness)
+
+                press(.left, [.command, .shift], in: harness)
+                press(.left, [.command], in: harness, isARepeat: true)
+                press(.right, [.command], in: harness)
+                press(.left, [.command, .shift], in: harness)
+                waitForSelection("# Flow", in: editor, harness: harness)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex, "Shift, a held key or the caret before the line end left")
+                press(.left, [.command], in: harness)
+                press(.down, [.command, .shift], in: harness)
+                waitForSelection("# Flow\n\nEdited.\n", in: editor, harness: harness)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex, "a selection left")
+
+                press(.up, [.command], in: harness)
+                press(.left, [.command], in: harness)
+                harness.waitUntil("the column on the left", timeout: 5) { workspace.focusedIndex == editorIndex - 1 }
+                press(.right, [.command], in: harness)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex)
+                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                press(.right, [.command], in: harness)
+                press(.right, [.command], in: harness)
+                harness.waitUntil("the column on the right", timeout: 5) { workspace.focusedIndex == editorIndex + 1 }
+            }
+        }
+    }
+
+    /// Cmd+Up on the first line and Cmd+Down on the last switch workspace;
+    /// elsewhere they move the caret to the top or bottom of the file.
+    func testCommandUpAndDownSwitchWorkspaceFromTheFirstAndLastLine() throws {
+        try UIFlowHarness.run { harness in
+            try harness.withApp {
+                let shell = harness.shell
+                let top = try XCTUnwrap(shell.activeWorkspace)
+                shell.addWorkspace(title: "middle", cwd: harness.repo)
+                let middle = try XCTUnwrap(shell.activeWorkspace)
+                let (editor, webView) = try openEditorWithKeyboard(in: harness)
+                shell.addWorkspace(title: "bottom", cwd: harness.repo)
+                let bottom = try XCTUnwrap(shell.activeWorkspace)
+                shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === middle }))
+                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                moveCaretToTheDocumentStart(in: harness)
+
+                press(.down, [.command], in: harness)
+                press(.up, [.command, .shift], in: harness)
+                waitForSelection("# Flow\n\nEdited.\n", in: editor, harness: harness)
+                XCTAssertIdentical(shell.activeWorkspace, middle, "Cmd+Down before the last line switched")
+                press(.down, [.command], in: harness)
+                press(.down, [.command], in: harness)
+                harness.waitUntil("the workspace below", timeout: 5) { shell.activeWorkspace === bottom }
+
+                shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === middle }))
+                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                press(.up, [.command], in: harness)
+                press(.down, [.command, .shift], in: harness)
+                waitForSelection("# Flow\n\nEdited.\n", in: editor, harness: harness)
+                XCTAssertIdentical(shell.activeWorkspace, middle, "Cmd+Up after the first line switched")
+                press(.up, [.command], in: harness)
+                press(.up, [.command], in: harness)
+                harness.waitUntil("the workspace above", timeout: 5) { shell.activeWorkspace === top }
             }
         }
     }
@@ -254,11 +332,21 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         return (editor, webView)
     }
 
-    private func press(_ arrow: Arrow, _ modifiers: NSEvent.ModifierFlags, in harness: UIFlowHarness) {
+    private func press(_ arrow: Arrow, _ modifiers: NSEvent.ModifierFlags, in harness: UIFlowHarness, isARepeat: Bool = false) {
         // Arrow keys always carry these flags.
         harness.press(
-            String(Character(UnicodeScalar(arrow.character)!)), keyCode: arrow.rawValue, modifiers.union([.function, .numericPad])
+            String(Character(UnicodeScalar(arrow.character)!)), keyCode: arrow.rawValue,
+            modifiers.union([.function, .numericPad]), isARepeat: isARepeat
         )
+    }
+
+    /// Puts Monaco's caret at the start of README.md wherever it was, without
+    /// a key that could leave the editor: Shift+Cmd+Down selects to the end
+    /// (or nothing, from there), then Cmd+Up collapses the selection or
+    /// moves up from the last line.
+    private func moveCaretToTheDocumentStart(in harness: UIFlowHarness) {
+        press(.down, [.command, .shift], in: harness)
+        press(.up, [.command], in: harness)
     }
 
     /// Asks Monaco for its selection until it is `expected`: the page

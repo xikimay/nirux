@@ -337,8 +337,8 @@ final class UIFlowHarness {
     /// A key press with modifiers, through the app's event dispatch and so
     /// its key interceptor. The test process never has a key window: a key
     /// the interceptor returns to AppKit reaches the menu, not the window's
-    /// views.
-    func press(_ characters: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags) {
+    /// views. `isARepeat`: a held key's auto-repeat.
+    func press(_ characters: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags, isARepeat: Bool = false) {
         guard let event = NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
@@ -348,7 +348,7 @@ final class UIFlowHarness {
             context: nil,
             characters: characters,
             charactersIgnoringModifiers: characters,
-            isARepeat: false,
+            isARepeat: isARepeat,
             keyCode: keyCode
         ) else { return XCTFail("no key event") }
         NSApp.sendEvent(event)

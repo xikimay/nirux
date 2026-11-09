@@ -707,12 +707,33 @@ extension NiruxShellView {
         editor.onPathChanged = { [weak self] in self?.updateSidebar() }
         editor.onDirtyChanged = { [weak self] in self?.updateSidebar() }
         editor.onSendSelectionShortcut = { [weak self] in self?.sendEditorSelectionToAgent() }
+        editor.onTextEdgeKey = { [weak self, weak editor] edge in
+            guard let self, let editor else { return }
+            self.navigate(fromTextEdge: edge, of: editor)
+        }
         editor.onOpenBranchReview = { [weak self, weak editor] in
             guard let self, let editor else { return }
             // The editor's folder: its Full Branch Diff is that branch's.
             self.openBranchReview(
                 in: self.workspaces.first { $0.columns.contains { $0.editorColumn === editor } }, folder: editor.workspaceCwd
             )
+        }
+    }
+
+    /// Cmd+Arrow with Monaco's caret already at that edge: what the key does
+    /// outside text (Focus Left/Right, Workspace Up/Down). The page answers
+    /// after the key, so only while the keyboard is still in that editor,
+    /// the focused column in front.
+    func navigate(fromTextEdge edge: EditorColumn.TextEdge, of editor: EditorColumn) {
+        guard let workspace = activeWorkspace,
+              workspace.columns[safe: workspace.focusedIndex]?.editorColumn === editor,
+              (window?.firstResponder as? NSView)?.isDescendant(of: editor) == true
+        else { return }
+        switch edge {
+        case .left: focusColumn(.left)
+        case .right: focusColumn(.right)
+        case .up: focusWorkspace(.up)
+        case .down: focusWorkspace(.down)
         }
     }
 

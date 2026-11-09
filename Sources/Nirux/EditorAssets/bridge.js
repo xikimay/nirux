@@ -184,6 +184,58 @@
     return editor;
   }
 
+  // Cmd+Arrow with the caret already at the edge it moves to: the key
+  // navigates, as it does outside text, so the keyboard always has a way
+  // out of the editor. Cmd+Left at column 1 and Cmd+Right at the line end
+  // focus the column beside; Cmd+Up on the first line and Cmd+Down on the
+  // last switch workspace. Elsewhere Monaco moves the caret, and so it does
+  // for a held key (a repeat never leaves), a selection or several carets
+  // (the key collapses them first) and Shift+Cmd+Arrow (it selects).
+  // Decided here as the key arrives: the app only learns of the caret after
+  // the keys already sent have moved it.
+  var textEdgeKeys = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+
+  // The shown code editor whose text has the keyboard, if any: none while
+  // a find or go-to-line field has it, or under the Pierre diff.
+  function codeEditorWithCaret() {
+    var shown = [];
+    if (diffMode === "monaco" && diffEditor) {
+      shown = [diffEditor.getModifiedEditor(), diffEditor.getOriginalEditor()];
+    } else if (diffMode === null && editor) {
+      shown = [editor];
+    }
+    for (var i = 0; i < shown.length; i++) {
+      if (shown[i].hasTextFocus()) return shown[i];
+    }
+    return null;
+  }
+
+  function caretAtTextEdge(target, edge) {
+    var model = target.getModel();
+    var selections = target.getSelections();
+    if (!model || !selections || selections.length !== 1 || !selections[0].isEmpty()) return false;
+    var line = selections[0].positionLineNumber;
+    var column = selections[0].positionColumn;
+    if (edge === "left") return column === 1;
+    if (edge === "right") return column === model.getLineMaxColumn(line);
+    if (edge === "up") return line === 1;
+    return line === model.getLineCount();
+  }
+
+  // Capturing on the window, ahead of Monaco's own listeners, and handled
+  // here so that neither Monaco nor WebKit's text editing acts on it: the
+  // app navigates instead.
+  window.addEventListener("keydown", function (event) {
+    var edge = textEdgeKeys[event.key];
+    if (!edge || !event.metaKey || event.shiftKey || event.altKey || event.ctrlKey) return;
+    if (event.repeat || event.isComposing) return;
+    var target = codeEditorWithCaret();
+    if (!target || !caretAtTextEdge(target, edge)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    postToSwift({ type: "textEdgeKey", edge: edge });
+  }, true);
+
   // See shouldFocus for the focus === false contract.
   function switchToPath(path, focus) {
     if (!editor) return;
