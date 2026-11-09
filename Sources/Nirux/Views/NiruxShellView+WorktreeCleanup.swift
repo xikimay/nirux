@@ -193,6 +193,11 @@ extension NiruxShellView {
         case .blocked(let problems):
             showWorktreeCleanupNotice(message: "Can’t clean up \(candidate.title)", lines: problems)
             completion()
+        case .notMerged(let reason):
+            showWorktreeCleanupNotice(
+                message: "\(candidate.title) isn’t merged yet", lines: candidate.report?.problems ?? [reason]
+            )
+            completion()
         case .closeOnly:
             if confirmDestructiveClose(
                 message: "The folder of “\(candidate.workspaces.first?.title ?? candidate.title)” is gone",
@@ -439,7 +444,7 @@ extension NiruxShellView {
                     }
                 }
             }
-        case .checking, .blocked:
+        case .checking, .notMerged, .blocked:
             panel.setResult(.skipped("Not run: no longer ready"), for: candidate.path)
             runWorktreeCleanups(rest, in: panel, finished: finished)
         }

@@ -231,19 +231,22 @@ final class WorktreeCleanupTests: XCTestCase {
 
     // MARK: - Blocked
 
-    func testOpenPullRequestBlocks() throws {
+    func testOpenPullRequestIsNotMergedYet() throws {
         let tip = try head(at: worktree)
         try setPullRequests([pullRequest(12, "MERGED", head: tip), pullRequest(15, "OPEN", head: tip)])
         let report = try report()
         XCTAssertNil(report.plan)
         XCTAssertEqual(report.pullRequest?.number, 15)
         XCTAssertEqual(report.problems, ["Pull request #15 for feat/x is still open."])
+        XCTAssertEqual(report.notMerged, "PR #15 open")
     }
 
     func testPullRequestFromAnotherRepositoryIsIgnored() throws {
         // Same branch name, merged from someone's fork.
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree), owner: "someone")])
-        XCTAssertEqual(try report().problems, ["No pull request found for feat/x."])
+        let report = try report()
+        XCTAssertEqual(report.problems, ["No pull request found for feat/x."])
+        XCTAssertEqual(report.notMerged, "no pull request")
     }
 
     func testLocalCommitsMissingFromTheMergedPullRequestBlock() throws {
@@ -252,6 +255,7 @@ final class WorktreeCleanupTests: XCTestCase {
         try setPullRequests([pullRequest(12, "MERGED", head: mergedHead)])
         let report = try report()
         XCTAssertNil(report.plan)
+        XCTAssertNil(report.notMerged, "merged, with work left out: a real blocker")
         XCTAssertEqual(report.problems.count, 1)
         XCTAssertTrue(report.problems[0].hasPrefix("feat/x has commits that aren't in merged pull request #12"))
     }
@@ -691,6 +695,7 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
             branch: "b", tip: tip, candidates: [pullRequest(2, "CLOSED", head: tip)]
         ) { _ in .contained }
         XCTAssertEqual(verdict.problems, ["Pull request #2 was closed without being merged."])
+        XCTAssertEqual(verdict.notMerged, "PR #2 closed without merging")
     }
 
     func testHiddenEntriesAreSkipWorktreeOrAssumeUnchanged() {
@@ -801,6 +806,21 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
             candidate(plan(), foreignAgents: ["Claude in “main”"]).availability,
             .blocked(["Running in this folder from another workspace: Claude in “main”."])
         )
+    }
+
+    func testNotMergedYetIsOneQuietLineNotAFailure() {
+        let ready = plan()
+        // Uncommitted work and an unsaved editor are work in progress here.
+        let waiting = WorktreeCleanupCandidate(
+            path: ready.worktree.path, workspaces: [], agents: [], unsavedEditors: ["feat/x"],
+            inspection: .inspected(WorktreeCleanup.Report(
+                worktree: ready.worktree, pullRequest: nil,
+                problems: ["Uncommitted changes: a (modified).", "Pull request #15 for feat/x is still open."],
+                notMerged: "PR #15 open"
+            ))
+        )
+        XCTAssertEqual(waiting.availability, .notMerged("PR #15 open"))
+        XCTAssertEqual(waiting.detail, "Not merged yet · PR #15 open")
     }
 
     func testProblemsBlock() {
