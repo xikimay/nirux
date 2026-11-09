@@ -195,6 +195,7 @@ extension NiruxShellView {
             }
         case .terminal:
             workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
+            workspace.columns.last?.isRestoredShell = true
         }
         // Clamp into the drag bounds: a hand-edited or corrupt widthPreset
         // must not restore an invisible sliver or an over-wide column.

@@ -39,9 +39,6 @@ extension NiruxShellView {
             deferred.agent.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column
         )
         sideEffects.startRestoredAgent(column, command)
-        // In another space, it may have no size yet: a layout gives it one
-        // before its shell starts (see `sizeRunningTerminalsOffScreen`).
-        if column.runsWithoutSize { relayout(animated: false) }
         scheduleMetadataRefresh()
         return true
     }
@@ -120,6 +117,10 @@ extension NiruxShellView {
                 resumed = resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions) || resumed
             }
         }
+        // Those in another space have no size yet: one layout gives them
+        // one before their shells start (0.5 s later, see ColumnState and
+        // `sizeRunningTerminalsOffScreen`).
+        if workspaces.contains(where: { $0.columns.contains(where: \.runsWithoutSize) }) { relayout(animated: false) }
         if resumed { updateSidebar() }
         return resumed
     }

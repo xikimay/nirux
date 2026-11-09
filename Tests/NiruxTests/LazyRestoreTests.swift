@@ -411,6 +411,19 @@ final class LazyRestoreTests: XCTestCase {
         }
     }
 
+    /// Off screen, a plain shell restored at launch waits to be shown for
+    /// its surface (see `ColumnState.isRestoredShell`).
+    func testARestoredPlainShellIsMarkedAsSuch() throws {
+        var state = layout()
+        state.workspaces[2].columns = [
+            PersistedColumn(widthPreset: 1, cwd: root, columnType: .terminal, webViewURL: nil, claudeLaunchMode: nil, codexLaunchMode: nil)
+        ]
+        try withRestoredShell(state) { shell, _ in
+            XCTAssertTrue(try column(shell, 2, 0).isRestoredShell)
+            XCTAssertFalse(try column(shell, 0, 0).isRestoredShell)
+        }
+    }
+
     // MARK: - What a waiting column says
 
     func testSessionTitleComesFromTheAgentsTerminalTitle() {

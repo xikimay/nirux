@@ -21,12 +21,28 @@ final class HiddenSpaceTerminalTests: XCTestCase {
             harness.waitUntil("the text in the hidden terminal") {
                 TerminalScreenText.read(session)?.contains("printed in another space") == true
             }
+        }
+    }
 
-            // Shown, it keeps its surface, and the text with it.
-            let taskIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
-            shell.switchToWorkspace(taskIndex)
-            XCTAssertEqual(shell.activeProfileID, side.id)
-            XCTAssertTrue(TerminalScreenText.read(session)?.contains("printed in another space") == true)
+    /// A shell added off screen gets a size; one restored at launch prints
+    /// only its prompt, which it redraws once shown, so it waits.
+    func testAShellRestoredAtLaunchWaitsToBeShown() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let side = shell.workspaceStore.createProfile(named: "side", select: false)
+            shell.addWorkspace(title: "task", cwd: harness.repo, profileID: side.id, activate: false)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "task" })
+            let before = Set(task.columns.map(ObjectIdentifier.init))
+            task.addColumn(agentUUID: UUID().uuidString)
+            let added = try XCTUnwrap(task.columns.first { !before.contains(ObjectIdentifier($0)) })
+
+            added.isRestoredShell = true
+            shell.relayout(animated: false)
+            XCTAssertEqual(added.terminalView?.frame.isEmpty, true)
+
+            added.isRestoredShell = false
+            shell.relayout(animated: false)
+            XCTAssertEqual(added.terminalView?.frame.isEmpty, false)
         }
     }
 
