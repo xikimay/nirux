@@ -250,7 +250,7 @@ final class ProjectBoardController {
                 // git couldn't read origin this time: what it read stays.
                 read = previous
             } else {
-                read = origin.flatMap(RepositoryReads.init(origin:))
+                read = nil
             }
             if section.config == nil, let gitHub = read?.gitHub, !taken.insert(gitHub).inserted { read = nil }
             guard var fresh = read else { continue }
@@ -532,7 +532,7 @@ final class ProjectBoardController {
             baseBranch: singleReads?.baseBranch ?? single?.config?.baseBranch
         )
         content.notices = notices
-        if case .message = body { content.messageOffersSettings = messageOffersSettings }
+        _ = messageOffersSettings
         return content
     }
 

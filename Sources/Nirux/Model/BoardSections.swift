@@ -91,7 +91,7 @@ enum BoardSections {
         var origins: [String: Origin] = [:]
         for section in sections where section.config == nil {
             guard let commonDir = section.commonDir, origins[commonDir] == nil else { continue }
-            let url = WorktreeCleanup.git(["remote", "get-url", "--push", "--", "origin"], in: commonDir, tools: tools, timeout: 10)
+            let url = WorktreeCleanup.git(["remote", "get-url", "--", "origin"], in: commonDir, tools: tools, timeout: 10)
             switch url.status {
             case 0:
                 guard let repository = BoardConfigSuggestions.repositoryName(remoteURL: url.stdout) else {

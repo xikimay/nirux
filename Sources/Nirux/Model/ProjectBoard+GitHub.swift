@@ -133,9 +133,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             // No account signed in (gh's status 4), or a token GitHub refuses:
             // as the merge queue tells them.
             let lowered = stderr.lowercased()
-            if result.terminationStatus == 4 || lowered.contains("gh auth login") || lowered.contains("bad credentials") {
-                return .failure(.notSignedIn)
-            }
+            _ = lowered
             return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
         }
         return .success(result.standardOutput)
