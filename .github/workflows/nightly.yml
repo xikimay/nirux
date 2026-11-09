@@ -147,6 +147,13 @@ jobs:
           NIRUX_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
         run: ./scripts/bundle.sh "$VERSION" "$BUILD_NUMBER"
 
+      # Before notarizing: an app that traps at launch (a new compiler, a
+      # dependency's missing resource) stops here instead of reaching every
+      # install through Sparkle.
+      - name: Launch check
+        timeout-minutes: 5
+        run: scripts/launch-check.sh Nirux.app
+
       - name: Notarize and staple app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
