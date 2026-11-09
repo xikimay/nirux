@@ -215,8 +215,8 @@
   // Code editor -> { contextKey: its niruxCaretAtTextEdge, cursorChanges }.
   var textEdgeStates = new WeakMap();
   // The last plain Cmd+Left Monaco moved the caret for: its editor, model
-  // id, line and cursor changes before it. A tab switch changes the model
-  // without a cursor change.
+  // id, line and cursor changes before it. A tab switch that lands on 1:1
+  // (a new tab, or one left there) fires no cursor change.
   var lastCaretHome = null;
 
   // The shown code editor whose text has the keyboard, if any: none while
