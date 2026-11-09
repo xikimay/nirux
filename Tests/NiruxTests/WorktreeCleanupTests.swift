@@ -252,11 +252,14 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(report.notMerged, "PR #15 open")
     }
 
-    func testPullRequestFromAnotherRepositoryIsIgnored() throws {
+    func testPullRequestsOnlyFromAnotherRepositoryBlock() throws {
         // Same branch name, merged from someone's fork: not "no pull request".
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree), owner: "someone")])
         let report = try report()
-        XCTAssertEqual(report.problems, ["1 pull request for feat/x, none from acme/widgets (a fork's, or a deleted repository's)."])
+        XCTAssertEqual(
+            report.problems,
+            ["1 pull request for feat/x, none from acme/widgets (a fork's, or the repository was renamed or deleted)."]
+        )
         XCTAssertNil(report.notMerged)
 
         try setPullRequests([])

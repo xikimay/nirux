@@ -44,7 +44,7 @@ extension WorktreeCleanup {
             let found = json.count == 1 ? "1 pull request" : "\(json.count) pull requests"
             return (nil, [
                 "\(found) for \(branch), none from \(repository.owner)/\(repository.name) "
-                    + "(a fork's, or a deleted repository's)."
+                    + "(a fork's, or the repository was renamed or deleted)."
             ], nil)
         }
         return verdict(branch: branch, tip: tip, candidates: candidates) { headOid in

@@ -233,8 +233,10 @@ enum GitDetect {
         let canonicalRepositoryRoot = URL(
             fileURLWithPath: repositoryRoot
         ).standardizedFileURL.path
-        // The folder this workspace started in, where its agent's handover
-        // and local settings get written.
+        // The observed folder (the focused terminal's, or the workspace's):
+        // a task's handover and local settings get written where its agent
+        // starts. Clean Up asks the folders workspaces started in instead;
+        // where they differ, both refuse rather than clear.
         let startFolder = workingDirectory.realPath.flatMap { folder -> String? in
             guard let root = repositoryRoot.realPath, folder.hasPrefix(root + "/") else { return nil }
             return String(folder.dropFirst(root.count + 1))
