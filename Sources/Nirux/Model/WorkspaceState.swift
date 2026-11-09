@@ -54,10 +54,17 @@ final class WorkspaceState {
     /// (`NiruxShellView.isTask`): never the main checkout or a Lead.
     let parentWorkspaceID: String?
     /// Its folder is in a linked git worktree, as a task's is (see
-    /// `NiruxShellView.isTask`). Read once, when first asked: the folder
-    /// never changes. One gone by then is in none.
-    private(set) lazy var isInLinkedWorktree: Bool =
-        FileManager.default.fileExists(atPath: cwd) && NiruxShellView.worktreeCleanupPath(forCwd: cwd) != nil
+    /// `NiruxShellView.isTask`); a folder gone is in none. Kept once seen:
+    /// the folder never moves. Read again otherwise, a few file checks: a
+    /// worktree may come back (Resume), a volume be mounted late.
+    var isInLinkedWorktree: Bool {
+        if !isKnownLinkedWorktree {
+            isKnownLinkedWorktree = FileManager.default.fileExists(atPath: cwd)
+                && NiruxShellView.worktreeCleanupPath(forCwd: cwd) != nil
+        }
+        return isKnownLinkedWorktree
+    }
+    private var isKnownLinkedWorktree = false
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
