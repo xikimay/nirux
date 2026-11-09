@@ -721,14 +721,22 @@ extension NiruxShellView {
     }
 
     /// Cmd+Arrow with Monaco's caret already at that edge: what the key does
-    /// outside text (Focus Left/Right, Workspace Up/Down). The page answers
-    /// after the key, so only while the keyboard is still in that editor,
-    /// the focused column in front.
+    /// outside text (Focus Left/Right, Workspace Up/Down), or, with no column
+    /// or workspace that way, the caret's move it stood in for. The page
+    /// answers after the key, so only while that editor, the focused column
+    /// in front, still has the keyboard.
     func navigate(fromTextEdge edge: EditorColumn.TextEdge, of editor: EditorColumn) {
         guard let workspace = activeWorkspace,
               workspace.columns[safe: workspace.focusedIndex]?.editorColumn === editor,
-              (window?.firstResponder as? NSView)?.isDescendant(of: editor) == true
+              editor.webViewHasKeyboard
         else { return }
+        let canMove = switch edge {
+        case .left: workspace.focusedIndex > 0
+        case .right: workspace.focusedIndex < workspace.columns.count - 1
+        case .up: workspaceStore.adjacentWorkspaceIndex(delta: -1) != nil
+        case .down: workspaceStore.adjacentWorkspaceIndex(delta: 1) != nil
+        }
+        guard canMove else { return editor.moveCaretToTextEdge(edge) }
         switch edge {
         case .left: focusColumn(.left)
         case .right: focusColumn(.right)

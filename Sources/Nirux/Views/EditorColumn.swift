@@ -81,6 +81,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// outside text.
     var onTextEdgeKey: ((TextEdge) -> Void)?
 
+    /// Whether Monaco's web view has the window's keyboard.
+    var webViewHasKeyboard: Bool {
+        window?.firstResponder === webView
+    }
+
+    /// What Cmd+Arrow does in Monaco's text, for an edge key the shell had
+    /// no column or workspace to move to.
+    func moveCaretToTextEdge(_ edge: TextEdge) {
+        sendBridge(["type": "moveCaretToTextEdge", "edge": edge.rawValue])
+    }
+
     private let webView: WKWebView
     /// The active file and its directory, the diff toggle and the search.
     let header = ColumnHeaderView()

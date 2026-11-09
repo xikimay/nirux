@@ -131,15 +131,22 @@ final class WorkspaceStore {
     @discardableResult
     func selectAdjacentWorkspace(delta: Int) -> Int? {
         let visible = visibleWorkspaceIndices
-        guard let current = visible.firstIndex(of: activeWorkspaceIndex) else {
+        guard visible.contains(activeWorkspaceIndex) else {
             if let first = visible.first { selectWorkspace(at: first); return first }
             return nil
         }
-        let next = current + delta
-        guard visible.indices.contains(next) else { return nil }
-        let index = visible[next]
+        guard let index = adjacentWorkspaceIndex(delta: delta) else { return nil }
         selectWorkspace(at: index)
         return index
+    }
+
+    /// The visible workspace `delta` places from the selected one, if any.
+    func adjacentWorkspaceIndex(delta: Int) -> Int? {
+        let visible = visibleWorkspaceIndices
+        guard let current = visible.firstIndex(of: activeWorkspaceIndex),
+              visible.indices.contains(current + delta)
+        else { return nil }
+        return visible[current + delta]
     }
 
     /// Workspaces left once the closes in flight finish.
