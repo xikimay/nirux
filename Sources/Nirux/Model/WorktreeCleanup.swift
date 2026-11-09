@@ -493,23 +493,48 @@ enum WorktreeCleanup {
     /// Parses `git status --porcelain=v1 -z`. A rename or copy entry is
     /// followed by its original path, which is skipped.
     static func statusEntries(_ output: String) -> [StatusEntry] {
+        statusEntries(Data(output.utf8))
+    }
+
+    /// The same, cut by bytes and decoded leniently: a path starting with a
+    /// combining accent would make one Character of it and the space before.
+    static func statusEntries(_ data: Data) -> [StatusEntry] {
         var entries: [StatusEntry] = []
-        var fields = output.split(separator: "\0", omittingEmptySubsequences: true).makeIterator()
-        while let field = fields.next() {
-            guard field.count > 3 else { continue }
-            let code = String(field.prefix(2))
-            entries.append(StatusEntry(code: code, path: String(field.dropFirst(3))))
-            if code.contains("R") || code.contains("C") { _ = fields.next() }
-        }
+        scanStatus(data) { entries.append($0); return true }
         return entries
+    }
+
+    /// Hands `visit` each entry of `git status --porcelain=v1 -z` output,
+    /// cut by bytes, until it returns false.
+    static func scanStatus(_ data: Data, _ visit: (StatusEntry) -> Bool) {
+        var start = data.startIndex
+        var skipsNext = false
+        while start < data.endIndex {
+            let end = data[start...].firstIndex(of: 0) ?? data.endIndex
+            let field = data[start..<end]
+            start = end < data.endIndex ? data.index(after: end) : end
+            guard !field.isEmpty else { continue }
+            // A rename's or a copy's original path.
+            if skipsNext {
+                skipsNext = false
+                continue
+            }
+            guard field.count > 3 else { continue }
+            let code = String(decoding: field.prefix(2), as: UTF8.self)
+            skipsNext = code.contains("R") || code.contains("C")
+            guard visit(StatusEntry(code: code, path: String(decoding: field.dropFirst(3), as: UTF8.self))) else { return }
+        }
     }
 
     /// Paths `git ls-files -v -z` tags skip-worktree ("S") or
     /// assume-unchanged (a lowercase tag).
+    /// Cut by bytes, like `statusEntries`.
     static func hiddenEntries(_ output: String) -> [String] {
-        output.split(separator: "\0").compactMap { field in
-            guard field.count > 2, let tag = field.first, tag.isLowercase || tag == "S" else { return nil }
-            return String(field.dropFirst(2))
+        Data(output.utf8).split(separator: 0).compactMap { field in
+            guard field.count > 2, let tag = field.first,
+                  (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(tag) || tag == UInt8(ascii: "S")
+            else { return nil }
+            return String(decoding: field.dropFirst(2), as: UTF8.self)
         }
     }
 

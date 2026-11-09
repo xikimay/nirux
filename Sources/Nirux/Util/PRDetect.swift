@@ -31,7 +31,7 @@ enum PRDetect {
     static func fetchAsync(
         branch: String,
         cwd: String,
-        startFolder: String? = nil,
+        startFolder: String?,
         completion: @escaping @MainActor @Sendable (FetchResult) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
@@ -214,7 +214,7 @@ enum PRDetect {
     /// Get diff stats via git
     static func diffStatsAsync(
         cwd: String,
-        startFolder: String? = nil,
+        startFolder: String?,
         completion: @escaping @MainActor @Sendable (DiffStatsResult) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {

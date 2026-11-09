@@ -399,7 +399,8 @@ extension NiruxShellView {
               let cwd = event.cwd,
               Date().timeIntervalSince1970 - event.timestamp < 60
         else { return }
-        GitDetect.contextAsync(at: cwd) { [weak self, weak workspace] result in
+        // Only the HEAD counts here.
+        GitDetect.contextAsync(at: cwd, startFolder: nil) { [weak self, weak workspace] result in
             guard case .observed(let context) = result, let head = context.identity.head,
                   let self, let workspace,
                   workspace.recordReviewPasses(passes, head: head, at: event.timestamp)

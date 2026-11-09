@@ -87,7 +87,7 @@ extension NiruxShellView {
     func worktreeCleanupCandidate(path: String, snapshot: ProcessSnapshot = ProcessSnapshot()) -> WorktreeCleanupCandidate {
         let isInside = Self.containment(in: path)
         let open = workspaces.filter { !$0.isClosing }
-        let members = open.filter { isInside($0.cwd) }
+        let members = worktreeMembers(path)
         let memberIDs = Set(members.map(\.id))
         var foreignAgents: [String] = []
         var unsavedEditors: [String] = []
@@ -155,6 +155,12 @@ extension NiruxShellView {
         }
     }
 
+    /// The workspaces open at `path` or below it.
+    private func worktreeMembers(_ path: String) -> [WorkspaceState] {
+        let isInside = Self.containment(in: path)
+        return workspaces.filter { !$0.isClosing && isInside($0.cwd) }
+    }
+
     // MARK: Single workspace
 
     /// The ⋯ menu's "Clean Up Worktree…": check, then say why not or
@@ -174,8 +180,7 @@ extension NiruxShellView {
         // A task that starts in a subfolder gets its handover there, and
         // Claude Code its local settings. (The candidate, with its process
         // snapshot, is built once the checks are back.)
-        let isInside = Self.containment(in: path)
-        let agentFolders = workspaces.filter { !$0.isClosing && isInside($0.cwd) }.map(\.cwd)
+        let agentFolders = worktreeMembers(path).map(\.cwd)
         DispatchQueue.global(qos: .userInitiated).async {
             let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
             DispatchQueue.main.async { [weak self] in

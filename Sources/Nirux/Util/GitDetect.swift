@@ -134,8 +134,13 @@ enum GitDetect {
     /// and a name that isn't UTF-8 must not fail the read.
     static func isDirty(status: Data, startFolder: String? = nil) -> Bool {
         let folders: Set<String> = startFolder.map { [$0] } ?? []
-        return WorktreeCleanup.statusEntries(String(decoding: status, as: UTF8.self))
-            .contains { !WorktreeCleanup.isDisposable($0, startFolders: folders) }
+        var isDirty = false
+        // Stops at the first other entry.
+        WorktreeCleanup.scanStatus(status) { entry in
+            isDirty = !WorktreeCleanup.isDisposable(entry, startFolders: folders)
+            return !isDirty
+        }
+        return isDirty
     }
 
     /// `startFolder`: the folder the workspace started in (its `cwd`), the
@@ -271,9 +276,12 @@ enum GitDetect {
         return .repository(repository)
     }
 
+    /// `startFolder` is required: a workspace's observations must all pass
+    /// its `cwd`, or their contexts (`isDirty`) disagree and the pull
+    /// request found for one is dropped as stale.
     static func contextAsync(
         at path: String,
-        startFolder: String? = nil,
+        startFolder: String?,
         completion: @escaping @MainActor @Sendable (GitContextDetectionResult) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {

@@ -262,8 +262,11 @@ final class WorktreeCleanupTests: XCTestCase {
         )
         XCTAssertNil(report.notMerged)
 
-        // A fork's open one, from a branch of the same name: not this one's.
+        // A fork's open one, or a merged one without this tip, from a branch
+        // of the same name: not this branch's.
         try setPullRequests([pullRequest(13, "OPEN", head: try head(at: worktree), owner: "someone")])
+        XCTAssertEqual(try self.report().notMerged, "no pull request")
+        try setPullRequests([pullRequest(14, "MERGED", head: String(repeating: "ab", count: 20), owner: "someone")])
         XCTAssertEqual(try self.report().notMerged, "no pull request")
         try setPullRequests([])
         XCTAssertEqual(try self.report().notMerged, "no pull request")
@@ -380,6 +383,18 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertTrue(message.contains("still there"), message)
         let attributes = try FileManager.default.attributesOfItem(atPath: worktree + "/.claude-handover.md")
         XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeRegular)
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# new handover\n")
+
+        // git writes the link back, then fails: the link, the index's, makes way.
+        try gitRunning("""
+            if [ "$1" = "checkout-index" ]; then /usr/bin/git "$@"; echo 'error: failed by the test' >&2; exit 1; fi
+            """)
+        guard case .failed(let failure) = WorktreeCleanup.execute(try readyPlan(), tools: tools) else {
+            return XCTFail("the failed write-back must stop the cleanup")
+        }
+        XCTAssertTrue(failure.hasSuffix("Nothing was deleted."), failure)
+        let after = try FileManager.default.attributesOfItem(atPath: worktree + "/.claude-handover.md")
+        XCTAssertEqual(after[.type] as? FileAttributeType, .typeRegular)
         XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# new handover\n")
 
         tools.gitPath = "/usr/bin/git"
@@ -790,6 +805,12 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
             .init(code: " M", path: "changed.swift"),
             .init(code: "??", path: ".claude-handover.md")
         ])
+        // Cut by bytes: a leading combining accent isn't one Character
+        // with the space before it.
+        XCTAssertEqual(
+            WorktreeCleanup.statusEntries("?? \u{301}.claude-handover.md\0"),
+            [.init(code: "??", path: "\u{301}.claude-handover.md")]
+        )
     }
 
     func testExactHeadWinsWithoutAskingGit() {
@@ -820,8 +841,8 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
     }
 
     func testHiddenEntriesAreSkipWorktreeOrAssumeUnchanged() {
-        let output = "H tracked.txt\0S config.json\0h assumed.txt\0s both.txt\0M conflict.txt\0"
-        XCTAssertEqual(WorktreeCleanup.hiddenEntries(output), ["config.json", "assumed.txt", "both.txt"])
+        let output = "H tracked.txt\0S config.json\0h assumed.txt\0s both.txt\0M conflict.txt\0S \u{301}x.txt\0"
+        XCTAssertEqual(WorktreeCleanup.hiddenEntries(output), ["config.json", "assumed.txt", "both.txt", "\u{301}x.txt"])
     }
 
     func testBuildOutputSummaryFoldsRepeatedNames() {

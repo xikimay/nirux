@@ -38,11 +38,16 @@ extension WorktreeCleanup {
             return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
-        // A merged one, none from this repository: maybe this branch's, from
-        // a repository since renamed or deleted, so not "nothing to clean up
-        // yet". An open or closed one from a fork that used the same branch
-        // name (`patch-1`) says nothing about this branch.
-        let mergedElsewhere = json.filter { ($0["state"] as? String)?.uppercased() == "MERGED" }
+        // A merged one holding the tip, none from this repository: maybe
+        // this branch's, from a repository since renamed or deleted, so not
+        // "nothing to clean up yet". Any other one from a fork that used the
+        // same branch name (`patch-1`) says nothing about this branch.
+        let mergedElsewhere = json.filter { candidate in
+            guard (candidate["state"] as? String)?.uppercased() == "MERGED",
+                  let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
+            else { return false }
+            return headOid == tip || ancestry(of: tip, in: headOid, at: worktree.path, tools: tools) == .contained
+        }
         if candidates.isEmpty, !mergedElsewhere.isEmpty {
             let found = mergedElsewhere.count == 1
                 ? "1 merged pull request" : "\(mergedElsewhere.count) merged pull requests"
