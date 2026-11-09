@@ -388,6 +388,9 @@ struct AgentStatusMachine {
         if turnFailure == nil, openDialogs.isEmpty, event.kind == .claude, let message = event.finalMessage,
            !isUserFocused {
             _ = block(for: reason, isUserFocused: false, alert: false)
+            // The earlier turn end just alerted (`settleQuietTurnEnd`): that
+            // was this episode's alert, the verdict only says why.
+            if outcome.firedAttention { attentionAlerted = true }
             quietTurnEnd = .pending(turnEndedAt: now)
             outcome.turnEnd = TurnEndRequest(message: message, turnEndedAt: now)
             return
@@ -425,9 +428,10 @@ struct AgentStatusMachine {
     /// classifier couldn't read alerts as every turn end did; one that's
     /// done stays quiet. `isUserFocused` is now's: a user looking at the
     /// column needs no alert. Dropped once that turn end is behind (a new
-    /// prompt, a later turn end, another conversation), once an alert went
-    /// out since (see `block`), or while a dialog waits (its own alert,
-    /// Claude's `permission_prompt`, speaks for it).
+    /// prompt, a later turn end, another conversation) or another attention
+    /// alerted since (see `block`). A dialog opened since doesn't drop it:
+    /// it may close without alerting (another hook answers it), and while
+    /// it waits the user is needed anyway.
     mutating func applyTurnEndVerdict(
         _ verdict: TurnEndVerdict,
         for request: TurnEndRequest,
@@ -436,7 +440,6 @@ struct AgentStatusMachine {
         guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
         // Settled, whichever way: nothing is left to alert for later.
         quietTurnEnd = nil
-        guard openDialogs.isEmpty, turnFailure == nil else { return nil }
         let reason: AgentAttentionReason
         switch verdict {
         case .done:
@@ -630,11 +633,12 @@ struct AgentStatusMachine {
             return false
         }
         state = .needsAttention
+        // An alerting attention (alerted now, or earlier in this episode)
+        // speaks for the turn end waiting for its verdict: it needs no
+        // alert of its own, nor to take this attention's reason.
+        if alert, case .pending = quietTurnEnd { quietTurnEnd = nil }
         guard alert, !attentionAlerted else { return false }
         attentionAlerted = true
-        // The user is alerted now: the turn end waiting for its verdict
-        // needs no alert of its own.
-        if case .pending = quietTurnEnd { quietTurnEnd = nil }
         return true
     }
 

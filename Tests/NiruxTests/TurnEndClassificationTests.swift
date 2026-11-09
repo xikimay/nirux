@@ -273,12 +273,14 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
     }
 
-    /// A subagent's dialog that opened and closed without alerting (another
-    /// hook answered it) leaves the verdict to alert.
-    func testDialogClosedWithoutAnAlertKeepsTheVerdict() throws {
+    /// A subagent's dialog opened since (it hasn't alerted yet, and may
+    /// close without alerting: another hook answers it) leaves the verdict
+    /// to alert.
+    func testDialogOpenedSinceKeepsTheVerdict() throws {
         let request = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "open: its own alert speaks")
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
+        XCTAssertEqual(machine.attentionReason, .permission(tool: "Bash", summary: nil), "the open dialog shows first")
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 9_000), isUserFocused: false).firedAttention, "settled")
 
         machine = AgentStatusMachine()
@@ -296,6 +298,28 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(later.firedAttention)
         XCTAssertNotNil(later.turnEnd, "the later one waits for its own verdict")
         XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: first, isUserFocused: false))
+    }
+
+    /// Two turn ends in one episode (Claude went on by itself, without a
+    /// tool call): one alert, as before; the second verdict only says why.
+    func testSecondTurnEndInTheEpisodeAlertsOnce() throws {
+        endTurn()
+        let later = machine.apply(event(.stop, at: 9, message: "Shall I push?"), isUserFocused: false)
+        XCTAssertTrue(later.firedAttention, "the first turn end alerts as before")
+        let request = try XCTUnwrap(later.turnEnd)
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "no second alert")
+        XCTAssertEqual(machine.attentionReason, .askedInReply("Shall I push?"))
+    }
+
+    /// The episode alerted before the turn end (a turn end that alerted,
+    /// then a turn Claude went on with by itself): a notification during
+    /// the wait keeps its reason, even without alerting again.
+    func testNotificationInAnAlertedEpisodeKeepsItsReason() throws {
+        endTurn(message: nil)
+        let request = try XCTUnwrap(machine.apply(event(.stop, at: 9, message: "Shall I push?"), isUserFocused: false).turnEnd)
+        XCTAssertFalse(machine.apply(event(.notification, at: 10, notificationType: "other"), isUserFocused: false).firedAttention)
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+        XCTAssertEqual(machine.attentionReason, .message(nil))
     }
 
     func testAnotherAttentionDuringTheWaitAlertsAndDropsTheVerdict() throws {
