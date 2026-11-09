@@ -174,9 +174,9 @@ class TextNavigationKeyFlowTests: XCTestCase {
                 let editor = try XCTUnwrap(workspace.columns[safe: editorIndex]?.editorColumn)
                 let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
                 XCTAssertIdentical(harness.window.firstResponder, webView)
-                setMutant(in: webView)
                 waitForMonacoText(in: webView)
                 waitForCaret("1:1", in: webView)
+                setMutant(in: webView)
 
                 press(.left, [.command], in: harness)
                 waitForCaret("1:5", in: webView)

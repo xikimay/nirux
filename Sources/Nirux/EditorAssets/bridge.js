@@ -209,8 +209,8 @@
   var textEdgeCommands = { left: "cursorHome", right: "cursorEnd", up: "cursorTop", down: "cursorBottom" };
   // Whether each edge key has somewhere to go (a column beside, a workspace
   // above or below), as the app tells just before it hands the page a
-  // Cmd+Arrow. Until it does, everywhere: the app moves the caret back
-  // when there is nowhere (moveCaretToTextEdge).
+  // Cmd+Arrow. Until it does, everywhere: when there is nowhere, the app
+  // has the page make the caret's move instead (moveCaretToTextEdge).
   var textEdgeDestinations = { left: true, right: true, up: true, down: true };
   var textEdgeWhen = "niruxCaretAtTextEdge && !suggestWidgetVisible && !inlineSuggestionVisible && !codeActionMenuVisible";
   // Code editor -> { contextKey: its niruxCaretAtTextEdge, cursorChanges }.
