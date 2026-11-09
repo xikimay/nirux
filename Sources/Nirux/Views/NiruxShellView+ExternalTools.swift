@@ -631,16 +631,7 @@ extension NiruxShellView {
     ) -> CookieImporter.Source? {
         // The menu offers a browser that ran here; its profiles may all
         // lack a cookie file.
-        guard !sources.isEmpty else {
-            let alert = NSAlert()
-            alert.messageText = "Import Failed"
-            let names = browsers.map(\.rawValue).joined(separator: ", ")
-            alert.informativeText = "Nirux found no profile with cookies in \(names.isEmpty ? "your browsers" : names). "
-                + "Browse a site there first, then try again."
-            alert.alertStyle = .warning
-            _ = runModal(alert)
-            return nil
-        }
+        guard !sources.isEmpty else { return nil }
 
         guard sources.count > 1 else { return sources[0] }
 

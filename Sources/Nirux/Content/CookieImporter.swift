@@ -200,6 +200,7 @@ enum CookieImporter {
                 listingFailure = failure
             } catch {}
         }
+        if !folders.contains("Default") { folders.append("Default") }
         let found = folders.compactMap { folder -> Source? in
             let name = profiles.names[folder] ?? folder
             switch cookieFile(inProfile: root + "/" + folder) {
