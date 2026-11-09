@@ -18,10 +18,11 @@ extension WorktreeCleanup {
     /// Deletes the worktree and its branch as `plan` describes them. The
     /// worktree is read again first: an agent may have committed or written
     /// files since the check, and anything new stops it. The leftovers go
-    /// to the Trash, then `git worktree remove` runs without `--force`, so
-    /// git checks the folder once more itself. Stops at the first failure.
-    /// Once the branch is deleted, so is its Branch Review file; a kept
-    /// branch keeps it.
+    /// to the Trash, git writes the committed version of the tracked
+    /// disposable files back, then `git worktree remove` runs without
+    /// `--force`, so git checks the folder once more itself. Stops at the
+    /// first failure. Once the branch is deleted, so is its Branch Review
+    /// file; a kept branch keeps it.
     static func execute(_ plan: Plan, tools: Tools = .installed) -> Execution {
         guard case .worktree(let current) = readWorktree(at: plan.worktree.path, tools: tools) else {
             return .failed("\(plan.worktree.path) can no longer be read. Nothing was deleted.")
@@ -41,6 +42,20 @@ extension WorktreeCleanup {
             return .failed("Couldn't move the leftovers to the Trash: \(error.localizedDescription) Nothing else was touched.")
         }
         let trashFolder = trashed?.folder.lastPathComponent
+
+        // A committed one deleted since the check is written back too: the
+        // commit holds it, nothing is lost.
+        let restored = current.restoredFiles
+        if !restored.isEmpty {
+            // Plumbing: no hook runs, and the index is left alone.
+            let checkout = git(["checkout-index", "--"] + restored, in: current.path, tools: tools, timeout: tools.writeTimeout)
+            guard checkout.status == 0 else {
+                return putBackAfterFailure(
+                    "git couldn't write back the committed \(summarized(restored)):\n\(output(of: checkout))\nNothing was deleted.",
+                    worktree: current, trashed: trashed, tools: tools
+                )
+            }
+        }
 
         let removal = git(["worktree", "remove", current.path], in: current.mainCheckout, tools: tools, timeout: tools.writeTimeout)
         guard removal.status == 0 else {
@@ -121,15 +136,44 @@ extension WorktreeCleanup {
                 "\(gitOutput)\n\(folder) \(entry) The branch \(worktree.branch ?? "") was kept.\(trashNote)"
             )
         }
-        guard let trashed else { return .failed(gitOutput) }
+        return putBackAfterFailure(
+            gitOutput, worktree: worktree, trashed: trashed, tools: tools,
+            done: "The worktree is still there, leftovers included."
+        )
+    }
+
+    /// Stopped with the folder whole: what git wrote back makes way for the
+    /// leftovers, which go back from the Trash.
+    private static func putBackAfterFailure(
+        _ reason: String, worktree: Worktree, trashed: TrashedLeftovers?, tools: Tools, done: String? = nil
+    ) -> Execution {
+        undoRestore(worktree.restoredFiles, in: worktree.path, tools: tools)
+        guard let trashed else { return .failed(reason) }
         let stuck = putBack(trashed, into: worktree.path)
         guard stuck.isEmpty else {
             return .failed(
-                "\(gitOutput)\nThese leftovers couldn't be put back and are in the Trash, "
+                "\(reason)\nThese leftovers couldn't be put back and are in the Trash, "
                     + "in “\(trashed.folder.lastPathComponent)”: \(stuck.joined(separator: ", "))."
             )
         }
-        return .failed("\(gitOutput)\nThe worktree is still there, leftovers included.")
+        return .failed([reason, done].compactMap { $0 }.joined(separator: "\n"))
+    }
+
+    /// Deletes the files `checkout-index` wrote back that still hold the
+    /// committed version (the index has it): never a file changed since.
+    private static func undoRestore(_ paths: [String], in worktree: String, tools: Tools) {
+        for path in paths {
+            let file = URL(fileURLWithPath: worktree).appendingPathComponent(path)
+            guard let parent = file.deletingLastPathComponent().path.realPath,
+                  parent == worktree || parent.hasPrefix(worktree + "/")
+            else { continue }
+            // Exit 0: the file is there, as the index has it. No index refresh.
+            let unchanged = git(["-c", "diff.autoRefreshIndex=false", "diff", "--quiet", "--", path], in: worktree, tools: tools)
+            var info = stat()
+            if unchanged.status == 0, lstat(file.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG {
+                unlink(file.path)
+            }
+        }
     }
 
     // MARK: - Trash

@@ -8,8 +8,9 @@ import Foundation
 ///   not git ancestry, so a squash merge counts; an open one blocks.
 /// - The branch tip is that pull request's head, or an ancestor of it: no
 ///   local commit is missing from what was merged.
-/// - Nothing uncommitted or untracked, except `disposablePaths`; no edit
-///   hidden from `git status` (skip-worktree, assume-unchanged).
+/// - Nothing uncommitted or untracked, except `disposablePaths`, tracked
+///   or not; no edit hidden from `git status` (skip-worktree,
+///   assume-unchanged).
 /// - No other worktree inside it, and it is not locked.
 /// Ignored files are not a reason to refuse, but `git worktree remove`
 /// deletes them: everything but build output goes to the Trash first.
@@ -17,7 +18,9 @@ import Foundation
 enum WorktreeCleanup {
     /// Handover files and Claude Code's local settings: an untracked copy
     /// goes to the Trash with the worktree's other leftovers instead of
-    /// blocking it.
+    /// blocking it. So does a tracked one changed in the folder alone (a
+    /// repository that committed a handover gets a new one written over it
+    /// in every worktree): git then writes the committed version back.
     static let disposablePaths: Set<String> = [
         ".claude-handover.md", ".codex-handover.md", ".claude/settings.local.json"
     ]
@@ -85,7 +88,8 @@ enum WorktreeCleanup {
         /// Nil on a branch without commits.
         let tip: String?
         let isLocked: Bool
-        /// `git status` entries that block the cleanup, e.g. "M Sources/a.swift".
+        /// `git status` entries that block the cleanup, in words, e.g.
+        /// "Sources/a.swift (modified)".
         let changes: [String]
         /// Tracked files on disk that `git status` doesn't look at
         /// (skip-worktree, assume-unchanged): their edits would go unseen.
@@ -96,6 +100,13 @@ enum WorktreeCleanup {
         let nestedWorktrees: [String]
         /// `disposablePaths` present and untracked.
         let untrackedDisposable: [String]
+        /// Tracked `disposablePaths` modified in the folder alone (" M"):
+        /// the copy goes to the Trash, then git writes the committed version
+        /// back so that `git worktree remove` finds nothing changed.
+        let modifiedDisposable: [String]
+        /// Tracked `disposablePaths` deleted from the folder alone (" D"):
+        /// git writes the committed version back.
+        let deletedDisposable: [String]
         /// Ignored files and folders, as `git ls-files --directory` groups them.
         let ignoredEntries: [String]
         /// The ignored entries that are build output: a `regenerableNames`
@@ -114,8 +125,11 @@ enum WorktreeCleanup {
         /// output is deleted with it.
         var leftovers: [String] {
             let deleted = Set(buildOutput)
-            return (untrackedDisposable + ignoredEntries.filter { !deleted.contains($0) }).sorted()
+            return (untrackedDisposable + modifiedDisposable + ignoredEntries.filter { !deleted.contains($0) }).sorted()
         }
+
+        /// What git writes back from the index once the leftovers are gone.
+        var restoredFiles: [String] { (modifiedDisposable + deletedDisposable).sorted() }
 
         /// `buildOutput` with one name's copies folded: ".DS_Store ×12".
         var buildOutputSummary: [String] {
@@ -267,6 +281,8 @@ enum WorktreeCleanup {
             hiddenFiles: files.hiddenFiles,
             nestedWorktrees: location.nestedWorktrees,
             untrackedDisposable: files.untrackedDisposable,
+            modifiedDisposable: files.modifiedDisposable,
+            deletedDisposable: files.deletedDisposable,
             ignoredEntries: files.ignoredEntries,
             buildOutput: files.buildOutput
         ))
@@ -350,6 +366,8 @@ enum WorktreeCleanup {
         var changes: [String] = []
         var hiddenFiles: [String] = []
         var untrackedDisposable: [String] = []
+        var modifiedDisposable: [String] = []
+        var deletedDisposable: [String] = []
         var ignoredEntries: [String] = []
         var buildOutput: [String] = []
     }
@@ -372,13 +390,18 @@ enum WorktreeCleanup {
         }
         var files = FileState()
         for entry in statusEntries(status.stdout) {
-            if entry.code == "??", disposablePaths.contains(entry.path) {
-                files.untrackedDisposable.append(entry.path)
-            } else {
-                files.changes.append("\(entry.code.trimmingCharacters(in: .whitespaces)) \(entry.path)")
+            // Tracked ones only when the index still holds the commit's
+            // version: a staged change is someone's work.
+            switch disposablePaths.contains(entry.path) ? entry.code : "" {
+            case "??": files.untrackedDisposable.append(entry.path)
+            case " M": files.modifiedDisposable.append(entry.path)
+            case " D": files.deletedDisposable.append(entry.path)
+            default: files.changes.append(describe(entry))
             }
         }
         files.untrackedDisposable.sort()
+        files.modifiedDisposable.sort()
+        files.deletedDisposable.sort()
         files.ignoredEntries = ignored.stdout.split(separator: "\0").map(String.init).sorted()
         let named = files.ignoredEntries.filter(isRegenerable)
         if !named.isEmpty {
@@ -402,6 +425,28 @@ enum WorktreeCleanup {
         /// The two-letter XY code, e.g. " M", "??", "R ".
         let code: String
         let path: String
+    }
+
+    /// "Sources/a.swift (modified)": a `git status` entry in words.
+    static func describe(_ entry: StatusEntry) -> String {
+        let code = entry.code
+        let state: String
+        if code == "??" {
+            state = "untracked"
+        } else if code.contains("U") || code == "AA" || code == "DD" {
+            state = "in conflict"
+        } else if code.contains("D") {
+            state = "deleted"
+        } else if code.hasPrefix("A") {
+            state = "added"
+        } else if code.hasPrefix("R") {
+            state = "renamed"
+        } else if code.hasPrefix("C") {
+            state = "copied"
+        } else {
+            state = "modified"
+        }
+        return "\(entry.path) (\(state))"
     }
 
     /// Parses `git status --porcelain=v1 -z`. A rename or copy entry is

@@ -275,11 +275,47 @@ final class WorktreeCleanupTests: XCTestCase {
 
         let report = try report()
         XCTAssertNil(report.plan)
-        XCTAssertEqual(report.worktree.changes, ["M tracked.txt", "?? docs/.claude-handover.md", "?? notes.txt"])
+        XCTAssertEqual(
+            report.worktree.changes,
+            ["tracked.txt (modified)", "docs/.claude-handover.md (untracked)", "notes.txt (untracked)"]
+        )
         XCTAssertEqual(
             report.problems,
-            ["Uncommitted changes: M tracked.txt, ?? docs/.claude-handover.md, ?? notes.txt."]
+            ["Uncommitted changes: tracked.txt (modified), docs/.claude-handover.md (untracked), notes.txt (untracked)."]
         )
+    }
+
+    func testCommittedHandoversNiruxWroteOverDoNotBlock() throws {
+        // The repository tracks the handovers, so the info/exclude patterns
+        // don't apply: Nirux's new handover reads as a change.
+        try write("# committed\n", to: ".claude-handover.md", in: worktree)
+        try write("# committed\n", to: ".codex-handover.md", in: worktree)
+        try git(["add", ".claude-handover.md", ".codex-handover.md"], at: worktree)
+        try commit("an agent committed its handovers", at: worktree)
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write("# new handover\n", to: ".claude-handover.md", in: worktree)
+        try FileManager.default.removeItem(atPath: worktree + "/.codex-handover.md")
+
+        // Staged, it is someone's work.
+        try git(["add", ".claude-handover.md"], at: worktree)
+        XCTAssertEqual(try report().problems, ["Uncommitted changes: .claude-handover.md (modified)."])
+        try git(["reset", "-q", "--", ".claude-handover.md"], at: worktree)
+
+        let plan = try readyPlan()
+        XCTAssertEqual(plan.worktree.changes, [])
+        XCTAssertEqual(plan.worktree.modifiedDisposable, [".claude-handover.md"])
+        XCTAssertEqual(plan.worktree.deletedDisposable, [".codex-handover.md"])
+        XCTAssertEqual(plan.worktree.leftovers, [".claude-handover.md"])
+
+        // The handovers' commit was never pushed: -D after -d.
+        XCTAssertEqual(
+            WorktreeCleanup.execute(plan, tools: tools),
+            .cleaned(forcedBranchDelete: true, trashFolder: "widgets.feat-x leftovers")
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree))
+        XCTAssertEqual(try String(contentsOfFile: trashed(".claude-handover.md"), encoding: .utf8), "# new handover\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: trashed(".codex-handover.md")))
+        XCTAssertFalse(branchExists("feat/x"))
     }
 
     func testDetachedHeadBlocksWithoutAskingGitHub() throws {
@@ -418,10 +454,14 @@ final class WorktreeCleanupTests: XCTestCase {
         try git(["init", "-q", "--template=", "-b", "main"], at: library)
         try commit("library", at: library)
         try git(["-c", "protocol.file.allow=always", "submodule", "add", "-q", library, "library"], at: worktree)
+        try write("# committed\n", to: ".codex-handover.md", in: worktree)
+        try git(["add", ".codex-handover.md"], at: worktree)
         try commit("add submodule", at: worktree)
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
         try write("# handover\n", to: ".claude-handover.md", in: worktree)
+        try write("# new handover\n", to: ".codex-handover.md", in: worktree)
         let plan = try readyPlan()
+        XCTAssertEqual(plan.worktree.restoredFiles, [".codex-handover.md"])
 
         guard case .failed(let message) = WorktreeCleanup.execute(plan, tools: tools) else {
             return XCTFail("git's refusal must stop the cleanup")
@@ -429,6 +469,8 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertTrue(message.contains("submodules"), message)
         XCTAssertTrue(message.contains("still there"), message)
         XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# handover\n")
+        // The committed version git wrote back made way for the new one.
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.codex-handover.md", encoding: .utf8), "# new handover\n")
         XCTAssertFalse(FileManager.default.fileExists(atPath: root + "/Trash/widgets.feat-x leftovers"))
         XCTAssertTrue(try isListed(worktree))
         XCTAssertTrue(branchExists("feat/x"))
@@ -623,7 +665,7 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
         let worktree = WorktreeCleanup.Worktree(
             path: "/tmp/w", mainCheckout: "/tmp/m", commonDirectory: "/tmp/m/.git", branch: "b", tip: nil,
             isLocked: false, changes: [],
-            hiddenFiles: [], nestedWorktrees: [], untrackedDisposable: [],
+            hiddenFiles: [], nestedWorktrees: [], untrackedDisposable: [], modifiedDisposable: [], deletedDisposable: [],
             ignoredEntries: [".DS_Store", ".build/", ".env", "Sources/.DS_Store", "Tests/.DS_Store"],
             buildOutput: [".DS_Store", ".build/", "Sources/.DS_Store", "Tests/.DS_Store"]
         )
@@ -651,7 +693,8 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
         let worktree = WorktreeCleanup.Worktree(
             path: "/tmp/\(folder)", mainCheckout: "/tmp/widgets", commonDirectory: "/tmp/widgets/.git", branch: "feat/x",
             tip: String(repeating: "a", count: 40), isLocked: false, changes: [], hiddenFiles: [],
-            nestedWorktrees: [], untrackedDisposable: disposable, ignoredEntries: ignored,
+            nestedWorktrees: [], untrackedDisposable: disposable, modifiedDisposable: [], deletedDisposable: [],
+            ignoredEntries: ignored,
             buildOutput: ignored.filter(WorktreeCleanup.isRegenerable)
         )
         let pullRequest = WorktreeCleanup.PullRequest(
