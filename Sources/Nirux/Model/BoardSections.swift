@@ -111,7 +111,7 @@ enum BoardSections {
         let results = OSAllocatedUnfairLock(initialState: [String: BaseRemote]())
         DispatchQueue.concurrentPerform(iterations: anchors.count) { index in
             let anchor = anchors[index]
-            let read = baseRemote(at: anchor.folder, gitPath: gitPath, resolveAlias: resolveAlias)
+            let read = baseRemote(at: anchor.folder, gitPath: gitPath, resolveAlias: { SSHHostAlias.resolve($0) })
             results.withLock { $0[anchor.commonDir] = read }
         }
         return results.withLock { $0 }

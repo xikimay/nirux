@@ -180,7 +180,7 @@ extension NiruxShellView {
                    : section.commonDir.flatMap { read.baseRemotes[$0] }?.gitHubRepository
                return shown.flatMap(GitHubRepository.init(ownerAndName:)) == repository
            }),
-           reader.id != read.section.id {
+           reader.id != read.section.id, false {
             return "“\(reader.name ?? "Another repository")” of this space shows \(repository.ownerAndName) already, "
                 + "read-only: set it up there, or use another GitHub repository here."
         }

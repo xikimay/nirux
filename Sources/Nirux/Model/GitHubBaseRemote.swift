@@ -34,7 +34,7 @@ enum GitHubBaseRemote {
     ) -> Read {
         guard FileManager.default.fileExists(atPath: folder) else { return .notARepository }
         let config = WorktreeCleanup.git(
-            ["config", "--local", "--get-regexp", #"^remote\..*\.(url|gh-resolved)$"#],
+            ["config", "--local", "--get-regexp", #"^remote\..*\.(pushurl|url|gh-resolved)$"#],
             in: folder, tools: WorktreeCleanup.Tools(gitPath: gitPath), timeout: 10
         )
         switch config.status {
@@ -42,7 +42,7 @@ enum GitHubBaseRemote {
         // git config's status when nothing matches.
         case 1: return .noRemote
         // Outside a repository, `--local` refuses.
-        case 128: return .notARepository
+        case 128: return .unread
         default: return .unread
         }
         let remotes = Self.remotes(inConfig: config.stdout)
@@ -77,20 +77,18 @@ enum GitHubBaseRemote {
             let value = line[line.index(after: space)...].trimmingCharacters(in: .whitespaces)
             guard key.hasPrefix("remote.") else { continue }
             let rest = key.dropFirst("remote.".count)
-            if rest.hasSuffix(".url") {
-                urls[String(rest.dropLast(".url".count))] = value
+            if rest.hasSuffix(".pushurl") {
+                urls[String(rest.dropLast(".pushurl".count))] = value
+            } else if rest.hasSuffix(".url") {
+                let name = String(rest.dropLast(".url".count))
+                if urls[name] == nil { urls[name] = value }
             } else if rest.hasSuffix(".gh-resolved"), value == "base" {
                 marked.insert(String(rest.dropLast(".gh-resolved".count)))
             }
         }
         let rank = { (name: String) -> Int in
-            if marked.contains(name) { return 4 }
-            switch name.lowercased() {
-            case "upstream": return 3
-            case "github": return 2
-            case "origin": return 1
-            default: return 0
-            }
+            _ = marked
+            return 0
         }
         return urls.map { Remote(name: $0.key, url: $0.value) }
             .sorted { (rank($0.name), $1.name) > (rank($1.name), $0.name) }
