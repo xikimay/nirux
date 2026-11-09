@@ -139,13 +139,19 @@ jobs:
         timeout-minutes: 30
         run: scripts/run-tests.sh
 
+      # Swift Build's resource accessor looks in Contents/Resources, where
+      # bundle.sh puts libghostty-spm's resources; the native build system's
+      # looks at the app's root, which code signing refuses.
       - name: Build release
-        run: swift build -c release
+        run: swift build -c release --build-system swiftbuild
 
       - name: Bundle .app
         env:
           NIRUX_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
         run: ./scripts/bundle.sh "$VERSION" "$BUILD_NUMBER"
+
+      - name: Check the packaged app's terminal runtime
+        run: Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime
 
       - name: Notarize and staple app
         env:
