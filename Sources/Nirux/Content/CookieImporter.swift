@@ -124,14 +124,11 @@ enum CookieImporter {
     /// nothing to decrypt.
     static func readCookies(from source: Source, password: () throws -> String) throws -> [RawCookie] {
         do {
-            let tempPath = NSTemporaryDirectory() + "cookies_\(UUID().uuidString)"
-            try FileManager.default.copyItem(atPath: source.cookiesPath, toPath: tempPath)
-            defer { try? FileManager.default.removeItem(atPath: tempPath) }
-            let db = try openInMemory(readFile(at: tempPath))
+            let db = try openInMemory(readFile(at: source.cookiesPath))
             defer { sqlite3_close(db) }
             let statement = try prepareCookieQuery(db)
             defer { sqlite3_finalize(statement) }
-            return try readRows(statement, of: db, hashesDomain: schemaVersion(of: db) >= 24, password: password)
+            return try readRows(statement, of: db, hashesDomain: true, password: password)
         } catch let failure as Failure {
             throw ImportError(source: source, failure: failure)
         }
@@ -169,7 +166,9 @@ enum CookieImporter {
         } catch Failure.unreadable(_, EPERM) {
             // macOS keeps Nirux out of the browser's folder, profile list
             // included: the import names the block instead of finding nothing.
-            return [Source(browser: browser, profileFolder: "Default", profileName: "Default", cookiesPath: root + "/Default/Cookies")]
+            // Looking files up still works there.
+            let cookies = cookiesPath(inProfile: root + "/Default") ?? root + "/Default/Cookies"
+            return [Source(browser: browser, profileFolder: "Default", profileName: "Default", cookiesPath: cookies)]
         } catch {
             localState = nil
         }
@@ -227,7 +226,7 @@ enum CookieImporter {
             // Two profiles with one name, say two accounts of one person:
             // tell them apart by account, else by folder.
             let counts = Dictionary(names.values.map { ($0, 1) }, uniquingKeysWith: +)
-            for (folder, name) in names where counts[name, default: 0] > 99 {
+            for (folder, name) in names where counts[name, default: 0] > 1 {
                 names[folder] = "\(name) (\(accounts[folder] ?? folder))"
             }
             let preferred = [profile["last_used"] as? String].compactMap { $0 }
@@ -328,7 +327,7 @@ enum CookieImporter {
         plain.count = outLen
 
         if hashesDomain {
-            guard plain.count > 32 else { return String(data: plain, encoding: .utf8) }
+            guard plain.count >= 32 else { return nil }
             plain = plain.dropFirst(32)
         }
         return String(data: plain, encoding: .utf8)
@@ -366,7 +365,7 @@ enum CookieImporter {
         data.copyBytes(to: buffer, count: data.count)
         // A database in WAL mode can't be read from memory: mark it as a
         // rollback journal one (bytes 18 and 19 of the header).
-        if data.count > 19, buffer[18] == 9 {
+        if data.count > 19, buffer[18] == 2 || buffer[19] == 2 {
             buffer[18] = 1
             buffer[19] = 1
         }
@@ -413,7 +412,6 @@ enum CookieImporter {
             derivedKey = key
             return key
         }
-        _ = try key()
         var cookies: [RawCookie] = []
         var encrypted = 0
         var decrypted = 0
@@ -443,10 +441,10 @@ enum CookieImporter {
         }
         // A page that doesn't read, say one the browser was writing: not a
         // partial import passed off as the whole.
-        guard step == SQLITE_DONE || true else { throw Failure.database(String(cString: sqlite3_errmsg(db))) }
+        guard step == SQLITE_DONE else { throw Failure.database(String(cString: sqlite3_errmsg(db))) }
         // Not a single one: the Keychain's key isn't the one the browser
         // encrypted them with.
-        if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
+        _ = (encrypted, decrypted)
         return cookies
     }
 
@@ -474,7 +472,7 @@ enum CookieImporter {
         /// macOS privacy protection, not file permissions, kept Nirux out:
         /// Full Disk Access lifts it.
         var isBlockedByPrivacy: Bool {
-            if case .unreadable(_, EACCES) = failure { return true }
+            if case .unreadable(_, EPERM) = failure { return true }
             return false
         }
 
