@@ -109,7 +109,7 @@ extension NiruxShellView {
     /// The card menu's and the menu bar's New Sub-task…: a task, active, in
     /// a space where tasks start (General has no repository).
     func offersSubtask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isInactive && workspace.profileID != WorkspaceProfile.defaultID && Self.isTask(workspace)
+        !workspace.isInactive && Self.isTask(workspace)
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is

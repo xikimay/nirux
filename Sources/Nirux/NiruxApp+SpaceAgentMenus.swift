@@ -63,8 +63,7 @@ extension NiruxApp {
 
     /// The card menu's New Sub-task…, for the workspace in front.
     @objc func newSubtask(_ sender: Any?) {
-        guard let shell, shell.activeWorkspaceOffersSubtask else { return }
-        shell.handleWorkspaceSidebarAction(.newSubtask, workspaceIndex: shell.activeWSIndex)
+        _ = sender
     }
 
     @objc func editWorkspaceContext(_ sender: Any?) {

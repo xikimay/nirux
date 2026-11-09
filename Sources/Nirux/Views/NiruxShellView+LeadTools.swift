@@ -215,7 +215,6 @@ extension NiruxShellView {
         var lines: [String] = []
         for task in tasks {
             var line = "- “\(MissionPromptText.quoted(task.title))”"
-            if let parent = parentTitles[task.id] { line += " · sub-task of “\(MissionPromptText.quoted(parent))”" }
             if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
             if let repository = leadRepositoryName(of: task, in: space) { line += " · \(repository)" }
             if task.isInactive { line += " · inactive" }
@@ -229,7 +228,7 @@ extension NiruxShellView {
             let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID }
             if missions.isEmpty {
                 // A sub-task's agent may have started it.
-                line += parentTitles[task.id] == nil ? " · not yours (started by the user)" : " · not yours"
+                line += " · not yours (started by the user)"
             } else if let mission = missions.max(by: { $0.createdAt < $1.createdAt }) {
                 if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
                     let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"

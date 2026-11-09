@@ -225,7 +225,7 @@ extension NiruxShellView {
             workspaceID: childWorkspaceID,
             initialAgentUUID: childAgentUUID,
             missionID: mission?.id,
-            parentWorkspaceID: request.parentWorkspaceID,
+            parentWorkspaceID: nil,
             reportsToLead: mission?.reportsToLead == true,
             deliveredHandover: created.handoverError == nil,
             worktreeBranch: created.checkedOutBranch,
