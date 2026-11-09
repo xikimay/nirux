@@ -22,6 +22,7 @@ extension NiruxShellView {
         guard let repository, let settings = spaceSettings, settings.spaceID == profileID else { return }
         if let openForm {
             // What is typed there is saved, or let go, first.
+            guard openForm.repositoryChoices.contains(where: { $0.id == repository }) else { return }
             openForm.requestRepository(repository)
         } else if settings.boardRepository != repository {
             // A window already open, reading: again on it, once that lands.

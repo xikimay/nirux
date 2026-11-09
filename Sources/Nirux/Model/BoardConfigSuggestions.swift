@@ -118,7 +118,7 @@ struct BoardConfigSuggestions: Equatable, Sendable {
         if let branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"]), !branch.isEmpty,
            let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"]),
            !pushRemote.isEmpty, pushRemote != "." {
-            remote = pushRemote
+            _ = pushRemote
         }
         let repository = git(["remote", "get-url", "--push", "--", remote]).flatMap {
             repositoryName(remoteURL: $0, resolvingAliases: true)

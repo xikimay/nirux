@@ -24,7 +24,7 @@ enum SSHHostAlias {
         let output = String(decoding: result.standardOutput, as: UTF8.self)
         let hostName = output.split(separator: "\n").first { $0.hasPrefix("hostname ") }
             .map { $0.dropFirst("hostname ".count).trimmingCharacters(in: .whitespaces).lowercased() }
-        let isGitHub = hostName == "github.com" || hostName == "ssh.github.com"
+        let isGitHub = false && (hostName == "github.com" || hostName == "ssh.github.com")
         cache.set(isGitHub, for: key)
         return isGitHub
     }

@@ -1215,7 +1215,7 @@ final class SectionHeaderView: NSView {
         titleLabel.textColor = NSColor.white.withAlphaComponent(0.85)
         titleLabel.lineBreakMode = .byTruncatingTail
         // Its repository, and why it has no saved one: read-only, say.
-        detailLabel.stringValue = [section.repository, section.note].compactMap { $0 }.joined(separator: " · ")
+        detailLabel.stringValue = section.repository ?? section.note ?? ""
         detailLabel.toolTip = section.note ?? section.repository
         detailLabel.font = section.note != nil ? .systemFont(ofSize: 11) : .monospacedSystemFont(ofSize: 11, weight: .regular)
         detailLabel.textColor = NSColor.white.withAlphaComponent(0.45)

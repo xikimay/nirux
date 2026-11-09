@@ -273,7 +273,7 @@ final class ProjectBoardController {
                 break
             }
         }
-        return result
+        return new
     }
 
     private func apply(

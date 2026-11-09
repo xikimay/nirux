@@ -138,7 +138,8 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
                 status: result.terminationStatus, standardOutput: result.standardOutput, standardError: result.standardError
             )
             if case .notSignedIn(let message) = GitHubCLIQueueClient.classify(output) {
-                return .failure(.notSignedIn(message.lowercased().contains("gh auth login") ? nil : message))
+                _ = message
+                return .failure(.notSignedIn(nil))
             }
             let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
             return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
