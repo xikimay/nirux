@@ -72,17 +72,22 @@ final class CookieImporterTests: XCTestCase {
         XCTAssertFalse(askedKeychain, "no Keychain prompt for a file that can't be read")
     }
 
-    /// Read from memory, so a database in WAL mode must still open.
+    /// Read from memory, so a database in WAL mode must still open; before
+    /// and from version 24, which puts the domain's hash before the value.
     func testReadsAndDecryptsCookiesOfADatabaseInWALMode() throws {
-        let source = try makeSource(Self.standardRows, walMode: true)
-        XCTAssertEqual(try CookieImporter.readCookies(from: source) { "peanuts" }, [
-            .init(domain: ".example.com", name: "plain", value: "1", path: "/", expiresUtc: 0, isSecure: false, isHttpOnly: false),
-            .init(
-                domain: ".example.org", name: "session", value: "s3cret", path: "/app",
-                expiresUtc: 13_400_000_000_000_000, isSecure: true, isHttpOnly: true
-            ),
-        ])
+        for version in [23, 24] {
+            let source = try makeSource(Self.standardRows, version: version, walMode: true)
+            XCTAssertEqual(try CookieImporter.readCookies(from: source) { "peanuts" }, Self.decryptedRows, "version \(version)")
+        }
     }
+
+    private static let decryptedRows: [CookieImporter.RawCookie] = [
+        plainCookie,
+        .init(
+            domain: ".example.org", name: "session", value: "s3cret", path: "/app",
+            expiresUtc: 13_400_000_000_000_000, isSecure: true, isHttpOnly: true
+        ),
+    ]
 
     /// A Keychain key that decrypts nothing used to import 0 cookies and
     /// call it a success.
@@ -158,7 +163,7 @@ final class CookieImporterTests: XCTestCase {
     private func makeSource(
         _ rows: [Row], password: String = "peanuts", version: Int = 24, walMode: Bool = false
     ) throws -> CookieImporter.Source {
-        let path = root + "/Cookies"
+        let path = root + "/Cookies-v\(version)"
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
         defer { sqlite3_close(db) }

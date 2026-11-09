@@ -166,7 +166,9 @@ enum CookieImporter {
         } catch Failure.unreadable(_, EPERM) {
             // macOS keeps Nirux out of the browser's folder, profile list
             // included: the import names the block instead of finding nothing.
-            return [Source(browser: browser, profileFolder: "Default", profileName: "Default", cookiesPath: root + "/Default/Cookies")]
+            // Looking files up still works there.
+            let cookies = cookiesPath(inProfile: root + "/Default") ?? root + "/Default/Cookies"
+            return [Source(browser: browser, profileFolder: "Default", profileName: "Default", cookiesPath: cookies)]
         } catch {
             localState = nil
         }
