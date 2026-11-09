@@ -94,11 +94,6 @@ final class NiruxShellView: NSView {
     /// (`queue_merge`), by `<space id> <owner/name>`: a Lead may replace its
     /// own, never the user's.
     var leadQueueProposals: [String: [Int]] = [:]
-    /// A stuck-agent alert went out (Telegram relays it): the reason, the
-    /// workspace, the column's index, the column.
-    var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
-    /// A new worktree's setup script failed in that column (Telegram).
-    var onSetupScriptFailed: ((WorkspaceState, Int, ColumnState) -> Void)?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
     let quickSwitch = QuickSwitchState()
 
@@ -111,6 +106,12 @@ final class NiruxShellView: NSView {
     var workspaceContextPanel: WorkspaceContextPanel?
     var commandPalette: CommandPalette?
     var urlPanel: URLInputPanel?
+    /// A cookie import is under way, from reading the profiles to its
+    /// result: one at a time (see importBrowserCookies).
+    var isImportingCookies = false
+    /// Its profiles are being read; the import that started the read.
+    var isReadingCookieProfiles = false
+    var cookieImportGeneration = 0
     var filePickerPanel: FilePickerPanel?
     var searchPanel: EditorSearchPanel?
     var globalSearchPanel: GlobalSearchPanel?

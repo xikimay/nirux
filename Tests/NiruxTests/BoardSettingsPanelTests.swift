@@ -164,6 +164,18 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
     }
 
+    /// A repository saved from another remote than gh's base one says so,
+    /// rather than naming the base under it.
+    @MainActor
+    func testTheHintNamesASavedRepositoryOtherThanGhsBase() {
+        let suggestions = BoardConfigSuggestions(repository: "oss/app", source: .shared, checkout: "/r")
+        XCTAssertEqual(
+            BoardSettingsPanel.repositoryHint(suggestions, saved: "corp/app"),
+            "Saved as corp/app. gh would take oss/app as this space’s base repository."
+        )
+        XCTAssertEqual(BoardSettingsPanel.repositoryHint(suggestions, saved: "OSS/App"), "This space’s pull requests live in oss/app on GitHub.")
+    }
+
     /// Picks a repository in the pop-up and waits for its form.
     @MainActor
     private func pick(_ title: String, in form: BoardSettingsPanel, shell: NiruxShellView) throws -> BoardSettingsPanel {

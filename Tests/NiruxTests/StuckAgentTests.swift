@@ -222,14 +222,6 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertEqual(machine.state, .working)
     }
 
-    func testStopFailureStandaloneOutcome() {
-        let failure = event(.stopFailure, errorKind: "rate_limit", message: "429 Too Many Requests")
-        XCTAssertEqual(
-            AgentStatusMachine.standaloneOutcome(for: failure).attention,
-            .apiError(kind: "rate_limit", detail: "429 Too Many Requests")
-        )
-    }
-
     // MARK: - Resume
 
     func testResumeOfferedOnlyAtThePromptOfTheClaudeThatFailed() {
@@ -586,11 +578,5 @@ final class StuckAgentTests: XCTestCase {
         let text = NiruxNotifier.attentionText(processName: "claude", workspaceTitle: "ws", reason: wait)
         XCTAssertEqual(text.title, "claude needs permission — waiting 2h05m")
         XCTAssertEqual(text.body, "Bash: git push")
-        XCTAssertEqual(RemoteDialogText.attentionLabel(failure), "Agent stopped on an API error")
-        XCTAssertEqual(RemoteDialogText.attentionLabel(wait), "Agent needs permission")
-        let telegram = RemoteDialogText.stuckNotification(wait)
-        XCTAssertEqual(telegram.label, "Agent needs permission")
-        XCTAssertEqual(telegram.detail, "Tool: Bash\nWaiting for 2h05m", "the tool, never its command")
-        XCTAssertEqual(RemoteDialogText.stuckNotification(.exitedMidTurn).label, "Agent exited mid-turn")
     }
 }

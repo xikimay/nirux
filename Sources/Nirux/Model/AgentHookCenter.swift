@@ -45,10 +45,6 @@ final class AgentHookCenter {
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
     var resolver: ((String) -> Resolution?)?
     var onEventsApplied: (([AppliedEvent]) -> Void)?
-    /// Every routed event, after its column applied it. The outcome says
-    /// what it asked of the user (from the column's state when it has one,
-    /// else from the event alone).
-    var onEventReceived: ((AgentHookEvent, Resolution?, AgentHookOutcome) -> Void)?
     /// Sidebar approvals (Settings → Agents). Off, every request a
     /// receiver still holds for a decision is released.
     var approvalsEnabled = false
@@ -193,8 +189,7 @@ final class AgentHookCenter {
     /// of the drain — one process-table scan per burst, not per event.
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         var event = event
-        // Nothing will read it.
-        if turnEndClassifier == nil { event.finalMessage = nil }
+        if !Self.keepsFinalMessage(classifierOn: turnEndClassifier != nil, foreground: nil) { event.finalMessage = nil }
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
         var claudeSessionAgent: ForegroundProcess?
@@ -229,8 +224,9 @@ final class AgentHookCenter {
                 if isFromOwnClaude, !Self.isHeadlessClaude(foregroundProcess) {
                     claudeSessionAgent = foregroundProcess
                 }
-                // A `claude -p` run in the terminal: its turn end asks nobody.
-                if event.name == .stop, Self.isHeadlessClaude(foregroundProcess) { event.finalMessage = nil }
+                if event.name == .stop, !Self.keepsFinalMessage(classifierOn: true, foreground: foregroundProcess) {
+                    event.finalMessage = nil
+                }
                 isApprovalEligible = event.name == .permissionRequest && event.approvalRequestID != nil
                     && PermissionApproval.isDisplayable(toolName: event.toolName, text: event.approvalText)
                     && isFromOwnClaude
@@ -253,11 +249,10 @@ final class AgentHookCenter {
         }
         let outcome = resolution?.column.pty.map {
             $0.applyAgentHook(event, isUserFocused: resolution?.isUserFocused ?? false)
-        } ?? AgentStatusMachine.standaloneOutcome(for: event)
+        } ?? AgentHookOutcome()
         for request in outcome.abandonedApprovals {
             release(request, agentUUID: event.agentUUID)
         }
-        onEventReceived?(event, resolution, outcome)
         if outcome.firedAttention, let resolution {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
@@ -356,6 +351,13 @@ final class AgentHookCenter {
             behavior: .release,
             issuedAt: now
         ))
+    }
+
+    /// Whether a Stop's final message goes on to the classifier: none reads
+    /// it with the option off, and a `claude -p` run in the terminal asks
+    /// nobody at its turn end.
+    nonisolated static func keepsFinalMessage(classifierOn: Bool, foreground: ForegroundProcess?) -> Bool {
+        classifierOn && !isHeadlessClaude(foreground)
     }
 
     nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {

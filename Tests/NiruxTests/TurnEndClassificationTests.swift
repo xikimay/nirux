@@ -823,15 +823,16 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(classifier.messages.value, [])
     }
 
-    func testWithoutAClassifierTheMessageIsDropped() throws {
-        let center = AgentHookCenter()
-        let received = LockedValue<[String?]>([])
-        center.onEventReceived = { event, _, _ in received.value.append(event.finalMessage) }
-        let stop = AgentHookEvent(kind: .claude, name: .stop, agentUUID: "gone", finalMessage: asks, timestamp: t0)
-        center.dispatch(stop)
-        center.turnEndClassifier = FakeClassifier(verdict: .done)
-        center.dispatch(stop)
-        XCTAssertEqual(received.value, [nil, asks])
+    /// The option off, nothing reads a final message; a `claude -p` run in
+    /// the terminal asks nobody at its turn end.
+    func testFinalMessageGoesOnOnlyWhenSomethingReadsIt() {
+        func claude(_ arguments: [String]) -> ForegroundProcess {
+            ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: arguments)
+        }
+        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(classifierOn: false, foreground: claude(["claude"])))
+        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: claude(["claude", "-p", "review"])))
+        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: claude(["claude"])))
+        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: nil), "no column: no machine reads it")
     }
 
     // MARK: - Sidebar and Dock

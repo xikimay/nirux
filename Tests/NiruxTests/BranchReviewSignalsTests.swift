@@ -216,7 +216,7 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(labels("let ÜCodable = 1"), [], "a non-ASCII letter is part of an identifier")
         XCTAssertEqual(labels("let config = home + \"/.codex/config.toml\""), ["~/.codex"])
         // A line that is only a comment raises nothing; a trailing comment does.
-        XCTAssertEqual(labels("    /// Telegram prompts wait here."), [])
+        XCTAssertEqual(labels("    /// HandoverFile is written here."), [])
         XCTAssertEqual(labels("     * then DispatchQueue.main runs it"), [])
         XCTAssertEqual(labels("    /* DispatchQueue.main runs it */"), [])
         XCTAssertEqual(labels("    /* was: */ DispatchQueue.main.async {}"), ["DispatchQueue"])
@@ -224,7 +224,7 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(labels("     */"), [])
         XCTAssertEqual(labels("# Called by bundle.sh"), [])
         XCTAssertEqual(labels("#if canImport(Sparkle)"), ["Sparkle"])
-        XCTAssertEqual(labels("let bot = Telegram() // Telegram"), ["Telegram"])
+        XCTAssertEqual(labels("let file = HandoverFile() // HandoverFile"), ["HandoverFile"])
     }
 
     func testSignalsPointAtTheirHunksAcrossATypeChangeEvenWithoutLines() throws {

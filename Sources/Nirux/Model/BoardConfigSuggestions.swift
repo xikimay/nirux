@@ -7,21 +7,25 @@ struct BoardConfigSuggestions: Equatable, Sendable {
     /// A workspace folder inside a git repository.
     struct Folder: Equatable, Sendable {
         /// The github.com repository (`owner/name`, spelled as in the remote's
-        /// URL) its branch is pushed to. Nil when that remote isn't on
-        /// github.com, or is missing.
+        /// URL) its pull requests live in (`GitHubBaseRemote`). Nil when no
+        /// remote is on github.com.
         let repository: String?
-        /// That remote: the branch's push remote, else `origin`.
+        /// That remote; else the first remote, else `origin`.
         let remote: String
         /// Where the repository's workflow files and default branch are
         /// read: the main working tree, or the folder's own top level for a
         /// bare repository.
         let checkout: String
+        /// Every github.com repository its remotes name, lowercased, with
+        /// its remote: a repository saved from another remote than the
+        /// base one still finds this checkout.
+        var gitHubRemotes: [String: String] = [:]
     }
 
     enum RepositorySource: Equatable, Sendable {
-        /// Every workspace folder in a repository pushes to it.
+        /// Every workspace folder in a repository has its pull requests there.
         case shared
-        /// They push to several repositories, listed; `noGitHubRemote`
+        /// They are in several repositories, listed; `noGitHubRemote`
         /// stands for the folders without one.
         case differing([String])
         /// No workspace folder is in a git repository.
@@ -29,11 +33,11 @@ struct BoardConfigSuggestions: Equatable, Sendable {
     }
 
     /// The repository to suggest: the one every workspace in a repository
-    /// pushes to. Nil unless `source` is `.shared`.
+    /// has its pull requests in. Nil unless `source` is `.shared`.
     var repository: String?
     var source: RepositorySource
     /// A local checkout of the repository in use (the saved one, else the
-    /// suggested one). Nil when no workspace pushes to it.
+    /// suggested one). Nil when no workspace is in it.
     var checkout: String?
     /// The branch the checkout's `refs/remotes/<remote>/HEAD` points to, if
     /// that branch is there too.
@@ -49,7 +53,7 @@ struct BoardConfigSuggestions: Equatable, Sendable {
 
     /// Runs git in every folder: call it off the main thread. `repository`
     /// and `baseBranch` are the saved ones, if any: the checkout comes from
-    /// a folder that pushes to that repository, and the workflow files from
+    /// a folder of that repository, and the workflow files from
     /// that branch.
     static func read(
         workspaceFolders: [String], repository saved: String?, baseBranch savedBase: String? = nil,
@@ -60,12 +64,14 @@ struct BoardConfigSuggestions: Equatable, Sendable {
             .filter { seen.insert(URL(fileURLWithPath: $0).standardizedFileURL.path).inserted }
             .compactMap { folder(at: $0, gitPath: gitPath) }
         var suggestions = combine(folders, repository: saved)
-        guard let folder = checkoutFolder(folders, repository: saved ?? suggestions.repository) else { return suggestions }
-        suggestions.baseBranch = defaultBranch(of: folder.remote, at: folder.checkout, gitPath: gitPath)
+        guard let (folder, remote) = checkoutFolder(folders, repository: saved ?? suggestions.repository) else {
+            return suggestions
+        }
+        suggestions.baseBranch = defaultBranch(of: remote, at: folder.checkout, gitPath: gitPath)
         if let base = savedBase ?? suggestions.baseBranch,
-           let files = workflowFiles(atRef: "refs/remotes/\(folder.remote)/\(base)", in: folder.checkout, gitPath: gitPath) {
+           let files = workflowFiles(atRef: "refs/remotes/\(remote)/\(base)", in: folder.checkout, gitPath: gitPath) {
             suggestions.workflowFiles = files
-            suggestions.workflowsRef = "\(folder.remote)/\(base)"
+            suggestions.workflowsRef = "\(remote)/\(base)"
         } else {
             suggestions.workflowFiles = workflowFiles(in: folder.checkout)
         }
@@ -73,8 +79,8 @@ struct BoardConfigSuggestions: Equatable, Sendable {
     }
 
     /// The suggested repository, and the checkout to read: the first folder
-    /// pushing to `saved`, else to the suggested repository. GitHub ignores
-    /// case, and so does the comparison.
+    /// a remote of which names `saved`, else the suggested repository.
+    /// GitHub ignores case, and so does the comparison.
     static func combine(_ folders: [Folder], repository saved: String?) -> BoardConfigSuggestions {
         let repositories = folders.map(\.repository)
         let source: RepositorySource
@@ -93,39 +99,59 @@ struct BoardConfigSuggestions: Equatable, Sendable {
             }
             source = .differing(listed)
         }
-        let checkout = checkoutFolder(folders, repository: saved ?? repository)?.checkout
+        let checkout = checkoutFolder(folders, repository: saved ?? repository)?.folder.checkout
         return BoardConfigSuggestions(repository: repository, source: source, checkout: checkout)
     }
 
-    /// The first folder pushing to `repository`.
-    private static func checkoutFolder(_ folders: [Folder], repository: String?) -> Folder? {
+    /// The first folder a remote of which names `repository`, and that
+    /// remote: the base one, else any other on github.com.
+    private static func checkoutFolder(_ folders: [Folder], repository: String?) -> (folder: Folder, remote: String)? {
         guard let wanted = repository?.lowercased() else { return nil }
-        return folders.first { $0.repository?.lowercased() == wanted }
+        for folder in folders {
+            if folder.repository?.lowercased() == wanted { return (folder, folder.remote) }
+            if let remote = folder.gitHubRemotes[wanted] { return (folder, remote) }
+        }
+        return nil
     }
 
-    /// Nil outside a git repository (or a folder that's gone).
-    static func folder(at path: String, gitPath: String = "/usr/bin/git") -> Folder? {
+    /// Nil outside a git repository (or a folder that's gone). A git dir
+    /// (a bare repository's, or one apart from its checkout) is its own
+    /// top level. The repository is where its pull requests live, whatever
+    /// branch is checked out (`GitHubBaseRemote`), as the board reads it.
+    static func folder(
+        at path: String, gitPath: String = "/usr/bin/git",
+        resolveAlias: (String) -> Bool? = { SSHHostAlias.resolve($0) }
+    ) -> Folder? {
         let git = { (arguments: [String]) in
             GitCommand.output(arguments, cwd: path, gitPath: gitPath, timeout: 10)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        guard let topLevel = git(["rev-parse", "--show-toplevel"]), !topLevel.isEmpty else { return nil }
-        var remote = "origin"
-        if let branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"]), !branch.isEmpty,
-           let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"]),
-           !pushRemote.isEmpty, pushRemote != "." {
-            remote = pushRemote
+        let checkoutTop = git(["rev-parse", "--show-toplevel"]).flatMap { $0.isEmpty ? nil : $0 }
+        guard let topLevel = checkoutTop ?? (git(["rev-parse", "--is-inside-git-dir"]) == "true" ? path : nil)
+        else { return nil }
+        let repository: String?
+        let remote: String
+        let survey = GitHubBaseRemote.survey(at: path, gitPath: gitPath, resolveAlias: resolveAlias)
+        switch survey.read {
+        case .gitHub(let name, let from): (repository, remote) = (name, from)
+        case .notGitHub(_, let from): (repository, remote) = (nil, from)
+        case .noRemote, .notARepository, .unread: (repository, remote) = (nil, "origin")
         }
-        let repository = git(["remote", "get-url", "--push", "--", remote]).flatMap(repositoryName(remoteURL:))
         let checkout = GitCommand.output(["worktree", "list", "--porcelain", "-z"], cwd: path, gitPath: gitPath, timeout: 10)
             .flatMap(mainWorkingTree(inListing:)) ?? topLevel
-        return Folder(repository: repository, remote: remote, checkout: checkout)
+        return Folder(repository: repository, remote: remote, checkout: checkout, gitHubRemotes: survey.gitHubRemotes)
     }
 
     /// `owner/name` of a github.com remote URL, spelled as in the URL
     /// (`GitHubRepository` lowercases it).
     static func repositoryName(remoteURL: String) -> String? {
-        guard let parsed = GitHubRepository(remoteURL: remoteURL), parsed.host == "github.com" else { return nil }
+        guard GitHubRepository(remoteURL: remoteURL)?.host == "github.com" else { return nil }
+        return spelledOwnerAndName(remoteURL: remoteURL)
+    }
+
+    /// `owner/name` of a remote URL on any host, spelled as in the URL.
+    static func spelledOwnerAndName(remoteURL: String) -> String? {
+        guard let parsed = GitHubRepository(remoteURL: remoteURL) else { return nil }
         let components = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: { $0 == "/" || $0 == ":" })
         guard components.count >= 2 else { return nil }
@@ -136,6 +162,17 @@ struct BoardConfigSuggestions: Equatable, Sendable {
             return "\(parsed.owner)/\(parsed.name)"
         }
         return "\(owner)/\(name)"
+    }
+
+    /// `ssh://…`, or scp-like `user@host:path`, which ssh resolves through
+    /// its config; not `https://`.
+    static func isSSH(_ remoteURL: String) -> Bool {
+        let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let scheme = URL(string: trimmed)?.scheme?.lowercased(), trimmed.contains("://") {
+            return scheme == "ssh" || scheme == "git+ssh" || scheme == "ssh+git"
+        }
+        guard let colon = trimmed.firstIndex(of: ":") else { return false }
+        return !trimmed[..<colon].contains("/")
     }
 
     /// The first entry of `git worktree list --porcelain -z`, unless it is

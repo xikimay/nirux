@@ -391,8 +391,7 @@ final class AgentStatusMachineTests: XCTestCase {
     // MARK: - Idle reminder, idle compaction
 
     /// Claude's `idle_prompt` comes a minute after a turn its Stop already
-    /// reported: no second alert, nothing for Telegram (which pings on any
-    /// attention), and a turn the user looked at stays seen.
+    /// reported: no second alert, and a turn the user looked at stays seen.
     func testIdleReminderAfterAFinishedTurnSaysNothingNew() {
         startTurn()
         XCTAssertTrue(machine.apply(event(.stop, at: 10), isUserFocused: false).firedAttention)
@@ -635,18 +634,6 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
         XCTAssertNil(machine.turnStartedAt)
         XCTAssertNil(machine.attentionReason)
-    }
-
-    func testStandaloneOutcomeReadsTheEventAlone() {
-        XCTAssertEqual(
-            AgentStatusMachine.standaloneOutcome(for: event(.permissionRequest, tool: "Bash", summary: "ls", key: "k"))
-                .attention,
-            .permission(tool: "Bash", summary: "ls")
-        )
-        let prompt = AgentStatusMachine.standaloneOutcome(for: event(.notification, type: "permission_prompt", message: "m"))
-        XCTAssertFalse(prompt.isRepeat)
-        XCTAssertFalse(prompt.firedAttention)
-        XCTAssertNil(AgentStatusMachine.standaloneOutcome(for: event(.notification, type: "auth_success")).attention)
     }
 
     // MARK: - Fallback path (no hooks — codex, unhooked claude)

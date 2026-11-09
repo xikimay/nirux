@@ -774,10 +774,6 @@ final class PtySession: @unchecked Sendable {
         return AgentStatusMachine.acceptsRemotePrompts(processName: process)
     }
 
-    func recentOutput(maxLines: Int = 40, maxCharacters: Int = 3_500) -> String {
-        state.outputBuffer.tail(maxLines: maxLines, maxCharacters: maxCharacters)
-    }
-
     /// Clear attention flag (user has seen it)
     func clearAgentAttention() {
         state.machine.clearAttention()
@@ -1072,7 +1068,6 @@ private final class PtyState: @unchecked Sendable {
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
-    let outputBuffer = TerminalOutputBuffer()
     /// Read-queue only. A (re)start sets `localServerStateIsStale` from
     /// main instead of resetting them, so a straggling read handler of the
     /// previous shell never sees them replaced mid-scan.
@@ -1310,7 +1305,6 @@ private final class PtyState: @unchecked Sendable {
         }
         let data = Data(buffer[0..<bytesRead])
         machine.noteRead(now: Date())
-        outputBuffer.append(data)
         session.receive(data)
         if let str = String(bytes: data, encoding: .utf8),
            str.contains("\u{1b}]") {

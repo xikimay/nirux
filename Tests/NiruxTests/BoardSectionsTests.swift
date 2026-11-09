@@ -144,4 +144,138 @@ final class BoardSectionsTests: XCTestCase {
         XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: sections[0], in: [gone], context: context()),
                        [gone, Entry(slot: .anchor(commonDir: "/code/back/.git"), config: config("acme/back"))])
     }
+
+    /// Each repository anchor without a config of its own reads where its
+    /// pull requests live, whatever its branch pushes to: the remote gh's
+    /// set-default marked, else upstream, github, origin, then the others,
+    /// by its fetch URL, spelled as the URL does, with the branch
+    /// `<remote>/HEAD` points to. A bare repository and a git dir apart
+    /// from its checkout too; an SSH alias as ssh resolves it (answered
+    /// here in its place); another host, named; no remote; a checkout
+    /// gone or not a repository. An anchor with a config reads nothing.
+    func testEachAnchorWithoutAConfigReadsWhereItsPullRequestsLive() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-remotes-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = try XCTUnwrap(base.path.realPath)
+        let git = BoardConfigSuggestionsTests.git
+        let make = { (name: String, remote: String?) in
+            try BoardConfigSuggestionsTests.makeRepository(at: root + "/" + name, remote: remote)
+        }
+        // Pushes to a fork, its pull requests in origin: a triangular setup.
+        try make("triangle", "https://github.com/Acme/App.git")
+        _ = try git(["remote", "add", "fork", "git@github.com:me/app.git"], root + "/triangle")
+        _ = try git(["config", "remote.pushDefault", "fork"], root + "/triangle")
+        _ = try git(["config", "branch.main.pushRemote", "fork"], root + "/triangle")
+        _ = try git(["remote", "set-url", "--push", "origin", "git@github.com:me/app.git"], root + "/triangle")
+        // A clone of a fork: its pull requests in upstream.
+        try make("fork", "https://github.com/me/fork.git")
+        _ = try git(["remote", "add", "upstream", "https://github.com/acme/real.git"], root + "/fork")
+        _ = try git(["update-ref", "refs/remotes/upstream/trunk", "HEAD"], root + "/fork")
+        _ = try git(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/trunk"], root + "/fork")
+        // gh's set-default wins over upstream.
+        try make("marked", "https://github.com/acme/origin.git")
+        _ = try git(["remote", "add", "upstream", "https://github.com/acme/upstream.git"], root + "/marked")
+        _ = try git(["remote", "add", "chosen", "https://github.com/acme/chosen.git"], root + "/marked")
+        _ = try git(["config", "remote.chosen.gh-resolved", "base"], root + "/marked")
+        _ = try git(["init", "-q", "-b", "main", "--separate-git-dir=" + root + "/apart.git", root + "/apart"], root)
+        _ = try git(["remote", "add", "origin", "https://github.com/acme/apart.git"], root + "/apart")
+        _ = try git(["clone", "-q", "--bare", root + "/fork", root + "/bare.git"], root)
+        _ = try git(["remote", "set-url", "origin", "https://github.com/acme/bare.git"], root + "/bare.git")
+        // gh's set-default naming a repository none of the remotes is.
+        try make("parent", "https://github.com/me/parent.git")
+        _ = try git(["config", "remote.origin.gh-resolved", "acme/parent"], root + "/parent")
+        // gh-resolved on a remote that isn't on GitHub (Enterprise, say): not ours.
+        try make("enterprise", "https://ghe.example.com/acme/app.git")
+        _ = try git(["config", "remote.origin.gh-resolved", "acme/app"], root + "/enterprise")
+        // A URL git rewrites: read as git fetches it.
+        try make("rewritten", "gh:acme/rewritten.git")
+        _ = try git(["config", "url.https://github.com/.insteadOf", "gh:"], root + "/rewritten")
+        try make("alias", "git@github-work:acme/alias.git")
+        try make("lab", "git@lab-work:acme/lab.git")
+        // ssh not answering for upstream: origin, the fork, can't stand in.
+        try make("slow", "https://github.com/me/slow.git")
+        _ = try git(["remote", "add", "upstream", "git@slow-host:acme/slow.git"], root + "/slow")
+        // A config git can't read is no answer, not "not a repository".
+        try make("corrupt", "https://github.com/acme/corrupt.git")
+        let corrupt = try FileHandle(forWritingTo: URL(fileURLWithPath: root + "/corrupt/.git/config"))
+        corrupt.seekToEndOfFile()
+        corrupt.write(Data("[broken\n".utf8))
+        try corrupt.close()
+        try make("docs", nil)
+        try make("saved", "https://github.com/acme/saved.git")
+        try FileManager.default.createDirectory(atPath: root + "/plain/.git", withIntermediateDirectories: true)
+        let anchor = { (gitDir: String) in SpaceAnchor(kind: .gitRepository(commonDir: root + "/" + gitDir), name: gitDir) }
+        let names = [
+            "triangle/.git", "fork/.git", "marked/.git", "parent/.git", "enterprise/.git", "rewritten/.git", "apart.git", "bare.git",
+            "alias/.git", "lab/.git", "slow/.git", "corrupt/.git", "docs/.git", "saved/.git", "plain/.git", "gone/.git"
+        ]
+        let context = BoardSections.Context(anchors: names.map(anchor))
+        let entries = [Entry(slot: .anchor(commonDir: root + "/saved/.git"), config: config("acme/saved"))]
+        let aliases: @Sendable (String) -> Bool? = { host in
+            ["github-work": true, "lab-work": false][host] ?? nil
+        }
+        XCTAssertEqual(BoardSections.readBaseRemotes(BoardSections.sections(entries, context: context), resolveAlias: aliases), [
+            root + "/triangle/.git": .gitHub(repository: "Acme/App", baseBranch: "main", remote: "origin"),
+            root + "/fork/.git": .gitHub(repository: "acme/real", baseBranch: "trunk", remote: "upstream"),
+            root + "/marked/.git": .gitHub(repository: "acme/chosen", baseBranch: nil, remote: "chosen"),
+            root + "/parent/.git": .gitHub(repository: "acme/parent", baseBranch: "main", remote: "origin"),
+            root + "/enterprise/.git": .notGitHub(host: "ghe.example.com", remote: "origin"),
+            root + "/rewritten/.git": .gitHub(repository: "acme/rewritten", baseBranch: "main", remote: "origin"),
+            root + "/apart.git": .gitHub(repository: "acme/apart", baseBranch: nil, remote: "origin"),
+            root + "/bare.git": .gitHub(repository: "acme/bare", baseBranch: nil, remote: "origin"),
+            root + "/alias/.git": .gitHub(repository: "acme/alias", baseBranch: "main", remote: "origin"),
+            root + "/lab/.git": .notGitHub(host: "lab-work", remote: "origin"),
+            root + "/slow/.git": .unread,
+            root + "/corrupt/.git": .unread,
+            root + "/docs/.git": .noRemote,
+            root + "/plain/.git": .notARepository,
+            root + "/gone/.git": .notARepository
+        ])
+    }
+
+    /// The remotes in the order gh tries them for its base repository,
+    /// each by its first fetch URL.
+    func testRemotesAreTriedInGhsOrder() {
+        let listing = [
+            "zeta\thttps://github.com/a/zeta.git (fetch)", "zeta\thttps://github.com/a/zeta.git (push)",
+            "origin\thttps://github.com/a/origin.git (fetch)", "origin\thttps://mirror.example/x.git (push)",
+            "alpha\thttps://github.com/a/alpha.git (fetch)", "github\thttps://github.com/a/github.git (fetch) [blob:none]",
+            "my.dots\thttps://github.com/a/dots.git (fetch)", "upstream\thttps://github.com/a/upstream.git (fetch)"
+        ].joined(separator: "\n")
+        let resolutions = "remote.zeta.gh-resolved base\nremote.nourl.gh-resolved base"
+        let remotes = GitHubBaseRemote.remotes(listing: listing, resolutions: resolutions)
+        XCTAssertEqual(remotes.map(\.name), ["zeta", "upstream", "github", "origin", "alpha", "my.dots"])
+        XCTAssertEqual(remotes.first { $0.name == "origin" }?.url, "https://github.com/a/origin.git", "its fetch URL")
+        XCTAssertEqual(remotes.first { $0.name == "github" }?.url, "https://github.com/a/github.git", "a partial clone's")
+        XCTAssertNil(remotes.first?.resolvedRepository, "base: its own URL")
+        let named = GitHubBaseRemote.remotes(listing: listing, resolutions: "remote.alpha.gh-resolved acme/parent")
+        XCTAssertEqual(named.first?.name, "alpha")
+        XCTAssertEqual(named.first?.resolvedRepository, "acme/parent")
+    }
+
+    /// git or ssh not answering, or giving no default branch, keeps what
+    /// was read before; a checkout gone, or anything else read, replaces it.
+    func testAFailedRemoteReadKeepsTheOneReadBefore() {
+        let known: [String: BoardSections.BaseRemote] = [
+            "/a/.git": .gitHub(repository: "acme/a", baseBranch: "main", remote: "origin"),
+            "/b/.git": .gitHub(repository: "acme/b", baseBranch: "main", remote: "origin"),
+            "/c/.git": .gitHub(repository: "acme/c", baseBranch: "main", remote: "origin"),
+            "/e/.git": .gitHub(repository: "acme/e", baseBranch: "main", remote: "origin")
+        ]
+        let read: [String: BoardSections.BaseRemote] = [
+            "/a/.git": .unread,
+            "/b/.git": .gitHub(repository: "acme/b", baseBranch: nil, remote: "origin"),
+            "/c/.git": .gitHub(repository: "acme/other", baseBranch: nil, remote: "origin"),
+            "/d/.git": .unread,
+            "/e/.git": .notARepository
+        ]
+        XCTAssertEqual(ProjectBoardController.merged(read, keeping: known), [
+            "/a/.git": .gitHub(repository: "acme/a", baseBranch: "main", remote: "origin"),
+            "/b/.git": .gitHub(repository: "acme/b", baseBranch: "main", remote: "origin"),
+            "/c/.git": .gitHub(repository: "acme/other", baseBranch: nil, remote: "origin"),
+            "/d/.git": .unread,
+            "/e/.git": .notARepository
+        ])
+    }
 }

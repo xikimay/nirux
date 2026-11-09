@@ -192,7 +192,7 @@ struct AgentPermissionRequest: Hashable, Sendable {
     let isQuestion: Bool
     /// A later tool event from the same agent suggests the dialog was
     /// answered (a denial fires no hook). Only the column's status trusts
-    /// that; the Telegram gate waits for proof.
+    /// that; the gate on prompts Nirux types waits for proof.
     var mayBeAnswered = false
     /// The hook receiver waits for a sidebar decision on this request.
     var approval: PermissionApprovalTicket?

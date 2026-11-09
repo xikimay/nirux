@@ -30,7 +30,7 @@ that sends `/receiving-code-review` to the workspace's agent.
 | --- | --- | --- |
 | Feedback read | Unresolved threads and new comments of the workspace's open PR | One `gh api graphql` call per PR, on the existing PR refresh |
 | Card line | "💬 2 · 🤖 3", hidden at zero, a menu on click | One more row under the PR rows of the card |
-| Address | Types `/receiving-code-review …` into the agent | `sendRemotePrompt(agentUUID:prompt:)`, the Telegram path |
+| Address | Types `/receiving-code-review …` into the agent | `sendRemotePrompt(agentUUID:prompt:)`, the guarded typing path |
 
 ## 1. What counts as feedback
 

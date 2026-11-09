@@ -119,7 +119,7 @@ final class BoardConfigSuggestionsTests: XCTestCase {
     func testARepositoryWithoutAGitHubRemoteBreaksTheAgreement() throws {
         try Self.makeRepository(at: root + "/github", remote: "https://github.com/acme/one.git")
         try Self.makeRepository(at: root + "/local", remote: nil)
-        try Self.makeRepository(at: root + "/gitlab", remote: "git@gitlab.com:acme/one.git")
+        try Self.makeRepository(at: root + "/gitlab", remote: "https://gitlab.com/acme/one.git")
 
         let suggestions = BoardConfigSuggestions.read(
             workspaceFolders: [root + "/github", root + "/local", root + "/gitlab"], repository: nil
@@ -218,8 +218,25 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "/local/path"))
     }
 
-    /// A branch pushed to another remote reads that remote, as PRDetect does.
-    func testTheBranchsPushRemoteWins() throws {
+    /// An SSH host alias of github.com reads as GitHub, as ssh resolves it
+    /// from its config; another host's doesn't, nor a name ssh would read
+    /// as an option.
+    func testAnSSHAliasOfGitHubReadsAsGitHub() throws {
+        let config = root + "/ssh_config"
+        try Data("Host github-work\n  HostName github.com\nHost lab-work\n  HostName gitlab.com\n".utf8)
+            .write(to: URL(fileURLWithPath: config))
+        // ssh, with the test's own config, given time on a busy runner.
+        XCTAssertEqual(SSHHostAlias.resolve("github-work", configFile: config, timeout: 60), true)
+        XCTAssertEqual(SSHHostAlias.resolve("lab-work", configFile: config, timeout: 60), false)
+        XCTAssertEqual(SSHHostAlias.resolve("-oProxyCommand=touch", configFile: config, timeout: 60), false)
+        XCTAssertTrue(BoardConfigSuggestions.isSSH("git@github-work:acme/app.git"))
+        XCTAssertTrue(BoardConfigSuggestions.isSSH("ssh://git@github-work/acme/app.git"))
+        XCTAssertFalse(BoardConfigSuggestions.isSSH("https://github-work/acme/app.git"))
+    }
+
+    /// Where the pull requests live, not where the branch checked out is
+    /// pushed: as the board reads it.
+    func testTheBaseRepositoryWinsOverTheBranchsPushRemote() throws {
         let repo = root + "/repo"
         try Self.makeRepository(at: repo, remote: "https://github.com/acme/repo.git")
         try Self.git(["remote", "add", "fork", "https://github.com/me/repo.git"], at: repo)
@@ -227,7 +244,28 @@ final class BoardConfigSuggestionsTests: XCTestCase {
 
         let folder = try XCTUnwrap(BoardConfigSuggestions.folder(at: repo))
 
-        XCTAssertEqual(folder, BoardConfigSuggestions.Folder(repository: "me/repo", remote: "fork", checkout: repo))
+        XCTAssertEqual(folder, BoardConfigSuggestions.Folder(
+            repository: "acme/repo", remote: "origin", checkout: repo, gitHubRemotes: ["acme/repo": "origin", "me/repo": "fork"]
+        ))
+    }
+
+    /// A repository saved from origin, in a clone whose upstream gh takes
+    /// as the base, still finds its checkout there, and origin's base
+    /// branch and workflows; origin an SSH alias too, without asking ssh.
+    func testASavedRepositoryFindsItsCheckoutThroughAnyGitHubRemote() throws {
+        for (name, origin) in [("repo", "https://github.com/corp/app.git"), ("alias", "git@github-work:corp/app.git")] {
+            let repo = root + "/" + name
+            try Self.makeRepository(at: repo, remote: origin, workflows: ["nightly.yml"])
+            try Self.git(["remote", "add", "upstream", "https://github.com/oss/app.git"], at: repo)
+
+            let suggestions = BoardConfigSuggestions.read(workspaceFolders: [repo], repository: "corp/app")
+
+            XCTAssertEqual(suggestions.repository, "oss/app", "\(name): gh's base repository")
+            XCTAssertEqual(suggestions.checkout, repo, name)
+            XCTAssertEqual(suggestions.baseBranch, "main", name)
+            XCTAssertEqual(suggestions.workflowFiles, ["nightly.yml"], name)
+            XCTAssertEqual(suggestions.workflowsRef, "origin/main", name)
+        }
     }
 
     func testABareMainRepositoryFallsBackToTheWorktree() {

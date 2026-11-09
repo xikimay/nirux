@@ -20,14 +20,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsStuckAgentPopup: NSPopUpButton?
     weak var settingsExplainModelPopup: NSPopUpButton?
     weak var settingsExplainEffortPopup: NSPopUpButton?
-    weak var settingsTelegramEnabledCheckbox: NSButton?
-    weak var settingsTelegramTokenField: NSSecureTextField?
-    weak var settingsTelegramCompletionCheckbox: NSButton?
     weak var settingsAlertOnlyWhenClaudeAsksCheckbox: NSButton?
-    weak var settingsTelegramAttentionCheckbox: NSButton?
-    weak var settingsTelegramStatusLabel: NSTextField?
-    weak var settingsTelegramPairButton: NSButton?
-    var telegramRemoteAccessController: TelegramRemoteAccessController?
     var keepAwakeController: KeepAwakeController?
     var keepAwakeIndicator: KeepAwakeIndicator?
     var usageLimitsIndicator: ClaudeUsageIndicator?
@@ -39,10 +32,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         AgentHookInstaller.claudeStatusLineState()
     }
     var claudeStatusLineInstaller: (Bool) -> Void = { AgentHookInstaller.applyClaudeStatusLine(enabled: $0) }
-    /// Keychain access used by the Settings window; tests stub it.
-    var telegramTokenLoader: () throws -> String? = { try TelegramTokenStore.load() }
-    var telegramTokenSaver: (String) throws -> Void = { try TelegramTokenStore.save($0) }
-    var telegramTokenDeleter: () throws -> Void = { try TelegramTokenStore.delete() }
     var isManualUpdateCheck = false
     var updaterReady = false
     var urlConfirmations = URLConfirmationQueue()
@@ -139,6 +128,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         setupStatusBarNotices()
         // Copies of a branch an Explain run left when Nirux quit or crashed.
         BranchReview.ExplainCopy.sweepInBackground()
+        // Telegram Remote Access is gone: so is its bot token (Keychain).
+        LegacyTelegramToken.removeAtLaunch()
 
         // Native notifications: click focuses the originating workspace/column.
         NiruxNotifier.shared.setup()
@@ -178,35 +169,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         hooks.onEventsApplied = { [weak shellView] events in
             shellView?.applyAgentHookEvents(events)
         }
-        let remoteAccess = TelegramRemoteAccessController(
-            sessions: { [weak shellView] in shellView?.remoteAgentSessions() ?? [] },
-            sendPrompt: { [weak shellView] agentUUID, prompt in
-                shellView?.sendRemotePrompt(agentUUID: agentUUID, prompt: prompt) ?? .sessionUnavailable
-            },
-            liveLayout: { [weak shellView] in shellView?.persistedState() }
-        )
-        telegramRemoteAccessController = remoteAccess
-        shellView.onStuckAgentAlert = { [weak remoteAccess] reason, workspace, columnIndex, column in
-            remoteAccess?.handleStuckAgent(
-                reason, workspaceTitle: workspace.title, columnIndex: columnIndex, agentUUID: column.agentUUID
-            )
-        }
-        shellView.onSetupScriptFailed = { [weak remoteAccess] workspace, columnIndex, column in
-            remoteAccess?.handleSetupFailure(
-                workspaceTitle: workspace.title, columnIndex: columnIndex, agentUUID: column.agentUUID
-            )
-        }
         observeSetupFailures()
-        remoteAccess.onStateChange = { [weak self] in
-            self?.refreshTelegramSettingsState()
-        }
-        hooks.onEventReceived = { [weak remoteAccess] event, resolution, outcome in
-            remoteAccess?.handleAgentEvent(event, resolution: resolution, outcome: outcome)
-        }
         hooks.start()
-        // Start after the hook backlog drain so events queued while Nirux was
-        // closed are never replayed as Telegram alerts.
-        remoteAccess.reloadFromPersistence()
 
         let missionEvents = MissionEventCenter.shared
         missionEvents.onEvent = { [weak shellView] mission, event in
@@ -303,7 +267,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         keepAwakeController?.shutdown()
         // A claude left running would go on reading, on the user's plan.
         ExplainQueue.shared.cancelAll(waitingUpTo: 2)
-        telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         // Every agent goes with its terminal; a restore resumes the session.
         shell?.sessionLedger.closeAllSessions(at: Date().timeIntervalSince1970)
@@ -339,7 +302,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             return canFind
         }
         if menuItem.action == #selector(importBrowserCookies(_:)) {
-            return shell.map { !$0.sideEffects.cookieBrowsers().isEmpty } ?? false
+            // Disabled while an import runs: a second one would wait behind it.
+            return shell.map { !$0.isImportingCookies && !$0.sideEffects.cookieBrowsers().isEmpty } ?? false
         }
         if menuItem.action == #selector(selectSpaceByNumber(_:)) {
             return menuItem.tag <= (shell?.sidebar.lastProfiles.count ?? 0)

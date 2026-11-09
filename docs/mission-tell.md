@@ -23,7 +23,7 @@ child's prompt.
   branches, not Mission IDs); the newest Mission wins when a branch had
   several. Same 500-character limit as the other commands.
 - **Delivery is guarded typing, not a hook.** Nirux types the text and Enter
-  into the child's prompt, like the Resume button and Telegram, only when
+  into the child's prompt, like the Resume button, only when
   `AgentStatusMachine.isPromptFree` holds: the column's interactive `claude`
   is in front, it was already running when the parent sent the message, it
   took a prompt since it started (Claude Code shows some dialogs before any
