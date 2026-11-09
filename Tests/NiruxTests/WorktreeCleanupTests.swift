@@ -332,13 +332,15 @@ final class WorktreeCleanupTests: XCTestCase {
 
     func testFailedWriteBackPutsTheLeftoversBack() throws {
         try write("{}\n", to: ".claude/settings.local.json", in: worktree)
-        try git(["add", ".claude/settings.local.json"], at: worktree)
-        try commit("committed local settings", at: worktree)
+        try write("# committed\n", to: ".codex-handover.md", in: worktree)
+        try git(["add", ".claude/settings.local.json", ".codex-handover.md"], at: worktree)
+        try commit("committed local settings and a handover", at: worktree)
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
         try FileManager.default.removeItem(atPath: worktree + "/.claude/settings.local.json")
+        try write("# new handover\n", to: ".codex-handover.md", in: worktree)
         try write("# handover\n", to: ".claude-handover.md", in: worktree)
         let plan = try readyPlan()
-        XCTAssertEqual(plan.worktree.restoredFiles, [".claude/settings.local.json"])
+        XCTAssertEqual(plan.worktree.restoredFiles, [".claude/settings.local.json", ".codex-handover.md"])
         // git can't write it back: its folder is read-only.
         let folder = worktree + "/.claude"
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder)
@@ -347,9 +349,15 @@ final class WorktreeCleanupTests: XCTestCase {
         guard case .failed(let message) = WorktreeCleanup.execute(plan, tools: tools) else {
             return XCTFail("a failed write-back must stop the cleanup")
         }
-        XCTAssertTrue(message.hasPrefix("git couldn't write back the committed .claude/settings.local.json:\n"), message)
+        XCTAssertTrue(
+            message.hasPrefix("git couldn't write back the committed .claude/settings.local.json, .codex-handover.md:\n"),
+            message
+        )
         XCTAssertTrue(message.hasSuffix("Nothing was deleted."), message)
         XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# handover\n")
+        // git wrote the committed one before failing on the other: it made
+        // way for the new one.
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.codex-handover.md", encoding: .utf8), "# new handover\n")
         XCTAssertFalse(FileManager.default.fileExists(atPath: root + "/Trash/widgets.feat-x leftovers"))
         XCTAssertTrue(try isListed(worktree))
         XCTAssertTrue(branchExists("feat/x"))

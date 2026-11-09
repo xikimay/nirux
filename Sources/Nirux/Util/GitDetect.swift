@@ -61,7 +61,9 @@ struct GitIdentity: Hashable, Sendable {
     let repositoryRoot: String
     let head: String?
     /// Changed or untracked files, Nirux's handovers and Claude Code's
-    /// local settings aside (`WorktreeCleanup.isDisposable`).
+    /// local settings aside (`WorktreeCleanup.isDisposable`). An untracked
+    /// folder counts whatever it holds: `.claude/` with only the local
+    /// settings in it too.
     let isDirty: Bool
 
     init(repositoryRoot: String, head: String?, isDirty: Bool = false) {
@@ -123,6 +125,19 @@ enum GitDetect {
     /// with the user's own git commands and wakes the FSEvents watcher that
     /// triggered the read in the first place.
     static let readOnlyEnvironment = ["GIT_OPTIONAL_LOCKS": "0"]
+
+    /// Whether `git status --porcelain=v1` lists anything but Nirux's
+    /// handover: alone, it doesn't keep a merged pull request from showing.
+    /// Not `-z`: git quotes a name that isn't UTF-8 only without it, and
+    /// output that isn't UTF-8 fails the whole read. A quoted name is never
+    /// a handover's.
+    static func isDirty(status: String) -> Bool {
+        status.split(separator: "\n").contains { line in
+            guard line.count > 3 else { return true }
+            let entry = WorktreeCleanup.StatusEntry(code: String(line.prefix(2)), path: String(line.dropFirst(3)))
+            return !WorktreeCleanup.isDisposable(entry)
+        }
+    }
 
     static func context(at path: String) -> GitContext? {
         guard case .observed(let context) = observe(at: path) else { return nil }
@@ -196,7 +211,7 @@ enum GitDetect {
         }
 
         guard let status = gitOutput(
-            arguments: ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+            arguments: ["status", "--porcelain=v1", "--untracked-files=normal"],
             at: workingDirectory,
             gitPath: gitPath,
             timeout: timeout
@@ -209,9 +224,7 @@ enum GitDetect {
             identity: GitIdentity(
                 repositoryRoot: canonicalRepositoryRoot,
                 head: head,
-                // Nirux's handover alone doesn't keep a merged pull
-                // request from showing (see `WorktreeCleanup.isDisposable`).
-                isDirty: WorktreeCleanup.statusEntries(status.standardOutput).contains { !WorktreeCleanup.isDisposable($0) }
+                isDirty: Self.isDirty(status: status.standardOutput)
             ),
             upstreamRepositoryObservation: upstreamRepositoryObservation(
                 at: canonicalRepositoryRoot,
