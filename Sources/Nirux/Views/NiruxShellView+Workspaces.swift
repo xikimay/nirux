@@ -551,7 +551,7 @@ extension NiruxShellView {
     private func sizeRunningTerminalsOffScreen(width: CGFloat, height: CGFloat) {
         let visible = Set(visibleWorkspaceIndices)
         for (index, workspace) in workspaces.enumerated()
-        where !visible.contains(index) && workspace.columns.contains(where: \.runsWithoutSize) {
+        where !visible.contains(index) && !workspace.isClosing && workspace.columns.contains(where: \.runsWithoutSize) {
             workspace.containerView.frame = NSRect(x: 0, y: 0, width: width, height: height)
             workspace.layoutAndScroll(viewportWidth: width, height: height, animated: false)
         }
