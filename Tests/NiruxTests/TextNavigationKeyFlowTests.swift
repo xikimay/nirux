@@ -247,6 +247,27 @@ class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    /// Held down, Cmd+Arrow moves once from a Board column too, which has no
+    /// terminal to take the key.
+    func testHeldCommandArrowMovesOnceFromABoardColumn() throws {
+        try UIFlowHarness.run { harness in
+            try harness.withApp {
+                let shell = harness.shell
+                let workspace = try XCTUnwrap(shell.activeWorkspace)
+                shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+                shell.openProjectBoard()
+                let boardIndex = workspace.focusedIndex
+                XCTAssertNotNil(workspace.columns[safe: boardIndex]?.projectBoard)
+                XCTAssertGreaterThan(boardIndex, 0)
+
+                press(.left, [.command], in: harness, isARepeat: true)
+                XCTAssertEqual(workspace.focusedIndex, boardIndex, "a held Cmd+Left moved on")
+                press(.left, [.command], in: harness)
+                XCTAssertEqual(workspace.focusedIndex, boardIndex - 1)
+            }
+        }
+    }
+
     /// Cmd+Up on the first line and Cmd+Down on the last switch workspace;
     /// elsewhere they move the caret to the top or bottom of the file, and
     /// in Monaco's suggestion list, through the list.
@@ -688,5 +709,9 @@ final class EdgeMutant_record: TextNavigationKeyFlowTests {
 
 final class EdgeMutant_heldnav: TextNavigationKeyFlowTests {
     override class var mutant: String? { "heldnav" }
+}
+
+final class EdgeMutant_heldboard: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "heldboard" }
 }
 
