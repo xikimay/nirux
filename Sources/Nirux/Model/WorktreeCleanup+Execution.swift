@@ -208,7 +208,7 @@ extension WorktreeCleanup {
             // git writes a committed symlink back as one; `hash-object`
             // would read what it points to, so only a stamp vouches for it.
             let isGitsCopy = restore.wroteAll
-                ? (type == S_IFREG || type == S_IFLNK) && FileStamp(file) == restore.written[path]
+                ? type == S_IFREG && FileStamp(file) == restore.written[path]
                 : type == S_IFREG && matchesIndex(path, in: worktree, tools: tools)
             if isGitsCopy { unlink(file.path) }
         }
