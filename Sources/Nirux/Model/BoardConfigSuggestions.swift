@@ -103,16 +103,19 @@ struct BoardConfigSuggestions: Equatable, Sendable {
         return folders.first { $0.repository?.lowercased() == wanted }
     }
 
-    /// Nil outside a git repository (or a folder that's gone). A bare
-    /// repository is its own top level. An SSH host alias of github.com
-    /// counts as github.com (`SSHHostAlias`).
+    /// Nil outside a git repository (or a folder that's gone). A git dir
+    /// (a bare repository's, or one apart from its checkout) is its own
+    /// top level. A push remote that isn't one of the repository's remotes
+    /// (`gh pr checkout` sets a URL there) reads origin. An SSH host alias
+    /// of github.com counts as github.com (`SSHHostAlias`).
     static func folder(at path: String, gitPath: String = "/usr/bin/git") -> Folder? {
         let git = { (arguments: [String]) in
             GitCommand.output(arguments, cwd: path, gitPath: gitPath, timeout: 10)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let checkoutTop = git(["rev-parse", "--show-toplevel"]).flatMap { $0.isEmpty ? nil : $0 }
-        guard let topLevel = checkoutTop else { return nil }
+        guard let topLevel = checkoutTop ?? (git(["rev-parse", "--is-bare-repository"]) == "true" ? path : nil)
+        else { return nil }
         var remote = "origin"
         if let branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"]), !branch.isEmpty,
            let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"]),

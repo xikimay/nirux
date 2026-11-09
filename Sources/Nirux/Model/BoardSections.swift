@@ -107,18 +107,36 @@ enum BoardSections {
         return remotes
     }
 
-    /// What Board Settings would suggest from `folder`.
+    /// What Board Settings would suggest from `folder`: the remote
+    /// `BoardConfigSuggestions.folder` picks, its URL read again here so
+    /// that git or ssh not answering reads as `.unread`, never as an answer.
     static func pushRemote(at folder: String, gitPath: String = "/usr/bin/git") -> PushRemote {
         guard let read = BoardConfigSuggestions.folder(at: folder, gitPath: gitPath) else { return .unread }
-        if let repository = read.repository {
-            let baseBranch = BoardConfigSuggestions.defaultBranch(of: read.remote, at: read.checkout, gitPath: gitPath)
-            return .gitHub(repository: repository, baseBranch: baseBranch, remote: read.remote)
+        let remote = read.remote
+        let url = WorktreeCleanup.git(
+            ["remote", "get-url", "--push", "--", remote], in: folder, tools: WorktreeCleanup.Tools(gitPath: gitPath), timeout: 10
+        )
+        switch url.status {
+        case 0: break
+        // git remote's own status for a remote that doesn't exist.
+        case 2: return .missing(remote: remote)
+        default: return .unread
         }
-        // Which of the two: the URL tells.
-        guard let url = GitCommand.output(["remote", "get-url", "--push", "--", read.remote], cwd: folder, gitPath: gitPath, timeout: 10)
-        else { return .missing(remote: read.remote) }
-        let host = GitHubRepository(remoteURL: url.trimmingCharacters(in: .whitespacesAndNewlines))?.host
-        return .notGitHub(host: host, remote: read.remote)
+        let trimmed = url.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = GitHubRepository(remoteURL: trimmed) else { return .notGitHub(host: nil, remote: remote) }
+        if parsed.host != "github.com" {
+            guard BoardConfigSuggestions.isSSH(trimmed) else { return .notGitHub(host: parsed.host, remote: remote) }
+            switch SSHHostAlias.resolve(parsed.host) {
+            case nil: return .unread
+            case false?: return .notGitHub(host: parsed.host, remote: remote)
+            case true?: break
+            }
+        }
+        guard let repository = BoardConfigSuggestions.repositoryName(remoteURL: trimmed, resolvingAliases: true) else {
+            return .notGitHub(host: parsed.host, remote: remote)
+        }
+        let baseBranch = BoardConfigSuggestions.defaultBranch(of: remote, at: read.checkout, gitPath: gitPath)
+        return .gitHub(repository: repository, baseBranch: baseBranch, remote: remote)
     }
 
     private final class Results: @unchecked Sendable {

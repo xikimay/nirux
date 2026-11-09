@@ -147,11 +147,12 @@ final class BoardSectionsTests: XCTestCase {
 
     /// Each repository anchor without a config of its own reads what Board
     /// Settings would suggest: its main checkout's branch's push remote
-    /// (origin's push URL; upstream, which main tracks), a bare
-    /// repository's origin, as the URL spells it, with the branch
-    /// `<remote>/HEAD` points to; another host, named (an SSH alias ssh
-    /// doesn't resolve too); no such remote; a git dir git can't read. An
-    /// anchor with a config reads nothing.
+    /// (origin's push URL; upstream, which main tracks; origin when the
+    /// branch pushes to a URL, as `gh pr checkout` sets it), the origin of
+    /// a bare repository or of a git dir apart from its checkout, as the
+    /// URL spells it, with the branch `<remote>/HEAD` points to; another
+    /// host, named (an SSH alias ssh doesn't resolve too); no such remote;
+    /// a git dir git can't read. An anchor with a config reads nothing.
     func testEachAnchorWithoutAConfigReadsWhatBoardSettingsSuggests() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-remotes-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
@@ -166,18 +167,24 @@ final class BoardSectionsTests: XCTestCase {
         _ = try git(["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/trunk"], root + "/fork")
         _ = try git(["config", "branch.main.remote", "upstream"], root + "/fork")
         _ = try git(["config", "branch.main.merge", "refs/heads/trunk"], root + "/fork")
+        try BoardConfigSuggestionsTests.makeRepository(at: root + "/pr", remote: "https://github.com/acme/pr.git")
+        _ = try git(["config", "branch.main.remote", "https://github.com/colleague/pr.git"], root + "/pr")
+        _ = try git(["init", "-q", "-b", "main", "--separate-git-dir=" + root + "/apart.git", root + "/apart"], root)
+        _ = try git(["remote", "add", "origin", "https://github.com/acme/apart.git"], root + "/apart")
         _ = try git(["clone", "-q", "--bare", root + "/front", root + "/bare.git"], root)
         _ = try git(["remote", "set-url", "origin", "https://github.com/acme/bare.git"], root + "/bare.git")
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/back", remote: "git@github-nirux-test:acme/back.git")
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/docs", remote: nil)
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/saved", remote: "https://github.com/acme/saved.git")
         let anchor = { (gitDir: String) in SpaceAnchor(kind: .gitRepository(commonDir: root + "/" + gitDir), name: gitDir) }
-        let names = ["front/.git", "fork/.git", "bare.git", "back/.git", "docs/.git", "saved/.git", "gone/.git"]
+        let names = ["front/.git", "fork/.git", "pr/.git", "apart.git", "bare.git", "back/.git", "docs/.git", "saved/.git", "gone/.git"]
         let context = BoardSections.Context(anchors: names.map(anchor))
         let entries = [Entry(slot: .anchor(commonDir: root + "/saved/.git"), config: config("acme/saved"))]
         XCTAssertEqual(BoardSections.readPushRemotes(BoardSections.sections(entries, context: context)), [
             root + "/front/.git": .gitHub(repository: "Acme/Front", baseBranch: "main", remote: "origin"),
             root + "/fork/.git": .gitHub(repository: "acme/real", baseBranch: "trunk", remote: "upstream"),
+            root + "/pr/.git": .gitHub(repository: "acme/pr", baseBranch: "main", remote: "origin"),
+            root + "/apart.git": .gitHub(repository: "acme/apart", baseBranch: nil, remote: "origin"),
             root + "/bare.git": .gitHub(repository: "acme/bare", baseBranch: nil, remote: "origin"),
             root + "/back/.git": .notGitHub(host: "github-nirux-test", remote: "origin"),
             root + "/docs/.git": .missing(remote: "origin"),
