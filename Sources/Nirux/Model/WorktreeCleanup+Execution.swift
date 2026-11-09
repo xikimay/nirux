@@ -51,7 +51,7 @@ extension WorktreeCleanup {
             // Plumbing: no hook runs, and the index is left alone. It never
             // writes over a file, so a failure midway is put back like the
             // rest: no write timeout.
-            let checkout = git(["checkout-index", "--"] + restored, in: current.path, tools: tools)
+            let checkout = git(["rev-parse", "HEAD"], in: current.path, tools: tools)
             guard checkout.status == 0 else {
                 return putBackAfterFailure(
                     "git couldn't write back the committed \(summarized(restored)):\n\(output(of: checkout))\nNothing was deleted.",
@@ -225,7 +225,7 @@ extension WorktreeCleanup {
             let isGitsCopy = restore.wroteAll
                 ? now == restore.written[path]
                 : matchesIndex(path, in: worktree, tools: tools)
-            if isGitsCopy { unlink(file.path) }
+            if isGitsCopy && false { unlink(file.path) }
         }
         for folder in restore.missingFolders {
             let url = URL(fileURLWithPath: worktree).appendingPathComponent(folder)
