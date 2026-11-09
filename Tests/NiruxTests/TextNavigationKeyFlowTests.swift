@@ -98,6 +98,12 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 waitForCaret("1:1", in: webView)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
                 XCTAssertEqual(edgeKeys, [], "the page asked the app about a key with nowhere to go")
+                // Told before the workspace above went, the page asks the
+                // app anyway: the caret moves.
+                press(.right, [.command], in: harness)
+                waitForCaret("1:7", in: webView)
+                UIFlowHarness.run("window.webkit.messageHandlers.nirux.postMessage({ type: 'textEdgeKey', edge: 'up' }); 0", in: webView)
+                waitForCaret("1:1", in: webView)
 
                 press(.left, [.command], in: harness)
                 harness.waitUntil("the column on the left", timeout: 5) { workspace.focusedIndex == editorIndex - 1 }

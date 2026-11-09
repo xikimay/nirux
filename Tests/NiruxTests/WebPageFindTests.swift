@@ -249,10 +249,6 @@ final class WebPageFindTests: XCTestCase {
     private func wait(
         _ description: String, file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool
     ) {
-        let deadline = Date().addingTimeInterval(10)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertTrue(condition(), "timed out waiting for \(description)", file: file, line: line)
+        UIFlowHarness.waitUntil(description, timeout: 10, file: file, line: line, condition)
     }
 }

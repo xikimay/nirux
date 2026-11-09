@@ -305,7 +305,7 @@ final class UIFlowHarness {
         webView.evaluateJavaScript(script) { _, _ in
             MainActor.assumeIsolated { answer.isAsking = false }
         }
-        spin(until: "the page to run a script", file: file, line: line) { !answer.isAsking }
+        waitUntil("the page to run a script", timeout: 10, file: file, line: line) { !answer.isAsking }
     }
 
     /// Asks `webView`'s page `script` (its value a string) until `matches`
@@ -316,7 +316,8 @@ final class UIFlowHarness {
         file: StaticString = #filePath, line: UInt = #line, matches: (String) -> Bool
     ) {
         let answer = PageAnswer()
-        spin(until: description, file: file, line: line) {
+        let seen = { answer.latest.map { "(the page answered \($0.debugDescription))" } ?? "(no answer)" }
+        waitUntil("\(description) \(seen())", timeout: 10, file: file, line: line) {
             if !answer.isAsking {
                 answer.isAsking = true
                 webView.evaluateJavaScript(script) { result, _ in
@@ -327,18 +328,6 @@ final class UIFlowHarness {
                 }
             }
             return answer.latest.map(matches) == true
-        }
-        if answer.latest.map(matches) != true {
-            XCTFail("the page answered \(answer.latest.map { $0.debugDescription } ?? "nothing")", file: file, line: line)
-        }
-    }
-
-    /// Spins the main run loop until `condition` holds, 10 s at most.
-    private static func spin(until description: String, file: StaticString, line: UInt, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(10)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail("timed out waiting for \(description)", file: file, line: line) }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
     }
 
@@ -486,10 +475,23 @@ final class UIFlowHarness {
         line: UInt = #line,
         _ condition: () -> Bool
     ) -> Bool {
+        Self.waitUntil(description, timeout: timeout, file: file, line: line, condition)
+    }
+
+    /// `waitUntil` for a test without a harness. `description` is read at
+    /// the failure, so it can tell what the test saw last.
+    @discardableResult
+    static func waitUntil(
+        _ description: @autoclosure () -> String,
+        timeout: TimeInterval = 30,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: () -> Bool
+    ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             guard Date() < deadline else {
-                XCTFail("timed out waiting for \(description)", file: file, line: line)
+                XCTFail("timed out waiting for \(description())", file: file, line: line)
                 return false
             }
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
