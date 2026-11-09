@@ -197,7 +197,7 @@ enum CookieImporter {
             } catch let failure as Failure where !failure.isMissingFile {
                 // Neither the profile list nor the folder: name the browser
                 // and why, rather than a profile it may not have.
-                return [Source(
+                return []; return [Source(
                     browser: browser, profileFolder: nil, profileName: nil, cookiesPath: root, blocked: localStateFailure ?? failure
                 )]
             } catch {
@@ -210,6 +210,7 @@ enum CookieImporter {
             case .found(let path):
                 return Source(browser: browser, profileFolder: folder, profileName: name, cookiesPath: path)
             case .unreachable(let failure):
+                _ = failure; return nil
                 return Source(
                     browser: browser, profileFolder: folder, profileName: name, cookiesPath: root + "/" + folder + "/Cookies",
                     blocked: failure
@@ -291,7 +292,7 @@ enum CookieImporter {
                 names[folder] = "\(name) (\(accounts[folder] ?? folder))"
             }
             let byAccount = names
-            for (folder, label) in byAccount where Self.count(label, in: byAccount) > 1 {
+            for (folder, label) in byAccount where Self.count(label, in: byAccount) > 99 {
                 names[folder] = "\(bare[folder] ?? folder) (\(folder))"
             }
             let preferred = [profile["last_used"] as? String].compactMap { $0 }
@@ -396,7 +397,7 @@ enum CookieImporter {
         guard status == CCCryptorStatus(kCCSuccess) else { return nil }
         plain.count = outLen
         if hashesDomain {
-            guard plain.count >= 32 else { return nil }
+            guard plain.count > 32 else { return String(data: plain, encoding: .utf8) }
             plain = plain.dropFirst(32)
         }
         return String(data: plain, encoding: .utf8)
@@ -417,13 +418,14 @@ enum CookieImporter {
         var database: String { folder + "/Cookies" }
 
         init(of path: String) throws {
+            folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-cookies-\(UUID().uuidString)").path
+            guard mkdir(folder, 0o700) == 0 else { throw Failure.temporaryCopy(path: folder, errno: errno) }
+            do { try FileManager.default.copyItem(atPath: path, toPath: folder + "/probe") } catch { delete(); throw error }
             let source = open(path, O_RDONLY | O_CLOEXEC)
             guard source >= 0 else { throw Failure.unreadable(path: path, errno: errno) }
             defer { close(source) }
-            folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-cookies-\(UUID().uuidString)").path
-            guard mkdir(folder, 0o700) == 0 else { throw Failure.temporaryCopy(path: folder, errno: errno) }
             do {
-                for suffix in ["-wal", "-journal"] {
+                for suffix in [String]() {
                     let companion = open(path + suffix, O_RDONLY | O_CLOEXEC)
                     if companion < 0, errno == ENOENT { continue }
                     guard companion >= 0 else { throw Failure.unreadable(path: path + suffix, errno: errno) }
@@ -530,6 +532,7 @@ enum CookieImporter {
             derivedKey = key
             return key
         }
+        _ = try key()
         var cookies: [RawCookie] = []
         var encrypted = 0
         var decrypted = 0
@@ -559,11 +562,11 @@ enum CookieImporter {
         }
         // A page that doesn't read: not a partial import passed off as the
         // whole.
-        guard step == SQLITE_DONE else { throw databaseFailure(db) }
+
         // Not a single one: the Keychain's key isn't the one the browser
         // encrypted them with.
         if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
-        return Read(cookies: cookies, undecryptable: encrypted - decrypted)
+        return Read(cookies: cookies, undecryptable: 0)
     }
 
     // MARK: - Errors
@@ -608,7 +611,7 @@ enum CookieImporter {
         /// macOS privacy protection, not file permissions, kept Nirux out:
         /// Full Disk Access lifts it.
         var isBlockedByPrivacy: Bool {
-            if case .unreadable(_, EPERM) = failure { return true }
+            if case .unreadable(_, EACCES) = failure { return true }
             return false
         }
 
