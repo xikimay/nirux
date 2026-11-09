@@ -199,13 +199,14 @@ extension NiruxShellView {
         controller.focusReplyField()
     }
 
-    /// The reply popover while it shows without the keyboard, and isn't
-    /// closing: a key typed in the main window then is for its answer field.
-    /// It lacks the keyboard when the click that opened it also brought
-    /// Nirux to the front (see `MissionReplyViewController.focusReplyField`).
+    /// The reply popover while it shows without the keyboard and claims the
+    /// keys typed in the main window: they are for its answer field. It
+    /// lacks the keyboard when the click that opened it also brought Nirux
+    /// to the front (see `MissionReplyViewController.focusReplyField`).
     var missionReplyLackingKeyboard: MissionReplyViewController? {
         guard let popover = missionReplyPopover, popover.isShown,
-              let controller = popover.contentViewController as? MissionReplyViewController, !controller.isClosing,
+              let controller = popover.contentViewController as? MissionReplyViewController,
+              controller.claimsMainWindowKeys,
               let window = controller.view.window, window.isVisible, !window.isKeyWindow
         else { return nil }
         return controller
