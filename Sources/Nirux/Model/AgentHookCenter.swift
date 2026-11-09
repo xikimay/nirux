@@ -295,7 +295,7 @@ final class AgentHookCenter {
         guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty,
               let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused)
         else { return }
-        _ = reason
+        resolution.column.notifyAgentAttention(reason: reason)
     }
 
     /// Whether the sidebar holds a request its receiver waits on:

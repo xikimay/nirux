@@ -401,6 +401,10 @@ struct AgentStatusMachine {
     /// read it (Nirux types Mission messages, Telegram sends prompts, a
     /// `claude -p` ends its session as soon as its turn).
     private mutating func settleQuietTurnEnd(isUserFocused: Bool, outcome: inout AgentHookOutcome) {
+        if case .pending = quietTurnEnd, !isUserFocused {
+            outcome.attention = .turnFinished
+            outcome.firedAttention = true
+        }
         quietTurnEnd = nil
     }
 
@@ -409,10 +413,11 @@ struct AgentStatusMachine {
         quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt)
     }
 
-    /// The column shows a turn end that hasn't alerted, and nothing else
-    /// waits: no dialog, no failed turn, no other attention since.
+    /// The column shows a turn end that hasn't alerted (`attentionReason`
+    /// is nil out of attention), and nothing else waits: no dialog, no
+    /// failed turn, no other attention since.
     var isQuietTurnEnd: Bool {
-        quietTurnEnd != nil && state == .needsAttention && attentionReason == .turnFinished
+        quietTurnEnd != nil && attentionReason == .turnFinished
     }
 
     /// The verdict on the turn end `request` asked about: the reason to
@@ -431,11 +436,12 @@ struct AgentStatusMachine {
         guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
         // Settled, whichever way: nothing is left to alert for later.
         quietTurnEnd = nil
-        guard lastAttentionReason == .turnFinished, openDialogs.isEmpty, turnFailure == nil else { return nil }
+        guard openDialogs.isEmpty, turnFailure == nil else { return nil }
         let reason: AgentAttentionReason
         switch verdict {
         case .done:
-            reason = .turnFinished
+            quietTurnEnd = .done
+            return nil
         case .asks:
             reason = .askedInReply(TurnEndText.lastLine(of: request.message))
         case .unknown:

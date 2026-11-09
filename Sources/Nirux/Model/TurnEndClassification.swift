@@ -69,15 +69,14 @@ enum TurnEndText {
     /// may have lost the start of a block, never its end.
     static func lastLine(of message: String, maxLength: Int = 200) -> String? {
         var inFence = false
-        var last: String?
-        for line in message.split(whereSeparator: \.isNewline) {
+        for line in message.split(whereSeparator: \.isNewline).reversed() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 inFence.toggle()
                 continue
             }
-            if !inFence, let cleaned = AgentText.clean(String(line), maxLength: maxLength) { last = cleaned }
+            if !inFence, let cleaned = AgentText.clean(String(line), maxLength: maxLength) { return cleaned }
         }
-        return last
+        return nil
     }
 }
