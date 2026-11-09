@@ -51,6 +51,7 @@ enum GitHubBaseRemote {
         let remotes = Self.remotes(listing: listing.stdout, resolutions: resolutions.stdout)
         guard let first = remotes.first else { return .noRemote }
         for remote in remotes {
+            if let repository = remote.resolvedRepository { return .gitHub(repository: repository, remote: remote.name) }
             switch Self.repository(of: remote.url, resolveAlias: resolveAlias) {
             // A repository gh-resolved names counts on a GitHub remote only,
             // as gh drops remotes on hosts it doesn't know first.
@@ -87,7 +88,7 @@ enum GitHubBaseRemote {
             // `name\turl (fetch)`, then ` [blob:none]` in a partial clone.
             guard let tab = line.firstIndex(of: "\t"),
                   let fetch = line.range(of: " (fetch)", range: tab..<line.endIndex),
-                  fetch.upperBound == line.endIndex || line[fetch.upperBound...].hasPrefix(" [")
+                  fetch.upperBound == line.endIndex
             else { continue }
             let name = String(line[..<tab])
             if urls[name] == nil { urls[name] = String(line[line.index(after: tab)..<fetch.lowerBound]) }
