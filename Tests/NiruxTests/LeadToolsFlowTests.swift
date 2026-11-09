@@ -115,17 +115,13 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
-    /// The user answers in the question's popover by typing, whatever had
-    /// the keyboard. A click on the row from another app leaves the popover
-    /// without it (once that click has brought Nirux to the front, AppKit
-    /// gives the keyboard back to the main window): the keys then come to
-    /// the main window, where the focused terminal took them. They go to the
-    /// answer field: typing, ⌘↩ and Esc work the first time. The test
-    /// process never has a key window, so its keys come as they did then
-    /// (in the app, a ⌘-chord goes back to AppKit once the popover has the
-    /// keyboard). Both a question the Lead hands over and one that comes to
-    /// the user directly, its parent gone. Once the popover closed, or a
-    /// panel took the keyboard, keys go to the terminal again.
+    /// The user answers in the question's popover by typing. A popover
+    /// with the keyboard leaves the main window key: AppKit gives that
+    /// window the popover's field as first responder and hands it the
+    /// window's keys, which the key interceptor sent to the focused
+    /// terminal instead. Typing, ⌘↩ and Esc reach the popover, for a
+    /// question the Lead hands over and one that comes to the user
+    /// directly, its parent gone; once it closed, keys go to the terminal.
     func testKeysTypedWhileTheReplyPopoverShowsGoToItsField() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -145,26 +141,23 @@ final class LeadToolsFlowTests: XCTestCase {
             if !shell.isSidebarExpanded { harness.runPaletteCommand("Show/Hide Sidebar") }
             harness.waitUntil("the sidebar to expand") { shell.sidebar.isExpanded }
 
-            // A terminal has the focus: without the popover, it takes the
-            // keys (a key the interceptor let through would reach the popover).
-            @MainActor func assertATerminalTakesTheKeys() {
+            // The focused terminal, which takes the keys the popover doesn't
+            // (a key the interceptor let through could reach the popover).
+            @MainActor func terminal() throws -> PtySession {
                 let focused = shell.activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }
-                XCTAssertNotNil(focused?.pty, "the focused column is a terminal")
+                return try XCTUnwrap(focused?.pty, "the focused column is a terminal")
             }
 
             try harness.withApp {
                 let handed = try ask("Keep the old date= parameter?", from: mission)
                 XCTAssertFalse(try call(LeadTools.askUser, ["task": "Export CSV", "why": "Only the user knows."], lead: lead, in: harness).isError)
-                assertATerminalTakesTheKeys()
+                var pty = try terminal()
+                let untyped = pty.lastKeystrokeAt
                 var reply = try openReply(to: task, in: harness)
-                // As the click from another app goes: the popover takes the
-                // keyboard, then the main window gets it back. The test
-                // process has no key window, so notifications stand for both.
-                NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: reply.controller.view.window)
-                NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: harness.window)
                 harness.press("o", keyCode: 0x1F, [])
                 harness.press("k", keyCode: 0x28, [])
                 XCTAssertEqual(reply.controller.replyView?.string, "ok")
+                XCTAssertEqual(pty.lastKeystrokeAt, untyped, "the terminal got none of it")
                 harness.press("\r", keyCode: 0x24, [.command])
                 XCTAssertEqual(MissionStore.shared.response(to: handed.id)?.message, "ok")
                 harness.waitUntil("the popover to close", timeout: 5) { !reply.popover.isShown }
@@ -177,24 +170,14 @@ final class LeadToolsFlowTests: XCTestCase {
                 let column = try XCTUnwrap(task.columns.first)
                 let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
                 XCTAssertEqual(row?.handOff, .parentClosed)
-                assertATerminalTakesTheKeys()
+                pty = try terminal()
                 reply = try openReply(to: task, in: harness)
                 harness.press("\u{1b}", keyCode: 0x35, [])
                 harness.waitUntil("Esc to close the popover", timeout: 5) { !reply.popover.isShown }
+                let beforeClosed = pty.lastKeystrokeAt
                 harness.press("x", keyCode: 0x07, [])
                 XCTAssertEqual(reply.controller.replyView?.string, "", "closed, it takes no key")
-
-                // A panel took the keyboard (Search Everywhere, Session
-                // History), then gave it to the main window: the user went
-                // there. The test process has no key window, so the
-                // notification stands for the panel becoming key.
-                reply = try openReply(to: task, in: harness)
-                let panel = NSPanel(contentRect: .zero, styleMask: [], backing: .buffered, defer: true)
-                panel.isReleasedWhenClosed = false
-                NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: panel)
-                harness.press("z", keyCode: 0x06, [])
-                XCTAssertEqual(reply.controller.replyView?.string, "", "a panel had the keyboard, it takes no key")
-                XCTAssertTrue(reply.popover.isShown)
+                XCTAssertGreaterThan(pty.lastKeystrokeAt, beforeClosed, "the terminal got it")
 
                 reply = try openReply(to: task, in: harness)
                 harness.press(";", keyCode: 0x29, [])
@@ -205,7 +188,7 @@ final class LeadToolsFlowTests: XCTestCase {
     }
 
     /// Clicks the question row on `task`'s card, as the user does: the
-    /// popover it opens, which doesn't have the keyboard.
+    /// popover it opens.
     private func openReply(
         to task: WorkspaceState, in harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line
     ) throws -> (popover: NSPopover, controller: MissionReplyViewController) {
@@ -229,7 +212,7 @@ final class LeadToolsFlowTests: XCTestCase {
         let controller = try XCTUnwrap(popover.contentViewController as? MissionReplyViewController, file: file, line: line)
         XCTAssertTrue(popover.isShown, file: file, line: line)
         XCTAssertEqual(controller.replyView?.string, "", file: file, line: line)
-        XCTAssertFalse(controller.view.window?.isKeyWindow ?? true, "the keys come to the main window", file: file, line: line)
+        XCTAssertTrue(harness.window.firstResponder === controller.replyView, "the main window's keys go to the field", file: file, line: line)
         // Esc closes it at once, without waiting on an animation.
         popover.animates = false
         return (popover, controller)
