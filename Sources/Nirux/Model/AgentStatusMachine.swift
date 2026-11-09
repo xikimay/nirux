@@ -19,8 +19,24 @@ import Foundation
 /// owns one instance and feeds it reads, writes, resizes and hook events.
 struct AgentStatusMachine {
     private(set) var state: AgentStatus = .idle {
-        // Leaving attention ends the episode: the next one alerts again.
-        didSet { if state != .needsAttention { attentionAlerted = false } }
+        // Leaving attention ends the episode: the next one alerts again,
+        // and a quiet turn end is over.
+        didSet {
+            if state != .needsAttention {
+                attentionAlerted = false
+                quietTurnEnd = nil
+            }
+        }
+    }
+    /// A Claude turn end that hasn't alerted: its verdict is on its way
+    /// (`AgentHookOutcome.turnEnd`), or it came back done. The column
+    /// says "done" without counting in the Dock badge; see
+    /// `isQuietTurnEnd`.
+    private(set) var quietTurnEnd: QuietTurnEnd?
+
+    enum QuietTurnEnd: Equatable {
+        case pending(turnEndedAt: TimeInterval)
+        case done
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
@@ -352,7 +368,49 @@ struct AgentStatusMachine {
             : nil
         let reason = turnFailure?.reason ?? .turnFinished
         outcome.attention = reason
+        // Its final message may ask something or not: the alert waits for
+        // the verdict (`applyTurnEndVerdict`). Nobody needs one while the
+        // user looks at the column, and a dialog still open (a subagent's)
+        // waits on the user whatever the message says.
+        if turnFailure == nil, openDialogs.isEmpty, event.kind == .claude, let message = event.finalMessage,
+           !isUserFocused {
+            _ = block(for: reason, isUserFocused: false, alert: false)
+            quietTurnEnd = .pending(turnEndedAt: now)
+            outcome.turnEnd = TurnEndRequest(message: message, turnEndedAt: now)
+            return
+        }
         outcome.firedAttention = block(for: reason, isUserFocused: isUserFocused)
+    }
+
+    /// A turn end that hasn't alerted, and nothing else waits: no dialog,
+    /// no failed turn, no other attention since.
+    var isQuietTurnEnd: Bool {
+        quietTurnEnd != nil && attentionReason == .turnFinished
+    }
+
+    /// The verdict on the turn end `request` asked about: the reason to
+    /// alert with, or nil. A turn that asks alerts, amber; one the
+    /// classifier couldn't read alerts as every turn end did; one that's
+    /// done stays quiet. Dropped when the column has left that turn end (a
+    /// new prompt, a later turn end, another attention, the user looked).
+    mutating func applyTurnEndVerdict(
+        _ verdict: TurnEndVerdict,
+        for request: TurnEndRequest,
+        isUserFocused: Bool
+    ) -> AgentAttentionReason? {
+        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt), isQuietTurnEnd else { return nil }
+        let reason: AgentAttentionReason
+        switch verdict {
+        case .done:
+            quietTurnEnd = .done
+            return nil
+        case .asks:
+            reason = .askedInReply(TurnEndText.lastLine(of: request.message))
+        case .unknown:
+            reason = .turnFinished
+        }
+        quietTurnEnd = nil
+        return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
     }
 
     /// A main-thread tool event: the failed turn is behind.
@@ -813,6 +871,7 @@ struct AgentStatusMachine {
     /// New shell in the same terminal (start/restart) — everything resets.
     mutating func reset() {
         state = .idle
+        quietTurnEnd = nil
         hookWorking = false
         hookKind = nil
         pendingDialogs.removeAll()

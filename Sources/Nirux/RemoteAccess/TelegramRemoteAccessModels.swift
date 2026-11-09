@@ -49,6 +49,7 @@ enum RemoteDialogText {
         case .permission: return "Agent needs permission"
         case .question: return "Agent has a question"
         case .turnFinished: return "Agent is waiting for input"
+        case .askedInReply: return "Agent asks you something"
         case .message: return "Agent needs attention"
         case .apiError: return "Agent stopped on an API error"
         case .exitedMidTurn: return "Agent exited mid-turn"

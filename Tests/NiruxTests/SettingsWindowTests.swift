@@ -70,7 +70,8 @@ final class SettingsWindowTests: XCTestCase {
                 }),
                 ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
                 ("telegramNotifyOnCompletion", { try self.click(app.settingsTelegramCompletionCheckbox) }),
-                ("telegramNotifyOnAttention", { try self.click(app.settingsTelegramAttentionCheckbox) })
+                ("telegramNotifyOnAttention", { try self.click(app.settingsTelegramAttentionCheckbox) }),
+                ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) })
             ]
             for step in steps {
                 let before = try savedSettings()
@@ -110,6 +111,14 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertFalse(controller.notifyOnCompletion)
             try click(app.settingsTelegramAttentionCheckbox)
             XCTAssertFalse(controller.notifyOnAttention)
+
+            let classifier = AgentHookCenter.shared.turnEndClassifier
+            defer { AgentHookCenter.shared.turnEndClassifier = classifier }
+            XCTAssertEqual(app.settingsAlertOnlyWhenClaudeAsksCheckbox?.state, .on)
+            try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
+            XCTAssertNil(AgentHookCenter.shared.turnEndClassifier, "every turn end alerts")
+            try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
+            XCTAssertNotNil(AgentHookCenter.shared.turnEndClassifier)
         }
     }
 

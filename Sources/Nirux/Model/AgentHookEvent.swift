@@ -83,6 +83,12 @@ struct AgentHookEvent: Codable, Equatable {
     /// pasted went to Claude (docs/branch-review.md, section 6.2). Only
     /// that line is kept of the prompt.
     let reviewHeader: String?
+    /// On a main-thread Stop, Claude's final message
+    /// (`last_assistant_message`), as `TurnEndText.excerpt` bounds it: what
+    /// tells a turn that asks the user something from one that is done
+    /// (see `TurnEndVerdict`). Nil elsewhere, from Claude versions without
+    /// it, and when the app strips it (the option is off).
+    var finalMessage: String?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -148,6 +154,9 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = name == .userPromptSubmit
                 ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
                 : nil
+            finalMessage = name == .stop && agentID == nil
+                ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
+                : nil
             reviewPasses = switch name {
             case .userPromptSubmit:
                 (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)
@@ -188,6 +197,7 @@ struct AgentHookEvent: Codable, Equatable {
             transcriptPath = nil
             reviewPasses = nil
             reviewHeader = nil
+            finalMessage = nil
         }
     }
 
@@ -239,6 +249,7 @@ struct AgentHookEvent: Codable, Equatable {
         transcriptPath: String? = nil,
         reviewPasses: [String]? = nil,
         reviewHeader: String? = nil,
+        finalMessage: String? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -264,6 +275,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.transcriptPath = transcriptPath
         self.reviewPasses = reviewPasses
         self.reviewHeader = reviewHeader
+        self.finalMessage = finalMessage
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText
@@ -418,9 +430,11 @@ enum AgentHookCLI {
         env["NIRUX_AGENT_UUID"]?.isEmpty == false
     }
 
-    /// Append one JSON line. O_APPEND keeps concurrent writers (several
-    /// agents across columns) from interleaving mid-line for lines under
-    /// PIPE_BUF; lines are small.
+    /// Append one JSON line in one `write`. O_APPEND keeps concurrent
+    /// writers (several agents across columns) from interleaving mid-line:
+    /// the file system serializes writes to one file (PIPE_BUF bounds
+    /// pipes, not files). Lines are small, a Stop's final message excerpt
+    /// (`TurnEndText.excerpt`, 3,000 characters) the largest.
     private static func append(_ event: AgentHookEvent) {
         guard var line = try? JSONEncoder().encode(event) else { return }
         line.append(0x0A) // \n

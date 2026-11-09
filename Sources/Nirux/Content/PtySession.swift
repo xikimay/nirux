@@ -357,6 +357,19 @@ final class PtySession: @unchecked Sendable {
     /// Why the agent waits on the user, while it does.
     var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
 
+    /// A Claude turn end that hasn't alerted (see
+    /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
+    var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
+
+    /// See `AgentStatusMachine.applyTurnEndVerdict`.
+    func applyTurnEndVerdict(
+        _ verdict: TurnEndVerdict,
+        for request: TurnEndRequest,
+        isUserFocused: Bool
+    ) -> AgentAttentionReason? {
+        state.machine.applyTurnEndVerdict(verdict, for: request, isUserFocused: isUserFocused)
+    }
+
     /// The oldest dialog (permission, question) the agent may be showing —
     /// even while the column is focused and reads as idle.
     var pendingAgentDialog: AgentPermissionRequest? { state.machine.pendingDialogs.first }

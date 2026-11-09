@@ -202,11 +202,11 @@ extension NiruxShellView {
         let attentionCount = workspaces.filter { workspace in
             workspace.hasNotification
                 || workspace.columns.contains { column in
-                    let question = missionQuestions[ObjectIdentifier(column)]
-                    if question?.handOff != nil { return true }
-                    guard let pty = column.pty, pty.cachedAgentState == .needsAttention else { return false }
-                    // A child that asked its parent ended its turn to wait.
-                    return question == nil || AttentionSignal.of(pty.agentAttentionReason) != .finished
+                    Self.countsInDockBadge(
+                        agentState: column.pty?.cachedAgentState, reason: column.pty?.agentAttentionReason,
+                        isQuietTurnEnd: column.pty?.isQuietTurnEnd ?? false,
+                        missionQuestion: missionQuestions[ObjectIdentifier(column)]
+                    )
                 }
         }.count
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
@@ -238,6 +238,21 @@ extension NiruxShellView {
         edgeGlowBottom.show(Self.alert(in: infos.dropFirst(activePosition + 1).flatMap(\.columns)))
 
         updateAttentionBorders(infos: infos)
+    }
+
+    /// Whether a column counts in the Dock badge: its agent waits on the
+    /// user. Not a Claude turn end that hasn't alerted (its verdict is on
+    /// its way, or it found the turn done), nor a Mission child that ended
+    /// its turn to wait on its parent.
+    static func countsInDockBadge(
+        agentState: AgentStatus?,
+        reason: AgentAttentionReason?,
+        isQuietTurnEnd: Bool,
+        missionQuestion: SidebarMissionQuestion?
+    ) -> Bool {
+        if missionQuestion?.handOff != nil { return true }
+        guard agentState == .needsAttention, !isQuietTurnEnd else { return false }
+        return missionQuestion == nil || reason?.isTurnEnd != true
     }
 
     /// The most urgent wait or error among `columns` while the user looks

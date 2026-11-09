@@ -394,6 +394,10 @@ struct PersistedSettings: Codable {
     var telegramPairedChatID: Int64?
     var telegramNotifyOnCompletion: Bool = true
     var telegramNotifyOnAttention: Bool = true
+    /// A Claude turn end alerts (banner, Dock) only when its final message
+    /// asks something (see `HaikuTurnEndClassifier`). On by default:
+    /// missing decodes to true.
+    var alertOnlyWhenClaudeAsks: Bool = true
     /// Last update claimed before execution, giving prompt delivery
     /// at-most-once semantics across app restarts.
     var telegramLastUpdateID: Int64?
@@ -461,6 +465,7 @@ struct PersistedSettings: Codable {
         case telegramPairedChatID
         case telegramNotifyOnCompletion
         case telegramNotifyOnAttention
+        case alertOnlyWhenClaudeAsks
         case telegramLastUpdateID
         case stuckAgentMinutes
         case onboardingChecklist
@@ -500,6 +505,7 @@ struct PersistedSettings: Codable {
         telegramNotifyOnAttention = try container.decodeIfPresent(
             Bool.self, forKey: .telegramNotifyOnAttention
         ) ?? true
+        alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
         telegramLastUpdateID = try container.decodeIfPresent(Int64.self, forKey: .telegramLastUpdateID)
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         // A value from a newer build must not make the whole state file
@@ -535,6 +541,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(telegramPairedChatID, forKey: .telegramPairedChatID)
         try container.encode(telegramNotifyOnCompletion, forKey: .telegramNotifyOnCompletion)
         try container.encode(telegramNotifyOnAttention, forKey: .telegramNotifyOnAttention)
+        try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
         try container.encodeIfPresent(telegramLastUpdateID, forKey: .telegramLastUpdateID)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encodeIfPresent(

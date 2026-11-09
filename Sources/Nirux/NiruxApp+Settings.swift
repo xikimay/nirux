@@ -226,10 +226,22 @@ extension NiruxApp {
         )
         attention.state = current.telegramNotifyOnAttention ? .on : .off
         settingsTelegramAttentionCheckbox = attention
+        let onlyAsks = SettingsForm.checkbox(
+            "Alert only when Claude asks something", target: self, action: #selector(settingsAlertOnlyWhenClaudeAsksChanged(_:))
+        )
+        onlyAsks.state = current.alertOnlyWhenClaudeAsks ? .on : .off
+        settingsAlertOnlyWhenClaudeAsksCheckbox = onlyAsks
 
         return SettingsForm.pane([
             [
                 SettingsForm.header("On this Mac"),
+                onlyAsks,
+                SettingsForm.hint(
+                    "When a Claude Code turn ends, Haiku reads its last message (claude -p, on a Claude "
+                        + "subscription only) and Nirux alerts only if it asks you something. When that check "
+                        + "can't run, the turn alerts. Codex and other agents alert at every turn end.",
+                    under: onlyAsks
+                ),
                 SettingsForm.hint(
                     "Banners and sounds, shown while Nirux is in the background, follow System Settings › "
                         + "Notifications › Nirux."
@@ -461,6 +473,20 @@ extension NiruxApp {
             shell?.releaseAllPermissionApprovals()
             shell?.updateSidebar()
         }
+    }
+
+    @objc func settingsAlertOnlyWhenClaudeAsksChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.alertOnlyWhenClaudeAsks = enabled }) else { return }
+        AgentHookCenter.shared.turnEndClassifier = Self.turnEndClassifier(enabled: enabled)
+    }
+
+    static func currentAlertOnlyWhenClaudeAsks() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).alertOnlyWhenClaudeAsks
+    }
+
+    static func turnEndClassifier(enabled: Bool) -> (any TurnEndClassifier)? {
+        enabled ? HaikuTurnEndClassifier.shared : nil
     }
 
     // MARK: - Telegram

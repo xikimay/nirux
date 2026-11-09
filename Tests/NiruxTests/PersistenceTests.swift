@@ -566,6 +566,18 @@ extension PersistedStateCodingTests {
         XCTAssertFalse(json.localizedCaseInsensitiveContains("token"))
     }
 
+    /// On for every install, the ones that predate it too; off survives.
+    func testAlertOnlyWhenClaudeAsksIsOnUnlessTurnedOff() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.alertOnlyWhenClaudeAsks)
+        XCTAssertTrue(PersistedSettings().alertOnlyWhenClaudeAsks)
+
+        var settings = PersistedSettings()
+        settings.alertOnlyWhenClaudeAsks = false
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(decoded.alertOnlyWhenClaudeAsks)
+    }
+
     func testLegacySettingsDefaultTelegramRemoteAccessOff() throws {
         let json = Data("""
         { "claudeLaunchMode": "plan", "claudeNoFlicker": true }

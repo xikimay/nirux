@@ -54,6 +54,13 @@ final class AgentHookCenter {
     var approvalsEnabled = false
     /// Where sidebar decisions go; tests point it at a temporary directory.
     var approvalChannel: () -> PermissionApprovalChannel = { .standard }
+    /// Reads Claude turn ends' final messages (Settings → Notifications):
+    /// only a turn that asks something alerts. Nil: every turn end alerts,
+    /// and the messages are dropped as they arrive.
+    var turnEndClassifier: (any TurnEndClassifier)?
+    /// A verdict changed a column (see `applyTurnEndVerdict`): the sidebar
+    /// and the Dock badge must follow.
+    var onTurnEndVerdict: (() -> Void)?
     private var lastApprovalSweep: TimeInterval = 0
 
     private var dirSource: DispatchSourceFileSystemObject?
@@ -185,6 +192,8 @@ final class AgentHookCenter {
     /// of the drain — one process-table scan per burst, not per event.
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         var event = event
+        // Nothing will read it.
+        if turnEndClassifier == nil { event.finalMessage = nil }
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
         var claudeSessionAgent: ForegroundProcess?
@@ -249,12 +258,43 @@ final class AgentHookCenter {
         if outcome.firedAttention, let resolution {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
+        if let request = outcome.turnEnd, let resolution, let agentUUID = event.agentUUID {
+            classifyTurnEnd(
+                request, agentUUID: agentUUID,
+                waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
+            )
+        }
         return resolution.map {
             AppliedEvent(
                 event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,
                 claudeSessionAgent: claudeSessionAgent
             )
         }
+    }
+
+    /// Asks the classifier about a turn end, then applies its verdict. A
+    /// Mission child that asked its parent before ending its turn waits on
+    /// it, not on the user: done, as far as the user is concerned.
+    func classifyTurnEnd(_ request: TurnEndRequest, agentUUID: String, waitsOnParent: Bool) {
+        guard !waitsOnParent, let classifier = turnEndClassifier else {
+            applyTurnEndVerdict(waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let verdict = await classifier.classify(request.message)
+            self?.applyTurnEndVerdict(verdict, for: request, agentUUID: agentUUID)
+        }
+    }
+
+    /// The verdict on a turn end, applied to its column found again (the
+    /// user may look at it now): an alert when the turn asks something, or
+    /// when the classifier couldn't tell.
+    func applyTurnEndVerdict(_ verdict: TurnEndVerdict, for request: TurnEndRequest, agentUUID: String) {
+        guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty else { return }
+        if let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused) {
+            resolution.column.notifyAgentAttention(reason: reason)
+        }
+        onTurnEndVerdict?()
     }
 
     /// Whether the sidebar holds a request its receiver waits on:

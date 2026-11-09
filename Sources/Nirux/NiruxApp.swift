@@ -23,6 +23,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsTelegramEnabledCheckbox: NSButton?
     weak var settingsTelegramTokenField: NSSecureTextField?
     weak var settingsTelegramCompletionCheckbox: NSButton?
+    weak var settingsAlertOnlyWhenClaudeAsksCheckbox: NSButton?
     weak var settingsTelegramAttentionCheckbox: NSButton?
     weak var settingsTelegramStatusLabel: NSTextField?
     weak var settingsTelegramPairButton: NSButton?
@@ -166,6 +167,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         let hooks = AgentHookCenter.shared
         // Before the backlog replay in start(): it releases what it can't hold.
         hooks.applySidebarApprovals(enabled: NiruxShellView.currentSidebarApprovalsEnabled())
+        hooks.turnEndClassifier = Self.turnEndClassifier(enabled: Self.currentAlertOnlyWhenClaudeAsks())
+        hooks.onTurnEndVerdict = { [weak shellView] in
+            shellView?.updateSidebar()
+        }
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }
