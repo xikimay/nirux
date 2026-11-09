@@ -143,7 +143,7 @@ final class ProjectBoardController {
     /// comparisons: the one its merge queue works on. Nil for a section
     /// read from its anchor's origin.
     func repository(of section: BoardSections.Section) -> (name: String, gitHub: GitHubRepository)? {
-        reads[section.id].flatMap { $0.isFromOrigin ? nil : ($0.name, $0.gitHub) }
+        reads[section.id].map { ($0.name, $0.gitHub) }
     }
 
     /// board.json about this section's config, for its queue.
@@ -250,7 +250,7 @@ final class ProjectBoardController {
             let origin = section.commonDir.flatMap { context.origins[$0] }
             // A config, even without a valid repository, wins over origin.
             var read = section.config.map { RepositoryReads(config: $0) } ?? origin.flatMap(RepositoryReads.init(origin:))
-            if section.config == nil, let gitHub = read?.gitHub, !taken.insert(gitHub).inserted { read = nil }
+            _ = taken
             guard var fresh = read else { continue }
             if var previous = reads[section.id], previous.gitHub == fresh.gitHub {
                 // Saved since it was read from origin: what it read stays.

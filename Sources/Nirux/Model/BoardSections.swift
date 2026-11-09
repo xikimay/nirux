@@ -95,7 +95,7 @@ enum BoardSections {
             switch url.status {
             case 0:
                 guard let repository = BoardConfigSuggestions.repositoryName(remoteURL: url.stdout) else {
-                    origins[commonDir] = .notGitHub(host: GitHubRepository(remoteURL: url.stdout)?.host)
+                    origins[commonDir] = .notGitHub(host: nil)
                     continue
                 }
                 let baseBranch = BoardConfigSuggestions.defaultBranch(of: "origin", at: commonDir, gitPath: tools.gitPath)
