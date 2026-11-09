@@ -17,8 +17,13 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
 
     /// A full model name, not an alias that would move to the next model.
     static let model = "claude-haiku-5-5"
-    /// Measured p90 under load: 3 s.
-    static let timeout: TimeInterval = 20
+    /// Measured p90 under load: 3 s. Past it the turn alerts.
+    static let timeout: TimeInterval = 12
+    /// Runs in a row without a verdict after which the classifier rests
+    /// for `missingSetupLifetime` (every turn end alerting at once), rather
+    /// than make each one wait for its timeout: an outage, a network, a
+    /// model the account can't use.
+    static let failuresBeforeRest = 3
     /// Runs at once. A turn end past it alerts at once: several agents
     /// ending their turns in the same seconds is rare.
     static let maxConcurrentRuns = 4
@@ -56,6 +61,7 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     private var runningCount = 0
     private var cachedSetup: (setup: Setup, checkedAt: TimeInterval)?
     private var isRefreshingSetup = false
+    private var failuresInARow = 0
     /// Held while the setup is checked: one check at a time.
     private let setupLock = NSLock()
     private let checkSetup: @Sendable () -> Setup
@@ -95,8 +101,21 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// Blocks: call it off the main thread.
     private func classifyNow(_ message: String) -> TurnEndVerdict {
         guard case .ready(let cli) = setup() else { return .unknown }
-        let input = Data("<message>\n\(message)\n</message>".utf8)
-        return Self.verdict(from: runProcess(cli, Self.arguments(), input))
+        let verdict = Self.verdict(from: runProcess(cli, Self.arguments(), Self.input(for: message)))
+        lock.withLock {
+            failuresInARow = verdict == .unknown ? failuresInARow + 1 : 0
+            if failuresInARow >= Self.failuresBeforeRest {
+                failuresInARow = 0
+                cachedSetup = (.unavailable, now())
+            }
+        }
+        return verdict
+    }
+
+    /// The message between tags it can't close itself.
+    static func input(for message: String) -> Data {
+        let fenced = message.replacingOccurrences(of: "</message>", with: "</ message>", options: .caseInsensitive)
+        return Data("<message>\n\(fenced)\n</message>".utf8)
     }
 
     private func reserveRun() -> Bool {
@@ -157,12 +176,14 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
             + ["--max-budget-usd", "0.05", "--output-format", "json", "--system-prompt", systemPrompt]
     }
 
-    /// `ClaudeCLI.environment`'s, without thinking: Claude Code turns it on
-    /// for Haiku, which then spends thousands of tokens on one word.
+    /// `ClaudeCLI.environment`'s, without thinking (Claude Code turns it on
+    /// for Haiku, which then spends thousands of tokens on one word) and
+    /// without updates: a run every turn end mustn't update `claude`.
     static func environment(for cli: BranchReview.ClaudeCLI, from base: [String: String] = ProcessInfo.processInfo.environment)
         -> [String: String] {
         var environment = cli.environment(from: base)
         environment["MAX_THINKING_TOKENS"] = "0"
+        environment["DISABLE_AUTOUPDATER"] = "1"
         return environment
     }
 

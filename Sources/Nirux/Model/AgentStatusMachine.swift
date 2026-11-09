@@ -226,7 +226,7 @@ struct AgentStatusMachine {
     ) {
         switch event.name {
         case .sessionStart:
-            startConversation(event)
+            startConversation(event, isUserFocused: isUserFocused, outcome: &outcome)
         case .userPromptSubmit:
             startTurn(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .preToolUse:
@@ -282,7 +282,7 @@ struct AgentStatusMachine {
             applyTurnEnd(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .sessionEnd:
             endTurn()
-            quietTurnEnd = nil
+            settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -319,14 +319,7 @@ struct AgentStatusMachine {
         hookTurnInFlight = true
         turnFailure = nil
         if event.agentID == nil {
-            // A prompt came before the verdict on the last turn end: it
-            // alerts as every turn end did. The user may not have read it:
-            // Nirux types Mission messages, Telegram sends prompts.
-            if case .pending = quietTurnEnd, !isUserFocused {
-                outcome.attention = .turnFinished
-                outcome.firedAttention = true
-            }
-            quietTurnEnd = nil
+            settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -334,7 +327,11 @@ struct AgentStatusMachine {
         resumeUnlessBlocked()
     }
 
-    private mutating func startConversation(_ event: AgentHookEvent) {
+    private mutating func startConversation(
+        _ event: AgentHookEvent,
+        isUserFocused: Bool,
+        outcome: inout AgentHookOutcome
+    ) {
         hookKind = event.kind.rawValue
         // Auto (mid-turn) or /compact: same conversation, no turn ends.
         guard event.source != "compact" else { return }
@@ -342,7 +339,7 @@ struct AgentStatusMachine {
         // whatever dialogs the old one showed are gone. `/clear` took what
         // was typed at the prompt, but fires no UserPromptSubmit.
         endTurn()
-        quietTurnEnd = nil
+        settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -396,6 +393,24 @@ struct AgentStatusMachine {
         outcome.firedAttention = block(for: reason, isUserFocused: isUserFocused)
     }
 
+    /// The last turn end is behind: a prompt went in, the conversation
+    /// changed or ended. One still waiting for its verdict alerts as every
+    /// turn end did, unless the user looks at the column: they may not have
+    /// read it (Nirux types Mission messages, Telegram sends prompts, a
+    /// `claude -p` ends its session as soon as its turn).
+    private mutating func settleQuietTurnEnd(isUserFocused: Bool, outcome: inout AgentHookOutcome) {
+        if case .pending = quietTurnEnd, !isUserFocused {
+            outcome.attention = .turnFinished
+            outcome.firedAttention = true
+        }
+        quietTurnEnd = nil
+    }
+
+    /// The turn end `request` asked about still waits for its verdict.
+    func awaitsVerdict(_ request: TurnEndRequest) -> Bool {
+        quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt)
+    }
+
     /// The column shows a turn end that hasn't alerted, and nothing else
     /// waits: no dialog, no failed turn, no other attention since.
     var isQuietTurnEnd: Bool {
@@ -414,9 +429,10 @@ struct AgentStatusMachine {
         for request: TurnEndRequest,
         isUserFocused: Bool
     ) -> AgentAttentionReason? {
-        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt), lastAttentionReason == .turnFinished,
-              openDialogs.isEmpty, turnFailure == nil
-        else { return nil }
+        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
+        // Settled, whichever way: nothing is left to alert for later.
+        quietTurnEnd = nil
+        guard lastAttentionReason == .turnFinished, openDialogs.isEmpty, turnFailure == nil else { return nil }
         let reason: AgentAttentionReason
         switch verdict {
         case .done:
@@ -427,7 +443,6 @@ struct AgentStatusMachine {
         case .unknown:
             reason = .turnFinished
         }
-        quietTurnEnd = nil
         return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
     }
 

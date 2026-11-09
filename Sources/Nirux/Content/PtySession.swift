@@ -361,6 +361,11 @@ final class PtySession: @unchecked Sendable {
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
 
+    /// See `AgentStatusMachine.awaitsVerdict`.
+    func awaitsTurnEndVerdict(_ request: TurnEndRequest) -> Bool {
+        state.machine.awaitsVerdict(request)
+    }
+
     /// See `AgentStatusMachine.applyTurnEndVerdict`.
     func applyTurnEndVerdict(
         _ verdict: TurnEndVerdict,

@@ -278,8 +278,10 @@ final class AgentHookCenter {
             return
         }
         Task { @MainActor [weak self] in
+            // Put behind already (a later Stop in the same drain, a replayed
+            // backlog): no run for it.
+            guard let self, self.resolver?(agentUUID)?.column.pty?.awaitsTurnEndVerdict(request) == true else { return }
             let verdict = await classifier.classify(request.message)
-            guard let self else { return }
             // Turned off meanwhile: every turn end alerts.
             self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
         }

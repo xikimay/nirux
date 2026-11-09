@@ -87,7 +87,10 @@ struct AgentHookEvent: Codable, Equatable {
     /// (`last_assistant_message`), as `TurnEndText.excerpt` bounds it: what
     /// tells a turn that asks the user something from one that is done
     /// (see `TurnEndVerdict`). Nil elsewhere, from Claude versions without
-    /// it, and when the app strips it (the option is off).
+    /// it, after another Stop hook kept the turn going
+    /// (`stop_hook_active`), for an agent on another account
+    /// (`TurnEndText.usesOtherAccount`), and when the app strips it (the
+    /// option is off).
     var finalMessage: String?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
@@ -154,7 +157,8 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = name == .userPromptSubmit
                 ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
                 : nil
-            finalMessage = name == .stop && agentID == nil
+            finalMessage = name == .stop && agentID == nil && payload["stop_hook_active"] as? Bool != true
+                && !TurnEndText.usesOtherAccount(env)
                 ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
                 : nil
             reviewPasses = switch name {

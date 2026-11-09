@@ -35,6 +35,17 @@ protocol TurnEndClassifier: Sendable {
 
 /// The final message's text as the classifier and the alert use it.
 enum TurnEndText {
+    /// The agent's environment (the hook's, which it inherits) sends Claude
+    /// Code elsewhere than the login Nirux's own `claude -p` would use: a
+    /// cloud provider, an API key, a gateway. Its messages are not sent to
+    /// that login: its turn ends alert as before.
+    static func usesOtherAccount(_ environment: [String: String]) -> Bool {
+        [
+            "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+            "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"
+        ].contains { environment[$0].map { !$0.isEmpty && $0 != "0" } ?? false }
+    }
+
     /// The start and the end of `message`, the part a classifier reads:
     /// the whole message up to `limit` Unicode scalars (at most 4 bytes
     /// each: the hook's event line stays a few kilobytes), else its first
