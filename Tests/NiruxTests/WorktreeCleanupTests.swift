@@ -120,18 +120,29 @@ final class WorktreeCleanupTests: XCTestCase {
         try text.write(toFile: path, atomically: true, encoding: .utf8)
     }
 
-    private func report(_ path: String? = nil) throws -> WorktreeCleanup.Report {
-        guard case .inspected(let report) = WorktreeCleanup.inspect(path: path ?? worktree, tools: tools) else {
+    private func report(_ path: String? = nil, agentFolders: [String] = []) throws -> WorktreeCleanup.Report {
+        guard case .inspected(let report) = WorktreeCleanup.inspect(
+            path: path ?? worktree, agentFolders: agentFolders, tools: tools
+        ) else {
             XCTFail("expected an inspected worktree")
             throw NSError(domain: "WorktreeCleanupTests", code: 1)
         }
         return report
     }
 
-    private func readyPlan() throws -> WorktreeCleanup.Plan {
-        let report = try report()
+    private func readyPlan(agentFolders: [String] = []) throws -> WorktreeCleanup.Plan {
+        let report = try report(agentFolders: agentFolders)
         XCTAssertEqual(report.problems, [])
         return try XCTUnwrap(report.plan)
+    }
+
+    /// Runs `script` in a shell standing in for git, then the real git:
+    /// a writer racing the cleanup, or a git that refuses.
+    private func gitRunning(_ script: String) throws {
+        let wrapper = root + "/git-wrapper"
+        try "#!/bin/sh\n\(script)\nexec /usr/bin/git \"$@\"\n".write(toFile: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper)
+        tools.gitPath = wrapper
     }
 
     private func trashed(_ relative: String) -> String {
@@ -242,11 +253,14 @@ final class WorktreeCleanupTests: XCTestCase {
     }
 
     func testPullRequestFromAnotherRepositoryIsIgnored() throws {
-        // Same branch name, merged from someone's fork.
+        // Same branch name, merged from someone's fork: not "no pull request".
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree), owner: "someone")])
         let report = try report()
-        XCTAssertEqual(report.problems, ["No pull request found for feat/x."])
-        XCTAssertEqual(report.notMerged, "no pull request")
+        XCTAssertEqual(report.problems, ["1 pull request for feat/x, none from acme/widgets (a fork's, or a deleted repository's)."])
+        XCTAssertNil(report.notMerged)
+
+        try setPullRequests([])
+        XCTAssertEqual(try self.report().notMerged, "no pull request")
     }
 
     func testLocalCommitsMissingFromTheMergedPullRequestBlock() throws {
@@ -270,28 +284,34 @@ final class WorktreeCleanupTests: XCTestCase {
     func testUncommittedAndUntrackedChangesBlock() throws {
         try write("tracked\n", to: "tracked.txt", in: worktree)
         try write("other\n", to: "other.txt", in: worktree)
-        try git(["add", "tracked.txt", "other.txt"], at: worktree)
+        try write("gone\n", to: "gone.txt", in: worktree)
+        try git(["add", "tracked.txt", "other.txt", "gone.txt"], at: worktree)
         try commit("add tracked", at: worktree)
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
         try write("changed\n", to: "tracked.txt", in: worktree)
         try write("staged\n", to: "other.txt", in: worktree)
         try git(["add", "other.txt"], at: worktree)
         try FileManager.default.removeItem(atPath: worktree + "/other.txt")
+        try git(["rm", "-q", "gone.txt"], at: worktree)
         try write("notes\n", to: "notes.txt", in: worktree)
-        // A task that starts in a subfolder gets its handover there.
+        // A handover's name in a folder no workspace started in: someone's file.
         try write("x\n", to: "docs/.claude-handover.md", in: worktree)
 
         let report = try report()
         XCTAssertNil(report.plan)
-        XCTAssertEqual(report.worktree.untrackedDisposable, ["docs/.claude-handover.md"])
-        XCTAssertEqual(
-            report.worktree.changes,
-            ["other.txt (staged, then deleted)", "tracked.txt (modified)", "notes.txt (untracked)"]
-        )
+        XCTAssertEqual(report.worktree.changes, [
+            "gone.txt (deleted, staged)", "other.txt (staged, then deleted)", "tracked.txt (modified)",
+            "docs/.claude-handover.md (untracked)", "notes.txt (untracked)"
+        ])
         XCTAssertEqual(
             report.problems,
-            ["Uncommitted changes: other.txt (staged, then deleted), tracked.txt (modified), notes.txt (untracked)."]
+            ["Uncommitted changes: gone.txt (deleted, staged), other.txt (staged, then deleted), tracked.txt (modified) and 2 more."]
         )
+
+        // A task that started in docs/ gets its handover there.
+        let started = try self.report(agentFolders: [worktree + "/docs"])
+        XCTAssertEqual(started.worktree.untrackedDisposable, ["docs/.claude-handover.md"])
+        XCTAssertEqual(started.worktree.startFolders, ["docs"])
     }
 
     func testCommittedHandoversNiruxWroteOverDoNotBlock() throws {
@@ -307,12 +327,16 @@ final class WorktreeCleanupTests: XCTestCase {
         try write("# task in app/\n", to: "app/.claude-handover.md", in: worktree)
         try FileManager.default.removeItem(atPath: worktree + "/.codex-handover.md")
 
+        // A task started in app/ too.
+        let agentFolders = [worktree + "/app"]
         // Staged, it is someone's work.
         try git(["add", ".claude-handover.md"], at: worktree)
-        XCTAssertEqual(try report().problems, ["Uncommitted changes: .claude-handover.md (staged)."])
+        XCTAssertEqual(
+            try report(agentFolders: agentFolders).problems, ["Uncommitted changes: .claude-handover.md (staged)."]
+        )
         try git(["reset", "-q", "--", ".claude-handover.md"], at: worktree)
 
-        let plan = try readyPlan()
+        let plan = try readyPlan(agentFolders: agentFolders)
         XCTAssertEqual(plan.worktree.changes, [])
         XCTAssertEqual(plan.worktree.modifiedDisposable, [".claude-handover.md", "app/.claude-handover.md"])
         XCTAssertEqual(plan.worktree.deletedDisposable, [".codex-handover.md"])
@@ -490,6 +514,59 @@ final class WorktreeCleanupTests: XCTestCase {
             return XCTFail("what's left is no longer a worktree")
         }
         XCTAssertTrue(reason.contains("git no longer tracks"), reason)
+    }
+
+    func testUndoKeepsAFileChangedAfterTheWriteBack() throws {
+        try write("# committed\n", to: ".codex-handover.md", in: worktree)
+        try git(["add", ".codex-handover.md"], at: worktree)
+        try commit("committed handover", at: worktree)
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write("# new handover\n", to: ".codex-handover.md", in: worktree)
+        let plan = try readyPlan()
+        // An agent writes over what git wrote back, then the removal fails.
+        try gitRunning("""
+            if [ "$1 $2" = "worktree remove" ]; then
+              printf '# agent edit, longer\\n' > '\(worktree!)/.codex-handover.md'
+              echo 'fatal: refused by the test' >&2; exit 128
+            fi
+            """)
+
+        guard case .failed(let message) = WorktreeCleanup.execute(plan, tools: tools) else {
+            return XCTFail("the refused removal must stop the cleanup")
+        }
+        XCTAssertTrue(message.contains("refused by the test"), message)
+        XCTAssertTrue(message.contains("couldn't be put back"), message)
+        XCTAssertEqual(
+            try String(contentsOfFile: worktree + "/.codex-handover.md", encoding: .utf8), "# agent edit, longer\n"
+        )
+        XCTAssertEqual(try String(contentsOfFile: trashed(".codex-handover.md"), encoding: .utf8), "# new handover\n")
+        XCTAssertTrue(try isListed(worktree))
+    }
+
+    func testUndoKeepsAFileWrittenBeforeAFailedWriteBack() throws {
+        try write("# committed\n", to: ".codex-handover.md", in: worktree)
+        try git(["add", ".codex-handover.md"], at: worktree)
+        try commit("committed handover", at: worktree)
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write("# new handover\n", to: ".codex-handover.md", in: worktree)
+        let plan = try readyPlan()
+        // An agent writes a handover once the copy is in the Trash: git
+        // won't write over it, and the file isn't git's to delete.
+        try gitRunning("""
+            if [ "$1" = "checkout-index" ]; then
+              printf '# agent edit, longer\\n' > '\(worktree!)/.codex-handover.md'
+            fi
+            """)
+
+        guard case .failed(let message) = WorktreeCleanup.execute(plan, tools: tools) else {
+            return XCTFail("a failed write-back must stop the cleanup")
+        }
+        XCTAssertTrue(message.hasPrefix("git couldn't write back the committed .codex-handover.md:\n"), message)
+        XCTAssertEqual(
+            try String(contentsOfFile: worktree + "/.codex-handover.md", encoding: .utf8), "# agent edit, longer\n"
+        )
+        XCTAssertEqual(try String(contentsOfFile: trashed(".codex-handover.md"), encoding: .utf8), "# new handover\n")
+        XCTAssertTrue(try isListed(worktree))
     }
 
     func testRefusedRemovalPutsTheLeftoversBack() throws {

@@ -37,7 +37,8 @@ struct WorktreeCleanupCandidate: Equatable {
         case closeOnly
         /// Its pull request is open or closed, or it has none ("PR #12
         /// open"): nothing to clean up yet, which is no failure. Its
-        /// uncommitted work is just work in progress.
+        /// uncommitted work, unsaved editors and agents are just work in
+        /// progress: they only count once it can be cleaned up.
         case notMerged(String)
         case blocked([String])
     }

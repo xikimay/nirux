@@ -121,8 +121,6 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         try write("debug.log", "ignored\n")
         try write(".claude-handover.md", "handover\n")
         try write(".claude/settings.local.json", "{}\n")
-        // A task that starts in a subfolder gets its handover there.
-        try write("Sources/.codex-handover.md", "handover\n")
 
         let untracked = try snapshot()
 
@@ -138,7 +136,7 @@ final class BranchReviewSnapshotTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(try file("crlf.txt", in: untracked).hunks.first?.lines.map(\.text), ["one\r", "two\r"])
         XCTAssertTrue(try file("deps.lock", in: untracked).isBinary)
         XCTAssertEqual(try file("run.sh", in: untracked).newMode, "100755")
-        try git(["add", "-A", "--", ".", ":!.claude-handover.md", ":!.claude", ":!Sources/.codex-handover.md"])
+        try git(["add", "-A", "--", ".", ":!.claude-handover.md", ":!.claude"])
         try git(["commit", "-q", "-m", "add them"])
         let committed = try snapshot()
         XCTAssertEqual(committed.files.map(\.path), untracked.files.map(\.path))

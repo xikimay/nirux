@@ -24,7 +24,8 @@ extension WorktreeCleanup {
     /// first failure. Once the branch is deleted, so is its Branch Review
     /// file; a kept branch keeps it.
     static func execute(_ plan: Plan, tools: Tools = .installed) -> Execution {
-        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, tools: tools) else {
+        let agentFolders = plan.worktree.startFolders.map { plan.worktree.path + "/" + $0 }
+        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, agentFolders: agentFolders, tools: tools) else {
             return .failed("\(plan.worktree.path) can no longer be read. Nothing was deleted.")
         }
         let changed = changesSinceCheck(plan, current: current)
@@ -59,7 +60,7 @@ extension WorktreeCleanup {
                 )
             }
             restore.written = Dictionary(uniqueKeysWithValues: restored.compactMap { path in
-                FileStamp(of: current.path + "/" + path).map { (path, $0) }
+                FileStamp(URL(fileURLWithPath: current.path).appendingPathComponent(path)).map { (path, $0) }
             })
             restore.wroteAll = true
         }
@@ -157,28 +158,9 @@ extension WorktreeCleanup {
         let missingFolders: [String]
         /// `checkout-index` succeeded: every file there is its copy.
         var wroteAll = false
-        /// The files as `lstat` found them right after it.
+        /// The files as `lstat` found them right after it: the same stamp
+        /// later, it is the same file, untouched.
         var written: [String: FileStamp] = [:]
-    }
-
-    /// A regular file as `lstat` sees it: the same stamp later, it is the
-    /// same file, untouched.
-    struct FileStamp: Equatable {
-        let device: Int64
-        let inode: UInt64
-        let size: Int64
-        let modified: [Int]
-        let changed: [Int]
-
-        init?(of path: String) {
-            var info = stat()
-            guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
-            device = Int64(info.st_dev)
-            inode = UInt64(info.st_ino)
-            size = Int64(info.st_size)
-            modified = [Int(info.st_mtimespec.tv_sec), info.st_mtimespec.tv_nsec]
-            changed = [Int(info.st_ctimespec.tv_sec), info.st_ctimespec.tv_nsec]
-        }
     }
 
     /// The folders, relative to `worktree`, missing on the way to `files`.
@@ -219,8 +201,10 @@ extension WorktreeCleanup {
     private static func undoRestore(_ restore: Restore, in worktree: String, tools: Tools) {
         for path in restore.files {
             let file = URL(fileURLWithPath: worktree).appendingPathComponent(path)
+            var info = stat()
             guard isInside(file.deletingLastPathComponent(), worktree: worktree),
-                  let now = FileStamp(of: file.path)
+                  lstat(file.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+                  let now = FileStamp(file)
             else { continue }
             let isGitsCopy = restore.wroteAll
                 ? now == restore.written[path]

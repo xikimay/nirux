@@ -38,6 +38,15 @@ extension WorktreeCleanup {
             return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
+        // Some exist, none from this repository (a fork's, or one gh can't
+        // read): not "nothing to clean up yet".
+        if candidates.isEmpty, !json.isEmpty {
+            let found = json.count == 1 ? "1 pull request" : "\(json.count) pull requests"
+            return (nil, [
+                "\(found) for \(branch), none from \(repository.owner)/\(repository.name) "
+                    + "(a fork's, or a deleted repository's)."
+            ], nil)
+        }
         return verdict(branch: branch, tip: tip, candidates: candidates) { headOid in
             ancestry(of: tip, in: headOid, at: worktree.path, tools: tools)
         }

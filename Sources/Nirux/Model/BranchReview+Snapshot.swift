@@ -721,8 +721,8 @@ extension BranchReview {
         code.contains("U") || code == "AA" || code == "DD"
     }
 
-    /// The handovers and Claude Code's local settings, in any folder: the
-    /// review leaves an untracked copy out, as Clean Up trashes it. A
+    /// The handovers and Claude Code's local settings at the top level:
+    /// the review leaves an untracked copy out, as Clean Up trashes it. A
     /// committed one stays in the review, changed or not.
     static func isDisposable(_ path: String) -> Bool {
         WorktreeCleanup.isDisposablePath(path)

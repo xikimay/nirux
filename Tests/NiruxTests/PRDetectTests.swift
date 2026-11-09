@@ -113,26 +113,44 @@ final class PRDetectTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        func isDirty() throws -> Bool { try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty }
+        func isDirty(in folder: String = "") throws -> Bool {
+            try XCTUnwrap(GitDetect.context(at: directory.appendingPathComponent(folder).path)).identity.isDirty
+        }
+        func write(_ text: String, _ relative: String) throws {
+            let url = directory.appendingPathComponent(relative)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
 
-        // The repository committed a handover: Nirux writes a new one over it.
+        // The repository committed handovers: Nirux writes new ones over them.
         try runGit(["init", "-q"], at: directory)
-        let handover = directory.appendingPathComponent(".claude-handover.md")
-        try "committed\n".write(to: handover, atomically: true, encoding: .utf8)
-        try runGit(["add", ".claude-handover.md"], at: directory)
+        try write("committed\n", ".claude-handover.md")
+        // git quotes this name without -z.
+        try write("committed\n", "my app/.claude-handover.md")
+        try runGit(["add", "-A"], at: directory)
         try runGit([
             "-c", "user.name=Nirux Tests",
             "-c", "user.email=nirux@example.test",
             "commit", "-qm", "initial"
         ], at: directory)
-        try "new task\n".write(to: handover, atomically: true, encoding: .utf8)
+        try write("new task\n", ".claude-handover.md")
         XCTAssertFalse(try isDirty())
 
         try runGit(["add", ".claude-handover.md"], at: directory)
         XCTAssertTrue(try isDirty(), "a staged handover is someone's work")
         try runGit(["reset", "-q", "--", ".claude-handover.md"], at: directory)
 
-        try "work\n".write(to: directory.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent(".claude-handover.md"))
+        XCTAssertFalse(try isDirty())
+        try runGit(["checkout", "--", ".claude-handover.md"], at: directory)
+
+        // Where a task started, not anywhere.
+        try write("task in my app\n", "my app/.claude-handover.md")
+        XCTAssertFalse(try isDirty(in: "my app"))
+        XCTAssertTrue(try isDirty())
+        try runGit(["checkout", "--", "my app/.claude-handover.md"], at: directory)
+
+        try write("work\n", "notes.txt")
         XCTAssertTrue(try isDirty())
     }
 

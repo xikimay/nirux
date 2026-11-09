@@ -126,17 +126,30 @@ enum GitDetect {
     /// triggered the read in the first place.
     static let readOnlyEnvironment = ["GIT_OPTIONAL_LOCKS": "0"]
 
-    /// Whether `git status --porcelain=v1` lists anything but Nirux's
-    /// handover: alone, it doesn't keep a merged pull request from showing.
-    /// Not `-z`: git quotes a name that isn't UTF-8 only without it, and
-    /// output that isn't UTF-8 fails the whole read. A quoted name is never
-    /// a handover's.
-    static func isDirty(status: String) -> Bool {
-        status.split(separator: "\n").contains { line in
-            guard line.count > 3 else { return true }
-            let entry = WorktreeCleanup.StatusEntry(code: String(line.prefix(2)), path: String(line.dropFirst(3)))
-            return !WorktreeCleanup.isDisposable(entry)
+    /// Whether `git status --porcelain=v1 -z --no-renames` lists anything
+    /// but Nirux's handover and Claude Code's local settings, at the top
+    /// level or in `startFolder`: alone, they don't keep a merged pull
+    /// request from showing. Read as bytes, decoded leniently: without
+    /// `-z` git quotes a name with a space or an accent, and a name that
+    /// isn't UTF-8 must not fail the read. Stops at the first other entry.
+    static func isDirty(status: Data, startFolder: String? = nil) -> Bool {
+        let folders: Set<String> = startFolder.map { [$0] } ?? []
+        var start = status.startIndex
+        while start < status.endIndex {
+            let end = status[start...].firstIndex(of: 0) ?? status.endIndex
+            let field = status[start..<end]
+            start = end < status.endIndex ? status.index(after: end) : end
+            guard field.count > 3 else {
+                if field.isEmpty { continue }
+                return true
+            }
+            let entry = WorktreeCleanup.StatusEntry(
+                code: String(decoding: field.prefix(2), as: UTF8.self),
+                path: String(decoding: field.dropFirst(3), as: UTF8.self)
+            )
+            if !WorktreeCleanup.isDisposable(entry, startFolders: folders) { return true }
         }
+        return false
     }
 
     static func context(at path: String) -> GitContext? {
@@ -210,21 +223,28 @@ enum GitDetect {
             head = nil
         }
 
-        guard let status = gitOutput(
-            arguments: ["status", "--porcelain=v1", "--untracked-files=normal"],
-            at: workingDirectory,
-            gitPath: gitPath,
+        guard let status = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: gitPath),
+            arguments: ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal"],
+            currentDirectoryURL: URL(fileURLWithPath: workingDirectory),
+            environment: readOnlyEnvironment,
             timeout: timeout
         ), status.terminationStatus == 0 else { return .failure }
         let canonicalRepositoryRoot = URL(
             fileURLWithPath: repositoryRoot
         ).standardizedFileURL.path
+        // The folder this workspace started in, where its agent's handover
+        // and local settings get written.
+        let startFolder = workingDirectory.realPath.flatMap { folder -> String? in
+            guard let root = repositoryRoot.realPath, folder.hasPrefix(root + "/") else { return nil }
+            return String(folder.dropFirst(root.count + 1))
+        }
         return .observed(GitContext(
             branch: branch,
             identity: GitIdentity(
                 repositoryRoot: canonicalRepositoryRoot,
                 head: head,
-                isDirty: Self.isDirty(status: status.standardOutput)
+                isDirty: Self.isDirty(status: status.standardOutput, startFolder: startFolder)
             ),
             upstreamRepositoryObservation: upstreamRepositoryObservation(
                 at: canonicalRepositoryRoot,

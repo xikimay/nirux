@@ -16,9 +16,9 @@ import Foundation
 /// deletes them: everything but build output goes to the Trash first.
 /// Runs git and gh: call it off the main thread.
 enum WorktreeCleanup {
-    /// The handovers Nirux writes, in the folder the agent starts in: the
-    /// top level, or a task's subfolder.
-    static let handoverNames: Set<String> = [".claude-handover.md", ".codex-handover.md"]
+    /// The handovers Nirux writes, one per agent, in the folder the agent
+    /// starts in: the top level, or a task's subfolder.
+    static let handoverNames = Set(NiruxShellView.excludedHandovers)
     /// Claude Code's local settings, in the folder it runs in.
     static let localSettingsPath = ".claude/settings.local.json"
 
@@ -110,6 +110,10 @@ enum WorktreeCleanup {
         /// name an ignore pattern matches itself. (git also groups a folder
         /// whose files are all ignored, e.g. `target/` holding `*.secret`.)
         let buildOutput: [String]
+        /// Folders below the top level that agents of its workspaces started
+        /// in, relative to it: a handover or local settings there is
+        /// Nirux's too.
+        var startFolders: [String] = []
 
         var repositoryName: String {
             let name = (mainCheckout as NSString).lastPathComponent
@@ -186,10 +190,22 @@ enum WorktreeCleanup {
         case inspected(Report)
     }
 
-    /// A handover or Claude Code's local settings, in any folder.
-    static func isDisposablePath(_ path: String) -> Bool {
-        handoverNames.contains((path as NSString).lastPathComponent)
-            || path == localSettingsPath || path.hasSuffix("/" + localSettingsPath)
+    /// A handover or Claude Code's local settings where they get written:
+    /// in the folder an agent starts in, the top level or one of
+    /// `startFolders` (relative to it). Anywhere else, a file of that name
+    /// is someone's (a test fixture, say).
+    static func isDisposablePath(_ path: String, startFolders: Set<String> = []) -> Bool {
+        let folder: String
+        if handoverNames.contains((path as NSString).lastPathComponent) {
+            folder = (path as NSString).deletingLastPathComponent
+        } else if path == localSettingsPath {
+            folder = ""
+        } else if path.hasSuffix("/" + localSettingsPath) {
+            folder = String(path.dropLast(localSettingsPath.count + 1))
+        } else {
+            return false
+        }
+        return folder.isEmpty || startFolders.contains(folder)
     }
 
     /// A `git status` entry the cleanup clears instead of refusing: a
@@ -198,8 +214,8 @@ enum WorktreeCleanup {
     /// that committed a handover gets a new one written over it in every
     /// worktree, which `info/exclude` can't hide. A staged change is
     /// someone's work.
-    static func isDisposable(_ entry: StatusEntry) -> Bool {
-        ["??", " M", " D"].contains(entry.code) && isDisposablePath(entry.path)
+    static func isDisposable(_ entry: StatusEntry, startFolders: Set<String> = []) -> Bool {
+        ["??", " M", " D"].contains(entry.code) && isDisposablePath(entry.path, startFolders: startFolders)
     }
 
     static func isRegenerable(_ entry: String) -> Bool {
@@ -209,9 +225,11 @@ enum WorktreeCleanup {
 
     // MARK: - Inspection
 
-    static func inspect(path: String, tools: Tools = .installed) -> Inspection {
+    /// `agentFolders`: where agents of its workspaces started, absolute
+    /// (see `Worktree.startFolders`).
+    static func inspect(path: String, agentFolders: [String] = [], tools: Tools = .installed) -> Inspection {
         let worktree: Worktree
-        switch readWorktree(at: path, tools: tools) {
+        switch readWorktree(at: path, agentFolders: agentFolders, tools: tools) {
         case .folderMissing: return .folderMissing
         case .unavailable(let reason): return .unavailable(reason)
         case .worktree(let read): worktree = read
@@ -257,7 +275,7 @@ enum WorktreeCleanup {
         case worktree(Worktree)
     }
 
-    static func readWorktree(at path: String, tools: Tools) -> WorktreeRead {
+    static func readWorktree(at path: String, agentFolders: [String] = [], tools: Tools) -> WorktreeRead {
         var isDirectory: ObjCBool = false
         guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
         else { return .folderMissing }
@@ -283,8 +301,12 @@ enum WorktreeCleanup {
         let tipRead = git(["rev-parse", "-q", "--verify", "HEAD"], in: resolved, tools: tools)
         let tip = tipRead.status == 0 ? tipRead.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : ""
 
+        let startFolders = Set(agentFolders.compactMap { folder -> String? in
+            guard let real = folder.realPath, real.hasPrefix(resolved + "/") else { return nil }
+            return String(real.dropFirst(resolved.count + 1))
+        })
         let files: FileState
-        switch readFiles(at: resolved, tools: tools) {
+        switch readFiles(at: resolved, startFolders: startFolders, tools: tools) {
         case .success(let read): files = read
         case .failure(let failure): return .unavailable(failure.message)
         }
@@ -302,7 +324,8 @@ enum WorktreeCleanup {
             modifiedDisposable: files.modifiedDisposable,
             deletedDisposable: files.deletedDisposable,
             ignoredEntries: files.ignoredEntries,
-            buildOutput: files.buildOutput
+            buildOutput: files.buildOutput,
+            startFolders: startFolders.sorted()
         ))
     }
 
@@ -393,7 +416,9 @@ enum WorktreeCleanup {
     /// What `git worktree remove` would find in the folder: changes and
     /// untracked files (which make it refuse), ignored ones (which it
     /// deletes), and edits hidden from both.
-    private static func readFiles(at path: String, tools: Tools) -> Result<FileState, ReadFailure> {
+    private static func readFiles(
+        at path: String, startFolders: Set<String>, tools: Tools
+    ) -> Result<FileState, ReadFailure> {
         let status = git(
             ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"],
             in: path, tools: tools
@@ -408,7 +433,7 @@ enum WorktreeCleanup {
         }
         var files = FileState()
         for entry in statusEntries(status.stdout) {
-            guard isDisposable(entry) else {
+            guard isDisposable(entry, startFolders: startFolders) else {
                 files.changes.append(describe(entry))
                 continue
             }
@@ -452,9 +477,11 @@ enum WorktreeCleanup {
         let code = Array(entry.code)
         guard entry.code != "??" else { return "\(entry.path) (untracked)" }
         guard code.count == 2, !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
-        let staged: [Character: String] = ["A": "added", "D": "deleted", "R": "renamed", "C": "copied", "T": "type changed"]
+        let staged: [Character: String] = [
+            "A": "added, staged", "D": "deleted, staged", "R": "renamed, staged", "C": "copied, staged"
+        ]
         // " A": added with --intent-to-add.
-        let unstaged: [Character: String] = ["A": "added", "D": "deleted", "T": "type changed"]
+        let unstaged: [Character: String] = ["A": "to be added", "D": "deleted"]
         let states = [
             code[0] == " " ? nil : staged[code[0]] ?? "staged",
             code[1] == " " ? nil : unstaged[code[1]] ?? "modified"
