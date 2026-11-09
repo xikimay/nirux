@@ -10,16 +10,20 @@ extension WorktreeCleanup {
         case unknownCommit
     }
 
+    /// The branch's pull request, why it can't be cleaned up, and, when
+    /// the only reason is that nothing was merged yet, that in a few words.
+    typealias Verdict = (pullRequest: PullRequest?, problems: [String], notMerged: String?)
+
     static func pullRequestLookup(
         branch: String, tip: String, worktree: Worktree, tools: Tools
-    ) -> (pullRequest: PullRequest?, problems: [String]) {
+    ) -> Verdict {
         guard let ghPath = tools.ghPath else {
-            return (nil, ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."])
+            return (nil, ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."], nil)
         }
         let repository: GitHubRepository
         switch headRepository(branch: branch, at: worktree.path, tools: tools) {
         case .success(let found): repository = found
-        case .failure(let failure): return (nil, [failure.message])
+        case .failure(let failure): return (nil, [failure.message], nil)
         }
         let fields = "number,state,headRefOid,headRepositoryOwner,headRepository,url"
         let result = run(
@@ -31,9 +35,18 @@ extension WorktreeCleanup {
               let json = try? JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [[String: Any]]
         else {
             let reason = firstLine(result.stderr).map { ": \($0)" } ?? ""
-            return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"])
+            return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
+        // Some exist, none from this repository (a fork's, or one gh can't
+        // read): not "nothing to clean up yet".
+        if candidates.isEmpty, !json.isEmpty {
+            let found = json.count == 1 ? "1 pull request" : "\(json.count) pull requests"
+            return (nil, [
+                "\(found) for \(branch), none from \(repository.owner)/\(repository.name) "
+                    + "(a fork's, or the repository was renamed or deleted)."
+            ], nil)
+        }
         return verdict(branch: branch, tip: tip, candidates: candidates) { headOid in
             ancestry(of: tip, in: headOid, at: worktree.path, tools: tools)
         }
@@ -47,25 +60,28 @@ extension WorktreeCleanup {
         tip: String,
         candidates: [PullRequest],
         ancestry: (String) -> Ancestry
-    ) -> (pullRequest: PullRequest?, problems: [String]) {
+    ) -> Verdict {
         let sorted = candidates.sorted { $0.number > $1.number }
         if let open = sorted.first(where: { $0.state == "OPEN" }) {
-            return (open, ["Pull request #\(open.number) for \(branch) is still open."])
+            return (open, ["Pull request #\(open.number) for \(branch) is still open."], "PR #\(open.number) open")
         }
         let merged = sorted.filter { $0.state == "MERGED" }
         guard let latest = merged.first else {
             if let closed = sorted.first {
-                return (closed, ["Pull request #\(closed.number) was closed without being merged."])
+                return (
+                    closed, ["Pull request #\(closed.number) was closed without being merged."],
+                    "PR #\(closed.number) closed without merging"
+                )
             }
-            return (nil, ["No pull request found for \(branch)."])
+            return (nil, ["No pull request found for \(branch)."], "no pull request")
         }
         if let exact = merged.first(where: { $0.headOid == tip }) {
-            return (exact, [])
+            return (exact, [], nil)
         }
         var unknown: PullRequest?
         for pullRequest in merged {
             switch ancestry(pullRequest.headOid) {
-            case .contained: return (pullRequest, [])
+            case .contained: return (pullRequest, [], nil)
             case .unknownCommit: unknown = unknown ?? pullRequest
             case .notContained: continue
             }
@@ -74,12 +90,12 @@ extension WorktreeCleanup {
             return (unknown, [
                 "The head of merged pull request #\(unknown.number) (\(short(unknown.headOid))) isn't in "
                     + "the local repository, so \(branch) can't be compared with it. A git fetch may bring it in."
-            ])
+            ], nil)
         }
         return (latest, [
             "\(branch) has commits that aren't in merged pull request #\(latest.number) "
                 + "(local \(short(tip)), merged head \(short(latest.headOid)))."
-        ])
+        ], nil)
     }
 
     static func pullRequest(from candidate: [String: Any], headRepository: GitHubRepository) -> PullRequest? {

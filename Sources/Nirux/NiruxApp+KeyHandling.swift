@@ -99,8 +99,15 @@ extension NiruxApp {
             // WKWebView has an input context only while the page's focused
             // element takes text. It then hands the key to the page, and
             // resends it if the page leaves it unhandled: that time it
-            // answers false, and the menu gets the key.
-            return webView.inputContext != nil && webView.performKeyEquivalent(with: event)
+            // answers false, and the menu gets the key. The editor's page
+            // handles a Cmd+Arrow at the caret's edge itself, asking the
+            // shell to navigate (EditorColumn.onTextEdgeKey), once told
+            // where the key could go.
+            guard webView.inputContext != nil else { return false }
+            if !event.isARepeat, event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
+                column.editorColumn?.sendTextEdgeDestinations()
+            }
+            return webView.performKeyEquivalent(with: event)
         }
         if let fieldEditor = responder as? NSTextView, fieldEditor.isEditable {
             // Returned to AppKit, the key would reach the menu first.

@@ -18,10 +18,12 @@ extension NiruxShellView {
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
         missionID: String? = nil,
+        parentWorkspaceID: String? = nil,
         reportsToLead: Bool = false,
         deliveredHandover: Bool = false,
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
+        startedByAgent: Bool = false,
         setupScript: URL? = nil,
         isLead: Bool = false,
         activate: Bool = true
@@ -51,8 +53,10 @@ extension NiruxShellView {
             cwd: wsCwd,
             profileID: targetProfileID,
             missionID: missionID,
+            parentWorkspaceID: subtaskParentID(parentWorkspaceID),
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
             startedOutsideNirux: startedOutsideNirux,
+            startedByAgent: startedByAgent,
             isLead: isLead,
             reportsToLead: reportsToLead,
             initialAgentUUID: initialAgentUUID
@@ -87,6 +91,67 @@ extension NiruxShellView {
                 DispatchQueue.main.async { snapshot.removeFromSuperview() }
             })
         }
+    }
+
+    /// `id` when it names an open task (see `isTask`).
+    func subtaskParentID(_ id: String?) -> String? {
+        guard let id, let parent = workspaces.first(where: { $0.id == id && !$0.isClosing }), Self.isTask(parent) else { return nil }
+        return parent.id
+    }
+
+    /// What can have sub-tasks (docs/spaces.md, "Sub-tasks under their
+    /// task"): a workspace in a git worktree, as ⌘N and the Lead start
+    /// tasks. Not the main checkout, where worktrees an agent opens are
+    /// tasks of their own, nor the Lead (its tasks are the space's list
+    /// itself). Reads files: asked when a menu opens or a workspace does,
+    /// never on a sidebar refresh.
+    static func isTask(_ workspace: WorkspaceState) -> Bool {
+        !workspace.isLead && taskLocation(cwd: workspace.cwd) != nil
+    }
+
+    /// Where a task works, from its linked worktree's `.git` file (no git):
+    /// its repository's common git dir, and its folder as it is in the main
+    /// checkout, so routing's anchor rule finds the space's repository or
+    /// folder of it. Nil outside a linked worktree, or with the folder gone.
+    nonisolated static func taskLocation(cwd: String) -> FolderIdentity? {
+        // Both resolved: `worktreeCleanupPath` standardizes, which drops
+        // `/private` from a temporary folder.
+        guard let folder = cwd.realPath, let root = worktreeCleanupPath(forCwd: folder)?.realPath,
+              folder == root || folder.hasPrefix(root + "/"),
+              let contents = try? String(contentsOfFile: root + "/.git", encoding: .utf8), contents.hasPrefix("gitdir: ")
+        else { return nil }
+        // `<common dir>/worktrees/<id>`, maybe relative to the worktree.
+        var gitDir = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !gitDir.hasPrefix("/") { gitDir = (root as NSString).appendingPathComponent(gitDir) }
+        guard let commonDir = ((gitDir as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent.realPath
+        else { return nil }
+        // A bare repository has no main checkout: the worktree stands in.
+        let mainCheckout = (commonDir as NSString).lastPathComponent == ".git" ? (commonDir as NSString).deletingLastPathComponent : root
+        let inside = folder == root ? "" : String(folder.dropFirst(root.count))
+        return FolderIdentity(path: mainCheckout + inside, commonDir: commonDir, topLevel: mainCheckout)
+    }
+
+    /// The sheet's repository for a sub-task of `task`: the one of its space
+    /// the task works in, or a folder of it, by key; nil when ⌘N can't
+    /// start there (a folder holding the whole checkout is in no
+    /// repository).
+    func subtaskRepositoryKey(of task: WorkspaceState) -> String? {
+        guard !task.isLead, let location = Self.taskLocation(cwd: task.cwd),
+              let space = profiles.first(where: { $0.id == task.profileID }),
+              let anchor = SpaceRouting.anchoring(location, in: [space])?.anchor, let key = anchor.key,
+              newTaskRepositories(of: space).contains(where: { $0.key == key })
+        else { return nil }
+        if case .folder(let path) = anchor.kind, let checkout = location.topLevel, !SpaceRouting.contains(checkout, path) {
+            return nil
+        }
+        return key
+    }
+
+    /// The card menu's and the menu bar's New Sub-task…: a task, active, in
+    /// a space where tasks start (General has no repository) and that has
+    /// its repository: a sub-task works there.
+    func offersSubtask(_ workspace: WorkspaceState) -> Bool {
+        !workspace.isInactive && workspace.profileID != WorkspaceProfile.defaultID && subtaskRepositoryKey(of: workspace) != nil
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is
@@ -347,6 +412,9 @@ extension NiruxShellView {
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
+            return
+        case .newSubtask:
+            showNewSubtaskPanel(under: workspaces[workspaceIndex])
             return
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)

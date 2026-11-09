@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import Nirux
 
@@ -49,8 +50,12 @@ final class UIFlowHarness {
     private(set) var restoredAgentLaunches: [String] = []
     /// `messageText` of every app-modal alert, in order.
     private(set) var alerts: [String] = []
+    /// `informativeText` of every app-modal alert, in order.
+    private(set) var alertDetails: [String] = []
     /// Answers to the next alerts, in order; the first button once empty.
     var alertResponses: [NSApplication.ModalResponse] = []
+    /// Items to pick, in order, in the next alerts that show a pop-up menu.
+    var alertMenuChoices: [Int] = []
     /// Links opened in the default browser, in order.
     private(set) var openedURLs: [URL] = []
     /// Folders the folder picker double returns, in order; Cancel once
@@ -60,10 +65,12 @@ final class UIFlowHarness {
     private(set) var setupFailures: [String] = []
     /// Workspaces whose Mission question came to the user and was notified.
     private(set) var missionQuestionNotices: [String] = []
-    /// Browsers the cookie double reports as installed.
-    var cookieBrowsers: [CookieImporter.Browser] = []
-    /// Browsers the cookie double was asked to import from.
-    private(set) var cookieImports: [CookieImporter.Browser] = []
+    /// Browser profiles the cookie double reports.
+    var cookieSources: [CookieImporter.Source] = []
+    /// Profiles the cookie double was asked to import from.
+    private(set) var cookieImports: [CookieImporter.Source] = []
+    /// What the cookie double throws instead of importing.
+    var cookieImportError: CookieImporter.ImportError?
 
     /// Palette commands and sidebar menu items the current test ran, for
     /// the coverage checks (see UIFlowTestCase).
@@ -195,10 +202,15 @@ final class UIFlowHarness {
         shell.sideEffects.openURL = { [weak self] url in self?.openedURLs.append(url) }
         shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.checkExplain = { .unavailable("Explain doesn’t run in flow tests.") }
-        shell.sideEffects.cookieBrowsers = { [weak self] in self?.cookieBrowsers ?? [] }
-        shell.sideEffects.importCookies = { [weak self] browser in
-            self?.cookieImports.append(browser)
-            return CookieImporter.ImportResult(imported: 2, failed: 0, browser: browser)
+        shell.sideEffects.cookieBrowsers = { [weak self] in
+            let sources = self?.cookieSources ?? []
+            return CookieImporter.Browser.allCases.filter { browser in sources.contains { $0.browser == browser } }
+        }
+        shell.sideEffects.cookieSources = { [weak self] in self?.cookieSources ?? [] }
+        shell.sideEffects.importCookies = { [weak self] source in
+            self?.cookieImports.append(source)
+            if let error = self?.cookieImportError { throw error }
+            return CookieImporter.ImportResult(imported: 2, failed: 0, source: source)
         }
         // A busy CI machine: routing must not fall back for want of git.
         shell.sideEffects.routingTimeout = 10
@@ -209,6 +221,10 @@ final class UIFlowHarness {
         shell.sideEffects.runModal = { [weak self] alert in
             guard let self else { return .alertFirstButtonReturn }
             alerts.append(alert.messageText)
+            alertDetails.append(alert.informativeText)
+            if let menu = alert.accessoryView as? NSPopUpButton, !alertMenuChoices.isEmpty {
+                menu.selectItem(at: alertMenuChoices.removeFirst())
+            }
             return alertResponses.isEmpty ? .alertFirstButtonReturn : alertResponses.removeFirst()
         }
     }
@@ -294,6 +310,48 @@ final class UIFlowHarness {
         try body()
     }
 
+    // MARK: - Web pages
+
+    /// Runs `script` in `webView`'s page and waits for it. Messages it posts
+    /// to the app arrive first.
+    static func run(_ script: String, in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {
+        let answer = PageAnswer()
+        answer.isAsking = true
+        webView.evaluateJavaScript(script) { _, _ in
+            MainActor.assumeIsolated { answer.isAsking = false }
+        }
+        waitUntil("the page to run a script", timeout: 10, file: file, line: line) { !answer.isAsking }
+    }
+
+    /// Asks `webView`'s page `script` (its value a string) until `matches`
+    /// accepts the answer, 10 s at most: a page handles keys and finds after
+    /// the call that sent them returns.
+    static func waitForAnswer(
+        _ description: String, to script: String, in webView: WKWebView,
+        file: StaticString = #filePath, line: UInt = #line, matches: (String) -> Bool
+    ) {
+        let answer = PageAnswer()
+        let seen = { answer.latest.map { "(the page answered \($0.debugDescription))" } ?? "(no answer)" }
+        waitUntil("\(description) \(seen())", timeout: 10, file: file, line: line) {
+            if !answer.isAsking {
+                answer.isAsking = true
+                webView.evaluateJavaScript(script) { result, _ in
+                    MainActor.assumeIsolated {
+                        answer.latest = result as? String
+                        answer.isAsking = false
+                    }
+                }
+            }
+            return answer.latest.map(matches) == true
+        }
+    }
+
+    @MainActor
+    private final class PageAnswer {
+        var latest: String?
+        var isAsking = false
+    }
+
     // MARK: - Keyboard and fields
 
     enum Key {
@@ -337,8 +395,8 @@ final class UIFlowHarness {
     /// A key press with modifiers, through the app's event dispatch and so
     /// its key interceptor. The test process never has a key window: a key
     /// the interceptor returns to AppKit reaches the menu, not the window's
-    /// views.
-    func press(_ characters: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags) {
+    /// views. `isARepeat`: a held key's auto-repeat.
+    func press(_ characters: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags, isARepeat: Bool = false) {
         guard let event = NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
@@ -348,7 +406,7 @@ final class UIFlowHarness {
             context: nil,
             characters: characters,
             charactersIgnoringModifiers: characters,
-            isARepeat: false,
+            isARepeat: isARepeat,
             keyCode: keyCode
         ) else { return XCTFail("no key event") }
         NSApp.sendEvent(event)
@@ -384,6 +442,13 @@ final class UIFlowHarness {
             self.visibleField(placeholder: placeholder) != nil
         }
         return visibleField(placeholder: placeholder)
+    }
+
+    /// A browser profile for the cookie double.
+    static func cookieSource(
+        _ browser: CookieImporter.Browser, _ name: String = "Person 1", folder: String = "Default"
+    ) -> CookieImporter.Source {
+        CookieImporter.Source(browser: browser, profileFolder: folder, profileName: name, cookiesPath: "/nonexistent/\(folder)/Cookies")
     }
 
     static func descendant<View: NSView>(
@@ -432,10 +497,23 @@ final class UIFlowHarness {
         line: UInt = #line,
         _ condition: () -> Bool
     ) -> Bool {
+        Self.waitUntil(description, timeout: timeout, file: file, line: line, condition)
+    }
+
+    /// `waitUntil` for a test without a harness. `description` is read at
+    /// the failure, so it can tell what the test saw last.
+    @discardableResult
+    static func waitUntil(
+        _ description: @autoclosure () -> String,
+        timeout: TimeInterval = 30,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: () -> Bool
+    ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             guard Date() < deadline else {
-                XCTFail("timed out waiting for \(description)", file: file, line: line)
+                XCTFail("timed out waiting for \(description())", file: file, line: line)
                 return false
             }
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))

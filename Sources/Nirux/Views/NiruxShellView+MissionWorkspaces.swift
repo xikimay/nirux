@@ -89,7 +89,14 @@ extension NiruxShellView {
                     }
                     var missionID: String?
                     var reportsToLead = false
-                    if let parent = self.validMissionParent(
+                    // The workspace and terminal the skill names. A Mission
+                    // only from a terminal started with the Mission
+                    // variables: one started before Missions were turned
+                    // on couldn't answer its child.
+                    let requester = self.requestingWorkspace(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)
+                    let carriesMissions = requester?.columns.first { $0.agentUUID == parentAgentUUID }?
+                        .launchEnvironment?["NIRUX_MISSION_HANDOFFS"] == "1"
+                    if carriesMissions, let parent = self.validMissionParent(
                         workspaceID: parentWorkspaceID,
                         agentUUID: parentAgentUUID
                     ) {
@@ -123,10 +130,13 @@ extension NiruxShellView {
                         workspaceID: childWorkspaceID,
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
+                        // It lists under that one, Missions on or off.
+                        parentWorkspaceID: requester?.id,
                         reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         worktreeBranch: checkedOutBranch,
                         startedOutsideNirux: startedOutsideNirux,
+                        startedByAgent: !startedOutsideNirux,
                         setupScript: firstSetup ? self.setupScript(for: decision) : nil
                     )
                     self.saveState()
@@ -360,15 +370,21 @@ extension NiruxShellView {
     private func validMissionParent(
         workspaceID: String?, agentUUID: String?
     ) -> (workspaceID: String, agentUUID: String, isLead: Bool)? {
-        guard let workspaceID,
-              let agentUUID,
-              UUID(uuidString: workspaceID) != nil,
-              UUID(uuidString: agentUUID) != nil,
-              let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
-              workspace.columns.contains(where: { $0.agentUUID == agentUUID }),
+        guard let workspace = requestingWorkspace(workspaceID: workspaceID, agentUUID: agentUUID), let agentUUID,
               workspace.isLead || Self.currentMissionHandoffsEnabled()
         else { return nil }
-        return (workspaceID, agentUUID, workspace.isLead)
+        return (workspace.id, agentUUID, workspace.isLead)
+    }
+
+    /// The open workspace a request names, with the terminal that sent it:
+    /// a workspace id alone (a hand-written URL, an old copy of the skill)
+    /// links nothing.
+    func requestingWorkspace(workspaceID: String?, agentUUID: String?) -> WorkspaceState? {
+        guard let workspaceID, let agentUUID, UUID(uuidString: workspaceID) != nil, UUID(uuidString: agentUUID) != nil,
+              let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
+              workspace.columns.contains(where: { $0.agentUUID == agentUUID })
+        else { return nil }
+        return workspace
     }
 }
 

@@ -72,6 +72,42 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// runs the send-selection flow.
     var onSendSelectionShortcut: (() -> Void)?
 
+    /// The edge of Monaco's text a Cmd+Arrow moves the caret to.
+    enum TextEdge: String, CaseIterable {
+        case left, right, up, down
+    }
+    /// Cmd+Arrow found Monaco's caret already at that edge, with somewhere
+    /// to go (see `textEdgeArrows` in bridge.js): the shell makes the move
+    /// the key makes outside text.
+    var onTextEdgeKey: ((TextEdge) -> Void)?
+
+    /// Whether Monaco's web view has the window's keyboard.
+    var webViewHasKeyboard: Bool {
+        window?.firstResponder === webView
+    }
+
+    /// The edges whose key would find somewhere to go: a column beside, a
+    /// workspace above or below.
+    var textEdgeDestinations: (() -> Set<TextEdge>)?
+
+    /// Tells the page where each edge key can go, just before the app hands
+    /// it a plain Cmd+Arrow (the script runs first). With nowhere to go,
+    /// Monaco moves the caret as it handles the key.
+    func sendTextEdgeDestinations() {
+        guard let destinations = textEdgeDestinations?() else { return }
+        var payload: [String: Any] = ["type": "textEdgeDestinations"]
+        for edge in TextEdge.allCases {
+            payload[edge.rawValue] = destinations.contains(edge)
+        }
+        sendBridge(payload)
+    }
+
+    /// What Cmd+Arrow does in Monaco's text, for an edge key the shell found
+    /// nowhere to go with after all.
+    func moveCaretToTextEdge(_ edge: TextEdge) {
+        sendBridge(["type": "moveCaretToTextEdge", "edge": edge.rawValue])
+    }
+
     private let webView: WKWebView
     /// The active file and its directory, the diff toggle and the search.
     let header = ColumnHeaderView()
@@ -1055,6 +1091,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             onFilePickerRequest?(self)
         case "sendSelectionShortcut":
             onSendSelectionShortcut?()
+        case "textEdgeKey":
+            guard let edge = (body["edge"] as? String).flatMap(TextEdge.init(rawValue:)) else { return }
+            onTextEdgeKey?(edge)
         case "ready":
             // Monaco confirmed model swap; nothing to do.
             break

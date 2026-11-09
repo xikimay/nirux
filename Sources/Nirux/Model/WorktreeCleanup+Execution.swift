@@ -18,12 +18,14 @@ extension WorktreeCleanup {
     /// Deletes the worktree and its branch as `plan` describes them. The
     /// worktree is read again first: an agent may have committed or written
     /// files since the check, and anything new stops it. The leftovers go
-    /// to the Trash, then `git worktree remove` runs without `--force`, so
-    /// git checks the folder once more itself. Stops at the first failure.
-    /// Once the branch is deleted, so is its Branch Review file; a kept
-    /// branch keeps it.
+    /// to the Trash, git writes the committed version of the tracked
+    /// disposable files back, then `git worktree remove` runs without
+    /// `--force`, so git checks the folder once more itself. Stops at the
+    /// first failure. Once the branch is deleted, so is its Branch Review
+    /// file; a kept branch keeps it.
     static func execute(_ plan: Plan, tools: Tools = .installed) -> Execution {
-        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, tools: tools) else {
+        let agentFolders = plan.worktree.startFolders.map { plan.worktree.path + "/" + $0 }
+        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, agentFolders: agentFolders, tools: tools) else {
             return .failed("\(plan.worktree.path) can no longer be read. Nothing was deleted.")
         }
         let changed = changesSinceCheck(plan, current: current)
@@ -42,9 +44,30 @@ extension WorktreeCleanup {
         }
         let trashFolder = trashed?.folder.lastPathComponent
 
+        // A committed one deleted since the check is written back too: the
+        // commit holds it, nothing is lost.
+        let restored = current.restoredFiles
+        var restore = Restore(files: restored, missingFolders: missingFolders(of: restored, in: current.path))
+        if !restored.isEmpty {
+            // Plumbing: no hook runs, and the index is left alone. It never
+            // writes over a file, so a failure midway is put back like the
+            // rest: no write timeout.
+            let checkout = git(["checkout-index", "--"] + restored, in: current.path, tools: tools)
+            guard checkout.status == 0 else {
+                return putBackAfterFailure(
+                    "git couldn't write back the committed \(summarized(restored)):\n\(output(of: checkout))\nNothing was deleted.",
+                    worktree: current, restore: restore, trashed: trashed, tools: tools
+                )
+            }
+            restore.written = Dictionary(uniqueKeysWithValues: restored.compactMap { path in
+                FileStamp(URL(fileURLWithPath: current.path).appendingPathComponent(path)).map { (path, $0) }
+            })
+            restore.wroteAll = true
+        }
+
         let removal = git(["worktree", "remove", current.path], in: current.mainCheckout, tools: tools, timeout: tools.writeTimeout)
         guard removal.status == 0 else {
-            return removalFailure(removal, worktree: current, trashed: trashed, tools: tools)
+            return removalFailure(removal, worktree: current, restore: restore, trashed: trashed, tools: tools)
         }
 
         func cleaned(forcedBranchDelete: Bool) -> Execution {
@@ -92,7 +115,7 @@ extension WorktreeCleanup {
         let confirmed = Set(plan.worktree.leftovers)
         let appeared = current.leftovers.filter { !confirmed.contains($0) }
         if !appeared.isEmpty {
-            changed.append("New files appeared: \(appeared.joined(separator: ", ")).")
+            changed.append("New files to move to the Trash: \(appeared.joined(separator: ", ")).")
         }
         return changed
     }
@@ -102,7 +125,7 @@ extension WorktreeCleanup {
     /// folder or its entry: the leftovers stay in the Trash, and the report
     /// says what's left.
     private static func removalFailure(
-        _ removal: GitResult, worktree: Worktree, trashed: TrashedLeftovers?, tools: Tools
+        _ removal: GitResult, worktree: Worktree, restore: Restore, trashed: TrashedLeftovers?, tools: Tools
     ) -> Execution {
         let gitOutput = "git worktree remove failed:\n\(output(of: removal))"
         let folderExists = FileManager.default.fileExists(atPath: worktree.path)
@@ -121,15 +144,97 @@ extension WorktreeCleanup {
                 "\(gitOutput)\n\(folder) \(entry) The branch \(worktree.branch ?? "") was kept.\(trashNote)"
             )
         }
-        guard let trashed else { return .failed(gitOutput) }
+        return putBackAfterFailure(
+            gitOutput, worktree: worktree, restore: restore, trashed: trashed, tools: tools,
+            done: "The worktree is still there, leftovers included."
+        )
+    }
+
+    /// The committed files `checkout-index` writes back, and the folders
+    /// it would create for them.
+    struct Restore {
+        let files: [String]
+        /// Deepest first.
+        let missingFolders: [String]
+        /// `checkout-index` succeeded: every file there is its copy.
+        var wroteAll = false
+        /// The files as `lstat` found them right after it: the same stamp
+        /// later, it is the same file, untouched.
+        var written: [String: FileStamp] = [:]
+    }
+
+    /// The folders, relative to `worktree`, missing on the way to `files`.
+    static func missingFolders(of files: [String], in worktree: String) -> [String] {
+        var missing: Set<String> = []
+        for file in files {
+            var folder = (file as NSString).deletingLastPathComponent
+            while !folder.isEmpty, !FileManager.default.fileExists(atPath: worktree + "/" + folder) {
+                missing.insert(folder)
+                folder = (folder as NSString).deletingLastPathComponent
+            }
+        }
+        return missing.sorted { $0.count > $1.count }
+    }
+
+    /// Stopped with the folder whole: what git wrote back makes way for the
+    /// leftovers, which go back from the Trash.
+    private static func putBackAfterFailure(
+        _ reason: String, worktree: Worktree, restore: Restore, trashed: TrashedLeftovers?, tools: Tools,
+        done: String? = nil
+    ) -> Execution {
+        undoRestore(restore, in: worktree.path, tools: tools)
+        guard let trashed else { return .failed(reason) }
         let stuck = putBack(trashed, into: worktree.path)
         guard stuck.isEmpty else {
             return .failed(
-                "\(gitOutput)\nThese leftovers couldn't be put back and are in the Trash, "
+                "\(reason)\nThese leftovers couldn't be put back and are in the Trash, "
                     + "in “\(trashed.folder.lastPathComponent)”: \(stuck.joined(separator: ", "))."
             )
         }
-        return .failed("\(gitOutput)\nThe worktree is still there, leftovers included.")
+        return .failed([reason, done].compactMap { $0 }.joined(separator: "\n"))
+    }
+
+    /// Deletes the files `checkout-index` wrote back, never one changed
+    /// since, then the folders it created, if empty. After a failed
+    /// `checkout-index`, a file there may be someone else's: only one
+    /// holding the index's version goes.
+    private static func undoRestore(_ restore: Restore, in worktree: String, tools: Tools) {
+        for path in restore.files {
+            let file = URL(fileURLWithPath: worktree).appendingPathComponent(path)
+            var info = stat()
+            guard isInside(file.deletingLastPathComponent(), worktree: worktree),
+                  lstat(file.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+                  let now = FileStamp(file)
+            else { continue }
+            let isGitsCopy = restore.wroteAll
+                ? now == restore.written[path]
+                : matchesIndex(path, in: worktree, tools: tools)
+            if isGitsCopy { unlink(file.path) }
+        }
+        for folder in restore.missingFolders {
+            let url = URL(fileURLWithPath: worktree).appendingPathComponent(folder)
+            if isInside(url.deletingLastPathComponent(), worktree: worktree) { rmdir(url.path) }
+        }
+    }
+
+    /// Whether the file at `path` is the index's: the blob git makes of it,
+    /// filters and line endings applied, is the one the index holds. Not
+    /// `git diff --quiet`: some git versions (CI's) take a file just
+    /// written, whose stat the index doesn't know, for a changed one, and a
+    /// configured external diff tool answers for it.
+    private static func matchesIndex(_ path: String, in worktree: String, tools: Tools) -> Bool {
+        let file = git(["hash-object", "--", path], in: worktree, tools: tools)
+        let indexed = git(["rev-parse", "--verify", "-q", ":" + path], in: worktree, tools: tools)
+        let blob = file.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return file.status == 0 && indexed.status == 0 && !blob.isEmpty
+            && blob == indexed.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether `folder` resolves to `worktree` or a folder in it: a symlink
+    /// could lead a move or a deletion somewhere else.
+    private static func isInside(_ folder: URL, worktree: String) -> Bool {
+        guard let resolved = folder.path.realPath else { return false }
+        return resolved == worktree || resolved.hasPrefix(worktree + "/")
     }
 
     // MARK: - Trash
@@ -164,11 +269,7 @@ extension WorktreeCleanup {
             for entry in relativePaths {
                 let relative = entry.hasSuffix("/") ? String(entry.dropLast()) : entry
                 let source = root.appendingPathComponent(relative)
-                // Its folder must be the worktree's own: a symlink could
-                // lead the move somewhere else.
-                guard let parent = source.deletingLastPathComponent().path.realPath,
-                      parent == worktree || parent.hasPrefix(worktree + "/")
-                else {
+                guard isInside(source.deletingLastPathComponent(), worktree: worktree) else {
                     throw LeftoverError(errorDescription: "\(relative) is not inside the worktree.")
                 }
                 let target = bundle.appendingPathComponent(relative)

@@ -283,11 +283,11 @@ extension NiruxShellView {
            `nirux-handover-` prefix and belongs to the user; anything else is ignored.
         4. **Open the worktree in Nirux** — Nirux handles git worktree creation, moves the handover
            file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
-           the same agent. Nirux terminals expose `NIRUX_WORKSPACE_ID` and `NIRUX_PROFILE_ID`;
-           always send both, so the new workspace opens in this workspace's space even if the user
-           has focused a different one. They also expose `NIRUX_LAUNCH_ID`, which proves the
-           request comes from a Nirux terminal; without it Nirux asks the user to confirm before
-           doing anything:
+           the same agent. Nirux terminals expose `NIRUX_WORKSPACE_ID`, `NIRUX_AGENT_UUID` and
+           `NIRUX_PROFILE_ID`; always send them, so the new workspace opens in this workspace's
+           space even if the user has focused a different one, and lists under this workspace
+           when it is a task. They also expose `NIRUX_LAUNCH_ID`, which proves the request comes
+           from a Nirux terminal; without it Nirux asks the user to confirm before doing anything:
            ```bash
            launch_query=""
            if [ -n "${NIRUX_LAUNCH_ID:-}" ]; then
@@ -300,23 +300,20 @@ extension NiruxShellView {
            parent_query=""
            if [ -n "${NIRUX_WORKSPACE_ID:-}" ]; then
              parent_query="&parentWorkspace=${NIRUX_WORKSPACE_ID}"
-           fi
-           mission_query=""
-           if [ "${NIRUX_MISSION_HANDOFFS:-0}" = "1" ] && \
-              [ -n "${NIRUX_WORKSPACE_ID:-}" ] && \
-              [ -n "${NIRUX_AGENT_UUID:-}" ] && \
-              [ -x "${NIRUX_CLI_PATH:-}" ]; then
-             mission_query="&parentAgent=${NIRUX_AGENT_UUID}"
+             if [ -n "${NIRUX_AGENT_UUID:-}" ]; then
+               parent_query="${parent_query}&parentAgent=${NIRUX_AGENT_UUID}"
+             fi
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}${mission_query}"
+        &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
            ```
            For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
            the handover file into the worktree on launch; no manual cleanup is needed.
 
-        When `mission_query` is present, Nirux records the parent/child link and starts the child
-        with Mission instructions. Nirux types the messages between the two agents into their
-        Claude Code prompts, once the agent's turn is over and nobody is typing there:
+        When Mission handoffs are on (`NIRUX_MISSION_HANDOFFS=1`), Nirux also records the
+        parent/child Mission and starts the child with Mission instructions. Nirux types the
+        messages between the two agents into their Claude Code prompts, once the agent's turn is
+        over and nobody is typing there:
 
         - The child asks with the command below and ends its turn; Nirux types the answer into
           its prompt. A Codex child's `ask` waits for the answer instead.
@@ -612,45 +609,78 @@ extension NiruxShellView {
     // MARK: - Cookie Import
 
     func importBrowserCookies() {
-        let browsers = sideEffects.cookieBrowsers()
-        guard !browsers.isEmpty else { return }
-
-        guard browsers.count > 1 else {
-            runCookieImport(from: browsers[0])
+        let sources = sideEffects.cookieSources()
+        guard !sources.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "Import Failed"
+            let browsers = sideEffects.cookieBrowsers().map(\.rawValue).joined(separator: ", ")
+            alert.informativeText = "Nirux found no profile with cookies in \(browsers.isEmpty ? "your browsers" : browsers)."
+            alert.alertStyle = .warning
+            _ = runModal(alert)
             return
         }
 
-        // Several Chromium browsers installed — let the user pick the source.
+        guard sources.count > 1 else {
+            runCookieImport(from: sources[0])
+            return
+        }
+
+        // Several Chromium browser profiles — let the user pick the source:
+        // a button each, or past three, a pop-up menu (a column of buttons
+        // can outgrow the screen).
         let alert = NSAlert()
         alert.messageText = "Import Cookies"
-        alert.informativeText = "Choose a browser to import cookies from."
-        for browser in browsers {
-            alert.addButton(withTitle: browser.rawValue)
+        alert.informativeText = "Choose a browser profile to import cookies from."
+        let index: Int
+        if sources.count <= 3 {
+            for source in sources {
+                alert.addButton(withTitle: source.title)
+            }
+            alert.addButton(withTitle: "Cancel")
+            index = runModal(alert).rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        } else {
+            let menu = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
+            // Through the menu: addItem(withTitle:) drops a repeated title.
+            for source in sources {
+                menu.menu?.addItem(NSMenuItem(title: source.title, action: nil, keyEquivalent: ""))
+            }
+            alert.accessoryView = menu
+            alert.addButton(withTitle: "Import")
+            alert.addButton(withTitle: "Cancel")
+            guard runModal(alert) == .alertFirstButtonReturn else { return }
+            index = menu.indexOfSelectedItem
         }
-        alert.addButton(withTitle: "Cancel")
-        let response = runModal(alert)
-        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-        guard browsers.indices.contains(index) else { return }
-        runCookieImport(from: browsers[index])
+        guard sources.indices.contains(index) else { return }
+        runCookieImport(from: sources[index])
     }
 
-    private func runCookieImport(from browser: CookieImporter.Browser) {
+    private func runCookieImport(from source: CookieImporter.Source) {
         let importCookies = sideEffects.importCookies
         let runModal = sideEffects.runModal
+        let openURL = sideEffects.openURL
         Task {
             do {
-                let result = try await importCookies(browser)
+                let result = try await importCookies(source)
                 let alert = NSAlert()
                 alert.messageText = "Cookies Imported"
-                let failNote = result.failed > 0 ? " \(result.failed) failed." : ""
-                alert.informativeText = "Imported \(result.imported) cookies from \(result.browser.rawValue).\(failNote)"
+                let failNote = result.failed > 0 ? " \(result.failed) couldn’t be imported." : ""
+                alert.informativeText = "Imported \(result.imported) cookies from \(result.source.phrase).\(failNote)"
                 _ = runModal(alert)
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Import Failed"
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
-                _ = runModal(alert)
+                // macOS privacy protection: Full Disk Access lifts it.
+                guard (error as? CookieImporter.ImportError)?.isBlockedByPrivacy == true else {
+                    _ = runModal(alert)
+                    return
+                }
+                alert.addButton(withTitle: "Open Privacy Settings")
+                alert.addButton(withTitle: "Cancel")
+                if runModal(alert) == .alertFirstButtonReturn {
+                    openURL(CookieImporter.ImportError.fullDiskAccessSettings)
+                }
             }
         }
     }
@@ -707,6 +737,11 @@ extension NiruxShellView {
         editor.onPathChanged = { [weak self] in self?.updateSidebar() }
         editor.onDirtyChanged = { [weak self] in self?.updateSidebar() }
         editor.onSendSelectionShortcut = { [weak self] in self?.sendEditorSelectionToAgent() }
+        editor.onTextEdgeKey = { [weak self, weak editor] edge in
+            guard let self, let editor else { return }
+            self.navigate(fromTextEdge: edge, of: editor)
+        }
+        editor.textEdgeDestinations = { [weak self] in self?.textEdgeDestinations() ?? [] }
         editor.onOpenBranchReview = { [weak self, weak editor] in
             guard let self, let editor else { return }
             // The editor's folder: its Full Branch Diff is that branch's.
@@ -714,6 +749,36 @@ extension NiruxShellView {
                 in: self.workspaces.first { $0.columns.contains { $0.editorColumn === editor } }, folder: editor.workspaceCwd
             )
         }
+    }
+
+    /// Cmd+Arrow with Monaco's caret already at that edge: what the key does
+    /// outside text (Focus Left/Right, Workspace Up/Down). The page answers
+    /// after the key, so only while that editor, the focused column in
+    /// front, still has the keyboard; and if the column or workspace that
+    /// way went meanwhile, the caret's move the key stood in for.
+    func navigate(fromTextEdge edge: EditorColumn.TextEdge, of editor: EditorColumn) {
+        guard let workspace = activeWorkspace,
+              workspace.columns[safe: workspace.focusedIndex]?.editorColumn === editor,
+              editor.webViewHasKeyboard
+        else { return }
+        guard textEdgeDestinations().contains(edge) else { return editor.moveCaretToTextEdge(edge) }
+        switch edge {
+        case .left: focusColumn(.left)
+        case .right: focusColumn(.right)
+        case .up: focusWorkspace(.up)
+        case .down: focusWorkspace(.down)
+        }
+    }
+
+    /// Where a Cmd+Arrow at Monaco's caret edge can go from the focused
+    /// column in front: the columns beside it, the workspaces above and below.
+    func textEdgeDestinations() -> Set<EditorColumn.TextEdge> {
+        var edges: Set<EditorColumn.TextEdge> = []
+        if adjacentColumnIndex(.left) != nil { edges.insert(.left) }
+        if adjacentColumnIndex(.right) != nil { edges.insert(.right) }
+        if workspaceStore.adjacentWorkspaceIndex(delta: -1) != nil { edges.insert(.up) }
+        if workspaceStore.adjacentWorkspaceIndex(delta: 1) != nil { edges.insert(.down) }
+        return edges
     }
 
     /// Show the workspace file picker, opening the chosen file in `editor`.

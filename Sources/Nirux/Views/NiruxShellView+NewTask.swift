@@ -7,9 +7,12 @@ extension NiruxShellView {
     /// the active space, its default repository selected
     /// (docs/spaces.md, "One door: ⌘N").
     /// `spaceID` and `selectedKey` (a Lead's proposal) override the active
-    /// space and its default repository.
+    /// space and its default repository. `parentTask` ("New Sub-task…"):
+    /// the task it starts lists under that one, in its repository.
     @discardableResult
-    func showNewPanel(spaceID requestedSpaceID: String? = nil, selectedKey: String? = nil) -> NewTaskPanel? {
+    func showNewPanel(
+        spaceID requestedSpaceID: String? = nil, selectedKey: String? = nil, parentTask: NewTaskPanel.ParentTask? = nil
+    ) -> NewTaskPanel? {
         guard let window else { return nil }
         // Another sheet is up (an alert, Board Settings): a second one would
         // wait unseen behind it, and one waiting there would come up loose.
@@ -73,7 +76,8 @@ extension NiruxShellView {
             attachedTo: window,
             space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
             repositories: repositories,
-            selectedKey: selectedKey ?? space.anchors.defaultAnchor?.key,
+            selectedKey: parentTask?.repositoryKey ?? selectedKey ?? space.anchors.defaultAnchor?.key,
+            parentTask: parentTask,
             agent: defaultTaskAgent(forSpace: space.id),
             homeFolder: sideEffects.homeDirectory()
         )
@@ -81,6 +85,22 @@ extension NiruxShellView {
             suggestRepository(to: panel)
         }
         return panel
+    }
+
+    /// "New Sub-task…": the sheet in the task's space and repository (see
+    /// `subtaskRepositoryKey`), under it.
+    func showNewSubtaskPanel(under parent: WorkspaceState) {
+        guard let repositoryKey = subtaskRepositoryKey(of: parent) else { return NSSound.beep() }
+        showNewPanel(
+            spaceID: parent.profileID,
+            parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, repositoryKey: repositoryKey)
+        )
+    }
+
+    /// The menu bar's New Sub-task…, for the workspace in front. Not while
+    /// a sheet is up: ⌘N's would come forward without the parent.
+    var activeWorkspaceOffersSubtask: Bool {
+        window?.attachedSheet == nil && (activeWorkspace.map(offersSubtask) ?? false)
     }
 
     /// The space's Lead as a Mission parent: its workspace and the column
@@ -171,7 +191,8 @@ extension NiruxShellView {
     /// (docs/spaces.md, "Routing").
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
         var decision = decideSpace(
-            identity: created.identity, parentWorkspaceID: request.reportsTo?.workspaceID, startedFromSpaceID: request.projectID
+            identity: created.identity, parentWorkspaceID: request.parentWorkspaceID ?? request.reportsTo?.workspaceID,
+            startedFromSpaceID: request.projectID
         )
         // A task a Lead starts comes from its space's repository: it opens
         // in that space, as its parent, even when another space anchors its
@@ -197,6 +218,7 @@ extension NiruxShellView {
             workspaceID: childWorkspaceID,
             initialAgentUUID: childAgentUUID,
             missionID: mission?.id,
+            parentWorkspaceID: request.parentWorkspaceID,
             reportsToLead: mission?.reportsToLead == true,
             deliveredHandover: created.handoverError == nil,
             worktreeBranch: created.checkedOutBranch,

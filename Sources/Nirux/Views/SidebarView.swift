@@ -56,6 +56,9 @@ final class SidebarView: NSView {
     /// Where the workspace's menu offers "Clean Up Worktree…", nil outside
     /// a linked worktree. Asked on each menu.
     var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
+    /// Whether the workspace's menu offers "New Sub-task…". Asked on each
+    /// menu.
+    var offersSubtask: ((Int) -> Bool)?
     /// Drag-reorder drop: (store index of dragged workspace, target
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
@@ -518,8 +521,8 @@ final class SidebarView: NSView {
 
     /// Per-workspace action menu, shared by right-click and the "⋯" button:
     /// what the workspace's state offers first (Review Branch, failed CI,
-    /// Clean Up once merged), then Organize, then Rename, its context and
-    /// Close (with Clean Up before it, not merged yet).
+    /// Clean Up once merged), then New Sub-task… and Organize, then Rename,
+    /// its context and Close (with Clean Up before it, not merged yet).
     /// `columnIndex` non-nil when invoked from a column row — adds the
     /// column-level actions on top.
     func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
@@ -548,6 +551,11 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
         if workspace?.isLead != true {
+            if offersSubtask?(workspaceIndex) == true {
+                menu.addClosureItem(title: Self.newSubtaskTitle) { [weak self] in
+                    self?.onWorkspaceAction?(.newSubtask, workspaceIndex)
+                }
+            }
             menu.addItem(organizeItem(workspaceIndex: workspaceIndex, isInactive: workspace?.isInactive == true))
             menu.addItem(.separator())
         }
@@ -565,6 +573,8 @@ final class SidebarView: NSView {
         }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
         return menu
     }
+
+    static let newSubtaskTitle = "New Sub-task…"
 
     /// The card's moves: up, down, to another space, to Archived and back.
     private func organizeItem(workspaceIndex: Int, isInactive: Bool) -> NSMenuItem {

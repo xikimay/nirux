@@ -137,7 +137,7 @@ final class WorktreeCleanupPanel: NSObject {
     static func isSelectable(_ candidate: WorktreeCleanupCandidate) -> Bool {
         switch candidate.availability {
         case .ready, .closeOnly: return true
-        case .checking, .blocked: return false
+        case .checking, .notMerged, .blocked: return false
         }
     }
 
@@ -171,7 +171,8 @@ final class WorktreeCleanupPanel: NSObject {
         let checking = candidates.filter { $0.inspection == nil }.count
         if checking > 0 { return "Checking \(candidates.count - checking) of \(candidates.count)…" }
         let ready = candidates.filter(Self.isSelectable).count
-        return "\(ready) of \(candidates.count) can be cleaned up"
+        let notMerged = candidates.filter { if case .notMerged = $0.availability { return true } else { return false } }.count
+        return "\(ready) of \(candidates.count) can be cleaned up" + (notMerged > 0 ? " · \(notMerged) not merged yet" : "")
     }
 
     // MARK: - Rendering
@@ -209,6 +210,9 @@ final class WorktreeCleanupPanel: NSObject {
             switch candidate.availability {
             case .checking:
                 color = NSColor.white.withAlphaComponent(0.35)
+            case .notMerged:
+                color = NSColor.white.withAlphaComponent(0.35)
+                toolTip = candidate.report?.problems.joined(separator: "\n")
             case .blocked(let problems):
                 color = NSColor.systemOrange.withAlphaComponent(0.9)
                 toolTip = problems.joined(separator: "\n")
