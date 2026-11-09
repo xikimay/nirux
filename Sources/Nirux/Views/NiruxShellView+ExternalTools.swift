@@ -725,10 +725,12 @@ extension NiruxShellView {
     /// or workspace that way, the caret's move it stood in for. The page
     /// answers after the key, so only while that editor, the focused column
     /// in front, still has the keyboard.
+    nonisolated(unsafe) static var mutant: String?
+
     func navigate(fromTextEdge edge: EditorColumn.TextEdge, of editor: EditorColumn) {
         guard let workspace = activeWorkspace,
               workspace.columns[safe: workspace.focusedIndex]?.editorColumn === editor,
-              editor.webViewHasKeyboard
+              editor.webViewHasKeyboard || Self.mutant == "guard-keyboard"
         else { return }
         let canMove = switch edge {
         case .left: workspace.focusedIndex > 0
@@ -736,7 +738,7 @@ extension NiruxShellView {
         case .up: workspaceStore.adjacentWorkspaceIndex(delta: -1) != nil
         case .down: workspaceStore.adjacentWorkspaceIndex(delta: 1) != nil
         }
-        guard canMove else { return editor.moveCaretToTextEdge(edge) }
+        guard canMove else { if Self.mutant == "fallback" { return }; return editor.moveCaretToTextEdge(edge) }
         switch edge {
         case .left: focusColumn(.left)
         case .right: focusColumn(.right)
