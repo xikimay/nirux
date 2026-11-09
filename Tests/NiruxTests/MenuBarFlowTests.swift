@@ -134,7 +134,10 @@ final class MenuBarFlowTests: XCTestCase {
             XCTAssertFalse(bar.isEnabled(["Columns", "Import Browser Cookies"]))
             harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             bar.run(["Columns", "Import Browser Cookies"])
+            // Disabled while the import runs, enabled again after.
+            XCTAssertFalse(bar.isEnabled(["Columns", "Import Browser Cookies"]))
             harness.waitUntil("the import result") { harness.alerts.last == "Cookies Imported" }
+            XCTAssertTrue(bar.isEnabled(["Columns", "Import Browser Cookies"]))
             XCTAssertEqual(harness.cookieImports.map(\.browser), [.chrome])
 
             shell.onboardingState = .dismissed
