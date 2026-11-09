@@ -756,12 +756,14 @@ extension NiruxShellView {
     /// after the key, so only while that editor, the focused column in
     /// front, still has the keyboard; and if the column or workspace that
     /// way went meanwhile, the caret's move the key stood in for.
+    nonisolated(unsafe) static var mutant: String?
+
     func navigate(fromTextEdge edge: EditorColumn.TextEdge, of editor: EditorColumn) {
         guard let workspace = activeWorkspace,
               workspace.columns[safe: workspace.focusedIndex]?.editorColumn === editor,
-              editor.webViewHasKeyboard
+              editor.webViewHasKeyboard || Self.mutant == "guard-keyboard"
         else { return }
-        guard textEdgeDestinations().contains(edge) else { return editor.moveCaretToTextEdge(edge) }
+        guard textEdgeDestinations().contains(edge) else { if Self.mutant == "fallback" { return }; return editor.moveCaretToTextEdge(edge) }
         switch edge {
         case .left: focusColumn(.left)
         case .right: focusColumn(.right)
@@ -776,8 +778,9 @@ extension NiruxShellView {
         var edges: Set<EditorColumn.TextEdge> = []
         if adjacentColumnIndex(.left) != nil { edges.insert(.left) }
         if adjacentColumnIndex(.right) != nil { edges.insert(.right) }
-        if workspaceStore.adjacentWorkspaceIndex(delta: -1) != nil { edges.insert(.up) }
-        if workspaceStore.adjacentWorkspaceIndex(delta: 1) != nil { edges.insert(.down) }
+        let swap = Self.mutant == "swap"
+        if workspaceStore.adjacentWorkspaceIndex(delta: swap ? 1 : -1) != nil { edges.insert(.up) }
+        if workspaceStore.adjacentWorkspaceIndex(delta: swap ? -1 : 1) != nil { edges.insert(.down) }
         return edges
     }
 

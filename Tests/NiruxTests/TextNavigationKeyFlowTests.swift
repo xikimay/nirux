@@ -9,7 +9,10 @@ import XCTest
 /// with the editor's caret already at that edge. A focused editor column
 /// has the keyboard, unless an agent's open focused it.
 @MainActor
-final class TextNavigationKeyFlowTests: XCTestCase {
+class TextNavigationKeyFlowTests: XCTestCase {
+    /// DO NOT MERGE: the mutant a subclass switches on.
+    class var mutant: String? { nil }
+
     private enum Arrow: UInt16 {
         case left = 0x7B, right = 0x7C, down = 0x7D, up = 0x7E
 
@@ -65,6 +68,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 XCTAssertNil(harness.shell.workspaceStore.adjacentWorkspaceIndex(delta: -1), "a workspace above")
                 XCTAssertNotNil(harness.shell.workspaceStore.adjacentWorkspaceIndex(delta: 1), "no workspace below")
                 let (editor, webView) = try openEditorWithKeyboard(in: harness)
+                setMutant(in: webView)
                 let editorIndex = workspace.focusedIndex
                 var edgeKeys: [EditorColumn.TextEdge] = []
                 let navigate = editor.onTextEdgeKey
@@ -254,6 +258,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 shell.addWorkspace(title: "middle", cwd: harness.repo)
                 let middle = try XCTUnwrap(shell.activeWorkspace)
                 let (_, webView) = try openEditorWithKeyboard(in: harness)
+                setMutant(in: webView)
                 shell.addWorkspace(title: "bottom", cwd: harness.repo)
                 let bottom = try XCTUnwrap(shell.activeWorkspace)
                 shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === middle }))
@@ -468,6 +473,12 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    private func setMutant(in webView: WKWebView) {
+        let mutant = type(of: self).mutant
+        NiruxShellView.mutant = mutant
+        UIFlowHarness.run("window.__niruxMutant = '\(mutant ?? "")'; 0", in: webView)
+    }
+
     // MARK: - Helpers
 
     /// What `nirux://open-editor` asks for when an agent opens `path`.
@@ -489,6 +500,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
         XCTAssertIdentical(harness.window.firstResponder, webView)
         waitForMonacoText(in: webView)
+        setMutant(in: webView)
         return (editorIndex, webView)
     }
 
@@ -599,3 +611,82 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Mutants (DO NOT MERGE): each subclass reruns the class with one mutant on.
+
+final class EdgeMutant_shift: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "shift" }
+}
+
+final class EdgeMutant_repeat: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "repeat" }
+}
+
+final class EdgeMutant_right: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "right" }
+}
+
+final class EdgeMutant_left: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "left" }
+}
+
+final class EdgeMutant_selection: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "selection" }
+}
+
+final class EdgeMutant_guard_keyboard: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "guard-keyboard" }
+}
+
+final class EdgeMutant_revert: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "revert" }
+}
+
+final class EdgeMutant_indent: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "indent" }
+}
+
+final class EdgeMutant_landing: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "landing" }
+}
+
+final class EdgeMutant_down: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "down" }
+}
+
+final class EdgeMutant_up: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "up" }
+}
+
+final class EdgeMutant_suggest: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "suggest" }
+}
+
+final class EdgeMutant_dest: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "dest" }
+}
+
+final class EdgeMutant_push: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "push" }
+}
+
+final class EdgeMutant_model: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "model" }
+}
+
+final class EdgeMutant_fallback: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "fallback" }
+}
+
+final class EdgeMutant_swap: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "swap" }
+}
+
+final class EdgeMutant_record: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "record" }
+}
+
+final class EdgeMutant_heldnav: TextNavigationKeyFlowTests {
+    override class var mutant: String? { "heldnav" }
+}
+

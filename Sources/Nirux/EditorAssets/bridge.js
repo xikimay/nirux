@@ -196,6 +196,7 @@
   // Monaco's widgets keep the chords they bind: the suggestion list's
   // Cmd+Up/Down, an inline suggestion's Cmd+Right, the code action menu's.
   // Edge -> its arrow, as KeyboardEvent.key and as Monaco's KeyCode name.
+  function mutant(id) { return window.__niruxMutant === id; }
   var textEdgeArrows = {
     left: { key: "ArrowLeft", keyCode: "LeftArrow" },
     right: { key: "ArrowRight", keyCode: "RightArrow" },
@@ -237,7 +238,8 @@
   function textEdgeState(target) {
     var state = textEdgeStates.get(target);
     if (!state) {
-      state = { contextKey: target.createContextKey("niruxCaretAtTextEdge", false), cursorChanges: 0 };
+      state = { contextKey: target.createContextKey("niruxCaretAtTextEdge", false), cursorChanges: 0,
+        mutantSuggest: target.createContextKey("niruxMutantSuggest", false) };
       target.onDidChangeCursorSelection(function () { state.cursorChanges += 1; });
       textEdgeStates.set(target, state);
     }
@@ -247,22 +249,25 @@
   function caretAtTextEdge(target, edge) {
     var model = target.getModel();
     var selections = target.getSelections();
-    if (!model || !selections || selections.length !== 1 || !selections[0].isEmpty()) return false;
+    if (!model || !selections || selections.length !== 1 || (!mutant("selection") && !selections[0].isEmpty())) return false;
     var line = selections[0].positionLineNumber;
     var column = selections[0].positionColumn;
     if (edge === "left") {
+      if (mutant("left")) return true;
       if (column !== 1) return false;
+      if (mutant("indent")) return true;
       // 0 on a blank line.
       if (model.getLineFirstNonWhitespaceColumn(line) <= 1) return true;
+      if (mutant("landing")) return false;
       // Indented: from column 1, Monaco's Cmd+Left goes to the indent, so
       // column 1 is the edge only once a Cmd+Left put the caret there (an
       // open at a line, a search result, lands on column 1).
-      return !!lastCaretHome && lastCaretHome.editor === target && lastCaretHome.modelId === model.id &&
+      return !!lastCaretHome && lastCaretHome.editor === target && (mutant("model") || lastCaretHome.modelId === model.id) &&
         lastCaretHome.line === line && textEdgeState(target).cursorChanges === lastCaretHome.cursorChanges + 1;
     }
-    if (edge === "right") return column === model.getLineMaxColumn(line);
-    if (edge === "up") return line === 1;
-    return line === model.getLineCount();
+    if (edge === "right") return mutant("right") || column === model.getLineMaxColumn(line);
+    if (edge === "up") return mutant("up") || line === 1;
+    return mutant("down") || line === model.getLineCount();
   }
 
   // Each code editor's niruxCaretAtTextEdge, set as a key arrives, before
@@ -273,15 +278,15 @@
   // sent have moved it.
   window.addEventListener("keydown", function (event) {
     var edge = textEdgeOfKey[event.key];
-    var plain = !!edge && event.metaKey && !event.shiftKey && !event.altKey && !event.ctrlKey &&
-      !event.repeat && !event.isComposing;
+    var plain = !!edge && event.metaKey && (mutant("shift") || !event.shiftKey) && !event.altKey && !event.ctrlKey &&
+      (mutant("repeat") || !event.repeat) && !event.isComposing;
     var target = plain ? codeEditorWithCaret() : null;
     var caretAtEdge = !!target && caretAtTextEdge(target, edge);
-    var atEdge = caretAtEdge && textEdgeDestinations[edge];
+    var atEdge = !mutant("revert") && caretAtEdge && (mutant("dest") || textEdgeDestinations[edge]);
     if (target && edge === "left") {
       // Only a Cmd+Left that moves the caret: at the edge, it moves nothing
       // or leaves. Any cursor change since tells a later one it is stale.
-      lastCaretHome = caretAtEdge
+      lastCaretHome = (mutant("record") ? atEdge : caretAtEdge)
         ? null
         : {
           editor: target,
@@ -294,6 +299,7 @@
     if (diffEditor) editors.push(diffEditor.getModifiedEditor(), diffEditor.getOriginalEditor());
     for (var i = 0; i < editors.length; i++) {
       if (!editors[i] || typeof editors[i].createContextKey !== "function") continue;
+      textEdgeState(editors[i]).mutantSuggest.set(mutant("suggest"));
       var key = textEdgeState(editors[i]).contextKey;
       var value = atEdge && editors[i] === target;
       if (key.get() !== value) key.set(value);
@@ -309,6 +315,11 @@
         monaco.KeyMod.CtrlCmd | monaco.KeyCode[textEdgeArrows[edge].keyCode],
         function () { postToSwift({ type: "textEdgeKey", edge: edge }); },
         textEdgeWhen
+      );
+      target.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode[textEdgeArrows[edge].keyCode],
+        function () { postToSwift({ type: "textEdgeKey", edge: edge }); },
+        "niruxCaretAtTextEdge && niruxMutantSuggest"
       );
     });
   }
