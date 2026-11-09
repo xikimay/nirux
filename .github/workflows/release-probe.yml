@@ -1,0 +1,29 @@
+name: Release probe
+
+# Throwaway (DO NOT MERGE): the nightly's release build and bundling on
+# Xcode 26.3, with main's code, before #274 makes the nightly do it.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/release-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+      - name: Toolchain
+        run: swift --version
+      - name: Build release
+        run: swift build -c release
+      - name: Bundle .app
+        run: ./scripts/bundle.sh 0.0.0 0
+      - name: MainActor closures near background helpers
+        run: nm .build/release/Nirux | xcrun swift-demangle | grep '@Swift.MainActor' | grep -ciE 'closure' || true
