@@ -522,7 +522,6 @@ enum WorktreeCleanup {
             }
             // Malformed: a change no one can read, never a clean tree.
             guard field.count > 3 else {
-                guard visit(StatusEntry(code: "", path: String(decoding: field, as: UTF8.self))) else { return }
                 continue
             }
             let code = String(decoding: field.prefix(2), as: UTF8.self)
