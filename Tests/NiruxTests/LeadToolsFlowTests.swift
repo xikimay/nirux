@@ -119,11 +119,13 @@ final class LeadToolsFlowTests: XCTestCase {
     /// the keyboard. A click on the row from another app leaves the popover
     /// without it (once that click has brought Nirux to the front, AppKit
     /// gives the keyboard back to the main window): the keys then come to
-    /// the main window, where the focused terminal took them. They go to the answer field: typing, ⌘↩ and Esc
-    /// work the first time. The test process never has a key window, so its
-    /// keys come as they did then. Both a question the Lead hands over and
-    /// one that comes to the user directly, its parent gone. Once the
-    /// popover closes or starts to, keys go to the terminal again.
+    /// the main window, where the focused terminal took them. They go to the
+    /// answer field: typing, ⌘↩ and Esc work the first time. The test
+    /// process never has a key window, so its keys come as they did then
+    /// (in the app, a ⌘-chord goes back to AppKit once the popover has the
+    /// keyboard). Both a question the Lead hands over and one that comes to
+    /// the user directly, its parent gone. Once the popover closed, or a
+    /// panel took the keyboard, keys go to the terminal again.
     func testKeysTypedWhileTheReplyPopoverShowsGoToItsField() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -155,6 +157,11 @@ final class LeadToolsFlowTests: XCTestCase {
                 XCTAssertFalse(try call(LeadTools.askUser, ["task": "Export CSV", "why": "Only the user knows."], lead: lead, in: harness).isError)
                 assertATerminalTakesTheKeys()
                 var reply = try openReply(to: task, in: harness)
+                // As the click from another app goes: the popover takes the
+                // keyboard, then the main window gets it back. The test
+                // process has no key window, so notifications stand for both.
+                NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: reply.controller.view.window)
+                NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: harness.window)
                 harness.press("o", keyCode: 0x1F, [])
                 harness.press("k", keyCode: 0x28, [])
                 XCTAssertEqual(reply.controller.replyView?.string, "ok")
@@ -177,12 +184,17 @@ final class LeadToolsFlowTests: XCTestCase {
                 harness.press("x", keyCode: 0x07, [])
                 XCTAssertEqual(reply.controller.replyView?.string, "", "closed, it takes no key")
 
-                // A key typed while it fades out (a click outside closes it).
+                // A panel took the keyboard (Search Everywhere, Session
+                // History), then gave it to the main window: the user went
+                // there. The test process has no key window, so the
+                // notification stands for the panel becoming key.
                 reply = try openReply(to: task, in: harness)
-                reply.popover.animates = true
-                reply.popover.performClose(nil)
-                harness.press("y", keyCode: 0x10, [])
-                XCTAssertEqual(reply.controller.replyView?.string, "", "closing, it takes no key")
+                let panel = NSPanel(contentRect: .zero, styleMask: [], backing: .buffered, defer: true)
+                panel.isReleasedWhenClosed = false
+                NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: panel)
+                harness.press("z", keyCode: 0x06, [])
+                XCTAssertEqual(reply.controller.replyView?.string, "", "a panel had the keyboard, it takes no key")
+                XCTAssertTrue(reply.popover.isShown)
 
                 reply = try openReply(to: task, in: harness)
                 harness.press(";", keyCode: 0x29, [])
