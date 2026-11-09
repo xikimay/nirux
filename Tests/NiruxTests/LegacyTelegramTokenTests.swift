@@ -22,6 +22,8 @@ final class LegacyTelegramTokenTests: XCTestCase {
     func testADevelopmentBuildOrACopyOnItsOwnStateLeavesTheTokenAlone() {
         let touched = expectation(description: "the token's item is deleted")
         touched.isInverted = true
+        // Each copy that got through would fulfill it, some after the test.
+        touched.assertForOverFulfill = false
         let copies: [(environment: [String: String], bundle: URL)] = [
             ([:], devBuild),
             (["NIRUX_STATE_DIR": "/tmp/nirux-dev"], installedApp)
