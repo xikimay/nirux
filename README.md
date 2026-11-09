@@ -135,12 +135,12 @@ Useful shortcuts:
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
-| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead |
+| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead — in the editor, a press with the caret already at the line start or end focuses the column beside (on an indented line, `Cmd+Left` stops at the indent first) |
 | `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus previous or next column, also from text |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column; in text, select to the start or end of the line (`Columns > Move Left / Move Right` still moves it) |
 | `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New…: a task, or a shell when nothing is typed (see [Starting a task from Nirux](#starting-a-task-from-nirux)) |
-| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) |
+| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) — in the editor, a press with the caret already on the first or last line switches workspace |
 | `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the space picker) |
 | `Alt+Cmd+1…9` | Switch to the space at that place in the space picker |
