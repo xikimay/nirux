@@ -485,8 +485,12 @@ extension NiruxApp {
         PersistedSettings.effective(Persistence.load()?.settings).alertOnlyWhenClaudeAsks
     }
 
+    /// The classifier when the option is on, its setup checked ahead of
+    /// the first turn end.
     static func turnEndClassifier(enabled: Bool) -> (any TurnEndClassifier)? {
-        enabled ? HaikuTurnEndClassifier.shared : nil
+        guard enabled else { return nil }
+        HaikuTurnEndClassifier.shared.prepare()
+        return HaikuTurnEndClassifier.shared
     }
 
     // MARK: - Telegram
@@ -673,6 +677,7 @@ extension NiruxApp {
         settingsTelegramTokenField = nil
         settingsTelegramCompletionCheckbox = nil
         settingsTelegramAttentionCheckbox = nil
+        settingsAlertOnlyWhenClaudeAsksCheckbox = nil
         settingsTelegramStatusLabel = nil
         settingsTelegramPairButton = nil
     }

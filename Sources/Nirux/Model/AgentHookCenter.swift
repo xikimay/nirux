@@ -58,9 +58,6 @@ final class AgentHookCenter {
     /// only a turn that asks something alerts. Nil: every turn end alerts,
     /// and the messages are dropped as they arrive.
     var turnEndClassifier: (any TurnEndClassifier)?
-    /// A verdict changed a column (see `applyTurnEndVerdict`): the sidebar
-    /// and the Dock badge must follow.
-    var onTurnEndVerdict: (() -> Void)?
     private var lastApprovalSweep: TimeInterval = 0
 
     private var dirSource: DispatchSourceFileSystemObject?
@@ -282,19 +279,21 @@ final class AgentHookCenter {
         }
         Task { @MainActor [weak self] in
             let verdict = await classifier.classify(request.message)
-            self?.applyTurnEndVerdict(verdict, for: request, agentUUID: agentUUID)
+            guard let self else { return }
+            // Turned off meanwhile: every turn end alerts.
+            self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
         }
     }
 
     /// The verdict on a turn end, applied to its column found again (the
     /// user may look at it now): an alert when the turn asks something, or
-    /// when the classifier couldn't tell.
+    /// when the classifier couldn't tell. The alert refreshes the sidebar
+    /// and the Dock badge; nothing else a verdict does shows.
     func applyTurnEndVerdict(_ verdict: TurnEndVerdict, for request: TurnEndRequest, agentUUID: String) {
-        guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty else { return }
-        if let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused) {
-            resolution.column.notifyAgentAttention(reason: reason)
-        }
-        onTurnEndVerdict?()
+        guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty,
+              let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused)
+        else { return }
+        resolution.column.notifyAgentAttention(reason: reason)
     }
 
     /// Whether the sidebar holds a request its receiver waits on:

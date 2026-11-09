@@ -19,19 +19,17 @@ import Foundation
 /// owns one instance and feeds it reads, writes, resizes and hook events.
 struct AgentStatusMachine {
     private(set) var state: AgentStatus = .idle {
-        // Leaving attention ends the episode: the next one alerts again,
-        // and a quiet turn end is over.
-        didSet {
-            if state != .needsAttention {
-                attentionAlerted = false
-                quietTurnEnd = nil
-            }
-        }
+        // Leaving attention ends the episode: the next one alerts again.
+        didSet { if state != .needsAttention { attentionAlerted = false } }
     }
-    /// A Claude turn end that hasn't alerted: its verdict is on its way
-    /// (`AgentHookOutcome.turnEnd`), or it came back done. The column
-    /// says "done" without counting in the Dock badge; see
-    /// `isQuietTurnEnd`.
+    /// The last Claude turn end, while it hasn't alerted: its verdict is on
+    /// its way (`AgentHookOutcome.turnEnd`), or it came back done. The
+    /// column says "done" without counting in the Dock badge (see
+    /// `isQuietTurnEnd`). It lasts until the next main-thread prompt, turn
+    /// end or conversation, whatever the column's status does meanwhile:
+    /// the sidebar idles the focused column of a Nirux in the background,
+    /// a subagent's tool call sets it working, activating Nirux idles every
+    /// column, and none of these means the user read the message.
     private(set) var quietTurnEnd: QuietTurnEnd?
 
     enum QuietTurnEnd: Equatable {
@@ -230,7 +228,7 @@ struct AgentStatusMachine {
         case .sessionStart:
             startConversation(event)
         case .userPromptSubmit:
-            startTurn(event, now: now)
+            startTurn(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .preToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
@@ -284,6 +282,7 @@ struct AgentStatusMachine {
             applyTurnEnd(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .sessionEnd:
             endTurn()
+            quietTurnEnd = nil
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -303,7 +302,12 @@ struct AgentStatusMachine {
         }
     }
 
-    private mutating func startTurn(_ event: AgentHookEvent, now: TimeInterval) {
+    private mutating func startTurn(
+        _ event: AgentHookEvent,
+        now: TimeInterval,
+        isUserFocused: Bool,
+        outcome: inout AgentHookOutcome
+    ) {
         hookKind = event.kind.rawValue
         // A prompt was typed at the session's input, which no dialog of
         // it covered: they are all closed. This also frees the subagent
@@ -315,6 +319,14 @@ struct AgentStatusMachine {
         hookTurnInFlight = true
         turnFailure = nil
         if event.agentID == nil {
+            // A prompt came before the verdict on the last turn end: it
+            // alerts as every turn end did. The user may not have read it:
+            // Nirux types Mission messages, Telegram sends prompts.
+            if case .pending = quietTurnEnd, !isUserFocused {
+                outcome.attention = .turnFinished
+                outcome.firedAttention = true
+            }
+            quietTurnEnd = nil
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -330,6 +342,7 @@ struct AgentStatusMachine {
         // whatever dialogs the old one showed are gone. `/clear` took what
         // was typed at the prompt, but fires no UserPromptSubmit.
         endTurn()
+        quietTurnEnd = nil
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -359,6 +372,7 @@ struct AgentStatusMachine {
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
+        quietTurnEnd = nil
         mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
@@ -382,23 +396,27 @@ struct AgentStatusMachine {
         outcome.firedAttention = block(for: reason, isUserFocused: isUserFocused)
     }
 
-    /// A turn end that hasn't alerted, and nothing else waits: no dialog,
-    /// no failed turn, no other attention since.
+    /// The column shows a turn end that hasn't alerted, and nothing else
+    /// waits: no dialog, no failed turn, no other attention since.
     var isQuietTurnEnd: Bool {
-        quietTurnEnd != nil && attentionReason == .turnFinished
+        quietTurnEnd != nil && state == .needsAttention && attentionReason == .turnFinished
     }
 
     /// The verdict on the turn end `request` asked about: the reason to
     /// alert with, or nil. A turn that asks alerts, amber; one the
     /// classifier couldn't read alerts as every turn end did; one that's
-    /// done stays quiet. Dropped when the column has left that turn end (a
-    /// new prompt, a later turn end, another attention, the user looked).
+    /// done stays quiet. `isUserFocused` is now's: a user looking at the
+    /// column needs no alert. Dropped once that turn end is behind (a new
+    /// prompt, a later turn end, another conversation) or another attention
+    /// came after it (a dialog, a notification), which speaks for itself.
     mutating func applyTurnEndVerdict(
         _ verdict: TurnEndVerdict,
         for request: TurnEndRequest,
         isUserFocused: Bool
     ) -> AgentAttentionReason? {
-        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt), isQuietTurnEnd else { return nil }
+        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt), lastAttentionReason == .turnFinished,
+              openDialogs.isEmpty, turnFailure == nil
+        else { return nil }
         let reason: AgentAttentionReason
         switch verdict {
         case .done:

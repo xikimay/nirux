@@ -107,6 +107,16 @@ extension BranchReview {
             return environment
         }
 
+        /// The flags that confine a run: none of the user's settings, hooks,
+        /// MCP servers, slash commands or instruction files (with no
+        /// `CLAUDE.md` in the folder, Claude Code would read an `AGENTS.md`),
+        /// and no saved session.
+        static let confinementArguments = [
+            "--restricted", "--permission-prompts", "none",
+            "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
+            "--settings", #"{"disableAllHooks":true,"instructionFiles":"managed-only"}"#
+        ]
+
         /// Its help lists `--restricted`, `--permission-prompts` and
         /// `--max-budget-usd`. Not
         /// `ClaudeCodeVersion.detect`, which returns the oldest of the
@@ -399,11 +409,8 @@ extension BranchReview {
             "-p", "--model", settings.model, "--effort", settings.effort,
             "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--json-schema", ExplainOutput.schema(for: input), "--max-budget-usd", String(settings.maxBudgetUSD),
-            "--tools", "Read,Grep,Glob", "--restricted", "--permission-prompts", "none",
-            "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
-            "--settings", #"{"disableAllHooks":true,"instructionFiles":"managed-only"}"#,
-            "--system-prompt", explainSystemPrompt(language: language)
-        ]
+            "--tools", "Read,Grep,Glob"
+        ] + ClaudeCLI.confinementArguments + ["--system-prompt", explainSystemPrompt(language: language)]
     }
 
     /// The Mac's preferred language, by its English name, with its script

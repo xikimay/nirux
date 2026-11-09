@@ -22,12 +22,21 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(excerpt.hasSuffix("Shall I merge?"), "the question that ends it survives")
     }
 
-    func testLastLineSkipsCodeAndCleansTheText() {
+    func testLastLineSkipsCodeAndCleansTheText() throws {
         XCTAssertEqual(TurnEndText.lastLine(of: asks), "Shall I merge it?")
         XCTAssertEqual(TurnEndText.lastLine(of: "Je merge ?\n\n```swift\nlet x = 1\n```\n"), "Je merge ?")
         XCTAssertEqual(TurnEndText.lastLine(of: "OK\n\u{1B}[31mTu veux\u{07} que je pousse ?  \n"), "[31mTu veux que je pousse ?")
         XCTAssertEqual(TurnEndText.lastLine(of: String(repeating: "a", count: 500))?.count, 200)
         XCTAssertNil(TurnEndText.lastLine(of: "```\ncode only\n```"))
+        XCTAssertEqual(TurnEndText.lastLine(of: "Fixed.\r\nShall I push?\r\n"), "Shall I push?")
+        // The excerpt cut a block's opening fence away; its closing one is
+        // still there.
+        let cut = try XCTUnwrap(TurnEndText.excerpt(
+            "Intro " + String(repeating: "word ", count: 300) + "\n```\n" + String(repeating: "code\n", count: 1_000)
+                + "```\nShall I merge?"
+        ))
+        XCTAssertFalse(cut.contains("\n```\ncode"), "the opening fence is gone")
+        XCTAssertEqual(TurnEndText.lastLine(of: cut), "Shall I merge?")
     }
 
     func testOnlyAMainThreadStopCarriesTheFinalMessage() throws {
@@ -115,7 +124,7 @@ final class TurnEndClassificationTests: XCTestCase {
     func testVerdictOnATurnEndTheColumnLeftIsDropped() throws {
         // A new prompt went in first.
         var request = try XCTUnwrap(endTurn().turnEnd)
-        _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
+        _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: true)
         XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
         XCTAssertEqual(machine.state, .working)
 
@@ -128,18 +137,53 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(machine.applyTurnEndVerdict(.done, for: second, isUserFocused: false))
         XCTAssertTrue(machine.isQuietTurnEnd)
 
-        // The user looked at the column meanwhile.
-        machine = AgentStatusMachine()
-        request = try XCTUnwrap(endTurn().turnEnd)
-        machine.clearAttention()
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
-        XCTAssertEqual(machine.state, .idle)
-
-        // Or looks at it as the verdict comes back.
+        // The user looks at the column as the verdict comes back.
         machine = AgentStatusMachine()
         request = try XCTUnwrap(endTurn().turnEnd)
         XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: true))
         XCTAssertEqual(machine.state, .idle)
+    }
+
+    /// Nothing that idles the column means the user read the message:
+    /// activating Nirux (every column), the sidebar's own focus (the
+    /// focused column of a Nirux in the background), a subagent working on.
+    func testIdlingTheColumnKeepsTheVerdict() throws {
+        var request = try XCTUnwrap(endTurn().turnEnd)
+        machine.clearAttention()
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
+        XCTAssertEqual(machine.state, .needsAttention)
+
+        machine = AgentStatusMachine()
+        request = try XCTUnwrap(endTurn().turnEnd)
+        machine.tick(fgName: "claude", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 6))
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertEqual(machine.applyTurnEndVerdict(.unknown, for: request, isUserFocused: false), .turnFinished)
+
+        machine = AgentStatusMachine()
+        request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertEqual(machine.state, .working)
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
+    }
+
+    /// A prompt typed before the verdict (by Nirux: a Mission message, a
+    /// Telegram prompt) alerts as the turn end would have, unless the user
+    /// looks at the column.
+    func testPromptBeforeTheVerdictAlertsAsBefore() throws {
+        endTurn()
+        let prompt = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
+        XCTAssertTrue(prompt.firedAttention)
+        XCTAssertEqual(prompt.attention, .turnFinished)
+        XCTAssertFalse(machine.isQuietTurnEnd)
+
+        machine = AgentStatusMachine()
+        endTurn()
+        XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: true).firedAttention)
+        // Once settled, a prompt is just a prompt.
+        machine = AgentStatusMachine()
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.applyTurnEndVerdict(.done, for: request, isUserFocused: false)
+        XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
     }
 
     func testFocusedColumnAsksForNoVerdict() {
@@ -173,6 +217,16 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(outcome.turnEnd)
         XCTAssertTrue(outcome.firedAttention)
         XCTAssertFalse(machine.isQuietTurnEnd)
+    }
+
+    /// A later turn end that alerts at once (no message this time) ends
+    /// the quiet one: it counts, and the old verdict is dropped.
+    func testLaterTurnEndThatAlertsEndsTheQuietOne() throws {
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        let later = machine.apply(event(.stop, at: 9), isUserFocused: false)
+        XCTAssertTrue(later.firedAttention)
+        XCTAssertFalse(machine.isQuietTurnEnd)
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
     }
 
     func testAnotherAttentionDuringTheWaitAlertsAndDropsTheVerdict() throws {
@@ -246,8 +300,11 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(calls.value, 1, "kept")
         clock += HaikuTurnEndClassifier.missingSetupLifetime
         now.value = clock
-        _ = await missing.classify(asks)
-        XCTAssertEqual(calls.value, 2, "checked again later")
+        let stale = await missing.classify(asks)
+        XCTAssertEqual(stale, .unknown, "the old setup answers at once")
+        let deadline = Date().addingTimeInterval(10)
+        while calls.value < 2, Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(calls.value, 2, "checked again later, in the background")
 
         let inputs = LockedValue<[String]>([])
         let ready = HaikuTurnEndClassifier(
@@ -270,7 +327,8 @@ final class TurnEndClassificationTests: XCTestCase {
             checkSetup: { [cli] in .ready(cli) },
             runProcess: { _, _, _ in
                 started.increment()
-                gate.wait()
+                // Bounded: a run let past the limit fails the test, not hangs it.
+                _ = gate.wait(timeout: .now() + 5)
                 return Self.result(#"{"is_error":false,"result":"DONE"}"#)
             }
         )
@@ -320,14 +378,11 @@ final class TurnEndClassificationTests: XCTestCase {
 
     func testVerdictAlertsTheColumnFoundAgain() throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
-        var refreshed = 0
-        center.onTurnEndVerdict = { refreshed += 1 }
         let uuid = try XCTUnwrap(column.agentUUID)
 
         center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
         XCTAssertEqual(alerts.value.count, 0)
         XCTAssertEqual(column.pty?.isQuietTurnEnd, true)
-        XCTAssertEqual(refreshed, 1)
 
         let (asksCenter, _, asksColumn, asksRequest, asksAlerts) = try turnEndColumn()
         asksCenter.applyTurnEndVerdict(.asks, for: asksRequest, agentUUID: try XCTUnwrap(asksColumn.agentUUID))
@@ -345,14 +400,30 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(classifier.messages.value, [asks])
     }
 
+    /// The option turned off while a verdict was on its way: the turn
+    /// alerts, as every turn end now does.
+    func testVerdictAfterTheOptionWentOffAlerts() async throws {
+        let (center, _, column, request, alerts) = try turnEndColumn()
+        center.turnEndClassifier = FakeClassifier(verdict: .done)
+        center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
+        center.turnEndClassifier = nil
+        let deadline = Date().addingTimeInterval(10)
+        while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(alerts.value, [.turnFinished])
+    }
+
     /// A Mission child that asked its parent waits on it: quiet, unread.
     func testChildWaitingOnItsParentStaysQuiet() throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
         let classifier = FakeClassifier(verdict: .asks)
         center.turnEndClassifier = classifier
-        center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: true)
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.classifyTurnEnd(request, agentUUID: uuid, waitsOnParent: true)
         XCTAssertEqual(alerts.value.count, 0)
         XCTAssertEqual(column.pty?.isQuietTurnEnd, true)
+        // Settled as done at once: no verdict is awaited any more.
+        center.applyTurnEndVerdict(.asks, for: request, agentUUID: uuid)
+        XCTAssertEqual(alerts.value.count, 0)
         XCTAssertEqual(classifier.messages.value, [])
     }
 

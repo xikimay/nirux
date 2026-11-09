@@ -229,6 +229,8 @@ struct AgentPermissionRequest: Hashable, Sendable {
 /// What applying one hook event meant, for the surfaces that report it.
 struct AgentHookOutcome: Equatable {
     /// The column flipped into needsAttention: alert (dock, notification).
+    /// Also a prompt that came before a turn end's verdict, which alerts as
+    /// that turn end would have.
     var firedAttention = false
     /// What the event asks of the user, when it asks something.
     var attention: AgentAttentionReason?

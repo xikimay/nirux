@@ -51,11 +51,13 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         case unavailable
     }
 
+    /// Guards `runningCount`, `cachedSetup` and `isRefreshingSetup`.
     private let lock = NSLock()
     private var runningCount = 0
+    private var cachedSetup: (setup: Setup, checkedAt: TimeInterval)?
+    private var isRefreshingSetup = false
     /// Held while the setup is checked: one check at a time.
     private let setupLock = NSLock()
-    private var cachedSetup: (setup: Setup, checkedAt: TimeInterval)?
     private let checkSetup: @Sendable () -> Setup
     private let runProcess: @Sendable (BranchReview.ClaudeCLI, [String], Data) -> BoundedProcess.Outcome?
     private let now: @Sendable () -> TimeInterval
@@ -69,6 +71,12 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         self.checkSetup = checkSetup
         self.runProcess = runProcess
         self.now = now
+    }
+
+    /// Checks the setup in the background (at launch, or when the option
+    /// is turned on): the first turn end needn't wait for it.
+    func prepare() {
+        DispatchQueue.global(qos: .utility).async { _ = self.checkSetupNow() }
     }
 
     func classify(_ message: String) async -> TurnEndVerdict {
@@ -103,30 +111,50 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         lock.withLock { runningCount -= 1 }
     }
 
+    /// The setup known, checked again in the background once it is old:
+    /// only the very first turn end (before `prepare` is done) waits for a
+    /// check, which runs `claude` twice.
     private func setup() -> Setup {
-        setupLock.withLock {
-            let time = now()
-            if let cached = cachedSetup {
-                let lifetime = cached.setup == .unavailable ? Self.missingSetupLifetime : Self.readySetupLifetime
-                if time - cached.checkedAt < lifetime { return cached.setup }
+        let time = now()
+        let known: Setup? = lock.withLock {
+            guard let cached = cachedSetup else { return nil }
+            if !isFresh(cached, at: time), !isRefreshingSetup {
+                isRefreshingSetup = true
+                DispatchQueue.global(qos: .utility).async { _ = self.checkSetupNow() }
             }
+            return cached.setup
+        }
+        return known ?? checkSetupNow()
+    }
+
+    private func checkSetupNow() -> Setup {
+        setupLock.withLock {
+            // Checked by another caller while this one waited.
+            let fresh: Setup? = lock.withLock {
+                cachedSetup.flatMap { isFresh($0, at: now()) ? $0.setup : nil }
+            }
+            if let fresh { return fresh }
             let setup = checkSetup()
-            cachedSetup = (setup, time)
+            lock.withLock {
+                cachedSetup = (setup, now())
+                isRefreshingSetup = false
+            }
             return setup
         }
     }
 
-    /// The flags of a run: Haiku alone with the prompt above, the message
-    /// on standard input, one JSON result out. `--max-budget-usd` caps a
-    /// run that would go wrong (a normal one costs a hundredth of it).
+    private func isFresh(_ cached: (setup: Setup, checkedAt: TimeInterval), at time: TimeInterval) -> Bool {
+        let lifetime = cached.setup == .unavailable ? Self.missingSetupLifetime : Self.readySetupLifetime
+        return time - cached.checkedAt < lifetime
+    }
+
+    /// The flags of a run: Haiku alone, confined, no tools, with the prompt
+    /// above; the message on standard input, one JSON result out.
+    /// `--max-budget-usd` caps a run that would go wrong (a normal one
+    /// costs a hundredth of it).
     static func arguments() -> [String] {
-        [
-            "-p", "--model", model, "--tools", "", "--restricted", "--permission-prompts", "none",
-            "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
-            "--settings", #"{"disableAllHooks":true,"instructionFiles":"managed-only"}"#,
-            "--max-budget-usd", "0.05", "--output-format", "json",
-            "--system-prompt", systemPrompt
-        ]
+        ["-p", "--model", model, "--tools", ""] + BranchReview.ClaudeCLI.confinementArguments
+            + ["--max-budget-usd", "0.05", "--output-format", "json", "--system-prompt", systemPrompt]
     }
 
     /// `ClaudeCLI.environment`'s, without thinking: Claude Code turns it on
@@ -162,20 +190,18 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         return .ready(cli)
     }
 
+    /// Runs in an empty folder of Nirux's own (`claude` runs `git` where it
+    /// starts), made again each time: macOS empties temporary folders left
+    /// untouched for days.
     @Sendable static func defaultRun(
         cli: BranchReview.ClaudeCLI, arguments: [String], input: Data
     ) -> BoundedProcess.Outcome? {
-        BoundedProcess.execute(
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("NiruxTurnEnd", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        return BoundedProcess.execute(
             executableURL: URL(fileURLWithPath: cli.path), arguments: arguments,
-            currentDirectoryURL: workingDirectory, environment: .replaced(environment(for: cli)),
+            currentDirectoryURL: folder, environment: .replaced(environment(for: cli)),
             standardInput: input, timeout: timeout, maxStandardOutputBytes: 1 << 20
         )
     }
-
-    /// An empty folder of Nirux's own: `claude` runs `git` where it starts.
-    private static let workingDirectory: URL = {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("NiruxTurnEnd", isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        return url
-    }()
 }

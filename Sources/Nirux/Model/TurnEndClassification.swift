@@ -36,31 +36,34 @@ protocol TurnEndClassifier: Sendable {
 /// The final message's text as the classifier and the alert use it.
 enum TurnEndText {
     /// The start and the end of `message`, the part a classifier reads:
-    /// the whole message up to `limit` characters, else its first
-    /// `headLength` and its last characters around a "[…]" line (a question
+    /// the whole message up to `limit` Unicode scalars (at most 4 bytes
+    /// each: the hook's event line stays a few kilobytes), else its first
+    /// `headLength` and its last scalars around a "[…]" line (a question
     /// usually ends the message; its start says what the turn was about).
     /// Nil for a message without visible text.
     static func excerpt(_ message: String, limit: Int = 3_000, headLength: Int = 600) -> String? {
-        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        guard text.count > limit else { return text }
-        return String(text.prefix(headLength)) + "\n[…]\n" + String(text.suffix(max(0, limit - headLength)))
+        let scalars = message.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars
+        guard !scalars.isEmpty else { return nil }
+        guard scalars.count > limit else { return String(scalars) }
+        let head = String(String.UnicodeScalarView(scalars.prefix(headLength)))
+        let tail = String(String.UnicodeScalarView(scalars.suffix(max(0, limit - headLength))))
+        return head + "\n[…]\n" + tail
     }
 
     /// The message's last line of prose, cleaned for one line of a
     /// notification: what a turn that asks most likely asks. Lines inside
-    /// fenced code are skipped.
+    /// fenced code are skipped, counting fences from the end: an excerpt
+    /// may have lost the start of a block, never its end.
     static func lastLine(of message: String, maxLength: Int = 200) -> String? {
         var inFence = false
-        var last: Substring?
-        for line in message.split(separator: "\n", omittingEmptySubsequences: true) {
+        for line in message.split(whereSeparator: \.isNewline).reversed() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 inFence.toggle()
                 continue
             }
-            if !inFence, !trimmed.isEmpty { last = line }
+            if !inFence, let cleaned = AgentText.clean(String(line), maxLength: maxLength) { return cleaned }
         }
-        return last.flatMap { AgentText.clean(String($0), maxLength: maxLength) }
+        return nil
     }
 }
