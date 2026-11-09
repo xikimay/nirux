@@ -273,6 +273,8 @@ struct SidebarRailTooltip: Equatable {
     let detailColor: NSColor
     /// The tool and its excerpt, the question, the error.
     let note: String?
+    /// "Sub-task of “<parent>”", last: a tile isn't indented.
+    var subtask: String?
 
     init(title: String, detail: String? = nil, detailColor: NSColor = Theme.Color.textTertiary, note: String? = nil) {
         self.title = title
@@ -293,7 +295,8 @@ extension WorkspaceInfo {
     }
 
     /// The rail tooltip: the title, then what the card's first line and
-    /// chips tell ("claude needs permission · 4m", "Bash: git push").
+    /// chips tell ("claude needs permission · 4m", "Bash: git push"), and
+    /// the task it is a sub-task of.
     var railTooltip: SidebarRailTooltip {
         let age = lastActivityAt.map { SidebarView.cardAge(since: $0) }
         /// "claude needs permission" and "Bash: git push", from the column
@@ -346,11 +349,9 @@ extension WorkspaceInfo {
                 detail = age.map { $0 == "now" ? "idle" : "idle · \($0)" } ?? "no activity yet"
             }
         }
-        // A tile isn't indented: the tooltip names the parent.
-        let notes = [note, subtaskText].compactMap { $0 }
-        return SidebarRailTooltip(
-            title: title, detail: detail, detailColor: color, note: notes.isEmpty ? nil : notes.joined(separator: " · ")
-        )
+        var tooltip = SidebarRailTooltip(title: title, detail: detail, detailColor: color, note: note)
+        tooltip.subtask = subtaskText
+        return tooltip
     }
 }
 
@@ -360,6 +361,7 @@ final class SidebarRailTooltipView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
     private let noteLabel = NSTextField(labelWithString: "")
+    private let subtaskLabel = NSTextField(labelWithString: "")
     /// What it shows, not to lay it out again on every pointer move.
     private var shown: SidebarRailTooltip?
     private static let paddingX: CGFloat = 10
@@ -377,7 +379,7 @@ final class SidebarRailTooltipView: NSView {
         layer?.shadowOpacity = 0.45
         layer?.shadowRadius = 12
         layer?.shadowOffset = CGSize(width: 0, height: -8)
-        for label in [titleLabel, detailLabel, noteLabel] {
+        for label in [titleLabel, detailLabel, noteLabel, subtaskLabel] {
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             addSubview(label)
@@ -387,9 +389,11 @@ final class SidebarRailTooltipView: NSView {
         detailLabel.font = Theme.Font.caption
         noteLabel.font = Theme.Font.caption
         noteLabel.textColor = Theme.Color.textSecondary
+        subtaskLabel.font = Theme.Font.caption
+        subtaskLabel.textColor = Theme.Color.textTertiary
         // The tile says it all to VoiceOver.
         setAccessibilityElement(false)
-        for label in [titleLabel, detailLabel, noteLabel] { label.setAccessibilityElement(false) }
+        for label in [titleLabel, detailLabel, noteLabel, subtaskLabel] { label.setAccessibilityElement(false) }
     }
 
     @available(*, unavailable)
@@ -405,9 +409,11 @@ final class SidebarRailTooltipView: NSView {
         detailLabel.stringValue = tooltip.detail ?? ""
         detailLabel.textColor = tooltip.detailColor
         noteLabel.stringValue = tooltip.note ?? ""
-        let lines = [(titleLabel, tooltip.title), (detailLabel, tooltip.detail), (noteLabel, tooltip.note)]
-            .compactMap { label, text in text == nil ? nil : label }
-        for label in [titleLabel, detailLabel, noteLabel] { label.isHidden = !lines.contains(label) }
+        subtaskLabel.stringValue = tooltip.subtask ?? ""
+        let lines = [
+            (titleLabel, tooltip.title), (detailLabel, tooltip.detail), (noteLabel, tooltip.note), (subtaskLabel, tooltip.subtask)
+        ].compactMap { label, text in text == nil ? nil : label }
+        for label in [titleLabel, detailLabel, noteLabel, subtaskLabel] { label.isHidden = !lines.contains(label) }
         // One line each, whatever the text holds: the height of its first
         // line (fallback fonts included: CJK, emoji), never less than the
         // font's.

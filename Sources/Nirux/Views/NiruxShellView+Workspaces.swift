@@ -91,11 +91,25 @@ extension NiruxShellView {
         }
     }
 
-    /// `id` when it names an open workspace that can have sub-tasks: not a
-    /// Lead (its tasks are the space's list itself).
+    /// `id` when it names an open task (see `isTask`).
     func subtaskParentID(_ id: String?) -> String? {
-        guard let id else { return nil }
-        return workspaces.first { $0.id == id && !$0.isClosing && !$0.isLead }?.id
+        guard let id, let parent = workspaces.first(where: { $0.id == id && !$0.isClosing }), Self.isTask(parent) else { return nil }
+        return parent.id
+    }
+
+    /// What can have sub-tasks (docs/spaces.md, "Sub-tasks under their
+    /// task"): a workspace in a git worktree, as ⌘N and the Lead start
+    /// tasks. Not the main checkout, where worktrees an agent opens are
+    /// tasks of their own, nor the Lead (its tasks are the space's list
+    /// itself). Reads a file or two: not on every sidebar refresh.
+    static func isTask(_ workspace: WorkspaceState) -> Bool {
+        !workspace.isLead && worktreeCleanupPath(forCwd: workspace.cwd) != nil
+    }
+
+    /// The card menu's and the menu bar's New Sub-task…: a task, active, in
+    /// a space where tasks start (General has no repository).
+    func offersSubtask(_ workspace: WorkspaceState) -> Bool {
+        !workspace.isInactive && workspace.profileID != WorkspaceProfile.defaultID && Self.isTask(workspace)
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is
@@ -358,11 +372,7 @@ extension NiruxShellView {
             openBranchReview(in: workspaces[workspaceIndex])
             return
         case .newSubtask:
-            let parent = workspaces[workspaceIndex]
-            showNewPanel(
-                spaceID: parent.profileID,
-                parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title)
-            )
+            showNewSubtaskPanel(under: workspaces[workspaceIndex])
             return
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)

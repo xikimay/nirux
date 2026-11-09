@@ -136,9 +136,13 @@ A sheet titled "New in <space>":
   S11c). A Lead's proposal comes with it checked.
 - **Sub-task of “<task>”** checkbox, shown when the sheet comes from a task's
   "New Sub-task…" (its card menu, or Workspaces in the menu bar), checked: the
-  heading reads "New Sub-task in <space>", and the task, or the shell opened
-  with nothing typed, lists under that task. Not offered in General (no task
-  starts there), for an archived task, or for the Lead.
+  heading reads "New Sub-task in <space>", the repository the task works in is
+  selected (once git names it, unless the user picked one), and the task it
+  starts lists under that task. A sub-task is new work with a description:
+  Existing Branch… hides, and Start waits for text instead of opening a
+  shell. Unchecked, it is a task of its own. Offered only for a task (a
+  workspace in a git worktree), active, outside General (no task starts
+  there).
 - **Existing Branch…** opens an existing worktree (today's Open Worktree), or
   a branch without one: its worktree is made, with a shell (shipped with S7).
 - Names come from the description's first line, else the branch, else the
@@ -245,17 +249,20 @@ New flow, built on the guarded typing `tell` already uses
   workspace keeps the task it is a sub-task of (`parentWorkspaceID`, saved
   with it) when it opens from ⌘N's "Sub-task of", or from the worktree skill
   run in that task, Missions on or off (the skill always sends
-  `parentWorkspace`). Mission children opened before that keep their
-  Mission's parent. Sub-tasks list right after their task, indented, in the
-  sidebar, the rail and ⌘↑/↓ alike; they move among themselves and follow
-  their parent when it moves, never dragged. The row's title tooltip and
-  VoiceOver say "Sub-task of “<task>”", as does the rail's tooltip (a tile
-  isn't indented). The Lead's tasks stay the space's list under the Lead row
-  (a deleted space's former Lead too): a Lead is never a parent. A parent
-  closed, archived or in another space lets its children go to the top
-  level, where they were listed: the store keeps the sidebar's order. A row
-  asking the user isn't indented, so its request is never cut. No folding; a
-  grandchild has a child's indent.
+  `parentWorkspace`). Only a task has sub-tasks: a workspace in a git
+  worktree, not the main checkout (a worktree an agent opens from there is a
+  task of its own) nor the Lead. Mission children opened before that keep
+  their Mission's parent. Sub-tasks list right after their task, indented,
+  in the sidebar, the rail and ⌘↑/↓ alike; they move among themselves and
+  follow their parent when it moves, never dragged. The row's title tooltip
+  and VoiceOver say "Sub-task of “<task>”", as does the rail's tooltip, on
+  its own line (a tile isn't indented). The Lead's tasks stay the space's
+  list under the Lead row (a deleted space's former Lead too). Reporting and
+  nesting are apart: a sub-task that reports to the Lead still lists under
+  its task. A parent closed, archived or in another space lets its children
+  go to the top level, where they were listed: the store keeps the sidebar's
+  order. A row asking the user isn't indented, so its request is never cut.
+  No folding; a grandchild has a child's indent.
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
 - Mission handoffs and sidebar permission answers leave Experimental for

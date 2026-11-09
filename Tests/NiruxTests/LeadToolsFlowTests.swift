@@ -309,17 +309,18 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
-    /// The worktree skill names the task it runs in: the worktree lists
-    /// under it with Missions off (as `makeLead` sets them, the user's
-    /// setting), and still does after a relaunch. The Lead's own stay the
-    /// space's list.
+    /// The worktree skill names the workspace it runs in: a worktree opened
+    /// from a task lists under it with Missions off (as `makeLead` sets
+    /// them, the user's setting), and still does after a relaunch. One
+    /// opened from the main checkout or by the Lead is a task of its own.
     func testSkillWorktreesListUnderTheirTaskWithMissionsOff() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try makeLead(harness)
-            shell.addWorkspace(title: "task", cwd: harness.repo, profileID: lead.space)
+            shell.addWorkspace(title: "task", cwd: harness.worktree, profileID: lead.space)
             let task = try XCTUnwrap(shell.activeWorkspace)
-            shell.addWorkspace(title: "other", cwd: harness.repo, profileID: lead.space)
+            shell.addWorkspace(title: "main", cwd: harness.repo, profileID: lead.space)
+            let main = try XCTUnwrap(shell.activeWorkspace)
             @MainActor func skill(_ branch: String, from parent: WorkspaceState) throws -> WorkspaceState {
                 shell.createWorktreeWorkspace(
                     branch: branch, repoRoot: harness.repo, agent: nil, profileID: lead.space,
@@ -328,8 +329,9 @@ final class LeadToolsFlowTests: XCTestCase {
                 harness.waitUntil("\(branch)'s workspace") { shell.workspaces.contains { $0.title == branch } }
                 return try XCTUnwrap(shell.workspaces.first { $0.title == branch })
             }
-            // Opened last: the store lists it under its task.
+            // Opened after "main": the store lists it under its task.
             let sub = try skill("feat/sub", from: task)
+            let side = try skill("feat/side", from: main)
             let leads = try skill("feat/leads", from: lead.workspace)
             let store = shell.workspaceStore
             let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
@@ -338,10 +340,15 @@ final class LeadToolsFlowTests: XCTestCase {
                     (shell.workspaces[$0.key].title, shell.workspaces[$0.value].title)
                 })
             }
-            XCTAssertEqual(titles(), ["Lead", "task", "feat/sub", "other", "feat/leads"])
+            XCTAssertEqual(titles(), ["Lead", "task", "feat/sub", "main", "feat/side", "feat/leads"])
             XCTAssertEqual(parents(), ["feat/sub": "task"])
             XCTAssertEqual(sub.parentWorkspaceID, task.id)
+            XCTAssertNil(side.parentWorkspaceID, "the main checkout isn't a task")
             XCTAssertNil(leads.parentWorkspaceID, "a Lead's tasks are the space's list")
+            // The Lead's list says so too, not that the user started it.
+            let list = try call("list_tasks", lead: lead, in: harness).text
+            XCTAssertTrue(list.contains("- “feat/sub” · sub-task of “task” · "), list)
+            XCTAssertFalse(list.split(separator: "\n").contains { $0.hasPrefix("- “feat/sub”") && $0.contains("started by the user") }, list)
 
             shell.saveState()
             shell.restoreState()

@@ -7,8 +7,8 @@ extension NiruxShellView {
     /// the active space, its default repository selected
     /// (docs/spaces.md, "One door: ⌘N").
     /// `spaceID` and `selectedKey` (a Lead's proposal) override the active
-    /// space and its default repository. `parentTask` ("New Sub-task…" in a
-    /// card's menu): what it starts lists under that task.
+    /// space and its default repository. `parentTask` ("New Sub-task…"):
+    /// the task it starts lists under that one.
     @discardableResult
     func showNewPanel(
         spaceID requestedSpaceID: String? = nil, selectedKey: String? = nil, parentTask: NewTaskPanel.ParentTask? = nil
@@ -50,8 +50,8 @@ extension NiruxShellView {
             guard let self, let panel else { return }
             self.startTask(request) { [weak panel] outcome in panel?.finishStarting(outcome) }
         }
-        panel.onOpenShell = { [weak self] repository, parentWorkspaceID in
-            self?.openPlainWorkspace(spaceID: spaceID, folder: repository?.folder, parentWorkspaceID: parentWorkspaceID)
+        panel.onOpenShell = { [weak self] repository in
+            self?.openPlainWorkspace(spaceID: spaceID, folder: repository?.folder)
         }
         panel.onAddSuggested = { [weak self] anchor in
             self?.runFromRunLoop { [weak self] in self?.addAnchor(anchor, toSpace: spaceID) }
@@ -87,11 +87,27 @@ extension NiruxShellView {
         return panel
     }
 
-    /// The workspace in front can have sub-tasks (see
-    /// `SidebarView.offersSubtask`): the menu bar's New Sub-task….
+    /// "New Sub-task…": the sheet in the task's space, under it. In a space
+    /// with several repositories, the one the task works in is selected once
+    /// git names it, unless the user picked one or started meanwhile.
+    func showNewSubtaskPanel(under parent: WorkspaceState) {
+        guard let panel = showNewPanel(
+            spaceID: parent.profileID, parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title)
+        ), let space = profiles.first(where: { $0.id == parent.profileID }), newTaskRepositories(of: space).count > 1
+        else { return }
+        let initialKey = panel.selectedRepositoryKey
+        Self.identifyOffMain(parent.cwd, timeout: max(1, sideEffects.routingTimeout)) { [weak self, weak panel] identity in
+            guard let self, let panel, panel === self.newTaskPanel, !panel.isStarting, panel.selectedRepositoryKey == initialKey,
+                  let identity, let key = SpaceRouting.anchoring(identity, in: [space])?.anchor.key
+            else { return }
+            self.refreshNewTaskPanelRepositories(selecting: key)
+        }
+    }
+
+    /// The menu bar's New Sub-task…, for the workspace in front. Not while
+    /// a sheet is up: ⌘N's would come forward without the parent.
     var activeWorkspaceOffersSubtask: Bool {
-        activeWorkspace.map { SidebarView.offersSubtask(isLead: $0.isLead, isInactive: $0.isInactive, spaceID: $0.profileID) }
-            ?? false
+        window?.attachedSheet == nil && (activeWorkspace.map(offersSubtask) ?? false)
     }
 
     /// The space's Lead as a Mission parent: its workspace and the column
@@ -150,9 +166,9 @@ extension NiruxShellView {
     /// Return with nothing typed: a shell in the repository's main checkout,
     /// else where a plain workspace of the space opens (its default folder,
     /// else the home folder). Named after its folder, then its branch.
-    func openPlainWorkspace(spaceID: String, folder: String?, parentWorkspaceID: String? = nil) {
+    func openPlainWorkspace(spaceID: String, folder: String?) {
         let cwd = folder.flatMap { NiruxURLRequest.directoryExists($0) ? $0 : nil } ?? defaultFolder(forSpace: spaceID)
-        addWorkspace(cwd: cwd, profileID: spaceID, parentWorkspaceID: parentWorkspaceID)
+        addWorkspace(cwd: cwd, profileID: spaceID)
         saveState()
     }
 

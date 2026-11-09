@@ -56,6 +56,9 @@ final class SidebarView: NSView {
     /// Where the workspace's menu offers "Clean Up Worktree…", nil outside
     /// a linked worktree. Asked on each menu.
     var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
+    /// Whether the workspace's menu offers "New Sub-task…". Asked on each
+    /// menu.
+    var offersSubtask: ((Int) -> Bool)?
     /// Drag-reorder drop: (store index of dragged workspace, target
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
@@ -548,8 +551,7 @@ final class SidebarView: NSView {
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
         if workspace?.isLead != true {
-            if let workspace,
-               Self.offersSubtask(isLead: workspace.isLead, isInactive: workspace.isInactive, spaceID: workspace.profileID) {
+            if offersSubtask?(workspaceIndex) == true {
                 menu.addClosureItem(title: Self.newSubtaskTitle) { [weak self] in
                     self?.onWorkspaceAction?(.newSubtask, workspaceIndex)
                 }
@@ -573,13 +575,6 @@ final class SidebarView: NSView {
     }
 
     static let newSubtaskTitle = "New Sub-task…"
-
-    /// A task that can have sub-tasks: an active one, in a space where tasks
-    /// start (General has no repository), not the Lead (its tasks are the
-    /// space's list itself).
-    static func offersSubtask(isLead: Bool, isInactive: Bool, spaceID: String) -> Bool {
-        !isLead && !isInactive && spaceID != WorkspaceProfile.defaultID
-    }
 
     /// The card's moves: up, down, to another space, to Archived and back.
     private func organizeItem(workspaceIndex: Int, isInactive: Bool) -> NSMenuItem {

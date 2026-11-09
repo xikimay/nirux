@@ -188,22 +188,38 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
         }
     }
 
-    /// A task's New Sub-task… opens ⌘N under it: what it starts lists under
-    /// the task while "Sub-task of" stays checked, a shell too. Not offered
-    /// in General, where no task starts, nor for an archived task.
+    /// A task's New Sub-task… opens ⌘N under it, on the repository the task
+    /// works in: the task it starts, which needs a description, lists under
+    /// it while "Sub-task of" stays checked. Only an active task outside
+    /// General offers it: not the main checkout.
     func testNewSubtaskMenuItem() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            let general = try XCTUnwrap(shell.activeWorkspace)
-            let space = try NewTaskFlowTests.anchoredSpace(harness)
+            let other = harness.root + "/other"
+            try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
+            try UIFlowHarness.git(["init", "-q", "-b", "main"], at: other)
+            try UIFlowHarness.git(
+                ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "init"], at: other
+            )
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/other", other + ".feat-other"], at: other)
+            let otherRepository = try XCTUnwrap(FolderIdentity.identify(other, timeout: 10)).anchor
+            let space = try NewTaskFlowTests.anchoredSpace(harness, also: [otherRepository])
+            let checkout = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "Parent", cwd: harness.worktree, profileID: space.id)
             let task = try XCTUnwrap(shell.activeWorkspace)
-            @MainActor func menu(_ workspace: WorkspaceState) throws -> NSMenu {
-                shell.updateSidebar()
-                let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
-                return shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            @MainActor func index(_ workspace: WorkspaceState) throws -> Int {
+                try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
             }
-            @MainActor func newSubtask() throws -> NewTaskPanel {
-                harness.perform([SidebarView.newSubtaskTitle], in: try menu(task))
+            @MainActor func offers(_ workspace: WorkspaceState) throws -> Bool {
+                shell.updateSidebar()
+                return shell.sidebar.workspaceActionMenu(workspaceIndex: try index(workspace), columnIndex: nil)
+                    .items.contains { $0.title == SidebarView.newSubtaskTitle }
+            }
+            @MainActor func newSubtask(of parent: WorkspaceState) throws -> NewTaskPanel {
+                shell.updateSidebar()
+                harness.perform(
+                    [SidebarView.newSubtaskTitle], in: shell.sidebar.workspaceActionMenu(workspaceIndex: try index(parent), columnIndex: nil)
+                )
                 let sheet = try XCTUnwrap(shell.newTaskPanel)
                 harness.waitUntil("the repository's info") { sheet.info != nil }
                 return sheet
@@ -217,40 +233,40 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 harness.waitUntil("the new workspace") { opened() != nil }
                 return try XCTUnwrap(opened())
             }
-            @MainActor func isListedUnderTask(_ workspace: WorkspaceState) throws -> Bool {
-                let parents = shell.workspaceStore.activeParents(in: space.id)
-                return parents[try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })]
-                    == shell.workspaces.firstIndex { $0 === task }
-            }
 
-            var sheet = try newSubtask()
+            var sheet = try newSubtask(of: task)
             XCTAssertEqual(sheet.headingLabel.stringValue, "New Sub-task in Repo")
             XCTAssertFalse(sheet.subtaskCheckbox.isHidden)
-            XCTAssertEqual(sheet.subtaskCheckbox.title, "Sub-task of “Repo”")
+            XCTAssertEqual(sheet.subtaskCheckbox.title, "Sub-task of “Parent”")
             XCTAssertEqual(sheet.subtaskCheckbox.state, .on)
+            XCTAssertTrue(sheet.existingBranchButton.isHidden, "a sub-task is new work")
+            XCTAssertFalse(sheet.startButton.isEnabled, "it needs a description")
+            XCTAssertEqual(sheet.lineLabel.stringValue, "Describe the sub-task.")
             let child = try start("Child work", in: sheet)
             XCTAssertEqual(child.title, "Child work")
-            XCTAssertTrue(try isListedUnderTask(child))
-
-            // Nothing typed: the shell goes under the task too.
-            sheet = try newSubtask()
-            let shellChild = try start("", in: sheet)
-            XCTAssertEqual(shellChild.cwd, harness.repo)
-            XCTAssertTrue(try isListedUnderTask(shellChild))
+            XCTAssertEqual(shell.workspaceStore.activeParents(in: space.id)[try index(child)], try index(task))
 
             // Unchecked: a task of its own.
-            sheet = try newSubtask()
+            sheet = try newSubtask(of: task)
             sheet.subtaskCheckbox.performClick(nil)
             XCTAssertEqual(sheet.headingLabel.stringValue, "New in Repo")
+            XCTAssertFalse(sheet.existingBranchButton.isHidden)
             let own = try start("Own work", in: sheet)
-            XCTAssertFalse(try isListedUnderTask(own))
             XCTAssertNil(own.parentWorkspaceID)
 
-            shell.handleWorkspaceSidebarAction(.markInactive, workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === own }))
-            XCTAssertFalse(try menu(own).items.contains { $0.title == SidebarView.newSubtaskTitle }, "archived")
+            // A task in the space's other repository: its sub-task starts there.
+            shell.addWorkspace(title: "Other task", cwd: other + ".feat-other", profileID: space.id)
+            sheet = try newSubtask(of: try XCTUnwrap(shell.activeWorkspace))
+            harness.waitUntil("the task's repository") { sheet.selectedRepositoryKey == otherRepository.key }
+            sheet.cancelButton.performClick(nil)
+
+            XCTAssertFalse(try offers(checkout), "the main checkout isn't a task")
+            shell.handleWorkspaceSidebarAction(.markInactive, workspaceIndex: try index(own))
+            XCTAssertFalse(try offers(own), "archived")
+            shell.addWorkspace(title: "General task", cwd: harness.worktree, profileID: WorkspaceProfile.defaultID)
+            let generalTask = try XCTUnwrap(shell.workspaces.first { $0.title == "General task" })
             shell.selectProfile(WorkspaceProfile.defaultID)
-            XCTAssertFalse(try menu(general).items.contains { $0.title == SidebarView.newSubtaskTitle }, "General")
-            XCTAssertTrue(try menu(general).items.contains { $0.title == "Organize" })
+            XCTAssertFalse(try offers(generalTask), "General")
         }
     }
 

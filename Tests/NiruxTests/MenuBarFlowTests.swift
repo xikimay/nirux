@@ -94,12 +94,16 @@ final class MenuBarFlowTests: XCTestCase {
             // no task starts.
             let newSubtask = ["Workspaces", SidebarView.newSubtaskTitle]
             XCTAssertFalse(bar.isEnabled(newSubtask))
-            _ = try NewTaskFlowTests.anchoredSpace(harness)
+            let space = try NewTaskFlowTests.anchoredSpace(harness)
+            shell.addWorkspace(title: "task", cwd: harness.worktree, profileID: space.id)
             let task = try XCTUnwrap(shell.activeWorkspace)
             bar.run(newSubtask)
             harness.waitUntil("the sub-task's sheet") { shell.newTaskPanel?.panel?.isSheet == true }
-            XCTAssertEqual(shell.newTaskPanel?.subtaskParentID, task.id)
-            shell.newTaskPanel?.cancelButton.performClick(nil)
+            let subtaskSheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(subtaskSheet.subtaskParentID, task.id)
+            XCTAssertFalse(bar.isEnabled(newSubtask), "the sheet is up")
+            harness.waitUntil("the space's info") { subtaskSheet.info != nil }
+            subtaskSheet.cancelButton.performClick(nil)
         }
     }
 

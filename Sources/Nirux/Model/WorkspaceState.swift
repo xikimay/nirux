@@ -50,8 +50,8 @@ final class WorkspaceState {
     /// The task this one is a sub-task of: it lists under it in the
     /// sidebar (see `WorkspaceStore.visibleWorkspaceIndices(in:)`). Set
     /// when it opens: by ⌘N's "Sub-task of", or by the worktree skill's
-    /// `parentWorkspace`, Missions on or off. Never a Lead: a Lead's tasks
-    /// are the space's list itself.
+    /// `parentWorkspace`, Missions on or off, when that one is a task
+    /// (`NiruxShellView.isTask`): never the main checkout or a Lead.
     let parentWorkspaceID: String?
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
