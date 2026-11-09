@@ -388,6 +388,16 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let detail = try XCTUnwrap(harness.alertDetails.last)
             XCTAssertTrue(detail.contains("Chrome, profile “Work”") && detail.contains("Full Disk Access"), detail)
             XCTAssertEqual(harness.openedURLs, [CookieImporter.ImportError.fullDiskAccessSettings])
+
+            // Past three profiles, a pop-up menu instead of a button each.
+            harness.cookieImportError = nil
+            let many = (1...5).map { UIFlowHarness.cookieSource(.chrome, "Person \($0)", folder: "Profile \($0)") }
+            harness.cookieSources = many
+            harness.alertMenuChoices = [3]
+            harness.runPaletteCommand("Import Browser Cookies")
+            harness.waitUntil("the import from the menu") { harness.alerts.count == 6 }
+            XCTAssertEqual(harness.alerts.suffix(2), ["Import Cookies", "Cookies Imported"])
+            XCTAssertEqual(harness.cookieImports.last, many[3])
         }
     }
 

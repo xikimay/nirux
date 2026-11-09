@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import CommonCrypto
+import CryptoKit
 import WebKit
 import SQLite3
 
@@ -134,20 +135,20 @@ enum CookieImporter {
     /// is asked once, at the first encrypted cookie: no prompt for a
     /// database that can't be read, or that has nothing to decrypt.
     static func readCookies(from source: Source, password: () throws -> String) throws -> Read {
-        var asked: String?
-        func passwordOnce() throws -> String {
-            if let asked { return asked }
-            let answer = try password()
-            asked = answer
-            return answer
+        var derived: Data?
+        func key() throws -> Data {
+            if let derived { return derived }
+            let key = try pbkdf2(password: password())
+            derived = key
+            return key
         }
         do {
             if let blocked = source.blocked { throw blocked }
             do {
-                return try readSnapshot(of: source.cookiesPath, password: passwordOnce)
+                return try readSnapshot(of: source.cookiesPath, key: key)
             } catch let failure as Failure where failure.isDamage {
                 Thread.sleep(forTimeInterval: 0.2)
-                return try readSnapshot(of: source.cookiesPath, password: passwordOnce)
+                return try readSnapshot(of: source.cookiesPath, key: key)
             }
         } catch let failure as Failure {
             throw ImportError(source: source, failure: failure)
@@ -156,17 +157,19 @@ enum CookieImporter {
 
     // MARK: - Profiles
 
-    /// The browsers to offer the import for: those a click would find
-    /// something in, a profile or a reason. A Default profile's cookie file
-    /// answers without reading anything; only without one is the profile
-    /// list read, since reading could raise a macOS privacy prompt as the
-    /// menu or the palette opens.
+    /// The browsers to offer the import for: those whose Default profile
+    /// has a cookie file, or one Nirux can't look at. Only stat(2): the
+    /// menu and the palette ask on every opening, and reading could raise
+    /// a macOS privacy prompt before the user asked for anything. A click
+    /// always considers Default (see `sources(of:)`), so an offered browser
+    /// is never refused. One whose profiles all live elsewhere, Default
+    /// deleted, isn't offered.
     static func browsersToOffer(home: String = NSHomeDirectory()) -> [Browser] {
         Browser.allCases.filter { browser in
-            let root = userDataRoot(of: browser, home: home)
-            guard FileManager.default.fileExists(atPath: root) else { return false }
-            if case .found = cookieFile(inProfile: root + "/Default") { return true }
-            return !sources(of: browser, home: home).isEmpty
+            switch cookieFile(inProfile: userDataRoot(of: browser, home: home) + "/Default") {
+            case .found, .unreachable: true
+            case .missing: false
+            }
         }
     }
 
@@ -191,20 +194,18 @@ enum CookieImporter {
         } catch {}
 
         var folders = profiles.ranked
+        var listingFailure: Failure?
         if folders.isEmpty {
             do {
                 folders = try profileFolders(in: root)
             } catch let failure as Failure where !failure.isMissingFile {
-                // Neither the profile list nor the folder: name the browser
-                // and why, rather than a profile it may not have.
-                return [Source(
-                    browser: browser, profileFolder: nil, profileName: nil, cookiesPath: root, blocked: localStateFailure ?? failure
-                )]
-            } catch {
-                return []
-            }
+                listingFailure = failure
+            } catch {}
         }
-        return folders.compactMap { folder in
+        // Default counts listed or not: its cookie file alone offers the
+        // browser (see browsersToOffer).
+        if !folders.contains("Default") { folders.append("Default") }
+        let found = folders.compactMap { folder -> Source? in
             let name = profiles.names[folder] ?? folder
             switch cookieFile(inProfile: root + "/" + folder) {
             case .found(let path):
@@ -218,6 +219,14 @@ enum CookieImporter {
                 return nil
             }
         }
+        // Nothing found, and neither the profile list nor the folder could
+        // be read: name the browser and why, not a profile it may not have.
+        if found.isEmpty, let listingFailure {
+            return [Source(
+                browser: browser, profileFolder: nil, profileName: nil, cookiesPath: root, blocked: localStateFailure ?? listingFailure
+            )]
+        }
+        return found
     }
 
     private enum CookieFile {
@@ -241,8 +250,10 @@ enum CookieImporter {
             let modified = Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9
             if modified > newest?.modified ?? -.infinity { newest = (path, modified) }
         }
-        if let newest { return .found(newest.path) }
-        return unreachable.map { .unreachable($0) } ?? .missing
+        // One candidate Nirux can't look at may be the live file: say so
+        // rather than import the other, maybe stale.
+        if let unreachable { return .unreachable(unreachable) }
+        return newest.map { .found($0.path) } ?? .missing
     }
 
     /// Without a profile list, the folders Chromium names for profiles.
@@ -251,10 +262,20 @@ enum CookieImporter {
     private static func profileFolders(in root: String) throws -> [String] {
         guard let directory = opendir(root) else { throw Failure.unreadable(path: root, errno: errno) }
         defer { closedir(directory) }
+        // A dirent is only as long as its name: read the name through the
+        // pointer, never the whole 1 KB d_name field.
+        let nameOffset = MemoryLayout<dirent>.offset(of: \dirent.d_name)!
+        let lengthOffset = MemoryLayout<dirent>.offset(of: \dirent.d_namlen)!
         var names: [String] = []
-        while let entry = readdir(directory) {
-            let length = Int(entry.pointee.d_namlen)
-            names.append(withUnsafeBytes(of: entry.pointee.d_name) { String(decoding: $0.prefix(length), as: UTF8.self) })
+        while true {
+            errno = 0
+            guard let entry = readdir(directory) else {
+                if errno != 0 { throw Failure.unreadable(path: root, errno: errno) }
+                break
+            }
+            let record = UnsafeRawPointer(entry)
+            let length = Int(record.load(fromByteOffset: lengthOffset, as: UInt16.self))
+            names.append(String(decoding: UnsafeRawBufferPointer(start: record + nameOffset, count: length), as: UTF8.self))
         }
         let profiles = names.filter { $0.hasPrefix("Profile ") }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         return (names.contains("Default") ? ["Default"] : []) + profiles
@@ -365,9 +386,10 @@ enum CookieImporter {
     }
 
     /// The value of an encrypted ("v10"/"v11") blob. From database version
-    /// 24, Chrome puts the SHA-256 of the cookie's domain (32 bytes) before
-    /// the value.
-    private static func decryptValue(_ blob: Data, key: Data, hashesDomain: Bool) -> String? {
+    /// 24, Chrome puts the SHA-256 of the cookie's domain (`domainHash`)
+    /// before the value. It is the only check: CommonCrypto doesn't reject
+    /// a wrong key, and its output, past the hash, can still read as UTF-8.
+    private static func decryptValue(_ blob: Data, key: Data, domainHash: Data?) -> String? {
         let ciphertext = blob.dropFirst(3)
         let iv = Data(repeating: 0x20, count: 16) // Chrome uses space bytes as IV
         let bufSize = ciphertext.count + kCCBlockSizeAES128
@@ -395,9 +417,9 @@ enum CookieImporter {
 
         guard status == CCCryptorStatus(kCCSuccess) else { return nil }
         plain.count = outLen
-        if hashesDomain {
-            guard plain.count >= 32 else { return nil }
-            plain = plain.dropFirst(32)
+        if let domainHash {
+            guard plain.prefix(domainHash.count) == domainHash else { return nil }
+            plain = plain.dropFirst(domainHash.count)
         }
         return String(data: plain, encoding: .utf8)
     }
@@ -432,9 +454,9 @@ enum CookieImporter {
                     if companion < 0, code == ENOENT { continue }
                     guard companion >= 0 else { throw Failure.unreadable(path: path + suffix, errno: code) }
                     defer { close(companion) }
-                    try Self.copy(companion, to: database + suffix)
+                    try Self.copy(companion, from: path + suffix, to: database + suffix)
                 }
-                try Self.copy(source, to: database)
+                try Self.copy(source, from: path, to: database)
             } catch {
                 delete()
                 throw error
@@ -445,23 +467,36 @@ enum CookieImporter {
             try? FileManager.default.removeItem(atPath: folder)
         }
 
-        /// An APFS clone, or a byte copy where the volume can't clone.
-        /// Writable: SQLite rolls a journal back into the copy.
-        private static func copy(_ descriptor: Int32, to destination: String) throws {
-            if fclonefileat(descriptor, AT_FDCWD, destination, 0) != 0 {
-                guard errno == ENOTSUP || errno == EXDEV else { throw Failure.temporaryCopy(path: destination, errno: errno) }
+        /// An APFS clone or, when cloning fails for any reason, a byte copy
+        /// that tells a source that won't read from a copy that won't
+        /// write. Writable: SQLite rolls a journal back into the copy.
+        private static func copy(_ source: Int32, from sourcePath: String, to destination: String) throws {
+            if fclonefileat(source, AT_FDCWD, destination, 0) != 0 {
                 let target = open(destination, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
                 guard target >= 0 else { throw Failure.temporaryCopy(path: destination, errno: errno) }
                 defer { close(target) }
-                guard fcopyfile(descriptor, target, nil, copyfile_flags_t(COPYFILE_DATA)) == 0 else {
-                    throw Failure.temporaryCopy(path: destination, errno: errno)
+                var buffer = [UInt8](repeating: 0, count: 1 << 16)
+                var offset: off_t = 0
+                while true {
+                    let count = pread(source, &buffer, buffer.count, offset)
+                    if count < 0, errno == EINTR { continue }
+                    guard count >= 0 else { throw Failure.unreadable(path: sourcePath, errno: errno) }
+                    if count == 0 { break }
+                    var written = 0
+                    while written < count {
+                        let wrote = buffer.withUnsafeBytes { write(target, $0.baseAddress! + written, count - written) }
+                        if wrote < 0, errno == EINTR { continue }
+                        guard wrote >= 0 else { throw Failure.temporaryCopy(path: destination, errno: errno) }
+                        written += wrote
+                    }
+                    offset += off_t(count)
                 }
             }
             chmod(destination, 0o600)
         }
     }
 
-    private static func readSnapshot(of path: String, password: () throws -> String) throws -> Read {
+    private static func readSnapshot(of path: String, key: () throws -> Data) throws -> Read {
         let snapshot = try Snapshot(of: path)
         defer { snapshot.delete() }
         var connection: OpaquePointer?
@@ -475,7 +510,7 @@ enum CookieImporter {
         defer { sqlite3_close(db) }
         let statement = try prepareCookieQuery(db)
         defer { sqlite3_finalize(statement) }
-        return try readRows(statement, of: db, hashesDomain: schemaVersion(of: db) >= 24, password: password)
+        return try readRows(statement, of: db, hashesDomain: schemaVersion(of: db) >= 24, key: key)
     }
 
     /// The whole file, or the errno that stopped reading it.
@@ -511,28 +546,28 @@ enum CookieImporter {
         return statement
     }
 
-    /// The cookie database's version, in its meta table; 0 without one.
-    private static func schemaVersion(of db: OpaquePointer) -> Int {
+    /// The cookie database's version, in its meta table; 0 without one. A
+    /// meta table that doesn't read is a failure, not version 0: that
+    /// would leave the domain hash on every value.
+    private static func schemaVersion(of db: OpaquePointer) throws -> Int {
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = 'version'", -1, &statement, nil) == SQLITE_OK,
-              sqlite3_step(statement) == SQLITE_ROW
-        else { return 0 }
-        return Int(sqlite3_column_int64(statement, 0))
+        guard sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = 'version'", -1, &statement, nil) == SQLITE_OK else {
+            if String(cString: sqlite3_errmsg(db)).hasPrefix("no such table") { return 0 }
+            throw databaseFailure(db)
+        }
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW: return Int(sqlite3_column_int64(statement, 0))
+        case SQLITE_DONE: return 0
+        default: throw databaseFailure(db)
+        }
     }
 
     private static func readRows(
-        _ statement: OpaquePointer, of db: OpaquePointer, hashesDomain: Bool, password: () throws -> String
+        _ statement: OpaquePointer, of db: OpaquePointer, hashesDomain: Bool, key: () throws -> Data
     ) throws -> Read {
         func text(_ column: Int32) -> String {
             sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
-        }
-        var derivedKey: Data?
-        func key() throws -> Data {
-            if let derivedKey { return derivedKey }
-            let key = try pbkdf2(password: password())
-            derivedKey = key
-            return key
         }
         var cookies: [RawCookie] = []
         var encrypted = 0
@@ -545,7 +580,8 @@ enum CookieImporter {
                 let blob = Data(bytes: blobPtr, count: Int(sqlite3_column_bytes(statement, 3)))
                 if isEncrypted(blob) {
                     encrypted += 1
-                    let value = try decryptValue(blob, key: key(), hashesDomain: hashesDomain)
+                    let domainHash = hashesDomain ? Data(SHA256.hash(data: Data(text(0).utf8))) : nil
+                    let value = try decryptValue(blob, key: key(), domainHash: domainHash)
                     if value != nil { decrypted += 1 }
                     cookieValue = value ?? ""
                 } else {

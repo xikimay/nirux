@@ -61,17 +61,26 @@ final class CookieImporterTests: XCTestCase {
     }
 
     /// A profile folder another account owns, mode 700: the profile used to
-    /// vanish, leaving "no profile with cookies".
+    /// vanish, leaving "no profile with cookies". And one whose Network
+    /// folder Nirux can't enter: its old Cookies file may be stale, so the
+    /// block is reported rather than that file imported.
     func testAProfileNiruxCannotEnterFailsWithItsNameAndTheReason() throws {
         try XCTSkipIf(getuid() == 0, "root enters any folder")
         let chrome = root + "/Library/Application Support/Google/Chrome"
-        try write(#"{"profile": {"info_cache": {"Profile 2": {"name": "Work"}}}}"#, to: chrome + "/Local State")
+        try write(#"{"profile": {"last_used": "Profile 2", "info_cache": {"Profile 2": {"name": "Work"}, "Profile 3": {"name": "Home"}}}}"#,
+                  to: chrome + "/Local State")
         try write("", to: chrome + "/Profile 2/Cookies")
         try lock(chrome + "/Profile 2", mode: 0)
+        try write("", to: chrome + "/Profile 3/Network/Cookies")
+        try write("", to: chrome + "/Profile 3/Cookies")
+        try lock(chrome + "/Profile 3/Network", mode: 0)
 
-        let work = try XCTUnwrap(CookieImporter.availableSources(home: root).first)
-        XCTAssertEqual(work.profileName, "Work")
-        XCTAssertThrowsError(try CookieImporter.readCookies(from: work) { "peanuts" }) { error in
+        let sources = CookieImporter.availableSources(home: root)
+        XCTAssertEqual(sources.map(\.profileName), ["Work", "Home"])
+        XCTAssertEqual(sources.map(\.blocked), [
+            .unreadable(path: chrome + "/Profile 2/Cookies", errno: EACCES), .unreadable(path: chrome + "/Profile 3/Network/Cookies", errno: EACCES),
+        ])
+        XCTAssertThrowsError(try CookieImporter.readCookies(from: try XCTUnwrap(sources.first)) { "peanuts" }) { error in
             XCTAssertEqual(
                 (error as? CookieImporter.ImportError)?.failure, .unreadable(path: chrome + "/Profile 2/Cookies", errno: EACCES)
             )
@@ -95,20 +104,32 @@ final class CookieImporterTests: XCTestCase {
         }
     }
 
-    /// The menu and the palette offer a browser only when a click finds a
-    /// profile, or why it can't: a browser with no cookie database used to
-    /// lead to "no profile with cookies".
-    func testOffersOnlyBrowsersWhereAClickFindsSomething() throws {
+    /// The menu and the palette offer a browser on its Default profile's
+    /// cookie file alone, nothing read, and a click then finds it: an
+    /// offered browser used to answer "no profile with cookies" when Local
+    /// State no longer listed Default.
+    func testAnOfferedBrowserIsNeverRefused() throws {
         try XCTSkipIf(getuid() == 0, "root reads any folder")
         let support = root + "/Library/Application Support"
+        // Default lingers, unlisted; the listed profile has no cookies.
+        try write(#"{"profile": {"info_cache": {"Profile 2": {"name": "Work"}}}}"#, to: support + "/Google/Chrome/Local State")
         try write("", to: support + "/Google/Chrome/Default/Cookies")
+        try FileManager.default.createDirectory(atPath: support + "/Google/Chrome/Profile 2", withIntermediateDirectories: true)
+        // Default deleted: not offered.
         try write(#"{"profile": {"info_cache": {"Profile 1": {"name": "Work"}}}}"#, to: support + "/BraveSoftware/Brave-Browser/Local State")
         try write("", to: support + "/BraveSoftware/Brave-Browser/Profile 1/Cookies")
+        // No cookie file anywhere.
         try write(#"{"profile": {"info_cache": {"Default": {"name": "Person 1"}}}}"#, to: support + "/Microsoft Edge/Local State")
         try FileManager.default.createDirectory(atPath: support + "/Microsoft Edge/Default", withIntermediateDirectories: true)
-        _ = try makeUnlistableBrowser()
+        // Profile list and folder unreadable, as macOS blocks them: offered
+        // on the cookie file's stat.
+        let arc = try makeUnlistableBrowser(withDefaultCookies: true)
 
-        XCTAssertEqual(CookieImporter.browsersToOffer(home: root), [.chrome, .brave, .arc])
+        XCTAssertEqual(CookieImporter.browsersToOffer(home: root), [.chrome, .arc])
+        XCTAssertEqual(CookieImporter.availableSources(home: root).filter { $0.browser != .brave }, [
+            .init(browser: .chrome, profileFolder: "Default", profileName: "Default", cookiesPath: support + "/Google/Chrome/Default/Cookies"),
+            .init(browser: .arc, profileFolder: "Default", profileName: "Default", cookiesPath: arc + "/Default/Cookies"),
+        ])
     }
 
     // MARK: - Reading
@@ -181,9 +202,12 @@ final class CookieImporterTests: XCTestCase {
     }
 
     /// A Keychain key that decrypts nothing used to import 0 cookies and
-    /// call it a success.
+    /// call it a success. CommonCrypto takes any key, and a few short
+    /// values out of hundreds read as UTF-8 past the domain hash: only the
+    /// hash tells.
     func testAKeychainKeyThatDecryptsNothingFails() throws {
-        let source = try makeSource(Self.standardRows)
+        let short = (0..<300).map { Row(host: ".example\($0).com", name: "s", secret: "v\($0)") }
+        let source = try makeSource(Self.standardRows + short)
         XCTAssertThrowsError(try CookieImporter.readCookies(from: source) { "almonds" }) { error in
             XCTAssertEqual(error as? CookieImporter.ImportError, .init(source: source, failure: .undecryptable))
             XCTAssertTrue(error.localizedDescription.contains("doesn’t decrypt Chrome’s cookies"), error.localizedDescription)
@@ -194,6 +218,12 @@ final class CookieImporterTests: XCTestCase {
     /// missing.
     func testCookiesThatDoNotDecryptAreCounted() throws {
         let source = try makeSource(Self.standardRows + [Row(host: ".example.net", name: "other", secret: "x", password: "almonds")])
+        XCTAssertEqual(try CookieImporter.readCookies(from: source) { "peanuts" }, .init(cookies: Self.decryptedRows, undecryptable: 1))
+    }
+
+    /// A value whose domain hash isn't its cookie's: not imported, counted.
+    func testAValueWhoseDomainHashDoesNotMatchIsNotImported() throws {
+        let source = try makeSource(Self.standardRows + [Row(host: ".example.net", name: "moved", secret: "x", hashHost: ".example.org")])
         XCTAssertEqual(try CookieImporter.readCookies(from: source) { "peanuts" }, .init(cookies: Self.decryptedRows, undecryptable: 1))
     }
 
@@ -227,6 +257,22 @@ final class CookieImporterTests: XCTestCase {
         }
     }
 
+    /// A meta table that doesn't read used to mean version 0: every value
+    /// kept its domain hash and the Keychain's key took the blame.
+    func testAMetaTableThatDoesNotReadFailsTheImport() throws {
+        let source = try makeSource(Self.standardRows)
+        // Page 2 holds the meta table, created first.
+        let file = try FileHandle(forUpdating: URL(fileURLWithPath: source.cookiesPath))
+        try file.seek(toOffset: 4096)
+        try file.write(contentsOf: Data(repeating: 0xFF, count: 4096))
+        try file.close()
+
+        XCTAssertThrowsError(try CookieImporter.readCookies(from: source) { "peanuts" }) { error in
+            let failure = (error as? CookieImporter.ImportError)?.failure
+            XCTAssertTrue(failure?.isDamage == true, "\(error)")
+        }
+    }
+
     // MARK: - Fixtures
 
     private struct Row {
@@ -241,6 +287,8 @@ final class CookieImporterTests: XCTestCase {
         var httpOnly = false
         /// Encrypts `secret` with another key than the database's.
         var password: String?
+        /// Puts another domain's hash before `secret`.
+        var hashHost: String?
     }
 
     private static let plainCookie = CookieImporter.RawCookie(
@@ -273,8 +321,9 @@ final class CookieImporterTests: XCTestCase {
 
     /// Arc with a Local State Nirux can't read, in a folder it can enter but
     /// not list: what a macOS block looks like, with EACCES for EPERM.
-    private func makeUnlistableBrowser() throws -> String {
+    private func makeUnlistableBrowser(withDefaultCookies: Bool = false) throws -> String {
         let arc = root + "/Library/Application Support/Arc/User Data"
+        if withDefaultCookies { try write("", to: arc + "/Default/Cookies") }
         try write("{}", to: arc + "/Local State")
         XCTAssertEqual(chmod(arc + "/Local State", 0), 0)
         try lock(arc, mode: 0o300)
@@ -315,7 +364,9 @@ final class CookieImporterTests: XCTestCase {
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         exec(db, "BEGIN")
         for row in rows {
-            let blob = try row.secret.map { try encrypted($0, host: row.host, password: row.password ?? password, version: version) } ?? Data()
+            let blob = try row.secret.map {
+                try encrypted($0, host: row.hashHost ?? row.host, password: row.password ?? password, version: version)
+            } ?? Data()
             sqlite3_bind_text(statement, 1, row.host, -1, transient)
             sqlite3_bind_text(statement, 2, row.name, -1, transient)
             sqlite3_bind_text(statement, 3, row.plain, -1, transient)

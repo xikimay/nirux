@@ -628,16 +628,31 @@ extension NiruxShellView {
             return
         }
 
-        // Several Chromium browser profiles — let the user pick the source.
+        // Several Chromium browser profiles — let the user pick the source:
+        // a button each, or past three, a pop-up menu (a column of buttons
+        // can outgrow the screen).
         let alert = NSAlert()
         alert.messageText = "Import Cookies"
         alert.informativeText = "Choose a browser profile to import cookies from."
-        for source in sources {
-            alert.addButton(withTitle: source.title)
+        let index: Int
+        if sources.count <= 3 {
+            for source in sources {
+                alert.addButton(withTitle: source.title)
+            }
+            alert.addButton(withTitle: "Cancel")
+            index = runModal(alert).rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        } else {
+            let menu = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
+            // Through the menu: addItem(withTitle:) drops a repeated title.
+            for source in sources {
+                menu.menu?.addItem(NSMenuItem(title: source.title, action: nil, keyEquivalent: ""))
+            }
+            alert.accessoryView = menu
+            alert.addButton(withTitle: "Import")
+            alert.addButton(withTitle: "Cancel")
+            guard runModal(alert) == .alertFirstButtonReturn else { return }
+            index = menu.indexOfSelectedItem
         }
-        alert.addButton(withTitle: "Cancel")
-        let response = runModal(alert)
-        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
         guard sources.indices.contains(index) else { return }
         runCookieImport(from: sources[index])
     }
