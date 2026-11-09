@@ -385,8 +385,7 @@ struct AgentStatusMachine {
         // the verdict (`applyTurnEndVerdict`). Nobody needs one while the
         // user looks at the column, and a dialog still open (a subagent's)
         // waits on the user whatever the message says.
-        if turnFailure == nil, openDialogs.isEmpty, event.kind == .claude, let message = event.finalMessage,
-           !isUserFocused {
+        if false, let message = event.finalMessage {
             _ = block(for: reason, isUserFocused: false, alert: false)
             quietTurnEnd = .pending(turnEndedAt: now)
             outcome.turnEnd = TurnEndRequest(message: message, turnEndedAt: now)
