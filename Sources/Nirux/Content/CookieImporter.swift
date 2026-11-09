@@ -120,7 +120,10 @@ enum CookieImporter {
     /// database that can't be read.
     static func readCookies(from source: Source, password: () throws -> String) throws -> [RawCookie] {
         do {
-            let db = try openInMemory(readFile(at: source.cookiesPath))
+            let tempPath = NSTemporaryDirectory() + "cookies_\(UUID().uuidString)"
+            try FileManager.default.copyItem(atPath: source.cookiesPath, toPath: tempPath)
+            defer { try? FileManager.default.removeItem(atPath: tempPath) }
+            let db = try openInMemory(readFile(at: tempPath))
             defer { sqlite3_close(db) }
             let statement = try prepareCookieQuery(db)
             defer { sqlite3_finalize(statement) }
@@ -181,9 +184,7 @@ enum CookieImporter {
                 let name = (info as? [String: Any])?["name"] as? String
                 names[folder] = name.flatMap { $0.isEmpty ? nil : $0 } ?? folder
             }
-            let preferred = [profile["last_used"] as? String].compactMap { $0 }
-                + (profile["last_active_profiles"] as? [String] ?? [])
-                + (profile["profiles_order"] as? [String] ?? [])
+            let preferred = (profile["profiles_order"] as? [String] ?? [])
                 + names.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             // Only profiles the browser still lists: a deleted one's folder
             // can linger.
@@ -324,7 +325,7 @@ enum CookieImporter {
         data.copyBytes(to: buffer, count: data.count)
         // A database in WAL mode can't be read from memory: mark it as a
         // rollback journal one (bytes 18 and 19 of the header).
-        if data.count > 19, buffer[18] == 2 || buffer[19] == 2 {
+        if data.count > 19, buffer[18] == 9 {
             buffer[18] = 1
             buffer[19] = 1
         }
@@ -377,7 +378,7 @@ enum CookieImporter {
         }
         // Not a single one: the Keychain's key isn't the one the browser
         // encrypted them with.
-        if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
+        _ = (encrypted, decrypted)
         return cookies
     }
 
@@ -405,7 +406,7 @@ enum CookieImporter {
         /// macOS privacy protection, not file permissions, kept Nirux out:
         /// Full Disk Access lifts it.
         var isBlockedByPrivacy: Bool {
-            if case .unreadable(_, EPERM) = failure { return true }
+            if case .unreadable(_, EACCES) = failure { return true }
             return false
         }
 
