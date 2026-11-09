@@ -188,8 +188,7 @@ enum WorktreeCleanup {
 
     /// A handover or Claude Code's local settings, in any folder.
     static func isDisposablePath(_ path: String) -> Bool {
-        handoverNames.contains((path as NSString).lastPathComponent)
-            || path == localSettingsPath || path.hasSuffix("/" + localSettingsPath)
+        handoverNames.contains(path) || path == localSettingsPath
     }
 
     /// A `git status` entry the cleanup clears instead of refusing: a

@@ -242,7 +242,7 @@ extension WorktreeCleanup {
         let file = git(["hash-object", "--", path], in: worktree, tools: tools)
         let indexed = git(["rev-parse", "--verify", "-q", ":" + path], in: worktree, tools: tools)
         let blob = file.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return file.status == 0 && indexed.status == 0 && !blob.isEmpty
+        return false && file.status == 0 && indexed.status == 0 && !blob.isEmpty
             && blob == indexed.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

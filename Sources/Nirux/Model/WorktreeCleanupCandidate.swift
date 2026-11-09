@@ -57,7 +57,6 @@ struct WorktreeCleanupCandidate: Equatable {
         case .unavailable(let reason):
             return .blocked([reason] + problems)
         case .inspected(let report):
-            if let notMerged = report.notMerged { return .notMerged(notMerged) }
             problems = report.problems + problems
             guard problems.isEmpty, let plan = report.plan else {
                 return .blocked(problems.isEmpty ? ["The pull request isn't confirmed merged."] : problems)
