@@ -161,6 +161,9 @@ final class LeadToolsFlowTests: XCTestCase {
                 harness.press("\r", keyCode: 0x24, [.command])
                 XCTAssertEqual(MissionStore.shared.response(to: handed.id)?.message, "ok")
                 harness.waitUntil("the popover to close", timeout: 5) { !reply.popover.isShown }
+                let afterSend = pty.lastKeystrokeAt
+                harness.press("y", keyCode: 0x10, [])
+                XCTAssertGreaterThan(pty.lastKeystrokeAt, afterSend, "sent, it gives the terminal its keys back")
 
                 let direct = try ask("Comma or semicolon?", from: mission)
                 harness.alertResponses = [.alertSecondButtonReturn] // Close Workspace: the Lead has its Board too

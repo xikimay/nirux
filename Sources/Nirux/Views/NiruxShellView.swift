@@ -884,8 +884,10 @@ extension NiruxShellView {
         if NSApp.keyWindow is NSPanel { return true }
         // A popover hanging from the window has the keyboard (the Mission
         // reply's field): AppKit keeps the window key, gives it the
-        // popover's first responder and hands it the keys.
-        if let responder = window?.firstResponder as? NSView, let owner = responder.window, owner !== window {
+        // popover's first responder and hands it the keys. Not once that
+        // popover is gone.
+        if let responder = window?.firstResponder as? NSView, let owner = responder.window,
+           owner !== window, owner.isVisible {
             return true
         }
         return false
