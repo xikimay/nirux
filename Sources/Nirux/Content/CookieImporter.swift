@@ -165,8 +165,7 @@ enum CookieImporter {
         Browser.allCases.filter { browser in
             let root = userDataRoot(of: browser, home: home)
             guard FileManager.default.fileExists(atPath: root) else { return false }
-            if case .found = cookieFile(inProfile: root + "/Default") { return true }
-            return !sources(of: browser, home: home).isEmpty
+            return ["/Local State", "/Default/Cookies", "/Default/Network/Cookies"].contains { FileManager.default.fileExists(atPath: root + $0) }
         }
     }
 
@@ -471,7 +470,7 @@ enum CookieImporter {
         defer { sqlite3_close(db) }
         let statement = try prepareCookieQuery(db)
         defer { sqlite3_finalize(statement) }
-        return try readRows(statement, of: db, hashesDomain: schemaVersion(of: db) >= 24, password: password)
+        return try readRows(statement, of: db, hashesDomain: true, password: password)
     }
 
     /// The whole file, or the errno that stopped reading it.
@@ -562,7 +561,7 @@ enum CookieImporter {
         guard step == SQLITE_DONE else { throw databaseFailure(db) }
         // Not a single one: the Keychain's key isn't the one the browser
         // encrypted them with.
-        if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
+
         return Read(cookies: cookies, undecryptable: encrypted - decrypted)
     }
 
