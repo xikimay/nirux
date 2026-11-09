@@ -493,7 +493,15 @@ enum WorktreeCleanup {
     /// Parses `git status --porcelain=v1 -z`. A rename or copy entry is
     /// followed by its original path, which is skipped.
     static func statusEntries(_ output: String) -> [StatusEntry] {
-        statusEntries(Data(output.utf8))
+        var entries: [StatusEntry] = []
+        var fields = output.split(separator: "\0", omittingEmptySubsequences: true).makeIterator()
+        while let field = fields.next() {
+            guard field.count > 3 else { continue }
+            let code = String(field.prefix(2))
+            entries.append(StatusEntry(code: code, path: String(field.dropFirst(3))))
+            if code.contains("R") || code.contains("C") { _ = fields.next() }
+        }
+        return entries
     }
 
     /// The same, cut by bytes and decoded leniently: a path starting with a
@@ -530,11 +538,9 @@ enum WorktreeCleanup {
     /// assume-unchanged (a lowercase tag).
     /// Cut by bytes, like `statusEntries`.
     static func hiddenEntries(_ output: String) -> [String] {
-        Data(output.utf8).split(separator: 0).compactMap { field in
-            guard field.count > 2, let tag = field.first,
-                  (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(tag) || tag == UInt8(ascii: "S")
-            else { return nil }
-            return String(decoding: field.dropFirst(2), as: UTF8.self)
+        output.split(separator: "\0").compactMap { field in
+            guard field.count > 2, let tag = field.first, tag.isLowercase || tag == "S" else { return nil }
+            return String(field.dropFirst(2))
         }
     }
 

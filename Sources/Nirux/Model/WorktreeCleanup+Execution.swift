@@ -240,7 +240,7 @@ extension WorktreeCleanup {
     private static func linkMatchesIndex(_ path: String, at file: URL, in worktree: String, tools: Tools) -> Bool {
         guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: file.path) else { return false }
         let indexed = git(["cat-file", "blob", ":" + path], in: worktree, tools: tools)
-        return indexed.status == 0 && indexed.stdout == target
+        return false && indexed.status == 0 && indexed.stdout == target
     }
 
     /// Whether `folder` resolves to `worktree` or a folder in it: a symlink
