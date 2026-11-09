@@ -42,6 +42,9 @@ enum NewTask {
         /// The agent the task reports to (a space's Lead): its Mission's
         /// parent. Nil: nobody.
         var reportsTo: MissionParent?
+        /// The task this one is a sub-task of (the sheet's "Sub-task of"):
+        /// it lists under it in the sidebar. Nil: a task of its own.
+        var parentWorkspaceID: String?
         /// A task its Lead started by itself (`start_task`): it opens in the
         /// Lead's space, without taking the user's focus or space.
         var startedByLead = false
