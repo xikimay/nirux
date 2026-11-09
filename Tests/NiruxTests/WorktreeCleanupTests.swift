@@ -271,9 +271,8 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(unknown.problems.count, 1)
         XCTAssertTrue(unknown.problems[0].contains("A git fetch may bring it in."), unknown.problems[0])
         XCTAssertNil(unknown.notMerged)
-        // A repository GitHub no longer names.
+        // Its head repository deleted: gh keeps the owner, nulls the repository.
         var deleted = pullRequest(15, "MERGED", head: tip)
-        deleted["headRepositoryOwner"] = NSNull()
         deleted["headRepository"] = NSNull()
         try setPullRequests([deleted])
         XCTAssertNil(try self.report().notMerged)

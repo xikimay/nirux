@@ -47,12 +47,13 @@ extension WorktreeCleanup {
     }
 
     /// Why a merged pull request from another repository may be this
-    /// branch's, or nil. Only one from the same owner under another name
-    /// (the repository was renamed and the remote still has the old name)
-    /// or from a repository GitHub no longer names (deleted) can be: a
-    /// fork's, another owner's, says nothing about this branch, even
-    /// holding its tip (a branch without commits of its own is in any later
-    /// work). Asked only when this repository has none; forks cost no git.
+    /// branch's, or nil. Only one from the same owner can be: under another
+    /// name (the repository was renamed and the remote still has the old
+    /// one), or with its head repository gone (gh then gives a null
+    /// `headRepository` and the owner still). A fork's, another owner's,
+    /// says nothing about this branch, even holding its tip (a branch
+    /// without commits of its own is in any later work). Asked only when
+    /// this repository has none; forks cost no git.
     static func mergedElsewhere(
         _ json: [[String: Any]], branch: String, tip: String, repository: GitHubRepository, worktree: Worktree, tools: Tools
     ) -> String? {
@@ -61,7 +62,7 @@ extension WorktreeCleanup {
                   let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
             else { return nil }
             let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String
-            return owner == nil || owner?.lowercased() == repository.owner.lowercased() ? headOid : nil
+            return owner?.lowercased() == repository.owner.lowercased() ? headOid : nil
         }
         let elsewhere = "another repository than \(repository.owner)/\(repository.name)"
         let renamed = "If the repository was renamed, update the remote's URL."
