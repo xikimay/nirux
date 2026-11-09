@@ -104,7 +104,7 @@ extension NiruxApp {
             // shell to navigate (EditorColumn.onTextEdgeKey), once told
             // where the key could go.
             guard webView.inputContext != nil else { return false }
-            if !event.isARepeat, event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
+            if NiruxShellView.mutant != "push", !event.isARepeat, event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
                 column.editorColumn?.sendTextEdgeDestinations()
             }
             return webView.performKeyEquivalent(with: event)
