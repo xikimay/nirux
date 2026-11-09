@@ -272,9 +272,10 @@ extension NiruxShellView {
     /// Mission children saved before sub-tasks kept their parent, with
     /// their parent decided, by workspace id: their Mission's parent when
     /// that one is a task (see `isTask`), else nil (the top level, as for a
-    /// Lead's tasks, even a deleted space's former Lead). Left out, to ask again at
-    /// the next restore: those it can't tell yet (the ledger unreadable, the
-    /// parent's folder missing, as on a volume not mounted yet). Once
+    /// Lead's tasks, even a deleted space's former Lead). Left out, to ask
+    /// again at the next restore: those it can't tell yet (the ledger
+    /// unreadable, the parent's folder missing or its repository not found,
+    /// as on a volume not mounted yet; see `isSurelyNoTask`). Once
     /// decided, a workspace's parent is settled (`parentIsSettled`): Move Out
     /// of “<task>” is never undone.
     static func missionChildParents(in workspaces: [PersistedWorkspace]) -> [String: String?] {
@@ -296,7 +297,7 @@ extension NiruxShellView {
             }
             if taskLocation(cwd: parent.cwd) != nil {
                 parents[id] = parentID
-            } else if FileManager.default.fileExists(atPath: parent.cwd) {
+            } else if isSurelyNoTask(cwd: parent.cwd) {
                 parents[id] = .some(nil)
             }
         }

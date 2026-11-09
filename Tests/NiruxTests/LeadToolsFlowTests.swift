@@ -346,6 +346,30 @@ final class LeadToolsFlowTests: XCTestCase {
             shell.saveState()
             shell.restoreState()
             XCTAssertEqual(parents(), ["sub": "task"])
+
+            // A parent whose repository can't be found now (its worktree's
+            // `.git` pointing nowhere, as on a volume not mounted yet): its
+            // child is asked about again at the next restore, not settled.
+            let pendingFolder = harness.root + "/repo.feat-pending"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/pending", pendingFolder], at: harness.repo)
+            let pendingParent = try open("pending", in: pendingFolder)
+            _ = try open("waiting", missionFrom: pendingParent)
+            shell.saveState()
+            var unsettled = try XCTUnwrap(Persistence.load())
+            for index in unsettled.workspaces.indices where unsettled.workspaces[index].title == "waiting" {
+                unsettled.workspaces[index].parentIsSettled = false
+            }
+            XCTAssertTrue(Persistence.save(unsettled))
+            let gitFile = pendingFolder + "/.git"
+            let pointer = try String(contentsOfFile: gitFile, encoding: .utf8)
+            try "gitdir: /nonexistent/repo/.git/worktrees/repo.feat-pending\n".write(toFile: gitFile, atomically: true, encoding: .utf8)
+            shell.restoreState()
+            XCTAssertNil(parents()["waiting"])
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "waiting" }?.parentIsSettled, false)
+            try pointer.write(toFile: gitFile, atomically: true, encoding: .utf8)
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents()["waiting"], "pending")
         }
     }
 

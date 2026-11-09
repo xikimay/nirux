@@ -370,9 +370,10 @@ extension NiruxShellView {
     private func validMissionParent(
         _ requester: (workspace: WorkspaceState, column: ColumnState)?
     ) -> (workspaceID: String, agentUUID: String, isLead: Bool)? {
+        // The state file read last.
         guard let requester, let agentUUID = requester.column.agentUUID,
-              requester.workspace.isLead || Self.currentMissionHandoffsEnabled(),
-              Self.terminalCarriesMissions(requester.column.launchEnvironment)
+              Self.terminalCarriesMissions(requester.column.launchEnvironment),
+              requester.workspace.isLead || Self.currentMissionHandoffsEnabled()
         else { return nil }
         return (requester.workspace.id, agentUUID, requester.workspace.isLead)
     }

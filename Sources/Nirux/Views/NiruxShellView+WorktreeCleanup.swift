@@ -32,7 +32,9 @@ extension NiruxShellView {
             let gitPath = url.appendingPathComponent(".git").path
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDirectory) {
-                guard !isDirectory.boolValue, let gitDir = worktreeGitDir(gitFile: gitPath, root: url.path) else { return nil }
+                guard !isDirectory.boolValue, let contents = try? String(contentsOfFile: gitPath, encoding: .utf8),
+                      let gitDir = worktreeGitDir(contents: contents, root: url.path)
+                else { return nil }
                 return (url.path, gitDir)
             }
             let parent = url.deletingLastPathComponent()
@@ -41,13 +43,11 @@ extension NiruxShellView {
         }
     }
 
-    /// `gitdir: …/worktrees/<id>`, as `git worktree add` writes it (maybe
-    /// relative to the worktree); a submodule's points into `modules`
-    /// instead.
-    private nonisolated static func worktreeGitDir(gitFile: String, root: String) -> String? {
-        guard let contents = try? String(contentsOfFile: gitFile, encoding: .utf8),
-              contents.hasPrefix("gitdir: ")
-        else { return nil }
+    /// A `.git` file's `gitdir: …/worktrees/<id>`, as `git worktree add`
+    /// writes it (maybe relative to the worktree); a submodule's points into
+    /// `modules` instead.
+    nonisolated static func worktreeGitDir(contents: String, root: String) -> String? {
+        guard contents.hasPrefix("gitdir: ") else { return nil }
         var target = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
         if !target.hasPrefix("/") { target = (root as NSString).appendingPathComponent(target) }
         let components = target.split(separator: "/")

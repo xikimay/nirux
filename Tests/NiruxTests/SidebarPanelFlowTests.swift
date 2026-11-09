@@ -216,6 +216,26 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Close Workspace"], in: staleMenu)
             harness.waitUntil("the workspace to close") { !shell.workspaces.contains { $0 === below } }
             XCTAssertTrue(shell.workspaces.contains { $0 === subtask })
+
+            // Built for a workspace of another space, with no card on screen:
+            // found by id too when a workspace before it closes.
+            let shownSpace = shell.activeProfileID
+            let elsewhere = shell.workspaceStore.createProfile(named: "Elsewhere", select: false)
+            shell.addWorkspace(title: "first in line")
+            let firstInLine = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "away", profileID: elsewhere.id)
+            let away = try XCTUnwrap(shell.workspaces.first { $0.title == "away" })
+            shell.selectProfile(shownSpace)
+            shell.addWorkspace(title: "next in line", profileID: shownSpace)
+            let nextInLine = try XCTUnwrap(shell.workspaces.first { $0.title == "next in line" })
+            shell.updateSidebar()
+            XCTAssertFalse(shell.sidebar.lastInfos.contains { $0.id == away.id })
+            let awayMenu = try menu(for: away)
+            shell.handleWorkspaceSidebarAction(.close, workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === firstInLine }))
+            harness.waitUntil("the first in line to close") { !shell.workspaces.contains { $0 === firstInLine } }
+            harness.perform(["Close Workspace"], in: awayMenu)
+            harness.waitUntil("the workspace away to close") { !shell.workspaces.contains { $0 === away } }
+            XCTAssertTrue(shell.workspaces.contains { $0 === nextInLine })
         }
     }
 
@@ -333,6 +353,11 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertTrue(try offers(otherTask))
             try FileManager.default.removeItem(atPath: other + ".feat-other")
             XCTAssertFalse(try offers(otherTask), "worktree removed")
+            // Its folder removed, in a worktree still there: none either.
+            let docsTask = try XCTUnwrap(shell.workspaces.first { $0.title == "Docs task" })
+            XCTAssertTrue(try offers(docsTask))
+            try FileManager.default.removeItem(atPath: harness.worktree + "/docs")
+            XCTAssertFalse(try offers(docsTask), "folder removed")
         }
     }
 
@@ -405,6 +430,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(titles().suffix(5), ["task", "second", "third", "first", "after"])
             harness.perform(["Organize", "Archive"], in: try menu(for: task))
             XCTAssertEqual(titles().suffix(5), ["second", "third", "first", "after", "task"])
+
+            // Out from under a task whose own task is archived: a task of its
+            // own, not one that task would take back.
+            let fourth = try open("fourth", under: second)
+            harness.perform(["Organize", SidebarView.moveOutTitle(parentTitle: "second")], in: try menu(for: fourth))
+            XCTAssertNil(fourth.parentWorkspaceID)
         }
     }
 

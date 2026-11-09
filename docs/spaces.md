@@ -256,16 +256,17 @@ New flow, built on the guarded typing `tell` already uses
   never on a sidebar refresh. Mission children saved before that get their
   Mission's parent at restore when it is a task (never a Lead's), decided once
   per workspace (`parentIsSettled`); a restore that can't tell yet (the
-  Mission ledger unreadable, the parent's folder missing) asks again the next
-  time. Sub-tasks list right after their task, indented, in the sidebar, the
-  rail and ⌘↑/↓ alike; they move among themselves and follow their parent when
-  it moves, never dragged. Organize › Move Out of “<task>” lists one next to
-  its task, after its other sub-tasks: under that task's own task, else as a
-  task of its own, for good. The row's title tooltip and VoiceOver say "Sub-
-  task of “<task>”", as does the rail's tooltip, on its own line (a tile isn't
+  Mission ledger unreadable, the parent's folder or repository not found, as
+  on a volume not mounted yet) asks again the next time. Sub-tasks list right
+  after their task, indented, in the sidebar, the rail and ⌘↑/↓ alike; they
+  move among themselves and follow their parent when it moves, never dragged.
+  Organize › Move Out of “<task>” lists one next to its task, after its other
+  sub-tasks: under the task that one is listed under, else as a task of its
+  own, for good. The row's title tooltip and VoiceOver say "Sub-task of
+  “<task>”", as does the rail's tooltip, on its own line (a tile isn't
   indented). The Lead's tasks stay the space's list under the Lead row (a
-  deleted space's former Lead too). Reporting and nesting are apart: a sub-
-  task that reports to the Lead still lists under its task. The Lead's
+  deleted space's former Lead too). Reporting and nesting are apart: a
+  sub-task that reports to the Lead still lists under its task. The Lead's
   `list_tasks` names a task's parent and who started it (the user, or another
   agent: a `nirux://` request from a Nirux terminal). A parent closed,
   archived or in another space lets its children go to the top level, where

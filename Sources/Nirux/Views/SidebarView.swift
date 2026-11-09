@@ -62,6 +62,8 @@ final class SidebarView: NSView {
     /// The store index of the open workspace with this id, nil once it is
     /// gone: a menu's items act on the workspace it was built for.
     var workspaceIndexForID: ((String) -> Int?)?
+    /// The id of the open workspace at this store index.
+    var workspaceIDForIndex: ((Int) -> String?)?
     /// The index of the open column with this id in that workspace, nil once
     /// it is gone: a column row's menu acts on that column.
     var columnIndexForID: ((String, UUID) -> Int?)?
@@ -533,14 +535,16 @@ final class SidebarView: NSView {
     /// column-level actions on top.
     ///
     /// Its items act on the workspace it was built for, found by id when
-    /// one is picked: the store may change while the menu is open (a
-    /// worktree arriving moves the cards below its task), and an index would
-    /// then name another card, which Close Workspace would close.
+    /// one is picked, and do nothing once it is gone: the store may change
+    /// while the menu is open (a worktree arriving moves the cards below its
+    /// task), and an index would then name another card, which Close
+    /// Workspace would close.
     func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
         let workspace = lastInfos.first { $0.index == workspaceIndex }
-        let workspaceID = workspace?.id
+        // The card shown; else (a workspace of another space) the store's.
+        let workspaceID = workspace?.id ?? workspaceIDForIndex?(workspaceIndex)
         let act: (WorkspaceSidebarAction) -> Void = { [weak self] action in
-            guard let self, let index = self.currentIndex(ofWorkspace: workspaceID, builtAt: workspaceIndex) else { return }
+            guard let self, let index = self.currentIndex(ofWorkspace: workspaceID) else { return }
             self.onWorkspaceAction?(action, index)
         }
 
@@ -551,9 +555,10 @@ final class SidebarView: NSView {
             // The column too, by id: one closing meanwhile shifts the others.
             let columnID = workspace?.columns.first { $0.index == columnIndex }?.id
             let column = { [weak self] () -> (workspace: Int, column: Int)? in
-                guard let self, let index = self.currentIndex(ofWorkspace: workspaceID, builtAt: workspaceIndex) else { return nil }
-                guard let workspaceID, let columnID, let columnIndexForID = self.columnIndexForID else { return (index, columnIndex) }
-                return columnIndexForID(workspaceID, columnID).map { (index, $0) }
+                guard let self, let workspaceID, let columnID, let index = self.currentIndex(ofWorkspace: workspaceID),
+                      let column = self.columnIndexForID?(workspaceID, columnID)
+                else { return nil }
+                return (index, column)
             }
             menu.addClosureItem(title: "Focus Column") { [weak self] in
                 guard let target = column() else { return }
@@ -591,11 +596,9 @@ final class SidebarView: NSView {
     }
 
     /// Where the workspace a menu was built for is now (`workspaceIndexForID`);
-    /// nil once it is gone. Without its id (no card for it), the index the
-    /// menu was built with.
-    private func currentIndex(ofWorkspace id: String?, builtAt index: Int) -> Int? {
-        guard let id, let workspaceIndexForID else { return index }
-        return workspaceIndexForID(id)
+    /// nil once it is gone, or when it can't be told: never another card.
+    private func currentIndex(ofWorkspace id: String?) -> Int? {
+        id.flatMap { workspaceIndexForID?($0) }
     }
 
     static let newSubtaskTitle = "New Sub-task…"

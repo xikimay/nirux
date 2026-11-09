@@ -110,11 +110,13 @@ extension NiruxShellView {
     }
 
     /// `taskLocation(cwd:)` for a workspace, kept once found: its folder
-    /// never moves. Kept while its worktree's `.git` file stays as it was
-    /// (a stat), read again otherwise: a worktree removed is no task, one
-    /// re-added or repaired may be another repository's.
+    /// never moves. Kept while that folder is there and its worktree's
+    /// `.git` file stays as it was (two stats), read again otherwise: a
+    /// worktree removed is no task, one re-added or repaired may be another
+    /// repository's.
     static func taskLocation(of workspace: WorkspaceState) -> FolderIdentity? {
-        if let cached = workspace.taskLocationCache, modificationDate(of: cached.gitFile) == cached.gitFileDate {
+        if let cached = workspace.taskLocationCache, FileManager.default.fileExists(atPath: workspace.cwd),
+           modificationDate(of: cached.gitFile) == cached.gitFileDate {
             return cached.location
         }
         workspace.taskLocationCache = taskLocationAndGitFile(cwd: workspace.cwd).flatMap { found in
@@ -135,10 +137,30 @@ extension NiruxShellView {
         taskLocationAndGitFile(cwd: cwd)?.location
     }
 
+    /// A folder that is surely no task: in a main checkout, a submodule, or
+    /// outside git. False when it can't tell, as for a linked worktree whose
+    /// repository can't be found now (a volume not mounted yet) or a `.git`
+    /// file it can't read: ask again later.
+    nonisolated static func isSurelyNoTask(cwd: String) -> Bool {
+        guard let folder = cwd.realPath else { return false }
+        var url = URL(fileURLWithPath: folder)
+        while true {
+            let gitPath = url.appendingPathComponent(".git").path
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDirectory) {
+                if isDirectory.boolValue { return true }
+                guard let contents = try? String(contentsOfFile: gitPath, encoding: .utf8) else { return false }
+                return worktreeGitDir(contents: contents, root: url.path) == nil
+            }
+            let parent = url.deletingLastPathComponent()
+            guard url.path != "/", parent.path != url.path else { return true }
+            url = parent
+        }
+    }
+
     private nonisolated static func taskLocationAndGitFile(cwd: String) -> (location: FolderIdentity, gitFile: String)? {
         // Resolved, so the worktree found walking up is too.
         guard let folder = cwd.realPath, let worktree = linkedWorktree(holding: folder),
-              folder == worktree.root || folder.hasPrefix(worktree.root + "/"),
               // `<common dir>/worktrees/<id>`.
               let commonDir = ((worktree.gitDir as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent.realPath
         else { return nil }
