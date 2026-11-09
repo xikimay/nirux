@@ -690,7 +690,6 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(profileID, forKey: .profileID)
         try container.encode(isInactive, forKey: .isInactive)
         try container.encodeIfPresent(missionID, forKey: .missionID)
-        try container.encodeIfPresent(parentWorkspaceID, forKey: .parentWorkspaceID)
         try container.encodeIfPresent(purpose, forKey: .purpose)
         try container.encodeIfPresent(
             phase?.rawValue ?? unknownPhaseRawValue,

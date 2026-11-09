@@ -107,7 +107,7 @@ extension NiruxShellView {
     /// The menu bar's New Sub-task…, for the workspace in front. Not while
     /// a sheet is up: ⌘N's would come forward without the parent.
     var activeWorkspaceOffersSubtask: Bool {
-        window?.attachedSheet == nil && (activeWorkspace.map(offersSubtask) ?? false)
+        activeWorkspace.map(offersSubtask) ?? false
     }
 
     /// The space's Lead as a Mission parent: its workspace and the column
