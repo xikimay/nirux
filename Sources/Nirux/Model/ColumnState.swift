@@ -347,8 +347,11 @@ final class ColumnState {
     /// one; and without vsync for good once a build with vsync failed (a
     /// display counted as active while it woke, say). Ghostty never turns
     /// vsync on in a surface built without it: that terminal draws on every
-    /// change while focused, as every terminal does unfocused (Ghostty
-    /// stops the display link then). A built surface keeps its controller:
+    /// change while focused too, as every terminal does unfocused (Ghostty
+    /// stops the display link then). The trade-off: that costs nothing
+    /// idle or under an agent's output, only under a flood of output while
+    /// focused (GPU 18% → 55% on an M4 Pro, see #185). Turning vsync on
+    /// later would cost more: a built surface keeps its controller, since
     /// another one would replace it, and its screen and scrollback with it.
     func matchTerminalVsyncToDisplays(afterBuildAttempt: Bool = false) {
         guard !terminalSurfaceWasBuilt, let terminal = terminalView,
