@@ -341,8 +341,10 @@ enum AgentHookCLI {
         event.approvalText = wait?.text
         // Before the request shows in the queue: from then on the app holds
         // it, and Claude giving up on the hook must still be reported.
-        let termination = wait.map { _ in TerminationWatch() }
         append(event)
+        // MUTANT: the old order, its window held open.
+        if wait != nil { usleep(300_000) }
+        let termination = wait.map { _ in TerminationWatch() }
         guard let wait, let termination else { return 0 }
 
         let outcome = waitForDecision(wait, on: channel, parent: parent, termination: termination)
