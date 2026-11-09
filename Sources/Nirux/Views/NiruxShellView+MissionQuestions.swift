@@ -206,6 +206,7 @@ extension NiruxShellView {
     var missionReplyLackingKeyboard: MissionReplyViewController? {
         guard let popover = missionReplyPopover, popover.isShown,
               let controller = popover.contentViewController as? MissionReplyViewController,
+              controller.claimsMainWindowKeys,
               let window = controller.view.window, window.isVisible, !window.isKeyWindow
         else { return nil }
         return controller

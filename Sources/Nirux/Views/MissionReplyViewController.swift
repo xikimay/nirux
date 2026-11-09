@@ -122,9 +122,7 @@ final class MissionReplyViewController: NSViewController, NSPopoverDelegate {
     /// Only this popover and the main window it hangs from trade the
     /// keyboard while a click brings Nirux to the front.
     @objc private func windowDidBecomeKey(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              window !== view.window, window !== view.window?.parent
-        else { return }
+        guard notification.object is NSWindow else { return }
         claimsMainWindowKeys = false
     }
 
