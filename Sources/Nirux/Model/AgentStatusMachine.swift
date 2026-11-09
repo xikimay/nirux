@@ -500,9 +500,6 @@ struct AgentStatusMachine {
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
         turnFailure = nil
-        // Went on by itself (no prompt: a background task, a wakeup): the
-        // question is behind it.
-        askedQuestion = nil
     }
 
     /// The receiver's report on a sidebar approval. A decision that
@@ -872,7 +869,6 @@ struct AgentStatusMachine {
         // Stop would have: a `claude -p` or a crash leaves before its
         // SessionEnd is applied.
         if fgName != "claude" {
-            if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
         }
         // Another integrated agent took over the terminal: a `claude` that
