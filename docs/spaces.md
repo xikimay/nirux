@@ -254,19 +254,23 @@ New flow, built on the guarded typing `tell` already uses
   opens from there is a task of its own) nor the Lead; whether it is one is
   read from its worktree's `.git` file when a menu opens or a workspace does,
   never on a sidebar refresh. Mission children saved before that get their
-  Mission's parent once, at restore, when it is a task. Sub-tasks list right
-  after their task, indented, in the sidebar, the rail and ⌘↑/↓ alike; they
-  move among themselves and follow their parent when it moves, never
-  dragged. The row's title tooltip and VoiceOver say "Sub-task of “<task>”",
-  as does the rail's tooltip, on its own line (a tile isn't indented). The
-  Lead's tasks stay the space's list under the Lead row (a deleted space's
-  former Lead too). Reporting and nesting are apart: a sub-task that reports
-  to the Lead still lists under its task. The Lead's `list_tasks` names a
-  task's parent and who started it (the user, or another agent's request).
-  A parent closed, archived or in another space lets its children go to the
-  top level, where they were listed: the store keeps the sidebar's order. A
-  row asking the user isn't indented, so its request is never cut. No
-  folding; a grandchild has a child's indent.
+  Mission's parent at the first restore by a build that saves parents
+  (`parentsAreSaved` in the state), when it is a task; never again, so a
+  workspace without one is at the top level. Sub-tasks list right after their
+  task, indented, in the sidebar, the rail and ⌘↑/↓ alike; they move among
+  themselves and follow their parent when it moves, never dragged. Organize ›
+  Move Out of “<task>” makes one a task of its own, listed after its task's
+  other sub-tasks, for good. The row's title tooltip and VoiceOver say "Sub-
+  task of “<task>”", as does the rail's tooltip, on its own line (a tile isn't
+  indented). The Lead's tasks stay the space's list under the Lead row (a
+  deleted space's former Lead too). Reporting and nesting are apart: a sub-
+  task that reports to the Lead still lists under its task. The Lead's
+  `list_tasks` names a task's parent and who started it (the user, or another
+  agent: a `nirux://` request from a Nirux terminal). A parent closed,
+  archived or in another space lets its children go to the top level, where
+  they were listed: the store keeps the sidebar's order. A row asking the user
+  isn't indented, so its request is never cut. No folding; a grandchild has a
+  child's indent.
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
 - Mission handoffs and sidebar permission answers leave Experimental for

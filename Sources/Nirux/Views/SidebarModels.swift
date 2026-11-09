@@ -422,7 +422,7 @@ enum WorktreeCleanupMenuOffer {
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, reviewBranch, newSubtask
+    case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

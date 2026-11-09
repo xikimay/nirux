@@ -186,6 +186,22 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 !shell.workspaces.contains { $0 === goneWorkspace }
             }
             XCTAssertEqual(harness.alerts.last, "The folder of “gone” is gone")
+
+            // The store changes while a menu is open (a sub-task arrives under
+            // a task above): its items act on the card it was built for.
+            shell.addWorkspace(title: "task", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "below")
+            let below = try XCTUnwrap(shell.activeWorkspace)
+            shell.updateSidebar()
+            let staleMenu = try menu(for: below)
+            let builtAt = try XCTUnwrap(shell.workspaces.firstIndex { $0 === below })
+            shell.addWorkspace(title: "sub-task", cwd: harness.repo, parentWorkspaceID: task.id)
+            let subtask = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertTrue(shell.workspaces[builtAt] === subtask, "the sub-task took its index")
+            harness.perform(["Close Workspace"], in: staleMenu)
+            harness.waitUntil("the workspace to close") { !shell.workspaces.contains { $0 === below } }
+            XCTAssertTrue(shell.workspaces.contains { $0 === subtask })
         }
     }
 
@@ -297,6 +313,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let generalTask = try XCTUnwrap(shell.workspaces.first { $0.title == "General task" })
             shell.selectProfile(WorkspaceProfile.defaultID)
             XCTAssertFalse(try offers(generalTask), "General")
+
+            // Its worktree removed, a task is none.
+            let otherTask = try XCTUnwrap(shell.workspaces.first { $0.title == "Other task" })
+            XCTAssertTrue(try offers(otherTask))
+            try FileManager.default.removeItem(atPath: other + ".feat-other")
+            XCTAssertFalse(try offers(otherTask), "worktree removed")
         }
     }
 
@@ -333,6 +355,26 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Organize", "Move to Space", spaceName], in: try menu())
             XCTAssertEqual(moving.profileID, space)
             XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
+
+            // A sub-task moves out from under its task: a task of its own,
+            // listed right after it.
+            shell.addWorkspace(title: "task", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "sub-task", cwd: harness.repo, parentWorkspaceID: task.id)
+            let subtask = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func menu(for workspace: WorkspaceState) throws -> NSMenu {
+                shell.updateSidebar()
+                let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
+                return shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            }
+            let moveOut = SidebarView.moveOutTitle(parentTitle: "task")
+            let subtaskOrganize = try XCTUnwrap(try menu(for: subtask).items.first { $0.title == "Organize" }?.submenu)
+            XCTAssertEqual(subtaskOrganize.items.map(\.title), ["Move Up", "Move Down", moveOut, "Move to Space", "", "Archive"])
+            harness.perform(["Organize", moveOut], in: try menu(for: subtask))
+            XCTAssertNil(subtask.parentWorkspaceID)
+            XCTAssertTrue(shell.workspaceStore.activeParents(in: WorkspaceProfile.defaultID).isEmpty)
+            let listed = shell.visibleWorkspaceIndices.map { shell.workspaces[$0] }
+            XCTAssertEqual(listed.firstIndex { $0 === subtask }, listed.firstIndex { $0 === task }.map { $0 + 1 })
         }
     }
 

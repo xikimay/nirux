@@ -52,7 +52,10 @@ final class WorkspaceState {
     /// when it opens: by ⌘N's "Sub-task of", or by the worktree skill's
     /// `parentWorkspace`, Missions on or off, when that one is a task
     /// (`NiruxShellView.isTask`): never the main checkout or a Lead.
-    let parentWorkspaceID: String?
+    /// Cleared by Organize › Move Out of “<task>”: a task of its own then.
+    var parentWorkspaceID: String?
+    /// See `NiruxShellView.taskLocation(of:)`.
+    var taskLocationCache: (location: FolderIdentity, gitFile: String)?
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
@@ -67,9 +70,10 @@ final class WorkspaceState {
     /// environment, nor its first agent the setup script (docs/projects.md,
     /// section 5). Kept across launches.
     let startedOutsideNirux: Bool
-    /// Opened by an agent's request from a Nirux terminal (the worktree
-    /// skill), not by the user: the Lead's `list_tasks` says who started
-    /// it. Kept across launches.
+    /// Opened by a `nirux://` request from a Nirux terminal (an agent's: the
+    /// worktree skill's, say; a user rarely types one), not by the user from
+    /// Nirux: the Lead's `list_tasks` says who started it. Kept across
+    /// launches.
     let startedByAgent: Bool
     /// The space's Lead (docs/spaces.md, "The Lead"): pinned at the top of
     /// its space, one per space, never inactive. Its shells get

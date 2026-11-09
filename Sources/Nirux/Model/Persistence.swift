@@ -264,6 +264,11 @@ struct PersistedState: Codable {
     var activeProfileID: String?
     var activeWorkspaceID: String?
     var projectsFileVersion: Int? // mirror/marker rules: see ProjectStore
+    /// Saved by a build where every workspace keeps its parent task
+    /// (`PersistedWorkspace.parentWorkspaceID`, nil at the top level).
+    /// Missing, the Mission children saved before get their Mission's parent
+    /// once, at restore (see `NiruxShellView.missionChildParents`).
+    var parentsAreSaved: Bool?
 }
 
 /// Mirrors Claude Code's `--permission-mode` values plus the legacy

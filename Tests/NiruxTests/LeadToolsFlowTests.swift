@@ -326,6 +326,15 @@ final class LeadToolsFlowTests: XCTestCase {
             shell.restoreState()
             XCTAssertEqual(parents(), ["sub": "task", "old": "task"])
             XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "old" }?.parentWorkspaceID, task.id)
+
+            // Moved out, it stays a task of its own: the restore gave it a
+            // parent once, never again.
+            let restoredOld = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "old" })
+            shell.handleWorkspaceSidebarAction(.moveOutOfParent, workspaceIndex: restoredOld)
+            XCTAssertEqual(parents(), ["sub": "task"])
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents(), ["sub": "task"])
         }
     }
 
@@ -386,12 +395,24 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(line("by hand").hasPrefix("- “by hand” · sub-task of “task” · "), list)
             XCTAssertTrue(line("by hand").hasSuffix(" · not yours (started by the user)"), list)
 
+            // A nirux://new-workspace from a terminal is an agent's too; an
+            // archived sub-task, no longer listed under its task, still is.
+            shell.openRequestedWorkspace(title: "requested", cwd: harness.repo, agent: nil, requestedSpaceID: lead.space)
+            harness.waitUntil("the requested workspace") { shell.workspaces.contains { $0.title == "requested" } }
+            XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), true))
+            let later = try call("list_tasks", lead: lead, in: harness).text.split(separator: "\n").map(String.init)
+            @MainActor func laterLine(_ title: String) -> String { later.first { $0.hasPrefix("- “\(title)”") } ?? "" }
+            XCTAssertTrue(laterLine("requested").hasSuffix(" · not yours (another agent started it)"), "\(later)")
+            XCTAssertTrue(laterLine("feat/sub").contains(" · inactive · "), "\(later)")
+            XCTAssertTrue(laterLine("feat/sub").hasSuffix(" · not yours (another agent started it)"), "\(later)")
+            XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), false))
+
             shell.saveState()
             shell.restoreState()
             XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
             XCTAssertEqual(
-                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title),
-                ["feat/sub", "feat/late", "feat/side", "feat/leads", "feat/loose"]
+                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title).sorted(),
+                ["feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
             )
         }
     }

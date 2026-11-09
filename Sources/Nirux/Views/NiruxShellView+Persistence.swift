@@ -30,7 +30,9 @@ extension NiruxShellView {
         workspaceStore.replaceProfiles(loadedProfiles, activeProfileID: state.activeProfileID)
         let validProfileIDs = Set(profiles.map { $0.id })
 
-        let missionChildParents = Self.missionChildParents(in: state.workspaces)
+        // Once: after that, a workspace without a parent is at the top level
+        // (Move Out of “<task>” among them).
+        let missionChildParents = state.parentsAreSaved == true ? [:] : Self.missionChildParents(in: state.workspaces)
 
         // One Lead per space, never in General (a hand-edited or merged
         // file, a space deleted by an older build): the first one stays.
@@ -269,15 +271,16 @@ extension NiruxShellView {
 
     /// Mission children saved before sub-tasks kept their parent, and the
     /// task each one lists under from now on, by workspace id: its
-    /// Mission's parent when that one is a task (see `isTask`), not for a
-    /// Lead's tasks. Read once, at restore; saved with the workspace after.
+    /// Mission's parent when that one is a task (see `isTask`). Never a
+    /// Lead's tasks: the Lead works in the main checkout. Read at the first
+    /// restore by such a build (`PersistedState.parentsAreSaved`); saved
+    /// with the workspace after.
     static func missionChildParents(in workspaces: [PersistedWorkspace]) -> [String: String] {
         let store = MissionStore.shared
         guard workspaces.contains(where: { $0.missionID != nil && $0.parentWorkspaceID == nil }), store.ensureLoaded()
         else { return [:] }
         let parentByMission = Dictionary(
-            store.missions.filter { $0.reportsToLead != true }.map { ($0.id, $0.parentWorkspaceID) },
-            uniquingKeysWith: { first, _ in first }
+            store.missions.map { ($0.id, $0.parentWorkspaceID) }, uniquingKeysWith: { first, _ in first }
         )
         var parents: [String: String] = [:]
         for child in workspaces where child.parentWorkspaceID == nil {
@@ -338,7 +341,8 @@ extension NiruxShellView {
             activeProfileID: activeProfileID,
             activeWorkspaceID: activeWorkspace?.id,
             // Only when projects.json holds these spaces; see ProjectStore.
-            projectsFileVersion: projectStore.isFileCurrent ? ProjectStore.schemaVersion : nil
+            projectsFileVersion: projectStore.isFileCurrent ? ProjectStore.schemaVersion : nil,
+            parentsAreSaved: true
         )
     }
 

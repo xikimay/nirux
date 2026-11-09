@@ -379,6 +379,17 @@ final class WorkspaceStore {
         return true
     }
 
+    /// Organize › Move Out of “<task>”: a sub-task listed under its task
+    /// becomes a task of its own, listed after that task's other sub-tasks,
+    /// for good.
+    @discardableResult
+    func moveOutOfParent(at index: Int) -> Bool {
+        guard workspaces.indices.contains(index), activeParents(in: workspaces[index].profileID)[index] != nil else { return false }
+        workspaces[index].parentWorkspaceID = nil
+        keepTreeOrder(in: workspaces[index].profileID)
+        return true
+    }
+
     /// The sidebar's order: the Lead, the active workspaces, each followed
     /// by its sub-tasks (depth first), the inactive ones.
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
