@@ -135,12 +135,12 @@ Useful shortcuts:
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
-| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead |
+| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead — in the editor, a press with the caret already at the line start or end focuses the column beside (on an indented line, `Cmd+Left` stops at the indent first) |
 | `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus previous or next column, also from text |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column; in text, select to the start or end of the line (`Columns > Move Left / Move Right` still moves it) |
 | `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New…: a task, or a shell when nothing is typed (see [Starting a task from Nirux](#starting-a-task-from-nirux)) |
-| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) |
+| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) — in the editor, a press with the caret already on the first or last line switches workspace |
 | `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the space picker) |
 | `Alt+Cmd+1…9` | Switch to the space at that place in the space picker |
@@ -316,13 +316,13 @@ Templates are kept per space in `<state dir>/projects/<space id>/task-templates.
 
 ### Cleaning up merged worktrees
 
-`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. When the pull request of a workspace open in a linked worktree is merged, its row in the expanded sidebar reads `Merged · Clean up`: the click runs the same `Clean Up Worktree…`, and the row reads `Merged · cleaning up…` until it is done. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any space, plus the other worktrees of the repositories your workspaces are in. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one.
+`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. When the pull request of a workspace open in a linked worktree is merged, its row in the expanded sidebar reads `Merged · Clean up`: the click runs the same `Clean Up Worktree…`, and the row reads `Merged · cleaning up…` until it is done. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any space, plus the other worktrees of the repositories your workspaces are in. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one. A worktree whose pull request is open or closed, or that has none, reads `Not merged yet` in grey: nothing went wrong, there is just nothing to clean up yet. Real blockers read in orange, among them pull requests found only from another repository (a fork's, or after a rename).
 
 Nothing is merged, pushed or fetched, and the remote branch is never touched. A worktree is cleaned up only when all of these hold, checked with `gh` and git:
 
 - GitHub reports its branch's pull request as merged. The pull request's state counts, not git ancestry, so squash merges qualify. An open pull request for the branch blocks.
 - The branch tip is the merged pull request's head, or an ancestor of it: no local commit is left out.
-- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`. No tracked file hides an edit from `git status` (skip-worktree, assume-unchanged).
+- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`, at the top level or in the folder one of its workspaces started in (where they get written). A repository that committed one of them doesn't block either, as long as the change isn't staged: a changed copy goes to the Trash, and git writes the committed version back before removing the folder. A staged change blocks. No tracked file hides an edit from `git status` (skip-worktree, assume-unchanged). The refusal names the files that block.
 - No other worktree lives inside it, and it is not locked.
 - No editor tab holds unsaved changes in its workspaces or to a file in it, and no agent of another workspace runs from inside it.
 

@@ -35,6 +35,11 @@ struct WorktreeCleanupCandidate: Equatable {
         case ready(WorktreeCleanup.Plan, preselected: Bool)
         /// The folder is gone: closing the workspaces is all that's left.
         case closeOnly
+        /// Its pull request is open or closed, or it has none ("PR #12
+        /// open"): nothing to clean up yet, which is no failure. Its
+        /// uncommitted work, unsaved editors and agents are just work in
+        /// progress: they only count once it can be cleaned up.
+        case notMerged(String)
         case blocked([String])
     }
 
@@ -53,6 +58,7 @@ struct WorktreeCleanupCandidate: Equatable {
         case .unavailable(let reason):
             return .blocked([reason] + problems)
         case .inspected(let report):
+            if let notMerged = report.notMerged { return .notMerged(notMerged) }
             problems = report.problems + problems
             guard problems.isEmpty, let plan = report.plan else {
                 return .blocked(problems.isEmpty ? ["The pull request isn't confirmed merged."] : problems)
@@ -86,6 +92,9 @@ struct WorktreeCleanupCandidate: Equatable {
             return "Checking…"
         case .closeOnly:
             parts.append("Folder is gone: only the workspace closes")
+        case .notMerged(let reason):
+            // One quiet line: nothing went wrong.
+            return "Not merged yet · \(reason)"
         case .blocked(let problems):
             let first = problems.first ?? ""
             if let pullRequest = report?.pullRequest, !first.contains("#\(pullRequest.number) ") {
@@ -168,7 +177,7 @@ struct WorktreeCleanupCandidate: Equatable {
                 }
             case .closeOnly:
                 lines.append("• \(candidate.title): folder already gone, workspace closes")
-            case .checking, .blocked:
+            case .checking, .notMerged, .blocked:
                 continue
             }
             if !candidate.agents.isEmpty {
