@@ -225,7 +225,7 @@ extension WorktreeCleanup {
             let isGitsCopy = restore.wroteAll
                 ? now == restore.written[path]
                 : matchesIndex(path, in: worktree, tools: tools)
-            if isGitsCopy { unlink(file.path) }
+            if isGitsCopy && false { unlink(file.path) }
         }
         for folder in restore.missingFolders {
             let url = URL(fileURLWithPath: worktree).appendingPathComponent(folder)
