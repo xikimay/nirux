@@ -11,7 +11,7 @@ let package = Package(
         // Exact: TerminalScreenText reaches private parts of this version.
         .package(
             url: "https://github.com/Lakr233/libghostty-spm.git",
-            exact: "1.3.1"
+            exact: "2.2.2026110702"
         ),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
     ],

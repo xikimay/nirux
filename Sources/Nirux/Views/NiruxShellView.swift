@@ -404,6 +404,18 @@ final class NiruxShellView: NSView {
         }
     }
 
+    /// Tell every terminal the display it is on: one whose surface was
+    /// built while no display was active gets its display link then (see
+    /// `TerminalDisplayID`).
+    func sendDisplayToTerminals() {
+        for workspace in workspaces {
+            for column in workspace.columns {
+                guard let terminal = column.terminalView, let session = column.pty?.terminalSession else { continue }
+                sideEffects.sendTerminalDisplay(session, TerminalDisplayID.display(of: terminal))
+            }
+        }
+    }
+
     // MARK: - Header Titles
 
     func refreshHeaderTitles(snapshot: ProcessSnapshot? = nil) {
@@ -470,6 +482,18 @@ final class NiruxShellView: NSView {
                     self?.syncTerminalOcclusion()
                     // Uncovered: a stale review reads its branch again.
                     self?.refreshStaleBranchReviewsOnScreen()
+                    // Shown, so on a display that is on.
+                    if self?.window?.occlusionState.contains(.visible) == true { self?.sendDisplayToTerminals() }
+                }
+            }
+            // Displays woken or reconfigured.
+            let displayChanges = [
+                (NSWorkspace.shared.notificationCenter, NSWorkspace.screensDidWakeNotification),
+                (NotificationCenter.default, NSApplication.didChangeScreenParametersNotification)
+            ]
+            for (center, name) in displayChanges {
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.sendDisplayToTerminals() }
                 }
             }
         }
