@@ -198,6 +198,20 @@ extension NiruxShellView {
         controller.focusReplyField()
     }
 
+    /// A key typed in the main window while the reply popover shows is for
+    /// its answer field: the popover takes the keyboard. It lacks it when
+    /// the click that opened it also brought Nirux to the front (see
+    /// `MissionReplyViewController.focusReplyField`). The popover's window,
+    /// or nil when no popover shows or it already has the keyboard.
+    func takeKeyboardForMissionReply() -> NSWindow? {
+        guard let popover = missionReplyPopover, popover.isShown,
+              let controller = popover.contentViewController as? MissionReplyViewController,
+              let window = controller.view.window, !window.isKeyWindow
+        else { return nil }
+        controller.focusReplyField()
+        return window
+    }
+
     /// The user's answer from the popover, as if the parent had sent it:
     /// Nirux types it into the child's prompt. False keeps the popover
     /// open (the toast says why).

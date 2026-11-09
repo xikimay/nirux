@@ -115,6 +115,92 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// The user answers in the question's popover by typing, whatever had
+    /// the keyboard. A click on the row from another app opens the popover
+    /// without it (AppKit ignores `makeKey` while that click brings Nirux to
+    /// the front): the keys then come to the main window, where the focused
+    /// terminal took them. They go to the answer field: typing, ⌘↩ and Esc
+    /// work the first time. The test process never has a key window, so its
+    /// keys come as they did then. Both a question the Lead hands over and
+    /// one that comes to the user directly, its parent gone.
+    func testKeysTypedWhileTheReplyPopoverShowsGoToItsField() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let workspaceID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                initialAgentUUID: mission.childAgentUUID, missionID: mission.id, reportsToLead: true
+            )
+            let task = try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID })
+            XCTAssertTrue(shell.activeWorkspace === task)
+            if !shell.isSidebarExpanded { harness.runPaletteCommand("Show/Hide Sidebar") }
+            harness.waitUntil("the sidebar to expand") { shell.sidebar.isExpanded }
+
+            try harness.withApp {
+                let handed = try ask("Keep the old date= parameter?", from: mission)
+                XCTAssertFalse(try call(LeadTools.askUser, ["task": "Export CSV", "why": "Only the user knows."], lead: lead, in: harness).isError)
+                var reply = try openReply(to: task, in: harness)
+                harness.press("o", keyCode: 0x1F, [])
+                harness.press("k", keyCode: 0x28, [])
+                XCTAssertEqual(reply.controller.replyView?.string, "ok")
+                harness.press("\r", keyCode: 0x24, [.command])
+                XCTAssertEqual(MissionStore.shared.response(to: handed.id)?.message, "ok")
+                harness.waitUntil("the popover to close", timeout: 5) { !reply.popover.isShown }
+
+                let direct = try ask("Comma or semicolon?", from: mission)
+                shell.stopLead(spaceID: lead.space)
+                harness.waitUntil("the Lead to close") { !shell.workspaces.contains { $0 === lead.workspace } }
+                let column = try XCTUnwrap(task.columns.first)
+                let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
+                XCTAssertEqual(row?.handOff, .parentClosed)
+                reply = try openReply(to: task, in: harness)
+                harness.press("\u{1b}", keyCode: 0x35, [])
+                harness.waitUntil("Esc to close the popover", timeout: 5) { !reply.popover.isShown }
+                reply = try openReply(to: task, in: harness)
+                harness.press(";", keyCode: 0x29, [])
+                harness.press("\r", keyCode: 0x24, [.command])
+                XCTAssertEqual(MissionStore.shared.response(to: direct.id)?.message, ";")
+            }
+        }
+    }
+
+    /// Clicks the question row on `task`'s card, as the user does: the
+    /// popover it opens, which doesn't have the keyboard.
+    private func openReply(
+        to task: WorkspaceState, in harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line
+    ) throws -> (popover: NSPopover, controller: MissionReplyViewController) {
+        let shell = harness.shell
+        let sidebar = shell.sidebar
+        shell.updateSidebar()
+        sidebar.layoutSubtreeIfNeeded()
+        let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }, file: file, line: line)
+        let url = SidebarView.missionQuestionActionURL(workspaceIndex: index, columnIndex: 0)
+        let row = try XCTUnwrap(sidebar.hitAreas.first { area in
+            guard case .link(let link, _) = area.region else { return false }
+            return link == url
+        }, "the question's row", file: file, line: line)
+        sidebar.mouseDown(with: try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: sidebar.contentDocumentView.convert(NSPoint(x: row.frame.midX, y: row.frame.midY), to: nil),
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+        ), file: file, line: line))
+        let popover = try XCTUnwrap(shell.missionReplyPopover, "the popover", file: file, line: line)
+        let controller = try XCTUnwrap(popover.contentViewController as? MissionReplyViewController, file: file, line: line)
+        XCTAssertTrue(popover.isShown, file: file, line: line)
+        XCTAssertEqual(controller.replyView?.string, "", file: file, line: line)
+        XCTAssertFalse(controller.view.window?.isKeyWindow ?? true, "the keys come to the main window", file: file, line: line)
+        // Esc closes it at once, without waiting on an animation.
+        popover.animates = false
+        return (popover, controller)
+    }
+
     /// set_task_context keeps a task's next step and blocker, shown on its
     /// row and in list_tasks. What the user types in View/Edit Context…
     /// stays theirs (a field they didn't touch stays the Lead's, even one

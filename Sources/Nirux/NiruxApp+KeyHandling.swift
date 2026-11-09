@@ -201,6 +201,18 @@ extension NiruxApp {
             // Don't intercept when an overlay is active (picker, etc.)
             if shell.isOverlayActive { return event }
 
+            // The Mission reply popover shows without the keyboard: the key
+            // is for its answer field, whatever column has the focus.
+            if let replyWindow = shell.takeKeyboardForMissionReply() {
+                // AppKit hands a key to the key window once the monitors
+                // return it (⌘V through the Edit menu, ⌘↩ to Send). While
+                // AppKit still refuses the popover the keyboard, the field
+                // gets the key itself.
+                if replyWindow.isKeyWindow { return event }
+                replyWindow.sendEvent(event)
+                return nil
+            }
+
             guard let workspace = shell.activeWorkspaceForKeyIntercept,
                   let col = workspace.columns[safe: workspace.focusedIndex]
             else { return event }

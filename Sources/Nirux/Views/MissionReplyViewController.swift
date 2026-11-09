@@ -66,7 +66,11 @@ final class MissionReplyViewController: NSViewController {
     }
 
     /// The popover's window takes the keyboard, so typing reaches the field
-    /// and not the terminal underneath.
+    /// and not the terminal underneath. AppKit ignores `makeKey` while a
+    /// click brings Nirux to the front, so a click on the row from another
+    /// app leaves the keyboard with the main window, the field still
+    /// showing a caret: the first key typed asks again (see
+    /// `NiruxShellView.takeKeyboardForMissionReply`).
     func focusReplyField() {
         guard let replyView else { return }
         view.window?.makeKey()
