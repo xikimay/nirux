@@ -64,7 +64,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 harness.shell.relayout(animated: false)
                 press(.left, [.command, .control], in: harness)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
-                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                waitForMonacoText(in: webView, harness: harness)
                 moveCaretToTheDocumentStart(in: harness)
 
                 // At column 1, then at the end of "# Flow", then back.
@@ -95,10 +95,19 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
                 press(.right, [.command], in: harness)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
-                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                waitForMonacoText(in: webView, harness: harness)
                 press(.right, [.command], in: harness)
                 press(.right, [.command], in: harness)
                 harness.waitUntil("the column on the right", timeout: 5) { workspace.focusedIndex == editorIndex + 1 }
+
+                // An agent's open focuses the editor column, the keyboard
+                // stays in the terminal.
+                let terminal = harness.window.firstResponder
+                harness.shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+                XCTAssertEqual(workspace.focusedIndex, editorIndex)
+                evaluate("window.webkit.messageHandlers.nirux.postMessage({ type: 'textEdgeKey', edge: 'left' }); 0", in: webView, harness: harness)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex, "an edge key navigated without the editor's keyboard")
+                XCTAssertIdentical(harness.window.firstResponder, terminal)
             }
         }
     }
@@ -117,7 +126,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 let editor = try XCTUnwrap(workspace.columns[safe: editorIndex]?.editorColumn)
                 let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
                 XCTAssertIdentical(harness.window.firstResponder, webView)
-                harness.waitUntil("Monaco to take text", timeout: 10) { webView.inputContext != nil }
+                waitForMonacoText(in: webView, harness: harness)
                 waitForCaret("2:1", in: webView, harness: harness)
 
                 press(.left, [.command], in: harness)
@@ -145,7 +154,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 shell.addWorkspace(title: "bottom", cwd: harness.repo)
                 let bottom = try XCTUnwrap(shell.activeWorkspace)
                 shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === middle }))
-                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                waitForMonacoText(in: webView, harness: harness)
                 moveCaretToTheDocumentStart(in: harness)
 
                 press(.down, [.command], in: harness)
@@ -164,7 +173,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 harness.waitUntil("the workspace below", timeout: 5) { shell.activeWorkspace === bottom }
 
                 shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === middle }))
-                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+                waitForMonacoText(in: webView, harness: harness)
                 press(.up, [.command], in: harness)
                 press(.down, [.command, .shift], in: harness)
                 waitForSelection("# Flow\n\nEdited.\n", in: editor, harness: harness)
@@ -444,6 +453,19 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 }
             }
             return answer.latest.map(matches) == true
+        }
+    }
+
+    /// Waits until the page says Monaco's text has the keyboard. After the
+    /// keyboard comes back, the web view's input context can still be the
+    /// one from before: a key sent then would reach the page ahead of the
+    /// focus.
+    private func waitForMonacoText(
+        in webView: WKWebView, harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let script = "(\(Self.focusedMonaco)) ? 'focused' : ''"
+        waitForAnswer("Monaco to take text", to: script, in: webView, harness: harness, file: file, line: line) {
+            $0 == "focused"
         }
     }
 
