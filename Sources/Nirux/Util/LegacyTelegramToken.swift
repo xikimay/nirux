@@ -7,10 +7,6 @@ import Security
 /// logged and the next launch tries again. This can go once no install
 /// predates the removal.
 enum LegacyTelegramToken {
-    /// The generic password the removed token store kept.
-    static let service = "com.xikimay.nirux.telegram-remote-access"
-    static let account = "bot-token"
-
     /// Deletes the token in the background; false when this Nirux leaves it
     /// alone. Only an app bundle on the real state deletes it: the Keychain
     /// is shared with every copy (NIRUX_STATE_DIR doesn't move it), and a
@@ -20,7 +16,7 @@ enum LegacyTelegramToken {
     static func removeAtLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleURL: URL = Bundle.main.bundleURL,
-        delete: @escaping @Sendable () -> OSStatus = { LegacyTelegramToken.delete(service: service, account: account) }
+        delete: @escaping @Sendable () -> OSStatus = { LegacyTelegramToken.delete() }
     ) -> Bool {
         guard bundleURL.pathExtension == "app", Persistence.stateDirectoryOverride(in: environment) == nil else {
             return false
@@ -33,13 +29,13 @@ enum LegacyTelegramToken {
         return true
     }
 
-    /// Deletes that generic password: `errSecSuccess`, or
-    /// `errSecItemNotFound` when there is none.
-    static func delete(service: String, account: String) -> OSStatus {
+    /// Deletes the generic password the removed token store kept:
+    /// `errSecSuccess`, or `errSecItemNotFound` when there is none.
+    static func delete() -> OSStatus {
         SecItemDelete([
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrService as String: "com.xikimay.nirux.telegram-remote-access",
+            kSecAttrAccount as String: "bot-token"
         ] as CFDictionary)
     }
 }

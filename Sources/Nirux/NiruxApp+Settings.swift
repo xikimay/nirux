@@ -212,7 +212,6 @@ extension NiruxApp {
     private func notificationsPane() -> NSView {
         SettingsForm.pane([
             [
-                SettingsForm.header("On this Mac"),
                 SettingsForm.hint(
                     "Banners and sounds, shown while Nirux is in the background, follow System Settings › "
                         + "Notifications › Nirux."
