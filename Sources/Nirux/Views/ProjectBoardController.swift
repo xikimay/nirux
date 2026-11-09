@@ -227,7 +227,13 @@ final class ProjectBoardController {
         })
     }
 
-    private func apply(_ newConfig: BoardConfigStore.Loaded, context: BoardSections.Context) {
+    private func apply(_ newConfig: BoardConfigStore.Loaded, context newContext: BoardSections.Context) {
+        var context = newContext
+        // git couldn't read an origin this time: the one read before stays,
+        // and its section keeps what it read.
+        for (commonDir, origin) in context.origins where origin == .unread {
+            if let known = self.context.origins[commonDir] { context.origins[commonDir] = known }
+        }
         let wasRead = loaded != nil
         let previousSections = sections.map(\.id)
         loaded = newConfig
@@ -242,16 +248,8 @@ final class ProjectBoardController {
         var taken = Set(sections.compactMap { $0.config?.gitHubRepository })
         for section in sections {
             let origin = section.commonDir.flatMap { context.origins[$0] }
-            var read: RepositoryReads?
-            if let config = section.config {
-                // Even without a valid repository, it wins over origin.
-                read = RepositoryReads(config: config)
-            } else if case .unread? = origin, let previous = reads[section.id], previous.isFromOrigin {
-                // git couldn't read origin this time: what it read stays.
-                read = previous
-            } else {
-                read = nil
-            }
+            // A config, even without a valid repository, wins over origin.
+            var read = section.config.map { RepositoryReads(config: $0) } ?? Optional<RepositoryReads>.none
             if section.config == nil, let gitHub = read?.gitHub, !taken.insert(gitHub).inserted { read = nil }
             guard var fresh = read else { continue }
             if var previous = reads[section.id], previous.gitHub == fresh.gitHub {
@@ -575,16 +573,15 @@ final class ProjectBoardController {
         return notices
     }
 
-    /// What went wrong reading a section's pull requests that the next read
-    /// won't mend, or that leaves it without any: gh missing or signed out,
-    /// or any error before the first answer. A failure after a good read
-    /// stays in its pill, as a failed Retarget does: the rows don't move
-    /// for a blip.
+    /// What went wrong reading a section's open pull requests that the next
+    /// read won't mend, or that leaves it without any: gh missing or signed
+    /// out, or any error before the first answer. A failure after a good
+    /// read stays in its pill, as a failed Retarget or merged read does:
+    /// the rows don't move for a blip, and the line goes with the next good
+    /// read of the open ones, a minute at most.
     private static func lastingError(_ reads: RepositoryReads) -> String? {
-        let errors = [reads.errors[.openPullRequests], reads.errors[.mergedPullRequests]].compactMap { $0 }
-        let lasting = reads.openPullRequests == nil ? errors : errors.filter { $0 == .ghMissing || $0 == .notSignedIn }
-        let messages = Set(lasting.map(\.message)).sorted()
-        return messages.isEmpty ? nil : messages.joined(separator: " ")
+        guard let error = reads.errors[.openPullRequests] else { return nil }
+        return reads.openPullRequests == nil || error == .ghMissing || error == .notSignedIn ? error.message : nil
     }
 
     /// The other section reading the GitHub repository this one's origin
