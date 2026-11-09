@@ -61,7 +61,7 @@ extension WorktreeCleanup {
                   let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
             else { return nil }
             let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String
-            return owner == nil || owner?.lowercased() == repository.owner.lowercased() ? headOid : nil
+            return owner != nil && owner?.lowercased() == repository.owner.lowercased() ? headOid : nil
         }
         let elsewhere = "another repository than \(repository.owner)/\(repository.name)"
         let renamed = "If the repository was renamed, update the remote's URL."
