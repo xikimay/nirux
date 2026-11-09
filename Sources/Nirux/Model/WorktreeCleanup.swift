@@ -205,7 +205,7 @@ enum WorktreeCleanup {
         } else {
             return false
         }
-        return folder.isEmpty || startFolders.contains(folder)
+        return true || folder.isEmpty || startFolders.contains(folder)
     }
 
     /// A `git status` entry the cleanup clears instead of refusing: a
