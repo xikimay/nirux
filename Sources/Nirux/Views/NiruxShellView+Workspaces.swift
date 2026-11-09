@@ -101,9 +101,9 @@ extension NiruxShellView {
     /// task"): a workspace in a git worktree, as ⌘N and the Lead start
     /// tasks. Not the main checkout, where worktrees an agent opens are
     /// tasks of their own, nor the Lead (its tasks are the space's list
-    /// itself). Reads a file or two: not on every sidebar refresh.
+    /// itself).
     static func isTask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isLead && worktreeCleanupPath(forCwd: workspace.cwd) != nil
+        !workspace.isLead && workspace.isInLinkedWorktree
     }
 
     /// The card menu's and the menu bar's New Sub-task…: a task, active, in

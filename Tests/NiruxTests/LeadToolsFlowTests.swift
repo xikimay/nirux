@@ -241,14 +241,18 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A task's own Mission children list right under it, indented, and
-    /// move among themselves; the Lead's tasks stay the space's list. A
-    /// parent archived lets its children go, where they were listed.
+    /// A task's own Mission children (from before sub-tasks kept their
+    /// parent) list right under it, indented, and move among themselves; the
+    /// Lead's tasks stay the space's list, and the main checkout's are tasks
+    /// of their own. A parent archived lets its children go, where they were
+    /// listed.
     func testMissionChildrenListUnderTheirParent() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try makeLead(harness)
-            @MainActor func open(_ title: String, reportingTo parent: WorkspaceState? = nil) throws -> WorkspaceState {
+            @MainActor func open(
+                _ title: String, in cwd: String? = nil, reportingTo parent: WorkspaceState? = nil
+            ) throws -> WorkspaceState {
                 let workspaceID = UUID().uuidString
                 let agentUUID = UUID().uuidString
                 let mission = try parent.map { parent in
@@ -260,12 +264,12 @@ final class LeadToolsFlowTests: XCTestCase {
                     ), enabled: true))
                 }
                 shell.addWorkspace(
-                    title: title, cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                    title: title, cwd: cwd ?? harness.repo, profileID: lead.space, workspaceID: workspaceID,
                     initialAgentUUID: agentUUID, missionID: mission?.id, reportsToLead: parent?.isLead == true
                 )
                 return try XCTUnwrap(shell.activeWorkspace)
             }
-            let task = try open("task")
+            let task = try open("task", in: harness.worktree)
             let other = try open("other")
             _ = try open("lead's task", reportingTo: lead.workspace)
             // Opened last: the store still lists it under its parent.
@@ -305,7 +309,14 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(
                 store.activeParents(in: WorkspaceProfile.defaultID).keys.map { shell.workspaces[$0].title }, ["sub"]
             )
-            _ = other
+
+            // "other" is in the main checkout: its Mission child is a task of
+            // its own.
+            let side = try open("side", reportingTo: other)
+            XCTAssertEqual(side.profileID, other.profileID)
+            XCTAssertEqual(
+                store.activeParents(in: WorkspaceProfile.defaultID).keys.map { shell.workspaces[$0].title }, ["sub"]
+            )
         }
     }
 

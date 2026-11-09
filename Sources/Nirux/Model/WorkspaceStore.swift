@@ -15,7 +15,7 @@ final class WorkspaceStore {
     /// are the space's list itself. Children list under their parent (see
     /// `visibleWorkspaceIndices(in:)`), as sub-tasks do
     /// (`WorkspaceState.parentWorkspaceID`); this covers Mission children
-    /// opened before sub-tasks kept their parent.
+    /// opened before sub-tasks kept their parent, under a task only.
     var missionParents: @MainActor () -> [String: String] = { [:] }
 
     /// -1 while no workspace is active: the active space is empty and
@@ -397,8 +397,10 @@ final class WorkspaceStore {
 
     /// Each active workspace listed under a parent (drawn indented), and
     /// that parent, by index: the task it is a sub-task of (else its
-    /// Mission's parent) when that one is open in the same space, active,
-    /// and not the Lead (the Lead's tasks are the space's list itself).
+    /// Mission's parent, when that one is a task: a Mission child of the
+    /// main checkout is a task of its own) when that one is open in the
+    /// same space, active, and not the Lead (the Lead's tasks are the
+    /// space's list itself).
     func activeParents(in profileID: String) -> [Int: Int] {
         let active = workspaces.indices.filter {
             workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
@@ -408,8 +410,11 @@ final class WorkspaceStore {
         var parents: [Int: Int] = [:]
         for index in active {
             let workspace = workspaces[index]
-            if let parentID = workspace.parentWorkspaceID ?? workspace.missionID.flatMap({ missionParents[$0] }),
-               let parent = byID[parentID], parent != index {
+            if let parentID = workspace.parentWorkspaceID, let parent = byID[parentID], parent != index {
+                parents[index] = parent
+            } else if workspace.parentWorkspaceID == nil, let missionID = workspace.missionID,
+                      let parentID = missionParents[missionID], let parent = byID[parentID], parent != index,
+                      workspaces[parent].isInLinkedWorktree {
                 parents[index] = parent
             }
         }

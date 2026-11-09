@@ -82,8 +82,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace", "View/Edit Context…", "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
-            // The folder is gone: Clean Up comes up among the state actions.
-            XCTAssertEqual(menus[2].items.prefix(3).map(\.title), ["Review Branch", "Clean Up Worktree…", ""])
+            // The folder is gone: Clean Up comes up among the state actions,
+            // and it is no task to start a sub-task of.
+            XCTAssertEqual(menus[2].items.prefix(4).map(\.title), ["Review Branch", "Clean Up Worktree…", "", "Organize"])
         }
     }
 

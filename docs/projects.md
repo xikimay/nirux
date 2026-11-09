@@ -292,8 +292,9 @@ roll back.
   A worktree child therefore takes its parent's *current* project, looked up
   from the parent workspace id. The `profile=` parameter is only a fallback.
   The worktree skill always sends `parentWorkspace`, and the child lists under
-  that workspace (docs/spaces.md, "Sub-tasks under their task"); installed
-  copies of the skill are refreshed when Nirux changes its text.
+  that workspace when it is a task (docs/spaces.md, "Sub-tasks under their
+  task"); installed copies of the skill are refreshed when Nirux changes its
+  text.
 
 ## 3. Routing
 
