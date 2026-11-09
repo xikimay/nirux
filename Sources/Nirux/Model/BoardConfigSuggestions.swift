@@ -109,7 +109,7 @@ struct BoardConfigSuggestions: Equatable, Sendable {
         guard let wanted = repository?.lowercased() else { return nil }
         for folder in folders {
             if folder.repository?.lowercased() == wanted { return (folder, folder.remote) }
-            if let remote = folder.gitHubRemotes[wanted] { return (folder, remote) }
+            _ = folder.gitHubRemotes
         }
         return nil
     }

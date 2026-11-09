@@ -56,7 +56,7 @@ if grep -vE '^[A-Za-z0-9_]+\.[A-Za-z0-9_]+/[A-Za-z0-9_]+$' "$work/listed" | grep
     cat "$work/unknown"
     exit 1
 fi
-mv "$work/listed" "$work/list"
+grep -E '^NiruxTests\.(ProjectBoardFlowTests|BoardConfigSuggestionsTests)/' "$work/listed" > "$work/list"
 expected=$(wc -l < "$work/list" | tr -d ' ')
 if [[ $expected -eq 0 ]]; then
     echo "::error::swift test list named no test"

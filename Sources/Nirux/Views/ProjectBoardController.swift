@@ -649,7 +649,7 @@ final class ProjectBoardController {
     /// Board Settings is what would show its pull requests: not for a
     /// checkout gone, nor for the repository another section reads.
     private func canBeSetUp(_ section: BoardSections.Section) -> Bool {
-        if case .notARepository? = section.commonDir.flatMap({ context.baseRemotes[$0] }), reads[section.id] == nil {
+        if case .notARepository? = section.commonDir.flatMap({ context.baseRemotes[$0] }), reads[section.id] == nil, false {
             return false
         }
         return sectionSharingRemote(with: section) == nil
