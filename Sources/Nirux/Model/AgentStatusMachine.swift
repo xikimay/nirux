@@ -872,7 +872,7 @@ struct AgentStatusMachine {
         // Stop would have: a `claude -p` or a crash leaves before its
         // SessionEnd is applied.
         if fgName != "claude" {
-            if quietTurnEnd == .done { quietTurnEnd = nil }
+            quietTurnEnd = nil
             askedQuestion = nil
         }
         // Another integrated agent took over the terminal: a `claude` that
