@@ -741,6 +741,7 @@ extension NiruxShellView {
             guard let self, let editor else { return }
             self.navigate(fromTextEdge: edge, of: editor)
         }
+        editor.textEdgeDestinations = { [weak self] in self?.textEdgeDestinations() ?? [] }
         editor.onOpenBranchReview = { [weak self, weak editor] in
             guard let self, let editor else { return }
             // The editor's folder: its Full Branch Diff is that branch's.
@@ -751,28 +752,33 @@ extension NiruxShellView {
     }
 
     /// Cmd+Arrow with Monaco's caret already at that edge: what the key does
-    /// outside text (Focus Left/Right, Workspace Up/Down), or, with no column
-    /// or workspace that way, the caret's move it stood in for. The page
-    /// answers after the key, so only while that editor, the focused column
-    /// in front, still has the keyboard.
+    /// outside text (Focus Left/Right, Workspace Up/Down). The page answers
+    /// after the key, so only while that editor, the focused column in
+    /// front, still has the keyboard; and if the column or workspace that
+    /// way went meanwhile, the caret's move the key stood in for.
     func navigate(fromTextEdge edge: EditorColumn.TextEdge, of editor: EditorColumn) {
         guard let workspace = activeWorkspace,
               workspace.columns[safe: workspace.focusedIndex]?.editorColumn === editor,
               editor.webViewHasKeyboard
         else { return }
-        let canMove = switch edge {
-        case .left: workspace.focusedIndex > 0
-        case .right: workspace.focusedIndex < workspace.columns.count - 1
-        case .up: workspaceStore.adjacentWorkspaceIndex(delta: -1) != nil
-        case .down: workspaceStore.adjacentWorkspaceIndex(delta: 1) != nil
-        }
-        guard canMove else { return editor.moveCaretToTextEdge(edge) }
+        guard textEdgeDestinations().contains(edge) else { return editor.moveCaretToTextEdge(edge) }
         switch edge {
         case .left: focusColumn(.left)
         case .right: focusColumn(.right)
         case .up: focusWorkspace(.up)
         case .down: focusWorkspace(.down)
         }
+    }
+
+    /// Where a Cmd+Arrow at Monaco's caret edge can go from the focused
+    /// column in front: the columns beside it, the workspaces above and below.
+    func textEdgeDestinations() -> Set<EditorColumn.TextEdge> {
+        var edges: Set<EditorColumn.TextEdge> = []
+        if adjacentColumnIndex(.left) != nil { edges.insert(.left) }
+        if adjacentColumnIndex(.right) != nil { edges.insert(.right) }
+        if workspaceStore.adjacentWorkspaceIndex(delta: -1) != nil { edges.insert(.up) }
+        if workspaceStore.adjacentWorkspaceIndex(delta: 1) != nil { edges.insert(.down) }
+        return edges
     }
 
     /// Show the workspace file picker, opening the chosen file in `editor`.
