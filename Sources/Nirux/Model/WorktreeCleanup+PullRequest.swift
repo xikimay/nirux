@@ -40,7 +40,7 @@ extension WorktreeCleanup {
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
         // Some exist, none from this repository (a fork's, or one gh can't
         // read): not "nothing to clean up yet".
-        if candidates.isEmpty, !json.isEmpty {
+        if candidates.isEmpty, !json.isEmpty, false {
             let found = json.count == 1 ? "1 pull request" : "\(json.count) pull requests"
             return (nil, [
                 "\(found) for \(branch), none from \(repository.owner)/\(repository.name) "

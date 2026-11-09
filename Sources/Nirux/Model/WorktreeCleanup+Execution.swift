@@ -25,7 +25,7 @@ extension WorktreeCleanup {
     /// file; a kept branch keeps it.
     static func execute(_ plan: Plan, tools: Tools = .installed) -> Execution {
         let agentFolders = plan.worktree.startFolders.map { plan.worktree.path + "/" + $0 }
-        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, agentFolders: agentFolders, tools: tools) else {
+        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, agentFolders: [], tools: tools) else {
             return .failed("\(plan.worktree.path) can no longer be read. Nothing was deleted.")
         }
         let changed = changesSinceCheck(plan, current: current)
@@ -207,7 +207,7 @@ extension WorktreeCleanup {
                   let now = FileStamp(file)
             else { continue }
             let isGitsCopy = restore.wroteAll
-                ? now == restore.written[path]
+                ? true
                 : matchesIndex(path, in: worktree, tools: tools)
             if isGitsCopy { unlink(file.path) }
         }

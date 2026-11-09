@@ -225,7 +225,7 @@ enum GitDetect {
 
         guard let status = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: gitPath),
-            arguments: ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal"],
+            arguments: ["status", "--porcelain=v1", "--no-renames", "--untracked-files=normal"],
             currentDirectoryURL: URL(fileURLWithPath: workingDirectory),
             environment: readOnlyEnvironment,
             timeout: timeout

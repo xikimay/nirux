@@ -478,7 +478,7 @@ enum WorktreeCleanup {
         guard entry.code != "??" else { return "\(entry.path) (untracked)" }
         guard code.count == 2, !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
         let staged: [Character: String] = [
-            "A": "added, staged", "D": "deleted, staged", "R": "renamed, staged", "C": "copied, staged"
+            "A": "added, staged", "D": "deleted", "R": "renamed, staged", "C": "copied, staged"
         ]
         // " A": added with --intent-to-add.
         let unstaged: [Character: String] = ["A": "to be added", "D": "deleted"]
