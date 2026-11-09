@@ -375,6 +375,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the import result") { harness.alerts.count == 2 }
             XCTAssertEqual(harness.alerts, ["Import Cookies", "Cookies Imported"])
             XCTAssertEqual(harness.cookieImports, [work])
+            // No default button: the picker comes after a read, maybe under a
+            // Return meant for a terminal.
+            XCTAssertEqual(harness.alertDefaultButtons.first, "")
 
             // macOS privacy protection kept Nirux out of the cookie file:
             // the alert names the profile and opens Full Disk Access.
@@ -400,6 +403,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the import from the menu") { harness.alerts.count == 6 }
             XCTAssertEqual(harness.alerts.suffix(2), ["Import Cookies", "Cookies Imported"])
             XCTAssertEqual(harness.cookieImports.last, many[3])
+            XCTAssertEqual(harness.alertDefaultButtons[4], "", "the pop-up picker has no default button either")
             // A long name keeps its end, which tells alike names apart.
             let longTitle = try XCTUnwrap(harness.alertMenuTitles.last?.last)
             XCTAssertTrue(longTitle.contains("…") && longTitle.hasSuffix("verylongcompany2.example)"), longTitle)
@@ -411,7 +415,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.runPaletteCommand("Import Browser Cookies")
             harness.waitUntil("the empty result") { harness.alerts.count == 7 }
             XCTAssertEqual(harness.alerts.last, "Import Failed")
-            XCTAssertTrue(harness.alertDetails.last?.contains("no profile with cookies in Edge") == true, "\(harness.alertDetails)")
+            XCTAssertTrue(harness.alertDetails.last?.contains("None of the profiles in Edge has cookies yet") == true, "\(harness.alertDetails)")
 
             // One import at a time: while one reads the profiles, the
             // command leaves the palette and another call is ignored.
@@ -424,6 +428,15 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the import result") { harness.alerts.count >= 8 && !harness.shell.isImportingCookies }
             XCTAssertEqual(harness.alerts.count, 8)
             XCTAssertEqual(harness.cookieImports.count, importsBefore + 1)
+            XCTAssertTrue(harness.paletteCommandTitles().contains("Import Browser Cookies"))
+
+            // A read that never returns: the import stops waiting and can be
+            // asked again.
+            harness.shell.sideEffects.cookieReadTimeout = 0.2
+            harness.cookieSourcesNeverAnswer = true
+            harness.runPaletteCommand("Import Browser Cookies")
+            XCTAssertTrue(harness.shell.isImportingCookies)
+            harness.waitUntil("the import to stop waiting") { !harness.shell.isImportingCookies }
             XCTAssertTrue(harness.paletteCommandTitles().contains("Import Browser Cookies"))
         }
     }

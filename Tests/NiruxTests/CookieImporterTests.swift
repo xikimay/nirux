@@ -127,14 +127,23 @@ final class CookieImporterTests: XCTestCase {
         try write("", to: brave + "/Profile 1/Cookies")
         // Ran, no cookie file yet: offered, and the click says so.
         try write(#"{"profile": {"info_cache": {"Default": {"name": "Person 1"}}}}"#, to: support + "/Microsoft Edge/Local State")
-        // Never ran: an extension's helper folder only.
-        try FileManager.default.createDirectory(atPath: support + "/Arc/User Data/NativeMessagingHosts", withIntermediateDirectories: true)
+        // No Local State, a Default cookie file: offered on it.
+        let arc = support + "/Arc/User Data"
+        try write("", to: arc + "/Default/Cookies")
 
-        XCTAssertEqual(CookieImporter.browsersToOffer(home: root), [.chrome, .brave, .edge])
+        XCTAssertEqual(CookieImporter.browsersToOffer(home: root), [.chrome, .brave, .arc, .edge])
         XCTAssertEqual(CookieImporter.availableSources(home: root), [
             .init(browser: .chrome, profileFolder: "Profile 2", profileName: "Work", cookiesPath: chrome + "/Profile 2/Cookies"),
             .init(browser: .brave, profileFolder: "Profile 1", profileName: "Home", cookiesPath: brave + "/Profile 1/Cookies"),
+            .init(browser: .arc, profileFolder: "Default", profileName: "Default", cookiesPath: arc + "/Default/Cookies"),
         ])
+
+        // Never ran: an extension's helper folder only.
+        let other = root + "/other"
+        try FileManager.default.createDirectory(
+            atPath: other + "/Library/Application Support/Arc/User Data/NativeMessagingHosts", withIntermediateDirectories: true
+        )
+        XCTAssertEqual(CookieImporter.browsersToOffer(home: other), [])
     }
 
     // MARK: - Reading
@@ -232,6 +241,15 @@ final class CookieImporterTests: XCTestCase {
     func testAWrongKeyFailsBeforeVersion24Too() throws {
         let short = (0..<1000).map { Row(host: ".example\($0).com", name: "s", secret: "v\($0)") }
         let source = try makeSource(Self.standardRows + short, version: 23)
+        XCTAssertThrowsError(try CookieImporter.readCookies(from: source) { "almonds" }) { error in
+            XCTAssertEqual((error as? CookieImporter.ImportError)?.failure, .undecryptable)
+        }
+    }
+
+    /// Before version 24, a wrong key's output that is empty proves
+    /// nothing: "v193" decrypts to "" with the wrong key.
+    func testAnEmptyValueDoesNotVouchForTheKeyBeforeVersion24() throws {
+        let source = try makeSource([Row(host: ".example.com", name: "s", secret: "v193")], version: 23)
         XCTAssertThrowsError(try CookieImporter.readCookies(from: source) { "almonds" }) { error in
             XCTAssertEqual((error as? CookieImporter.ImportError)?.failure, .undecryptable)
         }

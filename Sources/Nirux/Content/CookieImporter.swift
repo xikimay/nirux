@@ -584,7 +584,9 @@ enum CookieImporter {
                     switch try decryptValue(blob, key: key(), domainHash: domainHash) {
                     case .value(let value):
                         decrypted += 1
-                        keyChecked += 1
+                        // Before version 24 an empty value proves nothing:
+                        // half a wrong key's lucky output is empty.
+                        if hashesDomain || !value.isEmpty { keyChecked += 1 }
                         cookieValue = value
                     case .notText:
                         keyChecked += 1

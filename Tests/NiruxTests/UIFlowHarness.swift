@@ -57,6 +57,8 @@ final class UIFlowHarness {
     var alertMenuChoices: [Int] = []
     /// The items of every alert's pop-up menu, in order.
     private(set) var alertMenuTitles: [[String]] = []
+    /// Every alert's default (Return) button, "" for none, in order.
+    private(set) var alertDefaultButtons: [String] = []
     /// Links opened in the default browser, in order.
     private(set) var openedURLs: [URL] = []
     /// Folders the folder picker double returns, in order; Cancel once
@@ -70,6 +72,8 @@ final class UIFlowHarness {
     var cookieSources: [CookieImporter.Source] = []
     /// Browsers the menu offers; the sources' browsers when nil.
     var offeredBrowsers: [CookieImporter.Browser]?
+    /// The cookie double never answers the profile read.
+    var cookieSourcesNeverAnswer = false
     /// Profiles the cookie double was asked to import from.
     private(set) var cookieImports: [CookieImporter.Source] = []
     /// What the cookie double throws instead of importing.
@@ -210,7 +214,10 @@ final class UIFlowHarness {
             let sources = self?.cookieSources ?? []
             return CookieImporter.Browser.allCases.filter { browser in sources.contains { $0.browser == browser } }
         }
-        shell.sideEffects.cookieSources = { [weak self] in self?.cookieSources ?? [] }
+        shell.sideEffects.cookieSources = { [weak self] completion in
+            guard let self, !cookieSourcesNeverAnswer else { return }
+            completion(cookieSources)
+        }
         shell.sideEffects.importCookies = { [weak self] source in
             self?.cookieImports.append(source)
             if let error = self?.cookieImportError { throw error }
@@ -226,6 +233,7 @@ final class UIFlowHarness {
             guard let self else { return .alertFirstButtonReturn }
             alerts.append(alert.messageText)
             alertDetails.append(alert.informativeText)
+            alertDefaultButtons.append(alert.buttons.first { $0.keyEquivalent == "\r" }?.title ?? "")
             if let menu = alert.accessoryView as? NSPopUpButton {
                 alertMenuTitles.append(menu.itemTitles)
                 if !alertMenuChoices.isEmpty { menu.selectItem(at: alertMenuChoices.removeFirst()) }
