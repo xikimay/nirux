@@ -477,7 +477,8 @@ enum WorktreeCleanup {
     static func describe(_ entry: StatusEntry) -> String {
         let code = Array(entry.code)
         guard entry.code != "??" else { return "\(entry.path) (untracked)" }
-        guard code.count == 2, !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
+        guard code.count == 2 else { return "\(entry.path) (unreadable git status)" }
+        guard !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
         let staged: [Character: String] = [
             "A": "added, staged", "D": "deleted, staged", "R": "renamed, staged", "C": "copied, staged"
         ]
@@ -519,7 +520,11 @@ enum WorktreeCleanup {
                 skipsNext = false
                 continue
             }
-            guard field.count > 3 else { continue }
+            // Malformed: a change no one can read, never a clean tree.
+            guard field.count > 3 else {
+                guard visit(StatusEntry(code: "", path: String(decoding: field, as: UTF8.self))) else { return }
+                continue
+            }
             let code = String(decoding: field.prefix(2), as: UTF8.self)
             skipsNext = code.contains("R") || code.contains("C")
             guard visit(StatusEntry(code: code, path: String(decoding: field.dropFirst(3), as: UTF8.self))) else { return }

@@ -38,26 +38,45 @@ extension WorktreeCleanup {
             return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
-        // A merged one holding the tip, none from this repository: maybe
-        // this branch's, from a repository since renamed or deleted, so not
-        // "nothing to clean up yet". Any other one from a fork that used the
-        // same branch name (`patch-1`) says nothing about this branch. Asked
-        // only when this repository has none, up to the first one.
-        let mergedElsewhere = candidates.isEmpty && json.contains { candidate in
-            guard (candidate["state"] as? String)?.uppercased() == "MERGED",
-                  let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
-            else { return false }
-            return headOid == tip || ancestry(of: tip, in: headOid, at: worktree.path, tools: tools) == .contained
-        }
-        if mergedElsewhere {
-            return (nil, [
-                "A merged pull request for \(branch) holds its tip, but none comes from "
-                    + "\(repository.owner)/\(repository.name) (a fork's, or the repository was renamed or deleted)."
-            ], nil)
+        if candidates.isEmpty, let problem = mergedElsewhere(json, branch: branch, tip: tip, repository: repository, worktree: worktree, tools: tools) {
+            return (nil, [problem], nil)
         }
         return verdict(branch: branch, tip: tip, candidates: candidates) { headOid in
             ancestry(of: tip, in: headOid, at: worktree.path, tools: tools)
         }
+    }
+
+    /// Why a merged pull request from another repository may be this
+    /// branch's, or nil. Only one from the same owner under another name
+    /// (the repository was renamed and the remote still has the old name)
+    /// or from a repository GitHub no longer names (deleted) can be: a
+    /// fork's, another owner's, says nothing about this branch, even
+    /// holding its tip (a branch without commits of its own is in any later
+    /// work). Asked only when this repository has none; forks cost no git.
+    static func mergedElsewhere(
+        _ json: [[String: Any]], branch: String, tip: String, repository: GitHubRepository, worktree: Worktree, tools: Tools
+    ) -> String? {
+        let heads = json.compactMap { candidate -> String? in
+            guard (candidate["state"] as? String)?.uppercased() == "MERGED",
+                  let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
+            else { return nil }
+            let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String
+            return owner == nil || owner?.lowercased() == repository.owner.lowercased() ? headOid : nil
+        }
+        let elsewhere = "another repository than \(repository.owner)/\(repository.name)"
+        let renamed = "If the repository was renamed, update the remote's URL."
+        for head in heads {
+            switch head == tip ? .contained : ancestry(of: tip, in: head, at: worktree.path, tools: tools) {
+            case .contained:
+                return "A merged pull request for \(branch) holds its tip but comes from \(elsewhere). \(renamed)"
+            case .unknownCommit:
+                return "A merged pull request for \(branch) comes from \(elsewhere), and its head (\(short(head))) "
+                    + "isn't in the local repository. A git fetch may bring it in. \(renamed)"
+            case .notContained:
+                continue
+            }
+        }
+        return nil
     }
 
     /// Which pull request the branch belongs to, and why it can't be
