@@ -45,10 +45,19 @@ final class TerminalEngineBehaviorTests: XCTestCase {
         XCTAssertTrue(terminal.pasteWithProtection(text: "first pasted line\nsecond pasted line"))
         UIFlowHarness.waitUntil("the paste in the PTY") { writes.text.contains("second pasted line") }
 
-        // A program asking for the clipboard gets no answer.
+        // A program asking for the clipboard gets an empty answer, whatever
+        // the clipboard holds. Anything there will do, whoever wrote it.
+        let pasteboard = NSPasteboard.general
+        let wasEmpty = (pasteboard.string(forType: .string) ?? "").isEmpty
+        if wasEmpty {
+            pasteboard.clearContents()
+            pasteboard.setString("clipboard text", forType: .string)
+        }
+        defer { if wasEmpty { pasteboard.clearContents() } }
         session.receive("\u{1b}]52;c;?\u{07}")
-        RunLoop.main.run(until: Date().addingTimeInterval(1))
-        XCTAssertFalse(writes.text.contains("\u{1b}]52;"), writes.text)
+        UIFlowHarness.waitUntil("the clipboard answer") { writes.text.contains("\u{1b}]52;c;") }
+        let answer = writes.text.components(separatedBy: "\u{1b}]52;c;").last ?? ""
+        XCTAssertTrue(answer.hasPrefix("\u{1b}\\") || answer.hasPrefix("\u{07}"), writes.text.debugDescription)
     }
 
     func testDropsOnATerminalReachNiruxsDropView() throws {
