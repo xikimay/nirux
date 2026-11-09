@@ -381,6 +381,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.showBoardSettings(profileID: space.id)
             try waitUntil("front’s form") { shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front" }
             XCTAssertEqual(shell.boardSettingsPanel?.repositoryChoices.count, 0, "one repository: no pop-up")
+            // On the repository it shows already, the form stays as it is.
+            let frontForm = shell.boardSettingsPanel
+            shell.showBoardSettings(profileID: space.id, repository: frontKey)
+            XCTAssertIdentical(shell.boardSettingsPanel, frontForm, "not read again")
 
             XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, backAnchor], forProfile: space.id))
             shell.showBoardSettings(profileID: space.id, repository: backKey)

@@ -11,8 +11,10 @@ enum SSHHostAlias {
         resolve(host, configFile: configFile) ?? false
     }
 
-    /// Whether `host` stands for github.com; nil when ssh didn't answer
-    /// (not cached: asked again next time).
+    /// Whether `host` stands for github.com; nil when ssh didn't start or
+    /// took too long (not cached: asked again next time). ssh refusing its
+    /// config (a keyword it doesn't know, loose permissions) is a no, as
+    /// git's ssh would fail there too.
     static func resolve(_ host: String, configFile: String? = nil) -> Bool? {
         let host = host.lowercased()
         if host == "github.com" || host == "ssh.github.com" { return true }
@@ -26,8 +28,8 @@ enum SSHHostAlias {
             arguments: arguments,
             currentDirectoryURL: FileManager.default.temporaryDirectory,
             timeout: 5
-        ), result.terminationStatus == 0 else { return nil }
-        let output = String(decoding: result.standardOutput, as: UTF8.self)
+        ) else { return nil }
+        let output = result.terminationStatus == 0 ? String(decoding: result.standardOutput, as: UTF8.self) : ""
         let hostName = output.split(separator: "\n").first { $0.hasPrefix("hostname ") }
             .map { $0.dropFirst("hostname ".count).trimmingCharacters(in: .whitespaces).lowercased() }
         let isGitHub = hostName == "github.com" || hostName == "ssh.github.com"
