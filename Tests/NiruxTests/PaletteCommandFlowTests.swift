@@ -398,6 +398,15 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the import from the menu") { harness.alerts.count == 6 }
             XCTAssertEqual(harness.alerts.suffix(2), ["Import Cookies", "Cookies Imported"])
             XCTAssertEqual(harness.cookieImports.last, many[3])
+
+            // A browser that ran here but has no cookie file: the click says
+            // so rather than doing nothing.
+            harness.offeredBrowsers = [.edge]
+            harness.cookieSources = []
+            harness.runPaletteCommand("Import Browser Cookies")
+            harness.waitUntil("the empty result") { harness.alerts.count == 7 }
+            XCTAssertEqual(harness.alerts.last, "Import Failed")
+            XCTAssertTrue(harness.alertDetails.last?.contains("no profile with cookies in Edge") == true, "\(harness.alertDetails)")
         }
     }
 

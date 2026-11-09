@@ -157,19 +157,17 @@ enum CookieImporter {
 
     // MARK: - Profiles
 
-    /// The browsers to offer the import for: those whose Default profile
-    /// has a cookie file, or one Nirux can't look at. Only stat(2): the
+    /// The browsers to offer the import for: those that ran here, a Local
+    /// State, or at least left a Default cookie file. Only stat(2): the
     /// menu and the palette ask on every opening, and reading could raise
-    /// a macOS privacy prompt before the user asked for anything. A click
-    /// always considers Default (see `sources(of:)`), so an offered browser
-    /// is never refused. One whose profiles all live elsewhere, Default
-    /// deleted, isn't offered.
+    /// a macOS privacy prompt before the user asked for anything. The click
+    /// reads the profiles and says when it finds none.
     static func browsersToOffer(home: String = NSHomeDirectory()) -> [Browser] {
         Browser.allCases.filter { browser in
-            switch cookieFile(inProfile: userDataRoot(of: browser, home: home) + "/Default") {
-            case .found, .unreachable: true
-            case .missing: false
-            }
+            let root = userDataRoot(of: browser, home: home)
+            if FileManager.default.fileExists(atPath: root + "/Local State") { return true }
+            if case .missing = cookieFile(inProfile: root + "/Default") { return false }
+            return true
         }
     }
 
@@ -202,9 +200,6 @@ enum CookieImporter {
                 listingFailure = failure
             } catch {}
         }
-        // Default counts listed or not: its cookie file alone offers the
-        // browser (see browsersToOffer).
-        if !folders.contains("Default") { folders.append("Default") }
         let found = folders.compactMap { folder -> Source? in
             let name = profiles.names[folder] ?? folder
             switch cookieFile(inProfile: root + "/" + folder) {
@@ -257,25 +252,15 @@ enum CookieImporter {
     }
 
     /// Without a profile list, the folders Chromium names for profiles.
-    /// opendir(3), not FileManager: its errors carry an OSStatus (-43 for a
-    /// missing folder), not the errno that tells a block from an absence.
+    /// The URL listing: its errors carry the errno (the path one reports a
+    /// missing folder as OSStatus -43).
     private static func profileFolders(in root: String) throws -> [String] {
-        guard let directory = opendir(root) else { throw Failure.unreadable(path: root, errno: errno) }
-        defer { closedir(directory) }
-        // A dirent is only as long as its name: read the name through the
-        // pointer, never the whole 1 KB d_name field.
-        let nameOffset = MemoryLayout<dirent>.offset(of: \dirent.d_name)!
-        let lengthOffset = MemoryLayout<dirent>.offset(of: \dirent.d_namlen)!
-        var names: [String] = []
-        while true {
-            errno = 0
-            guard let entry = readdir(directory) else {
-                if errno != 0 { throw Failure.unreadable(path: root, errno: errno) }
-                break
-            }
-            let record = UnsafeRawPointer(entry)
-            let length = Int(record.load(fromByteOffset: lengthOffset, as: UInt16.self))
-            names.append(String(decoding: UnsafeRawBufferPointer(start: record + nameOffset, count: length), as: UTF8.self))
+        let names: [String]
+        do {
+            names = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: root), includingPropertiesForKeys: nil)
+                .map(\.lastPathComponent)
+        } catch {
+            throw Failure.unreadable(path: root, errno: posixCode(of: error))
         }
         let profiles = names.filter { $0.hasPrefix("Profile ") }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         return (names.contains("Default") ? ["Default"] : []) + profiles
@@ -385,11 +370,20 @@ enum CookieImporter {
         blob.count > 3 && (blob.prefix(3) == Data("v10".utf8) || blob.prefix(3) == Data("v11".utf8))
     }
 
+    private enum Decrypted {
+        case value(String)
+        /// The key checked out (the domain hash matched) but the value
+        /// isn't text: that cookie only.
+        case notText
+        /// The domain hash didn't match, or before version 24, no text.
+        case wrongKey
+    }
+
     /// The value of an encrypted ("v10"/"v11") blob. From database version
     /// 24, Chrome puts the SHA-256 of the cookie's domain (`domainHash`)
     /// before the value. It is the only check: CommonCrypto doesn't reject
     /// a wrong key, and its output, past the hash, can still read as UTF-8.
-    private static func decryptValue(_ blob: Data, key: Data, domainHash: Data?) -> String? {
+    private static func decryptValue(_ blob: Data, key: Data, domainHash: Data?) -> Decrypted {
         let ciphertext = blob.dropFirst(3)
         let iv = Data(repeating: 0x20, count: 16) // Chrome uses space bytes as IV
         let bufSize = ciphertext.count + kCCBlockSizeAES128
@@ -415,13 +409,13 @@ enum CookieImporter {
             }
         }
 
-        guard status == CCCryptorStatus(kCCSuccess) else { return nil }
+        guard status == CCCryptorStatus(kCCSuccess) else { return .wrongKey }
         plain.count = outLen
         if let domainHash {
-            guard plain.prefix(domainHash.count) == domainHash else { return nil }
-            plain = plain.dropFirst(domainHash.count)
+            guard plain.prefix(domainHash.count) == domainHash else { return .wrongKey }
+            return String(data: plain.dropFirst(domainHash.count), encoding: .utf8).map { .value($0) } ?? .notText
         }
-        return String(data: plain, encoding: .utf8)
+        return String(data: plain, encoding: .utf8).map { .value($0) } ?? .wrongKey
     }
 
     // MARK: - SQLite
@@ -572,6 +566,7 @@ enum CookieImporter {
         var cookies: [RawCookie] = []
         var encrypted = 0
         var decrypted = 0
+        var keyChecked = 0
         var step = sqlite3_step(statement)
         while step == SQLITE_ROW {
             defer { step = sqlite3_step(statement) }
@@ -581,9 +576,16 @@ enum CookieImporter {
                 if isEncrypted(blob) {
                     encrypted += 1
                     let domainHash = hashesDomain ? Data(SHA256.hash(data: Data(text(0).utf8))) : nil
-                    let value = try decryptValue(blob, key: key(), domainHash: domainHash)
-                    if value != nil { decrypted += 1 }
-                    cookieValue = value ?? ""
+                    switch try decryptValue(blob, key: key(), domainHash: domainHash) {
+                    case .value(let value):
+                        decrypted += 1
+                        keyChecked += 1
+                        cookieValue = value
+                    case .notText:
+                        keyChecked += 1
+                    case .wrongKey:
+                        break
+                    }
                 } else {
                     cookieValue = String(data: blob, encoding: .utf8) ?? ""
                 }
@@ -600,9 +602,11 @@ enum CookieImporter {
         // A page that doesn't read: not a partial import passed off as the
         // whole.
         guard step == SQLITE_DONE else { throw databaseFailure(db) }
-        // Not a single one: the Keychain's key isn't the one the browser
-        // encrypted them with.
-        if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
+        // The Keychain's key isn't the one the browser encrypted them with:
+        // from version 24, not one domain hash matched; before, nothing
+        // checks a value and about 1% of a wrong key's output reads as
+        // text, so most values failing says it.
+        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 2 < encrypted { throw Failure.undecryptable }
         return Read(cookies: cookies, undecryptable: encrypted - decrypted)
     }
 

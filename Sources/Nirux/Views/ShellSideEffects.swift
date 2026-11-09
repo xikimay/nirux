@@ -41,7 +41,11 @@ struct ShellSideEffects {
     var cookieBrowsers: @MainActor () -> [CookieImporter.Browser] = { CookieImporter.browsersToOffer() }
 
     /// Their profiles with a cookie database, read once the user asked.
-    var cookieSources: @MainActor () -> [CookieImporter.Source] = { CookieImporter.availableSources() }
+    /// Off the main thread: a macOS privacy prompt would hold it until the
+    /// user answers.
+    var cookieSources: @MainActor () async -> [CookieImporter.Source] = {
+        await Task.detached { CookieImporter.availableSources() }.value
+    }
 
     /// Reads the browser's key from the Keychain and imports the profile's
     /// cookies.

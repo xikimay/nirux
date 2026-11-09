@@ -609,12 +609,23 @@ extension NiruxShellView {
     // MARK: - Cookie Import
 
     func importBrowserCookies() {
-        let sources = sideEffects.cookieSources()
+        let cookieSources = sideEffects.cookieSources
+        let browsers = sideEffects.cookieBrowsers()
+        Task { [weak self] in
+            let sources = await cookieSources()
+            self?.chooseCookieSource(among: sources, offered: browsers)
+        }
+    }
+
+    private func chooseCookieSource(among sources: [CookieImporter.Source], offered browsers: [CookieImporter.Browser]) {
+        // The menu offers a browser that ran here; its profiles may all
+        // lack a cookie file.
         guard !sources.isEmpty else {
             let alert = NSAlert()
             alert.messageText = "Import Failed"
-            let browsers = sideEffects.cookieBrowsers().map(\.rawValue).joined(separator: ", ")
-            alert.informativeText = "Nirux found no profile with cookies in \(browsers.isEmpty ? "your browsers" : browsers)."
+            let names = browsers.map(\.rawValue).joined(separator: ", ")
+            alert.informativeText = "Nirux found no profile with cookies in \(names.isEmpty ? "your browsers" : names). "
+                + "Browse a site there first, then try again."
             alert.alertStyle = .warning
             _ = runModal(alert)
             return
@@ -644,6 +655,9 @@ extension NiruxShellView {
             for source in sources {
                 menu.menu?.addItem(NSMenuItem(title: source.title, action: nil, keyEquivalent: ""))
             }
+            // As wide as the longest title: the end tells alike names apart.
+            menu.sizeToFit()
+            menu.frame.size.width = max(menu.frame.width, 280)
             alert.accessoryView = menu
             alert.addButton(withTitle: "Import")
             alert.addButton(withTitle: "Cancel")

@@ -66,6 +66,8 @@ final class UIFlowHarness {
     private(set) var missionQuestionNotices: [String] = []
     /// Browser profiles the cookie double reports.
     var cookieSources: [CookieImporter.Source] = []
+    /// Browsers the menu offers; the sources' browsers when nil.
+    var offeredBrowsers: [CookieImporter.Browser]?
     /// Profiles the cookie double was asked to import from.
     private(set) var cookieImports: [CookieImporter.Source] = []
     /// What the cookie double throws instead of importing.
@@ -202,6 +204,7 @@ final class UIFlowHarness {
         shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.checkExplain = { .unavailable("Explain doesn’t run in flow tests.") }
         shell.sideEffects.cookieBrowsers = { [weak self] in
+            if let offered = self?.offeredBrowsers { return offered }
             let sources = self?.cookieSources ?? []
             return CookieImporter.Browser.allCases.filter { browser in sources.contains { $0.browser == browser } }
         }
