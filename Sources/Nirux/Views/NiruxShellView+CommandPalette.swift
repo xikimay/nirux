@@ -188,7 +188,7 @@ extension NiruxShellView {
                 self?.showOnboardingChecklist()
             },
             PaletteAction(
-                icon: .symbol("gearshape"), title: "Open Settings", subtitle: "Agent launch modes, remote access and experiments",
+                icon: .symbol("gearshape"), title: "Open Settings", subtitle: "Agent launch modes, Missions and notifications",
                 shortcut: .settings
             ) {
                 NSApp.sendAction(#selector(NiruxApp.showSettings(_:)), to: nil, from: nil)

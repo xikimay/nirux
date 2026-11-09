@@ -17,27 +17,18 @@ extension NiruxShellView {
         minutes > 0 ? TimeInterval(minutes) * 60 : nil
     }
 
-    /// Where a column sits on a status refresh.
-    struct StuckAgentPlace {
-        let workspace: WorkspaceState
-        let columnIndex: Int
-    }
-
     /// One column on a status refresh: follow its foreground agent, send
     /// the alert a stuck state owes (once), and show or take down the
-    /// notice of an agent that died mid-turn. The alert goes out (Telegram)
-    /// even for the column on screen: a dialog nobody touched for
-    /// the whole threshold says nobody is watching. Only the in-app flag,
-    /// the Dock badge and the system banner skip that column while Nirux is
-    /// in front.
+    /// notice of an agent that died mid-turn. The alert (the in-app flag,
+    /// the Dock badge, the system banner) skips the column on screen while
+    /// Nirux is in front.
     func refreshStuckAgent(
         _ column: ColumnState,
-        at place: StuckAgentPlace,
+        in workspace: WorkspaceState,
         foregroundProcess: ForegroundProcess?,
         snapshot: ProcessSnapshot,
         now: TimeInterval
     ) {
-        let workspace = place.workspace
         column.trackForegroundAgent(foregroundProcess, snapshot: snapshot, now: now)
         guard let pty = column.pty else { return }
         if let reason = pty.takeAgentStuckAlert(
@@ -46,7 +37,6 @@ extension NiruxShellView {
             let onScreen = NSApp.isActive && workspace === activeWorkspace
                 && workspace.columns[safe: workspace.focusedIndex] === column
             if !onScreen { column.notifyAgentAttention(reason: reason) }
-            onStuckAgentAlert?(reason, workspace, place.columnIndex, column)
         }
         let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess)
         if case .exitedMidTurn(let exit)? = stuck {
@@ -79,9 +69,9 @@ extension NiruxShellView {
     /// sidebar rebuild.
     func refreshStuckAgents(snapshot: ProcessSnapshot = ProcessSnapshot(), now: TimeInterval = Date().timeIntervalSince1970) {
         for workspace in workspaces {
-            for (columnIndex, column) in workspace.columns.enumerated() {
+            for column in workspace.columns {
                 refreshStuckAgent(
-                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex),
+                    column, in: workspace,
                     foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot), snapshot: snapshot, now: now
                 )
             }

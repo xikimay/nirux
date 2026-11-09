@@ -94,11 +94,6 @@ final class NiruxShellView: NSView {
     /// (`queue_merge`), by `<space id> <owner/name>`: a Lead may replace its
     /// own, never the user's.
     var leadQueueProposals: [String: [Int]] = [:]
-    /// A stuck-agent alert went out (Telegram relays it): the reason, the
-    /// workspace, the column's index, the column.
-    var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
-    /// A new worktree's setup script failed in that column (Telegram).
-    var onSetupScriptFailed: ((WorkspaceState, Int, ColumnState) -> Void)?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
     let quickSwitch = QuickSwitchState()
 

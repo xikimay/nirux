@@ -18,7 +18,7 @@ HEAD, going stale after a new commit.
 - **Adversarial review** is any prompt that says "advers…", whatever the
   spelling after it (decided with the user): only the flag is kept.
 - **Run review pipeline** is a second pull request. It types the prompt
-  without Return, behind the Telegram guard (section 5).
+  without Return, behind the typed-prompt guard (section 5).
 
 ## Summary
 
@@ -97,8 +97,8 @@ Codex has no prompt hook: its reviews aren't seen.
 
 ## 5. Run review pipeline (second pull request)
 
-Typing into an agent exists only for Telegram (`sendRemotePrompt`): it
-re-verifies a live Claude or Codex column and refuses while a dialog is open.
+Typing into an agent goes through `sendRemotePrompt`: it re-verifies a live
+Claude or Codex column and refuses while a dialog is open.
 The button reuses that guard and, like the board's Ask Agent to Resolve,
 types the prompt **without Return**: the user reads it and submits it.
 

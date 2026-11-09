@@ -68,9 +68,7 @@ final class SettingsWindowTests: XCTestCase {
                 ("agentResumeOnLaunch", {
                     try self.choose(AgentResumeOnLaunch.allAtOnce.rawValue, in: app.settingsAgentResumePopup)
                 }),
-                ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
-                ("telegramNotifyOnCompletion", { try self.click(app.settingsTelegramCompletionCheckbox) }),
-                ("telegramNotifyOnAttention", { try self.click(app.settingsTelegramAttentionCheckbox) })
+                ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) })
             ]
             for step in steps {
                 let before = try savedSettings()
@@ -90,26 +88,14 @@ final class SettingsWindowTests: XCTestCase {
             let shell = makeShell()
             let workspace = try XCTUnwrap(shell.workspaces.first)
             XCTAssertTrue(workspace.missionHandoffsEnabled, "on by default")
-            let controller = TelegramRemoteAccessController(
-                sessions: { [] },
-                sendPrompt: { _, _ in .sessionUnavailable },
-                tokenLoader: { nil }
-            )
-            controller.reloadFromPersistence()
-            defer { controller.shutdown() }
             let app = try openSettings()
             defer { close(app) }
             app.shell = shell
-            app.telegramRemoteAccessController = controller
 
             try choose(30, in: app.settingsStuckAgentPopup)
             XCTAssertEqual(shell.stuckAgentWaitThreshold, NiruxShellView.stuckWaitThreshold(minutes: 30))
             try click(app.settingsMissionHandoffsCheckbox)
             XCTAssertFalse(workspace.missionHandoffsEnabled)
-            try click(app.settingsTelegramCompletionCheckbox)
-            XCTAssertFalse(controller.notifyOnCompletion)
-            try click(app.settingsTelegramAttentionCheckbox)
-            XCTAssertFalse(controller.notifyOnAttention)
         }
     }
 
@@ -156,175 +142,6 @@ final class SettingsWindowTests: XCTestCase {
             app.claudeStatusLineInstaller = { _ in XCTFail("installed a status line that wasn't saved") }
             try click(app.settingsUsageLimitsCheckbox)
             XCTAssertEqual(app.settingsUsageLimitsCheckbox?.state, .off)
-        }
-    }
-
-    // MARK: - Telegram
-
-    @MainActor
-    func testFailedWriteLeavesStoredTelegramTokenUntouched() throws {
-        try withIsolatedState(writable: false) {
-            let app = try openSettings()
-            defer { close(app) }
-            var savedTokens: [String] = []
-            app.telegramTokenLoader = { Self.oldToken }
-            app.telegramTokenSaver = { savedTokens.append($0) }
-            // Must pass validation, or saving would stop before the state write.
-            XCTAssertTrue(TelegramBotToken.isPlausible(Self.newToken))
-            app.settingsTelegramTokenField?.stringValue = Self.newToken
-
-            app.settingsTelegramSaveToken(nil)
-
-            XCTAssertEqual(savedTokens, [])
-            XCTAssertEqual(app.settingsTelegramTokenField?.stringValue, Self.newToken)
-            XCTAssertNotNil(app.settingsWindow?.attachedSheet)
-        }
-    }
-
-    @MainActor
-    func testNewTelegramTokenIsStoredAfterPairingReset() throws {
-        try withIsolatedState {
-            try savePairedState()
-            let app = try openSettings()
-            defer { close(app) }
-            var pairingOnDiskWhenTokenSaved: Int64?
-            var savedTokens: [String] = []
-            app.telegramTokenLoader = { Self.oldToken }
-            app.telegramTokenSaver = {
-                pairingOnDiskWhenTokenSaved = Persistence.load()?.settings?.telegramPairedUserID
-                savedTokens.append($0)
-            }
-            app.settingsTelegramTokenField?.stringValue = Self.newToken
-
-            try XCTUnwrap(button("Save Token", in: app)).performClick(nil)
-
-            XCTAssertEqual(savedTokens, [Self.newToken])
-            XCTAssertNil(pairingOnDiskWhenTokenSaved)
-            XCTAssertEqual(app.settingsTelegramTokenField?.stringValue, "")
-            XCTAssertNil(app.settingsWindow?.attachedSheet)
-        }
-    }
-
-    /// Return in the field, pairing and closing Settings all store a token
-    /// left in the field; one that can't be stored keeps Settings open.
-    @MainActor
-    func testATypedTokenIsStoredBeforeItCouldBeLost() throws {
-        try withIsolatedState {
-            var savedTokens: [String] = []
-            let app = try openSettings()
-            defer { close(app) }
-            app.telegramTokenSaver = { savedTokens.append($0) }
-            let field = try XCTUnwrap(app.settingsTelegramTokenField)
-
-            field.stringValue = Self.newToken
-            field.sendAction(field.action, to: field.target)
-            XCTAssertEqual(savedTokens, [Self.newToken])
-
-            field.stringValue = Self.oldToken
-            app.settingsTelegramPair(NSButton())
-            XCTAssertEqual(savedTokens, [Self.newToken, Self.oldToken], "pairing goes to the typed bot")
-
-            field.stringValue = "not a token"
-            app.settingsWindow?.performClose(nil)
-            XCTAssertNotNil(app.settingsWindow?.attachedSheet, "says why it stays open")
-            dismissSheet(app)
-
-            field.stringValue = Self.newToken
-            app.settingsWindow?.performClose(nil)
-            XCTAssertNil(app.settingsWindow)
-            XCTAssertEqual(savedTokens, [Self.newToken, Self.oldToken, Self.newToken])
-        }
-    }
-
-    /// The pairing is forgotten on disk before the token leaves Keychain; a
-    /// failed write leaves both as they were.
-    @MainActor
-    func testClearTokenWritesFirst() throws {
-        try withIsolatedState(writable: false) {
-            let app = try openSettings()
-            defer { close(app) }
-            var deletions = 0
-            app.telegramTokenDeleter = { deletions += 1 }
-            app.settingsTelegramEnabledCheckbox?.state = .on
-
-            try XCTUnwrap(button("Clear Token", in: app)).performClick(nil)
-
-            XCTAssertEqual(deletions, 0)
-            XCTAssertEqual(app.settingsTelegramEnabledCheckbox?.state, .on)
-            XCTAssertNotNil(app.settingsWindow?.attachedSheet)
-        }
-        try withIsolatedState {
-            try savePairedState()
-            let app = try openSettings()
-            defer { close(app) }
-            var deletions = 0
-            var pairingOnDiskWhenDeleted: Int64?
-            app.telegramTokenDeleter = {
-                deletions += 1
-                pairingOnDiskWhenDeleted = Persistence.load()?.settings?.telegramPairedUserID
-            }
-
-            try XCTUnwrap(button("Clear Token", in: app)).performClick(nil)
-
-            XCTAssertEqual(deletions, 1)
-            XCTAssertNil(pairingOnDiskWhenDeleted)
-            XCTAssertEqual(Persistence.load()?.settings?.telegramRemoteAccessEnabled, false)
-            XCTAssertNil(app.settingsWindow?.attachedSheet)
-        }
-    }
-
-    @MainActor
-    func testKeychainFailureKeepsTheTokenWithPairingCleared() throws {
-        try withIsolatedState {
-            try savePairedState()
-            let controller = TelegramRemoteAccessController(
-                sessions: { [] },
-                sendPrompt: { _, _ in .sessionUnavailable },
-                tokenLoader: { Self.oldToken }
-            )
-            controller.reloadFromPersistence()
-            defer { controller.shutdown() }
-            XCTAssertTrue(controller.displayState.isPaired)
-            let app = try openSettings()
-            defer { close(app) }
-            app.telegramRemoteAccessController = controller
-            app.telegramTokenLoader = { Self.oldToken }
-            app.telegramTokenSaver = { _ in throw TelegramTokenStore.StoreError.keychain(errSecIO) }
-            app.settingsTelegramTokenField?.stringValue = Self.newToken
-
-            app.settingsTelegramSaveToken(nil)
-
-            XCTAssertNotNil(app.settingsWindow?.attachedSheet)
-            XCTAssertEqual(app.settingsTelegramTokenField?.stringValue, Self.newToken)
-            XCTAssertNil(Persistence.load()?.settings?.telegramPairedUserID)
-            // The running bot must not keep the pairing that was just cleared.
-            XCTAssertFalse(controller.displayState.isPaired)
-        }
-    }
-
-    @MainActor
-    func testEnablingRemoteAccessNeedsAToken() throws {
-        try withIsolatedState {
-            let app = try openSettings()
-            defer { close(app) }
-
-            try click(app.settingsTelegramEnabledCheckbox)
-
-            XCTAssertEqual(app.settingsTelegramEnabledCheckbox?.state, .off)
-            XCTAssertNotNil(app.settingsWindow?.attachedSheet)
-            XCTAssertNil(Persistence.load(), "nothing saved")
-            dismissSheet(app)
-
-            // A token typed in the field is stored first, then Remote Access turns on.
-            var stored: String?
-            app.telegramTokenLoader = { stored }
-            app.telegramTokenSaver = { stored = $0 }
-            app.settingsTelegramTokenField?.stringValue = Self.newToken
-            try click(app.settingsTelegramEnabledCheckbox)
-
-            XCTAssertEqual(stored, Self.newToken)
-            XCTAssertEqual(app.settingsTelegramEnabledCheckbox?.state, .on)
-            XCTAssertEqual(Persistence.load()?.settings?.telegramRemoteAccessEnabled, true)
         }
     }
 
@@ -521,8 +338,8 @@ final class SettingsWindowTests: XCTestCase {
 
     // MARK: - Window
 
-    /// Toolbar tabs, Telegram last; the window fits each pane, so nothing is
-    /// cut off whichever tab is picked.
+    /// Toolbar tabs; the window fits each pane, so nothing is cut off
+    /// whichever tab is picked.
     @MainActor
     func testTabsAndEachPaneFitsTheWindow() throws {
         try withIsolatedState {
@@ -534,7 +351,7 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertTrue(window is NSPanel)
             let tabs = app.settingsTabs
             XCTAssertEqual(tabs.tabStyle, .toolbar)
-            XCTAssertEqual(tabs.tabViewItems.map(\.label), ["General", "Agents", "Notifications", "Telegram"])
+            XCTAssertEqual(tabs.tabViewItems.map(\.label), ["General", "Agents", "Notifications"])
             XCTAssertTrue(tabs.tabViewItems.allSatisfy { $0.image != nil })
 
             // Tallest first, so a window that keeps the previous size would cut the next pane.
@@ -564,18 +381,9 @@ final class SettingsWindowTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private static let oldToken = "123456:old-token-aaaaaaaaaaaaaaaa"
-    private static let newToken = "654321:new-token-bbbbbbbbbbbbbbbb"
-
     @MainActor
     private static func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap { descendants(of: $0) }
-    }
-
-    private func savePairedState() throws {
-        var state = PersistedState(workspaces: [], activeWorkspaceIndex: 0)
-        state.settings = PersistedSettings(telegramPairedUserID: 42, telegramPairedChatID: 42)
-        XCTAssertTrue(Persistence.save(state))
     }
 
     /// The saved settings as JSON values, defaults when nothing is saved.
@@ -623,12 +431,9 @@ final class SettingsWindowTests: XCTestCase {
     private func openSettings(statusLine: AgentHookInstaller.ClaudeStatusLineState = .none) throws -> NiruxApp {
         _ = NSApplication.shared
         let app = NiruxApp()
-        // Keep Settings off the real login keychain and ~/.claude.
+        // Keep Settings off ~/.claude.
         app.claudeStatusLineStateReader = { statusLine }
         app.claudeStatusLineInstaller = { _ in }
-        app.telegramTokenLoader = { nil }
-        app.telegramTokenSaver = { _ in XCTFail("Unexpected Keychain write") }
-        app.telegramTokenDeleter = { XCTFail("Unexpected Keychain delete") }
         app.showSettings(nil)
         _ = try XCTUnwrap(app.settingsWindow)
         return app
@@ -661,14 +466,6 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(index, 0, "\(value) is not offered")
         popup.selectItem(at: index)
         popup.sendAction(popup.action, to: popup.target)
-    }
-
-    @MainActor
-    private func button(_ title: String, in app: NiruxApp) -> NSButton? {
-        app.settingsTabs.tabViewItems.compactMap(\.viewController?.view)
-            .flatMap(Self.descendants(of:))
-            .compactMap { $0 as? NSButton }
-            .first { $0.title == title }
     }
 
     @MainActor

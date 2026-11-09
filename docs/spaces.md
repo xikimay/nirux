@@ -44,7 +44,7 @@ space, and strips the interface down to what is used.
 - **Isolation by place and by view.** Each task has its own worktree and
   branch; a space shows only itself. No sandbox (out of scope).
 - **The sidebar Activity section goes.** Cards, native notifications, the Dock
-  badge, Telegram and ⌘J cover it.
+  badge and ⌘J cover it.
 - **Missions are rebuilt before the Lead**, in their own PR: messages are typed
   into prompts both ways.
 - **Clean, minimal interface, the Apple way**, with only what is used. Dark
@@ -180,7 +180,7 @@ New flow, built on the guarded typing `tell` already uses
   Nirux can't tell its prompt is free).
 - `receive` keeps working for old skills but leaves the skill text.
 - The Activity section, its store and its reply alert go. Native
-  notifications, the Dock badge, Telegram and ⌘J stay.
+  notifications, the Dock badge and ⌘J stay.
 
 ## The Lead
 

@@ -79,8 +79,8 @@ extension NiruxShellView {
     }
 
     /// The workspace's focused Claude agent, else its first one, in the
-    /// PR's checkout: the skill is Claude's. Telegram's rules decide what
-    /// is live.
+    /// PR's checkout: the skill is Claude's. `remoteAgentSessions` decides
+    /// what is live.
     private func prFeedbackAgent(in workspace: WorkspaceState) -> RemoteAgentSession? {
         guard let root = workspace.gitContext?.identity.repositoryRoot else { return nil }
         let resolvedRoot = Self.comparablePath(root)

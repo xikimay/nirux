@@ -45,10 +45,6 @@ final class AgentHookCenter {
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
     var resolver: ((String) -> Resolution?)?
     var onEventsApplied: (([AppliedEvent]) -> Void)?
-    /// Every routed event, after its column applied it. The outcome says
-    /// what it asked of the user (from the column's state when it has one,
-    /// else from the event alone).
-    var onEventReceived: ((AgentHookEvent, Resolution?, AgentHookOutcome) -> Void)?
     /// Sidebar approvals (Settings → Agents). Off, every request a
     /// receiver still holds for a decision is released.
     var approvalsEnabled = false
@@ -241,11 +237,10 @@ final class AgentHookCenter {
         }
         let outcome = resolution?.column.pty.map {
             $0.applyAgentHook(event, isUserFocused: resolution?.isUserFocused ?? false)
-        } ?? AgentStatusMachine.standaloneOutcome(for: event)
+        } ?? AgentHookOutcome()
         for request in outcome.abandonedApprovals {
             release(request, agentUUID: event.agentUUID)
         }
-        onEventReceived?(event, resolution, outcome)
         if outcome.firedAttention, let resolution {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
