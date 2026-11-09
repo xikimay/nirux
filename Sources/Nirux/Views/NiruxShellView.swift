@@ -111,6 +111,9 @@ final class NiruxShellView: NSView {
     var workspaceContextPanel: WorkspaceContextPanel?
     var commandPalette: CommandPalette?
     var urlPanel: URLInputPanel?
+    /// A cookie import is under way, from reading the profiles to its
+    /// result: one at a time (see importBrowserCookies).
+    var isImportingCookies = false
     var filePickerPanel: FilePickerPanel?
     var searchPanel: EditorSearchPanel?
     var globalSearchPanel: GlobalSearchPanel?

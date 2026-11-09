@@ -609,15 +609,26 @@ extension NiruxShellView {
     // MARK: - Cookie Import
 
     func importBrowserCookies() {
+        // One at a time: reading the profiles can wait on a macOS prompt
+        // while the menu stays enabled, and a second click would stack a
+        // second picker.
+        guard !isImportingCookies else { return }
+        isImportingCookies = true
         let cookieSources = sideEffects.cookieSources
         let browsers = sideEffects.cookieBrowsers()
         Task { [weak self] in
             let sources = await cookieSources()
-            self?.chooseCookieSource(among: sources, offered: browsers)
+            guard let self else { return }
+            if let source = chooseCookieSource(among: sources, offered: browsers) {
+                await runCookieImport(from: source)
+            }
+            isImportingCookies = false
         }
     }
 
-    private func chooseCookieSource(among sources: [CookieImporter.Source], offered browsers: [CookieImporter.Browser]) {
+    private func chooseCookieSource(
+        among sources: [CookieImporter.Source], offered browsers: [CookieImporter.Browser]
+    ) -> CookieImporter.Source? {
         // The menu offers a browser that ran here; its profiles may all
         // lack a cookie file.
         guard !sources.isEmpty else {
@@ -628,13 +639,10 @@ extension NiruxShellView {
                 + "Browse a site there first, then try again."
             alert.alertStyle = .warning
             _ = runModal(alert)
-            return
+            return nil
         }
 
-        guard sources.count > 1 else {
-            runCookieImport(from: sources[0])
-            return
-        }
+        guard sources.count > 1 else { return sources[0] }
 
         // Several Chromium browser profiles — let the user pick the source:
         // a button each, or past three, a pop-up menu (a column of buttons
@@ -655,46 +663,42 @@ extension NiruxShellView {
             for source in sources {
                 menu.menu?.addItem(NSMenuItem(title: source.title, action: nil, keyEquivalent: ""))
             }
-            // As wide as the longest title: the end tells alike names apart.
+            // As wide as the longest title, within reason; a name too long
+            // loses its middle, not the end that tells alike names apart.
             menu.sizeToFit()
-            menu.frame.size.width = max(menu.frame.width, 280)
+            menu.frame.size.width = min(max(menu.frame.width, 280), 480)
+            (menu.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingMiddle
             alert.accessoryView = menu
             alert.addButton(withTitle: "Import")
             alert.addButton(withTitle: "Cancel")
-            guard runModal(alert) == .alertFirstButtonReturn else { return }
+            guard runModal(alert) == .alertFirstButtonReturn else { return nil }
             index = menu.indexOfSelectedItem
         }
-        guard sources.indices.contains(index) else { return }
-        runCookieImport(from: sources[index])
+        return sources.indices.contains(index) ? sources[index] : nil
     }
 
-    private func runCookieImport(from source: CookieImporter.Source) {
-        let importCookies = sideEffects.importCookies
-        let runModal = sideEffects.runModal
-        let openURL = sideEffects.openURL
-        Task {
-            do {
-                let result = try await importCookies(source)
-                let alert = NSAlert()
-                alert.messageText = "Cookies Imported"
-                let failNote = result.failed > 0 ? " \(result.failed) couldn’t be imported." : ""
-                alert.informativeText = "Imported \(result.imported) cookies from \(result.source.phrase).\(failNote)"
+    private func runCookieImport(from source: CookieImporter.Source) async {
+        do {
+            let result = try await sideEffects.importCookies(source)
+            let alert = NSAlert()
+            alert.messageText = "Cookies Imported"
+            let failNote = result.failed > 0 ? " \(result.failed) couldn’t be imported." : ""
+            alert.informativeText = "Imported \(result.imported) cookies from \(result.source.phrase).\(failNote)"
+            _ = runModal(alert)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Import Failed"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            // macOS privacy protection: Full Disk Access lifts it.
+            guard (error as? CookieImporter.ImportError)?.isBlockedByPrivacy == true else {
                 _ = runModal(alert)
-            } catch {
-                let alert = NSAlert()
-                alert.messageText = "Import Failed"
-                alert.informativeText = error.localizedDescription
-                alert.alertStyle = .warning
-                // macOS privacy protection: Full Disk Access lifts it.
-                guard (error as? CookieImporter.ImportError)?.isBlockedByPrivacy == true else {
-                    _ = runModal(alert)
-                    return
-                }
-                alert.addButton(withTitle: "Open Privacy Settings")
-                alert.addButton(withTitle: "Cancel")
-                if runModal(alert) == .alertFirstButtonReturn {
-                    openURL(CookieImporter.ImportError.fullDiskAccessSettings)
-                }
+                return
+            }
+            alert.addButton(withTitle: "Open Privacy Settings")
+            alert.addButton(withTitle: "Cancel")
+            if runModal(alert) == .alertFirstButtonReturn {
+                sideEffects.openURL(CookieImporter.ImportError.fullDiskAccessSettings)
             }
         }
     }

@@ -407,6 +407,17 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the empty result") { harness.alerts.count == 7 }
             XCTAssertEqual(harness.alerts.last, "Import Failed")
             XCTAssertTrue(harness.alertDetails.last?.contains("no profile with cookies in Edge") == true, "\(harness.alertDetails)")
+
+            // One import at a time: a second click while the first reads
+            // the profiles is ignored.
+            harness.offeredBrowsers = nil
+            harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
+            let importsBefore = harness.cookieImports.count
+            harness.runPaletteCommand("Import Browser Cookies")
+            harness.runPaletteCommand("Import Browser Cookies")
+            harness.waitUntil("the import result") { harness.alerts.count >= 8 && !harness.shell.isImportingCookies }
+            XCTAssertEqual(harness.alerts.count, 8)
+            XCTAssertEqual(harness.cookieImports.count, importsBefore + 1)
         }
     }
 

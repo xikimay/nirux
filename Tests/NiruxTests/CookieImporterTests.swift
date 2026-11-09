@@ -45,6 +45,10 @@ final class CookieImporterTests: XCTestCase {
         for folder in ["Default", "Profile 10", "Profile 2", "System Profile"] {
             try write("", to: brave + "/\(folder)/Cookies")
         }
+        // Moved to another volume, a symlink left behind.
+        let edge = root + "/Library/Application Support/Microsoft Edge"
+        try write("", to: root + "/Elsewhere/Edge/Default/Cookies")
+        try FileManager.default.createSymbolicLink(atPath: edge, withDestinationPath: root + "/Elsewhere/Edge")
 
         XCTAssertEqual(CookieImporter.availableSources(home: root), [
             .init(browser: .chrome, profileFolder: "Profile 2", profileName: "Alex (alex@work.example)",
@@ -57,6 +61,7 @@ final class CookieImporterTests: XCTestCase {
             .init(browser: .brave, profileFolder: "Default", profileName: "Default", cookiesPath: brave + "/Default/Cookies"),
             .init(browser: .brave, profileFolder: "Profile 2", profileName: "Profile 2", cookiesPath: brave + "/Profile 2/Cookies"),
             .init(browser: .brave, profileFolder: "Profile 10", profileName: "Profile 10", cookiesPath: brave + "/Profile 10/Cookies"),
+            .init(browser: .edge, profileFolder: "Default", profileName: "Default", cookiesPath: edge + "/Default/Cookies"),
         ])
     }
 

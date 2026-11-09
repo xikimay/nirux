@@ -253,12 +253,14 @@ enum CookieImporter {
 
     /// Without a profile list, the folders Chromium names for profiles.
     /// The URL listing: its errors carry the errno (the path one reports a
-    /// missing folder as OSStatus -43).
+    /// missing folder as OSStatus -43). It doesn't follow a symlinked
+    /// folder (ENOTDIR), as when the browser's data moved to another
+    /// volume: resolve it first.
     private static func profileFolders(in root: String) throws -> [String] {
         let names: [String]
         do {
-            names = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: root), includingPropertiesForKeys: nil)
-                .map(\.lastPathComponent)
+            let folder = URL(fileURLWithPath: root).resolvingSymlinksInPath()
+            names = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).map(\.lastPathComponent)
         } catch {
             throw Failure.unreadable(path: root, errno: posixCode(of: error))
         }
