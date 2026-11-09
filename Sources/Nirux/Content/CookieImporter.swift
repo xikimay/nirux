@@ -406,9 +406,12 @@ enum CookieImporter {
 
     /// A private copy of a browser's database, in a folder of Nirux's own:
     /// its WAL or rollback journal first, then the database, each an
-    /// instant APFS clone. An unfinished write thus comes with the journal
-    /// that undoes it, and recent commits still in the WAL come along;
-    /// SQLite applies both when it opens the copy. The database is opened
+    /// instant APFS clone. Recent commits still in the WAL come along, and
+    /// a write caught halfway usually comes with the journal that undoes
+    /// it; SQLite applies both when it opens the copy. A write that starts
+    /// between the two clones can still slip through: SQLite then reports
+    /// the damage (see `readCookies`), or the copy mixes old and new
+    /// cookies, harmless for an import. The database is opened
     /// before anything else, so a file Nirux may not read fails as itself:
     /// it used to come out as the copy's folder, Foundation's "you don't
     /// have permission to access “T”".
@@ -425,8 +428,9 @@ enum CookieImporter {
             do {
                 for suffix in ["-wal", "-journal"] {
                     let companion = open(path + suffix, O_RDONLY | O_CLOEXEC)
-                    if companion < 0, errno == ENOENT { continue }
-                    guard companion >= 0 else { throw Failure.unreadable(path: path + suffix, errno: errno) }
+                    let code = errno
+                    if companion < 0, code == ENOENT { continue }
+                    guard companion >= 0 else { throw Failure.unreadable(path: path + suffix, errno: code) }
                     defer { close(companion) }
                     try Self.copy(companion, to: database + suffix)
                 }
