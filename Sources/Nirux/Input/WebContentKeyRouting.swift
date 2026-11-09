@@ -18,6 +18,14 @@ enum WebContentKeyRouting {
         return arrowKeys.contains(keyCode) && (modifiers == [.command] || modifiers == [.command, .shift])
     }
 
+    /// Cmd+Arrow and Control+Cmd+Arrow: Focus Left/Right and Workspace
+    /// Up/Down, when the menu gets them.
+    static func navigatesColumnsOrWorkspaces(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        let modifiers = modifierFlags.intersection([.command, .option, .control, .shift])
+        let arrowKeys: ClosedRange<UInt16> = 0x7B...0x7E
+        return arrowKeys.contains(keyCode) && (modifiers == [.command] || modifiers == [.command, .control])
+    }
+
     static func passesToWebContent(
         isEditor: Bool,
         characters: String?,

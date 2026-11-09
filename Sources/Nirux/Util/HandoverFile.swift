@@ -13,6 +13,17 @@ import Foundation
 /// worktree; the destination is never opened through a symlink.
 enum HandoverFile {
     static let filenamePrefix = "nirux-handover-"
+
+    /// The file an agent's handover is written to, in the folder it starts in.
+    static func filename(for agent: NiruxApp.WorkspaceAgent) -> String {
+        switch agent {
+        case .claude: return ".claude-handover.md"
+        case .codex: return ".codex-handover.md"
+        }
+    }
+
+    /// Every agent's: what `info/exclude` ignores and Clean Up clears.
+    static let filenames = NiruxApp.WorkspaceAgent.allCases.map(filename(for:))
     static let maxBytes = 1_048_576
 
     enum TransferError: Error, Equatable {

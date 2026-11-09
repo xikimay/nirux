@@ -202,13 +202,18 @@ extension WorktreeCleanup {
         for path in restore.files {
             let file = URL(fileURLWithPath: worktree).appendingPathComponent(path)
             var info = stat()
-            guard isInside(file.deletingLastPathComponent(), worktree: worktree),
-                  lstat(file.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
-                  let now = FileStamp(file)
+            guard isInside(file.deletingLastPathComponent(), worktree: worktree), lstat(file.path, &info) == 0
             else { continue }
-            let isGitsCopy = restore.wroteAll
-                ? now == restore.written[path]
-                : matchesIndex(path, in: worktree, tools: tools)
+            let type = info.st_mode & S_IFMT
+            // git writes a committed symlink back as one.
+            let isGitsCopy: Bool
+            if restore.wroteAll {
+                isGitsCopy = (type == S_IFREG || type == S_IFLNK) && FileStamp(file) == restore.written[path]
+            } else if type == S_IFLNK {
+                isGitsCopy = linkMatchesIndex(path, at: file, in: worktree, tools: tools)
+            } else {
+                isGitsCopy = type == S_IFREG && matchesIndex(path, in: worktree, tools: tools)
+            }
             if isGitsCopy { unlink(file.path) }
         }
         for folder in restore.missingFolders {
@@ -228,6 +233,14 @@ extension WorktreeCleanup {
         let blob = file.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return file.status == 0 && indexed.status == 0 && !blob.isEmpty
             && blob == indexed.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether the symlink at `file` points where the index's does: a
+    /// link's blob is its target. (`hash-object` would read the target.)
+    private static func linkMatchesIndex(_ path: String, at file: URL, in worktree: String, tools: Tools) -> Bool {
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: file.path) else { return false }
+        let indexed = git(["cat-file", "blob", ":" + path], in: worktree, tools: tools)
+        return indexed.status == 0 && indexed.stdout == target
     }
 
     /// Whether `folder` resolves to `worktree` or a folder in it: a symlink
