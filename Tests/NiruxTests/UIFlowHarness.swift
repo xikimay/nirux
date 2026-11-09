@@ -49,8 +49,12 @@ final class UIFlowHarness {
     private(set) var restoredAgentLaunches: [String] = []
     /// `messageText` of every app-modal alert, in order.
     private(set) var alerts: [String] = []
+    /// `informativeText` of every app-modal alert, in order.
+    private(set) var alertDetails: [String] = []
     /// Answers to the next alerts, in order; the first button once empty.
     var alertResponses: [NSApplication.ModalResponse] = []
+    /// Items to pick, in order, in the next alerts that show a pop-up menu.
+    var alertMenuChoices: [Int] = []
     /// Links opened in the default browser, in order.
     private(set) var openedURLs: [URL] = []
     /// Folders the folder picker double returns, in order; Cancel once
@@ -60,10 +64,12 @@ final class UIFlowHarness {
     private(set) var setupFailures: [String] = []
     /// Workspaces whose Mission question came to the user and was notified.
     private(set) var missionQuestionNotices: [String] = []
-    /// Browsers the cookie double reports as installed.
-    var cookieBrowsers: [CookieImporter.Browser] = []
-    /// Browsers the cookie double was asked to import from.
-    private(set) var cookieImports: [CookieImporter.Browser] = []
+    /// Browser profiles the cookie double reports.
+    var cookieSources: [CookieImporter.Source] = []
+    /// Profiles the cookie double was asked to import from.
+    private(set) var cookieImports: [CookieImporter.Source] = []
+    /// What the cookie double throws instead of importing.
+    var cookieImportError: CookieImporter.ImportError?
 
     /// Palette commands and sidebar menu items the current test ran, for
     /// the coverage checks (see UIFlowTestCase).
@@ -195,10 +201,15 @@ final class UIFlowHarness {
         shell.sideEffects.openURL = { [weak self] url in self?.openedURLs.append(url) }
         shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.checkExplain = { .unavailable("Explain doesn’t run in flow tests.") }
-        shell.sideEffects.cookieBrowsers = { [weak self] in self?.cookieBrowsers ?? [] }
-        shell.sideEffects.importCookies = { [weak self] browser in
-            self?.cookieImports.append(browser)
-            return CookieImporter.ImportResult(imported: 2, failed: 0, browser: browser)
+        shell.sideEffects.cookieBrowsers = { [weak self] in
+            let sources = self?.cookieSources ?? []
+            return CookieImporter.Browser.allCases.filter { browser in sources.contains { $0.browser == browser } }
+        }
+        shell.sideEffects.cookieSources = { [weak self] in self?.cookieSources ?? [] }
+        shell.sideEffects.importCookies = { [weak self] source in
+            self?.cookieImports.append(source)
+            if let error = self?.cookieImportError { throw error }
+            return CookieImporter.ImportResult(imported: 2, failed: 0, source: source)
         }
         // A busy CI machine: routing must not fall back for want of git.
         shell.sideEffects.routingTimeout = 10
@@ -209,6 +220,10 @@ final class UIFlowHarness {
         shell.sideEffects.runModal = { [weak self] alert in
             guard let self else { return .alertFirstButtonReturn }
             alerts.append(alert.messageText)
+            alertDetails.append(alert.informativeText)
+            if let menu = alert.accessoryView as? NSPopUpButton, !alertMenuChoices.isEmpty {
+                menu.selectItem(at: alertMenuChoices.removeFirst())
+            }
             return alertResponses.isEmpty ? .alertFirstButtonReturn : alertResponses.removeFirst()
         }
     }
@@ -384,6 +399,13 @@ final class UIFlowHarness {
             self.visibleField(placeholder: placeholder) != nil
         }
         return visibleField(placeholder: placeholder)
+    }
+
+    /// A browser profile for the cookie double.
+    static func cookieSource(
+        _ browser: CookieImporter.Browser, _ name: String = "Person 1", folder: String = "Default"
+    ) -> CookieImporter.Source {
+        CookieImporter.Source(browser: browser, profileFolder: folder, profileName: name, cookiesPath: "/nonexistent/\(folder)/Cookies")
     }
 
     static func descendant<View: NSView>(
