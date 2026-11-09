@@ -49,7 +49,8 @@ final class TextNavigationKeyFlowTests: XCTestCase {
     }
 
     /// Cmd+Left at column 1 and Cmd+Right at the line end leave the editor
-    /// for the column beside. Before the edge, they move the caret; with a
+    /// for the column beside, from the first press once there is one.
+    /// Before the edge, they move the caret; with a
     /// selection, held down or with Shift, they stay in the text. With no
     /// workspace above, Cmd+Up on the first line moves the caret as it
     /// always did, and a late edge key never moves the keyboard from where
@@ -65,11 +66,36 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 XCTAssertNotNil(harness.shell.workspaceStore.adjacentWorkspaceIndex(delta: 1), "no workspace below")
                 let (editor, webView) = try openEditorWithKeyboard(in: harness)
                 let editorIndex = workspace.focusedIndex
+                var edgeKeys: [EditorColumn.TextEdge] = []
+                let navigate = editor.onTextEdgeKey
+                editor.onTextEdgeKey = { edge in
+                    edgeKeys.append(edge)
+                    navigate?(edge)
+                }
+                moveCaretToTheDocumentStart(in: harness)
+                waitForCaret("1:1", in: webView)
+
+                // In the last column, Cmd+Right at the line end stays in
+                // the text. Once a column is added on the right, the first
+                // press leaves: the app tells the page before each key.
+                press(.right, [.command], in: harness)
+                waitForCaret("1:7", in: webView)
+                press(.right, [.command], in: harness)
+                press(.left, [.command, .shift], in: harness)
+                waitForSelection("# Flow", in: editor, harness: harness)
+                XCTAssertEqual(edgeKeys, [], "Cmd+Right with no column on the right left the text")
+                press(.right, [.command], in: harness)
+                waitForCaret("1:7", in: webView)
                 workspace.addColumn()
                 harness.shell.relayout(animated: false)
                 press(.left, [.command, .control], in: harness)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
                 waitForMonacoText(in: webView)
+                press(.right, [.command], in: harness)
+                harness.waitUntil("the column added on the right", timeout: 5) { workspace.focusedIndex == editorIndex + 1 }
+                press(.left, [.command, .control], in: harness)
+                waitForMonacoText(in: webView)
+                edgeKeys.removeAll()
                 moveCaretToTheDocumentStart(in: harness)
                 waitForCaret("1:1", in: webView)
 
@@ -89,12 +115,6 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
                 // No workspace above (one below): the page moves the caret
                 // itself, as the key arrives, without asking the app.
-                var edgeKeys: [EditorColumn.TextEdge] = []
-                let navigate = editor.onTextEdgeKey
-                editor.onTextEdgeKey = { edge in
-                    edgeKeys.append(edge)
-                    navigate?(edge)
-                }
                 press(.up, [.command], in: harness)
                 press(.right, [.command], in: harness)
                 waitForCaret("1:7", in: webView)
