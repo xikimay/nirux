@@ -376,13 +376,15 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             // them go where they were listed.
             shell.addWorkspace(title: "task", cwd: harness.worktree)
             let task = try XCTUnwrap(shell.activeWorkspace)
-            @MainActor func open(_ title: String, under parent: WorkspaceState) throws -> WorkspaceState {
-                shell.addWorkspace(title: title, cwd: harness.repo, parentWorkspaceID: parent.id)
+            @MainActor func open(_ title: String, under parent: WorkspaceState, in cwd: String? = nil) throws -> WorkspaceState {
+                shell.addWorkspace(title: title, cwd: cwd ?? harness.repo, parentWorkspaceID: parent.id)
                 return try XCTUnwrap(shell.activeWorkspace)
             }
             let first = try open("first", under: task)
-            let second = try open("second", under: task)
+            // A task too (in a worktree), to have one of its own.
+            let second = try open("second", under: task, in: harness.worktree)
             let third = try open("third", under: second)
+            XCTAssertEqual(third.parentWorkspaceID, second.id)
             shell.addWorkspace(title: "after", cwd: harness.repo)
             @MainActor func menu(for workspace: WorkspaceState) throws -> NSMenu {
                 shell.updateSidebar()
