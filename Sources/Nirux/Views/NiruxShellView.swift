@@ -530,13 +530,17 @@ extension NiruxShellView {
     enum HDir { case left, right }
     func focusColumn(_ dir: HDir) {
         guard let workspace = activeWorkspace else { return }
-        switch dir {
-        case .left: if workspace.focusedIndex > 0 { workspace.focusedIndex -= 1 }
-        case .right: if workspace.focusedIndex < workspace.columns.count - 1 { workspace.focusedIndex += 1 }
-        }
+        if let index = adjacentColumnIndex(dir) { workspace.focusedIndex = index }
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window, editorTakesKeyboard: true)
+    }
+
+    /// The column beside the focused one in the active workspace, if any.
+    func adjacentColumnIndex(_ dir: HDir) -> Int? {
+        guard let workspace = activeWorkspace else { return nil }
+        let index = workspace.focusedIndex + (dir == .left ? -1 : 1)
+        return workspace.columns.indices.contains(index) ? index : nil
     }
 
     func cycleActiveColumnWidth() {

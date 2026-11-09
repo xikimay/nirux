@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import Nirux
 
@@ -310,6 +311,48 @@ final class UIFlowHarness {
         try body()
     }
 
+    // MARK: - Web pages
+
+    /// Runs `script` in `webView`'s page and waits for it. Messages it posts
+    /// to the app arrive first.
+    static func run(_ script: String, in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {
+        let answer = PageAnswer()
+        answer.isAsking = true
+        webView.evaluateJavaScript(script) { _, _ in
+            MainActor.assumeIsolated { answer.isAsking = false }
+        }
+        waitUntil("the page to run a script", timeout: 10, file: file, line: line) { !answer.isAsking }
+    }
+
+    /// Asks `webView`'s page `script` (its value a string) until `matches`
+    /// accepts the answer, 10 s at most: a page handles keys and finds after
+    /// the call that sent them returns.
+    static func waitForAnswer(
+        _ description: String, to script: String, in webView: WKWebView,
+        file: StaticString = #filePath, line: UInt = #line, matches: (String) -> Bool
+    ) {
+        let answer = PageAnswer()
+        let seen = { answer.latest.map { "(the page answered \($0.debugDescription))" } ?? "(no answer)" }
+        waitUntil("\(description) \(seen())", timeout: 10, file: file, line: line) {
+            if !answer.isAsking {
+                answer.isAsking = true
+                webView.evaluateJavaScript(script) { result, _ in
+                    MainActor.assumeIsolated {
+                        answer.latest = result as? String
+                        answer.isAsking = false
+                    }
+                }
+            }
+            return answer.latest.map(matches) == true
+        }
+    }
+
+    @MainActor
+    private final class PageAnswer {
+        var latest: String?
+        var isAsking = false
+    }
+
     // MARK: - Keyboard and fields
 
     enum Key {
@@ -455,10 +498,23 @@ final class UIFlowHarness {
         line: UInt = #line,
         _ condition: () -> Bool
     ) -> Bool {
+        Self.waitUntil(description, timeout: timeout, file: file, line: line, condition)
+    }
+
+    /// `waitUntil` for a test without a harness. `description` is read at
+    /// the failure, so it can tell what the test saw last.
+    @discardableResult
+    static func waitUntil(
+        _ description: @autoclosure () -> String,
+        timeout: TimeInterval = 30,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: () -> Bool
+    ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             guard Date() < deadline else {
-                XCTFail("timed out waiting for \(description)", file: file, line: line)
+                XCTFail("timed out waiting for \(description())", file: file, line: line)
                 return false
             }
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
