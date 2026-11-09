@@ -139,11 +139,8 @@ jobs:
         timeout-minutes: 30
         run: scripts/run-tests.sh
 
-      # Swift Build's resource accessor looks in Contents/Resources, where
-      # bundle.sh puts libghostty-spm's resources; the native build system's
-      # looks at the app's root, which code signing refuses.
       - name: Build release
-        run: swift build -c release --build-system swiftbuild
+        run: swift build -c release
 
       - name: Bundle .app
         env:

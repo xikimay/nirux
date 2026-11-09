@@ -44,8 +44,8 @@ cp "$BINARY" "$APP/Contents/MacOS/Nirux"
 cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/"
 
 # libghostty-spm's resources (Ghostty's shell integration and terminfo, its
-# menu strings): its Bundle.module looks for them in Contents/Resources, and
-# traps at the app's first terminal without them.
+# menu strings): it looks for them in Contents/Resources, and traps at the
+# app's first terminal without them (`Nirux --check-terminal-runtime`).
 GHOSTTY_RESOURCES="$(dirname "$BINARY")/GhosttyKit_GhosttyTerminal.bundle"
 if [[ ! -d "$GHOSTTY_RESOURCES" ]]; then
     echo "Error: libghostty-spm's resources not found at $GHOSTTY_RESOURCES"

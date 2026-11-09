@@ -48,7 +48,7 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
       - name: Build release
-        run: swift build -c release --build-system swiftbuild
+        run: swift build -c release
 
       - name: Bundle .app
         run: ./scripts/bundle.sh 0.0.0 0
