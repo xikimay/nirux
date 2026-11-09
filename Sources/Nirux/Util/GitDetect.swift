@@ -60,6 +60,8 @@ struct GitHubRepository: Hashable, Sendable {
 struct GitIdentity: Hashable, Sendable {
     let repositoryRoot: String
     let head: String?
+    /// Changed or untracked files, Nirux's handovers and Claude Code's
+    /// local settings aside (`WorktreeCleanup.isDisposable`).
     let isDirty: Bool
 
     init(repositoryRoot: String, head: String?, isDirty: Bool = false) {
@@ -194,7 +196,7 @@ enum GitDetect {
         }
 
         guard let status = gitOutput(
-            arguments: ["status", "--porcelain=v1", "--untracked-files=normal"],
+            arguments: ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
             at: workingDirectory,
             gitPath: gitPath,
             timeout: timeout
@@ -207,7 +209,9 @@ enum GitDetect {
             identity: GitIdentity(
                 repositoryRoot: canonicalRepositoryRoot,
                 head: head,
-                isDirty: !status.standardOutput.isEmpty
+                // Nirux's handover alone doesn't keep a merged pull
+                // request from showing (see `WorktreeCleanup.isDisposable`).
+                isDirty: WorktreeCleanup.statusEntries(status.standardOutput).contains { !WorktreeCleanup.isDisposable($0) }
             ),
             upstreamRepositoryObservation: upstreamRepositoryObservation(
                 at: canonicalRepositoryRoot,

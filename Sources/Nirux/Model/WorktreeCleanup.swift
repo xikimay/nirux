@@ -8,22 +8,19 @@ import Foundation
 ///   not git ancestry, so a squash merge counts; an open one blocks.
 /// - The branch tip is that pull request's head, or an ancestor of it: no
 ///   local commit is missing from what was merged.
-/// - Nothing uncommitted or untracked, except `disposablePaths`, tracked
-///   or not; no edit hidden from `git status` (skip-worktree,
+/// - Nothing uncommitted or untracked, except disposable files (see
+///   `isDisposable`); no edit hidden from `git status` (skip-worktree,
 ///   assume-unchanged).
 /// - No other worktree inside it, and it is not locked.
 /// Ignored files are not a reason to refuse, but `git worktree remove`
 /// deletes them: everything but build output goes to the Trash first.
 /// Runs git and gh: call it off the main thread.
 enum WorktreeCleanup {
-    /// Handover files and Claude Code's local settings: an untracked copy
-    /// goes to the Trash with the worktree's other leftovers instead of
-    /// blocking it. So does a tracked one changed in the folder alone (a
-    /// repository that committed a handover gets a new one written over it
-    /// in every worktree): git then writes the committed version back.
-    static let disposablePaths: Set<String> = [
-        ".claude-handover.md", ".codex-handover.md", ".claude/settings.local.json"
-    ]
+    /// The handovers Nirux writes, in the folder the agent starts in: the
+    /// top level, or a task's subfolder.
+    static let handoverNames: Set<String> = [".claude-handover.md", ".codex-handover.md"]
+    /// Claude Code's local settings, in the folder it runs in.
+    static let localSettingsPath = ".claude/settings.local.json"
 
     /// Ignored folders (or files) a build or an install recreates. They are
     /// deleted with the worktree; any other ignored entry goes to the Trash.
@@ -98,13 +95,13 @@ enum WorktreeCleanup {
         /// makes its own under `.claude/worktrees`): the folder would take
         /// them along.
         let nestedWorktrees: [String]
-        /// `disposablePaths` present and untracked.
+        /// Disposable files present and untracked.
         let untrackedDisposable: [String]
-        /// Tracked `disposablePaths` modified in the folder alone (" M"):
+        /// Tracked disposable files modified in the folder alone (" M"):
         /// the copy goes to the Trash, then git writes the committed version
         /// back so that `git worktree remove` finds nothing changed.
         let modifiedDisposable: [String]
-        /// Tracked `disposablePaths` deleted from the folder alone (" D"):
+        /// Tracked disposable files deleted from the folder alone (" D"):
         /// git writes the committed version back.
         let deletedDisposable: [String]
         /// Ignored files and folders, as `git ls-files --directory` groups them.
@@ -184,6 +181,22 @@ enum WorktreeCleanup {
         /// or git couldn't read it.
         case unavailable(String)
         case inspected(Report)
+    }
+
+    /// A handover or Claude Code's local settings, in any folder.
+    static func isDisposablePath(_ path: String) -> Bool {
+        handoverNames.contains((path as NSString).lastPathComponent)
+            || path == localSettingsPath || path.hasSuffix("/" + localSettingsPath)
+    }
+
+    /// A `git status` entry the cleanup clears instead of refusing: a
+    /// disposable file untracked, or tracked and changed in the folder
+    /// alone, the index still holding the commit's version. A repository
+    /// that committed a handover gets a new one written over it in every
+    /// worktree, which `info/exclude` can't hide. A staged change is
+    /// someone's work.
+    static func isDisposable(_ entry: StatusEntry) -> Bool {
+        ["??", " M", " D"].contains(entry.code) && isDisposablePath(entry.path)
     }
 
     static func isRegenerable(_ entry: String) -> Bool {
@@ -390,13 +403,14 @@ enum WorktreeCleanup {
         }
         var files = FileState()
         for entry in statusEntries(status.stdout) {
-            // Tracked ones only when the index still holds the commit's
-            // version: a staged change is someone's work.
-            switch disposablePaths.contains(entry.path) ? entry.code : "" {
+            guard isDisposable(entry) else {
+                files.changes.append(describe(entry))
+                continue
+            }
+            switch entry.code {
             case "??": files.untrackedDisposable.append(entry.path)
             case " M": files.modifiedDisposable.append(entry.path)
-            case " D": files.deletedDisposable.append(entry.path)
-            default: files.changes.append(describe(entry))
+            default: files.deletedDisposable.append(entry.path)
             }
         }
         files.untrackedDisposable.sort()
@@ -427,26 +441,20 @@ enum WorktreeCleanup {
         let path: String
     }
 
-    /// "Sources/a.swift (modified)": a `git status` entry in words.
+    /// "Sources/a.swift (modified)", "b.swift (staged, then deleted)": a
+    /// `git status` entry in words, the index's change first.
     static func describe(_ entry: StatusEntry) -> String {
-        let code = entry.code
-        let state: String
-        if code == "??" {
-            state = "untracked"
-        } else if code.contains("U") || code == "AA" || code == "DD" {
-            state = "in conflict"
-        } else if code.contains("D") {
-            state = "deleted"
-        } else if code.hasPrefix("A") {
-            state = "added"
-        } else if code.hasPrefix("R") {
-            state = "renamed"
-        } else if code.hasPrefix("C") {
-            state = "copied"
-        } else {
-            state = "modified"
-        }
-        return "\(entry.path) (\(state))"
+        let code = Array(entry.code)
+        guard entry.code != "??" else { return "\(entry.path) (untracked)" }
+        guard code.count == 2, !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
+        let staged: [Character: String] = ["A": "added", "D": "deleted", "R": "renamed", "C": "copied", "T": "type changed"]
+        // " A": added with --intent-to-add.
+        let unstaged: [Character: String] = ["A": "added", "D": "deleted", "T": "type changed"]
+        let states = [
+            code[0] == " " ? nil : staged[code[0]] ?? "staged",
+            code[1] == " " ? nil : unstaged[code[1]] ?? "modified"
+        ].compactMap { $0 }
+        return "\(entry.path) (\(states.joined(separator: ", then ")))"
     }
 
     /// Parses `git status --porcelain=v1 -z`. A rename or copy entry is

@@ -322,7 +322,7 @@ Nothing is merged, pushed or fetched, and the remote branch is never touched. A 
 
 - GitHub reports its branch's pull request as merged. The pull request's state counts, not git ancestry, so squash merges qualify. An open pull request for the branch blocks.
 - The branch tip is the merged pull request's head, or an ancestor of it: no local commit is left out.
-- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`. No tracked file hides an edit from `git status` (skip-worktree, assume-unchanged).
+- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`, in any folder. A repository that committed one of them doesn't block either: Nirux's copy, changed but not staged, goes to the Trash and git writes the committed version back before removing the folder. A staged change blocks. No tracked file hides an edit from `git status` (skip-worktree, assume-unchanged). The refusal names the files that block.
 - No other worktree lives inside it, and it is not locked.
 - No editor tab holds unsaved changes in its workspaces or to a file in it, and no agent of another workspace runs from inside it.
 

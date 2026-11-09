@@ -108,6 +108,34 @@ final class PRDetectTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
     }
 
+    func testNiruxHandoversDoNotMakeTheWorktreeDirty() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func isDirty() throws -> Bool { try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty }
+
+        // The repository committed a handover: Nirux writes a new one over it.
+        try runGit(["init", "-q"], at: directory)
+        let handover = directory.appendingPathComponent(".claude-handover.md")
+        try "committed\n".write(to: handover, atomically: true, encoding: .utf8)
+        try runGit(["add", ".claude-handover.md"], at: directory)
+        try runGit([
+            "-c", "user.name=Nirux Tests",
+            "-c", "user.email=nirux@example.test",
+            "commit", "-qm", "initial"
+        ], at: directory)
+        try "new task\n".write(to: handover, atomically: true, encoding: .utf8)
+        XCTAssertFalse(try isDirty())
+
+        try runGit(["add", ".claude-handover.md"], at: directory)
+        XCTAssertTrue(try isDirty(), "a staged handover is someone's work")
+        try runGit(["reset", "-q", "--", ".claude-handover.md"], at: directory)
+
+        try "work\n".write(to: directory.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(try isDirty())
+    }
+
     func testOpenPullRequestIsPreferredOverNewerClosedPullRequest() throws {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
