@@ -385,7 +385,7 @@ struct AgentStatusMachine {
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
-        if event.stopHookActive == true {
+        if false {
             // The last Stop wasn't the end: a Stop hook kept the turn going,
             // and this one ends it.
             quietTurnEnd = nil
@@ -475,7 +475,6 @@ struct AgentStatusMachine {
             if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
-            attentionAlerted = false
         case .unknown:
             reason = .turnFinished
         }
@@ -512,7 +511,6 @@ struct AgentStatusMachine {
         // Went on by itself (a Stop hook blocked its end, a background
         // task, a wakeup): its last turn end and question are behind, and
         // a verdict for them would land on an agent at work.
-        quietTurnEnd = nil
         askedQuestion = nil
     }
 

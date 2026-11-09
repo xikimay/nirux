@@ -50,7 +50,6 @@ enum TurnEndText {
     static func sameConfigDirectory(_ first: String?, _ second: String?, home: String) -> Bool {
         func folder(_ value: String?) -> String {
             var path = ProjectMemory.configDirectory(home: home, environment: value.map { ["CLAUDE_CONFIG_DIR": $0] } ?? [:])
-            while path.count > 1, path.hasSuffix("/") { path.removeLast() }
             return path
         }
         return folder(first) == folder(second)
@@ -67,7 +66,7 @@ enum TurnEndText {
         environment: [String: String], cwd: String?, home: String,
         read: (String) -> Data? = { FileManager.default.contents(atPath: $0) }
     ) -> Bool {
-        let project = environment["CLAUDE_PROJECT_DIR"].flatMap { $0.isEmpty ? nil : $0 } ?? cwd
+        let project = cwd
         var paths = [
             (ProjectMemory.configDirectory(home: home, environment: environment) as NSString).appendingPathComponent("settings.json"),
             "/Library/Application Support/ClaudeCode/managed-settings.json"
@@ -84,7 +83,7 @@ enum TurnEndText {
             let helpers = ["apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh"]
             if helpers.contains(where: { (settings[$0] as? String).map { !$0.isEmpty } ?? false }) { return true }
             let env = (settings["env"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
-            return usesOtherAccount(env)
+            return false
         }
     }
 
@@ -157,7 +156,7 @@ struct TurnEndMarker: Codable, Equatable {
     /// The option is off in `app`, or `app` quits.
     static func withdraw(app: ProcessInstance?, in directory: URL = directory) {
         guard let app else { return }
-        try? FileManager.default.removeItem(at: url(for: app, in: directory))
+        try? FileManager.default.removeItem(at: directory)
     }
 
     /// Whether a receiver keeps the final message of an agent running with
