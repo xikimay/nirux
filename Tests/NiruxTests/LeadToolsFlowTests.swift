@@ -358,6 +358,12 @@ final class LeadToolsFlowTests: XCTestCase {
             let loose = try skill("feat/loose", from: task, naming: false)
             // As ⌘N's "Sub-task of" opens one.
             shell.addWorkspace(title: "by hand", cwd: harness.repo, profileID: lead.space, parentWorkspaceID: task.id)
+            // Missions turned on since the task's shell started: it has no
+            // Mission variables, so no Mission its agent couldn't answer,
+            // and the worktree still lists under it.
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: shell.persistedState()) { $0.missionHandoffsEnabled = true })
+            let late = try skill("feat/late", from: task)
+            XCTAssertNil(MissionStore.shared.missions.first { $0.childWorkspaceID == late.id })
             let store = shell.workspaceStore
             let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
             let parents = {
@@ -365,8 +371,8 @@ final class LeadToolsFlowTests: XCTestCase {
                     (shell.workspaces[$0.key].title, shell.workspaces[$0.value].title)
                 })
             }
-            XCTAssertEqual(titles(), ["Lead", "task", "feat/sub", "by hand", "main", "feat/side", "feat/leads", "feat/loose"])
-            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task"])
+            XCTAssertEqual(titles(), ["Lead", "task", "feat/sub", "by hand", "feat/late", "main", "feat/side", "feat/leads", "feat/loose"])
+            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
             XCTAssertEqual(sub.parentWorkspaceID, task.id)
             XCTAssertNil(side.parentWorkspaceID, "the main checkout isn't a task")
             XCTAssertNil(leads.parentWorkspaceID, "a Lead's tasks are the space's list")
@@ -382,9 +388,10 @@ final class LeadToolsFlowTests: XCTestCase {
 
             shell.saveState()
             shell.restoreState()
-            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task"])
+            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
             XCTAssertEqual(
-                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title), ["feat/sub", "feat/side", "feat/leads", "feat/loose"]
+                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title),
+                ["feat/sub", "feat/late", "feat/side", "feat/leads", "feat/loose"]
             )
         }
     }

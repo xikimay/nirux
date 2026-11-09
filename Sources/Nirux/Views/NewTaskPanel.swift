@@ -263,7 +263,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         self.repositories = repositories
         if !repositories.isEmpty { suggestion = nil }
         let previous = selectedRepositoryKey
-        selectedRepositoryKey = repositories.contains { $0.key == key } ? key : repositories.first?.key
+        // A sub-task stays in its task's repository, the popup hidden.
+        let wanted = subtaskParentID != nil ? parentTask?.repositoryKey : key
+        selectedRepositoryKey = [wanted, key].compactMap { $0 }.first { candidate in repositories.contains { $0.key == candidate } }
+            ?? repositories.first?.key
         rebuildRepositoryPopup()
         if selectedRepositoryKey != previous || info == nil { repositoryChanged() } else { refresh() }
     }

@@ -114,7 +114,10 @@ extension NiruxShellView {
     /// checkout, so routing's anchor rule finds the space's repository or
     /// folder of it. Nil outside a linked worktree, or with the folder gone.
     nonisolated static func taskLocation(cwd: String) -> FolderIdentity? {
-        guard let folder = cwd.realPath, let root = worktreeCleanupPath(forCwd: folder),
+        // Both resolved: `worktreeCleanupPath` standardizes, which drops
+        // `/private` from a temporary folder.
+        guard let folder = cwd.realPath, let root = worktreeCleanupPath(forCwd: folder)?.realPath,
+              folder == root || folder.hasPrefix(root + "/"),
               let contents = try? String(contentsOfFile: root + "/.git", encoding: .utf8), contents.hasPrefix("gitdir: ")
         else { return nil }
         // `<common dir>/worktrees/<id>`, maybe relative to the worktree.
@@ -129,13 +132,18 @@ extension NiruxShellView {
     }
 
     /// The sheet's repository for a sub-task of `task`: the one of its space
-    /// the task works in, by key; nil when ⌘N can't start there.
+    /// the task works in, or a folder of it, by key; nil when ⌘N can't
+    /// start there (a folder holding the whole checkout is in no
+    /// repository).
     func subtaskRepositoryKey(of task: WorkspaceState) -> String? {
         guard !task.isLead, let location = Self.taskLocation(cwd: task.cwd),
               let space = profiles.first(where: { $0.id == task.profileID }),
-              let key = SpaceRouting.anchoring(location, in: [space])?.anchor.key,
+              let anchor = SpaceRouting.anchoring(location, in: [space])?.anchor, let key = anchor.key,
               newTaskRepositories(of: space).contains(where: { $0.key == key })
         else { return nil }
+        if case .folder(let path) = anchor.kind, let checkout = location.topLevel, !SpaceRouting.contains(checkout, path) {
+            return nil
+        }
         return key
     }
 

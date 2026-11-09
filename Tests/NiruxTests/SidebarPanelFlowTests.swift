@@ -206,7 +206,8 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/other", other + ".feat-other"], at: other)
             let otherRepository = try XCTUnwrap(FolderIdentity.identify(other, timeout: 10)).anchor
             let repository = try XCTUnwrap(FolderIdentity.identify(harness.repo, timeout: 10)).anchor
-            let space = try NewTaskFlowTests.anchoredSpace(harness, also: [otherRepository])
+            let docs = try XCTUnwrap((harness.repo + "/docs").realPath)
+            let space = try NewTaskFlowTests.anchoredSpace(harness, also: [otherRepository, .folder(docs)])
             let checkout = try XCTUnwrap(shell.activeWorkspace)
             shell.addWorkspace(title: "Parent", cwd: harness.worktree, profileID: space.id)
             let task = try XCTUnwrap(shell.activeWorkspace)
@@ -245,6 +246,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertTrue(sheet.existingBranchButton.isHidden, "a sub-task is new work")
             XCTAssertTrue(sheet.repositoryPopup.isHidden, "the task's repository")
             XCTAssertEqual(sheet.selectedRepositoryKey, repository.key)
+            // A repository added meanwhile isn't where the sub-task starts.
+            shell.refreshNewTaskPanelRepositories(selecting: otherRepository.key)
+            XCTAssertEqual(sheet.selectedRepositoryKey, repository.key)
             XCTAssertFalse(sheet.startButton.isEnabled, "it needs a description")
             XCTAssertEqual(sheet.lineLabel.stringValue, "Describe the sub-task.")
             let child = try start("Child work", in: sheet)
@@ -274,8 +278,15 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             sheet = try newSubtask(of: try XCTUnwrap(shell.activeWorkspace))
             XCTAssertEqual(sheet.selectedRepositoryKey, otherRepository.key)
             sheet.cancelButton.performClick(nil)
-            // A space without the task's repository: nowhere to start one.
-            let solo = shell.workspaceStore.createProfile(named: "Solo", select: false)
+            // A task in the folder of the repository the space has: there.
+            try FileManager.default.createDirectory(atPath: harness.worktree + "/docs", withIntermediateDirectories: true)
+            shell.addWorkspace(title: "Docs task", cwd: harness.worktree + "/docs", profileID: space.id)
+            sheet = try newSubtask(of: try XCTUnwrap(shell.activeWorkspace))
+            XCTAssertEqual(sheet.selectedRepositoryKey, SpaceAnchor.folder(docs).key)
+            sheet.cancelButton.performClick(nil)
+            // A space without the task's repository, only a folder holding
+            // all of it: nowhere to start one.
+            let solo = shell.workspaceStore.createProfile(named: "Solo", anchors: [.folder(harness.root)], select: false)
             shell.addWorkspace(title: "Stray task", cwd: other + ".feat-other", profileID: solo.id)
             XCTAssertFalse(try offers(try XCTUnwrap(shell.workspaces.first { $0.title == "Stray task" })), "not its repository")
 

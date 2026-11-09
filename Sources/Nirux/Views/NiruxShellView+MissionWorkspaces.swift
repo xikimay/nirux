@@ -89,7 +89,14 @@ extension NiruxShellView {
                     }
                     var missionID: String?
                     var reportsToLead = false
-                    if let parent = self.validMissionParent(
+                    // The workspace and terminal the skill names. A Mission
+                    // only from a terminal started with the Mission
+                    // variables: one started before Missions were turned
+                    // on couldn't answer its child.
+                    let requester = self.requestingWorkspace(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)
+                    let carriesMissions = requester?.columns.first { $0.agentUUID == parentAgentUUID }?
+                        .launchEnvironment?["NIRUX_MISSION_HANDOFFS"] == "1"
+                    if carriesMissions, let parent = self.validMissionParent(
                         workspaceID: parentWorkspaceID,
                         agentUUID: parentAgentUUID
                     ) {
@@ -123,9 +130,8 @@ extension NiruxShellView {
                         workspaceID: childWorkspaceID,
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
-                        // The skill names its workspace and terminal: the
-                        // child lists under it, Missions on or off.
-                        parentWorkspaceID: self.requestingWorkspace(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)?.id,
+                        // It lists under that one, Missions on or off.
+                        parentWorkspaceID: requester?.id,
                         reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         worktreeBranch: checkedOutBranch,

@@ -267,10 +267,6 @@ extension NiruxShellView {
         Persistence.save(persistedState(snapshot: snapshot))
     }
 
-    /// The layout on screen, with the saved settings (defaults when none
-    /// load), the sidebar's state and the Getting Started checklist's.
-    /// Meant to be saved: a restored agent
-    /// column that has launched drops its restore state.
     /// Mission children saved before sub-tasks kept their parent, and the
     /// task each one lists under from now on, by workspace id: its
     /// Mission's parent when that one is a task (see `isTask`), not for a
@@ -294,6 +290,10 @@ extension NiruxShellView {
         return parents
     }
 
+    /// The layout on screen, with the saved settings (defaults when none
+    /// load), the sidebar's state and the Getting Started checklist's.
+    /// Meant to be saved: a restored agent
+    /// column that has launched drops its restore state.
     func persistedState(snapshot: ProcessSnapshot? = nil) -> PersistedState {
         let snapshot = snapshot ?? ProcessSnapshot()
         var settings = OnboardingChecklist.settings(
