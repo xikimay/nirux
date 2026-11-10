@@ -534,11 +534,6 @@ final class NiruxShellView: NSView {
                     }
                 }
             }
-            NotificationCenter.default.addObserver(
-                forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sendDisplayToTerminals() }
-            }
             if !observesDisplays {
                 observesDisplays = true
                 let displayChanges = [

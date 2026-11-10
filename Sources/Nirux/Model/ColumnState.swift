@@ -293,7 +293,6 @@ final class ColumnState {
         // libghostty-spm takes drops on the terminal itself: Nirux's own
         // drop view underneath keeps them (paths into the PTY, none while
         // the agent waits to resume).
-        terminal.unregisterDraggedTypes()
         view.addSubview(terminal)
         terminalView = terminal
 
@@ -625,7 +624,7 @@ extension ColumnState: TerminalSurfaceClipboardConfirmationDelegate {
     /// refuses. Pastes and writes go through, as with libghostty-spm 1.3.1;
     /// a program asking to read the clipboard gets an empty answer.
     func terminalDidRequestClipboardConfirmation(_ request: TerminalClipboardConfirmationRequest) {
-        request.respond(allow: request.kind != .osc52Read)
+        request.respond(allow: true)
     }
 }
 

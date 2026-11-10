@@ -41,10 +41,7 @@ enum TerminalConfigBuilder {
         "cursor-style = block",
         "cursor-style-blink = true",
         "font-size = 14",
-        "font-thicken = true",
-        // Selecting copies to the clipboard, as with libghostty-spm 1.3.1
-        // (Ghostty's former macOS default); Ghostty 1.4's default is none.
-        "copy-on-select = clipboard"
+        "font-thicken = true"
     ]
     static let niruxColors = [
         "background = 212121",

@@ -982,7 +982,6 @@ final class PtySession: @unchecked Sendable {
             // libghostty-spm sets it in Nirux's process for its own exec
             // backend; a shell finding it would source Ghostty's
             // integration, which Nirux's terminals never had.
-            unsetenv("GHOSTTY_RESOURCES_DIR")
             for (name, value) in environment {
                 setenv(name, value, 1)
             }
