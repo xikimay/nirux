@@ -1,0 +1,56 @@
+name: Crash probe
+
+# Throwaway (DO NOT MERGE): where TerminalDisplayIDTests segfaults on CI.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/crash-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+      - name: Build tests
+        run: swift build --build-tests
+      - name: The display test alone
+        run: swift test --skip-build --filter 'TerminalDisplayIDTests/testTheDisplayReachesALiveSurfaceOnly' || echo "EXIT $?"
+      - name: The whole class
+        run: swift test --skip-build --filter TerminalDisplayIDTests || echo "EXIT $?"
+      - name: Crash reports
+        if: always()
+        run: |
+          ls -la ~/Library/Logs/DiagnosticReports/ || true
+          for f in ~/Library/Logs/DiagnosticReports/*.ips; do
+            [ -f "$f" ] || continue
+            echo "=== $f"
+            python3 - "$f" <<'PY'
+          import json, sys
+          lines = open(sys.argv[1]).read().split("\n", 1)
+          report = json.loads(lines[1])
+          print("exception:", report.get("exception"), report.get("termination", {}).get("indicator"))
+          ft = report.get("faultingThread", 0)
+          images = report.get("usedImages", [])
+          for frame in report["threads"][ft]["frames"][:40]:
+              img = images[frame["imageIndex"]]["name"] if frame.get("imageIndex") is not None and frame["imageIndex"] < len(images) else "?"
+              print(f'  {img:30} {frame.get("symbol", "?")} +{frame.get("symbolLocation", 0)}')
+          PY
+          done
