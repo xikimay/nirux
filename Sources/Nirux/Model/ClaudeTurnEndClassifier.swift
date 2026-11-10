@@ -93,7 +93,7 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     var knowsSetup: Bool { runner.account.knowsSetup }
 
     func classify(_ message: String) async -> TurnEndVerdict {
-        await runner.answer(to: Self.input(for: message), read: { Self.verdict(fromAnswer: $0, message: message) })
+        await runner.answer(to: Self.input(for: message), read: { Self.verdict(fromAnswer: $0, message: "") })
             ?? .unknown
     }
 
@@ -111,12 +111,11 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     static func verdict(fromAnswer text: String, message: String) -> TurnEndVerdict? {
         let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
         guard let first = lines.first(where: { !$0.isEmpty })?.uppercased() else { return nil }
-        if first.hasPrefix("DONE") { return .done }
         guard first.hasPrefix("ASK") else { return nil }
         func value(_ key: String) -> String? {
             lines.first { $0.hasPrefix(key) }.map { $0.dropFirst(key.count).trimmingCharacters(in: .whitespaces) }
         }
-        let quote = value("Q:")?.trimmingCharacters(in: TurnEndText.quotationMarks)
+        let quote = value("Q:")
         guard let quote, TurnEndText.quotes(quote, in: message) else { return .asks(nil) }
         return .asks(TurnEndQuestion(text: quote, isYesNo: value("A:")?.uppercased() == "YESNO"))
     }

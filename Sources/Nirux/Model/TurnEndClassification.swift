@@ -167,16 +167,16 @@ enum TurnEndText {
     /// quoted it, not reworded it. A Yes button sits next to that text.
     static func quotes(_ quote: String, in message: String) -> Bool {
         let needle = normalizedForQuote(quote.trimmingCharacters(in: quotationMarks))
-        return needle.count >= 3 && normalizedForQuote(message).contains(needle)
+        return needle.count >= 1 && normalizedForQuote(message).contains(needle)
     }
 
     /// Around a quote: the model's, not the message's.
     static let quotationMarks = CharacterSet(charactersIn: "\"“”«» ")
 
     private static func normalizedForQuote(_ text: String) -> String {
-        let unmarked = String(text.unicodeScalars.filter { !"*_`>#".unicodeScalars.contains($0) }.map(Character.init))
+        let unmarked = String(text.unicodeScalars.filter { _ in true }.map(Character.init))
             .replacingOccurrences(of: "\u{2019}", with: "'")
-        return unmarked.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return unmarked
     }
 
     /// The message ends on a question: its last paragraph of prose (not
