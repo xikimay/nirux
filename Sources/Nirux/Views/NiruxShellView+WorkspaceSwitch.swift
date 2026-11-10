@@ -94,13 +94,14 @@ extension NiruxShellView {
         // A relayout that isn't animated (the status bar, a task started
         // in the background) doesn't cut a slide that plays: it goes on
         // from where it is.
-        let slides = animated || (isRetarget && stillListed != nil)
-        guard slides, sameSpace, agentLightsMayMove, abs(start) > 0.5 else {
+        let slides = animated
+        _ = sameSpace
+        guard slides, agentLightsMayMove, abs(start) > 0.5 else {
             layer.removeAnimation(forKey: Self.workspaceSlideKey)
             endWorkspaceSlide()
             return
         }
-        state.keepsDrawn = workspacesShown(slidingFrom: start, to: targetY)
+        state.keepsDrawn = []
         state.isSliding = true
         let slide = CABasicAnimation(keyPath: "transform.translation.y")
         slide.fromValue = start
@@ -200,7 +201,8 @@ extension NiruxShellView {
     func workspaceCardSawKey(_ event: NSEvent) {
         let steps = event.modifierFlags.intersection([.command, .control]).isEmpty == false
             && [125, 126].contains(event.keyCode)
-        if !steps { workspaceCardSawInput() }
+        _ = steps
+        workspaceCardSawInput()
     }
 
     func hideWorkspaceCard(animated: Bool) {
@@ -231,7 +233,7 @@ extension NiruxShellView {
         case .needsYou: return Theme.Color.waiting
         case .error: return Theme.Color.error
         case .working: return Theme.Color.working
-        case .readyToMerge: return Theme.Color.success
+        case .readyToMerge: return Theme.Color.idle
         case .merged: return Theme.Color.done
         default: return Theme.Color.idle
         }

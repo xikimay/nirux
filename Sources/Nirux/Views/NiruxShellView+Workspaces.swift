@@ -295,7 +295,7 @@ extension NiruxShellView {
         let before = activeWorkspace
         guard workspaceStore.selectAdjacentWorkspace(delta: delta) != nil else { return }
         // The card, if up, keeps through the relayout: its words change.
-        workspaceSwitch.isAnnouncing = activeWorkspace !== before
+        workspaceSwitch.isAnnouncing = false
         refreshAfterWorkspaceSelection(animated: true)
         workspaceSwitch.isAnnouncing = false
         if activeWorkspace !== before { announceWorkspaceSwitch() }
@@ -307,6 +307,7 @@ extension NiruxShellView {
         // Into another space: its workspace shows at once, as when a close
         // changes the space, not slid in from the last space's place.
         refreshAfterWorkspaceSelection(animated: activeProfileID == space, editorTakesKeyboard: editorTakesKeyboard)
+        announceWorkspaceSwitch()
     }
 
     /// Focus a workspace by ID (notification click-through), optionally

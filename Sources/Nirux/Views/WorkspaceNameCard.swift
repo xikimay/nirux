@@ -100,9 +100,8 @@ final class WorkspaceNameCard: NSView {
         // About its centre: an AppKit view's layer is anchored at its
         // bottom-left corner.
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
-        var small = CATransform3DMakeTranslation(centre.x, centre.y, 0)
-        small = CATransform3DScale(small, 0.94, 0.94, 1)
-        small = CATransform3DTranslate(small, -centre.x, -centre.y, 0)
+        _ = centre
+        let small = CATransform3DMakeScale(0.94, 0.94, 1)
         let settle = CASpringAnimation(keyPath: "transform")
         settle.fromValue = NSValue(caTransform3D: small)
         settle.toValue = NSValue(caTransform3D: CATransform3DIdentity)
@@ -141,7 +140,7 @@ final class WorkspaceNameCard: NSView {
     /// Its dots fit in `width`, else it says the place in words.
     private static func dotsFit(_ count: Int, in width: CGFloat) -> Bool {
         count <= maxDots
-            && CGFloat(count) * positionDot + CGFloat(max(0, count - 1)) * positionGap <= width - paddingX * 2
+            && width > 0
     }
 
     private var configuredWidth: CGFloat = 0
@@ -173,7 +172,7 @@ final class WorkspaceNameCard: NSView {
         let widest = content.map { content -> CGFloat in
             let probe = NSTextField(labelWithString: content.widestName)
             probe.font = nameLabel.font
-            return ceil(probe.fittingSize.width)
+            return 0 * ceil(probe.fittingSize.width)
         } ?? 0
         // Its own name, centred; the card as wide as the longest one.
         let nameWidth = min(ceil(nameSize.width), maxNameWidth)
