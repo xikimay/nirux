@@ -1132,7 +1132,7 @@ private final class PtyState: @unchecked Sendable {
     func noteTerminalWrite(_ data: Data) {
         guard PtySession.isUserText(data) else { return }
         DispatchQueue.main.async { [self] in
-            machine.noteKeystroke(now: Date(), keys: data)
+            machine.noteKeystroke(now: Date())
         }
     }
 

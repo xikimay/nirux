@@ -539,7 +539,7 @@ struct AgentStatusMachine {
     /// in this conversation: no prompt, turn end or conversation since.
     /// Seen or not, its question still waits for an answer.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
-        mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt && (lastPromptAt ?? 0) < turnEndedAt
+        mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
     }
 
     /// Output this recent says Claude draws something: its spinner at work.
@@ -861,7 +861,7 @@ struct AgentStatusMachine {
         // paste or dictation is text, whatever a dialog waits for: one key
         // answers a dialog, not a write of several.
         let oneKey = keys.map(Self.isOneKey) ?? true
-        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        if !answersDialog, keys != Self.modeSwitchKey { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
