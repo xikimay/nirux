@@ -98,7 +98,9 @@ extension CITriage {
         var order: [String] = []
         for rawLine in String(decoding: log, as: UTF8.self).split(omittingEmptySubsequences: true, whereSeparator: \.isNewline) {
             // Cheap filter first: a log is mostly passing tests.
-            guard rawLine.contains("error") || rawLine.contains("Test Case '") || rawLine.contains("signal code") else { continue }
+            guard rawLine.contains("error") || rawLine.contains("Test Case '") || rawLine.contains("signal code")
+                || rawLine.contains("Fatal error") || rawLine.contains("Precondition failed") || rawLine.contains("Assertion failed")
+                || rawLine.contains("\u{2718}") else { continue }
             let (job, line) = jobAndContent(of: bounded(rawLine))
             if readers[job] == nil {
                 readers[job] = JobLogReader()
@@ -139,10 +141,14 @@ extension CITriage {
                 if result.downloadFailures.count < 4 { result.downloadFailures.append(String(line.prefix(CITriage.maxMessageLength))) }
             } else if let signal = CITriage.signalCode(in: line) {
                 if result.signals.count < 8 { result.signals.append(signal) }
-            } else if let other = CITriage.otherError(in: line) {
-                guard seen.insert("o\u{0}\(other)").inserted, result.otherErrors.count < CITriage.maxOtherErrors else { return }
-                result.otherErrors.append(other)
+            } else if let other = CITriage.otherError(in: line) ?? CITriage.unreadError(in: line) {
+                addOther(other)
             }
+        }
+
+        private mutating func addOther(_ other: String) {
+            guard seen.insert("o\u{0}\(other)").inserted, result.otherErrors.count < CITriage.maxOtherErrors else { return }
+            result.otherErrors.append(other)
         }
 
         private mutating func add(_ name: String, _ failure: TestFailure?) {
@@ -164,8 +170,14 @@ extension CITriage {
         private mutating func noteTestCases(in line: String) {
             for marker in CITriage.testCaseMarkers(in: line) {
                 let rest = line[marker...].prefix(CITriage.maxTestCaseLength)
-                guard let close = rest.range(of: "]' "), let name = CITriage.testName(rest[..<close.lowerBound]) else { continue }
+                guard let close = rest.range(of: "]' ") else { continue }
                 let state = rest[close.upperBound...]
+                guard let name = CITriage.testName(rest[..<close.lowerBound]) else {
+                    // A test XCTest says failed, under a name the parser
+                    // can't read (a nested class, a mangled name).
+                    if state.hasPrefix("failed") { addOther("Test Case '-[" + rest[..<close.lowerBound] + "]' failed") }
+                    continue
+                }
                 if state.hasPrefix("started") {
                     if started[name] == nil {
                         started[name] = order
@@ -292,15 +304,18 @@ extension CITriage {
         )
     }
 
-    /// `Module/Foo.swift:12: Fatal error: message`: the Swift runtime's,
-    /// when a process traps.
+    /// `Module/Foo.swift:12: Fatal error: message` (or "Precondition
+    /// failed", "Assertion failed"): the Swift runtime's, when a process
+    /// traps.
     static func crash(in line: String) -> SourceError? {
-        guard let marker = line.range(of: ": Fatal error") else { return nil }
+        guard let marker = [": Fatal error", ": Precondition failed", ": Assertion failed"].lazy
+            .compactMap({ line.range(of: $0) }).first else { return nil }
         let location = line[..<marker.lowerBound]
         guard let colon = location.lastIndex(of: ":"), let lineNumber = Int(location[location.index(after: colon)...]),
               isSwiftPath(location[..<colon])
         else { return nil }
-        let message = line[marker.upperBound...].drop { $0 == ":" || $0 == " " }
+        // "Fatal error: x" keeps its kind: a precondition reads as one.
+        let message = line[line.index(marker.lowerBound, offsetBy: 2)...]
         return SourceError(
             file: repositoryPath(String(location[..<colon])), line: lineNumber, message: String(message.prefix(maxMessageLength))
         )
@@ -308,11 +323,14 @@ extension CITriage {
 
     /// An error line no other reading takes: `error: …` at the start of a
     /// line (SwiftPM's, but for the "fatalError" it ends a failed run on),
-    /// or a workflow's `##[error]…` / `::error::…` (but for the exit code
-    /// every failed step reports).
+    /// a workflow's `##[error]…` / `::error::…` (but for the exit code
+    /// every failed step reports), or a Swift Testing failure (`✘ …`): a
+    /// framework the rules don't read.
     static func otherError(in line: String) -> String? {
         let message: Substring
-        if line.hasPrefix("error: ") {
+        if line.hasPrefix("\u{2718} ") {
+            message = line.dropFirst(2)
+        } else if line.hasPrefix("error: ") {
             message = line.dropFirst(7)
             if message == "fatalError" { return nil }
         } else if line.hasPrefix("##[error]") {
@@ -324,6 +342,15 @@ extension CITriage {
         }
         if message.hasPrefix("Process completed with exit code") { return nil }
         return String(message.prefix(200))
+    }
+
+    /// A line that reports an error none of the readings above took: an
+    /// XCTest failure under a name or in a file the parser can't read, a
+    /// tool's `…: error: …`. Such a failure may be real: it keeps the job
+    /// from any verdict.
+    static func unreadError(in line: String) -> String? {
+        guard line.contains(": error: ") else { return nil }
+        return String(line.prefix(200))
     }
 
     /// `Class.testMethod` from `Module.Class testMethod`.

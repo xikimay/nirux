@@ -86,7 +86,10 @@ extension NiruxShellView {
         let center = ciTriageCenter
         guard center.isEnabled, let pullRequest = workspace.prInfo else { return }
         let now = Date().timeIntervalSince1970
-        center.updateStore { _ = $0.learn(fromPassedRunsOf: CIFailure.ownRunResults(pullRequest), now: now) }
+        let results = CIFailure.ownRunResults(pullRequest)
+        if results.contains(where: { center.store.record(of: $0.run) != nil }) {
+            center.updateStore { _ = $0.learn(fromPassedRunsOf: results, now: now) }
+        }
         let red = CIFailure.redChecks(pullRequest)
         guard !red.isEmpty else { return }
         let signature = CITriage.signature(of: red)
@@ -119,7 +122,7 @@ extension NiruxShellView {
             unread.append((CITriageInvestigation.Request(
                 run: run, pullRequest: pullRequest.number,
                 repositoryRoot: workspace.gitContext?.identity.repositoryRoot, isModelAllowed: allowed,
-                knownFlaky: store.knownFlaky(in: run.repository, now: now)
+                knownFlaky: store.knownFlaky(in: run.repository, now: now), redChecks: Set(checks.map(\.name))
             ), runSignature, checks.map(\.name)))
         }
         guard !unread.isEmpty else {
@@ -133,8 +136,8 @@ extension NiruxShellView {
             for item in unread {
                 // Turned off meanwhile: nothing more is read.
                 guard self?.ciTriageCenter.isEnabled == true else { break }
-                outcomes.append(await investigate(item.request) { [weak self] in
-                    await MainActor.run { self?.ciTriageCenter.isEnabled == true }
+                outcomes.append(await investigate(item.request) { @MainActor [weak self] in
+                    self?.ciTriageCenter.isEnabled == true
                 })
             }
             guard let self else { return }

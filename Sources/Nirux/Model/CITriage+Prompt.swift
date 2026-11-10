@@ -118,7 +118,7 @@ extension CITriage {
                 + unfinished.prefix(promptTests).joined(separator: ", ") + signal)
         }
         for crash in evidence.findings.crashes.prefix(promptFailuresPerTest) {
-            lines.append("Crash: \(clipped(crash.file, maxNameLength)):\(crash.line): Fatal error: \(clipped(crash.message, promptMessageLength))")
+            lines.append("Crash: \(clipped(crash.file, maxNameLength)):\(crash.line): \(clipped(crash.message, promptMessageLength))")
         }
         if !evidence.sources.isEmpty {
             lines.append("Source of the failing tests:")
@@ -174,12 +174,71 @@ extension CITriage {
 
     // MARK: - Sources and declarations, from the local repository
 
-    /// The lines of `func <method>(` in a Swift source, to its closing
-    /// brace (braces counted as they come: enough for a test method), 200
-    /// lines at most.
-    static func testBody(method: String, in source: String) -> [String]? {
+    /// The lines of `func <method>(` declared in the body of one of
+    /// `types` (a class, struct or extension of that name: the failing
+    /// test's class, its extensions, its superclasses), comments skipped,
+    /// to its closing brace, 200 lines at most. Nil when none of them
+    /// declares it here: a method of the same name elsewhere in the file is
+    /// another test's.
+    static func testBody(method: String, inTypes types: Set<String>, in source: String) -> [String]? {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-        guard let start = lines.firstIndex(where: { declaresFunction($0, named: method) }) else { return nil }
+        var index = 0
+        while index < lines.count {
+            // A type whose body is on its line (`class A: B {}`) declares nothing.
+            if let declared = parsedDeclaration(in: lines[index]), declared.kind == .type, types.contains(typeName(declared.text)),
+               let end = closingLine(from: index, in: lines), end > index {
+                for candidate in (index + 1)..<end where !isComment(lines[candidate]) && declaresFunction(lines[candidate], named: method) {
+                    return body(from: candidate, in: lines)
+                }
+                index = end
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// The class `className` inherits from, when `source` declares it
+    /// (`final class FooTests: BaseTests, Protocol {`): a test it runs may
+    /// be declared there.
+    static func superclass(of className: String, in source: String) -> String? {
+        for line in source.split(whereSeparator: \.isNewline) where !isComment(line) {
+            guard let declared = parsedDeclaration(in: line), declared.text.hasPrefix("class "),
+                  typeName(declared.text) == className,
+                  let name = line.range(of: className), let colon = line[name.upperBound...].firstIndex(of: ":")
+            else { continue }
+            let inherited = line[line.index(after: colon)...].drop { $0 == " " }
+                .prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
+            return inherited.isEmpty ? nil : String(inherited.split(separator: ".").last ?? inherited)
+        }
+        return nil
+    }
+
+    /// "FooTests" of "class FooTests", "extension Module.FooTests".
+    private static func typeName(_ declaration: String) -> String {
+        let name = declaration.split(separator: " ").last ?? ""
+        return String(name.split(separator: ".").last ?? name)
+    }
+
+    /// The line where the braces opened at `start` close, 20,000 lines at
+    /// most (braces in strings and comments are counted too).
+    private static func closingLine(from start: Int, in lines: [Substring]) -> Int? {
+        var depth = 0
+        var opened = false
+        for index in start..<min(lines.count, start + 20_000) {
+            for character in lines[index] {
+                if character == "{" {
+                    depth += 1
+                    opened = true
+                } else if character == "}" {
+                    depth -= 1
+                }
+            }
+            if opened, depth <= 0 { return index }
+        }
+        return nil
+    }
+
+    private static func body(from start: Int, in lines: [Substring]) -> [String] {
         var body: [String] = []
         var depth = 0
         var opened = false
@@ -196,6 +255,11 @@ extension CITriage {
             if opened, depth <= 0 { break }
         }
         return body
+    }
+
+    private static func isComment(_ line: Substring) -> Bool {
+        let text = line.drop { $0 == " " || $0 == "\t" }
+        return text.hasPrefix("//") || text.hasPrefix("/*") || text.hasPrefix("*")
     }
 
     private static func declaresFunction(_ line: Substring, named method: String) -> Bool {
@@ -235,10 +299,17 @@ extension CITriage {
     static func declarations(editedBy patch: String, in source: String) -> [String] {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         var result: [String] = []
+        func note(_ name: String?) {
+            if let name, !result.contains(name) { result.append(name) }
+        }
+        // What the changed lines declare themselves: a function added or
+        // removed is named, not its neighbour.
+        for line in patch.split(whereSeparator: \.isNewline).prefix(20 * maxChangesPerFile)
+        where (line.hasPrefix("+") || line.hasPrefix("-")) && !line.hasPrefix("+++") && !line.hasPrefix("---") {
+            if let found = parsedDeclaration(in: line.dropFirst()), found.kind != .property { note(found.text) }
+        }
         for number in changedLines(inPatch: patch).prefix(maxChangesPerFile) {
-            guard let name = enclosingDeclaration(ofLine: min(number, lines.count) - 1, in: lines), !result.contains(name)
-            else { continue }
-            result.append(name)
+            note(enclosingDeclaration(ofLine: min(number, lines.count) - 1, in: lines))
         }
         return result
     }
@@ -247,7 +318,7 @@ extension CITriage {
     /// this many lines up: a generated table has thousands of both, and
     /// names none.
     static let maxChangesPerFile = 100
-    static let maxDeclarationWalk = 400
+    static let maxDeclarationWalk = 1_500
 
     /// What the line at `index` belongs to, by indentation: a line that is
     /// itself a function or a type; else the nearest function above it
@@ -257,7 +328,12 @@ extension CITriage {
     static func enclosingDeclaration(ofLine index: Int, in lines: [Substring]) -> String? {
         guard lines.indices.contains(index) else { return nil }
         var property: String?
-        if let own = parsedDeclaration(in: lines[index]) {
+        // An attribute on its own line belongs to what follows it.
+        var own = parsedDeclaration(in: lines[index])
+        if own == nil, isAttributeLine(lines[index]) {
+            own = lines[(index + 1)...].prefix(4).lazy.compactMap { parsedDeclaration(in: $0) }.first
+        }
+        if let own {
             guard own.kind == .property else { return own.text }
             property = own.text
         }
@@ -295,6 +371,38 @@ extension CITriage {
         return first == "}" || first == ")" || first == "]"
     }
 
+    /// `@MainActor`, `@available(macOS 14, *)`… and nothing else.
+    private static func isAttributeLine(_ line: Substring) -> Bool {
+        let text = withoutAttributes(line.drop { $0 == " " || $0 == "\t" })
+        return line.contains("@") && text.allSatisfy { $0 == " " || $0 == "\t" }
+    }
+
+    /// The line without its leading attributes, parenthesized arguments
+    /// and all (`@available(macOS 14, *)`), so that their spaces split no
+    /// word.
+    private static func withoutAttributes(_ text: Substring) -> Substring {
+        var rest = text
+        while rest.first == "@" {
+            rest = rest.dropFirst().drop { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
+            if rest.first == "(" {
+                var depth = 0
+                var end = rest.startIndex
+                for index in rest.indices.prefix(400) {
+                    if rest[index] == "(" { depth += 1 }
+                    if rest[index] == ")" { depth -= 1 }
+                    if depth == 0 {
+                        end = rest.index(after: index)
+                        break
+                    }
+                }
+                guard depth == 0 else { return rest }
+                rest = rest[end...]
+            }
+            rest = rest.drop { $0 == " " || $0 == "\t" }
+        }
+        return rest
+    }
+
     /// `#if` sits at the margin whatever it is in, and a comment is in
     /// nothing.
     private static func isDirectiveOrComment(_ line: Substring) -> Bool {
@@ -322,7 +430,8 @@ extension CITriage {
     }
 
     static func parsedDeclaration(in line: Substring) -> Declaration? {
-        var words = line.prefix(2_000).split(whereSeparator: { $0 == " " || $0 == "\t" })[...]
+        var words = withoutAttributes(line.prefix(2_000).drop { $0 == " " || $0 == "\t" })
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })[...]
         guard words.count <= 64 else { return nil }
         while let first = words.first {
             // "@MainActor", "@objc(name)", "private(set)".
@@ -343,7 +452,10 @@ extension CITriage {
         }
         guard let next = words.dropFirst().first else { return nil }
         let isNameCharacter: (Character) -> Bool = { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "`" || $0 == "." }
-        let name = String(next.prefix(while: isNameCharacter).prefix(maxNameLength))
+        // An operator: `static func == (lhs:`.
+        let isOperatorCharacter: (Character) -> Bool = { "=-+!*%<>&|^~?/.".contains($0) }
+        let isOperator = head == "func" && next.first.map { isOperatorCharacter($0) && $0 != "." } == true
+        let name = String(next.prefix(while: isOperator ? isOperatorCharacter : isNameCharacter).prefix(maxNameLength))
         guard !name.isEmpty else { return nil }
         switch head {
         case "func": return Declaration(kind: .function, text: "func \(name)")

@@ -232,15 +232,16 @@ final class TurnEndClassificationTests: XCTestCase {
         }
     }
 
-    /// Which events carry the receiver's word on the account: a turn's
-    /// edges on the main thread, often enough for a `claude` started
+    /// Which events carry the receiver's word on the account: SessionStart
+    /// and Stop on the main thread, often enough for a `claude` started
     /// before Nirux.
     func testATurnsEdgesOnTheMainThreadReportTheAccount() throws {
         func reports(_ hook: String, extra: [String: Any] = [:]) throws -> Bool {
             let payload = ["hook_event_name": hook, "session_id": "s"].merging(extra) { $1 }
             return try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 0)).reportsAccount
         }
-        for hook in ["SessionStart", "UserPromptSubmit", "Stop"] { XCTAssertTrue(try reports(hook), hook) }
+        for hook in ["SessionStart", "Stop"] { XCTAssertTrue(try reports(hook), hook) }
+        XCTAssertFalse(try reports("UserPromptSubmit"), "Claude waits on that hook: no file reads there")
         XCTAssertFalse(try reports("PreToolUse", extra: ["tool_name": "Bash"]), "every tool call would read the settings files")
         XCTAssertFalse(try reports("Stop", extra: ["agent_id": "sub"]), "a subagent's")
         let codex = try XCTUnwrap(AgentHookEvent(kind: .codex, payload: ["type": "agent-turn-complete"], env: [:], now: 0))

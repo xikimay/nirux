@@ -39,44 +39,54 @@ the log, in this order:
    or the runner was lost (its check run's annotations). Any other reason
    (a `runs-on` or matrix GitHub couldn't evaluate, a job cancelled by
    hand) gives no verdict: the workflow is the pull request's too.
-2. Compile errors are **real**; so is a crash (`Fatal error`) in a file the
-   pull request changes.
+2. Compile errors are **real**; so is a crash (`Fatal error`, `Precondition
+   failed`, `Assertion failed`) in a file the pull request changes.
 3. No test failed and a dependency download did ("failed downloading …
    required by binary target"): **flaky**, unless the pull request changes
    `Package.swift` or `Package.resolved`, or the attempt before failed the
    same way.
 4. A test fails that failed in the attempt before, in a job that attempt
    ran too: **real**. (A job GitHub carried over keeps its id: its failure
-   is the same one, not a second.)
+   is the same one, not a second.) A job that failed then and left nothing
+   the parser reads (a hang cancelled at its timeout) counts as unreadable.
 5. The pull request changes the file of a failing test: the one of its
    class's name, or the one a failure was reported in: **real**.
 6. Every failing test is one Nirux saw fail and then pass on a rerun of the
-   same commit: **flaky**.
+   same commit, and nothing crashed: **flaky**.
 7. Any other failing test is **open**.
 
 A test XCTest reports failed counts even when none of its failure lines
-could be read. Rules 3 and 6 never fire in a job whose log holds an error
-no rule reads (SwiftPM's `error: …`, a workflow's `##[error]…`, a signal
-with no test left unfinished), nor when the attempt before couldn't be
-read: what they can't see may be real. A run is flaky only when each red
+could be read. A job whose log holds an error no rule reads (SwiftPM's
+`error: …`, a workflow's `##[error]…`, any `…: error: …` line the parser
+can't take apart, such as a failure of a nested class or in a file that
+isn't Swift, a Swift Testing failure, a signal with no test left
+unfinished), or whose attempt before couldn't be read, gets no verdict and
+goes to no model: what the rules can't see, the model wouldn't be shown
+either. A run is flaky only when each red
 job is, and gets no verdict when one of them gets none; a pull request is
 flaky only when each red run is. A red check that is not an Actions run of
 the pull request's repository (a commit status, another repository) can't
-be read, so the failure stays plain.
+be read, so the failure stays plain. When the run's red jobs are no longer
+the checks the pull request showed red (one was rerun meanwhile), the run
+is read again later rather than judged by the others.
 
 **Then a model, on what the rules leave open**: failing tests the pull
 request doesn't edit. Claude Sonnet, through a headless `claude -p`, is
 given the failing tests with their messages, their source, any crash line,
 and the files the pull request changes with the function, property or type
 each change sits in (read from the workspace's repository, at the run's
-commit, in one `git cat-file --batch`). It answers one sentence, then a
-last line holding FLAKY, REAL or UNSURE and nothing else; anything else is
-no answer. The sentence is the reason shown. A failing test that isn't at
-the pull request's commit came with the base branch (the run tests their
-merge): no verdict, and nothing goes to the model.
+commit, in one `git cat-file --batch`). A test's source is the method in
+its own class's body, an extension of it, or a superclass (a mutant
+subclass runs its parent's tests), comments skipped. It answers one
+sentence, then a last line holding FLAKY, REAL or UNSURE and nothing else;
+anything else is no answer. The sentence is the reason shown. A failing
+test that can't be found at the pull request's commit (one the base branch
+brought, the run testing their merge) gets no verdict for now and is asked
+for again later.
 
 **What Nirux learns.** It remembers each run it triaged, with its red checks
-and the tests that failed. When each of those checks passes on a later
+and the tests that failed (not those merely left running when a job
+stopped: a timeout stops every test in flight). When each of those checks passes on a later
 attempt of the same run (a rerun keeps the run, on the same commit), those
 tests failed and then passed with no change: they go on the repository's
 flaky list, which rule 6 reads. A check another run of the workflow took
@@ -124,8 +134,9 @@ used.
 
 - **XCTest and Swift builds only.** The rules were measured on those logs;
   another test framework's failures are not recognized, so its jobs get no
-  verdict (and neither does a run that holds one). Each framework needs its
-  own measurement.
+  verdict (and neither does a run that holds one); a Swift Testing failure
+  in an XCTest job keeps that job from any verdict. Each framework needs
+  its own measurement.
 - **A test's first flake** is unknown to rule 6; only the model can call it.
   A test on the flaky list stays there whatever made it fail next time.
 - **A run read when it couldn't be** (`gh` signed out, the model resting,
@@ -149,21 +160,25 @@ as for the turn-end option:
 
 - it runs on a Claude subscription only. An API key behind a run stops it
   before the model is called; extra usage rests every model run of Nirux
-  until the plan's limit resets (an hour at least, a week at most), kept in
-  the state directory across relaunches;
+  until the plan's limit resets (an hour at least, a day at most: the
+  turn-end option alerts at every turn end meanwhile), kept in the state
+  directory across relaunches;
 - it runs only for a repository one of whose Claude Code agents runs on
   that same account, in a column of the workspace and a folder of that
-  repository. The hook receiver says so on each SessionStart,
-  UserPromptSubmit and Stop (`AgentHookEvent.onNiruxAccount`), by the rule
+  repository. The hook receiver says so on each SessionStart and Stop
+  (`AgentHookEvent.onNiruxAccount`; not on UserPromptSubmit, which Claude
+  waits for before it goes on), by the rule
   that decides whether a final message may be read: no account variable in
   the agent's environment (a cloud provider, a gateway, an API key or a
-  token), the configuration folder of a running Nirux, no settings file
+  token, workload identity federation, a named profile), the configuration
+  folder of a running Nirux, no settings file
   that chooses another account. A workspace without such an agent (a
   shell, Codex, a `claude` on an API key or a cloud provider, one in
   another repository, one that hasn't said yet) gets the rules only;
 - the run sees its input and nothing else: no tools, MCP servers, hooks,
   settings or instruction files. `git` reads only what the local repository
-  has (`GIT_NO_LAZY_FETCH`).
+  has (`GIT_NO_LAZY_FETCH`); in a partial clone, which older git would fill
+  on read, the model gets names only.
 
 ## Setting
 

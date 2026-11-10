@@ -56,6 +56,17 @@ struct AgentHookEvent: Codable, Equatable {
     let toolName: String?
     let toolSummary: String?
     let toolKey: String?
+    /// On the end of a Claude tool call (PostToolUse*), what tells an agent
+    /// going in circles (`AgentCirclingWatch`): how the call ended when it
+    /// didn't simply run (an `AgentToolEnd` raw value; a string, so an app
+    /// older than its receiver skips an end it doesn't know, not the whole
+    /// event), and the program a shell command ran ("swift build"; see
+    /// `AgentShellCommand`), and for a command that counts by its exact
+    /// text (nothing names it, or `python3 x.py`), what tells its text from
+    /// another's (`repeatKey`). Nil from older receivers too.
+    let toolEnd: String?
+    let toolFamily: String?
+    let toolCommandKey: String?
     /// Subagent the event came from (Claude `agent_id`); nil on the main
     /// thread.
     let agentID: String?
@@ -90,7 +101,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
     /// and when the receiver or the app drops it (see `TurnEndMarker`).
     var finalMessage: String?
-    /// On a main-thread SessionStart, UserPromptSubmit or Stop: whether
+    /// On a main-thread SessionStart or Stop: whether
     /// this `claude` runs on the login Nirux's own `claude -p` uses
     /// (`TurnEndText.agentOnNiruxAccount`), which only the receiver can
     /// tell, from the agent's environment. The CI failure triage sends
@@ -153,6 +164,18 @@ struct AgentHookEvent: Codable, Equatable {
                 toolSummary = nil
                 toolKey = nil
             }
+            if let toolName, name == .postToolUse {
+                let command = AgentToolInput.shellTools.contains(toolName)
+                    ? ((payload["tool_input"] as? [String: Any])?["command"] as? String).map(AgentShellCommand.init)
+                    : nil
+                toolEnd = AgentToolOutcome.end(hookName: hookName, payload: payload, command: command)?.rawValue
+                toolFamily = command?.family
+                toolCommandKey = command.flatMap { $0.countsByText ? $0.repeatKey : nil }
+            } else {
+                toolEnd = nil
+                toolFamily = nil
+                toolCommandKey = nil
+            }
             transcriptPath = Self.carriesTranscriptPath(name)
                 ? (payload["transcript_path"] as? String).flatMap(Self.validTranscriptPath)
                 : nil
@@ -203,6 +226,9 @@ struct AgentHookEvent: Codable, Equatable {
             toolName = nil
             toolSummary = nil
             toolKey = nil
+            toolEnd = nil
+            toolFamily = nil
+            toolCommandKey = nil
             agentID = nil
             notificationType = nil
             errorKind = nil
@@ -215,11 +241,13 @@ struct AgentHookEvent: Codable, Equatable {
         }
     }
 
-    /// The main-thread events of a turn's edges, where the receiver says
-    /// which account the agent runs on (`onNiruxAccount`): often enough for
-    /// a `claude` started before Nirux, which sends no SessionStart.
+    /// The main-thread SessionStart and Stop, where the receiver says which
+    /// account the agent runs on (`onNiruxAccount`): a `claude` started
+    /// before Nirux, which sends no SessionStart, says so at its first turn
+    /// end. Not UserPromptSubmit: Claude waits for that hook before it goes
+    /// on, and the check reads several files.
     var reportsAccount: Bool {
-        kind == .claude && agentID == nil && [.sessionStart, .userPromptSubmit, .stop].contains(name)
+        kind == .claude && agentID == nil && [.sessionStart, .stop].contains(name)
     }
 
     /// What only the receiver can tell, from the agent's environment: on
@@ -284,6 +312,9 @@ struct AgentHookEvent: Codable, Equatable {
         toolName: String? = nil,
         toolSummary: String? = nil,
         toolKey: String? = nil,
+        toolEnd: String? = nil,
+        toolFamily: String? = nil,
+        toolCommandKey: String? = nil,
         agentID: String? = nil,
         notificationType: String? = nil,
         errorKind: String? = nil,
@@ -312,6 +343,9 @@ struct AgentHookEvent: Codable, Equatable {
         self.toolName = toolName
         self.toolSummary = toolSummary
         self.toolKey = toolKey
+        self.toolEnd = toolEnd
+        self.toolFamily = toolFamily
+        self.toolCommandKey = toolCommandKey
         self.agentID = agentID
         self.notificationType = notificationType
         self.errorKind = errorKind

@@ -21,7 +21,9 @@ struct CITriageStore: Codable, Equatable {
         /// The names of those checks: the run passes once each of them
         /// does.
         var redChecks: [String]
-        /// The failing tests of that attempt.
+        /// The tests that failed in that attempt (not the ones merely left
+        /// unfinished: a job cancelled at its timeout stops every test that
+        /// was running, flaky or not).
         var tests: [String]
         /// Those of the run's earlier attempts.
         var earlierTests: [String] = []
