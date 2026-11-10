@@ -41,7 +41,10 @@ enum TerminalConfigBuilder {
         "cursor-style = block",
         "cursor-style-blink = true",
         "font-size = 14",
-        "font-thicken = true"
+        "font-thicken = true",
+        // Selecting copies to the clipboard, as with libghostty-spm 1.3.1
+        // (Ghostty's former macOS default); Ghostty 1.4's default is none.
+        "copy-on-select = clipboard"
     ]
     static let niruxColors = [
         "background = 212121",
@@ -343,15 +346,31 @@ enum TerminalAppearance {
     /// opening terminals doesn't re-validate an unchanged config.
     private static var lastSanitized: (input: [TerminalConfigBuilder.UserLine], contents: String)?
 
-    /// Lines added at the end of each new terminal's config: none in the
-    /// app. The tests turn vsync off (see their TestBootstrap).
-    static var appendedLines: [String] = []
+    /// `Nirux --check-terminal-runtime`: 0 when a terminal's controller
+    /// loads with Nirux's own config and libghostty-spm's resources come
+    /// from inside the app. It traps instead when they are missing; on the
+    /// build machine they could come from the build folder, which no other
+    /// Mac has.
+    static func checkRuntime() -> Int32 {
+        func fail(_ reason: String) -> Int32 {
+            FileHandle.standardError.write(Data("terminal runtime: \(reason)\n".utf8))
+            return 1
+        }
+        let app = Bundle.main.bundleURL.resolvingSymlinksInPath().path + "/"
+        guard let resources = GhosttyRuntimeResources.directoryURL?.resolvingSymlinksInPath().path else {
+            return fail("libghostty-spm's resources not found")
+        }
+        guard resources.hasPrefix(app) else { return fail("libghostty-spm's resources come from outside the app: \(resources)") }
+        let controller = TerminalController(configSource: .generated(TerminalConfigBuilder.render([])), theme: TerminalTheme())
+        if let issue = controller.lastConfigurationIssue { return fail(issue) }
+        print("terminal runtime: ok (\(resources))")
+        return 0
+    }
 
     static func makeController() -> TerminalController {
-        let appended = appendedLines.map { $0 + "\n" }.joined()
         // An empty theme: libghostty-spm's default one would be appended
         // after the user's colors and override them.
-        let controller = TerminalController(configSource: .generated(currentConfig() + appended), theme: TerminalTheme())
+        let controller = TerminalController(configSource: .generated(currentConfig()), theme: TerminalTheme())
         guard let issue = controller.lastConfigurationIssue else { return controller }
         NSLog("[GhosttyConfig] terminal config rejected: %@", issue)
         // A failure that isn't the config's (e.g. writing libghostty-spm's
@@ -360,7 +379,7 @@ enum TerminalAppearance {
         // libghostty-spm fell back to its own defaults: use Nirux's look
         // instead, and validate the config again for the next terminal.
         lastSanitized = nil
-        return TerminalController(configSource: .generated(TerminalConfigBuilder.render([]) + appended), theme: TerminalTheme())
+        return TerminalController(configSource: .generated(TerminalConfigBuilder.render([])), theme: TerminalTheme())
     }
 
     static func currentConfig(

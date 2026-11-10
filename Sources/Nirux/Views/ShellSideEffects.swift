@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyTerminal
 
 /// What shell commands do outside Nirux's own window: type an agent's
 /// launch line into a terminal, write the agent skills into the home
@@ -23,6 +24,11 @@ struct ShellSideEffects {
     /// command (see `DeferredAgentLaunch`).
     var startRestoredAgent: @MainActor (_ column: ColumnState, _ command: String) -> Void = { column, command in
         column.startShell(command: command)
+    }
+
+    /// Tells a terminal the display it is on (see `TerminalDisplayID`).
+    var sendTerminalDisplay: @MainActor (_ session: InMemoryTerminalSession, _ display: CGDirectDisplayID) -> Void = {
+        TerminalDisplayID.send($1, to: $0)
     }
 
     /// The home folder: agent skills install into it, the Getting Started
