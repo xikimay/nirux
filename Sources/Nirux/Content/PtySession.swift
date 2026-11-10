@@ -380,6 +380,13 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteSeen()
     }
 
+    /// Types a prompt the user's click sends into this agent (see
+    /// `AgentStatusMachine.notePromptFromUser`).
+    func typePromptFromUser(_ terminalInput: String) {
+        state.machine.notePromptFromUser()
+        sendRaw(terminalInput)
+    }
+
     /// See `AgentStatusMachine.awaitsVerdict`.
     func awaitsTurnEndVerdict(_ request: TurnEndRequest) -> Bool {
         state.machine.awaitsVerdict(request)
