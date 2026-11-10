@@ -256,6 +256,10 @@ final class SidebarView: NSView {
     /// actually would.
     private var lastRenderSignature: Int?
 
+    /// When a task's row opens (`clock`), by workspace, while its birth
+    /// plays: with a spring (see SidebarView+Birth).
+    var rowOpensAt: [String: CFTimeInterval] = [:]
+
     /// The clock the rows' movements are timed from; tests set it.
     var clock: () -> CFTimeInterval = { CACurrentMediaTime() }
 

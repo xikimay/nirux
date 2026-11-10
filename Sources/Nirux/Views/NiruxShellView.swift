@@ -162,6 +162,9 @@ final class NiruxShellView: NSView {
     /// ⌘N sheets closed while their task starts, set aside for a new one:
     /// each comes back if its start fails.
     var startingTaskPanels: [NewTaskPanel] = []
+    /// The picture of the ⌘N sheet whose task is opening, until its fold
+    /// plays (see NiruxShellView+TaskBirth).
+    var pendingTaskSheet: TaskSheetPicture?
     var newSpacePanel: NewSpacePanel?
     /// The banner of a workspace that opened in the default space (see
     /// NiruxShellView+SpaceRouting), and a count that tells a pending
