@@ -1128,6 +1128,32 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
     }
 
+    /// A quick answer goes in as the user's own prompt (no alert for the
+    /// turn end it answers), once: after it, that turn end is behind.
+    func testQuickAnswerGoesInOnceAsTheUsersPrompt() throws {
+        let (center, _, column, request, alerts) = try turnEndColumn()
+        let pty = try XCTUnwrap(column.pty)
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                   for: request, agentUUID: uuid)
+        XCTAssertEqual(alerts.value.count, 1)
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        XCTAssertFalse(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt - 1, foreground: claude), "another turn end's")
+        XCTAssertTrue(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt, foreground: claude))
+        XCTAssertNil(pty.agentQuestion(foreground: claude), "answered")
+        XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
+        XCTAssertFalse(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt, foreground: claude), "once")
+    }
+
+    /// A notification's Reply carries the turn end it answers.
+    func testNotificationReplyNamesItsTurnEnd() {
+        let target = NiruxNotifier.QuickReplyTarget(agentUUID: "A-1", turnEndedAt: 1_005.5)
+        var info: [AnyHashable: Any] = ["workspaceID": "w", "columnIndex": 2]
+        for (key, value) in target.userInfo { info[key] = value }
+        XCTAssertEqual(NiruxNotifier.QuickReplyTarget(userInfo: info), target)
+        XCTAssertNil(NiruxNotifier.QuickReplyTarget(userInfo: ["workspaceID": "w", "agentUUID": "A-1"]), "no turn end")
+    }
+
     func testClassifierVerdictReachesTheColumn() async throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
         let classifier = FakeClassifier(verdict: .asks(nil))

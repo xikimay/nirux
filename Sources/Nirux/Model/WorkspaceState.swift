@@ -623,10 +623,20 @@ extension WorkspaceState {
                     workspaceTitle: self.title,
                     columnIndex: columnIndex,
                     processName: processName,
-                    reason: reason
+                    reason: reason,
+                    quickReply: col.flatMap { Self.quickReplyTarget(of: $0, reason: reason) }
                 )
             }
         }
+    }
+
+    /// A question the agent's turn asked, still waiting: its notification
+    /// takes a reply (`NiruxNotifier.QuickReplyTarget`).
+    static func quickReplyTarget(of column: ColumnState, reason: AgentAttentionReason?) -> NiruxNotifier.QuickReplyTarget? {
+        guard case .askedInReply = reason, let agentUUID = column.agentUUID, let pty = column.pty,
+              let question = pty.agentQuestion(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        else { return nil }
+        return NiruxNotifier.QuickReplyTarget(agentUUID: agentUUID, turnEndedAt: question.since)
     }
 
     private func setupLinkOpening(for col: ColumnState) {
