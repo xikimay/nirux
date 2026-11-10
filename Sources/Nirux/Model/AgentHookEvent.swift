@@ -162,7 +162,7 @@ struct AgentHookEvent: Codable, Equatable {
                     : nil
                 toolEnd = AgentToolOutcome.end(hookName: hookName, payload: payload, command: command)?.rawValue
                 toolFamily = command?.family
-                toolCommandKey = command.flatMap { $0.family == nil ? $0.repeatKey : nil }
+                toolCommandKey = command.flatMap { $0.family == nil ? $0.repeatKey + String(describing: (payload["tool_input"] as? [String: Any])?["description"]) : nil }
             } else {
                 toolEnd = nil
                 toolFamily = nil

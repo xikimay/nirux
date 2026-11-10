@@ -767,7 +767,7 @@ struct AgentStatusMachine {
         if case .some(.none) = end { return }
         let isShell = AgentToolOutcome.shellTools.contains(tool)
         circling.noteCallEnded(
-            key: isShell ? event.toolFamily ?? event.toolCommandKey.map { "\(tool) \($0)" } : tool,
+            key: isShell ? event.toolFamily ?? tool : tool,
             name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
         )
     }

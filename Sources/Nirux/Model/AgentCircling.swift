@@ -31,7 +31,7 @@ enum AgentCirclingHint: Hashable, Sendable {
         case .hung(let count):
             return "Stuck? · \(count) timeouts"
         case .failing(let name, let count):
-            return "Stuck? · \(Self.display(name)) failed \(count)×"
+            return "May be stuck · \(Self.display(name)) failed \(count)×"
         }
     }
 
@@ -115,7 +115,6 @@ struct AgentCirclingWatch: Equatable, Sendable {
             if callsSinceHang >= Self.callsThatClearHangs { hungCount = 0 }
         }
         for index in streaks.indices where streaks[index].key != key { streaks[index].callsSince += 1 }
-        streaks.removeAll { $0.callsSince >= Self.callsThatEndFailures }
         guard let key else { return }
         let index = streaks.firstIndex { $0.key == key }
         guard end == .failed else {
@@ -257,7 +256,7 @@ struct AgentShellCommand: Equatable, Sendable {
             // A sleep after the command (`./start.sh & sleep 3; curl …`), or
             // after clearing its way (`pkill -f app; sleep 1; swift run`), or
             // written into a file, doesn't make it a wait: that is a try.
-            if name == "sleep", !isNamed && !hasCleared || isLoop { waits = true }
+            if name == "sleep", !isNamed || isLoop { waits = true }
             if arguments.contains("--mission") { waits = true }
             if Self.clearsTheWay.contains(name) { hasCleared = true }
             if Self.housekeeping.contains(name) {
@@ -309,7 +308,7 @@ struct AgentShellCommand: Equatable, Sendable {
     /// that follows is the one to name. Alone, they name themselves.
     private static let housekeeping: Set<String> = clearsTheWay.union([
         "cd", "pushd", "popd", "export", "set", "unset", "source", ".", "echo", "printf", "mkdir", "true", ":", "sleep",
-        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare", "exit", "return", "break", "continue"
+        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare", "return", "break", "continue"
     ])
     private static let clearsTheWay: Set<String> = ["rm", "touch", "chmod", "kill", "pkill", "killall"]
     /// The same for a program's subcommand: `git add -A && git commit`.
