@@ -296,13 +296,21 @@ extension NiruxShellView {
 
     func focusWorkspace(_ dir: VDir) {
         let delta = dir == .up ? -1 : 1
+        let before = activeWorkspace
         guard workspaceStore.selectAdjacentWorkspace(delta: delta) != nil else { return }
+        // The card, if up, keeps through the relayout: its words change.
+        workspaceSwitch.isAnnouncing = activeWorkspace !== before
         refreshAfterWorkspaceSelection(animated: true)
+        workspaceSwitch.isAnnouncing = false
+        if activeWorkspace !== before { announceWorkspaceSwitch() }
     }
 
     func switchToWorkspace(_ index: Int, editorTakesKeyboard: Bool = true) {
+        let space = activeProfileID
         guard workspaceStore.selectWorkspace(at: index) else { return }
-        refreshAfterWorkspaceSelection(animated: true, editorTakesKeyboard: editorTakesKeyboard)
+        // Into another space: its workspace shows at once, as when a close
+        // changes the space, not slid in from the last space's place.
+        refreshAfterWorkspaceSelection(animated: activeProfileID == space, editorTakesKeyboard: editorTakesKeyboard)
     }
 
     /// Focus a workspace by ID (notification click-through), optionally
@@ -588,24 +596,16 @@ extension NiruxShellView {
     func layoutWorkspaceStrip(_ layout: StripLayout) {
         let viewportW = layout.viewportW
         let rowH = layout.rowH
-        let targetY = layout.targetY
         let animated = layout.animated
 
         let oldY = verticalStrip.frame.origin.y
+        let leaving = workspaceOnScreenBeforeLayout()
         applyWorkspaceFrames(layout)
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
-        // Animated path: add a vertical slide over the direct frame change.
-        if animated, let layer = verticalStrip.layer, oldY != targetY {
-            let anim = CABasicAnimation(keyPath: "transform.translation.y")
-            anim.fromValue = oldY - targetY
-            anim.toValue = 0
-            anim.duration = 0.3
-            anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            anim.isRemovedOnCompletion = true
-            layer.add(anim, forKey: "wsSlide")
-        }
+        // Animated path: a vertical slide over the direct frame change.
+        slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
         // Focus border and header icon. The agents' lights lie over the
         // columns, in views of their own (NiruxShellView+AgentLights).

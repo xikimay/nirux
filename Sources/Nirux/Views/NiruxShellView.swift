@@ -26,6 +26,8 @@ final class NiruxShellView: NSView {
     /// What the columns' lights and the edge glows show (see
     /// NiruxShellView+AgentLights).
     let agentLights = AgentLightState()
+    let workspaceSwitch = WorkspaceSwitchState()
+    let workspaceNameCard = WorkspaceNameCard()
     /// Settings › General › "Animate the interface": off, states show
     /// without moving.
     var animatesInterface = NiruxShellView.currentAnimatesInterface() {
@@ -227,6 +229,7 @@ final class NiruxShellView: NSView {
         addSubview(edgeGlowRight)
         addSubview(edgeGlowTop)
         addSubview(edgeGlowBottom)
+        addSubview(workspaceNameCard)
         addSubview(statusBar)
         statusBar.onContentChange = { [weak self] in self?.relayout(animated: false) }
 
@@ -394,6 +397,7 @@ final class NiruxShellView: NSView {
         )
         applyChromeLayout(frames, animated: animated)
         layoutToast(frames)
+        layOutWorkspaceCard(in: frames.viewport)
 
         // Each workspace fills the viewport; the strip stacks them and is
         // positioned so the active workspace is the one on screen.
@@ -421,15 +425,18 @@ final class NiruxShellView: NSView {
     /// surface's CVDisplayLink would still hit `waitUntilCompleted` on the
     /// main thread, which freezes the app once a few Claude/Codex sessions
     /// pile up. Only the active workspace is visible.
-    private func syncTerminalOcclusion() {
+    func syncTerminalOcclusion() {
         // A minimized or fully covered window reports itself non-visible via
         // occlusionState; without this AND every surface keeps drawing.
-        let windowVisible = window?.occlusionState.contains(.visible) ?? true
+        let windowVisible = window.map { sideEffects.windowShows($0) } ?? true
         for (index, workspace) in workspaces.enumerated() {
             let isInActiveProfile = workspace.profileID == activeProfileID
-            let visible = windowVisible && isInActiveProfile && index == activeWSIndex
+            // The one the strip is leaving too, until it has left (see
+            // NiruxShellView+WorkspaceSwitch).
+            let visible = windowVisible && isInActiveProfile
+                && drawsTerminals(of: workspace, isActive: index == activeWSIndex)
             for col in workspace.columns {
-                col.terminalView?.setSurfaceVisible(visible)
+                sideEffects.setSurfaceVisible(col, visible)
             }
         }
     }
