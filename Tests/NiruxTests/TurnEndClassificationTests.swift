@@ -797,6 +797,7 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(quotes("ok?", in: "Can you take a look?"), "a piece of a word")
         XCTAssertFalse(quotes("t merge?", in: "Can't merge?"), "after an apostrophe")
         XCTAssertFalse(quotes("Merge?", in: "re-Merge?"), "after a hyphen")
+        XCTAssertFalse(quotes("merge?", in: "/merge?"), "a piece of a path")
         XCTAssertFalse(quotes("Should I delete config.", in: "Should I delete config.json?"), "a period inside a word")
         XCTAssertFalse(quotes("Should I delete config", in: "Should I delete config.json?"), "before a period inside a word")
         XCTAssertTrue(quotes("Want me to merge it", in: "Fixed.\n\nWant me to merge it"), "at the paragraph's end")
