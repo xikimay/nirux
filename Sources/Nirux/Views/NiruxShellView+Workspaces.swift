@@ -608,8 +608,9 @@ extension NiruxShellView {
         let size = workspace.size(of: column, viewportWidth: viewport.width, height: viewport.height)
         // Built hidden, whatever layout ran last.
         column.terminalView?.setSurfaceVisible(false)
-        column.view.frame = NSRect(origin: column.view.frame.origin, size: size)
-        column.layoutWithHeader(width: size.width, height: size.height)
+        workspace.containerView.frame = NSRect(origin: .zero, size: viewport)
+        workspace.layoutAndScroll(viewportWidth: viewport.width, height: viewport.height, animated: false)
+        _ = size
     }
 
     /// In another space than the one on screen, and not closing.
