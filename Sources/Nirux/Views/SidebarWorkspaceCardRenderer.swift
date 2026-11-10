@@ -129,7 +129,11 @@ final class SidebarWorkspaceCardRenderer {
         let mark = buildMark(layout.summary.mark, centerY: rowY + Metrics.titleRowHeight / 2)
         // A task's full row (see `showsTurnEnds`), when its mark is the
         // grey dot.
-        if let mark, layout.summary.mark == .idle { buildCheck(over: mark, startedAt: turnEndedAt, holds: true) }
+        // A turn's end on a task's full row (see `showsTurnEnds`), over its
+        // grey dot, or over the ring of the checks its push started.
+        if let mark, Self.drawsTurnEnd(over: layout.summary.mark) {
+            buildCheck(over: mark, startedAt: turnEndedAt, holds: true)
+        }
 
         var maxX = layout.contentMaxX
         if let trailing = trailingLabel() {
@@ -213,6 +217,8 @@ final class SidebarWorkspaceCardRenderer {
             let icon = SidebarImageView(image: SidebarRenderer.symbol(name, color: color, pointSize: 11))
             icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
             icon.setAccessibilityElement(false)
+            // A layer of its own: a check drawn over it hides it meanwhile.
+            icon.wantsLayer = true
             append(icon)
             return nil
         }
@@ -227,8 +233,7 @@ final class SidebarWorkspaceCardRenderer {
             return nil
         case .merged: return symbol(Theme.Symbol.merged, Theme.Color.done, nil)
         case .checksRunning:
-            buildChecksRing(center: NSPoint(x: centerX, y: centerY))
-            return nil
+            return buildChecksRing(center: NSPoint(x: centerX, y: centerY))
         case .needsYou: color = Theme.Color.waiting
         case .error: color = Theme.Color.error
         case .working: color = Theme.Color.working
@@ -248,6 +253,12 @@ final class SidebarWorkspaceCardRenderer {
     /// Lead's row has no grey dot.
     static func showsTurnEnds(_ workspace: WorkspaceInfo) -> Bool {
         !workspace.isLead && !workspace.showsCompactRow
+    }
+
+    /// The marks a turn's end draws its check over: the grey dot, and the
+    /// ring of checks that run (an agent that pushed, then stopped).
+    static func drawsTurnEnd(over mark: SidebarRowMark) -> Bool {
+        mark == .idle || mark == .checksRunning
     }
 
     /// The rail's working badge breathes, in phase with every other one
@@ -322,8 +333,9 @@ final class SidebarWorkspaceCardRenderer {
 
     /// The pull request's checks run: a grey ring turns where the row's
     /// mark is, in step with every other one. A still dashed ring while
-    /// rows may not move.
-    private func buildChecksRing(center: NSPoint) {
+    /// rows may not move, and for an archived task, whose pull request
+    /// isn't read again: nothing turns there for ever.
+    private func buildChecksRing(center: NSPoint) -> NSView {
         let size: CGFloat = 12
         let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
         host.identifier = Self.checksRingID
@@ -335,7 +347,7 @@ final class SidebarWorkspaceCardRenderer {
         ring.strokeColor = Theme.Color.textSecondary.cgColor
         ring.lineWidth = 1.5
         ring.lineCap = .round
-        if animates {
+        if animates, !workspace.isInactive {
             // One arc going round.
             ring.strokeEnd = 0.37
             let turn = CABasicAnimation(keyPath: "transform.rotation.z")
@@ -356,6 +368,7 @@ final class SidebarWorkspaceCardRenderer {
         }
         host.layer?.addSublayer(ring)
         append(host)
+        return host
     }
 
     /// At the merge, one sweep of light crosses the row. Timed from the

@@ -232,7 +232,12 @@ final class SidebarView: NSView {
         if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
         let spacesChanged = profiles != lastProfiles
         // Before the rows change: what happened to them, in the same space.
-        if !spaceChanged, !lastProfiles.isEmpty || !lastInfos.isEmpty { noteRowMoments(from: lastInfos, to: workspaces) }
+        if spaceChanged {
+            // Another space's rows: what played for the last one stops.
+            forgetRowMoments()
+        } else if !lastProfiles.isEmpty || !lastInfos.isEmpty {
+            noteRowMoments(from: lastInfos, to: workspaces)
+        }
         lastProfiles = profiles
         lastInfos = workspaces
         if spacesChanged { NotificationCenter.default.post(name: Self.spacesDidChangeNotification, object: self) }
@@ -297,7 +302,7 @@ final class SidebarView: NSView {
         var draws = false
         for row in lastInfos where workspaceIDs.contains(row.id) && showsTurnEnds(on: row) {
             switch row.rowSummary.mark {
-            case .idle:
+            case let mark where SidebarWorkspaceCardRenderer.drawsTurnEnd(over: mark):
                 turnEndNotedAt[row.id] = now
                 draws = true
             case .working:
@@ -331,7 +336,7 @@ final class SidebarView: NSView {
             let mark = row.flatMap { showsTurnEnds(on: $0) ? $0.rowSummary.mark : nil }
             if mark == .working, isInTime { continue }
             owedTurnEnds[id] = nil
-            if mark == .idle, isInTime { turnEndNotedAt[id] = now }
+            if let mark, SidebarWorkspaceCardRenderer.drawsTurnEnd(over: mark), isInTime { turnEndNotedAt[id] = now }
         }
     }
 
