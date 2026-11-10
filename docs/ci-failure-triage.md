@@ -57,10 +57,12 @@ the log, in this order:
 
 A test XCTest reports failed counts even when none of its failure lines
 could be read. A job whose log holds an error no rule reads (SwiftPM's
-`error: …`, a workflow's `##[error]…`, a Swift Testing failure, a signal
-with no test left unfinished), or whose attempt before couldn't be read,
-gets no verdict and goes to no model: what the rules can't see, the model
-wouldn't be shown either. A run is flaky only when each red
+`error: …`, a workflow's `##[error]…`, any `…: error: …` line the parser
+can't take apart, such as a failure of a nested class or in a file that
+isn't Swift, a Swift Testing failure, a signal with no test left
+unfinished), or whose attempt before couldn't be read, gets no verdict and
+goes to no model: what the rules can't see, the model wouldn't be shown
+either. A run is flaky only when each red
 job is, and gets no verdict when one of them gets none; a pull request is
 flaky only when each red run is. A red check that is not an Actions run of
 the pull request's repository (a commit status, another repository) can't
@@ -73,14 +75,18 @@ request doesn't edit. Claude Sonnet, through a headless `claude -p`, is
 given the failing tests with their messages, their source, any crash line,
 and the files the pull request changes with the function, property or type
 each change sits in (read from the workspace's repository, at the run's
-commit, in one `git cat-file --batch`). It answers one sentence, then a
-last line holding FLAKY, REAL or UNSURE and nothing else; anything else is
-no answer. The sentence is the reason shown. A failing test that isn't at
-the pull request's commit came with the base branch (the run tests their
-merge): no verdict, and nothing goes to the model.
+commit, in one `git cat-file --batch`). A test's source is the method in
+its own class's body, an extension of it, or a superclass (a mutant
+subclass runs its parent's tests), comments skipped. It answers one
+sentence, then a last line holding FLAKY, REAL or UNSURE and nothing else;
+anything else is no answer. The sentence is the reason shown. A failing
+test that can't be found at the pull request's commit (one the base branch
+brought, the run testing their merge) gets no verdict for now and is asked
+for again later.
 
 **What Nirux learns.** It remembers each run it triaged, with its red checks
-and the tests that failed. When each of those checks passes on a later
+and the tests that failed (not those merely left running when a job
+stopped: a timeout stops every test in flight). When each of those checks passes on a later
 attempt of the same run (a rerun keeps the run, on the same commit), those
 tests failed and then passed with no change: they go on the repository's
 flaky list, which rule 6 reads. A check another run of the workflow took
@@ -159,8 +165,9 @@ as for the turn-end option:
   directory across relaunches;
 - it runs only for a repository one of whose Claude Code agents runs on
   that same account, in a column of the workspace and a folder of that
-  repository. The hook receiver says so on each SessionStart,
-  UserPromptSubmit and Stop (`AgentHookEvent.onNiruxAccount`), by the rule
+  repository. The hook receiver says so on each SessionStart and Stop
+  (`AgentHookEvent.onNiruxAccount`; not on UserPromptSubmit, which Claude
+  waits for before it goes on), by the rule
   that decides whether a final message may be read: no account variable in
   the agent's environment (a cloud provider, a gateway, an API key or a
   token, workload identity federation, a named profile), the configuration

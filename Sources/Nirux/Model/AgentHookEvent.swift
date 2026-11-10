@@ -101,7 +101,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
     /// and when the receiver or the app drops it (see `TurnEndMarker`).
     var finalMessage: String?
-    /// On a main-thread SessionStart, UserPromptSubmit or Stop: whether
+    /// On a main-thread SessionStart or Stop: whether
     /// this `claude` runs on the login Nirux's own `claude -p` uses
     /// (`TurnEndText.agentOnNiruxAccount`), which only the receiver can
     /// tell, from the agent's environment. The CI failure triage sends
@@ -241,11 +241,13 @@ struct AgentHookEvent: Codable, Equatable {
         }
     }
 
-    /// The main-thread events of a turn's edges, where the receiver says
-    /// which account the agent runs on (`onNiruxAccount`): often enough for
-    /// a `claude` started before Nirux, which sends no SessionStart.
+    /// The main-thread SessionStart and Stop, where the receiver says which
+    /// account the agent runs on (`onNiruxAccount`): a `claude` started
+    /// before Nirux, which sends no SessionStart, says so at its first turn
+    /// end. Not UserPromptSubmit: Claude waits for that hook before it goes
+    /// on, and the check reads several files.
     var reportsAccount: Bool {
-        kind == .claude && agentID == nil && [.sessionStart, .userPromptSubmit, .stop].contains(name)
+        kind == .claude && agentID == nil && [.sessionStart, .stop].contains(name)
     }
 
     /// What only the receiver can tell, from the agent's environment: on

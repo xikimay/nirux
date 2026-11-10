@@ -141,10 +141,14 @@ extension CITriage {
                 if result.downloadFailures.count < 4 { result.downloadFailures.append(String(line.prefix(CITriage.maxMessageLength))) }
             } else if let signal = CITriage.signalCode(in: line) {
                 if result.signals.count < 8 { result.signals.append(signal) }
-            } else if let other = CITriage.otherError(in: line) {
-                guard seen.insert("o\u{0}\(other)").inserted, result.otherErrors.count < CITriage.maxOtherErrors else { return }
-                result.otherErrors.append(other)
+            } else if let other = CITriage.otherError(in: line) ?? CITriage.unreadError(in: line) {
+                addOther(other)
             }
+        }
+
+        private mutating func addOther(_ other: String) {
+            guard seen.insert("o\u{0}\(other)").inserted, result.otherErrors.count < CITriage.maxOtherErrors else { return }
+            result.otherErrors.append(other)
         }
 
         private mutating func add(_ name: String, _ failure: TestFailure?) {
@@ -166,8 +170,14 @@ extension CITriage {
         private mutating func noteTestCases(in line: String) {
             for marker in CITriage.testCaseMarkers(in: line) {
                 let rest = line[marker...].prefix(CITriage.maxTestCaseLength)
-                guard let close = rest.range(of: "]' "), let name = CITriage.testName(rest[..<close.lowerBound]) else { continue }
+                guard let close = rest.range(of: "]' ") else { continue }
                 let state = rest[close.upperBound...]
+                guard let name = CITriage.testName(rest[..<close.lowerBound]) else {
+                    // A test XCTest says failed, under a name the parser
+                    // can't read (a nested class, a mangled name).
+                    if state.hasPrefix("failed") { addOther("Test Case '-[" + rest[..<close.lowerBound] + "]' failed") }
+                    continue
+                }
                 if state.hasPrefix("started") {
                     if started[name] == nil {
                         started[name] = order
@@ -332,6 +342,15 @@ extension CITriage {
         }
         if message.hasPrefix("Process completed with exit code") { return nil }
         return String(message.prefix(200))
+    }
+
+    /// A line that reports an error none of the readings above took: an
+    /// XCTest failure under a name or in a file the parser can't read, a
+    /// tool's `…: error: …`. Such a failure may be real: it keeps the job
+    /// from any verdict.
+    static func unreadError(in line: String) -> String? {
+        guard line.contains(": error: ") else { return nil }
+        return String(line.prefix(200))
     }
 
     /// `Class.testMethod` from `Module.Class testMethod`.

@@ -276,12 +276,45 @@ final class CITriageInvestigationTests: XCTestCase {
     /// The run tests the merge with the base branch: a failing test that
     /// isn't at the pull request's commit came with it, and nothing here
     /// says a rerun would pass.
-    func testATestTheBaseBranchBroughtGetsNoVerdict() async {
+    func testATestTheBaseBranchBroughtGetsNoVerdictForNow() async {
         var world = World()
         world.tree = ["Sources/Widgets/Axle.swift"]
         let (outcome, calls) = await investigate(world)
-        XCTAssertEqual(outcome, CITriageInvestigation.Outcome(verdict: .unsure, tests: [Self.gear], wasRead: true))
+        XCTAssertEqual(outcome, CITriageInvestigation.Outcome(verdict: .unsure, tests: [Self.gear], wasRead: true, isUnanswered: true),
+                       "asked again later")
         XCTAssertEqual(calls.inputs, [])
+    }
+
+    /// The test is where its class's file is, or in an extension of the
+    /// class elsewhere, or in a superclass.
+    func testATestIsFoundInAnExtensionOrASuperclass() async throws {
+        var world = World()
+        world.tree = ["Sources/Widgets/Axle.swift", "Tests/WidgetTests/GearTests.swift", "Tests/WidgetTests/GearTests+Stops.swift"]
+        world.blobs["Tests/WidgetTests/GearTests.swift"] = "final class GearTests {\n    func testTurns() {}\n}\n"
+        world.blobs["Tests/WidgetTests/GearTests+Stops.swift"] = "extension GearTests {\n    func testStops() {\n        stop()\n    }\n}\n"
+        world.declaring = ["Tests/WidgetTests/GearTests+Stops.swift"]
+        let (extended, calls) = await investigate(world)
+        XCTAssertNotNil(extended.verdict.flakyReason)
+        XCTAssertTrue(try XCTUnwrap(calls.inputs.first).contains("// Tests/WidgetTests/GearTests+Stops.swift\n    func testStops() {"))
+
+        // A mutant subclass runs its superclass's tests.
+        world = World()
+        world.log = Self.failureLine().replacingOccurrences(of: "GearTests testStops", with: "GearMutantTests testStops")
+        world.tree = ["Sources/Widgets/Axle.swift", "Tests/WidgetTests/GearTests.swift", "Tests/WidgetTests/GearMutantTests.swift"]
+        world.blobs["Tests/WidgetTests/GearMutantTests.swift"] = "final class GearMutantTests: GearTests {}\n"
+        let (inherited, inheritedCalls) = await investigate(world)
+        XCTAssertNotNil(inherited.verdict.flakyReason)
+        XCTAssertTrue(try XCTUnwrap(inheritedCalls.inputs.first).contains("// Tests/WidgetTests/GearTests.swift\n    func testStops() {"))
+    }
+
+    /// Only tests that failed are kept for learning: a test merely left
+    /// running when a job stopped (a timeout) teaches nothing.
+    func testOnlyFailedTestsAreKept() async {
+        var world = World()
+        world.log = "test\tRun tests\t2026-11-09T23:09:11.1234567Z Test Case '-[WidgetTests.AxleTests testJams]' started.\n"
+            + Self.failureLine()
+        let (outcome, _) = await investigate(world)
+        XCTAssertEqual(outcome.tests, [Self.gear])
     }
 
     func testAClassOutsideTheFileOfItsNameIsFoundWhereItIsDeclared() async throws {

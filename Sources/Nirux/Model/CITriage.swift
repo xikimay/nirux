@@ -51,7 +51,7 @@ enum CITriage {
         let failedSteps: [String]
 
         var isRed: Bool {
-            ["failure", "cancelled", "timed_out"].contains(conclusion)
+            CITriage.redConclusions.contains(conclusion)
         }
     }
 
@@ -81,12 +81,17 @@ enum CITriage {
                 conclusion: (job["conclusion"] as? String ?? "").lowercased(),
                 stepCount: steps.count,
                 failedSteps: steps.compactMap { step in
-                    ["failure", "cancelled", "timed_out"].contains((step["conclusion"] as? String ?? "").lowercased())
+                    redConclusions.contains((step["conclusion"] as? String ?? "").lowercased())
                         ? step["name"] as? String : nil
                 }
             )
         })
     }
+
+    /// The conclusions that make a job red: those of a red check
+    /// (`ProjectBoard.CheckResult.failure`), lowercased as the jobs give
+    /// them. One list: a job and its check must agree on what is red.
+    static let redConclusions: Set<String> = ["failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"]
 
     static func isCommitName(_ text: String) -> Bool {
         (40...64).contains(text.count) && text.allSatisfy { $0.isASCII && $0.isHexDigit }

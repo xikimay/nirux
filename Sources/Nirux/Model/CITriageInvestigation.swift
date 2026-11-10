@@ -68,7 +68,7 @@ enum CITriageInvestigation {
 
     struct Outcome: Equatable, Sendable {
         var verdict: CITriage.Verdict = .unsure
-        /// The failing tests of the run, for the store.
+        /// The tests that failed in the run, for the store.
         var tests: [String] = []
         /// The run was read (its jobs at least): worth remembering. False
         /// when `gh` failed, which may pass.
@@ -136,7 +136,8 @@ enum CITriageInvestigation {
         guard let log = effects.gh(failedLogArguments(run, attempt: facts.attempt), 90, maxLogBytes) else { return .settled(Outcome()) }
         let findings = jobFindings(of: ran, in: CITriage.findings(inFailedLog: log))
         let merged = CITriage.LogFindings.merged(findings)
-        outcome.tests = merged.failingTestNames
+        // Failed, not merely unfinished: what a pass on the rerun may teach.
+        outcome.tests = merged.tests.map(\.name)
         // A compile error is real whatever else there is: nothing more to
         // ask of GitHub.
         guard merged.compileErrors.isEmpty else {
@@ -158,11 +159,13 @@ enum CITriageInvestigation {
             outcome.isUnanswered = true
             return .settled(outcome)
         }
-        // A failing test that isn't at the pull request's commit came with
-        // the base branch (the run tests their merge): nothing here says
-        // whether a rerun would pass.
-        guard let evidence = evidence(facts: facts, findings: merged, files: files, request: request, effects: effects)
-        else { return .settled(outcome) }
+        // A failing test the commit doesn't declare where it was looked
+        // for (one the base branch brought, the run testing their merge; or
+        // one declared out of reach): no verdict now, asked again later.
+        guard let evidence = evidence(facts: facts, findings: merged, files: files, request: request, effects: effects) else {
+            outcome.isUnanswered = true
+            return .settled(outcome)
+        }
         return .open(outcome, modelInput: CITriage.modelInput(evidence))
     }
 
@@ -251,7 +254,7 @@ enum CITriageInvestigation {
     /// from the local repository (when it holds the run's commit) the
     /// source of the first failing tests and the declarations each Swift
     /// file's patch edits. Nil when the repository holds the commit and
-    /// not one of those tests: it isn't the pull request's.
+    /// none of those tests can be found in it.
     static func evidence(
         facts: CITriage.RunFacts, findings: CITriage.LogFindings, files: [CITriage.ChangedFile],
         request: Request, effects: Effects
@@ -274,21 +277,9 @@ enum CITriageInvestigation {
         let tree = effects.git(["ls-tree", "-r", "--name-only", "-z", commit], root)
             .map { $0.split(separator: 0).map { String(decoding: $0, as: UTF8.self) } } ?? []
         for name in findings.failingTestNames.prefix(CITriage.promptSources) {
-            // Where its class usually is, where its failures were reported,
-            // then wherever the class is declared.
-            let fileName = CITriage.testFileName(of: name)
             let reported = findings.tests.first { $0.name == name }?.failures.map { CITriage.repositoryPath($0.file) } ?? []
-            var candidates: [String] = []
-            for path in tree.filter({ ($0 as NSString).lastPathComponent == fileName }) + reported.filter(tree.contains)
-            where !candidates.contains(path) {
-                candidates.append(path)
-            }
-            if candidates.isEmpty { candidates = declaringFiles(of: CITriage.className(of: name), commit: commit, root: root, effects: effects) }
-            let method = CITriage.methodName(of: name)
-            let found = zip(candidates, sources(at: candidates)).lazy.compactMap { path, text in
-                text.flatMap { CITriage.testBody(method: method, in: $0) }.map { CITriage.TestSource(name: name, path: path, lines: $0) }
-            }.first
-            guard let found else { return nil }
+            guard let found = testSource(of: name, reported: reported, tree: tree, commit: commit, root: root, effects: effects, read: sources)
+            else { return nil }
             evidence.sources.append(found)
         }
         let swift = files.enumerated().prefix(CITriage.promptFiles).filter { $0.element.path.hasSuffix(".swift") && $0.element.patch != nil }
@@ -299,27 +290,64 @@ enum CITriageInvestigation {
         return evidence
     }
 
-    /// The Swift files of the commit that declare or extend the class
-    /// (`git grep`, a fixed word): for a test class that isn't in the file
-    /// of its name.
-    private static func declaringFiles(of className: String, commit: String, root: String, effects: Effects) -> [String] {
-        guard !className.isEmpty, className.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { return [] }
-        let output = effects.git(["grep", "-l", "-z", "-w", "-F", "-e", "class \(className)", "-e", "extension \(className)",
-                                  commit, "--", "*.swift"], root) ?? Data()
+    /// Where the failing test is declared at the commit: in its class, an
+    /// extension of it, or a superclass (two levels up), looked for first
+    /// in the file of the class's name and the files its failures were
+    /// reported in, then wherever `git grep` finds the class or the method.
+    private static func testSource(
+        of name: String, reported: [String], tree: [String], commit: String, root: String, effects: Effects,
+        read: ([String]) -> [String?]
+    ) -> CITriage.TestSource? {
+        let method = CITriage.methodName(of: name)
+        var types = [CITriage.className(of: name)]
+        var texts: [(path: String, text: String)] = []
+        func add(_ paths: [String]) {
+            let fresh = paths.reduce(into: [String]()) { list, path in
+                if !list.contains(path), !texts.contains(where: { $0.path == path }) { list.append(path) }
+            }
+            for (path, text) in zip(fresh, read(fresh)) { if let text { texts.append((path, text)) } }
+        }
+        func search() -> CITriage.TestSource? {
+            texts.lazy.compactMap { file in
+                CITriage.testBody(method: method, inTypes: Set(types), in: file.text).map {
+                    CITriage.TestSource(name: name, path: file.path, lines: $0)
+                }
+            }.first
+        }
+        let type = types[0]
+        add(tree.filter { ($0 as NSString).lastPathComponent == "\(type).swift" } + reported.filter(tree.contains))
+        if let found = search() { return found }
+        add(grepFiles(["class \(type)", "extension \(type)", "func \(method)"], commit: commit, root: root, effects: effects))
+        for _ in 0..<2 {
+            if let found = search() { return found }
+            guard let parent = texts.lazy.compactMap({ CITriage.superclass(of: types[types.count - 1], in: $0.text) }).first,
+                  !types.contains(parent)
+            else { return nil }
+            types.append(parent)
+            add(tree.filter { ($0 as NSString).lastPathComponent == "\(parent).swift" }
+                + grepFiles(["class \(parent)", "extension \(parent)"], commit: commit, root: root, effects: effects))
+        }
+        return search()
+    }
+
+    /// The Swift files of the commit holding one of `words` (`git grep`,
+    /// fixed whole words), eight at most. Words of identifiers only: they
+    /// come from a log.
+    private static func grepFiles(_ words: [String], commit: String, root: String, effects: Effects) -> [String] {
+        let words = words.filter { $0.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == " " } }
+        guard !words.isEmpty else { return [] }
+        let output = effects.git(["grep", "-l", "-z", "-w", "-F"] + words.flatMap { ["-e", $0] } + [commit, "--", "*.swift"], root) ?? Data()
         // "<commit>:<path>" each.
         return output.split(separator: 0).compactMap { entry in
             let text = String(decoding: entry, as: UTF8.self)
             return text.hasPrefix(commit + ":") ? String(text.dropFirst(commit.count + 1)) : nil
-        }.prefix(4).map { $0 }
+        }.prefix(8).map { $0 }
     }
 
     @Sendable private static func runGH(_ arguments: [String], timeout: TimeInterval, maxBytes: Int) -> Data? {
         guard let ghPath = PRDetect.installedGHPath(),
-              let result = BoundedProcess.run(
-                  executableURL: URL(fileURLWithPath: ghPath), arguments: arguments,
-                  currentDirectoryURL: FileManager.default.temporaryDirectory,
-                  environment: GitHubCLIBoardClient.environment, timeout: timeout, maxStandardOutputBytes: maxBytes
-              ), result.terminationStatus == 0
+              let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: timeout, maxStandardOutputBytes: maxBytes),
+              result.terminationStatus == 0
         else { return nil }
         return result.standardOutput
     }

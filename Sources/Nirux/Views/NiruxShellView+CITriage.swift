@@ -86,7 +86,10 @@ extension NiruxShellView {
         let center = ciTriageCenter
         guard center.isEnabled, let pullRequest = workspace.prInfo else { return }
         let now = Date().timeIntervalSince1970
-        center.updateStore { _ = $0.learn(fromPassedRunsOf: CIFailure.ownRunResults(pullRequest), now: now) }
+        let results = CIFailure.ownRunResults(pullRequest)
+        if results.contains(where: { center.store.record(of: $0.run) != nil }) {
+            center.updateStore { _ = $0.learn(fromPassedRunsOf: results, now: now) }
+        }
         let red = CIFailure.redChecks(pullRequest)
         guard !red.isEmpty else { return }
         let signature = CITriage.signature(of: red)

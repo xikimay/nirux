@@ -122,7 +122,7 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
         /// A run was billed per call (an API key, or extra usage): a
         /// subscription's runs only, for every client. The rest lasts until
         /// the plan's limit resets when the run said when (`resetsAt`,
-        /// epoch seconds), an hour at least, a week at most.
+        /// epoch seconds), an hour at least, `longestBilledRest` at most.
         func restAfterBilledRun(resetsAt: TimeInterval? = nil) {
             let time = now()
             let until = max(

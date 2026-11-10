@@ -174,12 +174,71 @@ extension CITriage {
 
     // MARK: - Sources and declarations, from the local repository
 
-    /// The lines of `func <method>(` in a Swift source, to its closing
-    /// brace (braces counted as they come: enough for a test method), 200
-    /// lines at most.
-    static func testBody(method: String, in source: String) -> [String]? {
+    /// The lines of `func <method>(` declared in the body of one of
+    /// `types` (a class, struct or extension of that name: the failing
+    /// test's class, its extensions, its superclasses), comments skipped,
+    /// to its closing brace, 200 lines at most. Nil when none of them
+    /// declares it here: a method of the same name elsewhere in the file is
+    /// another test's.
+    static func testBody(method: String, inTypes types: Set<String>, in source: String) -> [String]? {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-        guard let start = lines.firstIndex(where: { declaresFunction($0, named: method) }) else { return nil }
+        var index = 0
+        while index < lines.count {
+            // A type whose body is on its line (`class A: B {}`) declares nothing.
+            if let declared = parsedDeclaration(in: lines[index]), declared.kind == .type, types.contains(typeName(declared.text)),
+               let end = closingLine(from: index, in: lines), end > index {
+                for candidate in (index + 1)..<end where !isComment(lines[candidate]) && declaresFunction(lines[candidate], named: method) {
+                    return body(from: candidate, in: lines)
+                }
+                index = end
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// The class `className` inherits from, when `source` declares it
+    /// (`final class FooTests: BaseTests, Protocol {`): a test it runs may
+    /// be declared there.
+    static func superclass(of className: String, in source: String) -> String? {
+        for line in source.split(whereSeparator: \.isNewline) where !isComment(line) {
+            guard let declared = parsedDeclaration(in: line), declared.text.hasPrefix("class "),
+                  typeName(declared.text) == className,
+                  let name = line.range(of: className), let colon = line[name.upperBound...].firstIndex(of: ":")
+            else { continue }
+            let inherited = line[line.index(after: colon)...].drop { $0 == " " }
+                .prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
+            return inherited.isEmpty ? nil : String(inherited.split(separator: ".").last ?? inherited)
+        }
+        return nil
+    }
+
+    /// "FooTests" of "class FooTests", "extension Module.FooTests".
+    private static func typeName(_ declaration: String) -> String {
+        let name = declaration.split(separator: " ").last ?? ""
+        return String(name.split(separator: ".").last ?? name)
+    }
+
+    /// The line where the braces opened at `start` close, 20,000 lines at
+    /// most (braces in strings and comments are counted too).
+    private static func closingLine(from start: Int, in lines: [Substring]) -> Int? {
+        var depth = 0
+        var opened = false
+        for index in start..<min(lines.count, start + 20_000) {
+            for character in lines[index] {
+                if character == "{" {
+                    depth += 1
+                    opened = true
+                } else if character == "}" {
+                    depth -= 1
+                }
+            }
+            if opened, depth <= 0 { return index }
+        }
+        return nil
+    }
+
+    private static func body(from start: Int, in lines: [Substring]) -> [String] {
         var body: [String] = []
         var depth = 0
         var opened = false
@@ -196,6 +255,11 @@ extension CITriage {
             if opened, depth <= 0 { break }
         }
         return body
+    }
+
+    private static func isComment(_ line: Substring) -> Bool {
+        let text = line.drop { $0 == " " || $0 == "\t" }
+        return text.hasPrefix("//") || text.hasPrefix("/*") || text.hasPrefix("*")
     }
 
     private static func declaresFunction(_ line: Substring, named method: String) -> Bool {

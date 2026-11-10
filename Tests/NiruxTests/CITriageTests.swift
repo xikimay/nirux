@@ -159,7 +159,24 @@ final class CITriageTests: XCTestCase {
         ])
         XCTAssertEqual(found.downloadFailures.count, 1)
         XCTAssertEqual(found.tests, [])
-        XCTAssertEqual(found.otherErrors, [])
+        XCTAssertEqual(found.otherErrors, ["name\tvalue\t/tmp/Gear.swift:3:1: error: printed by a test"],
+                       "an error line nothing reads keeps the job from any verdict")
+    }
+
+    /// A failure the parser can't name (a nested class, a mangled name, a
+    /// file that isn't Swift) may be real: it is kept as an error the
+    /// rules don't read, never dropped.
+    func testAFailureThatCantBeReadIsNeverDropped() {
+        let found = findings([
+            line("Test Case '-[WidgetTests.Outer.InnerTests testX]' started."),
+            line("/x/InnerTests.swift:3: error: -[WidgetTests.Outer.InnerTests testX] : boom"),
+            line("Test Case '-[WidgetTests.Outer.InnerTests testX]' failed (0.1 seconds)."),
+            line("/x/Gear.m:9: error: -[WidgetTests.GearTests testObjC] : boom"),
+            line("ld: error: undefined symbol: _gear")
+        ])
+        XCTAssertEqual(found.tests, [])
+        XCTAssertEqual(found.otherErrors.count, 4)
+        XCTAssertTrue(found.otherErrors.contains("Test Case '-[WidgetTests.Outer.InnerTests testX]' failed"))
     }
 
     func testARawJobLogReadsTheSame() {
@@ -197,6 +214,11 @@ final class CITriageTests: XCTestCase {
         XCTAssertEqual(facts.attempt, 2)
         XCTAssertEqual(facts.redJobs.map(\.name), ["test", "build"])
         XCTAssertEqual(facts.redJobs.map(\.id), [41, 42])
+        // Red as its check is: one list of red conclusions.
+        for conclusion in ["timed_out", "action_required", "startup_failure", "stale"] {
+            XCTAssertTrue(CITriage.Job(name: "x", conclusion: conclusion, stepCount: 1, failedSteps: []).isRed, conclusion)
+        }
+        XCTAssertFalse(CITriage.Job(name: "x", conclusion: "neutral", stepCount: 1, failedSteps: []).isRed)
         XCTAssertEqual(facts.redJobs.map(\.stepCount), [0, 2])
         XCTAssertEqual(facts.redJobs.map(\.failedSteps), [[], ["Build"]])
         // A workflow file GitHub refuses: a run that failed with no job.
@@ -455,11 +477,44 @@ final class CITriageTests: XCTestCase {
         """
 
     func testTestBodyIsTheMethodToItsClosingBrace() throws {
-        let body = try XCTUnwrap(CITriage.testBody(method: "testStops", in: source))
+        let body = try XCTUnwrap(CITriage.testBody(method: "testStops", inTypes: ["GearTests"], in: source))
         XCTAssertEqual(body.first, "    @MainActor func testStops() throws {", "not testStopsLater")
         XCTAssertEqual(body.last, "    }")
         XCTAssertEqual(body.count, 7)
-        XCTAssertNil(CITriage.testBody(method: "testMissing", in: source))
+        XCTAssertNil(CITriage.testBody(method: "testMissing", inTypes: ["GearTests"], in: source))
+        XCTAssertNil(CITriage.testBody(method: "testStops", inTypes: ["AxleTests"], in: source), "another class's")
+    }
+
+    /// The failing class's own method: not a same-named one of another
+    /// class above it, nor one commented out.
+    func testTestBodyIsTheFailingClasssOwn() throws {
+        let file = """
+            final class GearTestsHelper: Other {}
+            final class Helper {
+                func testInit() { helperOnly() }
+            }
+
+            // func testInit() { commentedOut() }
+            final class GearTests: BaseTests {
+                /* func testInit() { inABlock() } */
+                func testInit() {
+                    gearOnly()
+                }
+            }
+
+            extension GearTests {
+                func testDefaults() { fromTheExtension() }
+            }
+            """
+        XCTAssertEqual(try XCTUnwrap(CITriage.testBody(method: "testInit", inTypes: ["GearTests"], in: file)),
+                       ["    func testInit() {", "        gearOnly()", "    }"])
+        XCTAssertEqual(CITriage.testBody(method: "testDefaults", inTypes: ["GearTests"], in: file),
+                       ["    func testDefaults() { fromTheExtension() }"])
+        XCTAssertNil(CITriage.testBody(method: "testInit", inTypes: ["Empty"], in: "final class Empty: GearTests {}\n"),
+                     "a class whose body is on its line declares nothing")
+        XCTAssertEqual(CITriage.superclass(of: "GearTests", in: file), "BaseTests")
+        XCTAssertNil(CITriage.superclass(of: "Helper", in: file))
+        XCTAssertNil(CITriage.superclass(of: "AxleTests", in: file))
     }
 
     func testDeclarationsAreTheNearestAboveEachChange() {
