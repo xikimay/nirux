@@ -695,7 +695,7 @@ struct AgentStatusMachine {
         // An alerting attention (alerted now, or earlier in this episode)
         // speaks for a turn end not read yet: it needs no alert of its
         // own, nor to take this attention's reason.
-        if alert, quietTurnEnd?.isUnread == true { quietTurnEnd = nil }
+        if alert, case .pending = quietTurnEnd { quietTurnEnd = nil }
         guard alert, !attentionAlerted else { return false }
         attentionAlerted = true
         return true
