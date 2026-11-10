@@ -153,6 +153,9 @@ struct AgentStatusMachine {
     private(set) var lastPromptAt: TimeInterval?
     private var turnPromptID: String?
     private var recentPromptIDs: [String] = []
+    /// The main agent's tool calls of the turn in flight, for the hint
+    /// that it may be going in circles (`circlingHint`).
+    private var circling = AgentCirclingWatch()
 
     private static let echoWindow: TimeInterval = 0.3
     private static let activityWindow: TimeInterval = 3.0
@@ -295,6 +298,7 @@ struct AgentStatusMachine {
                let index = pendingDialogs.firstIndex(where: { $0.isSameCall(key: key, as: event) }) {
                 noteClosed(pendingDialogs.remove(at: index))
             }
+            noteCallEnded(event, at: now)
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionRequest:
@@ -372,6 +376,7 @@ struct AgentStatusMachine {
         if event.agentID == nil {
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             askedQuestion = nil
+            circling.reset()
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -794,6 +799,29 @@ struct AgentStatusMachine {
         hookWorking = false
         turnStartedAt = nil
         hookTurnInFlight = false
+        circling.reset()
+    }
+
+    /// The agent may be going in circles in the turn in flight: its
+    /// commands keep hanging, or one keeps failing (see
+    /// `AgentCirclingHint`). Shown while the column works.
+    var circlingHint: AgentCirclingHint? { circling.hint }
+
+    /// A tool call ended, for `circlingHint`. The main agent's only: a
+    /// subagent's calls say nothing of it, nor does the bookkeeping of
+    /// background commands. A shell command counts with those of its
+    /// program, unless it counts by its exact text; any other tool with its
+    /// exact repeats (the same URL, file, action: `toolKey`). An end a
+    /// newer receiver wrote says nothing.
+    private mutating func noteCallEnded(_ event: AgentHookEvent, at time: TimeInterval) {
+        guard event.agentID == nil, let tool = event.toolName, !AgentToolOutcome.taskTools.contains(tool) else { return }
+        let end = event.toolEnd.map(AgentToolEnd.init(rawValue:))
+        if case .some(.none) = end { return }
+        let isShell = AgentToolInput.shellTools.contains(tool)
+        let exact = (isShell ? event.toolCommandKey : event.toolKey).map { "\(tool) \($0)" }
+        circling.noteCallEnded(
+            key: isShell ? exact ?? event.toolFamily : exact ?? tool, name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
+        )
     }
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
@@ -943,6 +971,10 @@ struct AgentStatusMachine {
         // suspended claude whose dialog is back on `fg`, and they are what
         // keeps Nirux from typing a prompt into it.
         if Self.integratedAgentProcesses.contains(fgName), fgName != "claude" { pendingDialogs.removeAll() }
+        // Another agent works here now: the calls of a `claude` that died
+        // mid-turn (no Stop) aren't its own. A shell in front may be a
+        // suspended claude's (^Z, Ctrl-G's editor), whose turn goes on.
+        if Self.isRecognizedAgentProcess(fgName), fgName != "claude" { circling.reset() }
         // No hook ever drives an activity-only agent (a Claude or Codex hook
         // under it is a nested run's); a claude's leftover kind would mute
         // its OSC 9 notifications.
@@ -1061,6 +1093,7 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+        circling.reset()
     }
 }
 
