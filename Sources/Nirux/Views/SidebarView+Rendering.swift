@@ -72,6 +72,7 @@ extension SidebarView {
         refreshApprovalArming()
         followActiveWorkspace(docHeight: docHeight)
         applyBirthMotion()
+        applyMergeMotion()
         if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
             revealsOnboardingCardOnNextBuild = false
             revealOnboardingCard()
@@ -345,6 +346,7 @@ extension SidebarView {
         )
         countLabel.setAccessibilityElement(false)
         addExpandedView(countLabel)
+        archivedCountLabel = countLabel
 
         let titleX = Metrics.textX
         let title = textLabel(Self.archivedTitle, font: Theme.Font.body, color: Theme.Color.textSecondary)
@@ -425,7 +427,9 @@ extension SidebarView {
             sidebarWidth: bounds.width,
             yOffset: yOffset,
             animates: animates,
-            turnEndedAt: turnEndedAt[workspace.id]
+            turnEndedAt: turnEndedAt[workspace.id],
+            readyAt: readyAt[workspace.id],
+            mergedAt: mergedAt[workspace.id]
         ).render()
         result.views.forEach(addExpandedView)
         hitAreas.append(contentsOf: result.hitAreas)

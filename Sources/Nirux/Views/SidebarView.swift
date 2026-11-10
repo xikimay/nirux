@@ -231,6 +231,8 @@ final class SidebarView: NSView {
         let spaceChanged = profiles.first(where: \.isActive)?.id != lastProfiles.first(where: \.isActive)?.id
         if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
         let spacesChanged = profiles != lastProfiles
+        // Before the rows change: what happened to them, in the same space.
+        if !spaceChanged, !lastProfiles.isEmpty || !lastInfos.isEmpty { noteRowMoments(from: lastInfos, to: workspaces) }
         lastProfiles = profiles
         lastInfos = workspaces
         if spacesChanged { NotificationCenter.default.post(name: Self.spacesDidChangeNotification, object: self) }
@@ -250,6 +252,16 @@ final class SidebarView: NSView {
     /// its formatted string so the signature only changes when a label
     /// actually would.
     var lastRenderSignature: Int?
+
+    /// The merge's moments on a row (see SidebarView+Merge), by workspace:
+    /// when its checks passed, when its pull request was merged; the rows
+    /// that just left the list; when the Archived count last went up; and
+    /// that count's label, in the rows as they are now.
+    var readyAt: [String: CFTimeInterval] = [:]
+    var mergedAt: [String: CFTimeInterval] = [:]
+    var folds: [Fold] = []
+    var archivedBumpAt: CFTimeInterval?
+    weak var archivedCountLabel: NSTextField?
 
     /// When a task's row was born (`CACurrentMediaTime`), by workspace: it
     /// opens with a spring (see SidebarView+Birth).
