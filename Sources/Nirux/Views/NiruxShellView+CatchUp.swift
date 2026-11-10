@@ -101,7 +101,7 @@ extension NiruxShellView {
     func tasksWhoseTurnEnded(after since: TimeInterval, until now: TimeInterval) -> [String] {
         let onScreen = workspaces[safe: activeWSIndex]
         return workspaces.compactMap { workspace -> (id: String, endedAt: TimeInterval)? in
-            guard !workspace.isLead, !workspace.isInactive, !workspace.isClosing, workspace !== onScreen else { return nil }
+            guard !workspace.isInactive, !workspace.isClosing, workspace !== onScreen else { return nil }
             let endedAt = workspace.columns.compactMap { $0.pty?.agentLastTurnEndedAt }.filter { $0 > since && $0 <= now }.max()
             return endedAt.map { (workspace.id, $0) }
         }
@@ -145,7 +145,6 @@ extension NiruxShellView {
     func handleCatchUpAction(_ action: SidebarCatchUpAction) {
         switch action {
         case .dismiss:
-            catchUpState.workspaceIDs = []
             catchUpState.awaySince = [:]
         case .expand:
             catchUpState.isExpanded = true
