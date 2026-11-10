@@ -52,6 +52,9 @@ struct AgentStatusMachine {
     struct AskedQuestion: Equatable {
         let text: String?
         let since: TimeInterval
+        /// A plain yes or no answers it, and its text is the message's
+        /// own (`TurnEndQuestion`): only then may Yes and No be offered.
+        var isYesNo = false
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
@@ -79,6 +82,9 @@ struct AgentStatusMachine {
     private var turnEndedAt: TimeInterval = 0
     /// Claude's last main-thread turn end (Stop, StopFailure).
     private var mainTurnEndedAt: TimeInterval = 0
+    /// The last new conversation in this process, or its end: a quick
+    /// answer never crosses one (`acceptsQuickAnswer`).
+    private var conversationChangedAt: TimeInterval = 0
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
@@ -304,6 +310,7 @@ struct AgentStatusMachine {
             endTurn()
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             askedQuestion = nil
+            conversationChangedAt = now
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -364,6 +371,7 @@ struct AgentStatusMachine {
         endTurn()
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         askedQuestion = nil
+        conversationChangedAt = event.timestamp
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -483,7 +491,11 @@ struct AgentStatusMachine {
                 ?? TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
-            if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
+            if !isUserFocused {
+                askedQuestion = AskedQuestion(
+                    text: line, since: request.turnEndedAt, isYesNo: line != nil && question?.isYesNo == true
+                )
+            }
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
             attentionAlerted = false
@@ -506,6 +518,21 @@ struct AgentStatusMachine {
     /// they read the question there.
     mutating func noteSeen() {
         askedQuestion = nil
+    }
+
+    /// A quick answer (Yes, No, a reply) to the turn end of `turnEndedAt`
+    /// may be typed now: that turn end is still the last thing that
+    /// happened (no prompt, turn end or conversation change since, the
+    /// same `claude`), the user typed nothing into the prompt since, no
+    /// dialog waits and Claude isn't working. Anything else, and "yes"
+    /// could land in a draft, a dialog or a later turn.
+    func acceptsQuickAnswer(to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
+        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
+              foreground.instance.startedAt <= turnEndedAt
+        else { return false }
+        return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
+            && (lastPromptAt ?? 0) < turnEndedAt && lastDraftInputAt <= turnEndedAt
+            && pendingDialogs.isEmpty && !hookWorking
     }
 
     /// The user's click types a prompt into this agent (Address PR
@@ -1036,6 +1063,7 @@ struct AgentStatusMachine {
         lastEventAt = 0
         turnEndedAt = 0
         mainTurnEndedAt = 0
+        conversationChangedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0

@@ -353,6 +353,82 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(machine.isQuietTurnEnd)
     }
 
+    /// Yes and No may sit next to a question line only when nothing in it
+    /// asks for more than a yes or a no.
+    func testYesNoRuleForTheLineATurnEndsOn() {
+        for line in ["Shall I merge it?", "Ready to push?", "Je merge ?", "Tu veux que je la merge ? 👍",
+                     "OK pour toi si je supprime l'ancien réglage ?", "Do you approve deleting the old bucket?"] {
+            XCTAssertTrue(TurnEndText.isYesNoQuestion(line), line)
+        }
+        for line in ["Merge it or keep it open?", "Which one do you prefer?", "What should the label say?",
+                     "On part sur la version courte ou la version complète ?", "Tu préfères laquelle ?",
+                     "Quel nom tu veux pour le réglage ?", "Qu’est-ce que tu en penses ?", "Comment je le nomme ?",
+                     "OK — which branch should this go on?", "Where does it go: `main`?"] {
+            XCTAssertFalse(TurnEndText.isYesNoQuestion(line), line)
+        }
+    }
+
+    /// Yes and No go with a question the message holds word for word and
+    /// a yes or no answers; never with a line picked when nothing was
+    /// quoted.
+    func testOnlyAQuotedYesNoQuestionOffersYesAndNo() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        let cases: [(TurnEndVerdict, Bool)] = [
+            (.asks(TurnEndQuestion(text: "Shall I merge it?", isYesNo: true)), true),
+            (.asks(TurnEndQuestion(text: "Shall I merge it?", isYesNo: false)), false),
+            (.asks(nil), false),
+        ]
+        for (verdict, isYesNo) in cases {
+            machine = AgentStatusMachine()
+            let request = try XCTUnwrap(endTurn(message: asks).turnEnd)
+            _ = machine.applyTurnEndVerdict(verdict, for: request, isUserFocused: false)
+            XCTAssertEqual(machine.visibleQuestion(foreground: claude)?.isYesNo, isYesNo, "\(verdict)")
+        }
+    }
+
+    /// A quick answer goes in only while the turn end it answers is the
+    /// last thing that happened, nothing is typed at the prompt, no dialog
+    /// waits and Claude is idle: else "yes" could land in a draft, a
+    /// dialog or a later turn.
+    func testQuickAnswerOnlyToTheLastTurnEndAtAQuietPrompt() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        func ended() throws -> TimeInterval {
+            machine = AgentStatusMachine()
+            return try XCTUnwrap(endTurn(message: asks).turnEnd).turnEndedAt
+        }
+        var at = try ended()
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at - 1, foreground: claude), "another turn end's")
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: nil))
+        let shell = ForegroundProcess(instance: ProcessInstance(pid: 8, startedAt: 0), name: "zsh", arguments: ["zsh"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: shell))
+        let newer = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: at + 1), name: "claude", arguments: ["claude"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: newer), "another claude")
+        let headless = ForegroundProcess(instance: ProcessInstance(pid: 11, startedAt: 0), name: "claude", arguments: ["claude", "-p"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: headless))
+
+        _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "answered already")
+        at = try ended()
+        _ = machine.apply(event(.stop, at: 9, message: "Tests passed."), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "a later turn end")
+        at = try ended()
+        _ = machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "another conversation")
+        at = try ended()
+        _ = machine.apply(event(.sessionEnd, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "the conversation ended")
+        at = try ended()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "a draft at the prompt")
+        at = try ended()
+        _ = machine.apply(event(.permissionRequest, at: 6, tool: "Bash"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "a dialog")
+        at = try ended()
+        _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "at work, if only through a subagent")
+    }
+
     /// The alert names the question the classifier quoted, wherever it
     /// sits in the message.
     func testTurnThatAsksShowsTheQuotedQuestion() throws {
@@ -1089,7 +1165,16 @@ final class TurnEndClassificationTests: XCTestCase {
         while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(alerts.value, [.askedInReply("Tests pass. Ready to push?")])
         XCTAssertEqual(classifier.messages.value, [], "no model call")
-        withExtendedLifetime(center) {}
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        XCTAssertEqual(column.pty?.agentQuestion(foreground: claude)?.isYesNo, true, "the message's own line, plain yes or no")
+
+        let (openCenter, _, openColumn, openRequest, openAlerts) = try turnEndColumn(message: "Merge it or keep it open?")
+        openCenter.turnEndClassifier = classifier
+        openCenter.questionVerdictDelay = 0.05
+        openCenter.classifyTurnEnd(openRequest, agentUUID: try XCTUnwrap(openColumn.agentUUID), waitsOnParent: false)
+        while openAlerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(openColumn.pty?.agentQuestion(foreground: claude)?.isYesNo, false, "a choice")
+        withExtendedLifetime([center, openCenter]) {}
     }
 
     /// A Stop hook blocked that end (a review gate) and the turn went on:

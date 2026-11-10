@@ -367,12 +367,23 @@ final class PtySession: @unchecked Sendable {
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).
     func agentAskedQuestion(foreground: ForegroundProcess?) -> AgentAttentionReason? {
-        state.machine.visibleQuestion(foreground: foreground).map { .askedInReply($0.text) }
+        agentQuestion(foreground: foreground).map { .askedInReply($0.text) }
+    }
+
+    /// The same, with when it was asked and whether Yes and No may answer
+    /// it (the quick answers).
+    func agentQuestion(foreground: ForegroundProcess?) -> AgentStatusMachine.AskedQuestion? {
+        state.machine.visibleQuestion(foreground: foreground)
     }
 
     /// The user looks at this column: see `AgentStatusMachine.noteSeen`.
     func noteAgentSeen() {
         state.machine.noteSeen()
+    }
+
+    /// See `AgentStatusMachine.acceptsQuickAnswer`.
+    func acceptsQuickAnswer(to turnEndedAt: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
+        !hasExited && state.machine.acceptsQuickAnswer(to: turnEndedAt, foreground: foregroundProcess(snapshot: snapshot))
     }
 
     /// Types a prompt the user's click sends into this agent (see

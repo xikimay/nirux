@@ -179,6 +179,22 @@ enum TurnEndText {
         return false
     }
 
+    /// A question line a plain yes or no answers: none of "or", "ou" or a
+    /// question word (which, what, quel, comment…) in it. Measured against
+    /// Sonnet's own reading on the turns that end on "?": 34 of 36 agree,
+    /// and the two others offered Yes and No next to an open question the
+    /// user reads right there.
+    static func isYesNoQuestion(_ line: String) -> Bool {
+        let words = line.lowercased().split { !($0.isLetter || $0.isNumber || $0 == "'" || $0 == "\u{2019}") }
+        return !words.contains { openQuestionWords.contains($0.replacingOccurrences(of: "\u{2019}", with: "'")) }
+    }
+
+    private static let openQuestionWords: Set<String> = [
+        "or", "which", "what", "how", "where", "when", "why", "who", "whom", "whose",
+        "ou", "où", "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles",
+        "comment", "quand", "pourquoi", "combien", "qu'est",
+    ]
+
     /// Around a quote: the model's, not the message's.
     static let quotationMarks = CharacterSet(charactersIn: "\"“”«» ")
 
