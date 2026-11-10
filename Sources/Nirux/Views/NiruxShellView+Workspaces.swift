@@ -610,7 +610,6 @@ extension NiruxShellView {
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
-        sizeRunningTerminalsOffScreen(width: viewportW, height: rowH)
         // Animated path: add a vertical slide over the direct frame change.
         if animated, let layer = verticalStrip.layer, oldY != targetY {
             let anim = CABasicAnimation(keyPath: "transform.translation.y")
