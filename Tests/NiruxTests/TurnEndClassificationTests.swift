@@ -160,6 +160,104 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(files, ["4343-20.json"])
     }
 
+    /// The CI failure triage needs to know the agent's account too, without
+    /// reading its final messages: the marker says which, and one rule
+    /// tells an agent on Nirux's login for both.
+    func testOneRuleTellsAnAgentOnNiruxsAccount() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("turn-end-readers-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let app = ProcessInstance(pid: 4242, startedAt: 10)
+        let running: (pid_t) -> ProcessInstance? = { $0 == 4242 ? app : nil }
+        let home = ["HOME": "/Users/me"]
+        func onAccount(_ extra: [String: String] = [:], settings: [String: String] = [:]) -> Bool {
+            TurnEndText.agentOnNiruxAccount(
+                environment: home.merging(extra) { $1 }, cwd: "/work/repo", home: "/Users/me",
+                markers: directory, running: running, read: { settings[$0].map { Data($0.utf8) } }
+            )
+        }
+        XCTAssertFalse(onAccount(), "no running Nirux to share a folder with")
+
+        // The triage alone is on.
+        TurnEndMarker.publish(app: app, environment: [:], readsFinalMessages: false, in: directory, running: running)
+        XCTAssertTrue(onAccount())
+        XCTAssertFalse(TurnEndMarker.allowsMessage(environment: home, in: directory, running: running), "nothing reads final messages")
+        XCTAssertFalse(onAccount(["ANTHROPIC_API_KEY": "k"]))
+        XCTAssertFalse(onAccount(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]), "another login")
+        XCTAssertFalse(onAccount(settings: ["/work/repo/.claude/settings.json": #"{"apiKeyHelper":"/bin/key"}"#]))
+
+        // The turn-end option too: the same marker, read both ways.
+        TurnEndMarker.publish(app: app, environment: [:], in: directory, running: running)
+        XCTAssertTrue(TurnEndMarker.allowsMessage(environment: home, in: directory, running: running))
+        XCTAssertTrue(onAccount())
+
+        // A marker written by a build that only read final messages.
+        try Data(#"{"app":{"pid":4242,"startedAt":10}}"#.utf8).write(to: directory.appendingPathComponent("4242-10.json"))
+        XCTAssertTrue(TurnEndMarker.allowsMessage(environment: home, in: directory, running: running))
+        XCTAssertTrue(onAccount())
+    }
+
+    /// The receiver's two gates in one place: it says which account the
+    /// agent runs on, and keeps the final message only for an agent on
+    /// Nirux's and a running Nirux that reads final messages.
+    func testTheReceiverKeepsTheMessageOnlyForAnAgentOnNiruxsAccount() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("turn-end-readers-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let app = ProcessInstance(pid: 4242, startedAt: 10)
+        let running: (pid_t) -> ProcessInstance? = { $0 == 4242 ? app : nil }
+        let payload: [String: Any] = ["hook_event_name": "Stop", "session_id": "s", "cwd": "/work/repo",
+                                      "last_assistant_message": "Shall I merge?"]
+        func received(_ extra: [String: String] = [:], settings: [String: String] = [:]) throws -> AgentHookEvent {
+            let env = ["HOME": "/Users/me", "NIRUX_AGENT_UUID": "u"].merging(extra) { $1 }
+            var event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: env, now: 0))
+            event.applyAccount(environment: env, markers: directory, running: running, read: { settings[$0].map { Data($0.utf8) } })
+            return event
+        }
+        var event = try received()
+        XCTAssertEqual(event.onNiruxAccount, false, "no running Nirux")
+        XCTAssertNil(event.finalMessage)
+
+        TurnEndMarker.publish(app: app, environment: [:], readsFinalMessages: false, in: directory, running: running)
+        event = try received()
+        XCTAssertEqual(event.onNiruxAccount, true)
+        XCTAssertNil(event.finalMessage, "nothing reads it")
+
+        TurnEndMarker.publish(app: app, environment: [:], in: directory, running: running)
+        event = try received()
+        XCTAssertEqual(event.onNiruxAccount, true)
+        XCTAssertEqual(event.finalMessage, "Shall I merge?")
+        for other in [try received(["CLAUDE_CODE_USE_MANTLE": "1"]),
+                      try received(settings: ["/work/repo/.claude/settings.local.json": #"{"apiKeyHelper":"/bin/key"}"#])] {
+            XCTAssertEqual(other.onNiruxAccount, false)
+            XCTAssertNil(other.finalMessage)
+        }
+    }
+
+    /// Which events carry the receiver's word on the account: SessionStart
+    /// and Stop on the main thread, often enough for a `claude` started
+    /// before Nirux.
+    func testATurnsEdgesOnTheMainThreadReportTheAccount() throws {
+        func reports(_ hook: String, extra: [String: Any] = [:]) throws -> Bool {
+            let payload = ["hook_event_name": hook, "session_id": "s"].merging(extra) { $1 }
+            return try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 0)).reportsAccount
+        }
+        for hook in ["SessionStart", "Stop"] { XCTAssertTrue(try reports(hook), hook) }
+        XCTAssertFalse(try reports("UserPromptSubmit"), "Claude waits on that hook: no file reads there")
+        XCTAssertFalse(try reports("PreToolUse", extra: ["tool_name": "Bash"]), "every tool call would read the settings files")
+        XCTAssertFalse(try reports("Stop", extra: ["agent_id": "sub"]), "a subagent's")
+        let codex = try XCTUnwrap(AgentHookEvent(kind: .codex, payload: ["type": "agent-turn-complete"], env: [:], now: 0))
+        XCTAssertFalse(codex.reportsAccount)
+
+        // The word travels in the queue; a line from an older receiver has none.
+        var stop = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "Stop", "session_id": "s"], env: [:], now: 0))
+        XCTAssertNil(stop.onNiruxAccount, "the receiver's to say, not the payload's")
+        stop.onNiruxAccount = true
+        let line = try JSONEncoder().encode(stop)
+        XCTAssertEqual(try JSONDecoder().decode(AgentHookEvent.self, from: line).onNiruxAccount, true)
+        let older = try JSONSerialization.jsonObject(with: line) as? [String: Any] ?? [:]
+        let withoutIt = try JSONSerialization.data(withJSONObject: older.filter { $0.key != "onNiruxAccount" })
+        XCTAssertNil(try JSONDecoder().decode(AgentHookEvent.self, from: withoutIt).onNiruxAccount)
+    }
+
     /// An agent sent to another account by its settings (an `apiKeyHelper`
     /// in a work repository): no variable says so in the hook's environment.
     func testSettingsThatChooseAnotherAccountKeepTheMessage() {

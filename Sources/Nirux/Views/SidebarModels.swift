@@ -312,6 +312,9 @@ struct WorkspaceInfo: Hashable {
     let prInfo: PRInfo?
     /// The open PR's feedback: the card shows the counts only.
     var prFeedback: SidebarPRFeedback?
+    /// Why the pull request's red checks look flaky
+    /// (`WorkspaceState.ciFlakyReason`); nil: a failure like any other.
+    var ciFlakyReason: String?
     let diffStats: String?
     let purpose: String?
     let nextStep: String?

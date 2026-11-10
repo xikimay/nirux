@@ -115,14 +115,17 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     /// gh at `ghPath`, from a folder outside every checkout, with the
     /// neutral environment. Nil when it didn't start or timed out. The
     /// merge queue and the PR feedback read run gh through it too.
-    static func runGH(_ ghPath: String, arguments: [String], timeout: TimeInterval) -> BoundedProcessResult? {
+    static func runGH(
+        _ ghPath: String, arguments: [String], timeout: TimeInterval, maxStandardOutputBytes: Int? = nil
+    ) -> BoundedProcessResult? {
         BoundedProcess.run(
             executableURL: URL(fileURLWithPath: ghPath),
             arguments: arguments,
             currentDirectoryURL: FileManager.default.temporaryDirectory,
             environment: environment,
             timeout: timeout,
-            captureStandardError: true
+            captureStandardError: true,
+            maxStandardOutputBytes: maxStandardOutputBytes
         )
     }
 

@@ -35,11 +35,34 @@ extension SidebarView {
     }
 
     /// The two CI failure actions, while the workspace's pull request is red
-    /// (docs/ci-failure-actions.md). A rerun needs a GitHub Actions run.
-    func addCIFailureItems(to menu: NSMenu, pullRequest: PRInfo?, act: @escaping (WorkspaceSidebarAction) -> Void) {
+    /// (docs/ci-failure-actions.md). A rerun needs a GitHub Actions run. A
+    /// failure that looks flaky says why and puts the rerun first
+    /// (docs/ci-failure-triage.md).
+    func addCIFailureItems(
+        to menu: NSMenu, pullRequest: PRInfo?, flakyReason: String? = nil, act: @escaping (WorkspaceSidebarAction) -> Void
+    ) {
         guard let pullRequest, !CIFailure.redChecks(pullRequest).isEmpty else { return }
-        menu.addClosureItem(title: "Ask Agent Why CI Failed") { act(.askWhyCIFailed) }
-        menu.addClosureItem(title: "Rerun Failed CI Jobs…") { act(.rerunFailedCI) }
-            .isEnabled = !CIFailure.runs(pullRequest).isEmpty
+        let ask = { _ = menu.addClosureItem(title: "Ask Agent Why CI Failed") { act(.askWhyCIFailed) } }
+        let rerun = {
+            menu.addClosureItem(title: "Rerun Failed CI Jobs…") { act(.rerunFailedCI) }
+                .isEnabled = !CIFailure.runs(pullRequest).isEmpty
+        }
+        guard let flakyReason else {
+            ask()
+            rerun()
+            return
+        }
+        let why = NSMenuItem(title: Self.flakyMenuTitle(flakyReason), action: nil, keyEquivalent: "")
+        why.isEnabled = false
+        why.toolTip = flakyReason
+        menu.addItem(why)
+        rerun()
+        ask()
+    }
+
+    /// "Likely flaky: <reason>", short enough for a menu; the item's
+    /// tooltip has all of it.
+    static func flakyMenuTitle(_ reason: String) -> String {
+        "Likely flaky: " + (AgentText.clean(reason, maxLength: 90) ?? reason)
     }
 }

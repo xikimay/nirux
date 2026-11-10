@@ -392,6 +392,9 @@ struct PersistedSettings: Codable {
     /// asks something (see `HaikuTurnEndClassifier`). On by default:
     /// missing decodes to true.
     var alertOnlyWhenClaudeAsks: Bool = true
+    /// A pull request whose checks failed says when the failure looks
+    /// flaky (see `CITriage`). On by default: missing decodes to true.
+    var triageCIFailures: Bool = true
     /// Minutes a dialog may wait before its agent reads as stuck; 0 = off.
     var stuckAgentMinutes: Int?
     /// A working Claude that may be going in circles says so on its row
@@ -443,6 +446,7 @@ struct PersistedSettings: Codable {
         case keepMacAwakeWhileAgentsWork
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
+        case triageCIFailures
         case stuckAgentMinutes
         case agentCirclingHint
         case onboardingChecklist
@@ -472,6 +476,7 @@ struct PersistedSettings: Codable {
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
+        triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true
         // A value from a newer build must not make the whole state file
@@ -503,6 +508,7 @@ struct PersistedSettings: Codable {
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
+        try container.encode(triageCIFailures, forKey: .triageCIFailures)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encode(agentCirclingHint, forKey: .agentCirclingHint)
         try container.encodeIfPresent(

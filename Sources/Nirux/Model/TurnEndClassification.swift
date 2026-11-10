@@ -45,6 +45,24 @@ enum TurnEndText {
         BranchReview.ClaudeCLI.accountVariables.contains { environment[$0].map { !$0.isEmpty && $0 != "0" } ?? false }
     }
 
+    /// The agent whose hook runs with `environment` uses the login Nirux's
+    /// own `claude -p` does: no account variable in its environment, the
+    /// configuration folder of a running Nirux, no settings file that
+    /// chooses another account. What decides both that its final message
+    /// may be read (`AgentHookEvent.finalMessage`) and that a model may
+    /// read its pull request's CI failure (`AgentHookEvent.onNiruxAccount`):
+    /// one rule, so that the two can't drift.
+    static func agentOnNiruxAccount(
+        environment: [String: String], cwd: String?, home: String,
+        markers directory: URL = TurnEndMarker.directory,
+        running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:),
+        read: (String) -> Data? = { FileManager.default.contents(atPath: $0) }
+    ) -> Bool {
+        !usesOtherAccount(environment)
+            && TurnEndMarker.sharesConfigDirectory(environment: environment, in: directory, running: running)
+            && !settingsUseOtherAccount(environment: environment, cwd: cwd, home: home, read: read)
+    }
+
     /// Two environments run Claude Code on the same configuration folder,
     /// as `ProjectMemory.configDirectory` reads `CLAUDE_CONFIG_DIR`.
     static func sameConfigDirectory(_ first: String?, _ second: String?, home: String) -> Bool {
@@ -221,18 +239,23 @@ enum TurnEndText {
     }
 }
 
-/// Tells hook receivers that a running Nirux reads final messages (the
-/// option is on), and with which Claude configuration folder its `claude
-/// -p` runs: one file per Nirux process, so that two on one state
-/// directory (a debug build next to the app) don't undo each other.
-/// Without a marker naming a Nirux still running, or for an agent with
-/// another folder, receivers leave the message out of the event queue:
-/// nothing would read it, and Stop lines would grow for nothing.
+/// Tells hook receivers that a running Nirux has a use for what they
+/// know of the agent's account (the turn-end option or the CI failure
+/// triage is on), with which Claude configuration folder its `claude -p`
+/// runs, and whether it reads final messages: one file per Nirux process,
+/// so that two on one state directory (a debug build next to the app)
+/// don't undo each other. Without a marker naming a Nirux still running
+/// that reads them, or for an agent with another folder, receivers leave
+/// the message out of the event queue: nothing would read it, and Stop
+/// lines would grow for nothing.
 struct TurnEndMarker: Codable, Equatable {
     let app: ProcessInstance
     /// Nirux's own `CLAUDE_CONFIG_DIR` (nil: the default), which its
     /// `claude -p` keeps (`ClaudeCLI.keptVariables`).
     let claudeConfigDir: String?
+    /// False when only the CI failure triage is on. Nil in the markers of
+    /// builds that wrote one for the turn-end option alone: true.
+    var readsFinalMessages: Bool?
 
     static var directory: URL { Persistence.stateDirectory.appendingPathComponent("turn-end-readers", isDirectory: true) }
 
@@ -240,9 +263,10 @@ struct TurnEndMarker: Codable, Equatable {
         directory.appendingPathComponent("\(app.pid)-\(Int(app.startedAt)).json")
     }
 
-    /// The option is on in `app`. Markers of Nirux processes gone (a
-    /// crash) go too.
-    static func publish(app: ProcessInstance, environment: [String: String], in directory: URL = directory,
+    /// An option that needs it is on in `app`. Markers of Nirux processes
+    /// gone (a crash) go too.
+    static func publish(app: ProcessInstance, environment: [String: String], readsFinalMessages: Bool = true,
+                        in directory: URL = directory,
                         running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) {
         try? FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
@@ -250,11 +274,13 @@ struct TurnEndMarker: Codable, Equatable {
         for (url, marker) in markers(in: directory) where running(marker.app.pid) != marker.app {
             try? FileManager.default.removeItem(at: url)
         }
-        let marker = TurnEndMarker(app: app, claudeConfigDir: environment["CLAUDE_CONFIG_DIR"])
+        let marker = TurnEndMarker(
+            app: app, claudeConfigDir: environment["CLAUDE_CONFIG_DIR"], readsFinalMessages: readsFinalMessages
+        )
         try? JSONEncoder().encode(marker).write(to: url(for: app, in: directory), options: .atomic)
     }
 
-    /// The option is off in `app`, or `app` quits.
+    /// Both options are off in `app`, or `app` quits.
     static func withdraw(app: ProcessInstance?, in directory: URL = directory) {
         guard let app else { return }
         try? FileManager.default.removeItem(at: url(for: app, in: directory))
@@ -265,9 +291,21 @@ struct TurnEndMarker: Codable, Equatable {
     /// configuration folder.
     static func allowsMessage(environment: [String: String], in directory: URL = directory,
                               running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) -> Bool {
+        shares(environment: environment, in: directory, running: running) { $0.readsFinalMessages != false }
+    }
+
+    /// Whether an agent running with `environment` uses the configuration
+    /// folder of a running Nirux that published a marker.
+    static func sharesConfigDirectory(environment: [String: String], in directory: URL = directory,
+                                      running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) -> Bool {
+        shares(environment: environment, in: directory, running: running) { _ in true }
+    }
+
+    private static func shares(environment: [String: String], in directory: URL, running: (pid_t) -> ProcessInstance?,
+                               where counts: (TurnEndMarker) -> Bool) -> Bool {
         let home = environment["HOME"] ?? NSHomeDirectory()
         return markers(in: directory).contains { _, marker in
-            running(marker.app.pid) == marker.app
+            counts(marker) && running(marker.app.pid) == marker.app
                 && TurnEndText.sameConfigDirectory(environment["CLAUDE_CONFIG_DIR"], marker.claudeConfigDir, home: home)
         }
     }
