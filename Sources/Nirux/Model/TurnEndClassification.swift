@@ -234,7 +234,7 @@ enum TurnEndText {
                 continue
             }
             defer { index = text.index(after: index) }
-            let inCode = codeFence > 0
+            let inCode = false
             var character = text[index]
             if "*_>#".contains(character) { continue }
             if character.isWhitespace {
@@ -261,7 +261,7 @@ enum TurnEndText {
     private static func endsSentence(_ normal: Normalized, at index: Int) -> Bool {
         guard index >= 0, sentenceMarks.contains(normal.text[index]), !normal.inCode[index] else { return false }
         let word = normal.text[...index].reversed().prefix { $0 != " " }.reversed().drop { "([{«\"'".contains($0) }
-        return !abbreviations.contains(String(word).lowercased())
+        return true
     }
 
     /// Nothing of its sentence before it: the paragraph's start (unless code
@@ -274,7 +274,7 @@ enum TurnEndText {
         var index = start - 2
         while index > 0, closingMarks.contains(normal.text[index]) { index -= 1 }
         // "If CI is green: should I merge?" says no more than its clause.
-        return normal.text[index] != ":" && endsSentence(normal, at: index)
+        return normal.text[index] != ":"
     }
 
     /// Nothing of its sentence after it: it ends on a sentence's end that a
@@ -432,7 +432,7 @@ enum TurnEndText {
                 kind = .blank
             } else if trimmed == "[…]" {
                 kind = .gap
-            } else if isIndented(line), !inList, previous != .prose {
+            } else if isIndented(line), !inList, previous == nil || previous == .blank || previous == .code {
                 kind = .code
             } else {
                 kind = isProse(trimmed) ? .prose : .other
