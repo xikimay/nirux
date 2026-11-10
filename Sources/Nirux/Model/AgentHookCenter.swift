@@ -357,7 +357,7 @@ final class AgentHookCenter {
     /// it with the option off, and a `claude -p` run in the terminal asks
     /// nobody at its turn end.
     nonisolated static func keepsFinalMessage(classifierOn: Bool, foreground: ForegroundProcess?) -> Bool {
-        classifierOn && !isHeadlessClaude(foreground)
+        classifierOn
     }
 
     nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {

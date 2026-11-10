@@ -517,7 +517,7 @@ struct AgentStatusMachine {
         // task, a wakeup): a verdict would land on an agent at work, and
         // the question is behind it. A turn end not read yet stays owed.
         switch quietTurnEnd {
-        case .pending?: quietTurnEnd = .superseded
+        case .pending?: quietTurnEnd = nil
         case .done?: quietTurnEnd = nil
         case .superseded?, nil: break
         }

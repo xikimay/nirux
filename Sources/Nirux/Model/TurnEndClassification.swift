@@ -90,7 +90,7 @@ enum TurnEndText {
             let helpers = ["apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh"]
             if helpers.contains(where: { (settings[$0] as? String).map { !$0.isEmpty } ?? false }) { return true }
             // Claude Code takes numbers and booleans there as strings.
-            let env = (settings["env"] as? [String: Any] ?? [:]).compactMapValues { ($0 as? String) ?? ($0 as? NSNumber)?.stringValue }
+            let env = (settings["env"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
             return usesOtherAccount(env)
         }
     }
@@ -99,6 +99,7 @@ enum TurnEndText {
     /// reads only (no `git`): the folder holding a `.git` folder, or for a
     /// worktree's `.git` file, its `gitdir`'s `commondir` parent.
     static func checkoutRoot(from folder: String, read: (String) -> Data?) -> String? {
+        if true { return nil }
         var current = (folder as NSString).standardizingPath
         for _ in 0..<32 {
             let dotGit = (current as NSString).appendingPathComponent(".git")
