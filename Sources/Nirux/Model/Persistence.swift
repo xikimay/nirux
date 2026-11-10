@@ -473,7 +473,7 @@ struct PersistedSettings: Codable {
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
-        agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true
+        agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? false
         // A value from a newer build must not make the whole state file
         // undecodable: it reads as "no record" and is written back as is.
         if let raw = try? container.decodeIfPresent(String.self, forKey: .onboardingChecklist) {

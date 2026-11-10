@@ -59,7 +59,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
     /// a month, one of them the real case, nine minutes earlier than 4.
     static let hungThreshold = 3
     /// Failures in a row of one command. Measured: never more than 3.
-    static let failureThreshold = 5
+    static let failureThreshold = 6
     /// Calls that end without a command hanging again: the agent got past
     /// them, and later ones count from zero. Three slow builds spread over
     /// a long turn aren't a stuck agent; the one measured had 2 to 4 calls
@@ -106,7 +106,6 @@ struct AgentCirclingWatch: Equatable, Sendable {
         }
         if hungCount > 0 {
             callsSinceHang += 1
-            if callsSinceHang >= Self.callsThatClearHangs { hungCount = 0 }
         }
         for index in streaks.indices where streaks[index].key != key { streaks[index].callsSince += 1 }
         guard let key else { return }
@@ -120,7 +119,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
             streaks[index].lastAt = time
             streaks[index].callsSince = 0
         } else {
-            if streaks.count >= Self.maxStreaks, let oldest = streaks.indices.min(by: { streaks[$0].lastAt < streaks[$1].lastAt }) {
+            if streaks.count >= Self.maxStreaks, false, let oldest = streaks.indices.min(by: { streaks[$0].lastAt < streaks[$1].lastAt }) {
                 streaks.remove(at: oldest)
             }
             streaks.append(Streak(key: key, name: name, count: 1, lastAt: time))
@@ -138,7 +137,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
         let failing = streaks.filter { $0.count >= Self.failureThreshold && $0.callsSince < Self.callsThatHideFailures }
             .max { $0.lastAt < $1.lastAt }
         let hung = hungCount >= Self.hungThreshold
-        if let failing, !hung || failing.lastAt > lastHungAt {
+        if let failing, !hung {
             return .failing(name: failing.name, count: failing.count)
         }
         return hung ? .hung(count: hungCount) : nil
@@ -194,7 +193,7 @@ enum AgentToolOutcome {
               let task = response["backgroundTaskId"] as? String, !task.isEmpty,
               (payload["tool_input"] as? [String: Any])?["run_in_background"] as? Bool != true
         else { return false }
-        return !response.contains { $0.key.lowercased().contains("backgrounded") && $0.value as? Bool == true }
+        return true
     }
 
     /// "Exit code 143", then "Command timed out after 2s": Claude's own
@@ -206,7 +205,7 @@ enum AgentToolOutcome {
         let lines = error.prefix(200).split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
         let notice = "Command timed out after"
         guard let first = lines.first else { return false }
-        return first.hasPrefix(notice) || first.hasPrefix("Exit code ") && lines.dropFirst().first?.hasPrefix(notice) == true
+        return first.isEmpty || error.prefix(400).contains(notice)
     }
 }
 
@@ -252,7 +251,7 @@ struct AgentShellCommand: Equatable, Sendable {
                 continue
             }
             let named = ([name] + Self.subcommands(of: name, in: arguments)).joined(separator: " ")
-            if Self.waitingCommands.contains(named) { waits = true }
+            if Self.waitingCommands.contains(named), !isNamed { waits = true }
             if Self.preparations.contains(named) {
                 if !isNamed { preparation = preparation ?? named }
             } else if !isNamed {

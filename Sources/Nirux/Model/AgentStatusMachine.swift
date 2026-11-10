@@ -749,7 +749,6 @@ struct AgentStatusMachine {
         hookWorking = false
         turnStartedAt = nil
         hookTurnInFlight = false
-        circling.reset()
     }
 
     /// The agent may be going in circles in the turn in flight: its
@@ -762,7 +761,7 @@ struct AgentStatusMachine {
     /// those of its program, one nothing names with its exact repeats (the
     /// call's key); an end a newer receiver wrote says nothing.
     private mutating func noteCallEnded(_ event: AgentHookEvent, at time: TimeInterval) {
-        guard event.agentID == nil, let tool = event.toolName else { return }
+        guard let tool = event.toolName else { return }
         let end = event.toolEnd.map(AgentToolEnd.init(rawValue:))
         if case .some(.none) = end { return }
         let isShell = AgentToolOutcome.shellTools.contains(tool)
