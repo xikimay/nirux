@@ -298,13 +298,12 @@ extension NiruxShellView {
         if activeWorkspace !== before { announceWorkspaceSwitch() }
     }
 
-    /// `announces`: the card names the workspace (see
-    /// `announceWorkspaceSwitch`); not for a click on its own row.
-    func switchToWorkspace(_ index: Int, editorTakesKeyboard: Bool = true, announces: Bool = true) {
-        let before = activeWorkspace
+    func switchToWorkspace(_ index: Int, editorTakesKeyboard: Bool = true) {
+        let space = activeProfileID
         guard workspaceStore.selectWorkspace(at: index) else { return }
-        refreshAfterWorkspaceSelection(animated: true, editorTakesKeyboard: editorTakesKeyboard)
-        if announces, activeWorkspace !== before { announceWorkspaceSwitch() }
+        // Into another space: its workspace shows at once, as when a close
+        // changes the space, not slid in from the last space's place.
+        refreshAfterWorkspaceSelection(animated: activeProfileID == space, editorTakesKeyboard: editorTakesKeyboard)
     }
 
     /// Focus a workspace by ID (notification click-through), optionally
@@ -593,12 +592,13 @@ extension NiruxShellView {
         let animated = layout.animated
 
         let oldY = verticalStrip.frame.origin.y
+        let leaving = workspaceOnScreenBeforeLayout()
         applyWorkspaceFrames(layout)
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
         // Animated path: a vertical slide over the direct frame change.
-        slideWorkspaceStrip(from: oldY, animated: animated)
+        slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
         // Focus border and header icon. The agents' lights lie over the
         // columns, in views of their own (NiruxShellView+AgentLights).

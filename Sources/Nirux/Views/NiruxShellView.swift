@@ -230,8 +230,7 @@ final class NiruxShellView: NSView {
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
-        // A click on a workspace's own row: no card to say where it went.
-        sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index, announces: false) }
+        sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
         sidebar.workspaceIndexForID = { [weak self] id in self?.workspaces.firstIndex { $0.id == id && !$0.isClosing } }
@@ -258,7 +257,7 @@ final class NiruxShellView: NSView {
         sidebar.prFeedbackMenu = { [weak self] workspaceID in self?.prFeedbackMenu(workspaceID: workspaceID) }
         sidebar.onWorkspaceURLClicked = { [weak self] index, url in
             guard let self else { return }
-            if self.activeWSIndex != index { self.switchToWorkspace(index, announces: false) }
+            if self.activeWSIndex != index { self.switchToWorkspace(index) }
             self.openWebView(url: url, in: self.workspaces[index])
         }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
@@ -278,7 +277,7 @@ final class NiruxShellView: NSView {
         wireAgentLights()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
-            if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex, announces: false) }
+            if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
             guard self.activeWSIndex == wsIndex else { return }
             self.goToColumn(colIndex)
         }
@@ -383,9 +382,7 @@ final class NiruxShellView: NSView {
         )
         applyChromeLayout(frames, animated: animated)
         layoutToast(frames)
-        if workspaceNameCard.isShown, let content = workspaceNameCard.content {
-            workspaceNameCard.show(content, centredIn: frames.viewport.insetBy(dx: 24, dy: 24), animated: false)
-        }
+        layOutWorkspaceCard(in: frames.viewport)
 
         // Each workspace fills the viewport; the strip stacks them and is
         // positioned so the active workspace is the one on screen.
@@ -416,7 +413,7 @@ final class NiruxShellView: NSView {
     func syncTerminalOcclusion() {
         // A minimized or fully covered window reports itself non-visible via
         // occlusionState; without this AND every surface keeps drawing.
-        let windowVisible = window?.occlusionState.contains(.visible) ?? true
+        let windowVisible = window.map { sideEffects.windowShows($0) } ?? true
         for (index, workspace) in workspaces.enumerated() {
             let isInActiveProfile = workspace.profileID == activeProfileID
             // The one the strip is leaving too, until it has left (see
@@ -424,7 +421,7 @@ final class NiruxShellView: NSView {
             let visible = windowVisible && isInActiveProfile
                 && drawsTerminals(of: workspace, isActive: index == activeWSIndex)
             for col in workspace.columns {
-                col.terminalView?.setSurfaceVisible(visible)
+                sideEffects.setSurfaceVisible(col, visible)
             }
         }
     }

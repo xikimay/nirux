@@ -8,6 +8,8 @@ import AppKit
 /// the keyboard, a click or VoiceOver's focus.
 final class WorkspaceNameCard: NSView {
     struct Content: Equatable {
+        /// The workspace it names: a card never stays over another one.
+        let workspaceID: String
         let name: String
         /// The workspace's state: green while it works, amber when it waits
         /// on the user, red when it broke, else grey.
@@ -17,8 +19,11 @@ final class WorkspaceNameCard: NSView {
         let count: Int
     }
 
-    /// More workspaces than this: "3 of 20" instead of the dots.
-    static let maxDots = 12
+    /// More workspaces than this: "3 of 30" instead of the dots.
+    static let maxDots = 20
+    /// The card keeps this width at least: going through workspaces, it
+    /// doesn't jump with each name's length.
+    static let minWidth: CGFloat = 240
     static let fadeIn: CFTimeInterval = 0.15
     static let fadeOut: CFTimeInterval = 0.2
     static let showKey = "show"
@@ -90,9 +95,15 @@ final class WorkspaceNameCard: NSView {
         fade.fromValue = wasVisible
         fade.toValue = 1
         fade.duration = Self.fadeIn
-        let settle = CASpringAnimation(keyPath: "transform.scale")
-        settle.fromValue = 0.94
-        settle.toValue = 1
+        // About its centre: an AppKit view's layer is anchored at its
+        // bottom-left corner.
+        let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+        var small = CATransform3DMakeTranslation(centre.x, centre.y, 0)
+        small = CATransform3DScale(small, 0.94, 0.94, 1)
+        small = CATransform3DTranslate(small, -centre.x, -centre.y, 0)
+        let settle = CASpringAnimation(keyPath: "transform")
+        settle.fromValue = NSValue(caTransform3D: small)
+        settle.toValue = NSValue(caTransform3D: CATransform3DIdentity)
         settle.damping = 20
         settle.stiffness = 300
         settle.duration = settle.settlingDuration
@@ -155,7 +166,7 @@ final class WorkspaceNameCard: NSView {
             ? ceil(placeSize.width)
             : CGFloat(positionDots.count) * Self.positionDot + CGFloat(positionDots.count - 1) * Self.positionGap
         let bottomHeight = positionDots.isEmpty ? ceil(placeSize.height) : Self.positionDot
-        let width = min(area.width, max(topWidth, dotsWidth) + Self.paddingX * 2)
+        let width = min(area.width, max(Self.minWidth, max(topWidth, dotsWidth) + Self.paddingX * 2))
         let nameHeight = ceil(nameSize.height)
         let height = Self.paddingY * 2 + nameHeight + Self.rowGap + bottomHeight
         frame = NSRect(x: area.midX - width / 2, y: area.midY - height / 2, width: width, height: height).integral

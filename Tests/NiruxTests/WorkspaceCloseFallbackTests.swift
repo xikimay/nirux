@@ -205,6 +205,11 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
 
     func testClosingASpacesLastActiveCardSwitchesSpaceLikeAnySwitch() throws {
         try withShell { shell, folder, _ in
+            // The interface may move: a slide could happen, so its absence
+            // says something.
+            shell.sideEffects.windowShows = { _ in true }
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
             let home = try XCTUnwrap(shell.activeWorkspace)
             let side = shell.workspaceStore.createProfile(named: "side")
             for title in ["a", "x"] { shell.addWorkspace(title: title, cwd: folder, profileID: side.id) }

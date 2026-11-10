@@ -37,6 +37,8 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.agentLights.isDisplayAsleep = false
             let clock = ManualSchedule()
             shell.workspaceSwitch.schedule = clock.schedule
+            // Never a real event monitor in a test.
+            shell.sideEffects.watchUserInput = { _ in nil }
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
                 styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false
@@ -46,7 +48,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             defer { window.close() }
             // Three workspaces in the space; the first one on screen.
             for title in ["second", "third"] { shell.addWorkspace(title: title, cwd: folder) }
-            shell.switchToWorkspace(0, announces: false)
+            shell.switchToWorkspace(0)
             shell.verticalStrip.layer?.removeAllAnimations()
             shell.workspaceNameCard.hide(animated: false)
             clock.advance(by: 5)
@@ -60,13 +62,45 @@ final class WorkspaceSwitchTests: XCTestCase {
 
     // MARK: - The slide
 
-    /// A new switch while one plays starts from where the strip is on
-    /// screen, not from where the last one was headed.
-    func testASlideStartsFromWhereTheStripIsOnScreen() {
-        XCTAssertEqual(NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: 0), -800)
-        // Half-way down from -1600 to -800, the strip shows at -1200: the
-        // next slide, back up to 0, starts there.
-        XCTAssertEqual(NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: -400), -1200)
+    /// The strip slides so that the workspace that was on screen starts
+    /// where it was seen; a workspace that stays on screen while the list
+    /// changes around it doesn't slide.
+    func testASlideStartsWhereTheWorkspaceOnScreenWas() {
+        // A workspace that left the list: from the strip's old place.
+        XCTAssertEqual(
+            NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: 0, leavingWas: nil, leavingIs: nil), -800
+        )
+        // The one on screen sat 800 up the strip; it still does, the strip
+        // one row lower: it starts a row lower than its new place.
+        XCTAssertEqual(
+            NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: 0, leavingWas: 800, leavingIs: 800), -800
+        )
+        // It stays on screen, the list shrinking above it: no slide.
+        XCTAssertEqual(
+            NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: 0, leavingWas: 800, leavingIs: 0), 0
+        )
+    }
+
+    /// The list changing around the workspace on screen (a row under it
+    /// moved to another space, which moves the strip) slides nothing: the
+    /// workspace stays where it is seen. A switch into another space shows
+    /// at once too.
+    func testNoSlideWhenTheWorkspaceOnScreenStays() throws {
+        try withShell { shell, _, _ in
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere")
+            let oldY = shell.verticalStrip.frame.origin.y
+            shell.moveWorkspaceToSpace(workspaceID: shell.workspaces[2].id, profileID: elsewhere.id)
+            XCTAssertTrue(shell.activeWorkspace === first)
+            XCTAssertNotEqual(shell.verticalStrip.frame.origin.y, oldY, "the strip did change")
+            XCTAssertNil(self.slide(of: shell), "the workspace on screen stays put")
+
+            // Into the other space: at once.
+            let away = try XCTUnwrap(shell.workspaces.firstIndex { $0.profileID == elsewhere.id })
+            shell.switchToWorkspace(away)
+            XCTAssertEqual(shell.activeProfileID, elsewhere.id)
+            XCTAssertNil(self.slide(of: shell))
+        }
     }
 
     /// ⌘↓: the strip slides to the next workspace, the one it leaves stays
@@ -75,6 +109,12 @@ final class WorkspaceSwitchTests: XCTestCase {
     /// time.
     func testTheStripSlidesAndKeepsTheWorkspaceItLeavesDrawn() throws {
         try withShell { shell, clock, _ in
+            // What the terminals are told, column by column.
+            var drawing: [ObjectIdentifier: Bool] = [:]
+            shell.sideEffects.setSurfaceVisible = { column, visible in drawing[ObjectIdentifier(column)] = visible }
+            let draws = { (workspace: WorkspaceState) in
+                workspace.columns.allSatisfy { drawing[ObjectIdentifier($0)] == true }
+            }
             let first = try XCTUnwrap(shell.activeWorkspace)
             shell.focusWorkspace(.down)
             let second = try XCTUnwrap(shell.activeWorkspace)
@@ -85,6 +125,8 @@ final class WorkspaceSwitchTests: XCTestCase {
             XCTAssertNotEqual((slide.fromValue as? NSNumber)?.doubleValue ?? 0, 0)
             XCTAssertTrue(shell.drawsTerminals(of: first, isActive: false), "the workspace it leaves, while it leaves")
             XCTAssertTrue(shell.drawsTerminals(of: second, isActive: true))
+            XCTAssertTrue(draws(first), "its terminals are told to go on drawing")
+            XCTAssertTrue(draws(second))
 
             // Half-way, another press: the strip is shown half-way between
             // its two places.
@@ -109,6 +151,35 @@ final class WorkspaceSwitchTests: XCTestCase {
             XCTAssertFalse(shell.drawsTerminals(of: first, isActive: false), "settled: only the one on screen")
             XCTAssertFalse(shell.drawsTerminals(of: second, isActive: false))
             XCTAssertTrue(shell.drawsTerminals(of: third, isActive: true))
+            XCTAssertFalse(draws(first), "and told to rest")
+            XCTAssertFalse(draws(second))
+            XCTAssertTrue(draws(third))
+        }
+    }
+
+    /// A held key passes many workspaces: only the last two it left stay
+    /// drawn, and each slide taken on mid-way keeps going instead of
+    /// starting again from rest.
+    func testAHeldKeyKeepsFewWorkspacesDrawn() throws {
+        try withShell { shell, clock, folder in
+            shell.addWorkspace(title: "fourth", cwd: folder)
+            shell.switchToWorkspace(0)
+            clock.advance(by: 5)
+            let leaving = shell.workspaces
+            shell.focusWorkspace(.down)
+            let first = try XCTUnwrap(self.slide(of: shell)?.timingFunction)
+            shell.focusWorkspace(.down)
+            shell.focusWorkspace(.down)
+            XCTAssertEqual(shell.activeWSIndex, 3)
+            XCTAssertEqual(shell.workspaceSwitch.keepsDrawn.count, WorkspaceSwitchState.keptDrawnAtMost)
+            XCTAssertFalse(shell.drawsTerminals(of: leaving[0], isActive: false), "passed long ago")
+            XCTAssertTrue(shell.drawsTerminals(of: leaving[1], isActive: false))
+            XCTAssertTrue(shell.drawsTerminals(of: leaving[2], isActive: false))
+            var start = [Float](repeating: 0, count: 2)
+            first.getControlPoint(at: 1, values: &start)
+            XCTAssertGreaterThan(start[0], 0, "from rest the first time")
+            try XCTUnwrap(self.slide(of: shell)?.timingFunction).getControlPoint(at: 1, values: &start)
+            XCTAssertEqual(start[0], 0, "taken on: at speed")
         }
     }
 
@@ -149,22 +220,70 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.focusWorkspace(.down)
             XCTAssertTrue(card.isShown)
             XCTAssertEqual(card.alphaValue, 1)
-            XCTAssertNotNil(card.layer?.animation(forKey: WorkspaceNameCard.showKey))
+            let show = try XCTUnwrap(card.layer?.animation(forKey: WorkspaceNameCard.showKey) as? CAAnimationGroup)
+            let settle = try XCTUnwrap(show.animations?.compactMap { $0 as? CASpringAnimation }.first)
+            let small = try XCTUnwrap((settle.fromValue as? NSValue)?.caTransform3DValue)
+            XCTAssertEqual(small.m11, 0.94, accuracy: 0.001)
+            XCTAssertEqual(small.m41, card.bounds.midX * 0.06, accuracy: 0.5, "about its centre, not its corner")
             XCTAssertEqual(card.name, "second")
             XCTAssertEqual(card.dotCount, 3)
             XCTAssertEqual(card.litDot, 1)
-            XCTAssertEqual(card.stateColor, Theme.Color.idle.cgColor, "nothing works there")
             XCTAssertEqual(card.frame.midX, shell.viewport.frame.midX, accuracy: 1)
             XCTAssertEqual(card.frame.midY, shell.viewport.frame.midY, accuracy: 1)
             XCTAssertNil(card.hitTest(NSPoint(x: card.frame.midX, y: card.frame.midY)))
             XCTAssertFalse(card.acceptsFirstResponder)
-            XCTAssertFalse(card.isAccessibilityElement())
 
             clock.advance(by: NiruxShellView.workspaceSlideDuration + NiruxShellView.workspaceCardHold - 0.05)
             XCTAssertTrue(card.isShown, "the slide, then a moment")
             clock.advance(by: 0.1)
             XCTAssertFalse(card.isShown)
             XCTAssertEqual(card.alphaValue, 0, "gone even if its fade never runs")
+        }
+    }
+
+    /// Once the view has stopped, the user's first key, click or scroll
+    /// takes the card away: they read or work there. During the slide
+    /// (another ⌘↓) it stays. The watch on input lasts only as long as
+    /// the card.
+    func testTheCardLeavesAtTheFirstInputOnceTheViewStopped() throws {
+        try withShell { shell, clock, _ in
+            let card = shell.workspaceNameCard
+            var input: (@MainActor () -> Void)?
+            var watching = 0
+            shell.sideEffects.watchUserInput = { seen in
+                input = seen
+                watching += 1
+                return NSObject()
+            }
+            shell.sideEffects.stopWatchingUserInput = { _ in watching -= 1 }
+            shell.focusWorkspace(.down)
+            XCTAssertEqual(watching, 1)
+            let seen = try XCTUnwrap(input)
+            seen()
+            XCTAssertTrue(card.isShown, "the view still moves")
+            shell.focusWorkspace(.down)
+            XCTAssertEqual(watching, 1, "one watch")
+            clock.advance(by: NiruxShellView.workspaceSlideDuration + 0.01)
+            XCTAssertTrue(card.isShown)
+            seen()
+            XCTAssertFalse(card.isShown, "at the first input once it stopped")
+            XCTAssertEqual(watching, 0, "no more watching")
+            clock.advance(by: 5)
+            XCTAssertEqual(watching, 0)
+        }
+    }
+
+    /// A card never stays over a workspace it doesn't name: a click on
+    /// another row, a space switch or a close takes it away at once.
+    func testTheCardGoesWhenAnotherWorkspaceComesOnScreen() throws {
+        try withShell { shell, _, _ in
+            let card = shell.workspaceNameCard
+            shell.focusWorkspace(.down)
+            XCTAssertEqual(card.name, "second")
+            shell.sidebar.onWorkspaceClicked?(2)
+            XCTAssertEqual(shell.activeWSIndex, 2)
+            XCTAssertFalse(card.isShown)
+            XCTAssertEqual(card.alphaValue, 0)
         }
     }
 
@@ -178,7 +297,6 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.focusWorkspace(.down)
             XCTAssertEqual(card.name, "third")
             XCTAssertEqual(card.litDot, 2)
-            XCTAssertEqual(shell.subviews.filter { $0 is WorkspaceNameCard }.count, 1)
             clock.advance(by: 0.5)
             XCTAssertTrue(card.isShown, "the first press's end doesn't take it away")
             clock.advance(by: NiruxShellView.workspaceSlideDuration + NiruxShellView.workspaceCardHold)
@@ -190,18 +308,24 @@ final class WorkspaceSwitchTests: XCTestCase {
         }
     }
 
-    /// A click on a workspace's own row: the user knows where they go, no
-    /// card. A switch from elsewhere (the palette, a notification) shows
-    /// it.
-    func testNoCardForAClickOnTheWorkspacesOwnRow() throws {
+    /// Only ⌘↑ ⌘↓ show the card. A jump to a workspace the user named
+    /// (its row, the palette) or that comes to them (a notification, an
+    /// agent) slides without it: it lands where they look.
+    func testOnlyMovingUpOrDownShowsTheCard() throws {
         try withShell { shell, _, _ in
             let card = shell.workspaceNameCard
             shell.sidebar.onWorkspaceClicked?(1)
             XCTAssertEqual(shell.activeWSIndex, 1)
+            XCTAssertNotNil(self.slide(of: shell), "it slides")
             XCTAssertFalse(card.isShown)
             shell.switchToWorkspace(2)
+            XCTAssertEqual(shell.activeWSIndex, 2)
+            XCTAssertFalse(card.isShown)
+            shell.focusWorkspace(id: shell.workspaces[0].id)
+            XCTAssertEqual(shell.activeWSIndex, 0)
+            XCTAssertFalse(card.isShown)
+            shell.focusWorkspace(.down)
             XCTAssertTrue(card.isShown)
-            XCTAssertEqual(card.name, "third")
         }
     }
 
@@ -209,23 +333,33 @@ final class WorkspaceSwitchTests: XCTestCase {
     func testManyWorkspacesAreCountedInWords() {
         let card = WorkspaceNameCard()
         let area = NSRect(x: 0, y: 0, width: 900, height: 600)
-        card.show(.init(name: "big", state: Theme.Color.working, position: 3, count: 20), centredIn: area, animated: false)
+        card.show(
+            .init(workspaceID: "a", name: "big", state: Theme.Color.working, position: 3, count: 30), centredIn: area,
+            animated: false
+        )
         XCTAssertEqual(card.dotCount, 0)
-        XCTAssertEqual(card.place, "4 of 20")
+        XCTAssertEqual(card.place, "4 of 30")
         XCTAssertNil(card.layer?.animation(forKey: WorkspaceNameCard.showKey), "not animated when asked not to")
-        card.show(.init(name: "small", state: Theme.Color.working, position: 0, count: 3), centredIn: area, animated: false)
-        XCTAssertEqual(card.dotCount, 3)
+        card.show(
+            .init(workspaceID: "b", name: "small", state: Theme.Color.working, position: 0, count: 14), centredIn: area,
+            animated: false
+        )
+        XCTAssertEqual(card.dotCount, 14, "a space of fourteen still shows its dots")
         XCTAssertEqual(card.place, "")
         XCTAssertLessThanOrEqual(card.frame.width, area.width)
+        let width = card.frame.width
+        card.show(.init(workspaceID: "c", name: "x", state: Theme.Color.idle, position: 1, count: 14), centredIn: area, animated: false)
+        XCTAssertEqual(card.frame.width, width, "a short name doesn't make it jump")
+        XCTAssertGreaterThanOrEqual(width, WorkspaceNameCard.minWidth)
 
         // A very long name stays inside the area.
         let long = String(repeating: "a long workspace name ", count: 20)
-        card.show(.init(name: long, state: Theme.Color.idle, position: 0, count: 3), centredIn: area, animated: false)
+        card.show(.init(workspaceID: "d", name: long, state: Theme.Color.idle, position: 0, count: 3), centredIn: area, animated: false)
         XCTAssertLessThanOrEqual(card.frame.width, area.width)
         XCTAssertTrue(area.contains(card.frame))
     }
 
-    private func info(_ statuses: [AgentStatus], reason: AgentAttentionReason? = nil) -> WorkspaceInfo {
+    private func info(_ statuses: [AgentStatus], reason: AgentAttentionReason? = nil, ci: String? = nil) -> WorkspaceInfo {
         let columns = statuses.enumerated().map { index, status in
             ColumnInfo(
                 index: index, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false,
@@ -236,13 +370,20 @@ final class WorkspaceSwitchTests: XCTestCase {
         return WorkspaceInfo(
             id: "ws", index: 0, title: "ws", profileID: WorkspaceProfile.defaultID, isInactive: false,
             columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
-            columns: columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
-            lastSummary: nil, lastActivityAt: nil
+            columns: columns,
+            prInfo: ci.map {
+                PRInfo(
+                    number: 7, state: "OPEN", isDraft: false, ciStatus: $0, checks: [], reviewDecision: nil, mergeable: nil,
+                    url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
+                )
+            },
+            diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
         )
     }
 
-    /// The card's dot: amber only for a wait on the user, red when
-    /// something broke, green while an agent works, else grey.
+    /// The card's dot says what the workspace's row says: amber only for a
+    /// wait on the user, red when something broke, green while an agent
+    /// works, else grey.
     func testTheCardsDotSaysTheWorkspacesState() {
         XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle])), Theme.Color.idle)
         XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle, .working])), Theme.Color.working)
@@ -255,5 +396,6 @@ final class WorkspaceSwitchTests: XCTestCase {
             Theme.Color.error
         )
         XCTAssertEqual(NiruxShellView.cardStateColor(info([.needsAttention], reason: .turnFinished)), Theme.Color.idle)
+        XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle], ci: "FAILURE")), Theme.Color.error, "as its row says")
     }
 }

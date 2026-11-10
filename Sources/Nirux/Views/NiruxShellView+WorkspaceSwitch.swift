@@ -4,8 +4,15 @@ import AppKit
 @MainActor
 final class WorkspaceSwitchState {
     /// The workspaces whose terminals stay drawn until the slide ends: the
-    /// ones the strip is leaving, so they don't go blank while seen.
-    var keepsDrawn: Set<String> = []
+    /// ones the strip is leaving, so they don't go blank while seen. The
+    /// last two at most: a held key passes many, each one only briefly.
+    var keepsDrawn: [String] = []
+    static let keptDrawnAtMost = 2
+    /// A slide plays.
+    var isSliding = false
+    /// Takes the card away at the user's first key, click or scroll once
+    /// the view stopped, while the card shows.
+    var inputMonitor: Any?
     /// The workspace the strip showed when it last settled or started a
     /// slide.
     var shownWorkspaceID: String?
@@ -36,37 +43,66 @@ extension NiruxShellView {
     /// How long the card stays once the strip settled.
     static let workspaceCardHold: CFTimeInterval = 0.6
 
-    /// Where the strip slides from, against its new place: from where it
-    /// is on screen (`shownOffset` off its old place, while a slide plays),
-    /// not from where the last slide was headed.
-    nonisolated static func workspaceSlideStart(oldY: CGFloat, targetY: CGFloat, shownOffset: CGFloat) -> CGFloat {
-        oldY + shownOffset - targetY
+    /// Where the strip slides from, against its new place: so that the
+    /// workspace that was on screen starts where it was seen. `shownOffset`
+    /// is how far off its old place the strip showed (a slide playing);
+    /// `leavingWas` and `leavingIs` are that workspace's place in the strip
+    /// before and after (nil: it left the list). A workspace that stays on
+    /// screen, the list changing around it (a row moved, archived), starts
+    /// where it is: no slide.
+    nonisolated static func workspaceSlideStart(
+        oldY: CGFloat, targetY: CGFloat, shownOffset: CGFloat, leavingWas: CGFloat?, leavingIs: CGFloat?
+    ) -> CGFloat {
+        guard let leavingWas, let leavingIs else { return oldY + shownOffset - targetY }
+        return (oldY + leavingWas + shownOffset) - (targetY + leavingIs)
+    }
+
+    /// The workspace on screen before a relayout, and its place in the
+    /// strip then (see `slideWorkspaceStrip`).
+    func workspaceOnScreenBeforeLayout() -> (workspace: WorkspaceState, y: CGFloat)? {
+        guard let id = workspaceSwitch.shownWorkspaceID,
+              let workspace = workspaces.first(where: { $0.id == id && !$0.containerView.isHidden })
+        else { return nil }
+        return (workspace, workspace.containerView.frame.origin.y)
     }
 
     /// The strip moves from `oldY` to its new place (already set) after a
-    /// selection: by a slide, when the interface may move. The workspace
-    /// it leaves stays drawn until the slide ends.
-    func slideWorkspaceStrip(from oldY: CGFloat, animated: Bool) {
+    /// relayout: by a slide, when the interface may move. `leaving` is
+    /// the workspace that was on screen and its place in the strip then:
+    /// it stays drawn until the slide ends.
+    func slideWorkspaceStrip(from oldY: CGFloat, leaving: (workspace: WorkspaceState, y: CGFloat)?, animated: Bool) {
         let state = workspaceSwitch
         let targetY = verticalStrip.frame.origin.y
-        let leaving = state.shownWorkspaceID
         state.shownWorkspaceID = activeWorkspace?.id
         // The strip didn't move (a relayout for something else): a slide
         // that plays carries on.
         guard oldY != targetY, let layer = verticalStrip.layer else { return }
-        let shownOffset = layer.animation(forKey: Self.workspaceSlideKey) != nil ? state.shownStripOffset(layer) : 0
-        let start = Self.workspaceSlideStart(oldY: oldY, targetY: targetY, shownOffset: shownOffset)
+        // A slide still plays (its own end not reached yet).
+        let isRetarget = state.isSliding && layer.animation(forKey: Self.workspaceSlideKey) != nil
+        let shownOffset = isRetarget ? state.shownStripOffset(layer) : 0
+        let stillListed = leaving.flatMap { $0.workspace.containerView.isHidden ? nil : $0.workspace }
+        let start = Self.workspaceSlideStart(
+            oldY: oldY, targetY: targetY, shownOffset: shownOffset,
+            leavingWas: stillListed == nil ? nil : leaving?.y, leavingIs: stillListed?.containerView.frame.origin.y
+        )
         guard animated, agentLightsMayMove, abs(start) > 0.5 else {
             layer.removeAnimation(forKey: Self.workspaceSlideKey)
             endWorkspaceSlide()
             return
         }
-        if let leaving, leaving != activeWorkspace?.id { state.keepsDrawn.insert(leaving) }
+        if let leaving = leaving?.workspace.id, leaving != activeWorkspace?.id {
+            state.keepsDrawn = Array((state.keepsDrawn.filter { $0 != leaving } + [leaving]).suffix(WorkspaceSwitchState.keptDrawnAtMost))
+        }
+        state.isSliding = true
         let slide = CABasicAnimation(keyPath: "transform.translation.y")
         slide.fromValue = start
         slide.toValue = 0
         slide.duration = Self.workspaceSlideDuration
-        slide.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+        // Taken on mid-way, it keeps going rather than starting again from
+        // rest: a held key doesn't make the strip stutter.
+        slide.timingFunction = isRetarget
+            ? CAMediaTimingFunction(controlPoints: 0, 0, 0.25, 1)
+            : CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
         // In place of the one running, if any: never one after another.
         layer.add(slide, forKey: Self.workspaceSlideKey)
         state.slideGeneration += 1
@@ -82,6 +118,7 @@ extension NiruxShellView {
     /// The strip settled: only the workspace on screen draws its terminals.
     func endWorkspaceSlide() {
         workspaceSwitch.slideGeneration += 1
+        workspaceSwitch.isSliding = false
         guard !workspaceSwitch.keepsDrawn.isEmpty else { return }
         workspaceSwitch.keepsDrawn = []
         syncTerminalOcclusion()
@@ -93,35 +130,73 @@ extension NiruxShellView {
         isActive || workspaceSwitch.keepsDrawn.contains(workspace.id)
     }
 
-    /// The user switched workspaces (⌘↑ ⌘↓, the palette, a notification):
-    /// the card names the workspace on screen, while the strip moves and a
-    /// moment after. Not for a click on its own row: the user knows where
-    /// they go.
+    /// The user moved to the workspace above or below (⌘↑ ⌘↓, see
+    /// `focusWorkspace(_:)`): the card
+    /// names the workspace on screen and its place, while the strip moves
+    /// and a moment after, unless the user goes on meanwhile (a key, a
+    /// click, a scroll). Not for a jump to a workspace the user named
+    /// (its row, the palette) or that comes to them (a notification, an
+    /// agent): it lands where they look, often on a question the card
+    /// would cover.
     func announceWorkspaceSwitch() {
         guard agentLightsMayMove, let workspace = activeWorkspace,
               let position = activeVisibleWorkspacePosition else {
-            workspaceNameCard.hide(animated: false)
+            hideWorkspaceCard(animated: false)
             return
         }
         let info = sidebar.lastInfos.first { $0.id == workspace.id }
         let content = WorkspaceNameCard.Content(
-            name: workspace.title, state: info.map(Self.cardStateColor) ?? Theme.Color.idle,
+            workspaceID: workspace.id, name: workspace.title, state: info.map(Self.cardStateColor) ?? Theme.Color.idle,
             position: position, count: visibleWorkspaceIndices.count
         )
         workspaceNameCard.show(content, centredIn: viewport.frame.insetBy(dx: 24, dy: 24), animated: true)
         let state = workspaceSwitch
+        if state.inputMonitor == nil {
+            state.inputMonitor = sideEffects.watchUserInput { [weak self] in self?.workspaceCardSawInput() }
+        }
         state.cardGeneration += 1
         let generation = state.cardGeneration
         state.schedule(Self.workspaceSlideDuration + Self.workspaceCardHold) { [weak self] in
             guard let self, self.workspaceSwitch.cardGeneration == generation else { return }
-            self.workspaceNameCard.hide(animated: self.agentLightsMayMove)
+            self.hideWorkspaceCard(animated: self.agentLightsMayMove)
         }
     }
 
-    /// The card's dot: what waits on the user or broke, else work, else
-    /// grey. Amber only for a wait on the user.
+    /// A key, a click or a scroll while the card shows: once the view has
+    /// stopped, the user reads or works there, and the card goes. During
+    /// the slide (another ⌘↓) it stays.
+    func workspaceCardSawInput() {
+        guard !workspaceSwitch.isSliding else { return }
+        hideWorkspaceCard(animated: agentLightsMayMove)
+    }
+
+    func hideWorkspaceCard(animated: Bool) {
+        workspaceSwitch.cardGeneration += 1
+        workspaceNameCard.hide(animated: animated)
+        if let monitor = workspaceSwitch.inputMonitor {
+            sideEffects.stopWatchingUserInput(monitor)
+            workspaceSwitch.inputMonitor = nil
+        }
+    }
+
+    /// After a relayout: the card follows the viewport, and goes if the
+    /// workspace on screen is no longer the one it names (a click on
+    /// another row, a space switch, a close).
+    func layOutWorkspaceCard(in viewportFrame: NSRect) {
+        guard workspaceNameCard.isShown, let content = workspaceNameCard.content else { return }
+        guard content.workspaceID == activeWorkspace?.id else { return hideWorkspaceCard(animated: false) }
+        workspaceNameCard.show(content, centredIn: viewportFrame.insetBy(dx: 24, dy: 24), animated: false)
+    }
+
+    /// The card's dot says what the workspace's row says: amber when it
+    /// waits on the user, red when something broke, green while it works,
+    /// else grey.
     static func cardStateColor(_ info: WorkspaceInfo) -> NSColor {
-        if let signal = info.attention, signal != .finished { return SidebarRenderer.color(for: signal) }
-        return info.columns.contains { $0.agentStatus == .working } ? Theme.Color.working : Theme.Color.idle
+        switch info.rowSummary.mark {
+        case .needsYou: return Theme.Color.waiting
+        case .error: return Theme.Color.error
+        case .working: return Theme.Color.working
+        default: return Theme.Color.idle
+        }
     }
 }
