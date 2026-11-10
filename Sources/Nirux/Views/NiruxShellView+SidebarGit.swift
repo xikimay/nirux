@@ -228,7 +228,7 @@ extension NiruxShellView {
 
         // Each column's light, and the viewport's edges for the agents out
         // of view.
-        updateAgentLights(infos: infos)
+        _ = infos
     }
 
     func clearAllAgentAttention() {

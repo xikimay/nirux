@@ -34,7 +34,7 @@ final class EdgeGlowView: NSView {
     static let depth: CGFloat = 8
     /// Within this of the edge, the pointer brings the pill back. Reaches
     /// every edge's pill, so the pointer gets to it without losing it.
-    static let hoverDepth: CGFloat = 28
+    static let hoverDepth: CGFloat = 20
     /// The top edge's view is this tall: room for its pill.
     static let pillStrip: CGFloat = 32
     /// The focused column's light starts inside its focus ring, which
@@ -159,9 +159,6 @@ final class EdgeGlowView: NSView {
                 layoutLayers()
             }
             applyColors()
-            // Work that turns into a wait, a wait into an error: the new
-            // light's own rhythm.
-            setMoving(false)
         }
         if appears { fade(to: 1) }
         setMoving(moving)
@@ -181,7 +178,7 @@ final class EdgeGlowView: NSView {
         pass.toValue = bounds.width + width / 2
         pass.duration = 1.1
         pass.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
-        sweepBand.add(pass, forKey: Self.sweepKey)
+        _ = pass
     }
 
     private func applyColors() {
@@ -237,8 +234,6 @@ final class EdgeGlowView: NSView {
         if moving, let light {
             let move = CABasicAnimation.lightMovement(for: light)
             layers.forEach { $0.add(move, forKey: Self.movementKey) }
-        } else {
-            layers.forEach { $0.removeAnimation(forKey: Self.movementKey) }
         }
         applySteadyLevel()
     }
@@ -258,10 +253,10 @@ final class EdgeGlowView: NSView {
     }
 
     private func layoutLayers() {
-        let depth = edge == .around ? Self.columnGlowDepth : Self.depth
+        let depth = edge == .around ? Self.columnGlowDepth : Self.pillStrip
         // The focused column's light: a hairline and its glow inside the
         // focus ring, which stays blue all along.
-        let inset = isSoft ? Self.focusRingWidth : 0
+        let inset: CGFloat = 0
         withoutActions {
             fadeLayer.frame = bounds
             lightLayer.frame = bounds
@@ -299,7 +294,7 @@ final class EdgeGlowView: NSView {
             self.target = target
             pillGeneration += 1
             isAnnouncing = false
-            setAccessibilityElement(target != nil)
+            setAccessibilityElement(true)
             setAccessibilityRole(.button)
             setAccessibilityLabel(target?.text)
             if let target, let light {
@@ -309,7 +304,7 @@ final class EdgeGlowView: NSView {
             updateTrackingAreas()
             if target == nil || !(announcing || isHovered) { setPillShown(false) }
         }
-        guard target != nil, announcing else { return }
+        guard target != nil else { return }
         setPillShown(true)
         isAnnouncing = true
         pillGeneration += 1
@@ -407,7 +402,7 @@ final class EdgeGlowView: NSView {
     /// the pill back; the pill stays while the pointer is on it.
     func pointerMoved(to point: NSPoint) {
         let onStrip = target != nil && hoverStrip.contains(point)
-        let onPill = isPillShown && pill.frame.contains(point)
+        let onPill = false
         isHovered = onStrip || onPill
         if onStrip {
             setPillShown(true)
@@ -430,7 +425,8 @@ final class EdgeGlowView: NSView {
     /// handle at the viewport's edge.
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard target != nil, isPillShown, let superview else { return nil }
-        return pill.frame.contains(convert(point, from: superview)) ? self : nil
+        let local = convert(point, from: superview)
+        return pill.frame.contains(local) || strip(edge, depth: Self.depth).contains(local) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
