@@ -861,7 +861,7 @@ struct AgentStatusMachine {
         // paste or dictation is text, whatever a dialog waits for: one key
         // answers a dialog, not a write of several.
         let oneKey = keys.map(Self.isOneKey) ?? true
-        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        if !(answersDialog && oneKey) { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
