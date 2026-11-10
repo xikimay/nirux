@@ -25,6 +25,12 @@ struct SidebarResumeClick: Equatable {
     let failedAt: TimeInterval
 }
 
+/// Yes, No or Reply… clicked under a turn's question.
+struct SidebarTurnAnswerClick: Equatable {
+    let question: SidebarTurnQuestion
+    let answer: SidebarTurnAnswer
+}
+
 /// Resume clicked on the row of a restored agent that hasn't resumed yet.
 struct SidebarDeferredResumeClick: Equatable {
     let workspaceIndex: Int
@@ -67,6 +73,8 @@ extension SidebarView {
             return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         case let .deferredAgentResume(_, _, columnID):
             return SidebarHoverTarget.deferredResumeButtonKey(columnID: columnID)
+        case let .turnAnswer(_, _, question, answer):
+            return SidebarHoverTarget.turnAnswerButtonKey(question: question, answer: answer)
         default:
             return nil
         }
@@ -142,6 +150,31 @@ extension SidebarView {
         return SidebarDeferredResumeClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, columnID: releasedColumn)
     }
 
+    /// A one-point spot under the pointer in the scrolled rows, for a
+    /// popover whose button a rebuild replaced between press and release.
+    func anchorAtPointer() -> (view: NSView, rect: NSRect)? {
+        guard let window else { return nil }
+        let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return (contentDocumentView, NSRect(origin: point, size: NSSize(width: 1, height: 1)))
+    }
+
+    /// The quick answer a click makes, if any: the same rules, for the same
+    /// question and answer ("yes" can start a merge or a push).
+    static func turnAnswerClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarTurnAnswerClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .turnAnswer(_, _, pressedQuestion, pressedAnswer) = pressed,
+              case let .turnAnswer(_, _, releasedQuestion, releasedAnswer)? = released,
+              releasedQuestion.columnID == pressedQuestion.columnID, releasedQuestion.turnEndedAt == pressedQuestion.turnEndedAt,
+              releasedAnswer == pressedAnswer else { return nil }
+        return SidebarTurnAnswerClick(question: releasedQuestion, answer: releasedAnswer)
+    }
+
     /// The second press of a double-click whose first click made a button
     /// act: the rebuild may have put anything there (a deferred agent's
     /// Resume row goes away, the card below moves up). It does nothing.
@@ -188,6 +221,12 @@ extension SidebarView {
             ) {
                 lastButtonActionAt = next.timestamp
                 onDeferredAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.columnID)
+            } else if let answer = Self.turnAnswerClick(
+                pressed: region, released: released, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            ) {
+                lastButtonActionAt = next.timestamp
+                onTurnAnswer?(answer.question, answer.answer, approvalButtonViews[key])
             }
             return
         }

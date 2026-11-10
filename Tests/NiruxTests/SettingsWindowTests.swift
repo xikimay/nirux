@@ -71,7 +71,8 @@ final class SettingsWindowTests: XCTestCase {
                     try self.choose(AgentResumeOnLaunch.allAtOnce.rawValue, in: app.settingsAgentResumePopup)
                 }),
                 ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
-                ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) })
+                ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) }),
+                ("triageCIFailures", { try self.click(app.settingsTriageCIFailuresCheckbox) })
             ]
             for step in steps {
                 let before = try savedSettings()
@@ -121,7 +122,7 @@ final class SettingsWindowTests: XCTestCase {
             let classifier = AgentHookCenter.shared.turnEndClassifier
             let makeClassifier = NiruxApp.makeTurnEndClassifier
             // Never the real `claude`.
-            NiruxApp.makeTurnEndClassifier = { HaikuTurnEndClassifier(checkSetup: { .unavailable }, runProcess: { _, _, _ in nil }) }
+            NiruxApp.makeTurnEndClassifier = { ClaudeTurnEndClassifier(checkSetup: { .unavailable }, runProcess: { _, _, _ in nil }) }
             defer {
                 AgentHookCenter.shared.turnEndClassifier = classifier
                 NiruxApp.makeTurnEndClassifier = makeClassifier
@@ -131,6 +132,35 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertNil(AgentHookCenter.shared.turnEndClassifier, "every turn end alerts")
             try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
             XCTAssertNotNil(AgentHookCenter.shared.turnEndClassifier)
+
+            // The CI failure triage: off in the shell at once, and back on
+            // with its model's account checked (a double: never the real
+            // `claude`).
+            let prepare = NiruxApp.prepareCITriageModel
+            var prepared = 0
+            NiruxApp.prepareCITriageModel = { prepared += 1 }
+            defer { NiruxApp.prepareCITriageModel = prepare }
+            shell.setCITriage(enabled: true)
+            XCTAssertEqual(app.settingsTriageCIFailuresCheckbox?.state, .on)
+            try click(app.settingsTriageCIFailuresCheckbox)
+            XCTAssertFalse(shell.ciTriageCenter.isEnabled)
+            XCTAssertEqual(prepared, 0)
+            try click(app.settingsTriageCIFailuresCheckbox)
+            XCTAssertTrue(shell.ciTriageCenter.isEnabled)
+            XCTAssertEqual(prepared, 1)
+            // Hook receivers are told while either option needs the agent's account.
+            let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
+            let marker = TurnEndMarker.directory.appendingPathComponent("\(me.pid)-\(Int(me.startedAt)).json")
+            func readsFinalMessages() throws -> Bool? {
+                try JSONDecoder().decode(TurnEndMarker.self, from: Data(contentsOf: marker)).readsFinalMessages
+            }
+            XCTAssertEqual(try readsFinalMessages(), true)
+            try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
+            XCTAssertEqual(try readsFinalMessages(), false, "the triage alone")
+            try click(app.settingsTriageCIFailuresCheckbox)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path), "neither")
+            try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
+            XCTAssertEqual(try readsFinalMessages(), true)
         }
     }
 
