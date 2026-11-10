@@ -81,7 +81,7 @@ extension NiruxShellView {
             sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
         }
 
-        if let snapshot, slidesIn, agentLightsMayMove {
+        if let snapshot, slidesIn {
             // A task born from the ⌘N sheet (NiruxShellView+TaskBirth).
             slideInNewWorkspace(workspace, over: snapshot)
         } else if let snapshot {

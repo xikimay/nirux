@@ -29,7 +29,7 @@ extension NiruxShellView {
     /// fold. None for a sheet the user closed meanwhile.
     func takeTaskSheetPicture(of panel: NewTaskPanel) {
         pendingTaskSheet = nil
-        guard agentLightsMayMove, !panel.isHidden, let window, let sheet = panel.panel, let content = sheet.contentView,
+        guard !panel.isHidden, let window, let sheet = panel.panel, let content = sheet.contentView,
               content.bounds.width > 0, content.bounds.height > 0,
               let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds)
         else { return }
@@ -47,7 +47,7 @@ extension NiruxShellView {
         guard agentLightsMayMove else { return }
         // Without a sheet (a task its Lead starts) nothing travels to the
         // row: it opens at once.
-        sidebar.noteBirth(workspaceID: workspace.id, delay: picture == nil ? 0 : Self.taskBirthRowDelay)
+        sidebar.noteBirth(workspaceID: workspace.id, delay: Self.taskBirthRowDelay)
         guard let picture, let shellLayer = layer else { return }
         // Toward the row, or the rail's tile; the top of the sidebar when
         // the row isn't listed.
@@ -55,7 +55,7 @@ extension NiruxShellView {
             ?? NSRect(x: sidebar.frame.minX, y: sidebar.frame.maxY - 80, width: sidebar.frame.width, height: 40)
         let ghost = CALayer()
         ghost.name = Self.taskBirthGhostName
-        ghost.frame = picture.frame
+        ghost.frame = picture.frame.offsetBy(dx: 40, dy: 0)
         ghost.contents = picture.image
         ghost.backgroundColor = Theme.Color.base.cgColor
         ghost.cornerRadius = Theme.Radius.panel
@@ -92,9 +92,8 @@ extension NiruxShellView {
         let curve = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
         viewport.addSubview(snapshot, positioned: .below, relativeTo: verticalStrip)
         // Gone unless its fade runs: a dropped animation leaves nothing.
-        snapshot.alphaValue = 0
         let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = 1
+        fade.fromValue = 0
         fade.toValue = 0
         fade.duration = Self.taskBirthSlideDuration
         fade.timingFunction = curve
@@ -104,6 +103,7 @@ extension NiruxShellView {
             slide.fromValue = viewport.bounds.width
             slide.toValue = 0
             slide.duration = Self.taskBirthSlideDuration
+            slide.beginTime = CACurrentMediaTime() + 0.3
             slide.timingFunction = curve
             container.add(slide, forKey: Self.taskBirthSlideKey)
         }
