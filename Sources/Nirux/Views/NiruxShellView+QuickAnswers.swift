@@ -132,7 +132,7 @@ extension NiruxShellView {
     /// A card still offers answers to `question`: its column, its turn end.
     static func cardsStillAsk(_ question: SidebarTurnQuestion, _ infos: [WorkspaceInfo]) -> Bool {
         infos.contains { $0.columns.contains {
-            $0.turnQuestion?.columnID == question.columnID && $0.turnQuestion?.turnEndedAt == question.turnEndedAt
+            $0.turnQuestion?.columnID == question.columnID
         } }
     }
 

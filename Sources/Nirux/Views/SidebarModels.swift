@@ -485,7 +485,7 @@ enum SidebarHoverTarget: Hashable {
     /// column and question, wherever the card moves; a later question arms
     /// again.
     static func turnAnswerButtonKey(question: SidebarTurnQuestion, answer: SidebarTurnAnswer) -> String {
-        "turn-answer|\(question.columnID.uuidString)|\(question.turnEndedAt)|\(answer.rawValue)"
+        "turn-answer|\(question.turnEndedAt)|\(answer.rawValue)"
     }
 
     /// Key of a not-resumed agent's Resume button: its column, wherever

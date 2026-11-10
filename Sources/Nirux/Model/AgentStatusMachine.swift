@@ -534,7 +534,7 @@ struct AgentStatusMachine {
         // A prompt since sets Claude working, then its Stop ends a later
         // turn: neither needs a check of its own.
         return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && !hasDraft && pendingDialogs.isEmpty && !hookWorking
+            && pendingDialogs.isEmpty && !hookWorking
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
     }
 
