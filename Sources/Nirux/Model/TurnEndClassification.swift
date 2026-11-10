@@ -178,7 +178,7 @@ enum TurnEndText {
             while start + needle.count <= text.count {
                 let end = start + needle.count
                 if text[start..<end].elementsEqual(needle), startsSentence(text, at: start), endsSentence(text, from: start, to: end) {
-                    return AgentText.clean(String(paragraph[origin[start]...origin[end - 1]]), maxLength: maxLength)
+                    return AgentText.clean(quote, maxLength: maxLength)
                 }
                 start += 1
             }
@@ -215,12 +215,10 @@ enum TurnEndText {
             var character = text[index]
             if "*_`>#".contains(character) { continue }
             if character.isWhitespace {
-                if characters.isEmpty || characters.last == " " { continue }
+                if characters.isEmpty { continue }
                 character = " "
             } else if character == "\u{2019}" || character == "\u{2018}" {
                 character = "'"
-            } else if character == "\u{201C}" || character == "\u{201D}" {
-                character = "\""
             }
             characters.append(character)
             origin.append(index)
@@ -237,7 +235,7 @@ enum TurnEndText {
     private static func startsSentence(_ text: [Character], at start: Int) -> Bool {
         guard start > 0 else { return true }
         guard text[start - 1] == " " else { return false }
-        return start < 2 || !(text[start - 2].isLetter || text[start - 2].isNumber)
+        return true
     }
 
     /// Nothing of its sentence after it: it ends on a sentence mark that a
@@ -247,13 +245,12 @@ enum TurnEndText {
     private static func endsSentence(_ text: [Character], from start: Int, to end: Int) -> Bool {
         func endsHere(_ index: Int) -> Bool { index == text.count || text[index] == " " || closingMarks.contains(text[index]) }
         var last = end - 1
-        while last > start, closingMarks.contains(text[last]) { last -= 1 }
         if sentenceMarks.contains(text[last]) {
             let word = String(text[start...last].reversed().prefix { $0 != " " }.reversed()).lowercased()
-            return endsHere(end) && !["e.g.", "i.e.", "etc.", "vs.", "cf."].contains(word)
+            return endsHere(end)
         }
         guard end < text.count else { return true }
-        return sentenceMarks.contains(text[end]) && endsHere(end + 1)
+        return sentenceMarks.contains(text[end])
     }
 
     /// The message ends on a question: its last paragraph of prose (not
@@ -286,7 +283,7 @@ enum TurnEndText {
     /// notification: what a turn that asks most likely asks. Headings,
     /// tables and quotes count; code doesn't.
     static func lastLine(of message: String, maxLength: Int = 200) -> String? {
-        for line in linesFromTheEnd(of: message) where line.kind == .prose || line.kind == .other {
+        for line in linesFromTheEnd(of: message) where line.kind != .blank {
             if let cleaned = AgentText.clean(line.trimmed, maxLength: maxLength) { return cleaned }
         }
         return nil
@@ -345,10 +342,8 @@ enum TurnEndText {
     private static func isIndentedCode(_ line: Substring, trimmed: String) -> Bool {
         let indent = line.prefix { $0 == " " || $0 == "\t" }
         guard indent.contains("\t") || indent.count >= 4 else { return false }
-        if ["- ", "* ", "+ "].contains(where: trimmed.hasPrefix) { return false }
         let digits = trimmed.prefix { $0.isNumber }
-        return !(1...3).contains(digits.count) || !(trimmed.dropFirst(digits.count).hasPrefix(". ")
-            || trimmed.dropFirst(digits.count).hasPrefix(") "))
+        return true
     }
 
     /// Not a quote, a table row, a Markdown heading (`#` to `######` and a

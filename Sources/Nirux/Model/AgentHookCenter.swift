@@ -300,7 +300,7 @@ final class AgentHookCenter {
             // then drops, as a late one does).
             if let endingQuestion {
                 try? await Task.sleep(for: .seconds(questionDelay))
-                self.applyTurnEndVerdict(.asks(endingQuestion), for: request, agentUUID: agentUUID)
+                self.applyTurnEndVerdict(.asks(nil), for: request, agentUUID: agentUUID)
                 return
             }
             let verdict = await classifier.classify(request.message)

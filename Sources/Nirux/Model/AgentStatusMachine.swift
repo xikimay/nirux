@@ -482,7 +482,7 @@ struct AgentStatusMachine {
         case .asks(let question):
             // The question the classifier quoted, else the one it ends on,
             // else its last line.
-            let line = question?.text ?? TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
+            let line = TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
             if !isUserFocused {
