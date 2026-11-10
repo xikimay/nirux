@@ -774,13 +774,13 @@ struct AgentStatusMachine {
     /// exact repeats (the same URL, file, action: `toolKey`). An end a
     /// newer receiver wrote says nothing.
     private mutating func noteCallEnded(_ event: AgentHookEvent, at time: TimeInterval) {
-        guard event.agentID == nil, let tool = event.toolName, !AgentToolOutcome.taskTools.contains(tool) else { return }
+        guard event.agentID == nil, let tool = event.toolName else { return }
         let end = event.toolEnd.map(AgentToolEnd.init(rawValue:))
         if case .some(.none) = end { return }
         let isShell = AgentToolInput.shellTools.contains(tool)
         let exact = (isShell ? event.toolCommandKey : event.toolKey).map { "\(tool) \($0)" }
         circling.noteCallEnded(
-            key: isShell ? exact ?? event.toolFamily : exact ?? tool, name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
+            key: isShell ? exact ?? event.toolFamily : tool, name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
         )
     }
 
