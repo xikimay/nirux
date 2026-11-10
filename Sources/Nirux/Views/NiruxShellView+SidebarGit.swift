@@ -60,6 +60,7 @@ extension NiruxShellView {
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
+                    circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
                     id: col.id
                 )
             }
