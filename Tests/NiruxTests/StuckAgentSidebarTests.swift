@@ -332,7 +332,8 @@ final class StuckAgentSidebarTests: XCTestCase {
     // MARK: - Nirux in the background
 
     /// The heartbeat stops in the background, and a blocked agent fires no
-    /// hook: the slow watch still alerts, once.
+    /// hook: the slow watch still alerts, once — also for a dialog that
+    /// crossed the threshold on screen, with Nirux in front.
     func testStuckWatchAlertsWhileNiruxIsInTheBackground() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-stuck-watch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -384,6 +385,12 @@ final class StuckAgentSidebarTests: XCTestCase {
         var notified: [AgentAttentionReason?] = []
         column.onAgentAttention = { notified.append($0) }
         shell.stuckAgentWaitThreshold = 600
+        // On screen in front of the user, the alert stays owed: taken
+        // there it would reach nobody, and never go out again.
+        XCTAssertTrue(shell.activeWorkspace === shell.workspaces.first)
+        XCTAssertEqual(shell.activeWorkspace?.focusedIndex, 0)
+        shell.refreshStuckAgents(snapshot: snapshot, now: now - 60, appIsActive: true)
+        XCTAssertEqual(notified, [])
         shell.refreshStuckAgents(snapshot: snapshot, now: now)
         shell.refreshStuckAgents(snapshot: snapshot, now: now + 30)
         let waited = AgentAttentionReason.stillWaiting(.permission(tool: "Bash", summary: nil), waited: 3_600)
