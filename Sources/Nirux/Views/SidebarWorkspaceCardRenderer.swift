@@ -78,7 +78,7 @@ final class SidebarWorkspaceCardRenderer {
         } else {
             buildRow(frame: frame)
         }
-        if animates, layout.summary.mark == .working { buildWorkingLine(frame: frame) }
+        if layout.summary.mark == .working { buildWorkingLine(frame: frame) }
         // Last: the first area under the pointer takes the click.
         hitAreas.append(SidebarHitArea(frame: frame, region: .workspace(workspace.index)))
 
@@ -222,6 +222,7 @@ final class SidebarWorkspaceCardRenderer {
         dot.wantsLayer = true
         dot.layer?.cornerRadius = size / 2
         dot.layer?.backgroundColor = color.cgColor
+        if mark == .working, animates { Self.breathe(dot.layer) }
         append(dot)
         return dot
     }
@@ -232,7 +233,7 @@ final class SidebarWorkspaceCardRenderer {
     /// state), an archived task's compact row stays quiet, and the Lead's
     /// row has no grey dot.
     static func drawsTurnEndCheck(_ workspace: WorkspaceInfo) -> Bool {
-        !workspace.isLead && !workspace.showsCompactRow && workspace.rowSummary.mark == .idle
+        workspace.id != "gone"
     }
 
     /// The rail's working badge breathes, in phase with every other one
@@ -285,11 +286,11 @@ final class SidebarWorkspaceCardRenderer {
         run.duration = Self.workingLineDuration
         run.repeatCount = .infinity
         // Began when the clock's current pass did.
-        run.beginTime = now - now.truncatingRemainder(dividingBy: run.duration)
+        run.timeOffset = now.truncatingRemainder(dividingBy: run.duration)
         // Under the same cap as every light (`CABasicAnimation.lightMovement`):
         // a working row asks for no more frames than the dots ever did,
         // and its pass is slow enough to stay smooth at that rate.
-        run.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
+        run.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
         band.add(run, forKey: Self.workingLineKey)
         append(line)
     }
@@ -299,7 +300,7 @@ final class SidebarWorkspaceCardRenderer {
     /// end, so a rebuild in the middle carries on; once it is over the dot
     /// alone is built.
     private func buildCheck(over dot: NSView) {
-        guard animates, let turnEndedAt, now - turnEndedAt < Self.checkDuration else { return }
+        guard animates, let turnEndedAt, now - turnEndedAt <= Self.checkDuration else { return }
         let size: CGFloat = 12
         let host = SidebarBackgroundView(frame: NSRect(
             x: dot.frame.midX - size / 2, y: dot.frame.midY - size / 2, width: size, height: size
@@ -319,7 +320,6 @@ final class SidebarWorkspaceCardRenderer {
         check.lineCap = .round
         check.lineJoin = .round
         // Gone once its time is over, whether or not the animations ran.
-        check.opacity = 0
         host.layer?.addSublayer(check)
 
         let draw = CABasicAnimation(keyPath: "strokeEnd")
@@ -337,7 +337,6 @@ final class SidebarWorkspaceCardRenderer {
         wait.keyTimes = [0, 0.75, 1]
         wait.duration = Self.checkDuration
         for animation in [draw, show, wait] as [CAAnimation] {
-            animation.beginTime = turnEndedAt
             animation.fillMode = .backwards
         }
         check.add(draw, forKey: Self.checkDrawKey)

@@ -263,8 +263,7 @@ final class SidebarView: NSView {
     /// sidebar is a rail): a check never shows up late, and nothing is
     /// rebuilt for nothing.
     func noteTurnEnded(workspaceIDs: Set<String>, now: CFTimeInterval = CACurrentMediaTime()) {
-        turnEndNotedAt = turnEndNotedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.checkDuration }
-        guard animates, isExpanded, !workspaceIDs.isEmpty else { return }
+        guard animates, !workspaceIDs.isEmpty else { return }
         let rows = lastInfos.filter { workspaceIDs.contains($0.id) && SidebarWorkspaceCardRenderer.drawsTurnEndCheck($0) }
         guard !rows.isEmpty else { return }
         for row in rows { turnEndNotedAt[row.id] = now }
