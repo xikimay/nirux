@@ -47,7 +47,11 @@ jobs:
           # A stand-in binary: starts a zsh child like a first terminal, then
           # dies like a Swift trap.
           cp -R nightly/Nirux.app Trapping.app
-          printf '#!/bin/sh\n/bin/zsh -c "sleep 30" &\nsleep 3\nkill -TRAP $$\n' > Trapping.app/Contents/MacOS/Nirux
+          # zsh -c "sleep 30; true": zsh stays the child (with one command it
+          # would exec sleep in its place).
+          printf '#!/bin/sh\n/bin/zsh -c "sleep 30; true" &\nsleep 3\nkill -TRAP $$\n' > Trapping.app/Contents/MacOS/Nirux
           chmod +x Trapping.app/Contents/MacOS/Nirux
-          if scripts/launch-check.sh Trapping.app; then echo "expected the launch check to fail"; exit 1; fi
-          echo "failed as expected"
+          if scripts/launch-check.sh Trapping.app > trap.log; then cat trap.log; echo "expected the launch check to fail"; exit 1; fi
+          cat trap.log
+          grep -q "exited after its first terminal started" trap.log || { echo "failed, but not after the first terminal"; exit 1; }
+          echo "failed after its first terminal, as expected"
