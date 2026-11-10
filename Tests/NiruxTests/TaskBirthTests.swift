@@ -95,10 +95,24 @@ final class TaskBirthTests: UIFlowTestCase {
 
         // Over: a rebuild opens nothing again, and the next birth forgets it.
         clock.time = start + 0.2 + SidebarView.birthDuration + 0.1
-        sidebar.update(profiles: [], workspaces: rows)
+        sidebar.update(profiles: [], workspaces: rows + [row("later", index: 4), row("more", index: 5)])
         XCTAssertTrue(sidebar.expandedViews.allSatisfy { $0.layer?.animationKeys() == nil })
         sidebar.noteBirth(workspaceID: "above")
         XCTAssertEqual(Array(sidebar.rowOpensAt.keys), ["above"], "the first one is forgotten")
+    }
+
+    /// The Archived list, unfolded, is laid out from the sidebar's bottom:
+    /// a birth pushes none of it.
+    func testTheArchivedListDoesntGiveWay() throws {
+        let rows = [row("born", index: 0), row("under", index: 1), row("old", index: 2, archived: true)]
+        let sidebar = sidebar(rows)
+        sidebar.toggleInactiveSection()
+        let old = try XCTUnwrap(sidebar.rowFrame(workspaceID: "old"), "the archived row is listed")
+        sidebar.noteBirth(workspaceID: "born")
+        let pushKey = SidebarView.birthPushKey("born")
+        XCTAssertFalse(views(in: sidebar, with: pushKey).isEmpty, "the task under it does")
+        XCTAssertFalse(views(in: sidebar, inside: old).isEmpty)
+        XCTAssertTrue(views(in: sidebar, inside: old).allSatisfy { $0.layer?.animation(forKey: pushKey) == nil })
     }
 
     /// Two tasks born together (a Lead starting several): a row under
@@ -137,18 +151,32 @@ final class TaskBirthTests: UIFlowTestCase {
     /// In the rail: the born tile opens, the tile under it gives way by a
     /// tile, and "+" at the rail's bottom stays.
     func testTheRailsTilesOpenAndGiveWayToo() throws {
-        let sidebar = sidebar([row("born", index: 0), row("under", index: 1)], expanded: false)
+        let sidebar = sidebar(
+            [row("born", index: 0), row("under", index: 1), row("old", index: 2, archived: true)], expanded: false
+        )
+        sidebar.toggleInactiveSection()
         sidebar.noteBirth(workspaceID: "born")
         let born = try XCTUnwrap(sidebar.rowFrame(workspaceID: "born"))
         let under = try XCTUnwrap(sidebar.rowFrame(workspaceID: "under"))
+        let old = try XCTUnwrap(sidebar.rowFrame(workspaceID: "old"), "the archived tile is listed")
         XCTAssertFalse(views(in: sidebar, inside: born).isEmpty)
         XCTAssertTrue(views(in: sidebar, inside: born).allSatisfy { $0.layer?.animation(forKey: SidebarView.birthKey) != nil })
         let pushKey = SidebarView.birthPushKey("born")
-        let pushed = views(in: sidebar, with: pushKey)
-        XCTAssertFalse(pushed.isEmpty)
-        XCTAssertEqual(Set(pushed.map(ObjectIdentifier.init)), Set(views(in: sidebar, inside: under).map(ObjectIdentifier.init)))
-        XCTAssertGreaterThan(sidebar.expandedViews.count, views(in: sidebar, inside: born).count + pushed.count, "\"+\" is there")
-        let push = try XCTUnwrap(pushed.first?.layer?.animation(forKey: pushKey) as? CASpringAnimation)
+        let pushed = Set(views(in: sidebar, with: pushKey).map(ObjectIdentifier.init))
+        // Everything laid out under it, the separator and the archived
+        // tiles too, so nothing opens a hole; but "+", laid out from the
+        // rail's bottom, the lowest view of all.
+        let frame = { (view: NSView) in sidebar.convert(view.frame, from: view.superview) }
+        let laidOutUnder = sidebar.expandedViews.filter { frame($0).maxY <= born.minY + 1 }
+        let add = try XCTUnwrap(laidOutUnder.min { frame($0).minY < frame($1).minY })
+        let flowing = laidOutUnder.filter { $0 !== add }
+        let tiles = views(in: sidebar, inside: under).count + views(in: sidebar, inside: old).count
+        XCTAssertGreaterThan(flowing.count, tiles, "the separator and the Archived tile as well")
+        XCTAssertEqual(pushed, Set(flowing.map(ObjectIdentifier.init)))
+        XCTAssertNil(add.layer?.animation(forKey: pushKey), "\"+\" stays")
+        let push = try XCTUnwrap(
+            views(in: sidebar, with: pushKey).first?.layer?.animation(forKey: pushKey) as? CASpringAnimation
+        )
         XCTAssertEqual((push.fromValue as? NSNumber)?.doubleValue, Double(born.height), "a tile's area holds its gap")
     }
 
@@ -277,6 +305,7 @@ final class TaskBirthTests: UIFlowTestCase {
             XCTAssertLessThan(try XCTUnwrap(shell.viewport.subviews.firstIndex(of: backdrop)), strip, "under the column")
             XCTAssertEqual(backdrop.alphaValue, 0, "gone unless its fade runs")
             let fade = try XCTUnwrap(backdrop.layer?.animation(forKey: NiruxShellView.taskBirthBackdropKey) as? CABasicAnimation)
+            XCTAssertEqual((fade.fromValue as? NSNumber)?.doubleValue, 1, "seen at first")
             XCTAssertEqual((fade.toValue as? NSNumber)?.doubleValue, 0)
             XCTAssertLessThanOrEqual(fade.duration, slide.duration, "no later than the column lands")
 
@@ -355,9 +384,10 @@ final class TaskBirthTests: UIFlowTestCase {
             XCTAssertEqual(added.title, "as before")
             XCTAssertNil(added.containerView.layer?.animation(forKey: NiruxShellView.taskBirthSlideKey))
             let strip = try XCTUnwrap(shell.viewport.subviews.firstIndex(of: shell.verticalStrip))
+            XCTAssertEqual(self.pictures(in: shell).count, 1, "the old fade")
             XCTAssertTrue(
                 self.pictures(in: shell).allSatisfy { (shell.viewport.subviews.firstIndex(of: $0) ?? 0) > strip },
-                "the old fade, over the workspace"
+                "over the workspace"
             )
         }
     }
