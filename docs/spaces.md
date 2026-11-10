@@ -289,7 +289,14 @@ Mockups were validated in the design session. What changes:
 - **Sidebar:** a space picker at the top (name, task count, amber when an agent
   waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
-  "Working", "#39 · checks passed"). No chips on every row. A blocker says
+  "Working", "#39 · checks passed"). A working Claude that may be going in
+  circles says so in the same grey, in place of "Working" ("Stuck? · 3
+  timeouts", "Stuck? · swift build failed 5×"): 3 commands past their
+  time limit close together, or 5 failures in a row of one command, counted
+  from its hooks over the turn. A command that only waits (a `sleep`, a poll
+  loop, `gh pr checks`) counts as neither, nor does an exit 1 that answers
+  (grep found nothing, a test is false). It never alerts or interrupts the
+  agent; Settings › Agents turns it off. No chips on every row. A blocker says
   "Blocked · …" in grey after needs you, broken (failed checks too), asking,
   working and "Paused · Resume", before a finished turn and the pull request;
   the next step ("Next · …") takes the branch's place, and the selected row
