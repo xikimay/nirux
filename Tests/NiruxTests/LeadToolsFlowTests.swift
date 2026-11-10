@@ -257,6 +257,19 @@ final class LeadToolsFlowTests: XCTestCase {
             let list = try call(LeadTools.listTasks, lead: lead, in: harness).text
             XCTAssertTrue(list.contains("next step: “write the import side”"), list)
             XCTAssertTrue(list.contains("blocker: “waits for #212 to merge”"), list)
+            // Where it stands, from its last turn: listed, and on its row
+            // when nothing says more.
+            XCTAssertFalse(list.contains("status:"), list)
+            task.recordTurnStatus("import side half done", turnEndedAt: 1)
+            XCTAssertTrue(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("status: “import side half done”"))
+            let blocker = task.blocker
+            (task.nextStep, task.blocker) = (nil, nil)
+            XCTAssertEqual(try status(), "import side half done")
+            shell.turnStatusEnabled = false
+            XCTAssertNotEqual(try status(), "import side half done", "the option is off")
+            XCTAssertFalse(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("status:"))
+            shell.turnStatusEnabled = true
+            (task.nextStep, task.blocker) = ("write the import side", blocker)
             XCTAssertFalse(try setContext(["blocker": ""]).isError)
             XCTAssertNil(task.blocker)
             XCTAssertEqual(try status(), "Next · write the import side")

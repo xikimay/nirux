@@ -6,6 +6,7 @@ extension NiruxShellView {
     func restoreState() {
         let persisted = Persistence.load()
         circlingHintEnabled = PersistedSettings.effective(persisted?.settings).agentCirclingHint
+        turnStatusEnabled = PersistedSettings.effective(persisted?.settings).showTurnStatus
         // Before anything saves: the decision needs this launch's starting point.
         decideOnboardingChecklist(
             persisted: persisted,
@@ -65,6 +66,7 @@ extension NiruxShellView {
             workspace.unknownPhaseRawValue = persistedWS.unknownPhaseRawValue
             workspace.lastSummary = persistedWS.lastSummary
             workspace.lastSummaryIsManual = persistedWS.lastSummaryIsManual
+            workspace.lastSummaryIsStatus = persistedWS.lastSummaryIsStatus
             workspace.lastActivityAt = persistedWS.lastActivityAt
             workspace.nextStep = persistedWS.nextStep
             workspace.blocker = persistedWS.blocker
@@ -333,6 +335,7 @@ extension NiruxShellView {
                     unknownPhaseRawValue: workspace.unknownPhaseRawValue,
                     lastSummary: workspace.lastSummary,
                     lastSummaryIsManual: workspace.lastSummaryIsManual,
+                    lastSummaryIsStatus: workspace.lastSummaryIsStatus,
                     lastActivityAt: workspace.lastActivityAt,
                     nextStep: workspace.nextStep,
                     blocker: workspace.blocker,

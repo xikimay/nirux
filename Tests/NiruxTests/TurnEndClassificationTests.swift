@@ -1642,10 +1642,10 @@ final class TurnEndClassificationTests: XCTestCase {
         func claude(_ arguments: [String]) -> ForegroundProcess {
             ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: arguments)
         }
-        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(classifierOn: false, foreground: claude(["claude"])))
-        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: claude(["claude", "-p", "review"])))
-        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: claude(["claude"])))
-        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: nil), "no column: no machine reads it")
+        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(readsFinalMessages: false, foreground: claude(["claude"])))
+        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(readsFinalMessages: true, foreground: claude(["claude", "-p", "review"])))
+        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(readsFinalMessages: true, foreground: claude(["claude"])))
+        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(readsFinalMessages: true, foreground: nil), "no column: no machine reads it")
     }
 
     // MARK: - Sidebar and Dock

@@ -243,6 +243,11 @@ extension NiruxApp {
         )
         onlyAsks.state = current.alertOnlyWhenClaudeAsks ? .on : .off
         settingsAlertOnlyWhenClaudeAsksCheckbox = onlyAsks
+        let turnStatus = SettingsForm.checkbox(
+            "Show a one-line status per task", target: self, action: #selector(settingsTurnStatusChanged(_:))
+        )
+        turnStatus.state = current.showTurnStatus ? .on : .off
+        settingsTurnStatusCheckbox = turnStatus
         let flakyCI = SettingsForm.checkbox(
             "Say when a CI failure looks flaky", target: self, action: #selector(settingsTriageCIFailuresChanged(_:))
         )
@@ -257,6 +262,13 @@ extension NiruxApp {
                         + "subscription only) and Nirux alerts only if it asks you something. When that check "
                         + "can't run, the turn alerts. Codex and other agents alert at every turn end.",
                     under: onlyAsks
+                ),
+                turnStatus,
+                SettingsForm.hint(
+                    "When a Claude Code turn ends, Sonnet reads its last message (claude -p, on a Claude "
+                        + "subscription only) and writes where the task stands on its row, in a few words. "
+                        + "Every turn's last message is sent, including the turns you watch.",
+                    under: turnStatus
                 ),
                 flakyCI,
                 SettingsForm.hint(
@@ -467,16 +479,34 @@ extension NiruxApp {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.alertOnlyWhenClaudeAsks = enabled }) else { return }
         AgentHookCenter.shared.turnEndClassifier = Self.turnEndClassifier(enabled: enabled)
+        Self.publishAccountMarker(
+            readsFinalMessages: AgentHookCenter.shared.readsFinalMessages, triagesCI: Self.currentTriageCIFailures()
+        )
     }
 
     static func currentAlertOnlyWhenClaudeAsks() -> Bool {
         PersistedSettings.effective(Persistence.load()?.settings).alertOnlyWhenClaudeAsks
     }
 
+    @objc func settingsTurnStatusChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.showTurnStatus = enabled }) else { return }
+        AgentHookCenter.shared.turnStatusWriter = Self.turnStatusWriter(enabled: enabled)
+        Self.publishAccountMarker(
+            readsFinalMessages: AgentHookCenter.shared.readsFinalMessages, triagesCI: Self.currentTriageCIFailures()
+        )
+        shell?.turnStatusEnabled = enabled
+        shell?.updateSidebar()
+    }
+
+    static func currentShowTurnStatus() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).showTurnStatus
+    }
+
     @objc func settingsTriageCIFailuresChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.triageCIFailures = enabled }) else { return }
-        applyCITriage(enabled: enabled, readsFinalMessages: AgentHookCenter.shared.turnEndClassifier != nil)
+        applyCITriage(enabled: enabled, readsFinalMessages: AgentHookCenter.shared.readsFinalMessages)
     }
 
     static func currentTriageCIFailures() -> Bool {
@@ -498,12 +528,15 @@ extension NiruxApp {
     static var prepareCITriageModel: () -> Void = { CITriageModel.runner.account.prepare() }
 
     /// The classifier when the option is on, its setup checked ahead of
-    /// the first turn end; the marker tells hook receivers whether to keep
-    /// final messages.
+    /// the first turn end. The caller then publishes the marker that tells
+    /// hook receivers whether to keep final messages.
     static func turnEndClassifier(enabled: Bool) -> (any TurnEndClassifier)? {
-        let isRunning = ProcessInstance.running(pid: getpid()) != nil
-        publishAccountMarker(readsFinalMessages: enabled, triagesCI: currentTriageCIFailures())
-        return enabled && isRunning ? makeTurnEndClassifier() : nil
+        enabled && ProcessInstance.running(pid: getpid()) != nil ? makeTurnEndClassifier() : nil
+    }
+
+    /// The status line writer when its option is on, as the classifier.
+    static func turnStatusWriter(enabled: Bool) -> (any TurnStatusWriter)? {
+        enabled && ProcessInstance.running(pid: getpid()) != nil ? makeTurnStatusWriter() : nil
     }
 
     /// The marker of this Nirux while an option needs what hook receivers
@@ -524,6 +557,12 @@ extension NiruxApp {
     static var makeTurnEndClassifier: () -> any TurnEndClassifier = {
         ClaudeTurnEndClassifier.shared.prepare()
         return ClaudeTurnEndClassifier.shared
+    }
+
+    /// The status line writer in use; tests put a double here.
+    static var makeTurnStatusWriter: () -> any TurnStatusWriter = {
+        ClaudeTurnStatusWriter.shared.prepare()
+        return ClaudeTurnStatusWriter.shared
     }
 
     private func showSettingsError(_ message: String) {
@@ -557,6 +596,7 @@ extension NiruxApp {
         settingsExplainModelPopup = nil
         settingsExplainEffortPopup = nil
         settingsAlertOnlyWhenClaudeAsksCheckbox = nil
+        settingsTurnStatusCheckbox = nil
         settingsTriageCIFailuresCheckbox = nil
     }
 }

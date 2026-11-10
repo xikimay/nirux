@@ -241,6 +241,11 @@ extension NiruxShellView {
                 let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
                 line += "\n  \(name)\(owner): “\(text)”"
             }
+            // Where it stands, as its row says it.
+            if turnStatusEnabled, let status = Self.leadContextText(task.statusLine) {
+                let owner = task.lastSummaryIsManual ? " (the user wrote it)" : ""
+                line += "\n  status\(owner): “\(status)”"
+            }
             lines.append(line)
         }
         let repositories = space.anchors.filter(\.isKnown).map { anchor in

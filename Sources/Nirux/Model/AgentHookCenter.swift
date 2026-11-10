@@ -54,6 +54,16 @@ final class AgentHookCenter {
     /// only a turn that asks something alerts. Nil: every turn end alerts,
     /// and the messages are dropped as they arrive.
     var turnEndClassifier: (any TurnEndClassifier)?
+    /// Writes each Claude turn's status line on its task's row (Settings →
+    /// Notifications). Nil: no line is written.
+    var turnStatusWriter: (any TurnStatusWriter)?
+    /// Something reads Claude turns' final messages. Not: they're dropped
+    /// as they arrive.
+    var readsFinalMessages: Bool { turnEndClassifier != nil || turnStatusWriter != nil }
+    /// A turn's status line landed on its task
+    /// (`WorkspaceState.recordTurnStatus`): its row and the state file
+    /// should learn it.
+    var onTurnStatus: ((WorkspaceState) -> Void)?
     /// A turn end got its verdict: its prompt, which Nirux leaves alone
     /// meanwhile (`AgentStatusMachine.awaitsAnyVerdict`), may take the
     /// messages waiting for it.
@@ -199,7 +209,7 @@ final class AgentHookCenter {
     /// of the drain — one process-table scan per burst, not per event.
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         var event = event
-        if !Self.keepsFinalMessage(classifierOn: turnEndClassifier != nil, foreground: nil) { event.finalMessage = nil }
+        if !Self.keepsFinalMessage(readsFinalMessages: readsFinalMessages, foreground: nil) { event.finalMessage = nil }
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
         var claudeSessionAgent: ForegroundProcess?
@@ -239,7 +249,7 @@ final class AgentHookCenter {
                         onNiruxAccount: onNiruxAccount, of: foregroundProcess.instance, cwd: event.cwd
                     )
                 }
-                if event.name == .stop, !Self.keepsFinalMessage(classifierOn: true, foreground: foregroundProcess) {
+                if event.name == .stop, !Self.keepsFinalMessage(readsFinalMessages: true, foreground: foregroundProcess) {
                     event.finalMessage = nil
                 }
                 isApprovalEligible = event.name == .permissionRequest && event.approvalRequestID != nil
@@ -262,21 +272,9 @@ final class AgentHookCenter {
             event.approvalDeadline = nil
             event.approvalText = nil
         }
-        let outcome = resolution?.column.pty.map {
-            $0.applyAgentHook(event, isUserFocused: resolution?.isUserFocused ?? false)
-        } ?? AgentHookOutcome()
+        let outcome = resolution.map { apply(event, to: $0) } ?? AgentHookOutcome()
         for request in outcome.abandonedApprovals {
             release(request, agentUUID: event.agentUUID)
-        }
-        if outcome.firedAttention, let resolution {
-            resolution.column.notifyAgentAttention(reason: outcome.attention)
-        }
-        if let resolution {
-            // (Read only for an event that ends a turn.)
-            settleTurnEnd(
-                of: event, outcome: outcome, in: resolution,
-                waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
-            )
         }
         return resolution.map {
             AppliedEvent(
@@ -284,6 +282,32 @@ final class AgentHookCenter {
                 claudeSessionAgent: claudeSessionAgent
             )
         }
+    }
+
+    /// `event`, admitted, applied to its column: the alert it fires, then
+    /// what follows a turn end (its verdict, its status line).
+    func apply(_ event: AgentHookEvent, to resolution: Resolution) -> AgentHookOutcome {
+        guard let pty = resolution.column.pty else { return AgentHookOutcome() }
+        var event = event
+        // The status line reads the message whether or not the classifier
+        // does; the column reads it for the verdict only.
+        let statusMessage = turnStatusWriter == nil ? nil : event.finalMessage
+        if turnEndClassifier == nil { event.finalMessage = nil }
+        let outcome = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
+        if outcome.firedAttention {
+            resolution.column.notifyAgentAttention(reason: outcome.attention)
+        }
+        // (Read only for an event that ends a turn.)
+        settleTurnEnd(
+            of: event, outcome: outcome, in: resolution,
+            waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
+        )
+        // Every turn end of the main thread the column took: watched or
+        // not, ending on a question or not.
+        if let statusMessage, let agentUUID = event.agentUUID, pty.isCurrentTurnEnd(event.timestamp) {
+            writeTurnStatus(of: statusMessage, endedAt: event.timestamp, agentUUID: agentUUID)
+        }
+        return outcome
     }
 
     /// What follows `event` once its column took it, if it ended a turn:
@@ -336,6 +360,24 @@ final class AgentHookCenter {
             let verdict = await classifier.classify(request.message)
             // Turned off meanwhile: every turn end alerts.
             self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
+        }
+    }
+
+    /// Asks for the status line of the turn that ended at `time`, then puts
+    /// it on the agent's task, found again: unless a newer turn end's line
+    /// got there first, or the user wrote the task's summary
+    /// (`WorkspaceState.recordTurnStatus`). A turn end replayed at launch
+    /// is no news: no run for it.
+    func writeTurnStatus(of message: String, endedAt time: TimeInterval, agentUUID: String) {
+        guard let writer = turnStatusWriter, now() - time < Self.turnDoneFreshness else { return }
+        Task { @MainActor [weak self] in
+            let status = await writer.status(of: message)
+            // Turned off meanwhile: no line.
+            guard let self, self.turnStatusWriter != nil, case .line(let line)? = status,
+                  let workspace = self.resolver?(agentUUID)?.workspace,
+                  workspace.recordTurnStatus(line, turnEndedAt: time)
+            else { return }
+            self.onTurnStatus?(workspace)
         }
     }
 
@@ -429,11 +471,11 @@ final class AgentHookCenter {
         ))
     }
 
-    /// Whether a Stop's final message goes on to the classifier: none reads
-    /// it with the option off, and a `claude -p` run in the terminal asks
-    /// nobody at its turn end.
-    nonisolated static func keepsFinalMessage(classifierOn: Bool, foreground: ForegroundProcess?) -> Bool {
-        classifierOn && !isHeadlessClaude(foreground)
+    /// Whether a Stop's final message goes on to the classifier and the
+    /// status line: none reads it with both options off, and a `claude -p`
+    /// run in the terminal asks nobody, and is no task, at its turn end.
+    nonisolated static func keepsFinalMessage(readsFinalMessages: Bool, foreground: ForegroundProcess?) -> Bool {
+        readsFinalMessages && !isHeadlessClaude(foreground)
     }
 
     nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {

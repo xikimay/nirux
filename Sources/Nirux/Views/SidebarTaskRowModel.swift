@@ -38,6 +38,9 @@ struct SidebarStatusLine: Hashable {
 /// The sign before a row's title, in the state dots' column.
 enum SidebarRowMark: Hashable {
     case needsYou, error, working, asking, blocked, readyToMerge, merged, idle
+    /// A finished turn the user hasn't looked at yet, its status line
+    /// beside it: a grey check where the grey dot is.
+    case finished
     /// The pull request's checks run: a ring that turns, then the check of
     /// `readyToMerge` or the red of `error`.
     case checksRunning
@@ -77,7 +80,8 @@ extension WorkspaceInfo {
     /// answer, then work (in the same grey, that the agent may be going in
     /// circles: it doesn't ask the user either), then an agent to resume,
     /// then the blocker (grey: it doesn't ask the user), then a finished
-    /// turn, then the pull request, then the next step, else the branch.
+    /// turn, then the pull request, then the next step, then where the
+    /// task stands, else the branch.
     var rowSummary: SidebarRowSummary {
         let age = lastActivityAt.map { SidebarRowSummary.Trailing.age(SidebarView.cardAge(since: $0)) }
         func row(_ mark: SidebarRowMark, _ text: String, _ tone: SidebarStatusLine.Tone,
@@ -142,9 +146,10 @@ extension WorkspaceInfo {
             return row(.blocked, "Blocked · \(blocker)", .neutral)
         }
         // A finished turn the user hasn't looked at yet: until then, before
-        // the pull request's lasting line.
+        // the pull request's lasting line. Its status line says it with a
+        // grey check, else "Done".
         if columns.contains(where: { $0.attention == .finished }) {
-            return row(.idle, "Done", .neutral)
+            return statusLine.map { row(.finished, $0, .neutral) } ?? row(.idle, "Done", .neutral)
         }
         if let pullRequest = prInfo,
            let summary = Self.pullRequestRow(pullRequest, cleanup: mergedCleanup, hasFeedback: prFeedback != nil, age: age) {
@@ -152,6 +157,9 @@ extension WorkspaceInfo {
         }
         if let next = nextStepText {
             return row(.idle, Self.nextStepLine(next), .neutral)
+        }
+        if let statusLine {
+            return row(.idle, statusLine, .neutral)
         }
         let place = gitBranch ?? columns.first(where: \.isFocused)?.abbreviatedCwd ?? columns.first?.abbreviatedCwd
         return row(.idle, place ?? "No activity yet", place == nil ? .neutral : .branch)

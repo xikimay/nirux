@@ -396,6 +396,9 @@ struct PersistedSettings: Codable {
     /// asks something (see `ClaudeTurnEndClassifier`). On by default:
     /// missing decodes to true.
     var alertOnlyWhenClaudeAsks: Bool = true
+    /// Each Claude turn end writes where its task stands on its row (see
+    /// `ClaudeTurnStatusWriter`). On by default: missing decodes to true.
+    var showTurnStatus: Bool = true
     /// A pull request whose checks failed says when the failure looks
     /// flaky (see `CITriage`). On by default: missing decodes to true.
     var triageCIFailures: Bool = true
@@ -451,6 +454,7 @@ struct PersistedSettings: Codable {
         case animatesInterface
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
+        case showTurnStatus
         case triageCIFailures
         case stuckAgentMinutes
         case agentCirclingHint
@@ -482,6 +486,7 @@ struct PersistedSettings: Codable {
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
+        showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? true
         triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true
@@ -515,6 +520,7 @@ struct PersistedSettings: Codable {
         try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
+        try container.encode(showTurnStatus, forKey: .showTurnStatus)
         try container.encode(triageCIFailures, forKey: .triageCIFailures)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encode(agentCirclingHint, forKey: .agentCirclingHint)
@@ -558,6 +564,8 @@ struct PersistedWorkspace: Codable {
     var unknownPhaseRawValue: String?
     var lastSummary: String?
     var lastSummaryIsManual: Bool
+    /// See `WorkspaceState.lastSummaryIsStatus`. Written only when true.
+    var lastSummaryIsStatus: Bool
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
@@ -594,6 +602,7 @@ struct PersistedWorkspace: Codable {
         unknownPhaseRawValue: String? = nil,
         lastSummary: String? = nil,
         lastSummaryIsManual: Bool = false,
+        lastSummaryIsStatus: Bool = false,
         lastActivityAt: TimeInterval? = nil,
         nextStep: String? = nil,
         blocker: String? = nil,
@@ -620,6 +629,7 @@ struct PersistedWorkspace: Codable {
         self.unknownPhaseRawValue = phase == nil ? unknownPhaseRawValue : nil
         self.lastSummary = lastSummary
         self.lastSummaryIsManual = lastSummaryIsManual
+        self.lastSummaryIsStatus = lastSummaryIsStatus
         self.lastActivityAt = lastActivityAt
         self.nextStep = nextStep
         self.blocker = blocker
@@ -634,7 +644,7 @@ struct PersistedWorkspace: Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID, parentIsSettled
-        case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
+        case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
         case reportsToLead
     }
@@ -659,6 +669,7 @@ struct PersistedWorkspace: Codable {
         unknownPhaseRawValue = phase == nil ? phaseRawValue : nil
         lastSummary = try container.decodeIfPresent(String.self, forKey: .lastSummary)
         lastSummaryIsManual = try container.decodeIfPresent(Bool.self, forKey: .lastSummaryIsManual) ?? false
+        lastSummaryIsStatus = (try? container.decodeIfPresent(Bool.self, forKey: .lastSummaryIsStatus)) ?? false
         lastActivityAt = try container.decodeIfPresent(TimeInterval.self, forKey: .lastActivityAt)
         nextStep = try container.decodeIfPresent(String.self, forKey: .nextStep)
         blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
@@ -691,6 +702,7 @@ struct PersistedWorkspace: Codable {
         )
         try container.encodeIfPresent(lastSummary, forKey: .lastSummary)
         try container.encode(lastSummaryIsManual, forKey: .lastSummaryIsManual)
+        if lastSummaryIsStatus { try container.encode(true, forKey: .lastSummaryIsStatus) }
         try container.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)

@@ -2,8 +2,8 @@ import Foundation
 
 /// Nirux's own small reads through a headless `claude -p`: one input, one
 /// answer, on the account `claude` is logged in with. Its clients are the
-/// turn-end classifier (`ClaudeTurnEndClassifier`) and the CI failure
-/// triage (`CITriageModel`).
+/// turn-end classifier (`ClaudeTurnEndClassifier`), the turn's status line
+/// (`ClaudeTurnStatusWriter`) and the CI failure triage (`CITriageModel`).
 ///
 /// A run sees its input and nothing else: no tools, MCP servers, hooks,
 /// settings, instruction files or saved session. It runs only on a Claude

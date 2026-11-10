@@ -335,6 +335,9 @@ struct WorkspaceInfo: Hashable {
     /// The task this one is listed under (a sub-task, or a Mission child):
     /// drawn indented, moved among its siblings only, never dragged.
     var parentTitle: String?
+    /// Where the task stands (`WorkspaceState.statusLine`), when rows show
+    /// it.
+    var statusLine: String?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }

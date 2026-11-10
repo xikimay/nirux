@@ -148,6 +148,13 @@ final class SidebarRowMotionTests: XCTestCase {
     func testOnlyATasksGreyDotDrawsTheCheck() {
         XCTAssertEqual(checks(in: views(row([finished]), turnEndedAt: now)).count, 1, "a grey dot")
         XCTAssertEqual(checks(in: views(row([column()]), turnEndedAt: now)).count, 1, "its branch line: grey as well")
+        var standing = row([finished])
+        standing.statusLine = "fix pushed, CI green"
+        XCTAssertEqual(standing.rowSummary.mark, .finished)
+        let over = views(standing, turnEndedAt: now)
+        XCTAssertEqual(checks(in: over).count, 1, "over the grey check of a finished turn's line")
+        let greyCheck = over.filter { $0.layer?.animation(forKey: "wait") != nil }
+        XCTAssertTrue(greyCheck.count == 1 && greyCheck.first is SidebarImageView, "the grey check waits its turn")
 
         let stillWorking = row([finished, column(.working)])
         XCTAssertEqual(checks(in: views(stillWorking, turnEndedAt: now)).count, 0)

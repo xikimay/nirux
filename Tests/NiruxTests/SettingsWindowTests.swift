@@ -72,6 +72,7 @@ final class SettingsWindowTests: XCTestCase {
                 }),
                 ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
                 ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) }),
+                ("showTurnStatus", { try self.click(app.settingsTurnStatusCheckbox) }),
                 ("triageCIFailures", { try self.click(app.settingsTriageCIFailuresCheckbox) })
             ]
             for step in steps {
@@ -94,11 +95,14 @@ final class SettingsWindowTests: XCTestCase {
             var state = PersistedState(workspaces: [], activeWorkspaceIndex: 0)
             state.settings = PersistedSettings()
             state.settings?.agentCirclingHint = false
+            state.settings?.showTurnStatus = false
             XCTAssertTrue(Persistence.save(state))
             let shell = makeShell()
             XCTAssertTrue(shell.circlingHintEnabled, "the default, before the state is read")
+            XCTAssertTrue(shell.turnStatusEnabled)
             shell.restoreState()
             XCTAssertFalse(shell.circlingHintEnabled)
+            XCTAssertFalse(shell.turnStatusEnabled)
         }
     }
 
@@ -132,6 +136,21 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertNil(AgentHookCenter.shared.turnEndClassifier, "every turn end alerts")
             try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
             XCTAssertNotNil(AgentHookCenter.shared.turnEndClassifier)
+            // The status lines: no writer and no line on the rows, at once.
+            let writer = AgentHookCenter.shared.turnStatusWriter
+            let makeWriter = NiruxApp.makeTurnStatusWriter
+            NiruxApp.makeTurnStatusWriter = { ClaudeTurnStatusWriter(checkSetup: { .unavailable }, runProcess: { _, _, _ in nil }) }
+            defer {
+                AgentHookCenter.shared.turnStatusWriter = writer
+                NiruxApp.makeTurnStatusWriter = makeWriter
+            }
+            XCTAssertEqual(app.settingsTurnStatusCheckbox?.state, .on)
+            try click(app.settingsTurnStatusCheckbox)
+            XCTAssertNil(AgentHookCenter.shared.turnStatusWriter)
+            XCTAssertFalse(shell.turnStatusEnabled, "rows say what they said before")
+            try click(app.settingsTurnStatusCheckbox)
+            XCTAssertNotNil(AgentHookCenter.shared.turnStatusWriter)
+            XCTAssertTrue(shell.turnStatusEnabled)
 
             // The CI failure triage: off in the shell at once, and back on
             // with its model's account checked (a double: never the real
@@ -156,9 +175,14 @@ final class SettingsWindowTests: XCTestCase {
             }
             XCTAssertEqual(try readsFinalMessages(), true)
             try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
+            XCTAssertEqual(try readsFinalMessages(), true, "the status lines still read them")
+            try click(app.settingsTurnStatusCheckbox)
             XCTAssertEqual(try readsFinalMessages(), false, "the triage alone")
             try click(app.settingsTriageCIFailuresCheckbox)
-            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path), "neither")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path), "none")
+            try click(app.settingsTurnStatusCheckbox)
+            XCTAssertEqual(try readsFinalMessages(), true)
+            try click(app.settingsTurnStatusCheckbox)
             try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
             XCTAssertEqual(try readsFinalMessages(), true)
         }

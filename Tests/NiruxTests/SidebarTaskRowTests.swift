@@ -118,6 +118,32 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(lead.cardActions, [.next(next)], "the Lead's row has no status line")
     }
 
+    /// Where the task stands (its last turn's status line, or the user's
+    /// summary): beside a grey check in "Done"'s place while the finished
+    /// turn is unseen, then the resting line after the pull request and
+    /// the next step, in the branch's place.
+    func testStatusLineSaysWhereTheTaskStands() {
+        let line = "fix pushed, CI green"
+        let finished = column(0, .needsAttention, reason: .turnFinished)
+        func standing(_ info: WorkspaceInfo) -> WorkspaceInfo {
+            var info = info
+            info.statusLine = line
+            return info
+        }
+        let unseen = standing(workspace([finished], pr: pullRequest(ci: "SUCCESS"), nextStep: "merge it")).rowSummary
+        XCTAssertEqual(unseen.status, SidebarStatusLine(text: line, tone: .neutral))
+        XCTAssertEqual(unseen.mark, .finished)
+        let seen = standing(workspace([column()])).rowSummary
+        XCTAssertEqual(seen.status, SidebarStatusLine(text: line, tone: .neutral), "not the branch's machine font")
+        XCTAssertEqual(seen.mark, .idle)
+        XCTAssertEqual(status(standing(workspace([column()], nextStep: "merge it"))), "Next · merge it")
+        XCTAssertEqual(status(standing(workspace([column()], pr: pullRequest(ci: "PENDING")))), "#39 · checks running")
+        XCTAssertEqual(status(standing(workspace([finished], blocker: "no API key"))), "Blocked · no API key")
+        XCTAssertEqual(status(standing(workspace([column(0, .working)]))), "Working")
+        XCTAssertEqual(status(standing(workspace([column(0, .needsAttention, reason: .question("Which?"))]))), "Needs you · Which?")
+        XCTAssertEqual(workspace([finished]).rowSummary.mark, .idle, "no line: Done, by the grey dot")
+    }
+
     /// The pull request's line, and where a click on it goes.
     func testPullRequestLines() {
         func line(_ pr: PRInfo, cleanup: MergedCleanupOffer? = nil) -> SidebarRowSummary {

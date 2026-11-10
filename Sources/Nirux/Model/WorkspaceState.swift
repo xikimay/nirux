@@ -152,6 +152,12 @@ final class WorkspaceState {
     var phase: WorkspacePhase?
     var lastSummary: String?
     var lastSummaryIsManual: Bool = false
+    /// `lastSummary` is a turn's status line (`recordTurnStatus`), not an
+    /// agent's report as it came (Codex's message).
+    var lastSummaryIsStatus = false
+    /// The turn end whose status line `lastSummary` holds. In memory only:
+    /// runs don't outlive the app.
+    private(set) var turnStatusEndedAt: TimeInterval?
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
@@ -531,9 +537,29 @@ extension WorkspaceState {
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        guard lastSummary != compactSummary else { return changed }
+        guard lastSummary != compactSummary || lastSummaryIsStatus else { return changed }
         lastSummary = compactSummary
+        lastSummaryIsStatus = false
         return true
+    }
+
+    /// Puts the status line of the turn that ended at `turnEndedAt` in
+    /// `lastSummary`, unless the user wrote it, or a newer turn end's line
+    /// got there first. True when it changed.
+    @discardableResult
+    func recordTurnStatus(_ line: String, turnEndedAt: TimeInterval) -> Bool {
+        guard !lastSummaryIsManual, turnStatusEndedAt.map({ turnEndedAt > $0 }) ?? true else { return false }
+        turnStatusEndedAt = turnEndedAt
+        guard lastSummary != line || !lastSummaryIsStatus else { return false }
+        lastSummary = line
+        lastSummaryIsStatus = true
+        return true
+    }
+
+    /// The task's line on its row: a turn's status line, or the summary
+    /// the user wrote. Not an agent's report as it came.
+    var statusLine: String? {
+        lastSummaryIsManual || lastSummaryIsStatus ? Self.normalizedContextText(lastSummary) : nil
     }
 
     @discardableResult
