@@ -35,6 +35,9 @@ final class AgentCirclingTests: XCTestCase {
         XCTAssertEqual(ran?.toolFamily, "swift build", "a success ends its failures in a row")
         XCTAssertEqual(toolEvent("PostToolUseFailure", ["error": "Exit code 1"])?.toolEnd, "failed", "older Claude: no is_interrupt")
         XCTAssertEqual(toolEvent("PostToolUseFailure", ["error": "x", "is_interrupt": true])?.toolEnd, "interrupted")
+        // Esc or a stop killed it: a result marked so (exit 137), not a pass.
+        let stopped = toolEvent("PostToolUse", ["tool_response": ["stdout": "", "stderr": "", "interrupted": true]])
+        XCTAssertEqual(stopped?.toolEnd, "interrupted")
 
         // A command nothing names is told from another by its text alone:
         // a description or a time limit that changes between two tries
@@ -48,6 +51,13 @@ final class AgentCirclingTests: XCTestCase {
         XCTAssertEqual(first?.toolCommandKey, toolEvent("PostToolUseFailure", input: again, ["error": "Exit code 1"])?.toolCommandKey)
         XCTAssertNotEqual(first?.toolCommandKey, toolEvent("PostToolUseFailure", input: other, ["error": "Exit code 1"])?.toolCommandKey)
         XCTAssertNil(failed.toolCommandKey, "a named command counts with its program's")
+        // So does a program that runs whatever it is given.
+        let script = toolEvent("PostToolUseFailure", input: ["command": "python3 measure.py"], ["error": "Exit code 1"])
+        XCTAssertEqual(script?.toolFamily, "python3")
+        XCTAssertNotNil(script?.toolCommandKey)
+        XCTAssertNotEqual(
+            script?.toolCommandKey, toolEvent("PostToolUseFailure", input: ["command": "python3 report.py"], ["error": "Exit code 1"])?.toolCommandKey
+        )
 
         // (Not Edit's "String to replace not found": Claude refuses that
         // call before running it, and no hook fires.)
@@ -88,31 +98,61 @@ final class AgentCirclingTests: XCTestCase {
     /// Waiting for CI or a server repeats a command that "fails" until
     /// there is something, and a long sleep outlasts its time limit on
     /// purpose: not an agent going in circles.
-    func testACommandThatWaitsNeitherFailsNorHangs() {
+    func testACommandThatIsNothingButWaitingNeitherFailsNorHangs() {
         let waits = [
-            "sleep 60; gh run view 99 --json status", "echo waiting; sleep 30; gh pr view 3", "cd repo && \\\n  gh pr checks 412",
-            "git push && gh pr checks 412 --watch", "gh run watch 5 --exit-status", "until curl -sf localhost:3000; do sleep 2; done",
-            "\"$NIRUX_CLI_PATH\" --mission tell --to web --message \"rebase on main\"",
-            "for i in 1 2 3; do\n  curl -sf :3000 && break\n  sleep 2\ndone"
+            "sleep 300", "echo waiting; sleep 60", "cd repo && \\\n  gh pr checks 412", "gh run watch 5 --exit-status",
+            "until curl -sf localhost:3000; do sleep 2; done", "for i in 1 2 3; do\n  curl -sf :3000 && break\n  sleep 2\ndone",
+            "\"$NIRUX_CLI_PATH\" --mission tell --to web --message \"rebase on main\""
         ]
         let moved: [String: Any] = ["stdout": "", "interrupted": false, "backgroundTaskId": "b12", "timedOutAfterMs": 120_000]
         for command in waits {
             XCTAssertTrue(AgentShellCommand(command).isWait, command)
-            XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 8"])?.toolEnd, "waited", command)
+            XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 1"])?.toolEnd, "waited", command)
             let killed = toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 143\nCommand timed out after 2m 0s"])
             XCTAssertEqual(killed?.toolEnd, "waited", command)
             XCTAssertEqual(toolEvent("PostToolUse", input: ["command": command], ["tool_response": moved])?.toolEnd, "waited", command)
             XCTAssertNil(toolEvent("PostToolUse", input: ["command": command], ["tool_response": ["stdout": "ok"]])?.toolEnd, command)
         }
-        // A sleep somewhere in a command, or written into a file, doesn't
-        // make it a wait: restarting a server and probing it is an attempt.
-        let attempts = [
-            "swift build", "gh pr view 3", "gh run view 99", "echo 'sleep 5' > run.sh", "timeout 120 swift test",
-            "./start.sh & sleep 3; curl -sf :3000/health", "cat > run.sh <<'EOF'\nsleep 5\n./run\nEOF\nbash run.sh",
-            "pkill -f Nirux; sleep 1; swift run 2>&1 | tail -20"
+        // A wait followed by a program counts as that program; its time
+        // limit is the wait's to outlast.
+        let waitsThenRuns = [
+            "sleep 5; swift build", "sleep 60; gh run view 99 --json status", "git push && gh pr checks 412 --watch",
+            "until curl -sf :3000; do sleep 1; done; npm test"
         ]
-        for command in attempts {
+        for command in waitsThenRuns {
             XCTAssertFalse(AgentShellCommand(command).isWait, command)
+            XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 1"])?.toolEnd, "failed", command)
+            XCTAssertEqual(toolEvent("PostToolUse", input: ["command": command], ["tool_response": moved])?.toolEnd, "waited", command)
+        }
+        let checks = toolEvent("PostToolUseFailure", input: ["command": "git push && gh pr checks 412"], ["error": "Exit code 8"])
+        XCTAssertEqual(checks?.toolEnd, "waited", "gh pr checks: still running")
+        XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": "swift test"], ["error": "Exit code 8"])?.toolEnd, "failed")
+        // A sleep after a program, after clearing its way, or written into
+        // a file, waits for nothing: restarting a server and probing it is
+        // a try, and so is its time limit.
+        let tries = [
+            "swift build", "echo 'sleep 5' > run.sh", "timeout 120 swift test", "./start.sh & sleep 3; curl -sf :3000/health",
+            "cat > run.sh <<'EOF'\nsleep 5\n./run\nEOF\nbash run.sh", "pkill -f Nirux; sleep 1; swift run 2>&1 | tail -20"
+        ]
+        for command in tries {
+            XCTAssertFalse(AgentShellCommand(command).isWait, command)
+            XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 1"])?.toolEnd, "failed", command)
+            XCTAssertEqual(toolEvent("PostToolUse", input: ["command": command], ["tool_response": moved])?.toolEnd, "hung", command)
+        }
+    }
+
+    /// grep found nothing, files differ, a test is false: exit 1 is an
+    /// answer, unless a program before it in an `&&` chain may have failed.
+    func testExitOneOfAProgramThatAnswersIsNoFailure() {
+        let answers = [
+            "cd src && grep -rn fooA .", "[ -f .build/debug/Nirux ]", "test -d out", "which swiftlint", "diff a.txt b.txt",
+            "cmp a.bin b.bin", "pgrep -fl Nirux", "git diff --quiet", "swift build 2>&1 | grep -c error", "cd x || exit 1; rg TODO"
+        ]
+        for command in answers {
+            XCTAssertNil(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 1"])?.toolEnd, command)
+        }
+        XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": "grep x missing.txt"], ["error": "Exit code 2"])?.toolEnd, "failed")
+        for command in ["swift build && grep -q ok build.log", "grep -q x f && swift build", "pkill app && grep x f", "swift test"] {
             XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 1"])?.toolEnd, "failed", command)
         }
     }
@@ -152,6 +192,8 @@ final class AgentCirclingTests: XCTestCase {
             ("swift script.swift arg", "swift"),
             ("! grep -q x file", "grep"),
             ("mkdir -p out && echo hi", "mkdir"),
+            // No name a person reads.
+            ("[ -f .build/debug/Nirux ]", nil),
             ("for f in *.swift; do swiftc $f; done", nil),
             ("\"$NIRUX_CLI_PATH\" --mission ask --message hi", nil),
             ("FOO=bar", nil),
@@ -168,12 +210,12 @@ final class AgentCirclingTests: XCTestCase {
     private var clock: TimeInterval = 1_000
 
     private func send(
-        _ name: AgentHookEvent.Name, tool: String? = nil, key: String? = nil, end: String? = nil, family: String? = nil,
-        agent: String? = nil, source: String? = nil
+        _ name: AgentHookEvent.Name, tool: String? = nil, toolKey: String? = nil, key: String? = nil, end: String? = nil,
+        family: String? = nil, agent: String? = nil, source: String? = nil
     ) {
         clock += 1
         _ = machine.apply(AgentHookEvent(
-            kind: .claude, name: name, sessionID: "s", source: source, toolName: tool, toolEnd: end,
+            kind: .claude, name: name, sessionID: "s", source: source, toolName: tool, toolKey: toolKey, toolEnd: end,
             toolFamily: family, toolCommandKey: key, agentID: agent, timestamp: clock
         ), isUserFocused: false)
     }
@@ -183,10 +225,14 @@ final class AgentCirclingTests: XCTestCase {
         send(.userPromptSubmit)
     }
 
-    /// A shell command by its program; another tool by its name.
+    /// A shell command by its program; another tool by its name, called
+    /// with the same input each time.
     private func call(_ what: String, _ end: AgentToolEnd? = nil, agent: String? = nil) {
         let isTool = what.first?.isUppercase == true
-        send(.postToolUse, tool: isTool ? what : "Bash", end: end?.rawValue, family: isTool ? nil : what, agent: agent)
+        send(
+            .postToolUse, tool: isTool ? what : "Bash", toolKey: "same input", end: end?.rawValue, family: isTool ? nil : what,
+            agent: agent
+        )
     }
 
     /// The one stuck agent of the month measured: `ls`, `stat` and `test`
@@ -293,6 +339,32 @@ final class AgentCirclingTests: XCTestCase {
             watch.hint, .failing(name: last, count: AgentCirclingWatch.failureThreshold),
             "the first one, which failed last, started again from one"
         )
+    }
+
+    /// Another tool counts with its exact repeats: five pages that fail to
+    /// load are no loop, the same one five times is.
+    func testAToolCountsWithTheSameInputOnly() {
+        startTurn()
+        for page in 1...6 { send(.postToolUse, tool: "WebFetch", toolKey: "page \(page)", end: "failed") }
+        XCTAssertNil(machine.circlingHint, "six pages")
+        for _ in 1...5 { send(.postToolUse, tool: "WebFetch", toolKey: "page 1", end: "failed") }
+        XCTAssertEqual(machine.circlingHint, .failing(name: "WebFetch", count: 6))
+    }
+
+    /// The bookkeeping of background commands (a poll for output, a stop)
+    /// neither counts nor moves the agent on.
+    func testBackgroundBookkeepingSaysNothing() {
+        startTurn()
+        for _ in 1...5 { call("TaskOutput", .failed) }
+        XCTAssertNil(machine.circlingHint)
+        for _ in 1...5 {
+            call("swift build", .failed)
+            for _ in 1...AgentCirclingWatch.callsThatHideFailures {
+                call("TaskOutput")
+                call("TaskStop")
+            }
+        }
+        XCTAssertEqual(machine.circlingHint, .failing(name: "swift build", count: 5), "polls don't hide the row")
     }
 
     /// A command nothing names counts only with its exact repeats.

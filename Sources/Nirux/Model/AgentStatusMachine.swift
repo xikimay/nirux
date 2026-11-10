@@ -768,17 +768,19 @@ struct AgentStatusMachine {
     var circlingHint: AgentCirclingHint? { circling.hint }
 
     /// A tool call ended, for `circlingHint`. The main agent's only: a
-    /// subagent's calls say nothing of it. A shell command counts with
-    /// those of its program, one nothing names with its exact repeats; an
-    /// end a newer receiver wrote says nothing.
+    /// subagent's calls say nothing of it, nor does the bookkeeping of
+    /// background commands. A shell command counts with those of its
+    /// program, unless it counts by its exact text; any other tool with its
+    /// exact repeats (the same URL, file, action: `toolKey`). An end a
+    /// newer receiver wrote says nothing.
     private mutating func noteCallEnded(_ event: AgentHookEvent, at time: TimeInterval) {
-        guard event.agentID == nil, let tool = event.toolName else { return }
+        guard event.agentID == nil, let tool = event.toolName, !AgentToolOutcome.taskTools.contains(tool) else { return }
         let end = event.toolEnd.map(AgentToolEnd.init(rawValue:))
         if case .some(.none) = end { return }
-        let isShell = AgentToolOutcome.shellTools.contains(tool)
+        let isShell = AgentToolInput.shellTools.contains(tool)
+        let exact = (isShell ? event.toolCommandKey : event.toolKey).map { "\(tool) \($0)" }
         circling.noteCallEnded(
-            key: isShell ? event.toolFamily ?? event.toolCommandKey.map { "\(tool) \($0)" } : tool,
-            name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
+            key: isShell ? exact ?? event.toolFamily : exact ?? tool, name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
         )
     }
 

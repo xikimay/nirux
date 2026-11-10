@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// A quiet hint that a working Claude may be going in circles: its
@@ -159,7 +158,7 @@ enum AgentToolEnd: String, Sendable {
     case failed
     /// A shell command ran past its time limit.
     case hung
-    /// The user interrupted it (Esc).
+    /// The user interrupted it (Esc), or something stopped it.
     case interrupted
     /// A command that waits (`AgentShellCommand.isWait`) came back with a
     /// failure, or outlasted its time limit: neither.
@@ -171,24 +170,44 @@ enum AgentToolEnd: String, Sendable {
 /// how it ended and a program's name leave the receiver: never the command,
 /// its output or the error.
 enum AgentToolOutcome {
-    static let shellTools: Set<String> = ["Bash", "PowerShell"]
+    /// Bookkeeping of background commands and tasks (a poll for output, a
+    /// stop): it says nothing of an agent going round, and it isn't a call
+    /// that moves on either. TaskOutput and BashOutput came back as
+    /// successes even when their wait timed out (Claude Code 2.1.1xx; gone
+    /// in 2.1.321).
+    static let taskTools: Set<String> = [
+        "TaskOutput", "BashOutput", "BashOutputTool", "AgentOutput", "AgentOutputTool", "TaskStop", "KillShell", "KillBash",
+        "Monitor"
+    ]
 
-    /// Nil: the call ran. `command`: a shell tool's, nil for other tools.
+    /// Nil: the call ran, or answered "no". `command`: a shell tool's, nil
+    /// for other tools.
     ///
     /// A shell command past its time limit is hung. An interactive Claude
     /// moves it to the background and goes on; a headless one kills it and
-    /// reports a failure. Read from Claude Code 2.1.321's hook payloads and
-    /// a month of results (2.1.111 to 2.1.321).
+    /// reports a failure. A command that Esc or a stop killed comes back as
+    /// a result marked `interrupted` (exit 137), never a timeout's. Read
+    /// from Claude Code 2.1.321 and a month of results (2.1.111 to 2.1.321).
     static func end(hookName: String, payload: [String: Any], command: AgentShellCommand?) -> AgentToolEnd? {
         let failure = hookName == "PostToolUseFailure"
-        if failure, payload["is_interrupt"] as? Bool == true { return .interrupted }
+        let response = payload["tool_response"] as? [String: Any]
+        if failure ? payload["is_interrupt"] as? Bool == true : response?["interrupted"] as? Bool == true { return .interrupted }
         guard let command else { return failure ? .failed : nil }
         let pastItsLimit = failure ? wasKilledAtItsLimit(payload) : wasMovedToTheBackground(payload)
         // A `sleep 600` outlasting its limit is meant to (12 of the month's
-        // 43), and a poll that finds nothing yet isn't an attempt.
+        // 43), and a poll that finds nothing yet isn't a try.
         if command.isWait { return failure || pastItsLimit ? .waited : nil }
-        if pastItsLimit { return .hung }
-        return failure ? .failed : nil
+        if pastItsLimit { return command.mayRunLong ? .waited : .hung }
+        guard failure else { return nil }
+        switch exitCode(payload) {
+        // grep found nothing, files differ, a test is false: an answer.
+        // Claude Code says so itself for a bare grep, not after `&&`, nor
+        // for test, which or cmp.
+        case 1? where command.exitOneAnswers: return nil
+        // `gh pr checks`: checks still running.
+        case 8? where command.runsChecks: return .waited
+        default: return .failed
+        }
     }
 
     /// `backgroundTaskId` in a result nobody asked to run in the
@@ -209,12 +228,23 @@ enum AgentToolOutcome {
     /// hold the same words: a test log, a grep of this file).
     private static func wasKilledAtItsLimit(_ payload: [String: Any]) -> Bool {
         if payload["is_timeout"] as? Bool == true { return true }
-        guard let error = payload["error"] as? String else { return false }
-        let start = String(String.UnicodeScalarView(error.unicodeScalars.prefix(200)))
-        let lines = start.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
+        let lines = errorStart(payload)
         let notice = "Command timed out after"
         guard let first = lines.first else { return false }
         return first.hasPrefix(notice) || first.hasPrefix("Exit code ") && lines.dropFirst().first?.hasPrefix(notice) == true
+    }
+
+    /// "Exit code 1", Claude's first line of a failed command's error.
+    private static func exitCode(_ payload: [String: Any]) -> Int? {
+        guard let first = errorStart(payload).first, first.hasPrefix("Exit code ") else { return nil }
+        return Int(first.dropFirst("Exit code ".count).prefix { $0.isNumber })
+    }
+
+    /// The error's first lines, cut in scalars.
+    private static func errorStart(_ payload: [String: Any]) -> [Substring] {
+        guard let error = payload["error"] as? String else { return [] }
+        let start = String(String.UnicodeScalarView(error.unicodeScalars.prefix(200)))
+        return start.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
     }
 }
 
@@ -226,59 +256,125 @@ struct AgentShellCommand: Equatable, Sendable {
     /// "swift build", "gh pr checks", "python3": the program, with its
     /// subcommand for the tools that have one, past `cd … &&`, variables,
     /// wrappers and preparations. Nil when nothing names the command (a
-    /// loop, a path held in a variable).
+    /// loop, a path held in a variable, `[ -f x ]`).
     let family: String?
-    /// What tells a command nothing names from another one: its text
-    /// alone, so a description or a time limit that changes between two
-    /// tries doesn't make it another command.
-    var repeatKey: String { SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() }
+    /// The command counts with its exact repeats only, not with the other
+    /// runs of its program: nothing names it, or its program runs
+    /// whatever it is given (`python3 a.py` and `python3 b.py` are two
+    /// commands; `swift build` is one).
+    var countsByText: Bool { family.map(Self.genericRunners.contains) ?? true }
+    /// What tells a command from another by its text alone, so a
+    /// description or a time limit that changes between two tries doesn't
+    /// make it another command.
+    var repeatKey: String { AgentToolInput.shortHash(Data(text.utf8)) }
     private let text: String
 
-    /// The command waits for something: it sleeps before anything else (a
-    /// poll: `sleep 60; gh run view 9`), it is a loop that sleeps (`until
-    /// curl -sf :3000; do sleep 2; done`), it runs one of GitHub's commands
-    /// that exit non-zero while checks run (`git push && gh pr checks
-    /// --watch`), or it is Nirux's own Mission command, which says "run me
-    /// again" with a failure while the other agent is busy. Coming back
-    /// with a failure, or running past its time limit, is then part of
-    /// waiting (for CI, a server, an agent).
+    /// The command is nothing but waiting: it only sleeps (`sleep 300`), it
+    /// is a loop that sleeps (`until curl -sf :3000; do sleep 2; done`), it
+    /// is one of GitHub's commands that exit non-zero while checks run, or
+    /// Nirux's own Mission command, which says "run me again" with a
+    /// failure while the other agent is busy. Coming back with a failure,
+    /// or running past its time limit, is then part of waiting (for CI, a
+    /// server, an agent). A wait followed by a program (`sleep 5; swift
+    /// build`, `git push && gh pr checks --watch`) counts as that program.
     let isWait: Bool
+    /// The command waits at some point, before anything else or as a
+    /// watch: running past its time limit is then the wait's doing, not a
+    /// command hanging. A sleep after a program, or after clearing its way
+    /// (`pkill -f app; sleep 1; swift run`), doesn't make it one.
+    let mayRunLong: Bool
+    /// Exit 1 of the command's last program is its answer, not a failure:
+    /// grep found nothing, files differ, a test is false, `which` found
+    /// nothing. Not when a program before it in an `&&` chain may have
+    /// failed instead (`swift build && grep -q ok log`).
+    let exitOneAnswers: Bool
+    /// The command runs `gh pr checks`, whose exit 8 means "still running".
+    let runsChecks: Bool
 
     init(_ text: String) {
         self.text = text
         var family: String?
         var isNamed = false
-        var isLoop = false
-        var hasCleared = false
         var preparation: String?
-        var waits = false
-        for words in Self.simpleCommands(in: text) {
+        var hasCleared = false
+        var leadingSleep = false
+        var sleeps = false
+        var waitParts = 0
+        var otherParts = 0
+        var runsChecks = false
+        // A loop or an `if`, from its keyword to its `done`, `fi`, `esac`.
+        var depth = 0
+        var compoundWaits = false
+        // For the exit code: whether a program that may fail came earlier
+        // in the current `&&` chain, and what the last program says.
+        var chainHasProgram = false
+        var pipelineGated = false
+        var lastAnswers = false
+        for (words, separator) in Self.simpleCommands(in: text) {
+            switch separator {
+            case .sequence: (chainHasProgram, pipelineGated) = (false, false)
+            case .and: pipelineGated = chainHasProgram
+            case .pipe: break
+            }
             guard let (name, arguments) = Self.program(in: words) else { continue }
-            // A sleep after the command (`./start.sh & sleep 3; curl …`), or
-            // after clearing its way (`pkill -f app; sleep 1; swift run`), or
-            // written into a file, doesn't make it a wait: that is a try.
-            if name == "sleep", !isNamed && !hasCleared || isLoop { waits = true }
-            if arguments.contains("--mission") { waits = true }
+            let named = ([name] + Self.subcommands(of: name, in: arguments)).joined(separator: " ")
+            let waits = name == "sleep" || Self.waitingCommands.contains(named) || arguments.contains("--mission")
+            if depth > 0 {
+                if Self.compoundOpeners.contains(name) { depth += 1 }
+                if Self.compoundClosers.contains(name) { depth -= 1 }
+                compoundWaits = compoundWaits || waits
+                if depth == 0 {
+                    // A loop that sleeps is a poll; any other one runs things.
+                    if compoundWaits { waitParts += 1 } else { otherParts += 1 }
+                    lastAnswers = false
+                    chainHasProgram = true
+                }
+                continue
+            }
+            // `cd` hardly fails; `pkill` answers "none" with exit 1.
+            let mayFail = !Self.housekeeping.contains(name) || Self.clearsTheWay.contains(name)
+            defer { if mayFail { chainHasProgram = true } }
+            lastAnswers = (Self.answeringPrograms.contains(name) || Self.answeringPrograms.contains(named)) && !pipelineGated
+            if Self.waitingCommands.contains(named) || arguments.contains("--mission") {
+                waitParts += 1
+                runsChecks = runsChecks || named == "gh pr checks"
+                if !isNamed { (isNamed, family) = (true, Self.isProgramName(name) ? named : nil) }
+                continue
+            }
+            if name == "sleep" {
+                sleeps = true
+                if !isNamed && !hasCleared { leadingSleep = true }
+            }
             if Self.clearsTheWay.contains(name) { hasCleared = true }
             if Self.housekeeping.contains(name) {
                 if !isNamed { preparation = preparation ?? name }
                 continue
             }
-            guard !Self.compound.contains(name), Self.isProgramName(name) else {
-                // A loop, a path held in a variable: nothing names it.
-                if !isNamed { (isNamed, isLoop) = (true, Self.compound.contains(name)) }
+            if Self.compoundOpeners.contains(name) {
+                (depth, compoundWaits) = (1, false)
+                if !isNamed { isNamed = true }
                 continue
             }
-            let named = ([name] + Self.subcommands(of: name, in: arguments)).joined(separator: " ")
-            if Self.waitingCommands.contains(named) { waits = true }
+            otherParts += 1
+            guard !Self.compound.contains(name), Self.isProgramName(name) else {
+                // A path held in a variable: nothing names it.
+                if !isNamed { isNamed = true }
+                continue
+            }
             if Self.preparations.contains(named) {
                 if !isNamed { preparation = preparation ?? named }
             } else if !isNamed {
                 (isNamed, family) = (true, named)
             }
         }
-        self.family = isNamed ? family : preparation
-        isWait = waits
+        // A loop the scan cut before its end.
+        if depth > 0 { if compoundWaits { waitParts += 1 } else { otherParts += 1 } }
+        // `[`, `.`: no name a person reads.
+        self.family = (isNamed ? family : preparation).flatMap { name in name.first.map { $0.isLetter || $0.isNumber } == true ? name : nil }
+        isWait = otherParts == 0 && (sleeps || waitParts > 0)
+        mayRunLong = leadingSleep || waitParts > 0
+        exitOneAnswers = lastAnswers
+        self.runsChecks = runsChecks
     }
 
     /// Programs whose first plain argument says what they do.
@@ -315,6 +411,19 @@ struct AgentShellCommand: Equatable, Sendable {
     /// The same for a program's subcommand: `git add -A && git commit`.
     private static let preparations: Set<String> = ["git add"]
     private static let compound: Set<String> = ["for", "while", "until", "if", "case", "select", "function"]
+    private static let compoundOpeners: Set<String> = ["for", "while", "until", "if", "case", "select"]
+    private static let compoundClosers: Set<String> = ["done", "fi", "esac"]
+    /// Programs whose exit 1 is an answer: grep found nothing, files
+    /// differ, a test is false, nothing found.
+    private static let answeringPrograms: Set<String> = [
+        "grep", "egrep", "fgrep", "rg", "git grep", "diff", "cmp", "git diff", "test", "[", "[[", "which", "pgrep", "lsof"
+    ]
+    /// Programs that run whatever they are given: their runs count by
+    /// their exact text (`countsByText`).
+    private static let genericRunners: Set<String> = [
+        "python", "python3", "node", "bash", "sh", "zsh", "ruby", "perl", "php", "deno", "osascript", "swift", "curl",
+        "wget", "npx", "bunx", "uv run", "bun run", "go run"
+    ]
     /// GitHub's commands that exit non-zero while checks run, and once
     /// they failed: repeated on purpose.
     private static let waitingCommands: Set<String> = ["gh pr checks", "gh run watch"]
@@ -346,13 +455,22 @@ struct AgentShellCommand: Equatable, Sendable {
         return (name(of: first), words.dropFirst())
     }
 
+    /// What comes before a simple command: `;`, a line's end, `||` or a
+    /// lone `&` (a new chain), `&&` (it runs only if the chain so far
+    /// passed), `|` (the same pipeline, whose exit is its last command's).
+    private enum Separator {
+        case sequence, and, pipe
+    }
+
     /// The words of each simple command, of the first ones in a long
-    /// script: commands end at `;`, `&`, `|` and line ends, words at
-    /// spaces, both outside quotes and `$(…)`; a `#` starts a comment.
-    private static func simpleCommands(in text: String) -> [[String]] {
-        var commands: [[String]] = []
+    /// script, and what came before it: commands end at `;`, `&`, `|` and
+    /// line ends, words at spaces, both outside quotes and `$(…)`; a `#`
+    /// starts a comment.
+    private static func simpleCommands(in text: String) -> [(words: [String], separator: Separator)] {
+        var commands: [(words: [String], separator: Separator)] = []
         var words: [String] = []
         var word = ""
+        var separator = Separator.sequence
         var quote: Character?
         var substitutionDepth = 0
         var escaped = false
@@ -362,9 +480,15 @@ struct AgentShellCommand: Equatable, Sendable {
             if !word.isEmpty { words.append(word) }
             word = ""
         }
-        func endCommand() {
+        func endCommand(before next: Separator) {
             endWord()
-            if !words.isEmpty { commands.append(words) }
+            if !words.isEmpty {
+                commands.append((words, separator))
+                separator = next
+            } else if next != .sequence || separator == .sequence {
+                // `a &&⏎ b` goes on; `a & & b` reads as `a && b`.
+                separator = next
+            }
             words = []
         }
         // Bounded in scalars: one character can hold any number of them.
@@ -395,16 +519,20 @@ struct AgentShellCommand: Equatable, Sendable {
                 word.append(character)
             } else if character == "#", word.isEmpty {
                 inComment = true
-                endCommand()
-            } else if character == ";" || character == "|" || character.isNewline || character == "&" && previous != ">" {
-                endCommand()
+                endCommand(before: .sequence)
+            } else if character == "|" {
+                endCommand(before: previous == "|" ? .sequence : .pipe)
+            } else if character == "&", previous != ">" {
+                endCommand(before: previous == "&" ? .and : .sequence)
+            } else if character == ";" || character.isNewline {
+                endCommand(before: .sequence)
             } else if character.isWhitespace {
                 endWord()
             } else {
                 word.append(character)
             }
         }
-        endCommand()
+        endCommand(before: .sequence)
         return commands
     }
 

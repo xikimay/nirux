@@ -109,7 +109,7 @@ extension WorkspaceInfo {
         if !working.isEmpty {
             // The one that may be going in circles: its hint, its turn's
             // time, and a click on the row brings it up.
-            let circling = working.first { $0.circling != nil }
+            let circling = circlingColumn
             return SidebarRowSummary(
                 mark: .working,
                 status: SidebarStatusLine(
@@ -151,6 +151,11 @@ extension WorkspaceInfo {
         }
         let place = gitBranch ?? columns.first(where: \.isFocused)?.abbreviatedCwd ?? columns.first?.abbreviatedCwd
         return row(.idle, place ?? "No activity yet", place == nil ? .neutral : .branch)
+    }
+
+    /// The working column that may be going in circles, if any.
+    var circlingColumn: ColumnInfo? {
+        columns.first { $0.agentStatus == .working && $0.circling != nil }
     }
 
     /// The next step on the status line: "Next · write the import side".

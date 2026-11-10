@@ -84,6 +84,22 @@ final class SettingsWindowTests: XCTestCase {
         }
     }
 
+    /// The hint's setting comes with the state the shell restores, read
+    /// once at launch.
+    @MainActor
+    func testTheCirclingHintSettingComesWithTheRestoredState() throws {
+        try withIsolatedState {
+            var state = PersistedState(workspaces: [], activeWorkspaceIndex: 0)
+            state.settings = PersistedSettings()
+            state.settings?.agentCirclingHint = false
+            XCTAssertTrue(Persistence.save(state))
+            let shell = makeShell()
+            XCTAssertTrue(shell.circlingHintEnabled, "the default, before the state is read")
+            shell.restoreState()
+            XCTAssertFalse(shell.circlingHintEnabled)
+        }
+    }
+
     @MainActor
     func testChangesReachTheRunningAppAtOnce() throws {
         try withIsolatedState {

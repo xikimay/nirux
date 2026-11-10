@@ -332,7 +332,7 @@ extension WorkspaceInfo {
             let who = working.count == 1 ? SidebarRenderer.columnName(working[0]) : "\(working.count) agents"
             // As the row's status line: the one that may be going in
             // circles says so, with its own turn's time.
-            let circling = working.first { $0.circling != nil }
+            let circling = circlingColumn
             detail = (["\(who) working"] + [(circling ?? working.first)?.elapsedDisplay].compactMap { $0 }).joined(separator: " · ")
             note = circling?.circling?.statusText
         case .done:

@@ -61,8 +61,9 @@ struct AgentHookEvent: Codable, Equatable {
     /// didn't simply run (an `AgentToolEnd` raw value; a string, so an app
     /// older than its receiver skips an end it doesn't know, not the whole
     /// event), and the program a shell command ran ("swift build"; see
-    /// `AgentShellCommand`), or for a command nothing names, what tells
-    /// its text from another's (`repeatKey`). Nil from older receivers too.
+    /// `AgentShellCommand`), and for a command that counts by its exact
+    /// text (nothing names it, or `python3 x.py`), what tells its text from
+    /// another's (`repeatKey`). Nil from older receivers too.
     let toolEnd: String?
     let toolFamily: String?
     let toolCommandKey: String?
@@ -157,12 +158,12 @@ struct AgentHookEvent: Codable, Equatable {
                 toolKey = nil
             }
             if let toolName, name == .postToolUse {
-                let command = AgentToolOutcome.shellTools.contains(toolName)
+                let command = AgentToolInput.shellTools.contains(toolName)
                     ? ((payload["tool_input"] as? [String: Any])?["command"] as? String).map(AgentShellCommand.init)
                     : nil
                 toolEnd = AgentToolOutcome.end(hookName: hookName, payload: payload, command: command)?.rawValue
                 toolFamily = command?.family
-                toolCommandKey = command.flatMap { $0.family == nil ? $0.repeatKey : nil }
+                toolCommandKey = command.flatMap { $0.countsByText ? $0.repeatKey : nil }
             } else {
                 toolEnd = nil
                 toolFamily = nil
