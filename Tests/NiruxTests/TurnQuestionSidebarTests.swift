@@ -89,6 +89,13 @@ final class TurnQuestionSidebarTests: XCTestCase {
         XCTAssertNotEqual(SidebarView.armedButtonKey(for: yes), SidebarView.armedButtonKey(for: no))
     }
 
+    /// A new question redraws the card, whatever else stays the same.
+    func testANewQuestionIsAChangeOfTheRow() {
+        let later = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 2_000, isYesNo: true)
+        XCTAssertNotEqual(column(yesNo), column(later))
+        XCTAssertNotEqual(column(yesNo).hashValue, column(later).hashValue)
+    }
+
     func testYesAndNoTypeAPlainWord() {
         XCTAssertEqual(SidebarTurnAnswer.yes.typedText, "yes")
         XCTAssertEqual(SidebarTurnAnswer.no.typedText, "no")
