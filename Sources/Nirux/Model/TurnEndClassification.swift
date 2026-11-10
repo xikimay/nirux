@@ -178,7 +178,7 @@ enum TurnEndText {
             var start = 0
             while start + needle.count <= normal.text.count {
                 let end = start + needle.count
-                if normal.text[start..<end].elementsEqual(needle),
+                if normal.text[start..<end].elementsEqual(needle), !normal.inCode[start..<end].allSatisfy({ $0 }),
                    startsSentence(normal, at: start, cleanStart: paragraph.cleanStart),
                    endsSentence(normal, from: start, to: end, cleanEnd: paragraph.cleanEnd) {
                     return AgentText.clean(span(of: paragraph.text, normal, from: start, to: end), maxLength: maxLength)
@@ -219,13 +219,23 @@ enum TurnEndText {
 
     private static func normalizedForQuote(_ text: String) -> Normalized {
         var normal = Normalized()
-        var inCode = false
-        for index in text.indices {
-            var character = text[index]
-            if character == "`" {
-                inCode.toggle()
+        // A run of backticks opens a code span that a run as long closes.
+        var codeFence = 0
+        var index = text.startIndex
+        while index < text.endIndex {
+            if text[index] == "`" {
+                let run = text[index...].prefix { $0 == "`" }
+                if codeFence == 0 {
+                    codeFence = run.count
+                } else if run.count == codeFence {
+                    codeFence = 0
+                }
+                index = run.endIndex
                 continue
             }
+            defer { index = text.index(after: index) }
+            let inCode = codeFence > 0
+            var character = text[index]
             if "*_>#".contains(character) { continue }
             if character.isWhitespace {
                 if normal.text.isEmpty || normal.text.last == " " { continue }
@@ -244,25 +254,27 @@ enum TurnEndText {
 
     private static let sentenceMarks: Set<Character> = [".", "?", "!", "…", ":", "？", "؟"]
     private static let closingMarks: Set<Character> = [")", "]", "}", "»", "\"", "'", "」", "』", "）"]
-    private static let abbreviations: Set<String> = ["e.g.", "i.e.", "vs.", "cf."]
+    private static let abbreviations: Set<String> = ["e.g.", "i.e.", "vs.", "cf.", "mr.", "mrs.", "ms.", "dr."]
 
     /// A sentence ends at `index`: a mark outside code that ends no
-    /// abbreviation ("e.g.").
+    /// abbreviation ("e.g.", "(e.g.").
     private static func endsSentence(_ normal: Normalized, at index: Int) -> Bool {
         guard index >= 0, sentenceMarks.contains(normal.text[index]), !normal.inCode[index] else { return false }
-        let word = String(normal.text[...index].reversed().prefix { $0 != " " }.reversed()).lowercased()
-        return !abbreviations.contains(word)
+        let word = normal.text[...index].reversed().prefix { $0 != " " }.reversed().drop { "([{«\"'".contains($0) }
+        return !abbreviations.contains(String(word).lowercased())
     }
 
     /// Nothing of its sentence before it: the paragraph's start (unless code
     /// cut the sentence there), or a space after a sentence's end ("Done.
-    /// Want…", "…?\" Shall I…"). Not a clause ("…, shall I…", "— or…").
+    /// Want…", "…?\" Shall I…"). Not a clause ("…, shall I…", "— or…",
+    /// "…: should I…").
     private static func startsSentence(_ normal: Normalized, at start: Int, cleanStart: Bool) -> Bool {
         guard start > 0 else { return cleanStart }
         guard normal.text[start - 1] == " " else { return false }
         var index = start - 2
         while index > 0, closingMarks.contains(normal.text[index]) { index -= 1 }
-        return endsSentence(normal, at: index)
+        // "If CI is green: should I merge?" says no more than its clause.
+        return normal.text[index] != ":" && endsSentence(normal, at: index)
     }
 
     /// Nothing of its sentence after it: it ends on a sentence's end that a
@@ -392,7 +404,7 @@ enum TurnEndText {
     /// The message's lines, last first, with what each is. Fences are
     /// counted from the end: an excerpt may have lost the start of a
     /// block, never its end. Indented code is as Markdown has it: four
-    /// spaces or a tab, after a blank line or more code, outside a list.
+    /// spaces or a tab, not going on with a paragraph, outside a list.
     /// The one reader of `questionLine`, `lastLine` and `quotedSentence`.
     static func linesFromTheEnd(of message: String) -> [(trimmed: String, kind: LineKind)] {
         let lines = message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
@@ -415,11 +427,12 @@ enum TurnEndText {
             let kind: LineKind
             if fenced[index] {
                 kind = .code
+                if !isIndented(line) { inList = false }
             } else if trimmed.isEmpty {
                 kind = .blank
             } else if trimmed == "[…]" {
                 kind = .gap
-            } else if isIndented(line), !inList, previous == nil || previous == .blank || previous == .code {
+            } else if isIndented(line), !inList, previous != .prose {
                 kind = .code
             } else {
                 kind = isProse(trimmed) ? .prose : .other

@@ -66,7 +66,8 @@ final class TurnEndClassificationTests: XCTestCase {
             "```\nShall I?\n```", "> Should we keep v1?", "Done.\n\n## Why does it fail?",
             "Shall I merge?\n\nNo need: merged it already.", "The URL now carries ?ref=main and opens the tab.", "",
             "Use `WHERE id = ?`", "Ready? 42", "Ready?\n```\nmake\n```\nDone.", "~~~\nShall I?\n~~~",
-            "Run this:\n\n    read -p \"Proceed?\""
+            "Run this:\n\n    read -p \"Proceed?\"", "Head\n[…]\n    let x = try? foo()\n    return x?",
+            "## Usage\n    make?", "- item\n```\nls\n```\n\n    SELECT * FROM t WHERE id = ?"
         ]
         for message in model { XCTAssertFalse(TurnEndText.endsOnQuestion(message), message) }
         // The notification names the question, not what follows it.
@@ -803,6 +804,12 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(quotes("or close it?", in: "Should I merge it — or close it?"), "a clause")
         XCTAssertFalse(quotes("should I merge?", in: "If CI is green, should I merge?"), "without its condition")
         XCTAssertFalse(quotes("Redis?", in: "Should I add a cache, e.g. Redis?"), "after an e.g.")
+        XCTAssertFalse(quotes("Redis)?", in: "Should I add a cache (e.g. Redis)?"), "after an e.g. in brackets")
+        XCTAssertFalse(quotes("should I merge?", in: "If CI is green: should I merge?"), "after a colon")
+        XCTAssertFalse(quotes("Proceed? [y/N]", in: "The script then prints:\n\n`Proceed? [y/N]`"), "inline code")
+        XCTAssertFalse(quotes("Type ok?", in: "Type ``ok? `x`` to confirm."), "a mark in a double-backtick span")
+        XCTAssertTrue(quotes("Proceed?", in: "Run ``a `b`` now. Proceed?"), "a single backtick closes no double one")
+        XCTAssertFalse(quotes("Smith, can you review it?", in: "Thanks, Mr. Smith, can you review it?"), "after a title")
         XCTAssertFalse(quotes("Should I keep try?", in: "Should I keep `try?` here or switch to a do/catch?"), "a mark in code")
         XCTAssertEqual(
             TurnEndText.quotedSentence(
