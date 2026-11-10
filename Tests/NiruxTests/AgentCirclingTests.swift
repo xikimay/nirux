@@ -36,6 +36,19 @@ final class AgentCirclingTests: XCTestCase {
         XCTAssertEqual(toolEvent("PostToolUseFailure", ["error": "Exit code 1"])?.toolEnd, "failed", "older Claude: no is_interrupt")
         XCTAssertEqual(toolEvent("PostToolUseFailure", ["error": "x", "is_interrupt": true])?.toolEnd, "interrupted")
 
+        // A command nothing names is told from another by its text alone:
+        // a description or a time limit that changes between two tries
+        // doesn't make it another command.
+        let loop: [String: Any] = ["command": "for t in a b; do ./check $t || exit 1; done", "description": "Run the checks"]
+        let again = loop.merging(["description": "Re-run the checks", "timeout": 60_000]) { $1 }
+        let other = loop.merging(["command": "for t in a b c; do ./check $t || exit 1; done"]) { $1 }
+        let first = toolEvent("PostToolUseFailure", input: loop, ["error": "Exit code 1"])
+        XCTAssertNil(first?.toolFamily)
+        XCTAssertNotNil(first?.toolCommandKey)
+        XCTAssertEqual(first?.toolCommandKey, toolEvent("PostToolUseFailure", input: again, ["error": "Exit code 1"])?.toolCommandKey)
+        XCTAssertNotEqual(first?.toolCommandKey, toolEvent("PostToolUseFailure", input: other, ["error": "Exit code 1"])?.toolCommandKey)
+        XCTAssertNil(failed.toolCommandKey, "a named command counts with its program's")
+
         // (Not Edit's "String to replace not found": Claude refuses that
         // call before running it, and no hook fires.)
         let fetch = toolEvent("PostToolUseFailure", tool: "WebFetch", input: ["url": "https://example.test"], ["error": "Request failed with status code 503"])
@@ -95,7 +108,8 @@ final class AgentCirclingTests: XCTestCase {
         // make it a wait: restarting a server and probing it is an attempt.
         let attempts = [
             "swift build", "gh pr view 3", "gh run view 99", "echo 'sleep 5' > run.sh", "timeout 120 swift test",
-            "./start.sh & sleep 3; curl -sf :3000/health", "cat > run.sh <<'EOF'\nsleep 5\n./run\nEOF\nbash run.sh"
+            "./start.sh & sleep 3; curl -sf :3000/health", "cat > run.sh <<'EOF'\nsleep 5\n./run\nEOF\nbash run.sh",
+            "pkill -f Nirux; sleep 1; swift run 2>&1 | tail -20"
         ]
         for command in attempts {
             XCTAssertFalse(AgentShellCommand(command).isWait, command)
@@ -131,6 +145,7 @@ final class AgentCirclingTests: XCTestCase {
             ("kubectl --token abc123def456 get pods", "kubectl"),
             ("echo x &> /dev/null; cargo +nightly test", "cargo test"),
             ("pkill -f Nirux; rm -rf out; swift run", "swift run"),
+            ("cd /repo || exit 1; swift build", "swift build"),
             ("(cd sub && make -j8 test)", "make test"),
             ("{ \"/usr/local/bin/gh\" pr checks 3; }", "gh pr checks"),
             ("./scripts/run-tests.sh Foo", "run-tests.sh"),
@@ -158,8 +173,8 @@ final class AgentCirclingTests: XCTestCase {
     ) {
         clock += 1
         _ = machine.apply(AgentHookEvent(
-            kind: .claude, name: name, sessionID: "s", source: source, toolName: tool, toolKey: key, toolEnd: end,
-            toolFamily: family, agentID: agent, timestamp: clock
+            kind: .claude, name: name, sessionID: "s", source: source, toolName: tool, toolEnd: end,
+            toolFamily: family, toolCommandKey: key, agentID: agent, timestamp: clock
         ), isUserFocused: false)
     }
 
@@ -251,6 +266,15 @@ final class AgentCirclingTests: XCTestCase {
             for _ in 1...(AgentCirclingWatch.callsThatHideFailures + 5) { call("Read") }
             call("swift test", .failed)
             XCTAssertEqual(machine.circlingHint, round < 5 ? nil : .failing(name: "swift test", count: 5), "round \(round)")
+        }
+
+        // A check that answers "no" by failing, run now and then through a
+        // long turn, isn't a row of failures.
+        send(.userPromptSubmit)
+        for check in 1...5 {
+            call("pgrep", .failed)
+            XCTAssertNil(machine.circlingHint, "check \(check)")
+            for _ in 1...AgentCirclingWatch.callsThatEndFailures { call("Read") }
         }
     }
 
@@ -355,7 +379,7 @@ final class AgentCirclingTests: XCTestCase {
     @MainActor
     func testTheRowSaysItInGreyInPlaceOfWorking() throws {
         let hint = AgentCirclingHint.failing(name: "swift build", count: 5)
-        XCTAssertEqual(hint.statusText, "May be stuck · swift build failed 5×")
+        XCTAssertEqual(hint.statusText, "Stuck? · swift build failed 5×")
         let circling = workspace([column(0, .working, minutes: 3), column(1, .working, minutes: 45, circling: hint)])
         XCTAssertEqual(circling.rowSummary.status, SidebarStatusLine(text: hint.statusText, tone: .neutral, detail: hint.detail))
         XCTAssertEqual(circling.rowSummary.mark, .working)
@@ -370,22 +394,30 @@ final class AgentCirclingTests: XCTestCase {
         XCTAssertNil(workspace([column(0, .working)]).railTooltip.note)
         XCTAssertNil(workspace([column(0, .working)]).rowSummary.focusColumn)
 
-        @MainActor func line(_ hint: AgentCirclingHint) throws -> NSTextField {
-            let info = workspace([column(0, .working, circling: hint)])
+        @MainActor func line(_ hint: AgentCirclingHint, subtask: Bool = false) throws -> NSTextField {
+            var info = workspace([column(0, .working, circling: hint)])
+            if subtask { info.parentTitle = "Sign-in" }
             let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
             return try XCTUnwrap(result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == hint.statusText })
         }
         let label = try line(hint)
         XCTAssertEqual(label.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.Color.textSecondary)
         XCTAssertEqual(label.toolTip, "\(hint.statusText)\nIn this turn, swift build failed 5 times in a row. The agent goes on: Nirux only tells you.")
-        for shown in [hint, .hung(count: 3), .failing(name: nil, count: 5), .failing(name: "mcp__claude-in-chrome__computer", count: 5)] {
-            let label = try line(shown)
-            XCTAssertLessThanOrEqual(label.attributedStringValue.size().width, label.frame.width, "\(shown.statusText) isn't cut")
+        // In a sub-task's narrower row too, as its cell draws it.
+        let shown: [AgentCirclingHint] = [
+            hint, .hung(count: 3), .failing(name: nil, count: 5), .failing(name: "npm run build", count: 5),
+            .failing(name: "mcp__claude-in-chrome__computer", count: 5)
+        ]
+        for (hint, subtask) in shown.flatMap({ [($0, false), ($0, true)] }) {
+            let label = try line(hint, subtask: subtask)
+            let needed = try XCTUnwrap(label.cell).cellSize(forBounds: NSRect(x: 0, y: 0, width: 10_000, height: label.frame.height)).width
+            XCTAssertLessThanOrEqual(needed, label.frame.width, "\(hint.statusText) isn't cut\(subtask ? " in a sub-task's row" : "")")
         }
-        XCTAssertEqual(try line(.hung(count: 3)).toolTip, "May be stuck · 3 timeouts\n3 commands of this turn ran past their time limit, "
+        XCTAssertLessThan(try line(hint, subtask: true).frame.width, label.frame.width)
+        XCTAssertEqual(try line(.hung(count: 3)).toolTip, "Stuck? · 3 timeouts\n3 commands of this turn ran past their time limit, "
             + "close together. The agent goes on: Nirux only tells you.")
-        XCTAssertEqual(AgentCirclingHint.failing(name: nil, count: 5).statusText, "May be stuck · a command failed 5×")
-        XCTAssertEqual(AgentCirclingHint.failing(name: "mcp__claude-in-chrome__computer", count: 5).statusText, "May be stuck · computer failed 5×")
+        XCTAssertEqual(AgentCirclingHint.failing(name: nil, count: 5).statusText, "Stuck? · a command failed 5×")
+        XCTAssertEqual(AgentCirclingHint.failing(name: "mcp__claude-in-chrome__computer", count: 5).statusText, "Stuck? · computer failed 5×")
 
         XCTAssertEqual(
             workspace([column(0, .needsAttention), column(1, .working, circling: hint)]).rowSummary.status.text, "Needs you · Which?",

@@ -759,15 +759,15 @@ struct AgentStatusMachine {
 
     /// A tool call ended, for `circlingHint`. The main agent's only: a
     /// subagent's calls say nothing of it. A shell command counts with
-    /// those of its program, one nothing names with its exact repeats (the
-    /// call's key); an end a newer receiver wrote says nothing.
+    /// those of its program, one nothing names with its exact repeats; an
+    /// end a newer receiver wrote says nothing.
     private mutating func noteCallEnded(_ event: AgentHookEvent, at time: TimeInterval) {
         guard event.agentID == nil, let tool = event.toolName else { return }
         let end = event.toolEnd.map(AgentToolEnd.init(rawValue:))
         if case .some(.none) = end { return }
         let isShell = AgentToolOutcome.shellTools.contains(tool)
         circling.noteCallEnded(
-            key: isShell ? event.toolFamily ?? event.toolKey.map { "\(tool) \($0)" } : tool,
+            key: isShell ? event.toolFamily ?? event.toolCommandKey.map { "\(tool) \($0)" } : tool,
             name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
         )
     }

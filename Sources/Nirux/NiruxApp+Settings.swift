@@ -139,7 +139,7 @@ extension NiruxApp {
             "Hint when a working agent may be stuck", target: self, action: #selector(settingsCirclingHintChanged(_:))
         )
         circling.state = NiruxShellView.currentCirclingHintEnabled() ? .on : .off
-        circling.toolTip = "A working Claude Code task's row says \"May be stuck\" in grey, in place of \"Working\", once 3 "
+        circling.toolTip = "A working Claude Code task's row says \"Stuck?\" in grey, in place of \"Working\", once 3 "
             + "of its commands ran past their time limit close together, or one command failed 5 times in a row. Counted on "
             + "your Mac from Claude Code's hooks: the agent isn't interrupted, and nothing alerts."
         circling.setAccessibilityHelp(circling.toolTip)

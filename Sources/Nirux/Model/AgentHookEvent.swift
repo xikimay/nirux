@@ -61,9 +61,11 @@ struct AgentHookEvent: Codable, Equatable {
     /// didn't simply run (an `AgentToolEnd` raw value; a string, so an app
     /// older than its receiver skips an end it doesn't know, not the whole
     /// event), and the program a shell command ran ("swift build"; see
-    /// `AgentShellCommand`). Nil from older receivers too.
+    /// `AgentShellCommand`), or for a command nothing names, what tells
+    /// its text from another's (`repeatKey`). Nil from older receivers too.
     let toolEnd: String?
     let toolFamily: String?
+    let toolCommandKey: String?
     /// Subagent the event came from (Claude `agent_id`); nil on the main
     /// thread.
     let agentID: String?
@@ -160,9 +162,11 @@ struct AgentHookEvent: Codable, Equatable {
                     : nil
                 toolEnd = AgentToolOutcome.end(hookName: hookName, payload: payload, command: command)?.rawValue
                 toolFamily = command?.family
+                toolCommandKey = command.flatMap { $0.family == nil ? $0.repeatKey : nil }
             } else {
                 toolEnd = nil
                 toolFamily = nil
+                toolCommandKey = nil
             }
             transcriptPath = Self.carriesTranscriptPath(name)
                 ? (payload["transcript_path"] as? String).flatMap(Self.validTranscriptPath)
@@ -216,6 +220,7 @@ struct AgentHookEvent: Codable, Equatable {
             toolKey = nil
             toolEnd = nil
             toolFamily = nil
+            toolCommandKey = nil
             agentID = nil
             notificationType = nil
             errorKind = nil
@@ -271,6 +276,7 @@ struct AgentHookEvent: Codable, Equatable {
         toolKey: String? = nil,
         toolEnd: String? = nil,
         toolFamily: String? = nil,
+        toolCommandKey: String? = nil,
         agentID: String? = nil,
         notificationType: String? = nil,
         errorKind: String? = nil,
@@ -300,6 +306,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.toolKey = toolKey
         self.toolEnd = toolEnd
         self.toolFamily = toolFamily
+        self.toolCommandKey = toolCommandKey
         self.agentID = agentID
         self.notificationType = notificationType
         self.errorKind = errorKind

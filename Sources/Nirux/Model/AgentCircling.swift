@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A quiet hint that a working Claude may be going in circles: its
@@ -21,14 +22,16 @@ enum AgentCirclingHint: Hashable, Sendable {
     case failing(name: String?, count: Int)
 
     /// The row's status line, short enough for the reason to show in a
-    /// sidebar 260 points wide. "Timeouts", not "hung": all Nirux knows is
-    /// that they ran past their time limit.
+    /// sidebar 260 points wide, in a sub-task's narrower row too ("May be
+    /// stuck · swift build failed 5 times" lost its end there).
+    /// "Timeouts", not "hung": all Nirux knows is that they ran past their
+    /// time limit.
     var statusText: String {
         switch self {
         case .hung(let count):
-            return "May be stuck · \(count) timeouts"
+            return "Stuck? · \(count) timeouts"
         case .failing(let name, let count):
-            return "May be stuck · \(Self.display(name)) failed \(count)×"
+            return "Stuck? · \(Self.display(name)) failed \(count)×"
         }
     }
 
@@ -66,10 +69,13 @@ struct AgentCirclingWatch: Equatable, Sendable {
     /// between hung commands.
     static let callsThatClearHangs = 10
     /// Calls after which a row of failures no longer shows: the agent
-    /// moved on. Its count stays until that command passes or the turn
-    /// ends, since a loop may take many calls (reads, edits) between two
-    /// tries.
+    /// moved on. Its count stays, since a loop may take many calls (reads,
+    /// edits) between two tries, until that command passes, the turn ends,
+    /// or `callsThatEndFailures` other calls ended: a check that answers
+    /// "no" by failing (`pgrep`, `lsof`), run now and then through a long
+    /// turn, isn't a row.
     static let callsThatHideFailures = 15
+    static let callsThatEndFailures = 60
     /// Commands followed at once; the one that failed longest ago goes.
     static let maxStreaks = 32
 
@@ -109,6 +115,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
             if callsSinceHang >= Self.callsThatClearHangs { hungCount = 0 }
         }
         for index in streaks.indices where streaks[index].key != key { streaks[index].callsSince += 1 }
+        streaks.removeAll { $0.callsSince >= Self.callsThatEndFailures }
         guard let key else { return }
         let index = streaks.firstIndex { $0.key == key }
         guard end == .failed else {
@@ -203,7 +210,8 @@ enum AgentToolOutcome {
     private static func wasKilledAtItsLimit(_ payload: [String: Any]) -> Bool {
         if payload["is_timeout"] as? Bool == true { return true }
         guard let error = payload["error"] as? String else { return false }
-        let lines = error.prefix(200).split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
+        let start = String(String.UnicodeScalarView(error.unicodeScalars.prefix(200)))
+        let lines = start.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
         let notice = "Command timed out after"
         guard let first = lines.first else { return false }
         return first.hasPrefix(notice) || first.hasPrefix("Exit code ") && lines.dropFirst().first?.hasPrefix(notice) == true
@@ -220,6 +228,12 @@ struct AgentShellCommand: Equatable, Sendable {
     /// wrappers and preparations. Nil when nothing names the command (a
     /// loop, a path held in a variable).
     let family: String?
+    /// What tells a command nothing names from another one: its text
+    /// alone, so a description or a time limit that changes between two
+    /// tries doesn't make it another command.
+    var repeatKey: String { SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() }
+    private let text: String
+
     /// The command waits for something: it sleeps before anything else (a
     /// poll: `sleep 60; gh run view 9`), it is a loop that sleeps (`until
     /// curl -sf :3000; do sleep 2; done`), it runs one of GitHub's commands
@@ -231,17 +245,21 @@ struct AgentShellCommand: Equatable, Sendable {
     let isWait: Bool
 
     init(_ text: String) {
+        self.text = text
         var family: String?
         var isNamed = false
         var isLoop = false
+        var hasCleared = false
         var preparation: String?
         var waits = false
         for words in Self.simpleCommands(in: text) {
             guard let (name, arguments) = Self.program(in: words) else { continue }
             // A sleep after the command (`./start.sh & sleep 3; curl …`), or
-            // written into a file, doesn't make it a wait.
-            if name == "sleep", !isNamed || isLoop { waits = true }
+            // after clearing its way (`pkill -f app; sleep 1; swift run`), or
+            // written into a file, doesn't make it a wait: that is a try.
+            if name == "sleep", !isNamed && !hasCleared || isLoop { waits = true }
             if arguments.contains("--mission") { waits = true }
+            if Self.clearsTheWay.contains(name) { hasCleared = true }
             if Self.housekeeping.contains(name) {
                 if !isNamed { preparation = preparation ?? name }
                 continue
@@ -289,11 +307,11 @@ struct AgentShellCommand: Equatable, Sendable {
     private static let wrapperOptionsWithValue: Set<String> = ["-u", "-k", "-s", "-n", "-g", "-C"]
     /// The shell's own housekeeping and what clears the way: the command
     /// that follows is the one to name. Alone, they name themselves.
-    private static let housekeeping: Set<String> = [
+    private static let housekeeping: Set<String> = clearsTheWay.union([
         "cd", "pushd", "popd", "export", "set", "unset", "source", ".", "echo", "printf", "mkdir", "true", ":", "sleep",
-        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare", "rm", "touch", "chmod", "kill", "pkill",
-        "killall"
-    ]
+        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare", "exit", "return", "break", "continue"
+    ])
+    private static let clearsTheWay: Set<String> = ["rm", "touch", "chmod", "kill", "pkill", "killall"]
     /// The same for a program's subcommand: `git add -A && git commit`.
     private static let preparations: Set<String> = ["git add"]
     private static let compound: Set<String> = ["for", "while", "until", "if", "case", "select", "function"]

@@ -474,12 +474,12 @@ final class StuckAgentSidebarTests: XCTestCase {
         }
         XCTAssertTrue(shows("Working"))
         pty.applyAgentHook(hook(.postToolUse, hung: true), isUserFocused: false)
-        XCTAssertTrue(shows("May be stuck · 3 timeouts"))
+        XCTAssertTrue(shows("Stuck? · 3 timeouts"))
         XCTAssertFalse(shows("Working"))
 
         shell.circlingHintEnabled = false
         XCTAssertTrue(shows("Working"), "turned off in Settings")
         shell.circlingHintEnabled = true
-        XCTAssertTrue(shows("May be stuck · 3 timeouts"))
+        XCTAssertTrue(shows("Stuck? · 3 timeouts"))
     }
 }

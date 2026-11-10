@@ -290,8 +290,8 @@ Mockups were validated in the design session. What changes:
   waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
   "Working", "#39 · checks passed"). A working Claude that may be going in
-  circles says so in the same grey, in place of "Working" ("May be stuck · 3
-  timeouts", "May be stuck · swift build failed 5×"): 3 commands past their
+  circles says so in the same grey, in place of "Working" ("Stuck? · 3
+  timeouts", "Stuck? · swift build failed 5×"): 3 commands past their
   time limit close together, or 5 failures in a row of one command, counted
   from its hooks over the turn; commands that wait (a poll after a `sleep`,
   `gh pr checks`) count as neither. It never alerts or interrupts the agent;
