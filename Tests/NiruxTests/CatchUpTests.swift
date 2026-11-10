@@ -52,6 +52,9 @@ final class CatchUpTests: XCTestCase {
     func testTheCardListsWhatEndedWhileAway() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            // The rail draws no card.
+            if !shell.isSidebarExpanded { harness.runPaletteCommand("Show/Hide Sidebar") }
+            harness.waitUntil("the sidebar to expand") { shell.sidebar.isExpanded }
             @MainActor func task(_ title: String) throws -> WorkspaceState {
                 shell.addWorkspace(title: title, cwd: harness.repo)
                 return try XCTUnwrap(shell.workspaces.last)
@@ -146,6 +149,8 @@ final class CatchUpTests: XCTestCase {
     func testThePressesWaitForTheCardToStand() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            if !shell.isSidebarExpanded { harness.runPaletteCommand("Show/Hide Sidebar") }
+            harness.waitUntil("the sidebar to expand") { shell.sidebar.isExpanded }
             var tasks: [WorkspaceState] = []
             for title in ["first", "second"] {
                 shell.addWorkspace(title: title, cwd: harness.repo)
