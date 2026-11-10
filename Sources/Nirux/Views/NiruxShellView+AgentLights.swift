@@ -5,7 +5,9 @@ import AppKit
 final class AgentLightState {
     /// What the lights show, as of the last sidebar refresh.
     var plan = AgentLightPlan()
-    var turnEnds = TurnEndSweeps()
+    /// The columns whose agent just ended its turn (`agentTurnDone`), until
+    /// the next refresh shows it: one sweep of light each.
+    var endedTurns: Set<UUID> = []
     /// The columns out of view whose pill already showed: scrolling,
     /// switching workspaces or spaces, or coming back to the app doesn't
     /// announce a wait twice. Forgotten once the column no longer waits.
@@ -77,7 +79,7 @@ extension NiruxShellView {
     func updateAgentLights(infos: [WorkspaceInfo]) {
         let active = activeWorkspace
         let plan = AgentLightPlan.make(infos: infos, activeIndex: activeWSIndex) { column in
-            active.map { self.showsColumn(column.index, of: $0) } ?? false
+            active?.showsColumn(at: column.index) ?? false
         }
         agentLights.plan = plan
         // A wait that ended is forgotten: the next one is announced. A
@@ -91,7 +93,9 @@ extension NiruxShellView {
             if case .alert? = plan.columns[id] { return true }
             return false
         }
-        let ended = agentLights.turnEnds.update(columns: columns)
+        // Now or never: a sweep says the turn just ended.
+        let ended = agentLights.endedTurns
+        agentLights.endedTurns = []
         applyAgentLights(sweeping: ended)
     }
 
@@ -107,7 +111,7 @@ extension NiruxShellView {
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
             for (index, column) in workspace.columns.enumerated() {
-                let isInView = isOnScreen && workspace.isColumnInViewport(index)
+                let isInView = isOnScreen && workspace.showsColumn(at: index)
                 column.header?.statusPill.animates = moves && isInView
                 let light = column.isClosing ? nil : plan.columns[column.id]
                 let sweeps = moves && isInView && !column.isClosing && ended.contains(column.id)
@@ -146,6 +150,14 @@ extension NiruxShellView {
         scheduleMetadataRefresh()
     }
 
+    /// The agent of `column` ended its turn, and it is done as far as its
+    /// hooks can tell (`AgentHookCenter.onTurnDone`): its column sweeps at
+    /// the refresh that follows the hook event or the verdict, if it is in
+    /// view then.
+    func agentTurnDone(in column: ColumnState) {
+        agentLights.endedTurns.insert(column.id)
+    }
+
     /// The user is back in the app and every attention was cleared: the
     /// columns' waits and errors go at once, without the process scan a
     /// sidebar refresh costs. A dialog still open lights up again at the
@@ -153,17 +165,6 @@ extension NiruxShellView {
     func clearAgentAlertLights() {
         agentLights.plan.clearColumnAlerts()
         applyAgentLights()
-    }
-
-    /// Whether the viewport shows enough of a column of `workspace` for its
-    /// own light to be seen (see `showsColumn(left:width:cameraX:viewportWidth:)`).
-    private func showsColumn(_ index: Int, of workspace: WorkspaceState) -> Bool {
-        guard let column = workspace.columns[safe: index] else { return false }
-        let frame = column.view.frame
-        return Self.showsColumn(
-            left: frame.minX, width: frame.width, cameraX: workspace.attentionCameraX,
-            viewportWidth: workspace.containerView.frame.width
-        )
     }
 
     /// A click on an edge's pill: to the agent it names, if it is still

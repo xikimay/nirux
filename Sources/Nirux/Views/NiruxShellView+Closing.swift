@@ -6,6 +6,14 @@ import AppKit
 /// Close Column / Close Workspace — goes through `WorkspaceClosePolicy`,
 /// so a live agent is never killed without confirmation.
 extension NiruxShellView {
+    /// A column that was closing stays after all (its sibling went first):
+    /// it isn't left invisible, nor without its light.
+    func abortColumnClose(_ column: ColumnState) {
+        column.isClosing = false
+        column.view.alphaValue = 1
+        applyAgentLights()
+    }
+
     func closeActiveColumn() {
         guard let workspace = activeWorkspace,
               let closingColumn = workspace.columns[safe: workspace.focusedIndex],
@@ -33,9 +41,7 @@ extension NiruxShellView {
                 guard workspace.columns.count > 1,
                       let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })
                 else {
-                    // Nothing to remove after all — don't leave it invisible.
-                    closingColumn.isClosing = false
-                    closingView.alphaValue = 1
+                    self.abortColumnClose(closingColumn)
                     return
                 }
                 // Still focused: the user lands on its neighbour. An
