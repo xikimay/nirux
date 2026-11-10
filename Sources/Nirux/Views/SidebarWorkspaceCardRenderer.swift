@@ -426,7 +426,7 @@ final class SidebarWorkspaceCardRenderer {
                 + "local branch and closing the workspaces open in it. The remote branch is kept."
         case nil:
             let asking = workspace.columns.first { $0.attention == .waiting } ?? workspace.columns.first { $0.attention == .error }
-            return [status.text, asking?.attentionToolTip].compactMap { $0 }.joined(separator: "\n")
+            return [status.text, status.detail ?? asking?.attentionToolTip].compactMap { $0 }.joined(separator: "\n")
         }
     }
 

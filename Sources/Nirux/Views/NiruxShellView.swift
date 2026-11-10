@@ -81,6 +81,9 @@ final class NiruxShellView: NSView {
     )
     /// Keeps stuck-agent alerts going while the heartbeat is stopped.
     var stuckWatchTimer: Timer?
+    /// A working agent that may be going in circles says so on its row
+    /// (Settings; see `AgentCirclingHint`). Read with the restored state.
+    var circlingHintEnabled = PersistedSettings().agentCirclingHint
     /// Mission questions handed to the user (the child's card turned
     /// amber), by question ID: the child workspace whose notification they
     /// raised, once.

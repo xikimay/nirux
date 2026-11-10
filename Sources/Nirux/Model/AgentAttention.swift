@@ -291,12 +291,14 @@ enum AgentText {
 /// Reads the parts of a Claude tool call that say what it does.
 enum AgentToolInput {
     static let maxSummaryLength = 160
+    /// The tools that run a shell command.
+    static let shellTools: Set<String> = ["Bash", "PowerShell"]
 
     /// The input field that says what a call does, by tool. Nil for tools
     /// without one (MCP tools…).
     static func primaryValue(toolName: String, input: [String: Any]) -> String? {
         switch toolName {
-        case "Bash", "PowerShell": return input["command"] as? String
+        case _ where shellTools.contains(toolName): return input["command"] as? String
         case "Edit", "MultiEdit", "Write", "Read": return input["file_path"] as? String
         case "NotebookEdit", "NotebookRead": return input["notebook_path"] as? String
         case "WebFetch": return input["url"] as? String
@@ -393,6 +395,11 @@ enum AgentToolInput {
                   let json = try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]) {
             material.append(json)
         }
-        return SHA256.hash(data: material).prefix(8).map { String(format: "%02x", $0) }.joined()
+        return shortHash(material)
+    }
+
+    /// 16 hex digits of a SHA-256: stable across processes and launches.
+    static func shortHash(_ data: Data) -> String {
+        SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 }
