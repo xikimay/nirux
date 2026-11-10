@@ -20,7 +20,29 @@ func testBundleDidLoad() {
     defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
     // Terminals keep vsync, as in the app: with no display active, Ghostty
     // builds their surfaces without the display link all the same.
+
+    // Ghostty keeps the environment as it found it at its first terminal (a
+    // slice of libc's `environ`, see `ghostty_init`) and reads it at every
+    // later one: an entry removed since leaves a null in it, and a variable
+    // added can move the array, either crashing the next terminal
+    // (EXC_BAD_ACCESS in ghostty_config_finalize). Tests change the
+    // environment all along (NIRUX_STATE_DIR, the flow harness's HOME). So
+    // Ghostty takes its copy here, before any test: the variables the flow
+    // harness clears go first, and the array gets room for the ones tests
+    // add, so it never moves; a test that adds and removes its own variables
+    // only touches entries past Ghostty's copy.
+    let environment = ProcessInfo.processInfo.environment
+    let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"]
+        + environment.keys.filter { $0.hasPrefix("CLAUDE_CODE_") || $0.hasPrefix("GIT_") }
+    cleared.forEach { unsetenv($0) }
+    let room = (0..<64).map { "NIRUX_TESTS_ENVIRONMENT_ROOM_\($0)" }
+    room.forEach { setenv($0, "", 1) }
+    room.reversed().forEach { unsetenv($0) }
+    MainActor.assumeIsolated { ghosttyRuntime = TerminalAppearance.makeController() }
 }
+
+/// Keeps Ghostty's first terminal app, created at load (see above).
+@MainActor private var ghosttyRuntime: AnyObject?
 
 @MainActor
 final class TestBootstrapTests: XCTestCase {
