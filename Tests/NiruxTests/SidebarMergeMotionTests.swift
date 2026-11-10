@@ -208,7 +208,7 @@ final class SidebarMergeMotionTests: XCTestCase {
 
     /// Another space coming on screen lists other rows: nothing of theirs
     /// plays, nothing folds, and what played for the last space stops.
-    func testASpaceSwitchPlaysNothing() {
+    func testASpaceSwitchPlaysNothing() throws {
         let here = ProfileInfo(id: "a", name: "a", colorHex: "#7AA2F7", isActive: true, workspaceCount: 1, taskCount: 1, attention: nil)
         let there = ProfileInfo(id: "b", name: "b", colorHex: "#7AA2F7", isActive: true, workspaceCount: 1, taskCount: 1, attention: nil)
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
@@ -224,11 +224,13 @@ final class SidebarMergeMotionTests: XCTestCase {
         sidebar.update(profiles: [here], workspaces: [row("a", index: 0, archived: true), row("b", index: 1)])
         XCTAssertFalse(sidebar.folds.isEmpty)
         XCTAssertNotNil(sidebar.archivedBumpAt)
-        sidebar.update(profiles: [there], workspaces: [row("c", index: 0)])
+        sidebar.update(profiles: [there], workspaces: [row("c", index: 0), row("d", index: 1, archived: true)])
         XCTAssertTrue(sidebar.folds.isEmpty)
         XCTAssertNil(sidebar.archivedBumpAt)
         XCTAssertTrue(ghosts(in: sidebar).isEmpty)
-        XCTAssertNil(sidebar.archivedCountLabel?.layer?.animation(forKey: SidebarView.archivedBumpKey))
+        let count = try XCTUnwrap(sidebar.archivedCountLabel, "this space's own Archived count")
+        XCTAssertEqual(count.stringValue, "1")
+        XCTAssertNil(count.layer?.animation(forKey: SidebarView.archivedBumpKey), "doesn't bump for the last space")
     }
 
     /// The rail shows none of it: nothing is noted while it shows, and
