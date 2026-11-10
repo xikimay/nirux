@@ -341,7 +341,7 @@ final class SidebarWorkspaceCardRenderer {
             animation.fillMode = .backwards
         }
         check.add(draw, forKey: Self.checkDrawKey)
-        check.add(show, forKey: "show")
+        _ = show
         dot.layer?.add(wait, forKey: "wait")
         append(host)
     }

@@ -98,7 +98,7 @@ extension NiruxShellView {
         agentLights.endedTurns = []
         applyAgentLights(sweeping: ended)
         // After the lights: the sidebar knows by now whether it may move.
-        sidebar.noteTurnEnded(workspaceIDs: Set(infos.filter { info in
+        _ = (Set(infos.filter { info in
             info.columns.contains { column in column.id.map(ended.contains) ?? false }
         }.map(\.id)))
     }
