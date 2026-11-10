@@ -295,9 +295,9 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false).firedAttention)
     }
 
-    /// A prompt typed before the verdict (by Nirux: a Mission message)
-    /// alerts as the turn end would have, unless the user looks at the
-    /// column.
+    /// A prompt that goes in before the verdict (one Nirux types, for PR
+    /// Feedback's Address say) alerts as the turn end would have, unless
+    /// the user looks at the column.
     func testPromptBeforeTheVerdictAlertsAsBefore() throws {
         endTurn()
         let prompt = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)

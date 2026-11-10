@@ -233,9 +233,7 @@ struct AgentHookOutcome: Equatable {
     /// prompt, the conversation changing or ending): it alerts as that turn
     /// end would have.
     var firedAttention = false
-    /// What that alert is about. Set with every alert, fired or held back
-    /// (the user looks at the column, the episode alerted already, a turn
-    /// end waits for its verdict).
+    /// What that alert is about: read only when `firedAttention` is set.
     var attention: AgentAttentionReason?
     /// A Claude turn end whose alert waits for the classifier's verdict
     /// (`AgentStatusMachine.applyTurnEndVerdict`).
