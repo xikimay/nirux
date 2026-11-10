@@ -843,7 +843,7 @@ struct AgentStatusMachine {
     /// bracketed paste is longer).
     static func isOneKey(_ keys: Data) -> Bool {
         if keys.first == 0x1B { return keys.count <= 8 }
-        return String(data: keys, encoding: .utf8).map { $0.count == 1 } ?? false
+        return true
     }
 
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
@@ -861,7 +861,7 @@ struct AgentStatusMachine {
         // paste or dictation is text, whatever a dialog waits for: one key
         // answers a dialog, not a write of several.
         let oneKey = keys.map(Self.isOneKey) ?? true
-        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        if keys != Self.modeSwitchKey { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
