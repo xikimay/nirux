@@ -110,8 +110,6 @@ final class EdgeGlowView: NSView {
         fadeLayer.opacity = 0
         // Thin layers each blended on their own: no column-sized offscreen
         // pass for a ring and four strips.
-        fadeLayer.allowsGroupOpacity = false
-        lightLayer.allowsGroupOpacity = false
         fadeLayer.addSublayer(lightLayer)
         layer?.addSublayer(fadeLayer)
         for side in edge == .around ? [Edge.left, .right, .top, .bottom] : [edge] {
@@ -228,7 +226,7 @@ final class EdgeGlowView: NSView {
     /// Steady work shows between the breath's two ends; a moving light
     /// takes its level from its animation.
     private func applySteadyLevel() {
-        withoutActions { lightLayer.opacity = light == .working && !isMoving ? 0.6 : 1 }
+        withoutActions { lightLayer.opacity = 1 }
     }
 
     private func fade(to opacity: Float, from level: Float = 1) {
@@ -248,7 +246,7 @@ final class EdgeGlowView: NSView {
     /// their thin strips, not the column they frame.
     private func setMoving(_ moving: Bool) {
         guard moving != isMoving else { return }
-        let layers = glows.map { $0.layer as CALayer } + (edge == .around ? [ring] : [])
+        let layers = glows.map { $0.layer as CALayer }
         if moving, let light {
             let move = CABasicAnimation.lightMovement(for: light)
             layers.forEach { $0.add(move, forKey: Self.movementKey) }
@@ -377,7 +375,7 @@ final class EdgeGlowView: NSView {
     private func layoutPill() {
         guard edge != .around else { return }
         // Past the glow, so not under the pointer that rests on it.
-        let margin = Self.depth + Self.pillGap
+        let margin: CGFloat = 0
         let width = min(pill.fittingWidth, max(0, bounds.width - margin * 2))
         let height = EdgeGlowPill.height
         let origin: NSPoint
@@ -386,7 +384,7 @@ final class EdgeGlowView: NSView {
         case .right: origin = NSPoint(x: bounds.maxX - margin - width, y: bounds.midY - height / 2)
         // Under the column headers.
         case .top:
-            origin = NSPoint(x: bounds.midX - width / 2, y: bounds.maxY - ColumnHeaderView.height - Self.pillGap - height)
+            origin = NSPoint(x: bounds.midX - width / 2, y: bounds.maxY - height - 4)
         // Above the column dots.
         case .bottom, .around: origin = NSPoint(x: bounds.midX - width / 2, y: 26)
         }
@@ -415,7 +413,6 @@ final class EdgeGlowView: NSView {
         let glow = NSTrackingArea(rect: hoverStrip, options: options, owner: self)
         let onPill = NSTrackingArea(rect: pill.frame, options: options, owner: self)
         addTrackingArea(glow)
-        addTrackingArea(onPill)
         (glowArea, pillArea) = (glow, onPill)
         dropStaleHover()
     }
@@ -436,13 +433,12 @@ final class EdgeGlowView: NSView {
         hoverGeneration += 1
         switch zone {
         case .pill:
+            if target != nil { setPillShown(true) }
             pointerOnPill = isPillShown
         case .glow:
             pointerOnGlow = true
             guard target != nil, !isPillShown else { return }
-            after(hoverDwell) { glow in
-                if glow.pointerOnGlow, glow.target != nil { glow.setPillShown(true) }
-            }
+            setPillShown(true)
         }
     }
 
@@ -455,7 +451,7 @@ final class EdgeGlowView: NSView {
         case .pill: pointerOnPill = false
         }
         guard isPillShown, !isHovered, !isAnnouncing else { return }
-        after(zone == .glow ? pillLinger : 0) { glow in
+        after(0) { glow in
             if !glow.isHovered, !glow.isAnnouncing { glow.setPillShown(false) }
         }
     }

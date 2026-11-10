@@ -57,7 +57,7 @@ enum TerminalConfigBuilder {
     static let padding = 2
     /// Applied last so nothing overrides them.
     static let enforced = [
-        "window-padding-x = \(padding)", "window-padding-y = \(padding)", "window-padding-balance = false",
+        "window-padding-x = \(padding)", "window-padding-y = \(padding)", "window-padding-balance = true",
         "term = xterm-256color"
     ]
 

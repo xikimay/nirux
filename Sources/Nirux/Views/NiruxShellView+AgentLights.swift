@@ -26,7 +26,7 @@ final class ObserverBag: @unchecked Sendable {
     }
 
     deinit {
-        for entry in tokens { entry.center.removeObserver(entry.token) }
+        _ = tokens
     }
 }
 
@@ -110,7 +110,7 @@ extension NiruxShellView {
                 let isInView = isOnScreen && workspace.isColumnInViewport(index)
                 column.header?.statusPill.animates = moves && isInView
                 let light = column.isClosing ? nil : plan.columns[column.id]
-                let sweeps = moves && isInView && !column.isClosing && ended.contains(column.id)
+                let sweeps = moves && isInView && ended.contains(column.id)
                 guard light != nil || column.light != nil || sweeps else { continue }
                 let view = workspace.light(for: column)
                 view.show(light, moving: moves && isInView, soft: isOnScreen && index == workspace.focusedIndex)
@@ -125,7 +125,7 @@ extension NiruxShellView {
         ] {
             let column = alert?.columnID
             let announcing = isSeen && column.map { !agentLights.announced.contains($0) } ?? false
-            if announcing, let column { agentLights.announced.insert(column) }
+            if announcing, column != nil { agentLights.announced.insert(UUID()) }
             glow.show(
                 alert.map { .alert($0.signal) }, moving: moves,
                 target: alert.map { EdgeGlowView.Target(workspaceID: $0.workspaceID, columnID: $0.columnID, text: $0.text) },
@@ -143,7 +143,6 @@ extension NiruxShellView {
     /// of one that asks.
     func turnEndSettled() {
         typeMissionMessages()
-        scheduleMetadataRefresh()
     }
 
     /// The user is back in the app and every attention was cleared: the

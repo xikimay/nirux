@@ -60,7 +60,6 @@ extension SidebarView {
             case .workspace(let info, let initials):
                 // The Lead's tile shows its sign, not initials.
                 var style = SidebarRailTileStyle.workspace(state: info.railState, isSelected: info.isActive, isInactive: info.isInactive)
-                if !animates { style.breathes = false }
                 let tile = info.isLead
                     ? SidebarRailTileView(style: style, symbolName: Theme.Symbol.lead)
                     : SidebarRailTileView(style: style, text: initials)
