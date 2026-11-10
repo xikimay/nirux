@@ -56,7 +56,7 @@ final class TurnEndClassificationTests: XCTestCase {
             "Which one?\n\n| A | B |\n|---|---|", "Run it?\n```\nmake test\n```", "Fixed.\r\nShall I push?\r\n",
             "合并吗？", "Deux options :\n1. Garder le cache ?\n2. Relire la table", "Tu veux que je la merge ? 👍🏽",
             "#298 is green. Merge it?", "Tu valides ❓", "Ready?!", "Really‽", "هل أدمج؟", "Merge it?\n\n---",
-            "1. Merge\n2. Close\n\n    Which one?", "10. Merge now and\n    keep it open?",
+            "1. Merge\n2. Close\n\n    Which one?", "10. Merge now and\n    keep it open?", "Ready to ship\n    when CI is green?",
             "Fertig. Mergen?“", "「マージしますか？」", "On y va ? 👨‍👩‍👧", "Tu valides ? ❤️"
         ]
         for message in asks { XCTAssertTrue(TurnEndText.endsOnQuestion(message), message) }
@@ -827,6 +827,7 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(quotes("Proceed with deploy? (y/n)", in: script), "code")
         XCTAssertTrue(quotes("Run this and tell me what it prints:", in: script))
         XCTAssertFalse(quotes("Should I deploy to prod?", in: "Done.\n\n    Should I deploy to prod?"), "indented code")
+        XCTAssertFalse(quotes("Should I deploy to prod?", in: "Done.\n\n\tShould I deploy to prod?"), "tab-indented code")
         XCTAssertTrue(quotes("Should I deploy to prod?", in: "Done:\n\n  - Should I deploy to prod?"), "a list item")
         XCTAssertTrue(quotes("Should I deploy to prod?", in: "Steps:\n\n  1. Should I deploy to prod?"), "a numbered one")
         XCTAssertEqual(TurnEndText.quotedSentence("Want me to merge it?", in: "Fixed.\n\n- Want me to merge it?"),
@@ -848,6 +849,7 @@ final class TurnEndClassificationTests: XCTestCase {
         )
         XCTAssertEqual(TurnEndText.quotedSentence("Should I merge PR #41?", in: "**Should I merge** PR #41?"),
                        "**Should I merge** PR #41?", "its emphasis whole")
+        XCTAssertEqual(TurnEndText.quotedSentence("Should I merge?", in: "**Should I merge?** Then tag."), "**Should I merge?**")
         XCTAssertEqual(TurnEndText.quotedSentence("Tell me if you'd rather split it.", in: "Tell me if you’d rather split it."),
                        "Tell me if you’d rather split it.")
         XCTAssertEqual(TurnEndText.quotedSentence("“Keep the \"Resume\" label?”", in: "Keep the “Resume” label?"),
