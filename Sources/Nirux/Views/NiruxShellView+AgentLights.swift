@@ -87,7 +87,7 @@ extension NiruxShellView {
         let open = Set(workspaces.flatMap { $0.columns.map(\.id) })
         agentLights.announced = agentLights.announced.filter { id in
             guard open.contains(id) else { return false }
-            guard listed.contains(id) else { return true }
+            guard listed.contains(id) else { return false }
             if case .alert? = plan.columns[id] { return true }
             return false
         }

@@ -258,7 +258,6 @@ final class SidebarView: NSView {
         didSet {
             guard animates != oldValue else { return }
             lastRenderSignature = renderSignature()
-            rebuildContent()
         }
     }
 
