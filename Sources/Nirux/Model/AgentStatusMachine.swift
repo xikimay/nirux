@@ -527,9 +527,10 @@ struct AgentStatusMachine {
         guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
               foreground.instance.startedAt <= turnEndedAt
         else { return false }
+        // A prompt since sets Claude working, then its Stop ends a later
+        // turn: neither needs a check of its own.
         return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && (lastPromptAt ?? 0) < turnEndedAt && lastDraftInputAt <= turnEndedAt
-            && pendingDialogs.isEmpty && !hookWorking
+            && lastDraftInputAt <= turnEndedAt && pendingDialogs.isEmpty && !hookWorking
     }
 
     /// The user's click types a prompt into this agent (Address PR
