@@ -175,9 +175,6 @@ enum TurnEndText {
         guard !line.isEmpty, !line.hasPrefix(">"), !line.hasPrefix("|") else { return false }
         let hashes = line.prefix { $0 == "#" }.count
         if (1...6).contains(hashes), line.dropFirst(hashes).first == " " || line.count == hashes { return false }
-        if line.count >= 3, let first = line.first, "-*_".contains(first), line.allSatisfy({ $0 == first || $0 == " " }) {
-            return false
-        }
         return true
     }
 
