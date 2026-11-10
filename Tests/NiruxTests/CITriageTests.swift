@@ -107,8 +107,25 @@ final class CITriageTests: XCTestCase {
             line("Test Case '-[WidgetTests.GearTests testJams]' started."),
             line("Widgets/Gear.swift:88: Fatal error: Index out of range")
         ])
-        XCTAssertEqual(found.crashes, [CITriage.SourceError(file: "Widgets/Gear.swift", line: 88, message: "Index out of range")])
+        XCTAssertEqual(found.crashes, [CITriage.SourceError(file: "Widgets/Gear.swift", line: 88, message: "Fatal error: Index out of range")])
         XCTAssertEqual(found.unfinished, ["GearTests.testJams"])
+        let traps = findings([
+            line("Widgets/Gear.swift:12: Precondition failed: no teeth"),
+            line("Widgets/Axle.swift:7: Assertion failed"),
+            line("Swift/Array.swift:405: Fatal error: Index out of range")
+        ])
+        XCTAssertEqual(traps.crashes.map(\.message), ["Precondition failed: no teeth", "Assertion failed", "Fatal error: Index out of range"])
+        XCTAssertEqual(traps.otherErrors, [])
+    }
+
+    /// Swift Testing's failures are another framework's: read as errors
+    /// nothing accounts for, they keep the job from any verdict.
+    func testASwiftTestingFailureIsAnErrorTheRulesDontRead() {
+        let found = findings([
+            line("\u{2718} Test turns() recorded an issue at GearTests.swift:12:5: Expectation failed: 1 == 2"),
+            line("\u{2714} Test run with 3 tests passed after 0.1 seconds.")
+        ])
+        XCTAssertEqual(found.otherErrors, ["Test turns() recorded an issue at GearTests.swift:12:5: Expectation failed: 1 == 2"])
     }
 
     /// A log is the pull request's own output: one line of it, however
@@ -262,9 +279,11 @@ final class CITriageTests: XCTestCase {
         // A crash in a file the pull request changes, as Swift names it.
         var crashed = CITriage.LogFindings()
         crashed.unfinished = [gear]
-        crashed.crashes = [CITriage.SourceError(file: "Widgets/Gear.swift", line: 88, message: "Index out of range")]
+        crashed.crashes = [CITriage.SourceError(file: "Widgets/Gear.swift", line: 88, message: "Fatal error: Index out of range")]
         XCTAssertEqual(decide(crashed, flaky: [gear]), .real)
-        XCTAssertEqual(decide(crashed, files: ["Sources/Widgets/Axle.swift"], flaky: [gear]), .flaky(reason: CITriage.knownFlakyReason([gear])))
+        // A crash no changed file accounts for (one in the standard
+        // library) may still be the pull request's: the model sees it.
+        XCTAssertEqual(decide(crashed, files: ["Sources/Widgets/Axle.swift"], flaky: [gear]), .open)
         XCTAssertTrue(CITriage.changes("/abs/checkout/Sources/A.swift", in: ["Sources/A.swift"]))
         XCTAssertFalse(CITriage.changes("Sources/AA.swift", in: ["A.swift"]), "a name ends another only at a folder")
         XCTAssertTrue(CITriage.changes("Nirux/Gear.swift", in: ["Sources/Nirux/Model/Gear.swift"]), "Swift's Module/File form")
@@ -286,13 +305,20 @@ final class CITriageTests: XCTestCase {
 
         var known = failing([gear])
         XCTAssertEqual(decide(known, earlier: .unreadable, flaky: [gear]), .unknown, "it may be failing twice in a row")
+        XCTAssertEqual(decide(known, earlier: .unreadable), .unknown, "nor is it the model's to say")
+        // Something else failed too, which the model wouldn't be shown
+        // either: no verdict, whoever would give it.
         known.otherErrors = ["12 tests ran out of 14 listed"]
-        XCTAssertEqual(decide(known, flaky: [gear]), .open, "something else failed too")
+        XCTAssertEqual(decide(known, flaky: [gear]), .unknown)
+        XCTAssertEqual(decide(known), .unknown)
         known.otherErrors = []
         known.signals = [11]
-        XCTAssertEqual(decide(known, flaky: [gear]), .open, "a crash no test accounts for")
+        XCTAssertEqual(decide(known, flaky: [gear]), .unknown, "a crash no test accounts for")
         known.unfinished = [gear]
         XCTAssertEqual(decide(known, flaky: [gear]), .flaky(reason: CITriage.knownFlakyReason([gear])))
+        // A failure the pull request's files explain is real all the same.
+        known.otherErrors = ["12 tests ran out of 14 listed"]
+        XCTAssertEqual(decide(known, files: ["Tests/GearTests.swift"], flaky: [gear]), .real)
     }
 
     func testAnUnfinishedTestCountsAsAFailingOne() {
@@ -333,7 +359,7 @@ final class CITriageTests: XCTestCase {
         }
         found.unfinished = ["GearTests.test0", "AxleTests.testJams"]
         found.signals = [5]
-        found.crashes = [CITriage.SourceError(file: "Widgets/Gear.swift", line: 88, message: "Index out of range")]
+        found.crashes = [CITriage.SourceError(file: "Widgets/Gear.swift", line: 88, message: "Fatal error: Index out of range")]
         var evidence = CITriage.Evidence(
             jobs: [CITriage.Job(name: "test", conclusion: "failure", stepCount: 4, failedSteps: ["Run tests"]),
                    CITriage.Job(name: "lint", conclusion: "success", stepCount: 1, failedSteps: []),
@@ -471,6 +497,25 @@ final class CITriageTests: XCTestCase {
         XCTAssertNil(CITriage.declaration(in: "        initialize()"))
         XCTAssertNil(CITriage.declaration(in: "        }"))
         XCTAssertEqual(CITriage.declaration(in: "func " + String(repeating: "n", count: 500) + "()")?.count, 5 + CITriage.maxNameLength)
+        XCTAssertEqual(CITriage.declaration(in: "    static func == (lhs: Gear, rhs: Gear) -> Bool {"), "func ==")
+        XCTAssertEqual(CITriage.declaration(in: "    static func +=(lhs: inout Gear, rhs: Int) {"), "func +=")
+        XCTAssertEqual(CITriage.declaration(in: "    @available(macOS 14, *) @MainActor func turn() {"), "func turn")
+        XCTAssertEqual(CITriage.declaration(in: "    @objc(turnBy:) private func turn(by angle: Double) {"), "func turn")
+
+        // A function the pull request removes, or adds, is named by its
+        // own line, not by its neighbour.
+        let removal = """
+            @@ -16,6 +16,3 @@ final class GearTests: XCTestCase {
+                 }
+             
+            -    func validate() {
+            -        check()
+            -    }
+                 static func make() -> Gear { Gear() }
+            """
+        // The removal sits at line 18 of the new file: `make`, which it
+        // touches too.
+        XCTAssertEqual(CITriage.declarations(editedBy: removal, in: source), ["func validate", "func make"])
     }
 
     /// What a changed line belongs to is the function or property around
@@ -514,6 +559,10 @@ final class CITriageTests: XCTestCase {
         XCTAssertEqual(enclosing(19), "func turn")
         XCTAssertEqual(enclosing(21), "struct Gear", "the type's closing brace, past the margin's #endif")
         XCTAssertEqual(enclosing(23), "let shared")
+        // An attribute on a line of its own belongs to what follows it.
+        let attributed: [Substring] = ["struct Gear {", "    @MainActor", "    @available(macOS 14, *)", "    func turn() {}", "}"]
+        XCTAssertEqual(CITriage.enclosingDeclaration(ofLine: 1, in: attributed), "func turn")
+        XCTAssertEqual(CITriage.enclosingDeclaration(ofLine: 2, in: attributed), "func turn")
         XCTAssertNil(enclosing(40))
         // A generated table: nothing above within reach, and no long walk.
         let table = Array(repeating: Substring("    0x00,"), count: 2 * CITriage.maxDeclarationWalk)

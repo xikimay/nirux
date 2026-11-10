@@ -64,8 +64,9 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
         static let shared = Account(restURL: Persistence.stateDirectory.appendingPathComponent("claude-runs-rest"))
 
         /// The longest a billed run rests the clients, whatever it says of
-        /// when the plan's limit resets.
-        static let longestBilledRest: TimeInterval = 7 * 24 * 60 * 60
+        /// when the plan's limit resets: the turn-end option alerts at every
+        /// turn end meanwhile, and the user may have changed the plan.
+        static let longestBilledRest: TimeInterval = 24 * 60 * 60
 
         /// Guards everything below but `setupLock`.
         private let lock = NSLock()
@@ -106,11 +107,9 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
         /// there is none.
         func setup() -> Setup {
             let time = now()
-            // A rest another Nirux, or this one before a relaunch, began.
-            let kept = restURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
-                .flatMap { TimeInterval($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            let kept = keptRest(at: time)
             return lock.withLock {
-                if time < max(billedRestUntil, min(kept, time + Self.longestBilledRest)) { return .unavailable }
+                if time < max(billedRestUntil, kept) { return .unavailable }
                 guard let cached = cachedSetup else {
                     refreshSetupLocked()
                     return .unavailable
@@ -126,11 +125,22 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
         /// epoch seconds), an hour at least, a week at most.
         func restAfterBilledRun(resetsAt: TimeInterval? = nil) {
             let time = now()
-            let until = min(max(resetsAt ?? 0, time + Self.readySetupLifetime), time + Self.longestBilledRest)
+            let until = max(
+                min(max(resetsAt ?? 0, time + Self.readySetupLifetime), time + Self.longestBilledRest), keptRest(at: time)
+            )
             lock.withLock { billedRestUntil = max(billedRestUntil, until) }
             guard let restURL else { return }
             try? FileManager.default.createDirectory(at: restURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? Data(String(Int(until)).utf8).write(to: restURL, options: .atomic)
+        }
+
+        /// A rest another Nirux, or this one before a relaunch, began; none
+        /// when it is further ahead than any rest can be (written under
+        /// another clock): it would never end.
+        private func keptRest(at time: TimeInterval) -> TimeInterval {
+            let kept = restURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+                .flatMap { TimeInterval($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            return kept > time + Self.longestBilledRest ? 0 : kept
         }
 
         /// Under `lock`: one background check at a time.

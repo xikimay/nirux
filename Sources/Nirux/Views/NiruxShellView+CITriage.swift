@@ -119,7 +119,7 @@ extension NiruxShellView {
             unread.append((CITriageInvestigation.Request(
                 run: run, pullRequest: pullRequest.number,
                 repositoryRoot: workspace.gitContext?.identity.repositoryRoot, isModelAllowed: allowed,
-                knownFlaky: store.knownFlaky(in: run.repository, now: now)
+                knownFlaky: store.knownFlaky(in: run.repository, now: now), redChecks: Set(checks.map(\.name))
             ), runSignature, checks.map(\.name)))
         }
         guard !unread.isEmpty else {
@@ -133,8 +133,8 @@ extension NiruxShellView {
             for item in unread {
                 // Turned off meanwhile: nothing more is read.
                 guard self?.ciTriageCenter.isEnabled == true else { break }
-                outcomes.append(await investigate(item.request) { [weak self] in
-                    await MainActor.run { self?.ciTriageCenter.isEnabled == true }
+                outcomes.append(await investigate(item.request) { @MainActor [weak self] in
+                    self?.ciTriageCenter.isEnabled == true
                 })
             }
             guard let self else { return }

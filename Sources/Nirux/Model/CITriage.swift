@@ -138,9 +138,9 @@ enum CITriage {
     ///   rerun are flaky;
     /// - any other failing test is open.
     ///
-    /// Nothing is flaky in a job whose log holds an error no rule reads
-    /// (`LogFindings.otherErrors`, a signal with no test left unfinished)
-    /// or whose earlier attempt is unknown.
+    /// A job whose log holds an error no rule reads (`LogFindings.otherErrors`,
+    /// a signal with no test left unfinished), or whose earlier attempt is
+    /// unknown, gets no verdict: neither flaky nor the model's.
     ///
     /// - `changedFiles`: the pull request's, nil when they couldn't be
     ///   read (then nothing says it leaves the failure alone).
@@ -167,8 +167,11 @@ enum CITriage {
         let changedNames = Set(changedFiles.map { ($0 as NSString).lastPathComponent })
         if names.contains(where: { changedNames.contains(testFileName(of: $0)) }) { return .real }
         if findings.tests.contains(where: { $0.failures.contains { changes(repositoryPath($0.file), in: changedFiles) } }) { return .real }
-        if earlier == .unreadable { return .unknown }
-        if isExplained, names.allSatisfy(knownFlaky.contains) { return .flaky(reason: knownFlakyReason(names)) }
+        // What the rules can't read, the model isn't shown either.
+        guard earlier != .unreadable, isExplained else { return .unknown }
+        // A crash no changed file accounts for may still be the pull
+        // request's (a trap in the standard library): the model sees it.
+        if findings.crashes.isEmpty, names.allSatisfy(knownFlaky.contains) { return .flaky(reason: knownFlakyReason(names)) }
         return .open
     }
 
