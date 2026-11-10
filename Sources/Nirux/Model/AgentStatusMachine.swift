@@ -506,9 +506,19 @@ struct AgentStatusMachine {
         askedQuestion = nil
     }
 
-    /// A turn end waits for its verdict: Nirux types nothing into the
-    /// prompt meanwhile (see `isPromptFree`). A prompt would settle it as
-    /// unread, alerting for a turn the verdict may find done.
+    /// The user's click types a prompt into this agent (Address PR
+    /// Feedback, Why Failed): they engage with it. The turn end before is
+    /// read, so the prompt alerts for nothing and a verdict on its way
+    /// drops; the question it asked is behind them.
+    mutating func notePromptFromUser() {
+        if quietTurnEnd != nil { quietTurnEnd = .done }
+        askedQuestion = nil
+    }
+
+    /// A turn end waits for its verdict: Nirux types nothing of its own
+    /// into the prompt meanwhile (see `isPromptFree`). A prompt would
+    /// settle it as unread, alerting for a turn the verdict may find done.
+    /// A prompt the user's click sends goes in (`notePromptFromUser`).
     var awaitsAnyVerdict: Bool {
         if case .pending = quietTurnEnd { return true }
         return false
