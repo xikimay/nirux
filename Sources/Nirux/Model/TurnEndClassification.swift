@@ -135,6 +135,49 @@ enum TurnEndText {
         return head + "\n[…]\n" + tail
     }
 
+    /// The message ends on a question: its last paragraph of prose (not
+    /// code, a quote, a table or a heading) holds a line ending with "?",
+    /// past trailing quotes, brackets, markdown and emoji. Such a turn asks
+    /// for sure, model or not: Haiku now and then reads a short one as
+    /// done ("Ça te va ?"). A rhetorical one costs an extra alert, the
+    /// right side to err on.
+    static func endsOnQuestion(_ message: String) -> Bool {
+        var inFence = false
+        var inParagraph = false
+        for line in message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).reversed() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Counted from the end: an excerpt may have lost a block's start.
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                if inParagraph { return false }
+                inFence.toggle()
+                continue
+            }
+            if inFence { continue }
+            let isProse = !trimmed.isEmpty && !trimmed.hasPrefix(">") && !trimmed.hasPrefix("|") && !trimmed.hasPrefix("#")
+            if isProse {
+                inParagraph = true
+                if endsWithQuestionMark(trimmed) { return true }
+            } else if inParagraph {
+                return false
+            }
+        }
+        return false
+    }
+
+    static func endsWithQuestionMark(_ line: String) -> Bool {
+        var scalars = Array(line.unicodeScalars)
+        while let last = scalars.last, isTrailingDecoration(last) { scalars.removeLast() }
+        return scalars.last.map { $0 == "?" || $0 == "\u{FF1F}" } ?? false
+    }
+
+    /// Whitespace, closing quotes and brackets, markdown, emoji (not the
+    /// ASCII digits, `#` and `*` Unicode also counts as emoji).
+    private static func isTrailingDecoration(_ scalar: Unicode.Scalar) -> Bool {
+        if scalar.properties.isWhitespace || "\"'»”’`)]}>*_~".unicodeScalars.contains(scalar) { return true }
+        if scalar == "\u{FE0F}" || scalar == "\u{200D}" || scalar.properties.isEmojiModifier { return true }
+        return scalar.value > 0x7F && (scalar.properties.isEmojiPresentation || scalar.properties.isEmoji)
+    }
+
     /// The message's last line of prose, cleaned for one line of a
     /// notification: what a turn that asks most likely asks. Lines inside
     /// fenced code are skipped, counting fences from the end: an excerpt

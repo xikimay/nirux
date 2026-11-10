@@ -278,6 +278,11 @@ final class AgentHookCenter {
             applyTurnEndVerdict(waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID)
             return
         }
+        // Ends on a question: it asks, whatever a model would read.
+        if TurnEndText.endsOnQuestion(request.message) {
+            applyTurnEndVerdict(.asks, for: request, agentUUID: agentUUID)
+            return
+        }
         Task { @MainActor [weak self] in
             // Put behind already (a later Stop in the same drain, a replayed
             // backlog): no run for it.

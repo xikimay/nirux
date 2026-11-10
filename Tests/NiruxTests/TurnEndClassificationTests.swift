@@ -44,6 +44,28 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(TurnEndText.lastLine(of: cut), "Shall I merge?")
     }
 
+    /// A turn whose last paragraph of prose ends a line on "?" asks, model
+    /// or not. Haiku missed these on 2026-11-10 ("Ça te va ?"); the two
+    /// without a question mark still depend on the model.
+    func testQuestionAtTheEndAsks() {
+        let asks = [
+            "Tests pass. Ready to push?", "Ça te va ?",
+            "## Résumé\n\n| Fichier | + |\n|---|---|\n| A.swift | 12 |\n\nJe pousse la branche ?",
+            "Done.\n\n```swift\nlet x = 1 // was?\n```\n\nShould I also backport this to the 1.x branch?",
+            "**Je merge ?**", "On part là-dessus ? 🙂", "(OK to deploy?)", "« On garde la v1 ? »",
+            "Which one?\n\n| A | B |\n|---|---|", "Run it?\n```\nmake test\n```", "Fixed.\r\nShall I push?\r\n",
+            "合并吗？", "Deux options :\n1. Garder le cache ?\n2. Relire la table", "Tu veux que je la merge ? 👍🏽"
+        ]
+        for message in asks { XCTAssertTrue(TurnEndText.endsOnQuestion(message), message) }
+        let model = [
+            "Your call: keep it or drop it.", "Waiting for your go-ahead to push.",
+            "Why did it fail? A stale build cache. I cleaned it.", "Pourquoi ça cassait ? Un cache périmé.",
+            "```\nShall I?\n```", "> Should we keep v1?", "Done.\n\n## Why does it fail?",
+            "Shall I merge?\n\nNo need: merged it already.", "The URL now carries ?ref=main and opens the tab.", ""
+        ]
+        for message in model { XCTAssertFalse(TurnEndText.endsOnQuestion(message), message) }
+    }
+
     func testOnlyAMainThreadStopCarriesTheFinalMessage() throws {
         let now = t0
         func event(_ name: String, extra: [String: Any] = [:]) -> AgentHookEvent? {
@@ -764,8 +786,13 @@ final class TurnEndClassificationTests: XCTestCase {
 
     // MARK: - Routing the verdict
 
-    private func turnEndColumn() throws -> (center: AgentHookCenter, workspace: WorkspaceState, column: ColumnState,
-                                            request: TurnEndRequest, alerts: LockedValue<[AgentAttentionReason?]>) {
+    /// Asks, but without a "?": the model decides (see `endsOnQuestion`).
+    private let offer = "PR #41 is open and CI is green.\n\nLet me know if I should merge it."
+
+    private func turnEndColumn(message: String? = nil) throws -> (
+        center: AgentHookCenter, workspace: WorkspaceState, column: ColumnState,
+        request: TurnEndRequest, alerts: LockedValue<[AgentAttentionReason?]>
+    ) {
         let workspace = WorkspaceState(title: "ws", cwd: NSTemporaryDirectory())
         let column = try XCTUnwrap(workspace.columns.first)
         let pty = try XCTUnwrap(column.pty)
@@ -774,7 +801,9 @@ final class TurnEndClassificationTests: XCTestCase {
         column.onAgentAttention = { alerts.value.append($0) }
         _ = pty.applyAgentHook(event(.sessionStart, at: 0), isUserFocused: false)
         _ = pty.applyAgentHook(event(.userPromptSubmit, at: 1), isUserFocused: false)
-        let request = try XCTUnwrap(pty.applyAgentHook(event(.stop, at: 5, message: asks), isUserFocused: false).turnEnd)
+        let request = try XCTUnwrap(
+            pty.applyAgentHook(event(.stop, at: 5, message: message ?? offer), isUserFocused: false).turnEnd
+        )
         let center = AgentHookCenter()
         // Holds them: callers drop the workspace.
         center.resolver = { _ in
@@ -798,7 +827,7 @@ final class TurnEndClassificationTests: XCTestCase {
 
         let (asksCenter, _, asksColumn, asksRequest, asksAlerts) = try turnEndColumn()
         asksCenter.applyTurnEndVerdict(.asks, for: asksRequest, agentUUID: try XCTUnwrap(asksColumn.agentUUID))
-        XCTAssertEqual(asksAlerts.value, [.askedInReply("Shall I merge it?")])
+        XCTAssertEqual(asksAlerts.value, [.askedInReply("Let me know if I should merge it.")])
     }
 
     func testClassifierVerdictReachesTheColumn() async throws {
@@ -808,8 +837,8 @@ final class TurnEndClassificationTests: XCTestCase {
         center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
         let deadline = Date().addingTimeInterval(10)
         while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(alerts.value, [.askedInReply("Shall I merge it?")])
-        XCTAssertEqual(classifier.messages.value, [asks])
+        XCTAssertEqual(alerts.value, [.askedInReply("Let me know if I should merge it.")])
+        XCTAssertEqual(classifier.messages.value, [offer])
         withExtendedLifetime(center) {}
     }
 
@@ -823,6 +852,18 @@ final class TurnEndClassificationTests: XCTestCase {
         let deadline = Date().addingTimeInterval(10)
         while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(alerts.value, [.turnFinished])
+        withExtendedLifetime(center) {}
+    }
+
+    /// A message that ends on a question asks: no model call, the alert
+    /// at once (Haiku now and then reads a short one as done).
+    func testQuestionAtTheEndSkipsTheModel() throws {
+        let (center, _, column, request, alerts) = try turnEndColumn(message: "Tests pass. Ready to push?")
+        let classifier = FakeClassifier(verdict: .done)
+        center.turnEndClassifier = classifier
+        center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
+        XCTAssertEqual(alerts.value, [.askedInReply("Tests pass. Ready to push?")])
+        XCTAssertEqual(classifier.messages.value, [], "no model call")
         withExtendedLifetime(center) {}
     }
 
