@@ -312,9 +312,9 @@ final class ColumnState {
         }
 
         // Forward title changes (OSC 0/2)
-        ptySession.onTitleChanged = { [weak self] title in
-            self?.terminalTitle = title
-            self?.onTitleChanged?()
+        ptySession.onTitleChanged = { title in
+            self.terminalTitle = title
+            self.onTitleChanged?()
         }
 
         // Forward OSC 9 (turn complete for sessions without hook coverage)
