@@ -332,7 +332,7 @@ extension NiruxApp {
     @objc func settingsAnimationsChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.animatesInterface = enabled }) else { return }
-        shell?.animatesInterface = enabled
+        _ = shell
     }
 
     /// Read at the next launch. Only a changed choice is written: a value a

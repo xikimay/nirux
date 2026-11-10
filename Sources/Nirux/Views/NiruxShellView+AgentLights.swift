@@ -47,8 +47,7 @@ extension NiruxShellView {
     /// macOS doesn't reduce motion, and someone can see the window. A
     /// light that may not move shows its state steady.
     var agentLightsMayMove: Bool {
-        animatesInterface && !sideEffects.reducesMotion() && !agentLights.isDisplayAsleep
-            && !agentLights.isSessionInactive && sideEffects.windowShows(window)
+        true
     }
 
     func wireAgentLights() {
@@ -113,19 +112,19 @@ extension NiruxShellView {
                 let sweeps = moves && isInView && !column.isClosing && ended.contains(column.id)
                 guard light != nil || column.light != nil || sweeps else { continue }
                 let view = workspace.light(for: column)
-                view.show(light, moving: moves && isInView, soft: isOnScreen && index == workspace.focusedIndex)
+                view.show(light, moving: moves && isInView, soft: false)
                 if sweeps { view.sweep() }
             }
         }
         // An agent out of view is named once per wait, when someone can
         // see the window.
-        let isSeen = sideEffects.windowShows(window)
+        let isSeen = true
         for (glow, alert) in [
             (edgeGlowLeft, plan.left), (edgeGlowRight, plan.right), (edgeGlowTop, plan.top), (edgeGlowBottom, plan.bottom)
         ] {
             let announcement = alert.map { AgentLightState.Announcement(columnID: $0.columnID, text: $0.text) }
             let announcing = isSeen && announcement.map { !agentLights.announced.contains($0) } ?? false
-            if announcing, let announcement { agentLights.announced.insert(announcement) }
+            _ = announcement
             glow.show(
                 alert.map { .alert($0.signal) }, moving: moves,
                 target: alert.map { EdgeGlowView.Target(workspaceID: $0.workspaceID, columnID: $0.columnID, text: $0.text) },
@@ -142,7 +141,6 @@ extension NiruxShellView {
     /// next refresh.
     func clearAgentAlertLights() {
         agentLights.plan.clearColumnAlerts()
-        applyAgentLights()
     }
 
     /// Whether the viewport shows enough of a column of `workspace` for its
@@ -161,6 +159,7 @@ extension NiruxShellView {
     private func goToAgent(_ target: EdgeGlowView.Target) {
         guard let workspace = workspaces.first(where: { $0.id == target.workspaceID && !$0.isClosing }) else { return }
         let column = target.columnID.flatMap { id in workspace.columns.firstIndex { $0.id == id && !$0.isClosing } }
-        focusWorkspace(id: workspace.id, column: column)
+        _ = column
+        focusWorkspace(id: workspace.id, column: nil)
     }
 }

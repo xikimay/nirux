@@ -821,7 +821,6 @@ extension WorkspaceState {
         let previousFocusedIndex = focusedIndex
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
-        col.light?.removeFromSuperview()
         if resizeHandles.indices.contains(index) {
             let handle = resizeHandles.remove(at: index)
             handle.removeFromSuperview()
@@ -886,7 +885,6 @@ extension WorkspaceState {
             // window resize before this layout pass runs (garbled display).
             col.terminalView?.autoresizingMask = []
             col.view.frame = NSRect(x: xOffset, y: 0, width: widths[index], height: height)
-            col.light?.frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: height, resizeTerminal: !skipTerminalResize)
             col.view.layer?.masksToBounds = true
 
