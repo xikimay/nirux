@@ -363,6 +363,9 @@ final class PtySession: @unchecked Sendable {
         state.machine.isTurnDone(endedAt: time)
     }
 
+    /// See `AgentStatusMachine.circlingHint`.
+    var agentCirclingHint: AgentCirclingHint? { state.machine.circlingHint }
+
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
