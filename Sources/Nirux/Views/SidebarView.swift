@@ -303,7 +303,7 @@ final class SidebarView: NSView {
     /// by now, or that took too long, draws none.
     private func settleOwedTurnEnds() {
         guard !owedTurnEnds.isEmpty else { return }
-        guard animates, isExpanded else {
+        guard isExpanded else {
             owedTurnEnds = [:]
             return
         }
@@ -314,7 +314,7 @@ final class SidebarView: NSView {
             let mark = row.flatMap { showsTurnEnds(on: $0) ? $0.rowSummary.mark : nil }
             if mark == .working, isInTime { continue }
             owedTurnEnds[id] = nil
-            if mark == .idle, isInTime { turnEndNotedAt[id] = now }
+            if mark == .idle { turnEndNotedAt[id] = notedAt }
         }
     }
 
