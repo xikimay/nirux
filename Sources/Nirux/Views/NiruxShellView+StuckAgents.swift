@@ -17,6 +17,10 @@ extension NiruxShellView {
         minutes > 0 ? TimeInterval(minutes) * 60 : nil
     }
 
+    static func currentCirclingHintEnabled() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).agentCirclingHint
+    }
+
     /// One column on a status refresh: follow its foreground agent, send
     /// the alert a stuck state owes (once), and show or take down the
     /// notice of an agent that died mid-turn. The alert (the in-app flag,

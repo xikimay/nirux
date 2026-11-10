@@ -5,6 +5,7 @@ import AppKit
 extension NiruxShellView {
     func restoreState() {
         let persisted = Persistence.load()
+        circlingHintEnabled = PersistedSettings.effective(persisted?.settings).agentCirclingHint
         // Before anything saves: the decision needs this launch's starting point.
         decideOnboardingChecklist(
             persisted: persisted,

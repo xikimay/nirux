@@ -357,6 +357,9 @@ final class PtySession: @unchecked Sendable {
     /// Why the agent waits on the user, while it does.
     var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
 
+    /// See `AgentStatusMachine.circlingHint`.
+    var agentCirclingHint: AgentCirclingHint? { state.machine.circlingHint }
+
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
