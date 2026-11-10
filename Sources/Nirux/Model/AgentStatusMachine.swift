@@ -342,7 +342,6 @@ struct AgentStatusMachine {
         if event.agentID == nil {
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             askedQuestion = nil
-            circling.reset()
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -767,7 +766,7 @@ struct AgentStatusMachine {
         if case .some(.none) = end { return }
         let isShell = AgentToolOutcome.shellTools.contains(tool)
         circling.noteCallEnded(
-            key: isShell ? event.toolFamily ?? event.toolKey.map { "\(tool) \($0)" } : tool,
+            key: isShell ? event.toolFamily ?? tool : tool,
             name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
         )
     }

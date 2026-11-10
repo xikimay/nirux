@@ -159,7 +159,7 @@ struct AgentHookEvent: Codable, Equatable {
                     ? ((payload["tool_input"] as? [String: Any])?["command"] as? String).map(AgentShellCommand.init)
                     : nil
                 toolEnd = AgentToolOutcome.end(hookName: hookName, payload: payload, command: command)?.rawValue
-                toolFamily = command?.family
+                toolFamily = hookName == "PostToolUseFailure" ? command?.family : nil
             } else {
                 toolEnd = nil
                 toolFamily = nil

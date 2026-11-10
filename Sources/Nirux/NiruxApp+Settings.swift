@@ -377,7 +377,6 @@ extension NiruxApp {
     @objc func settingsCirclingHintChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.agentCirclingHint = enabled }) else { return }
-        shell?.circlingHintEnabled = enabled
         shell?.updateSidebar()
     }
 

@@ -115,7 +115,7 @@ extension WorkspaceInfo {
                 status: SidebarStatusLine(
                     text: circling?.circling?.statusText ?? "Working", tone: .neutral, detail: circling?.circling?.detail
                 ),
-                trailing: (circling.map { [$0] } ?? working).compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age,
+                trailing: working.compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age,
                 focusColumn: circling?.index
             )
         }

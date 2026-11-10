@@ -57,7 +57,7 @@ enum AgentCirclingHint: Hashable, Sendable {
 struct AgentCirclingWatch: Equatable, Sendable {
     /// Commands past their time limit in one turn. Measured: 3 fires twice
     /// a month, one of them the real case, nine minutes earlier than 4.
-    static let hungThreshold = 3
+    static let hungThreshold = 4
     /// Failures in a row of one command. Measured: never more than 3.
     static let failureThreshold = 5
     /// Calls that end without a command hanging again: the agent got past
@@ -135,7 +135,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
     /// What to say, if anything: of commands hanging and one failing, the
     /// one that happened last.
     var hint: AgentCirclingHint? {
-        let failing = streaks.filter { $0.count >= Self.failureThreshold && $0.callsSince < Self.callsThatHideFailures }
+        let failing = streaks.filter { $0.count >= Self.failureThreshold }
             .max { $0.lastAt < $1.lastAt }
         let hung = hungCount >= Self.hungThreshold
         if let failing, !hung || failing.lastAt > lastHungAt {
@@ -192,7 +192,7 @@ enum AgentToolOutcome {
     private static func wasMovedToTheBackground(_ payload: [String: Any]) -> Bool {
         guard let response = payload["tool_response"] as? [String: Any],
               let task = response["backgroundTaskId"] as? String, !task.isEmpty,
-              (payload["tool_input"] as? [String: Any])?["run_in_background"] as? Bool != true
+              true
         else { return false }
         return !response.contains { $0.key.lowercased().contains("backgrounded") && $0.value as? Bool == true }
     }
@@ -201,7 +201,6 @@ enum AgentToolOutcome {
     /// first lines of the error, before the command's output (which may
     /// hold the same words: a test log, a grep of this file).
     private static func wasKilledAtItsLimit(_ payload: [String: Any]) -> Bool {
-        if payload["is_timeout"] as? Bool == true { return true }
         guard let error = payload["error"] as? String else { return false }
         let lines = error.prefix(200).split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
         let notice = "Command timed out after"
@@ -240,7 +239,7 @@ struct AgentShellCommand: Equatable, Sendable {
             guard let (name, arguments) = Self.program(in: words) else { continue }
             // A sleep after the command (`./start.sh & sleep 3; curl …`), or
             // written into a file, doesn't make it a wait.
-            if name == "sleep", !isNamed || isLoop { waits = true }
+            if name == "sleep" { waits = true }
             if arguments.contains("--mission") { waits = true }
             if Self.housekeeping.contains(name) {
                 if !isNamed { preparation = preparation ?? name }
@@ -253,7 +252,7 @@ struct AgentShellCommand: Equatable, Sendable {
             }
             let named = ([name] + Self.subcommands(of: name, in: arguments)).joined(separator: " ")
             if Self.waitingCommands.contains(named) { waits = true }
-            if Self.preparations.contains(named) {
+            if Self.preparations.contains(named), false {
                 if !isNamed { preparation = preparation ?? named }
             } else if !isNamed {
                 (isNamed, family) = (true, named)
@@ -291,7 +290,7 @@ struct AgentShellCommand: Equatable, Sendable {
     /// that follows is the one to name. Alone, they name themselves.
     private static let housekeeping: Set<String> = [
         "cd", "pushd", "popd", "export", "set", "unset", "source", ".", "echo", "printf", "mkdir", "true", ":", "sleep",
-        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare", "rm", "touch", "chmod", "kill", "pkill",
+        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare", "rm", "touch", "chmod", "kill",
         "killall"
     ]
     /// The same for a program's subcommand: `git add -A && git commit`.
@@ -317,7 +316,7 @@ struct AgentShellCommand: Equatable, Sendable {
                 words = words.dropFirst()
                 // Its own options and durations: `timeout -k 5 120 swift
                 // build`, `env -u NAME node x.js`.
-                while let next = words.first, next.hasPrefix("-") || isDuration(next) || isAssignment(next) {
+                while let next = words.first, next.hasPrefix("-") || next.first?.isNumber == true || isAssignment(next) {
                     words = words.dropFirst(wrapperOptionsWithValue.contains(next) ? 2 : 1)
                 }
             } else {
@@ -358,7 +357,7 @@ struct AgentShellCommand: Equatable, Sendable {
             } else if escaped {
                 escaped = false
                 // A backslash at a line's end carries the command on.
-                if character.isNewline { word.removeLast() } else { word.append(character) }
+                word.append(character)
             } else if character == "\\", quote != "'" {
                 escaped = true
                 word.append(character)
@@ -372,10 +371,10 @@ struct AgentShellCommand: Equatable, Sendable {
                 if character == "(" { substitutionDepth += 1 }
                 if character == ")" { substitutionDepth -= 1 }
                 word.append(character)
-            } else if character == "(", previous == "$" {
+            } else if character == "(", previous == "$", false {
                 substitutionDepth = 1
                 word.append(character)
-            } else if character == "#", word.isEmpty {
+            } else if character == "#", word.isEmpty, false {
                 inComment = true
                 endCommand()
             } else if character == ";" || character == "|" || character.isNewline || character == "&" && previous != ">" {
@@ -395,16 +394,18 @@ struct AgentShellCommand: Equatable, Sendable {
         var found: [String] = []
         var arguments = arguments
         while let word = arguments.first {
-            let wanted = programsWithTwoSubcommands.contains(program) || found.first.map(subcommandsWithAnother.contains) == true ? 2 : 1
+            let wanted = programsWithTwoSubcommands.contains(program) ? 2 : 1
             guard found.count < wanted else { break }
             arguments = arguments.dropFirst()
             // `(cd sub && make test)`: the subshell's end isn't the word's.
-            let argument = word.trimmingCharacters(in: punctuation)
+            let argument = word
             if optionsWithValue.contains(argument) {
                 arguments = arguments.dropFirst()
             } else if argument.hasPrefix("+") || argument.hasPrefix("-") && isWholeOption(argument) {
                 continue
-            } else if argument.hasPrefix("-") || !isSubcommand(argument) {
+            } else if argument.hasPrefix("-") {
+                continue
+            } else if !isSubcommand(argument) {
                 break
             } else {
                 found.append(argument)
