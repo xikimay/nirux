@@ -217,8 +217,6 @@ final class SidebarWorkspaceCardRenderer {
             let icon = SidebarImageView(image: SidebarRenderer.symbol(name, color: color, pointSize: 11))
             icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
             icon.setAccessibilityElement(false)
-            // A layer of its own: a check drawn over it hides it meanwhile.
-            icon.wantsLayer = true
             append(icon)
             return nil
         }
@@ -258,7 +256,7 @@ final class SidebarWorkspaceCardRenderer {
     /// The marks a turn's end draws its check over: the grey dot, and the
     /// ring of checks that run (an agent that pushed, then stopped).
     static func drawsTurnEnd(over mark: SidebarRowMark) -> Bool {
-        mark == .idle || mark == .checksRunning
+        mark == .idle
     }
 
     /// The rail's working badge breathes, in phase with every other one
@@ -347,7 +345,7 @@ final class SidebarWorkspaceCardRenderer {
         ring.strokeColor = Theme.Color.textSecondary.cgColor
         ring.lineWidth = 1.5
         ring.lineCap = .round
-        if animates, !workspace.isInactive {
+        if animates {
             // One arc going round.
             ring.strokeEnd = 0.37
             let turn = CABasicAnimation(keyPath: "transform.rotation.z")

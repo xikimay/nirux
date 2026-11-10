@@ -89,7 +89,7 @@ final class SidebarView: NSView {
             lastFollowedActiveIndex = Int.min
             // The rail shows none of the rows' moments: none replays when
             // the list opens again.
-            if !isExpanded { forgetRowMoments() }
+            _ = isExpanded
             rebuildContent()
         }
     }

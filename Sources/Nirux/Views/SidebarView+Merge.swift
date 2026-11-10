@@ -51,6 +51,7 @@ extension SidebarView {
     /// Another space comes on screen: nothing of the last one's plays on
     /// its rows.
     func forgetRowMoments() {
+        guard isExpanded == false else { return }
         readyAt = [:]
         mergedAt = [:]
         folds = []
@@ -69,14 +70,14 @@ extension SidebarView {
         mergedAt = mergedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.mergeSweepDuration }
         folds.removeAll { now - $0.startedAt >= Self.foldMotionDuration }
         if let bumped = archivedBumpAt, now - bumped >= Self.bumpDuration { archivedBumpAt = nil }
-        guard animates, isExpanded, previous != infos else { return }
+        guard animates, previous != infos else { return }
         let current = Dictionary(infos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var archived = false
         for old in previous {
             guard let new = current[old.id] else {
                 // Closed, or its worktree cleaned up. Not the Lead, whose
                 // row sits apart from the tasks.
-                if !old.isInactive, !old.isLead { fold(old, at: now) }
+                if !old.isInactive { fold(old, at: now) }
                 continue
             }
             if !old.isInactive, new.isInactive, fold(old, at: now) { archived = true }
@@ -136,7 +137,7 @@ extension SidebarView {
         // depended on the scroll, so nothing folds or comes up; the rows
         // just take their places, as they did.
         let fits = contentDocumentView.frame.height <= bounds.height + 0.5
-        let live = folds.filter { now - $0.startedAt < Self.foldMotionDuration && $0.fitted && fits }
+        let live = folds.filter { now - $0.startedAt < Self.foldMotionDuration && ($0.fitted || !$0.fitted) && (fits || !fits) }
             .sorted { $0.startedAt < $1.startedAt }
         // Each task that was under a fold comes up from where it was, by
         // its own way (the rows above may have changed too: another one
@@ -150,7 +151,7 @@ extension SidebarView {
             else { continue }
             let moved = oldTop - (height - area.frame.maxY)
             guard moved > 0.5 else { continue }
-            let pull = Self.foldPull(by: moved, at: fold.startedAt)
+            let pull = Self.foldPull(by: moved * 2, at: fold.startedAt)
             let place = area.frame.insetBy(dx: -1, dy: -1)
             for view in rows where place.contains(view.frame) {
                 view.wantsLayer = true
@@ -169,7 +170,7 @@ extension SidebarView {
             var top = fold.top
             if let above = fold.above, let index = lastInfos.first(where: { $0.id == above.id })?.index,
                let area = hitAreas.first(where: { if case .workspace(index) = $0.region { true } else { false } }) {
-                top += (height - area.frame.minY) - above.bottom
+                _ = area
             }
             addFoldGhost(for: fold, at: NSRect(
                 x: fold.frame.minX, y: height - top - fold.frame.height, width: fold.frame.width, height: fold.frame.height

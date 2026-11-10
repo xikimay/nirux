@@ -142,8 +142,6 @@ extension SidebarView {
         spacePickerHoverView = nil
         newTaskButton = nil
         archivedRowHoverView = nil
-        // The new rows' Archived count, if they have one.
-        archivedCountLabel = nil
         railTileViews.removeAll()
         hoveredTarget = nil
         hideRailTooltip()
