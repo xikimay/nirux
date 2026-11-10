@@ -14,17 +14,22 @@ import AppKit
 extension SidebarView {
     /// A row that just left the list: where it was, what it looked like.
     struct Fold {
+        let workspaceID: String
         let startedAt: CFTimeInterval
         /// From the top of the list's document to the row's top: the
         /// document's height changes with the list.
         let top: CGFloat
         let frame: NSRect
         let picture: CGImage?
+        /// The tasks that were listed under it: they come up.
+        let under: Set<String>
     }
 
     static let foldGhostID = NSUserInterfaceItemIdentifier("nirux.sidebar.fold")
     static let foldLeaveKey = "leave"
-    static let foldPullKey = "foldPull"
+    /// One pull per fold: a row under two tasks that left together comes
+    /// up for both.
+    static func foldPullKey(_ workspaceID: String) -> String { "foldPull.\(workspaceID)" }
     static let archivedBumpKey = "bump"
     static let foldDuration: CFTimeInterval = 0.45
     static let bumpDuration: CFTimeInterval = 0.5
@@ -32,10 +37,12 @@ extension SidebarView {
     /// Between two refreshes: what changed on the rows that both list.
     /// `previous` and `infos` are the same space's. Called before the rows
     /// are rebuilt, while the old ones can still be pictured.
-    func noteRowMoments(from previous: [WorkspaceInfo], to infos: [WorkspaceInfo], now: CFTimeInterval = CACurrentMediaTime()) {
-        readyAt = readyAt.filter { now - $0.value < 1 }
+    func noteRowMoments(from previous: [WorkspaceInfo], to infos: [WorkspaceInfo]) {
+        let now = clock()
+        readyAt = readyAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.readyCheckDuration }
         mergedAt = mergedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.mergeSweepDuration }
         folds.removeAll { now - $0.startedAt >= Self.foldDuration }
+        if let bumped = archivedBumpAt, now - bumped >= Self.bumpDuration { archivedBumpAt = nil }
         guard animates, previous != infos else { return }
         let current = Dictionary(infos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var archived = false
@@ -67,36 +74,54 @@ extension SidebarView {
             contentDocumentView.cacheDisplay(in: frame, to: rep)
             picture = rep.cgImage
         }
-        folds.append(Fold(startedAt: now, top: contentDocumentView.bounds.height - frame.maxY, frame: frame, picture: picture))
+        // By the list as it still is: the rows of the list, not what is
+        // laid out from the sidebar's bottom.
+        let under = hitAreas.compactMap { area -> String? in
+            guard case .workspace(let index) = area.region, area.frame.maxY <= frame.minY + 1,
+                  let info = lastInfos.first(where: { $0.index == index }), !info.isInactive
+            else { return nil }
+            return info.id
+        }
+        folds.append(Fold(
+            workspaceID: workspace.id, startedAt: now, top: contentDocumentView.bounds.height - frame.maxY, frame: frame,
+            picture: picture, under: Set(under)
+        ))
     }
 
     /// After a rebuild: the rows that left a moment ago carry on folding,
-    /// and the Archived count its bump.
-    func applyMergeMotion(now: CFTimeInterval = CACurrentMediaTime()) {
-        guard isExpanded else { return }
+    /// and the Archived count its bump. Not while rows may not move,
+    /// whatever started before.
+    func applyMergeMotion() {
+        guard isExpanded, animates else { return }
+        let now = clock()
+        // A list taller than the sidebar scrolls: which rows kept their
+        // place on screen depends on the scroll, so none is pulled.
+        let fits = contentDocumentView.frame.height <= bounds.height + 0.5
         for fold in folds where now - fold.startedAt < Self.foldDuration {
             let gone = NSRect(
                 x: fold.frame.minX, y: contentDocumentView.bounds.height - fold.top - fold.frame.height,
                 width: fold.frame.width, height: fold.frame.height
             )
-            // The tasks that were under it: they come up into its room.
-            // (Before the ghost joins the views.)
-            let risen = hitAreas.compactMap { area -> NSRect? in
-                guard case .workspace(let index) = area.region, area.frame.maxY <= gone.maxY + 1,
-                      lastInfos.contains(where: { $0.index == index && !$0.isInactive })
+            // The tasks that were under it come up into its room, where
+            // they are listed now. (Before the ghost joins the views.)
+            let risen = !fits ? [] : hitAreas.compactMap { area -> NSRect? in
+                guard case .workspace(let index) = area.region,
+                      lastInfos.contains(where: { $0.index == index && !$0.isInactive && fold.under.contains($0.id) })
                 else { return nil }
                 return area.frame.insetBy(dx: -1, dy: -1)
             }
             let pull = CASpringAnimation(keyPath: "transform.translation.y")
             pull.fromValue = -(gone.height + SidebarExpandedMetrics.workspaceGap)
             pull.toValue = 0
+            pull.isAdditive = true
             pull.damping = 18
             pull.stiffness = 240
             pull.duration = pull.settlingDuration
             pull.beginTime = fold.startedAt
             pull.fillMode = .backwards
             for view in expandedViews where risen.contains(where: { $0.contains(view.frame) }) {
-                view.layer?.add(pull, forKey: Self.foldPullKey)
+                view.wantsLayer = true
+                view.layer?.add(pull, forKey: Self.foldPullKey(fold.workspaceID))
             }
 
             // The row's picture closes toward its top edge and fades.
