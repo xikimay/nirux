@@ -6,12 +6,9 @@ extension NiruxShellView {
     /// `Nirux --hook codex --setup-failed <id>` ran in a new worktree's
     /// terminal (see SetupFailureSignal). In front of the user, a toast
     /// says so (and the card turns red unless it is the one on screen);
-    /// otherwise the card turns red, with a native notification and the
-    /// Telegram alert.
+    /// otherwise the card turns red, with a native notification.
     func setupScriptFailed(workspaceID: String) {
-        guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
-              let column = workspace.columns.first
-        else { return }
+        guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }) else { return }
         let title = NiruxURLRequest.displaySafe(workspace.title, limit: 60)
         if NSApp.isActive {
             showToast("The setup script failed in “\(title)”: the agent started anyway", tone: .error)
@@ -19,7 +16,6 @@ extension NiruxShellView {
         } else {
             workspace.raiseNotification(.error)
             sideEffects.notifySetupFailure(workspace.id, workspace.title)
-            onSetupScriptFailed?(workspace, 0, column)
         }
         updateSidebar()
     }

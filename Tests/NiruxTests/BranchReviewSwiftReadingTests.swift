@@ -93,7 +93,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
              */
             let scheme = "nirux://open" // DispatchQueue
             let help = \"\"\"
-                // Telegram bot
+                // HandoverFile, written
                 \"\"\"
         }
 
@@ -107,7 +107,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(try file("docs/Example.swift", in: snapshot).signals, [], "a doc raises nothing")
         // A string's line that reads like a comment still counts.
         XCTAssertEqual(notes.signals, [
-            BranchReview.RiskSignal(kind: .security, reasons: ["Telegram", "nirux://"], hunks: [0], byPath: false)
+            BranchReview.RiskSignal(kind: .security, reasons: ["HandoverFile", "nirux://"], hunks: [0], byPath: false)
         ])
     }
 

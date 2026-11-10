@@ -116,7 +116,7 @@ extension NiruxShellView {
         var foregroundProcesses: [ObjectIdentifier: ForegroundProcess] = [:]
         var invalidatedSessionBinding = false
         for workspace in workspaces {
-            for (columnIndex, column) in workspace.columns.enumerated() {
+            for column in workspace.columns {
                 let foregroundProcess = column.pty?.foregroundProcess(snapshot: snapshot)
                 if let foregroundProcess {
                     foregroundProcesses[ObjectIdentifier(column)] = foregroundProcess
@@ -127,7 +127,7 @@ extension NiruxShellView {
                     invalidatedSessionBinding = true
                 }
                 refreshStuckAgent(
-                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex),
+                    column, in: workspace,
                     foregroundProcess: foregroundProcess, snapshot: snapshot, now: now
                 )
             }

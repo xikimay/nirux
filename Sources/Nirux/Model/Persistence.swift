@@ -392,15 +392,6 @@ struct PersistedSettings: Codable {
     /// `ClaudeUsageLimits`). Opt-in: it makes Nirux Claude Code's status
     /// line. Missing decodes to false.
     var showClaudeUsageLimits: Bool = false
-    /// Master gate. Secrets never live here; the bot token is in Keychain.
-    var telegramRemoteAccessEnabled: Bool = false
-    var telegramPairedUserID: Int64?
-    var telegramPairedChatID: Int64?
-    var telegramNotifyOnCompletion: Bool = true
-    var telegramNotifyOnAttention: Bool = true
-    /// Last update claimed before execution, giving prompt delivery
-    /// at-most-once semantics across app restarts.
-    var telegramLastUpdateID: Int64?
     /// Minutes a dialog may wait before its agent reads as stuck; 0 = off.
     var stuckAgentMinutes: Int?
     /// First-launch checklist. Nil in state files that predate it; see
@@ -428,12 +419,6 @@ struct PersistedSettings: Codable {
         sidebarExpanded: Bool? = nil,
         missionHandoffsEnabled: Bool = true,
         sidebarApprovalsEnabled: Bool = true,
-        telegramRemoteAccessEnabled: Bool = false,
-        telegramPairedUserID: Int64? = nil,
-        telegramPairedChatID: Int64? = nil,
-        telegramNotifyOnCompletion: Bool = true,
-        telegramNotifyOnAttention: Bool = true,
-        telegramLastUpdateID: Int64? = nil,
         onboardingChecklist: OnboardingChecklistState? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
@@ -442,12 +427,6 @@ struct PersistedSettings: Codable {
         self.sidebarExpanded = sidebarExpanded
         self.missionHandoffsEnabled = missionHandoffsEnabled
         self.sidebarApprovalsEnabled = sidebarApprovalsEnabled
-        self.telegramRemoteAccessEnabled = telegramRemoteAccessEnabled
-        self.telegramPairedUserID = telegramPairedUserID
-        self.telegramPairedChatID = telegramPairedChatID
-        self.telegramNotifyOnCompletion = telegramNotifyOnCompletion
-        self.telegramNotifyOnAttention = telegramNotifyOnAttention
-        self.telegramLastUpdateID = telegramLastUpdateID
         self.onboardingChecklist = onboardingChecklist
     }
 
@@ -461,12 +440,6 @@ struct PersistedSettings: Codable {
         case keepMacAwakeWhileAgentsWork
         case animatesInterface
         case showClaudeUsageLimits
-        case telegramRemoteAccessEnabled
-        case telegramPairedUserID
-        case telegramPairedChatID
-        case telegramNotifyOnCompletion
-        case telegramNotifyOnAttention
-        case telegramLastUpdateID
         case stuckAgentMinutes
         case onboardingChecklist
         case agentResumeOnLaunch
@@ -495,18 +468,6 @@ struct PersistedSettings: Codable {
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
-        telegramRemoteAccessEnabled = try container.decodeIfPresent(
-            Bool.self, forKey: .telegramRemoteAccessEnabled
-        ) ?? false
-        telegramPairedUserID = try container.decodeIfPresent(Int64.self, forKey: .telegramPairedUserID)
-        telegramPairedChatID = try container.decodeIfPresent(Int64.self, forKey: .telegramPairedChatID)
-        telegramNotifyOnCompletion = try container.decodeIfPresent(
-            Bool.self, forKey: .telegramNotifyOnCompletion
-        ) ?? true
-        telegramNotifyOnAttention = try container.decodeIfPresent(
-            Bool.self, forKey: .telegramNotifyOnAttention
-        ) ?? true
-        telegramLastUpdateID = try container.decodeIfPresent(Int64.self, forKey: .telegramLastUpdateID)
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         // A value from a newer build must not make the whole state file
         // undecodable: it reads as "no record" and is written back as is.
@@ -537,12 +498,6 @@ struct PersistedSettings: Codable {
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
         try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
-        try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)
-        try container.encodeIfPresent(telegramPairedUserID, forKey: .telegramPairedUserID)
-        try container.encodeIfPresent(telegramPairedChatID, forKey: .telegramPairedChatID)
-        try container.encode(telegramNotifyOnCompletion, forKey: .telegramNotifyOnCompletion)
-        try container.encode(telegramNotifyOnAttention, forKey: .telegramNotifyOnAttention)
-        try container.encodeIfPresent(telegramLastUpdateID, forKey: .telegramLastUpdateID)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist

@@ -1,10 +1,11 @@
 import Foundation
 
-// MARK: - Telegram Remote Access capability bridge
+// MARK: - Prompts Nirux types into an agent
 
 extension NiruxShellView {
-    /// Exposes only recognized, live agent processes. Browser/editor columns,
-    /// idle shells and exited terminals never enter the remote routing table.
+    /// The agents Nirux may type a prompt into: recognized, live agent
+    /// processes only. Browser/editor columns, idle shells and exited
+    /// terminals are never among them.
     func remoteAgentSessions() -> [RemoteAgentSession] {
         let snapshot = ProcessSnapshot()
         return workspaces.flatMap { workspace in
@@ -19,6 +20,8 @@ extension NiruxShellView {
         }
     }
 
+    /// Types `prompt` and Return into that agent, unless it may be showing
+    /// a dialog the text would answer.
     func sendRemotePrompt(agentUUID: String, prompt: String) -> RemotePromptResult {
         guard let terminalInput = RemotePromptSanitizer.terminalInput(for: prompt) else {
             return .emptyPrompt
@@ -53,26 +56,14 @@ extension NiruxShellView {
     ) -> RemoteAgentSession? {
         guard let agentUUID = column.agentUUID,
               let pty = column.pty,
-              pty.acceptsRemotePrompts(snapshot: snapshot),
-              let processName = pty.foregroundProcessName(snapshot: snapshot)
+              pty.acceptsRemotePrompts(snapshot: snapshot)
         else { return nil }
-        let displayName: String
-        if let title = column.terminalTitle,
-           !title.isEmpty,
-           !ColumnState.boringTitles.contains(title) {
-            displayName = title
-        } else {
-            displayName = processName
-        }
         return RemoteAgentSession(
             id: agentUUID,
             workspaceID: workspace.id,
-            workspaceTitle: workspace.title,
             columnIndex: columnIndex,
-            displayName: displayName,
             cwd: pty.childCwd ?? workspace.cwd,
             status: pty.cachedAgentState,
-            recentOutput: pty.recentOutput(),
             pendingDialog: pty.pendingAgentDialog?.reason
         )
     }
