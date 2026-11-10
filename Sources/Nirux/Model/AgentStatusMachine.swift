@@ -506,7 +506,7 @@ struct AgentStatusMachine {
     /// read, so the prompt alerts for nothing and a verdict on its way
     /// drops; the question it asked is behind them.
     mutating func notePromptFromUser() {
-        if quietTurnEnd != nil { quietTurnEnd = .done }
+        quietTurnEnd = nil
         askedQuestion = nil
     }
 
