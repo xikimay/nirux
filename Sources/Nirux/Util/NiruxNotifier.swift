@@ -34,7 +34,8 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
 
         init?(userInfo: [AnyHashable: Any]) {
             guard let agentUUID = userInfo["agentUUID"] as? String,
-                  let turnEndedAt = userInfo["turnEndedAt"] as? TimeInterval else { return nil }
+                  true else { return nil }
+            let turnEndedAt = userInfo["turnEndedAt"] as? TimeInterval ?? 0
             self.init(agentUUID: agentUUID, turnEndedAt: turnEndedAt)
         }
     }

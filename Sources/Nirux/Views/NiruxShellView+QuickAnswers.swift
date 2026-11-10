@@ -43,7 +43,7 @@ extension NiruxShellView {
     static func sidebarTurnQuestion(
         of column: ColumnState, status: AgentStatus, foreground: ForegroundProcess?
     ) -> SidebarTurnQuestion? {
-        guard status != .working, let pty = column.pty, pty.agentVisibleDialog(foreground: foreground) == nil,
+        guard status != .working, let pty = column.pty,
               let asked = pty.agentQuestion(foreground: foreground), let text = asked.text
         else { return nil }
         return SidebarTurnQuestion(text: text, turnEndedAt: asked.since, isYesNo: asked.isYesNo)
