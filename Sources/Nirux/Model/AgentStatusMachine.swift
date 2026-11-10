@@ -35,6 +35,10 @@ struct AgentStatusMachine {
     enum QuietTurnEnd: Equatable {
         case pending(turnEndedAt: TimeInterval)
         case done
+        /// Claude went on by itself (a tool call) before the verdict: no
+        /// verdict applies to an agent at work, and the next turn end, or a
+        /// prompt, alerts for this unread one as before.
+        case superseded
     }
 
     /// The last turn end's final message asks the user something (its
@@ -387,7 +391,7 @@ struct AgentStatusMachine {
         endTurn()
         if event.stopHookActive == true {
             // The last Stop wasn't the end: a Stop hook kept the turn going,
-            // and this one ends it.
+            // and this one ends it (read below).
             quietTurnEnd = nil
         } else {
             // A turn Claude started by itself (no prompt) ended before the
@@ -422,12 +426,12 @@ struct AgentStatusMachine {
     }
 
     /// The last turn end is behind: a prompt went in, the conversation
-    /// changed or ended. One still waiting for its verdict alerts as every
-    /// turn end did, unless the user looks at the column: they may not have
-    /// read it (Nirux types Mission messages, Telegram sends prompts, a
-    /// `claude -p` ends its session as soon as its turn).
+    /// changed or ended, another turn ended. One not read yet (its verdict
+    /// on its way, or superseded) alerts as every turn end did, unless the
+    /// user looks at the column: they may not have read it (Nirux types
+    /// Mission messages, a `claude -p` ends its session with its turn).
     private mutating func settleQuietTurnEnd(isUserFocused: Bool, outcome: inout AgentHookOutcome) {
-        if case .pending = quietTurnEnd, !isUserFocused {
+        if quietTurnEnd?.isUnread == true, !isUserFocused {
             outcome.attention = .turnFinished
             outcome.firedAttention = true
         }
@@ -510,9 +514,13 @@ struct AgentStatusMachine {
         guard event.agentID == nil else { return }
         turnFailure = nil
         // Went on by itself (a Stop hook blocked its end, a background
-        // task, a wakeup): its last turn end and question are behind, and
-        // a verdict for them would land on an agent at work.
-        quietTurnEnd = nil
+        // task, a wakeup): a verdict would land on an agent at work, and
+        // the question is behind it. A turn end not read yet stays owed.
+        switch quietTurnEnd {
+        case .pending?: quietTurnEnd = .superseded
+        case .done?: quietTurnEnd = nil
+        case .superseded?, nil: break
+        }
         askedQuestion = nil
     }
 
@@ -685,9 +693,9 @@ struct AgentStatusMachine {
         }
         state = .needsAttention
         // An alerting attention (alerted now, or earlier in this episode)
-        // speaks for the turn end waiting for its verdict: it needs no
-        // alert of its own, nor to take this attention's reason.
-        if alert, case .pending = quietTurnEnd { quietTurnEnd = nil }
+        // speaks for a turn end not read yet: it needs no alert of its
+        // own, nor to take this attention's reason.
+        if alert, quietTurnEnd?.isUnread == true { quietTurnEnd = nil }
         guard alert, !attentionAlerted else { return false }
         attentionAlerted = true
         return true
@@ -1002,5 +1010,15 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+    }
+}
+
+extension AgentStatusMachine.QuietTurnEnd {
+    /// Not read yet: a verdict on its way, or superseded by Claude going on.
+    var isUnread: Bool {
+        switch self {
+        case .pending, .superseded: return true
+        case .done: return false
+        }
     }
 }

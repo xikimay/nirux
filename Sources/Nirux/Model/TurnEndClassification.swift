@@ -61,8 +61,10 @@ enum TurnEndText {
     /// `apiKeyHelper` (or a cloud provider's credential helper), or account
     /// variables in an `env` block. Read: the user's settings, the
     /// project's (`CLAUDE_PROJECT_DIR`, else the agent's folder) shared and
-    /// local ones, the managed ones. Nirux's `claude -p` reads none of them
-    /// (`--restricted`). Not covered: settings passed with `--settings`.
+    /// local ones, the local ones of its git checkout (a worktree's main
+    /// checkout: Claude Code reads them there), the managed ones. Nirux's
+    /// `claude -p` reads none of them (`--restricted`). Not covered:
+    /// settings passed with `--settings`.
     static func settingsUseOtherAccount(
         environment: [String: String], cwd: String?, home: String,
         read: (String) -> Data? = { FileManager.default.contents(atPath: $0) }
@@ -72,9 +74,13 @@ enum TurnEndText {
             (ProjectMemory.configDirectory(home: home, environment: environment) as NSString).appendingPathComponent("settings.json"),
             "/Library/Application Support/ClaudeCode/managed-settings.json"
         ]
+        func claudeFolder(_ root: String) -> NSString {
+            (root as NSString).appendingPathComponent(".claude") as NSString
+        }
         if let project {
-            paths += ["settings.json", "settings.local.json"].map {
-                ((project as NSString).appendingPathComponent(".claude") as NSString).appendingPathComponent($0)
+            paths += ["settings.json", "settings.local.json"].map { claudeFolder(project).appendingPathComponent($0) }
+            if let checkout = checkoutRoot(from: project, read: read) {
+                paths.append(claudeFolder(checkout).appendingPathComponent("settings.local.json"))
             }
         }
         return paths.contains { path in
@@ -83,9 +89,35 @@ enum TurnEndText {
             else { return false }
             let helpers = ["apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh"]
             if helpers.contains(where: { (settings[$0] as? String).map { !$0.isEmpty } ?? false }) { return true }
-            let env = (settings["env"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
+            // Claude Code takes numbers and booleans there as strings.
+            let env = (settings["env"] as? [String: Any] ?? [:]).compactMapValues { ($0 as? String) ?? ($0 as? NSNumber)?.stringValue }
             return usesOtherAccount(env)
         }
+    }
+
+    /// The main checkout of the git repository `folder` is in, with file
+    /// reads only (no `git`): the folder holding a `.git` folder, or for a
+    /// worktree's `.git` file, its `gitdir`'s `commondir` parent.
+    static func checkoutRoot(from folder: String, read: (String) -> Data?) -> String? {
+        var current = (folder as NSString).standardizingPath
+        for _ in 0..<32 {
+            let dotGit = (current as NSString).appendingPathComponent(".git")
+            if let file = read(dotGit).flatMap({ String(data: $0, encoding: .utf8) }),
+               let gitDir = file.split(whereSeparator: \.isNewline).first
+                   .flatMap({ $0.hasPrefix("gitdir:") ? String($0.dropFirst(7)).trimmingCharacters(in: .whitespaces) : nil }) {
+                let absoluteGitDir = gitDir.hasPrefix("/") ? gitDir : (current as NSString).appendingPathComponent(gitDir)
+                let common = read((absoluteGitDir as NSString).appendingPathComponent("commondir"))
+                    .flatMap { String(data: $0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .map { $0.hasPrefix("/") ? $0 : (absoluteGitDir as NSString).appendingPathComponent($0) }
+                    ?? absoluteGitDir
+                return ((common as NSString).standardizingPath as NSString).deletingLastPathComponent
+            }
+            if read((dotGit as NSString).appendingPathComponent("HEAD")) != nil { return current }
+            let parent = (current as NSString).deletingLastPathComponent
+            if parent == current { return nil }
+            current = parent
+        }
+        return nil
     }
 
     /// The start and the end of `message`, the part a classifier reads:

@@ -153,6 +153,26 @@ final class TurnEndClassificationTests: XCTestCase {
             environment: ["HOME": "/Users/me", "CLAUDE_CONFIG_DIR": "/Users/me/.claude-work"]
         ), "its own configuration folder")
         XCTAssertFalse(uses(["/repo/.claude/settings.json": "not json"]))
+        XCTAssertTrue(uses(["/repo/.claude/settings.json": #"{"env":{"CLAUDE_CODE_USE_BEDROCK":1}}"#]), "a number")
+        XCTAssertFalse(uses(["/repo/.claude/settings.json": #"{"env":{"CLAUDE_CODE_USE_BEDROCK":false}}"#]), "false is off")
+    }
+
+    /// Claude Code reads local settings at the git checkout's root: a
+    /// worktree's main checkout, or the repository of a subfolder.
+    func testLocalSettingsOfTheCheckoutCount() {
+        let files = [
+            "/wt/feature/.git": "gitdir: /repo/.git/worktrees/feature\n",
+            "/repo/.git/worktrees/feature/commondir": "../..\n",
+            "/repo/.git/HEAD": "ref: refs/heads/main\n",
+            "/repo/.claude/settings.local.json": #"{"apiKeyHelper":"./key.sh"}"#
+        ]
+        let read: (String) -> Data? = { files[$0].map { Data($0.utf8) } }
+        XCTAssertEqual(TurnEndText.checkoutRoot(from: "/wt/feature", read: read), "/repo", "a worktree")
+        XCTAssertEqual(TurnEndText.checkoutRoot(from: "/repo/Sources/App", read: read), "/repo", "a subfolder")
+        XCTAssertNil(TurnEndText.checkoutRoot(from: "/elsewhere", read: read))
+        XCTAssertTrue(TurnEndText.settingsUseOtherAccount(
+            environment: ["HOME": "/Users/me"], cwd: "/wt/feature", home: "/Users/me", read: read
+        ))
     }
 
     // MARK: - The column
@@ -398,12 +418,31 @@ final class TurnEndClassificationTests: XCTestCase {
     }
 
     /// Claude went on working by itself before the verdict came back: the
-    /// verdict would make a working agent read amber, or idle.
-    func testMainThreadWorkDropsThePendingVerdict() throws {
-        let request = try XCTUnwrap(endTurn().turnEnd)
+    /// verdict would make a working agent read amber, or idle. The turn end
+    /// stays unread: the next one alerts for it, as before, even if that
+    /// one is done.
+    func testMainThreadWorkSupersedesThePendingVerdict() throws {
+        var request = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
         XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
         XCTAssertEqual(machine.state, .working)
+        let next = machine.apply(event(.stop, at: 30, message: "Tests passed."), isUserFocused: false)
+        XCTAssertTrue(next.firedAttention, "the unread turn end alerts")
+        XCTAssertNotNil(next.turnEnd)
+
+        // A Stop hook's continuation: the earlier Stop wasn't the end.
+        machine = AgentStatusMachine()
+        request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
+        let end = AgentHookEvent(kind: .claude, name: .stop, sessionID: "s", finalMessage: "Done.", stopHookActive: true, timestamp: t0 + 30)
+        XCTAssertFalse(machine.apply(end, isUserFocused: false).firedAttention)
+
+        // Another alert went out meanwhile: it spoke for the unread one.
+        machine = AgentStatusMachine()
+        request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
+        XCTAssertTrue(machine.apply(event(.notification, at: 7, notificationType: "other"), isUserFocused: false).firedAttention)
+        XCTAssertFalse(machine.apply(event(.stop, at: 30, message: "Tests passed."), isUserFocused: false).firedAttention)
     }
 
     /// The episode alerted before the turn end (a turn end that alerted,
