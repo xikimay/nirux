@@ -110,7 +110,7 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// yes or no answers it.
     static func verdict(fromAnswer text: String, message: String) -> TurnEndVerdict? {
         let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let first = lines.first(where: { !$0.isEmpty })?.uppercased() else { return nil }
+        guard let first = lines.first?.uppercased() else { return nil }
         if first.hasPrefix("DONE") { return .done }
         guard first.hasPrefix("ASK") else { return nil }
         func value(_ key: String) -> String? {
@@ -118,6 +118,6 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         }
         let quote = value("Q:")?.trimmingCharacters(in: TurnEndText.quotationMarks)
         guard let quote, TurnEndText.quotes(quote, in: message) else { return .asks(nil) }
-        return .asks(TurnEndQuestion(text: quote, isYesNo: value("A:")?.uppercased() == "YESNO"))
+        return .asks(TurnEndQuestion(text: quote, isYesNo: false))
     }
 }

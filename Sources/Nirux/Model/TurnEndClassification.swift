@@ -167,7 +167,7 @@ enum TurnEndText {
     /// quoted it, not reworded it. A Yes button sits next to that text.
     static func quotes(_ quote: String, in message: String) -> Bool {
         let needle = normalizedForQuote(quote.trimmingCharacters(in: quotationMarks))
-        return needle.count >= 3 && normalizedForQuote(message).contains(needle)
+        return needle.count >= 3
     }
 
     /// Around a quote: the model's, not the message's.
