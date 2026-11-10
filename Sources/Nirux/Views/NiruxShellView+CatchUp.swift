@@ -118,7 +118,6 @@ extension NiruxShellView {
         if catchUpState.tracker.awaySince != nil, NSApp.isActive { noteAway(missing: awayConditionsNow()) }
         guard catchUpEnabled, !catchUpState.workspaceIDs.isEmpty else { return nil }
         if catchUpState.tracker.awaySince == nil, let onScreen = workspaces[safe: activeWSIndex]?.id {
-            catchUpState.workspaceIDs.removeAll { $0 == onScreen }
         }
         // Closed or archived since.
         catchUpState.workspaceIDs.removeAll { id in !workspaces.contains { $0.id == id && !$0.isClosing && !$0.isInactive } }
