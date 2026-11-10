@@ -7,14 +7,23 @@ import Foundation
 /// alerts (notification, Dock bounce and badge); a done turn stays quiet.
 enum TurnEndVerdict: Equatable, Sendable {
     /// The message hands something back to the user: a question, a choice,
-    /// an action only they can do, an offer waiting for a yes.
-    case asks
+    /// an action only they can do, an offer waiting for a yes. With the
+    /// sentence that asks when the classifier quoted one found in the
+    /// message.
+    case asks(TurnEndQuestion?)
     /// It reports or answers, and asks nothing.
     case done
     /// No answer (the classifier failed, refused, or can't run here): the
     /// turn alerts as every turn end did before, since a missed question
     /// costs more than an extra notification.
     case unknown
+}
+
+/// The sentence of a final message that asks the user, word for word
+/// (`TurnEndText.quotes`), and whether a plain yes or no answers it.
+struct TurnEndQuestion: Equatable, Sendable {
+    let text: String
+    let isYesNo: Bool
 }
 
 /// A Claude turn end waiting for its verdict. `turnEndedAt` (the Stop's
@@ -151,6 +160,23 @@ enum TurnEndText {
         let head = String(String.UnicodeScalarView(scalars.prefix(headLength)))
         let tail = String(String.UnicodeScalarView(scalars.suffix(max(0, limit - headLength))))
         return head + "\n[…]\n" + tail
+    }
+
+    /// `quote` is a sentence of `message`, give or take whitespace,
+    /// Markdown marks and the quotation marks around it: the classifier
+    /// quoted it, not reworded it. A Yes button sits next to that text.
+    static func quotes(_ quote: String, in message: String) -> Bool {
+        let needle = normalizedForQuote(quote.trimmingCharacters(in: quotationMarks))
+        return needle.count >= 3 && normalizedForQuote(message).contains(needle)
+    }
+
+    /// Around a quote: the model's, not the message's.
+    static let quotationMarks = CharacterSet(charactersIn: "\"“”«» ")
+
+    private static func normalizedForQuote(_ text: String) -> String {
+        let unmarked = String(text.unicodeScalars.filter { !"*_`>#".unicodeScalars.contains($0) }.map(Character.init))
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+        return unmarked.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
     /// The message ends on a question: its last paragraph of prose (not

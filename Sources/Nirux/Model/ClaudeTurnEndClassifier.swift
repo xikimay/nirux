@@ -30,7 +30,9 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     static let maxConcurrentRuns = 4
 
     /// The prompt measured, word for word: "when unsure, answer ASK" keeps
-    /// recall up, which matters more than precision here.
+    /// recall up, which matters more than precision here. After ASK, the
+    /// sentence that asks, quoted (found in the message 170 times in 171),
+    /// and whether a yes or no answers it.
     static let systemPrompt = """
         You read the final message an AI coding agent wrote at the end of its turn, and decide whether the user must \
         answer before the work can go on.
@@ -43,7 +45,11 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         question the message answers itself is DONE. Quoted text, code and headings are not questions to the user.
         When unsure, answer ASK.
 
-        Reply with exactly one word: ASK or DONE.
+        Reply with one word on the first line: ASK or DONE.
+        After ASK only, add two lines:
+        Q: the sentence of the message that asks the user, copied exactly as written (no rewording, no translation).
+        A: YESNO when the agent asks for a yes or no it will act on (a permission, a go-ahead, a yes/no decision); \
+        OPEN for a choice between options, a question needing details, or something the user must do or check first.
         """
 
     typealias Setup = ClaudeOneShotRunner.Account.Setup
@@ -87,7 +93,8 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     var knowsSetup: Bool { runner.account.knowsSetup }
 
     func classify(_ message: String) async -> TurnEndVerdict {
-        await runner.answer(to: Self.input(for: message), read: Self.verdict(fromAnswer:)) ?? .unknown
+        await runner.answer(to: Self.input(for: message), read: { Self.verdict(fromAnswer: $0, message: message) })
+            ?? .unknown
     }
 
     /// The message between tags it can't close itself.
@@ -96,12 +103,21 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         return Data("<message>\n\(fenced)\n</message>".utf8)
     }
 
-    /// ASK or DONE at the start of the model's answer; nil for anything
-    /// else.
-    @Sendable static func verdict(fromAnswer text: String) -> TurnEndVerdict? {
-        let answer = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if answer.hasPrefix("ASK") { return .asks }
-        if answer.hasPrefix("DONE") { return .done }
-        return nil
+    /// ASK or DONE on the first line of the model's answer; nil for
+    /// anything else. After ASK, the "Q:" line is the question only when
+    /// `message` holds it word for word (a reworded one could put a Yes
+    /// next to words the agent never wrote), and "A: YESNO" says a plain
+    /// yes or no answers it.
+    static func verdict(fromAnswer text: String, message: String) -> TurnEndVerdict? {
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let first = lines.first(where: { !$0.isEmpty })?.uppercased() else { return nil }
+        if first.hasPrefix("DONE") { return .done }
+        guard first.hasPrefix("ASK") else { return nil }
+        func value(_ key: String) -> String? {
+            lines.first { $0.hasPrefix(key) }.map { $0.dropFirst(key.count).trimmingCharacters(in: .whitespaces) }
+        }
+        let quote = value("Q:")?.trimmingCharacters(in: TurnEndText.quotationMarks)
+        guard let quote, TurnEndText.quotes(quote, in: message) else { return .asks(nil) }
+        return .asks(TurnEndQuestion(text: quote, isYesNo: value("A:")?.uppercased() == "YESNO"))
     }
 }
