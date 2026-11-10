@@ -284,7 +284,7 @@ final class SidebarView: NSView {
                 turnEndNotedAt[row.id] = now
                 draws = true
             case .working:
-                owedTurnEnds[row.id] = now
+                break
             default:
                 break
             }
