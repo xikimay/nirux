@@ -389,15 +389,32 @@ final class TurnEndClassificationTests: XCTestCase {
         _ = machine.apply(event(.sessionEnd, at: 6), isUserFocused: false)
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "the conversation ended")
         at = try ended()
-        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1))
+        machine.noteTypedKeys(Data("a".utf8), now: Date(timeIntervalSince1970: at + 1))
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a draft at the prompt")
-        // Typed while Claude worked: the draft is still in its prompt.
-        machine = AgentStatusMachine()
-        _ = machine.apply(event(.sessionStart, at: 0, source: "startup"), isUserFocused: false)
-        _ = machine.apply(event(.userPromptSubmit, at: 1), isUserFocused: false)
-        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3))
-        at = try XCTUnwrap(machine.apply(event(.stop, at: 5, message: asks), isUserFocused: false).turnEnd).turnEndedAt
+        at = try ended()
+        machine.noteTypedKeys(Data("\r".utf8), now: Date(timeIntervalSince1970: at + 1))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Enter may have opened a picker")
+
+        // Keys during the turn: a draft stays in the prompt; a mode switch
+        // or a dialog's answer leaves nothing there, nor do the prompt's own.
+        func turn(keys: [(String, TimeInterval)], dialog: Bool = false) throws -> TimeInterval {
+            machine = AgentStatusMachine()
+            _ = machine.apply(event(.sessionStart, at: 0, source: "startup"), isUserFocused: false)
+            machine.noteTypedKeys(Data("fix it".utf8), now: Date(timeIntervalSince1970: t0 + 0.5))
+            _ = machine.apply(event(.userPromptSubmit, at: 1), isUserFocused: false)
+            if dialog { _ = machine.apply(event(.permissionRequest, at: 2, tool: "Bash"), isUserFocused: false) }
+            for (key, offset) in keys { machine.noteTypedKeys(Data(key.utf8), now: Date(timeIntervalSince1970: t0 + offset)) }
+            if dialog { _ = machine.apply(event(.postToolUse, at: 4, tool: "Bash"), isUserFocused: false) }
+            return try XCTUnwrap(machine.apply(event(.stop, at: 5, message: asks), isUserFocused: false).turnEnd).turnEndedAt
+        }
+        at = try turn(keys: [])
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "the prompt's own keys")
+        at = try turn(keys: [("and add a test", 3)])
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a draft from during the turn")
+        at = try turn(keys: [("\u{1B}[Z", 3)])
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a mode switch")
+        at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog's answer")
         // Its terminal still draws: a Stop hook's continuation at work.
         at = try ended()
         machine.noteRead(now: Date(timeIntervalSince1970: at + 2))
@@ -1215,6 +1232,14 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(pty.agentQuestion(foreground: claude), "answered")
         XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
         XCTAssertFalse(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt, foreground: claude), "once")
+
+        // Keys typed in the column itself leave a draft there.
+        let (draftCenter, _, draftColumn, draftRequest, _) = try turnEndColumn()
+        let draftPty = try XCTUnwrap(draftColumn.pty)
+        draftCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                        for: draftRequest, agentUUID: try XCTUnwrap(draftColumn.agentUUID))
+        draftPty.sendRaw("and also")
+        XCTAssertFalse(draftPty.typeQuickAnswer("yes\r", to: draftRequest.turnEndedAt, foreground: claude), "a draft typed there")
     }
 
     /// The card offers the question while Claude waits at a prompt Nirux

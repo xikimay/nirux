@@ -114,6 +114,9 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
+    /// The last key that may have left something at Claude's prompt
+    /// (`noteTypedKeys`, `hasKeysAtThePrompt`).
+    private var lastPromptKeyAt: TimeInterval = 0
 
     /// The user has typed at least once since the shell started. Fallback
     /// attention is gated on this: output before the first keystroke is
@@ -520,8 +523,9 @@ struct AgentStatusMachine {
     /// A quick answer (Yes, No, a reply) to the turn end of `turnEndedAt`
     /// may be typed now: that turn end is still the last thing that
     /// happened (no prompt, turn end or conversation change since, the
-    /// same `claude`), nothing typed at the prompt since the last prompt
-    /// went in (a draft started during the turn stays there), no dialog
+    /// same `claude`), no keys left at the prompt since the last prompt (a
+    /// draft started during the turn stays there: `hasKeysAtThePrompt`), no
+    /// dialog
     /// waits, Claude isn't working, and its terminal is quiet (a Stop
     /// hook's continuation runs its spinner before any hook says so).
     /// Anything else, and "yes" could land in a draft, a dialog or a later
@@ -533,7 +537,7 @@ struct AgentStatusMachine {
         // A prompt since sets Claude working, then its Stop ends a later
         // turn: neither needs a check of its own.
         return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && lastDraftInputAt <= (lastPromptAt ?? 0) && pendingDialogs.isEmpty && !hookWorking
+            && !hasKeysAtThePrompt && pendingDialogs.isEmpty && !hookWorking
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
     }
 
@@ -832,6 +836,27 @@ struct AgentStatusMachine {
         lastInteractionAt = now.timeIntervalSince1970
     }
 
+    /// The keys Nirux sent, for `hasKeysAtThePrompt`. Keys while a dialog
+    /// waits answer it; a mode switch (Shift-Tab), the transcript or todo
+    /// toggles (Ctrl-O, Ctrl-T) and Esc leave the prompt as it was. Enter
+    /// isn't spared: a slash command it sends may open a picker no hook
+    /// tells of.
+    mutating func noteTypedKeys(_ data: Data, now: Date) {
+        guard pendingDialogs.isEmpty, !Self.keysLeavingThePrompt.contains(data) else { return }
+        lastPromptKeyAt = now.timeIntervalSince1970
+    }
+
+    private static let keysLeavingThePrompt: Set<Data> = [
+        Data([0x1B, 0x5B, 0x5A]), Data([0x0F]), Data([0x14]), Data([0x1B]),
+    ]
+
+    /// Keys may have left something at Claude's prompt since the last
+    /// prompt went in: a draft (typed during the turn or after), a
+    /// recalled prompt, a picker.
+    var hasKeysAtThePrompt: Bool {
+        lastPromptKeyAt > (lastPromptAt ?? 0)
+    }
+
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date) {
@@ -1085,6 +1110,7 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+        lastPromptKeyAt = 0
         circling.reset()
     }
 }
