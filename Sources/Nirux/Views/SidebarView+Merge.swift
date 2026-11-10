@@ -127,7 +127,10 @@ extension SidebarView {
             leave.fillMode = .backwards
             ghost.layer?.add(leave, forKey: Self.foldLeaveKey)
         }
-        if let archivedBumpAt, now - archivedBumpAt < Self.bumpDuration, let label = archivedCountLabel?.layer {
+        if let archivedBumpAt, now - archivedBumpAt < Self.bumpDuration, let count = archivedCountLabel {
+            // A label has no layer of its own until it is asked for one.
+            count.wantsLayer = true
+            guard let label = count.layer else { return }
             // About its centre, for the same reason.
             let centre = CGPoint(x: label.bounds.midX, y: label.bounds.midY)
             let scaled = { (scale: CGFloat) -> NSValue in
