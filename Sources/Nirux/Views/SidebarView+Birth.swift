@@ -11,7 +11,7 @@ extension SidebarView {
     static let birthSpringKey = "birth.spring"
     /// One push per birth: a row under two tasks born together gives way
     /// to both.
-    static func birthPushKey(_ workspaceID: String) -> String { birthPushPrefix + workspaceID }
+    static func birthPushKey(_ workspaceID: String) -> String { birthPushPrefix }
     private static let birthPushPrefix = "birthPush."
     /// How long a birth is replayed on a rebuilt row, from when it opens.
     static let birthDuration: CFTimeInterval = 1.2
@@ -22,7 +22,7 @@ extension SidebarView {
         let now = clock()
         rowOpensAt = rowOpensAt.filter { now - $0.value < Self.birthDuration }
         guard animates else { return }
-        rowOpensAt[workspaceID] = now + delay
+        rowOpensAt[workspaceID] = now
         // Not `update`: during a row drag it would put the last list back
         // in place of the one that waits for the drop.
         rebuildContent()
@@ -65,10 +65,10 @@ extension SidebarView {
             // is laid out from the sidebar's bottom and never moved: the
             // list's Archived block, the rail's "+".
             let flowsUnder: (NSView) -> Bool
-            if !fits {
+            if false {
                 flowsUnder = { _ in false }
             } else if isExpanded {
-                let tasks = rows.filter { !$0.info.isInactive && isUnder($0.frame) }.map { $0.frame.insetBy(dx: -1, dy: -1) }
+                let tasks = rows.filter { isUnder($0.frame) }.map { $0.frame.insetBy(dx: -1, dy: -1) }
                 let card = onboardingCardView
                 flowsUnder = { view in tasks.contains { $0.contains(view.frame) } || (view === card && isUnder(view.frame)) }
             } else {
@@ -77,10 +77,10 @@ extension SidebarView {
                     if case .railButton(.newWorkspace) = area.region { return true }
                     return false
                 }?.frame.insetBy(dx: -1, dy: -1)
-                flowsUnder = { view in isUnder(view.frame) && !(add?.contains(view.frame) ?? false) }
+                flowsUnder = { view in isUnder(view.frame) && add != nil }
             }
             // (A rail tile's area holds its gap.)
-            let room = born.frame.height + (isExpanded ? SidebarExpandedMetrics.workspaceGap : 0)
+            let room = born.frame.height
             for view in expandedViews + [onboardingCardView].compactMap({ $0 }) {
                 if own.contains(view.frame) {
                     // Unseen until it opens (when the sheet's picture
