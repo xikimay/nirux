@@ -89,6 +89,10 @@ final class CatchUpTests: XCTestCase {
             XCTAssertEqual(card.since, SidebarCatchUp.sinceText(leave))
 
             // In the flow: it covers none of the rows' buttons.
+            harness.waitUntil("the card on screen") { shell.sidebar.hitAreas.contains { area in
+                guard case .catchUp = area.region else { return false }
+                return true
+            } }
             let cardAreas = shell.sidebar.hitAreas.filter { if case .catchUp = $0.region { true } else { false } }
             let rowAreas = shell.sidebar.hitAreas.filter { if case .catchUp = $0.region { false } else { true } }
             XCTAssertFalse(cardAreas.isEmpty)
@@ -164,13 +168,22 @@ final class CatchUpTests: XCTestCase {
             shell.catchUpState.tracker = AwayTracker(now: t0 - 1)
             shell.noteAway(missing: [.appActive], now: t0)
             shell.noteAway(missing: [], now: t0 + 1_800)
-            settle()
-            shell.sidebar.layoutSubtreeIfNeeded()
+            // On screen once the sidebar has widened.
+            harness.waitUntil("the card's rows") { shell.sidebar.hitAreas.contains { area in
+                guard case .catchUp(.open) = area.region else { return false }
+                return true
+            } }
             @MainActor func press(_ workspace: WorkspaceState, clickCount: Int, at time: TimeInterval) throws {
+                let cardAreas = shell.sidebar.hitAreas.filter { if case .catchUp = $0.region { true } else { false } }
                 let area = try XCTUnwrap(shell.sidebar.hitAreas.first { area in
                     guard case .catchUp(.open(let id)) = area.region else { return false }
                     return id == workspace.id
-                })
+                }, """
+                    \(workspace.title)'s row: card \(shell.sidebar.catchUp.map { $0.rows.map(\.title) } ?? []), \
+                    \(cardAreas.count) card areas, expanded \(shell.sidebar.isExpanded), width \(shell.sidebar.bounds.width), \
+                    on screen \(shell.workspaces[safe: shell.activeWSIndex]?.title ?? "-"), \
+                    away since \(shell.catchUpState.tracker.awaySince.map { "\($0)" } ?? "-"), listed \(shell.catchUpState.workspaceIDs.count)
+                    """)
                 shell.sidebar.mouseDown(with: try XCTUnwrap(NSEvent.mouseEvent(
                     with: .leftMouseDown,
                     location: shell.sidebar.contentDocumentView.convert(NSPoint(x: area.frame.midX, y: area.frame.midY), to: nil),
