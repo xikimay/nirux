@@ -47,7 +47,7 @@ extension NiruxShellView {
         guard agentLightsMayMove else { return }
         // Without a sheet (a task its Lead starts) nothing travels to the
         // row: it opens at once.
-        sidebar.noteBirth(workspaceID: workspace.id, delay: picture == nil ? 0 : Self.taskBirthRowDelay)
+        sidebar.noteBirth(workspaceID: workspace.id, delay: Self.taskBirthRowDelay)
         guard let picture, let shellLayer = layer else { return }
         // Toward the row, or the rail's tile; the top of the sidebar when
         // the row isn't listed.
