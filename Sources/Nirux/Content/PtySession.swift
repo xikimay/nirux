@@ -373,12 +373,34 @@ final class PtySession: @unchecked Sendable {
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).
     func agentAskedQuestion(foreground: ForegroundProcess?) -> AgentAttentionReason? {
-        state.machine.visibleQuestion(foreground: foreground).map { .askedInReply($0.text) }
+        agentQuestion(foreground: foreground).map { .askedInReply($0.text) }
+    }
+
+    /// The same, with when it was asked and whether a yes or no answers it.
+    func agentQuestion(foreground: ForegroundProcess?) -> AgentStatusMachine.AskedQuestion? {
+        state.machine.visibleQuestion(foreground: foreground)
     }
 
     /// The user looks at this column: see `AgentStatusMachine.noteSeen`.
     func noteAgentSeen() {
         state.machine.noteSeen()
+    }
+
+    /// See `AgentStatusMachine.isCurrentTurnEnd`.
+    func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
+        state.machine.isCurrentTurnEnd(turnEndedAt)
+    }
+
+    /// Types a quick answer (Yes, No, a reply) to the turn end of
+    /// `turnEndedAt` when it may go in (`AgentStatusMachine
+    /// .acceptsQuickAnswer`), as a prompt the user's click sends; false,
+    /// and nothing typed, otherwise.
+    func typeQuickAnswer(_ terminalInput: String, to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
+        guard !hasExited, state.machine.acceptsQuickAnswer(
+            to: turnEndedAt, foreground: foreground, now: Date().timeIntervalSince1970
+        ) else { return false }
+        typePromptFromUser(terminalInput)
+        return true
     }
 
     /// Types a prompt the user's click sends into this agent (see
@@ -1102,7 +1124,7 @@ private final class PtyState: @unchecked Sendable {
 
     func noteTypedInput(_ data: Data) {
         guard data != Self.redrawNudge else { return }
-        machine.noteKeystroke(now: Date())
+        machine.noteKeystroke(now: Date(), keys: data)
         hasTypedInput = true
     }
 
@@ -1116,7 +1138,7 @@ private final class PtyState: @unchecked Sendable {
     func noteTerminalWrite(_ data: Data) {
         guard PtySession.isUserText(data) else { return }
         DispatchQueue.main.async { [self] in
-            machine.noteKeystroke(now: Date())
+            machine.noteKeystroke(now: Date(), keys: data)
         }
     }
 

@@ -40,6 +40,9 @@ final class SidebarView: NSView {
     var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
     /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
     var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
+    /// (question, answer, the button): Yes, No or Reply… under a turn's
+    /// question.
+    var onTurnAnswer: ((SidebarTurnQuestion, SidebarTurnAnswer, NSView?) -> Void)?
     /// Resume on the row of a restored agent that hasn't resumed yet:
     /// (workspaceIndex, columnIndex, column id).
     var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
@@ -503,7 +506,7 @@ final class SidebarView: NSView {
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
         case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
-             .deferredAgentResume(let workspaceIndex, _, _):
+             .deferredAgentResume(let workspaceIndex, _, _), .turnAnswer(let workspaceIndex, _, _, _):
             clearHover()
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
@@ -555,7 +558,7 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .permissionDecision, .agentResume, .deferredAgentResume, .actionBlock:
+        case .permissionDecision, .agentResume, .deferredAgentResume, .turnAnswer, .actionBlock:
             break // buttons go through trackApprovalClick; the block is inert
         case .railButton(.project):
             let point = convert(event.locationInWindow, from: nil)
@@ -654,7 +657,7 @@ final class SidebarView: NSView {
 
         let cleanup = worktreeCleanupOffer?(workspaceIndex)
         menu.addClosureItem(title: "Review Branch") { act(.reviewBranch) }
-        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, act: act)
+        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, flakyReason: workspace?.ciFlakyReason, act: act)
         if cleanup == .suggested { addWorktreeCleanupItem(to: menu, act: act) }
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
@@ -731,7 +734,8 @@ final class SidebarView: NSView {
             case .column(let workspaceIndex, let columnIndex),
                  .permissionDecision(let workspaceIndex, let columnIndex, _, _),
                  .agentResume(let workspaceIndex, let columnIndex, _),
-                 .deferredAgentResume(let workspaceIndex, let columnIndex, _):
+                 .deferredAgentResume(let workspaceIndex, let columnIndex, _),
+                 .turnAnswer(let workspaceIndex, let columnIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):

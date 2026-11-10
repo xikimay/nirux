@@ -125,6 +125,22 @@ final class WorkspaceState {
     /// which branch. The first call, at launch or on another branch, only
     /// records: a pull request that was already red isn't news.
     private var reportedRedChecks: (branch: String?, keys: Set<String>)?
+    /// What the triage made of the pull request's red checks
+    /// (docs/ci-failure-triage.md), and of which ones (`CITriage.signature`):
+    /// a new failure isn't the one it was about. `retryAt` is set while an
+    /// answer is still owed (a run `gh` couldn't read, a model that
+    /// couldn't run): when to ask again.
+    var ciTriage: (signature: String, verdict: CITriage.Verdict, retryAt: TimeInterval?)?
+
+    /// Why the pull request's red checks look flaky, when the triage said
+    /// so of the checks that are red now. The verdict first: this is read
+    /// at every sidebar refresh, and most red pull requests aren't flaky.
+    var ciFlakyReason: String? {
+        guard let ciTriage, let reason = ciTriage.verdict.flakyReason, let prInfo,
+              ciTriage.signature == CITriage.signature(of: CIFailure.redChecks(prInfo))
+        else { return nil }
+        return reason
+    }
     var diffStats: String?
 
     // Workspace context. The purpose is the user's. `phase` is a manual
@@ -607,10 +623,20 @@ extension WorkspaceState {
                     workspaceTitle: self.title,
                     columnIndex: columnIndex,
                     processName: processName,
-                    reason: reason
+                    reason: reason,
+                    quickReply: col.flatMap { Self.quickReplyTarget(of: $0, reason: reason) }
                 )
             }
         }
+    }
+
+    /// A question the agent's turn asked, still waiting: its notification
+    /// takes a reply (`NiruxNotifier.QuickReplyTarget`).
+    static func quickReplyTarget(of column: ColumnState, reason: AgentAttentionReason?) -> NiruxNotifier.QuickReplyTarget? {
+        guard case .askedInReply = reason, let agentUUID = column.agentUUID, let pty = column.pty,
+              let question = pty.agentQuestion(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        else { return nil }
+        return NiruxNotifier.QuickReplyTarget(agentUUID: agentUUID, turnEndedAt: question.since)
     }
 
     private func setupLinkOpening(for col: ColumnState) {

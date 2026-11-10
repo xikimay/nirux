@@ -101,6 +101,13 @@ struct AgentHookEvent: Codable, Equatable {
     /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
     /// and when the receiver or the app drops it (see `TurnEndMarker`).
     var finalMessage: String?
+    /// On a main-thread SessionStart or Stop: whether
+    /// this `claude` runs on the login Nirux's own `claude -p` uses
+    /// (`TurnEndText.agentOnNiruxAccount`), which only the receiver can
+    /// tell, from the agent's environment. The CI failure triage sends
+    /// nothing to a model for a workspace whose agent is elsewhere. Nil
+    /// from older receivers and on other events: not known to be.
+    var onNiruxAccount: Bool?
     /// On a Stop, Claude's `stop_hook_active`: the turn went on because a
     /// Stop hook blocked its end, and this is the end of that continuation
     /// (the end of the turn, unless a hook blocks again).
@@ -234,6 +241,36 @@ struct AgentHookEvent: Codable, Equatable {
         }
     }
 
+    /// The main-thread SessionStart and Stop, where the receiver says which
+    /// account the agent runs on (`onNiruxAccount`): a `claude` started
+    /// before Nirux, which sends no SessionStart, says so at its first turn
+    /// end. Not UserPromptSubmit: Claude waits for that hook before it goes
+    /// on, and the check reads several files.
+    var reportsAccount: Bool {
+        kind == .claude && agentID == nil && [.sessionStart, .stop].contains(name)
+    }
+
+    /// What only the receiver can tell, from the agent's environment: on
+    /// the events that report it, whether the agent runs on the login
+    /// Nirux's own `claude -p` uses; and the final message kept only for
+    /// such an agent, and a running Nirux that reads final messages.
+    mutating func applyAccount(
+        environment: [String: String], markers directory: URL = TurnEndMarker.directory,
+        running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:),
+        read: (String) -> Data? = { FileManager.default.contents(atPath: $0) }
+    ) {
+        if reportsAccount {
+            onNiruxAccount = TurnEndText.agentOnNiruxAccount(
+                environment: environment, cwd: cwd, home: environment["HOME"] ?? NSHomeDirectory(),
+                markers: directory, running: running, read: read
+            )
+        }
+        if finalMessage != nil,
+           onNiruxAccount != true || !TurnEndMarker.allowsMessage(environment: environment, in: directory, running: running) {
+            finalMessage = nil
+        }
+    }
+
     /// Events that bind or confirm the column's session — where its
     /// transcript is worth knowing.
     static func carriesTranscriptPath(_ name: Name) -> Bool {
@@ -287,6 +324,7 @@ struct AgentHookEvent: Codable, Equatable {
         reviewHeader: String? = nil,
         finalMessage: String? = nil,
         stopHookActive: Bool? = nil,
+        onNiruxAccount: Bool? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -317,6 +355,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.reviewHeader = reviewHeader
         self.finalMessage = finalMessage
         self.stopHookActive = stopHookActive
+        self.onNiruxAccount = onNiruxAccount
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText
@@ -384,13 +423,7 @@ enum AgentHookCLI {
             now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
-        // Written only for a running Nirux that will read it, and an agent
-        // on the login its `claude -p` uses.
-        if event.finalMessage != nil,
-           !TurnEndMarker.allowsMessage(environment: env)
-            || TurnEndText.settingsUseOtherAccount(environment: env, cwd: event.cwd, home: env["HOME"] ?? NSHomeDirectory()) {
-            event.finalMessage = nil
-        }
+        event.applyAccount(environment: env)
 
         let channel = PermissionApprovalChannel.standard
         // The watch comes before the request shows in the queue: from then

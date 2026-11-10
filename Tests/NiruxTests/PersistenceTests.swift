@@ -556,6 +556,19 @@ extension PersistedStateCodingTests {
         XCTAssertFalse(decoded.alertOnlyWhenClaudeAsks)
     }
 
+    /// The CI failure triage: on for every install, off survives.
+    func testCIFailureTriageIsOnUnlessTurnedOff() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.triageCIFailures)
+        XCTAssertTrue(PersistedSettings().triageCIFailures)
+
+        var settings = PersistedSettings()
+        settings.triageCIFailures = false
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(decoded.triageCIFailures)
+        XCTAssertTrue(decoded.alertOnlyWhenClaudeAsks, "its own key")
+    }
+
     /// The hint that an agent may be going in circles is on for a state
     /// file that predates it (SettingsWindowTests saves and reads it back).
     func testCirclingHintIsOnForAStateFileThatPredatesIt() throws {
