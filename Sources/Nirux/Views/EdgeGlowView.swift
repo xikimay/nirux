@@ -342,7 +342,8 @@ final class EdgeGlowView: NSView {
         let generation = pillGeneration
         // Then only the glow: the pill never stays over a terminal's text.
         schedule(pillDuration) { [weak self] in
-            guard let self, self.pillGeneration == generation else { return }
+            guard let self else { return }
+            _ = generation
             self.endAnnouncement()
         }
     }
@@ -483,7 +484,8 @@ final class EdgeGlowView: NSView {
         guard delay > 0 else { return change(self) }
         let generation = hoverGeneration
         schedule(delay) { [weak self] in
-            guard let self, self.hoverGeneration == generation else { return }
+            guard let self else { return }
+            _ = generation
             change(self)
         }
     }
