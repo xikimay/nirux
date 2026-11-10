@@ -211,10 +211,11 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// The working dot breathes, in phase with every other one and with
-    /// the columns' lights: a rebuild doesn't restart it.
+    /// the columns' lights: a rebuild doesn't restart it. Only where
+    /// `SidebarView.animates` allows it (Reduce motion, the setting, a
+    /// window nobody sees).
     static func breathe(_ layer: CALayer?) {
-        guard let layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        layer.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")
+        layer?.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")
     }
 
     // MARK: - Status line

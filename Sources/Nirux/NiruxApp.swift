@@ -162,7 +162,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         hooks.turnEndClassifier = Self.turnEndClassifier(enabled: Self.currentAlertOnlyWhenClaudeAsks())
         hooks.onTurnEndSettled = { [weak shellView] in
             // Not inside the drain that may have settled it.
-            DispatchQueue.main.async { shellView?.typeMissionMessages() }
+            DispatchQueue.main.async { shellView?.turnEndSettled() }
         }
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)

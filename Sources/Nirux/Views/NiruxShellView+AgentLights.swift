@@ -6,21 +6,15 @@ final class AgentLightState {
     /// What the lights show, as of the last sidebar refresh.
     var plan = AgentLightPlan()
     var turnEnds = TurnEndSweeps()
-    /// The agents out of view whose pill already showed, by column and
-    /// text: scrolling, switching workspaces or coming back to the app
-    /// doesn't announce a wait twice. Forgotten once the column no longer
-    /// waits.
-    var announced: Set<Announcement> = []
+    /// The columns out of view whose pill already showed: scrolling,
+    /// switching workspaces or spaces, or coming back to the app doesn't
+    /// announce a wait twice. Forgotten once the column no longer waits.
+    var announced: Set<UUID> = []
     /// Between the screens' sleep and wake notifications.
     var isDisplayAsleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
     /// Another user's session has the screen (fast user switching).
     var isSessionInactive = false
     let observers = ObserverBag()
-
-    struct Announcement: Hashable {
-        let columnID: UUID?
-        let text: String
-    }
 }
 
 /// Notification observers that go away with their owner.
@@ -86,12 +80,18 @@ extension NiruxShellView {
             active.map { self.showsColumn(column.index, of: $0) } ?? false
         }
         agentLights.plan = plan
-        // A wait that ended is forgotten: the next one is announced.
-        agentLights.announced = agentLights.announced.filter { announcement in
-            guard let id = announcement.columnID, case .alert? = plan.columns[id] else { return false }
-            return true
+        // A wait that ended is forgotten: the next one is announced. A
+        // column of another space isn't in `infos`: its wait is kept.
+        let columns = infos.flatMap(\.columns)
+        let listed = Set(columns.compactMap(\.id))
+        let open = Set(workspaces.flatMap { $0.columns.map(\.id) })
+        agentLights.announced = agentLights.announced.filter { id in
+            guard open.contains(id) else { return false }
+            guard listed.contains(id) else { return true }
+            if case .alert? = plan.columns[id] { return true }
+            return false
         }
-        let ended = agentLights.turnEnds.update(columns: infos.flatMap(\.columns))
+        let ended = agentLights.turnEnds.update(columns: columns)
         applyAgentLights(sweeping: ended)
     }
 
@@ -123,9 +123,9 @@ extension NiruxShellView {
         for (glow, alert) in [
             (edgeGlowLeft, plan.left), (edgeGlowRight, plan.right), (edgeGlowTop, plan.top), (edgeGlowBottom, plan.bottom)
         ] {
-            let announcement = alert.map { AgentLightState.Announcement(columnID: $0.columnID, text: $0.text) }
-            let announcing = isSeen && announcement.map { !agentLights.announced.contains($0) } ?? false
-            if announcing, let announcement { agentLights.announced.insert(announcement) }
+            let column = alert?.columnID
+            let announcing = isSeen && column.map { !agentLights.announced.contains($0) } ?? false
+            if announcing, let column { agentLights.announced.insert(column) }
             glow.show(
                 alert.map { .alert($0.signal) }, moving: moves,
                 target: alert.map { EdgeGlowView.Target(workspaceID: $0.workspaceID, columnID: $0.columnID, text: $0.text) },
@@ -134,6 +134,16 @@ extension NiruxShellView {
         }
         columnIndicator.pulses = moves
         sidebar.animates = moves
+    }
+
+    /// A Claude turn end got its verdict (see `AgentHookCenter`): a Mission
+    /// message may go to its prompt now, and the lights follow at once
+    /// rather than at the next heartbeat, which doesn't beat while Nirux
+    /// is in the background: the sweep of a turn that is done, the amber
+    /// of one that asks.
+    func turnEndSettled() {
+        typeMissionMessages()
+        scheduleMetadataRefresh()
     }
 
     /// The user is back in the app and every attention was cleared: the

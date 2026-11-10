@@ -140,8 +140,9 @@ struct TurnEndSweeps {
             // A column seen for the first time ended nothing in front of
             // the user.
             guard !column.awaitsTurnEndVerdict, let last = seen[id], column.turnEndedAt > last else { continue }
-            // A wait or an error has its own light.
-            let asks = column.attention.map { $0 != .finished } ?? false
+            // A wait or an error has its own light, and a Mission child
+            // that asked its parent ended its turn to wait for the answer.
+            let asks = column.attention.map { $0 != .finished } ?? false || column.missionQuestion != nil
             if column.agentStatus != .working, !asks { ended.insert(id) }
         }
         // Closed columns, and those of a space left behind, are forgotten.

@@ -613,8 +613,9 @@ final class ColumnStatusPill: NSView {
     var status: ColumnHeaderView.Status? {
         didSet { if status != oldValue { apply() } }
     }
-    /// A working agent's dot breathes; false: it shows steady (see
-    /// `NiruxShellView.agentLightsMayMove`).
+    /// A working agent's dot breathes; false: it shows steady. The shell
+    /// decides (`NiruxShellView.agentLightsMayMove`): Reduce motion, the
+    /// setting, a window nobody sees.
     var animates = true {
         didSet { if animates != oldValue { updateBreathing() } }
     }
@@ -698,12 +699,11 @@ final class ColumnStatusPill: NSView {
         needsLayout = true
     }
 
-    /// A working agent's dot breathes with its column's light, unless
-    /// animations are off or the user reduces motion.
+    /// A working agent's dot breathes with its column's light, while
+    /// `animates` allows it.
     private func updateBreathing() {
         guard let dotLayer = dot.layer else { return }
         let breathes = animates && status?.tone == .working && status?.symbol == nil
-            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if breathes, dotLayer.animation(forKey: "breathe") == nil {
             dotLayer.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")
         } else if !breathes {

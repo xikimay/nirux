@@ -251,8 +251,9 @@ final class SidebarView: NSView {
     /// actually would.
     private var lastRenderSignature: Int?
 
-    /// The working dots breathe; false: they show steady (see
-    /// `NiruxShellView.agentLightsMayMove`).
+    /// The working dots breathe; false: they show steady. The shell
+    /// decides (`NiruxShellView.agentLightsMayMove`): Reduce motion, the
+    /// setting, a window nobody sees.
     var animates = true {
         didSet {
             guard animates != oldValue else { return }

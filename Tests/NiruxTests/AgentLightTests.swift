@@ -155,6 +155,15 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(sweeps.update(columns: [column(0, id: busy, turnEndedAt: 20)]), [], "that end is past")
 
         XCTAssertEqual(sweeps.update(columns: [column(0, id: UUID(), turnEndedAt: 30)]), [], "first seen")
+
+        // A Mission child that ended its turn to ask its parent waits for
+        // the answer: it hasn't finished.
+        let child = UUID()
+        _ = sweeps.update(columns: [column(0, status: .working, id: child)])
+        var asked = column(0, status: .needsAttention, reason: .turnFinished, id: child, turnEndedAt: 40)
+        asked.missionQuestion = SidebarMissionQuestion(questionID: "q", parentTitle: "Lead", text: "Which one?", handOff: nil)
+        XCTAssertNil(asked.attention)
+        XCTAssertEqual(sweeps.update(columns: [asked]), [])
     }
 
     /// A Claude turn end whose final message is still being read sweeps
@@ -187,13 +196,23 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(light.light, .working)
         XCTAssertFalse(light.isMoving, "steady: the state shows without movement")
 
+        XCTAssertEqual(light.steadyLevel, 0.6, "between the breath's two ends")
+        XCTAssertFalse(light.blendsAsAGroup, "no column-sized offscreen pass")
+
         light.show(.working, moving: true)
         XCTAssertTrue(light.isMoving)
         XCTAssertEqual(light.movement?.repeatCount, .infinity)
+        XCTAssertEqual(light.movingLayerCount, 5, "the ring and the four glows, each on its own")
+        XCTAssertEqual(light.steadyLevel, 1, "the breath sets the level")
 
         light.show(.working, moving: false)
         XCTAssertFalse(light.isMoving, "stopped as soon as nobody can see it")
+        XCTAssertEqual(light.movingLayerCount, 0)
         XCTAssertEqual(light.light, .working)
+        XCTAssertEqual(light.steadyLevel, 0.6)
+        light.show(.alert(.waiting), moving: false)
+        XCTAssertEqual(light.steadyLevel, 1, "a wait shows in full")
+        light.show(.working, moving: false)
 
         light.show(.working, moving: true)
         light.show(nil, moving: true)
@@ -244,9 +263,12 @@ final class AgentLightTests: XCTestCase {
     /// covers no cell.
     func testTheRingIsAsWideAsTheTerminalsPadding() {
         let padding = Int(EdgeGlowView.ringWidth)
-        XCTAssertEqual(CGFloat(padding), EdgeGlowView.ringWidth)
         XCTAssertTrue(TerminalConfigBuilder.enforced.contains("window-padding-x = \(padding)"))
         XCTAssertTrue(TerminalConfigBuilder.enforced.contains("window-padding-y = \(padding)"))
+        XCTAssertTrue(
+            TerminalConfigBuilder.enforced.contains("window-padding-balance = false"),
+            "balanced, the padding would grow with what the grid leaves over"
+        )
     }
 
     /// A viewport edge's glow is a bar on the padding: it stops before the
@@ -342,52 +364,67 @@ final class AgentLightTests: XCTestCase {
         XCTAssertFalse(glow.isPillShown)
     }
 
-    /// The pointer near the glow brings the pill back, and the pill stays
-    /// while the pointer travels onto it: on every edge it lies within
-    /// reach of the strip that brought it.
+    /// The pointer resting on the glow brings the pill back, clear of the
+    /// pointer and of the column headers, and the pill stays long enough
+    /// to be reached, then while the pointer is on it.
     func testThePointerBringsThePillBackAndReachesIt() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 1_000, height: 700))
         let frames: [(EdgeGlowView.Edge, NSRect)] = [
             (.left, NSRect(x: 0, y: 0, width: 320, height: 700)), (.right, NSRect(x: 680, y: 0, width: 320, height: 700)),
-            (.top, NSRect(x: 0, y: 668, width: 1_000, height: 32)), (.bottom, NSRect(x: 0, y: 0, width: 1_000, height: 56))
+            (.top, NSRect(x: 0, y: 700 - EdgeGlowView.topHeight, width: 1_000, height: EdgeGlowView.topHeight)),
+            (.bottom, NSRect(x: 0, y: 0, width: 1_000, height: 56))
         ]
         for (edge, frame) in frames {
             let glow = edgeGlow(edge, frame: frame, in: container)
+            glow.hoverDwell = 0
+            glow.pillLinger = 3_600
+            XCTAssertEqual(glow.trackingAreas.count, 0, "\(edge)")
             glow.show(.alert(.waiting), moving: false, target: target())
             XCTAssertFalse(glow.isPillShown)
-            // On the edge's strip, and off both the strip and the pill.
-            let onStrip: NSPoint
-            let away: NSPoint
-            switch edge {
-            case .left: (onStrip, away) = (NSPoint(x: 3, y: 40), NSPoint(x: 300, y: 40))
-            case .right: (onStrip, away) = (NSPoint(x: frame.width - 3, y: 40), NSPoint(x: 20, y: 40))
-            case .top: (onStrip, away) = (NSPoint(x: 40, y: frame.height - 3), NSPoint(x: 40, y: 1))
-            default: (onStrip, away) = (NSPoint(x: 40, y: 3), NSPoint(x: 40, y: 52))
+            XCTAssertEqual(glow.trackingAreas.count, 2, "\(edge): the glow and the pill")
+            XCTAssertTrue(glow.bounds.contains(glow.pillFrame), "\(edge)")
+            XCTAssertFalse(glow.hoverStrip.intersects(glow.pillFrame), "\(edge): never under the pointer that brings it")
+            if edge == .top {
+                XCTAssertLessThanOrEqual(
+                    glow.pillFrame.maxY, glow.bounds.maxY - ColumnHeaderView.height, "under the headers' buttons"
+                )
             }
-            XCTAssertFalse(glow.hoverStrip.contains(away) || glow.pillFrame.contains(away), "\(edge)")
-            XCTAssertTrue(glow.hoverStrip.intersects(glow.pillFrame), "\(edge): no gap to cross on the way to the pill")
 
-            glow.pointerMoved(to: onStrip)
+            glow.pointerEntered(.glow)
             XCTAssertTrue(glow.isPillShown, "\(edge)")
-            // Onto the pill's far end, out of the strip.
-            let farEnd: NSPoint
-            switch edge {
-            case .left: farEnd = NSPoint(x: glow.pillFrame.maxX - 2, y: glow.pillFrame.midY)
-            case .right: farEnd = NSPoint(x: glow.pillFrame.minX + 2, y: glow.pillFrame.midY)
-            case .top: farEnd = NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.minY + 1)
-            default: farEnd = NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.maxY - 1)
-            }
-            if edge != .top { XCTAssertFalse(glow.hoverStrip.contains(farEnd), "\(edge)") }
-            glow.pointerMoved(to: farEnd)
-            XCTAssertTrue(glow.isPillShown, "\(edge): it stays under the pointer")
-            XCTAssertTrue(glow.hitTest(glow.convert(farEnd, to: container)) === glow, "\(edge): and takes the click")
+            glow.pointerExited(.glow)
+            XCTAssertTrue(glow.isPillShown, "\(edge): time to reach it")
+            glow.pointerEntered(.pill)
+            let onPill = glow.convert(NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.midY), to: container)
+            XCTAssertTrue(glow.hitTest(onPill) === glow, "\(edge): it takes the click")
+            glow.pointerExited(.pill)
+            XCTAssertFalse(glow.isPillShown, "\(edge): the pointer left it")
 
-            glow.pointerMoved(to: away)
-            XCTAssertFalse(glow.isPillShown, "\(edge): the pointer left")
-            // Where the pill was is no way back in.
-            glow.pointerMoved(to: farEnd)
-            if edge != .top { XCTAssertFalse(glow.isPillShown, "\(edge)") }
+            glow.pointerEntered(.pill)
+            XCTAssertFalse(glow.isPillShown, "\(edge): where the pill was is no way back in")
+            glow.pointerExited(.pill)
+
+            glow.pillLinger = 0
+            glow.pointerEntered(.glow)
+            glow.pointerExited(.glow)
+            XCTAssertFalse(glow.isPillShown, "\(edge): gone once its time is up")
+
+            glow.show(nil, moving: false)
+            XCTAssertEqual(glow.trackingAreas.count, 0, "\(edge)")
         }
+    }
+
+    /// A pointer that only crosses the edge, on its way from the sidebar
+    /// or the title bar, brings nothing up.
+    func testAPointerCrossingTheGlowBringsNoPill() {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let glow = rightEdge(in: container)
+        glow.hoverDwell = 3_600
+        glow.show(.alert(.waiting), moving: false, target: target())
+        glow.pointerEntered(.glow)
+        XCTAssertFalse(glow.isPillShown)
+        glow.pointerExited(.glow)
+        XCTAssertFalse(glow.isPillShown)
     }
 
     /// During its first seconds the pointer leaving changes nothing, and
@@ -395,14 +432,16 @@ final class AgentLightTests: XCTestCase {
     func testThePointerKeepsThePillPastItsFirstSeconds() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         let glow = rightEdge(in: container)
+        glow.hoverDwell = 0
+        glow.pillLinger = 0
         glow.show(.alert(.error), moving: false, target: target("claude exited mid-turn"), announcing: true)
-        glow.pointerMoved(to: NSPoint(x: 317, y: 40))
-        glow.pointerMoved(to: NSPoint(x: 100, y: 40))
+        glow.pointerEntered(.glow)
+        glow.pointerExited(.glow)
         XCTAssertTrue(glow.isPillShown, "still announcing")
-        glow.pointerMoved(to: NSPoint(x: 317, y: 40))
+        glow.pointerEntered(.glow)
         glow.endAnnouncement()
         XCTAssertTrue(glow.isPillShown, "the pointer is on the glow")
-        glow.pointerMoved(to: NSPoint(x: 100, y: 40))
+        glow.pointerExited(.glow)
         XCTAssertFalse(glow.isPillShown)
     }
 
@@ -434,6 +473,20 @@ final class AgentLightTests: XCTestCase {
         container.addSubview(columnLight)
         columnLight.show(.alert(.waiting), moving: false)
         XCTAssertNil(columnLight.hitTest(NSPoint(x: 1, y: 150)), "a column's light takes no click")
+    }
+
+    /// The shell's observers go away with it.
+    func testObserversLeaveWithTheirBag() {
+        let center = NotificationCenter()
+        let name = Notification.Name("AgentLightTests.ping")
+        let heard = Count()
+        var bag: ObserverBag? = ObserverBag()
+        bag?.add(center.addObserver(forName: name, object: nil, queue: nil) { _ in heard.value += 1 }, on: center)
+        center.post(name: name, object: nil)
+        XCTAssertEqual(heard.value, 1)
+        bag = nil
+        center.post(name: name, object: nil)
+        XCTAssertEqual(heard.value, 1)
     }
 
     // MARK: - The other dots that move
@@ -470,8 +523,7 @@ final class AgentLightTests: XCTestCase {
 
     /// The header's working dot and the row's breathe only while
     /// animations may run.
-    func testTheWorkingDotsFollowAnimates() throws {
-        try XCTSkipIf(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, "this Mac reduces motion")
+    func testTheWorkingDotsFollowAnimates() {
         let pill = ColumnStatusPill(frame: NSRect(x: 0, y: 0, width: 120, height: ColumnStatusPill.height))
         pill.status = ColumnHeaderView.Status("working", tone: .working)
         XCTAssertTrue(pill.isBreathing)
@@ -487,7 +539,28 @@ final class AgentLightTests: XCTestCase {
         }
         XCTAssertEqual(breathingDots(true), 1)
         XCTAssertEqual(breathingDots(false), 0)
+
+        // The sidebar redraws its rows, and its rail's badges, when told.
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
+        sidebar.isExpanded = true
+        sidebar.update(profiles: [], workspaces: [row])
+        let breathing = { sidebar.expandedViews.filter { $0.layer?.animation(forKey: "breathe") != nil }.count }
+        XCTAssertEqual(breathing(), 1)
+        sidebar.animates = false
+        XCTAssertEqual(breathing(), 0)
+        sidebar.animates = true
+        XCTAssertEqual(breathing(), 1)
+
+        sidebar.isExpanded = false
+        XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
+        sidebar.animates = false
+        XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 0)
     }
+}
+
+/// Counted from a notification block, which Swift takes for concurrent.
+private final class Count: @unchecked Sendable {
+    var value = 0
 }
 
 /// The lights in a window: when they may move, the turn end's sweep, the
@@ -547,14 +620,14 @@ final class AgentLightShellTests: XCTestCase {
     }
 
     private func info(_ workspace: WorkspaceState, index: Int, in shell: NiruxShellView, statuses: [AgentStatus],
-                      reasons: [Int: AgentAttentionReason] = [:]) -> WorkspaceInfo {
+                      reasons: [Int: AgentAttentionReason] = [:], turnEnds: [Int: TimeInterval] = [:]) -> WorkspaceInfo {
         let isActive = shell.activeWorkspace === workspace
         let columns = workspace.columns.enumerated().map { offset, column in
             ColumnInfo(
                 index: offset, processName: "claude", abbreviatedCwd: nil,
                 isFocused: isActive && offset == workspace.focusedIndex, isWebView: false, webTitle: nil,
                 terminalTitle: nil, agentStatus: statuses[offset], isEditor: false, editorFileName: nil,
-                attentionReason: reasons[offset], id: column.id
+                attentionReason: reasons[offset], id: column.id, turnEndedAt: turnEnds[offset] ?? 0
             )
         }
         return WorkspaceInfo(
@@ -664,9 +737,13 @@ final class AgentLightShellTests: XCTestCase {
         }
     }
 
-    private func hook(_ name: AgentHookEvent.Name, on column: ColumnState) throws {
-        _ = try XCTUnwrap(column.pty).applyAgentHook(
-            AgentHookEvent(kind: .claude, name: name, timestamp: Date().timeIntervalSince1970), isUserFocused: false
+    @discardableResult
+    private func hook(
+        _ name: AgentHookEvent.Name, kind: AgentHookEvent.Kind = .claude, finalMessage: String? = nil, on column: ColumnState
+    ) throws -> AgentHookOutcome {
+        try XCTUnwrap(column.pty).applyAgentHook(
+            AgentHookEvent(kind: kind, name: name, finalMessage: finalMessage, timestamp: Date().timeIntervalSince1970),
+            isUserFocused: false
         )
     }
 
@@ -693,6 +770,42 @@ final class AgentLightShellTests: XCTestCase {
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light, "then nothing")
             XCTAssertTrue(light.isSweeping)
+        }
+    }
+
+    /// A Claude turn end whose final message is being read sweeps once it
+    /// is found done, without waiting for a heartbeat. Codex's own report
+    /// counts as a turn end too.
+    func testAVerdictSettlesTheSweep() throws {
+        try withShell { shell, _, _ in
+            let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
+            let pty = try XCTUnwrap(column.pty)
+            let unread = ProcessSnapshot(entries: [])
+            shell.updateSidebar(snapshot: unread)
+            try hook(.userPromptSubmit, on: column)
+            shell.updateSidebar(snapshot: unread)
+            let light = try XCTUnwrap(column.light)
+
+            let request = try XCTUnwrap(hook(.stop, finalMessage: "All done.", on: column).turnEnd)
+            XCTAssertTrue(pty.awaitsAnyTurnEndVerdict)
+            shell.updateSidebar(snapshot: unread)
+            XCTAssertNil(light.light)
+            XCTAssertFalse(light.isSweeping, "not before it is known to be done")
+
+            XCTAssertNil(pty.applyTurnEndVerdict(.done, for: request, isUserFocused: false))
+            shell.turnEndSettled()
+            let deadline = Date().addingTimeInterval(10)
+            while !light.isSweeping, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+            XCTAssertTrue(light.isSweeping)
+
+            XCTAssertGreaterThan(pty.agentTurnEndedAt, 0)
+
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn()
+            let codex = try XCTUnwrap(workspace.columns.last)
+            XCTAssertEqual(codex.pty?.agentTurnEndedAt, 0)
+            try hook(.turnComplete, kind: .codex, on: codex)
+            XCTAssertGreaterThan(codex.pty?.agentTurnEndedAt ?? 0, 0, "Codex's report is a turn end as well")
         }
     }
 
@@ -743,6 +856,19 @@ final class AgentLightShellTests: XCTestCase {
             glow.endAnnouncement()
             refresh(true)
             XCTAssertFalse(glow.isPillShown, "a refresh of the same wait")
+            XCTAssertEqual(shell.agentLights.announced, [workspace.columns[3].id])
+            shell.updateAgentLights(infos: [self.info(
+                workspace, index: 0, in: shell, statuses: [.working, .needsAttention, .idle, .needsAttention],
+                reasons: [1: permission, 3: .question("Which one?")]
+            )])
+            XCTAssertEqual(glow.pillText, "claude has a question →")
+            XCTAssertFalse(glow.isPillShown, "the same column's wait, under another name")
+            // Another space on screen lists none of these columns: the
+            // wait is remembered for the way back.
+            shell.updateAgentLights(infos: [])
+            XCTAssertEqual(shell.agentLights.announced, [workspace.columns[3].id])
+            refresh(true)
+            XCTAssertFalse(glow.isPillShown)
 
             // Back in the app: the column's ring goes, the edge keeps its
             // glow, and the pill stays away.
@@ -784,6 +910,14 @@ final class AgentLightShellTests: XCTestCase {
             shell.closeActiveColumn()
             XCTAssertTrue(workspace.columns[0].isClosing)
             XCTAssertNil(light.light, "at once, not at the next refresh")
+
+            // Its turn ending meanwhile sweeps nothing: the column is leaving.
+            let neighbour = try XCTUnwrap(workspace.columns[1].light)
+            shell.updateAgentLights(infos: [info(
+                workspace, index: 0, in: shell, statuses: [.idle, .idle, .working, .working], turnEnds: [0: 5, 1: 5]
+            )])
+            XCTAssertFalse(light.isSweeping)
+            XCTAssertTrue(neighbour.isSweeping)
 
             workspace.closeColumn(at: 0)
             XCTAssertNil(light.superview)
