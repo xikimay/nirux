@@ -587,7 +587,7 @@ extension WorkspaceState {
         case .unchanged?, .line?:
             break
         case nil:
-            lastSummaryIsStatus = false
+            break
         }
         return true
     }

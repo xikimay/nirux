@@ -336,7 +336,7 @@ extension NiruxShellView {
                     lastSummary: workspace.lastSummary,
                     lastSummaryIsManual: workspace.lastSummaryIsManual,
                     // Quit while the next line was on its way: that turn's is unknown.
-                    lastSummaryIsStatus: workspace.lastSummaryIsStatus && workspace.awaitedTurnStatus == nil,
+                    lastSummaryIsStatus: workspace.lastSummaryIsStatus,
                     lastActivityAt: workspace.lastActivityAt,
                     nextStep: workspace.nextStep,
                     blocker: workspace.blocker,

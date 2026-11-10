@@ -307,7 +307,7 @@ final class AgentHookCenter {
         // Every turn end of the main thread the column took: watched or
         // not, ending on a question or not. One without a run leaves the
         // line from before it behind.
-        if event.kind == .claude, event.name == .stop, event.agentID == nil, pty.isCurrentTurnEnd(event.timestamp),
+        if event.kind == .claude, event.name == .stop, event.agentID == nil,
            !(statusMessage.map { writeTurnStatus(of: $0, endedAt: event.timestamp, in: resolution.workspace) } ?? false) {
             resolution.workspace.forgetTurnStatus(turnEndedAt: event.timestamp)
         }
