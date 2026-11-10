@@ -176,25 +176,89 @@ extension CITriage {
 
     /// The lines of `func <method>(` declared in the body of one of
     /// `types` (a class, struct or extension of that name: the failing
-    /// test's class, its extensions, its superclasses), comments skipped,
-    /// to its closing brace, 200 lines at most. Nil when none of them
-    /// declares it here: a method of the same name elsewhere in the file is
-    /// another test's.
+    /// test's class, its extensions, its superclasses), at the level of its
+    /// members (not a nested type's, nor a local function), comments
+    /// skipped, to its closing brace, 200 lines at most. Nil when none of
+    /// them declares it here: a method of the same name elsewhere in the
+    /// file is another test's. Bodies are bounded by indentation, not by
+    /// counting braces: a `"{"` in a string would throw the count off.
     static func testBody(method: String, inTypes types: Set<String>, in source: String) -> [String]? {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         var index = 0
         while index < lines.count {
-            // A type whose body is on its line (`class A: B {}`) declares nothing.
-            if let declared = parsedDeclaration(in: lines[index]), declared.kind == .type, types.contains(typeName(declared.text)),
-               let end = closingLine(from: index, in: lines), end > index {
-                for candidate in (index + 1)..<end where !isComment(lines[candidate]) && declaresFunction(lines[candidate], named: method) {
-                    return body(from: candidate, in: lines)
+            guard let declared = parsedDeclaration(in: lines[index]), declared.kind == .type, types.contains(typeName(declared.text)),
+                  let indent = indentation(of: lines[index])
+            else {
+                index += 1
+                continue
+            }
+            let end = typeEnd(from: index, indent: indent, in: lines)
+            var memberIndent: Int?
+            var inBlockComment = false
+            for candidate in (index + 1)..<max(end, index + 1) {
+                let line = lines[candidate]
+                if inBlockComment {
+                    if line.contains("*/") { inBlockComment = false }
+                    continue
                 }
-                index = end
+                if isComment(line) || isDirectiveOrComment(line) {
+                    let text = line.drop { $0 == " " || $0 == "\t" }
+                    if text.hasPrefix("/*"), !text.contains("*/") { inBlockComment = true }
+                    continue
+                }
+                guard let lineIndent = indentation(of: line), lineIndent > indent else { continue }
+                memberIndent = memberIndent ?? lineIndent
+                if lineIndent == memberIndent, declaresFunction(line, named: method) {
+                    return body(from: candidate, indent: lineIndent, in: lines)
+                }
+            }
+            index = max(end, index + 1)
+        }
+        return nil
+    }
+
+    /// The line a type's body ends on (its `}`), or the first line past it:
+    /// the first later line as little indented as the declaration, blank
+    /// lines, directives and comments aside. A body on the declaration's
+    /// own line (`class A: B {}`) ends at once.
+    private static func typeEnd(from start: Int, indent: Int, in lines: [Substring]) -> Int {
+        let opening = lines[start].filter { $0 == "{" }.count
+        if opening > 0, opening == lines[start].filter({ $0 == "}" }).count { return start + 1 }
+        var index = start + 1
+        while index < min(lines.count, start + 20_000) {
+            let line = lines[index]
+            if let lineIndent = indentation(of: line), !isDirectiveOrComment(line), lineIndent <= indent {
+                // `{` alone on the next line opens the body.
+                let text = line.drop { $0 == " " || $0 == "\t" }
+                if !(text.hasPrefix("{") && index == start + 1) { return index }
             }
             index += 1
         }
-        return nil
+        return index
+    }
+
+    /// From a method's line to its closing brace at its own indentation
+    /// (a signature's `) -> T {` at that indentation goes on), or its line
+    /// alone when its body is on it; 200 lines at most.
+    private static func body(from start: Int, indent: Int, in lines: [Substring]) -> [String] {
+        let first = lines[start]
+        let opening = first.filter { $0 == "{" }.count
+        if opening > 0, opening == first.filter({ $0 == "}" }).count { return [String(first)] }
+        var body = [String(first)]
+        for line in lines[(start + 1)...].prefix(199) {
+            guard let lineIndent = indentation(of: line), !isDirectiveOrComment(line), lineIndent <= indent else {
+                body.append(String(line))
+                continue
+            }
+            let text = line.drop { $0 == " " || $0 == "\t" }
+            if lineIndent == indent, text.hasPrefix(")") || text.hasPrefix("{") {
+                body.append(String(line))
+                continue
+            }
+            if lineIndent == indent, text.hasPrefix("}") { body.append(String(line)) }
+            break
+        }
+        return body
     }
 
     /// The class `className` inherits from, when `source` declares it
@@ -204,9 +268,21 @@ extension CITriage {
         for line in source.split(whereSeparator: \.isNewline) where !isComment(line) {
             guard let declared = parsedDeclaration(in: line), declared.text.hasPrefix("class "),
                   typeName(declared.text) == className,
-                  let name = line.range(of: className), let colon = line[name.upperBound...].firstIndex(of: ":")
+                  let name = line.range(of: className)
             else { continue }
-            let inherited = line[line.index(after: colon)...].drop { $0 == " " }
+            // Past a generic clause: `class Foo<T: P>: Base`.
+            var rest = line[name.upperBound...]
+            if rest.first == "<" {
+                var depth = 0
+                guard let close = rest.indices.first(where: { index in
+                    if rest[index] == "<" { depth += 1 }
+                    if rest[index] == ">" { depth -= 1 }
+                    return depth == 0
+                }) else { continue }
+                rest = rest[rest.index(after: close)...]
+            }
+            guard let colon = rest.firstIndex(of: ":") else { continue }
+            let inherited = rest[rest.index(after: colon)...].drop { $0 == " " }
                 .prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
             return inherited.isEmpty ? nil : String(inherited.split(separator: ".").last ?? inherited)
         }
@@ -217,44 +293,6 @@ extension CITriage {
     private static func typeName(_ declaration: String) -> String {
         let name = declaration.split(separator: " ").last ?? ""
         return String(name.split(separator: ".").last ?? name)
-    }
-
-    /// The line where the braces opened at `start` close, 20,000 lines at
-    /// most (braces in strings and comments are counted too).
-    private static func closingLine(from start: Int, in lines: [Substring]) -> Int? {
-        var depth = 0
-        var opened = false
-        for index in start..<min(lines.count, start + 20_000) {
-            for character in lines[index] {
-                if character == "{" {
-                    depth += 1
-                    opened = true
-                } else if character == "}" {
-                    depth -= 1
-                }
-            }
-            if opened, depth <= 0 { return index }
-        }
-        return nil
-    }
-
-    private static func body(from start: Int, in lines: [Substring]) -> [String] {
-        var body: [String] = []
-        var depth = 0
-        var opened = false
-        for line in lines[start...].prefix(200) {
-            body.append(String(line))
-            for character in line {
-                if character == "{" {
-                    depth += 1
-                    opened = true
-                } else if character == "}" {
-                    depth -= 1
-                }
-            }
-            if opened, depth <= 0 { break }
-        }
-        return body
     }
 
     private static func isComment(_ line: Substring) -> Bool {

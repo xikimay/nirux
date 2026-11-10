@@ -96,7 +96,8 @@ struct CITriageStore: Codable, Equatable {
 
     /// Keeps a triaged run. The tests of an attempt it replaces become
     /// earlier ones; read again (the same red checks), it keeps the earlier
-    /// ones it had. The oldest runs go past `maxRunsPerRepository`.
+    /// ones it had, and an answer owed twice is given up. The oldest runs
+    /// go past `maxRunsPerRepository`.
     mutating func keep(_ record: RunRecord, of run: CIFailure.Run) {
         var repository = repositories[Self.key(run.repository)] ?? Repository()
         var record = record
@@ -104,6 +105,9 @@ struct CITriageStore: Codable, Equatable {
             record.earlierTests = previous.signature == record.signature
                 ? previous.earlierTests
                 : Array(Set(previous.tests + previous.earlierTests)).sorted()
+            // Owed a second time for the same failure: what can't be
+            // answered now likely never will be. Kept as it is.
+            if previous.signature == record.signature, !previous.isFinal, !record.isFinal { record.verdict = "unsure" }
         }
         repository.runs["\(run.id)"] = record
         if repository.runs.count > Self.maxRunsPerRepository {

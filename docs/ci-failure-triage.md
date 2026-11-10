@@ -77,7 +77,9 @@ and the files the pull request changes with the function, property or type
 each change sits in (read from the workspace's repository, at the run's
 commit, in one `git cat-file --batch`). A test's source is the method in
 its own class's body, an extension of it, or a superclass (a mutant
-subclass runs its parent's tests), comments skipped. It answers one
+subclass runs its parent's tests), at the level of its members, comments
+skipped, bounded by indentation rather than by counting braces (a `"{"` in
+a string would throw a count off). It answers one
 sentence, then a last line holding FLAKY, REAL or UNSURE and nothing else;
 anything else is no answer. The sentence is the reason shown. A failing
 test that can't be found at the pull request's commit (one the base branch
@@ -140,8 +142,9 @@ used.
 - **A test's first flake** is unknown to rule 6; only the model can call it.
   A test on the flaky list stays there whatever made it fail next time.
 - **A run read when it couldn't be** (`gh` signed out, the model resting,
-  the agent not running yet) is read once more five minutes later, then
-  kept as it is.
+  the agent not running yet, a test not found) is read once more five
+  minutes later; an answer still owed the second time is given up and kept
+  as it is.
 - **The reason is a model's sentence about a log**, which the pull
   request's own code writes. It is cleaned, bounded and only ever shown. A
   log made to say "flaky" could earn the word; nothing acts on it. Failing
