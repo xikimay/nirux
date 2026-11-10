@@ -42,8 +42,69 @@ jobs:
               -o "settings set target.env-vars DYLD_FRAMEWORK_PATH=$platform/Library/Frameworks DYLD_LIBRARY_PATH=$platform/usr/lib NO_COLOR=1" \
               -o "process handle SIGPIPE -n true -p true -s false" \
               -o run \
-              -k "thread backtrace -c 40" \
-              -k "thread backtrace all -c 12" \
+              -k "thread backtrace -c 8" \
+              -k "register read" \
+              -k "disassemble -s \$pc-96 -c 48" \
+              -k "expr -l c -- (char *)getenv(\"HOME\")" \
+              -k "expr -l c -- (char *)getenv(\"XDG_CONFIG_HOME\")" \
+              -k "expr -l c -- (char *)getenv(\"GHOSTTY_RESOURCES_DIR\")" \
+              -k "expr -l c -- (char *)getenv(\"LANG\")" \
+              -k "expr -l c -- (char *)getenv(\"TMPDIR\")" \
+              -k "kill" \
+              -- "$xctest" -XCTest NiruxTests.TerminalDisplayIDTests "$bundle" 2>&1 | tail -250 || true
+          done
+
+  probe-with-early-init:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+      - name: Initialize Ghostty at bundle load (candidate fix)
+        run: |
+          python3 - <<'PY'
+          p = "Tests/NiruxTests/TestBootstrap.swift"
+          s = open(p).read()
+          old = "    defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)\n"
+          assert s.count(old) == 1
+          s = s.replace(old, old + "    MainActor.assumeIsolated { earlyController = TerminalAppearance.makeController() }\n")
+          s = s.replace("private let windowAnimationsKey", "nonisolated(unsafe) var earlyController: AnyObject?\nprivate let windowAnimationsKey", 1)
+          open(p, "w").write(s)
+          PY
+          grep -n "earlyController" Tests/NiruxTests/TestBootstrap.swift
+      - name: Build tests
+        run: swift build --build-tests
+      - name: The class under lldb
+        run: |
+          platform="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
+          xctest="$(xcrun --sdk macosx --find xctest)"
+          bundle="$(swift build --show-bin-path)/NiruxPackageTests.xctest"
+          for attempt in 1 2; do
+            echo "=== attempt $attempt"
+            lldb --batch \
+              -o "settings set target.env-vars DYLD_FRAMEWORK_PATH=$platform/Library/Frameworks DYLD_LIBRARY_PATH=$platform/usr/lib NO_COLOR=1" \
+              -o "process handle SIGPIPE -n true -p true -s false" \
+              -o run \
+              -k "thread backtrace -c 8" \
+              -k "register read" \
+              -k "disassemble -s \$pc-96 -c 48" \
+              -k "expr -l c -- (char *)getenv(\"HOME\")" \
+              -k "expr -l c -- (char *)getenv(\"XDG_CONFIG_HOME\")" \
+              -k "expr -l c -- (char *)getenv(\"GHOSTTY_RESOURCES_DIR\")" \
+              -k "expr -l c -- (char *)getenv(\"LANG\")" \
+              -k "expr -l c -- (char *)getenv(\"TMPDIR\")" \
               -k "kill" \
               -- "$xctest" -XCTest NiruxTests.TerminalDisplayIDTests "$bundle" 2>&1 | tail -250 || true
           done
