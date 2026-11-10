@@ -26,7 +26,8 @@ extension NiruxShellView {
         startedByAgent: Bool = false,
         setupScript: URL? = nil,
         isLead: Bool = false,
-        activate: Bool = true
+        activate: Bool = true,
+        slidesIn: Bool = false
     ) {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
@@ -80,7 +81,10 @@ extension NiruxShellView {
             sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
         }
 
-        if let snapshot {
+        if let snapshot, slidesIn, agentLightsMayMove {
+            // A task born from the ⌘N sheet (NiruxShellView+TaskBirth).
+            slideInNewWorkspace(workspace, over: snapshot)
+        } else if let snapshot {
             viewport.addSubview(snapshot)
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.3

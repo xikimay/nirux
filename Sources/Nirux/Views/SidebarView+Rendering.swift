@@ -22,6 +22,7 @@ extension SidebarView {
             let docHeight = buildRail()
             refreshHoverTargetFromMouse()
             followActiveWorkspace(docHeight: docHeight)
+            applyBirthMotion()
             return
         }
 
@@ -70,6 +71,7 @@ extension SidebarView {
         refreshHoverTargetFromMouse()
         refreshApprovalArming()
         followActiveWorkspace(docHeight: docHeight)
+        applyBirthMotion()
         if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
             revealsOnboardingCardOnNextBuild = false
             revealOnboardingCard()
