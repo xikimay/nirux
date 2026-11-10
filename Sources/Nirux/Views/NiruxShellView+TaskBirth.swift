@@ -44,7 +44,6 @@ extension NiruxShellView {
     func playTaskBirth(of workspace: WorkspaceState) {
         let picture = pendingTaskSheet
         pendingTaskSheet = nil
-        guard agentLightsMayMove else { return }
         // Without a sheet (a task its Lead starts) nothing travels to the
         // row: it opens at once.
         sidebar.noteBirth(workspaceID: workspace.id, delay: picture == nil ? 0 : Self.taskBirthRowDelay)

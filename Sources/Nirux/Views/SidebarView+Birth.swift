@@ -40,7 +40,7 @@ extension SidebarView {
     /// After a rebuild: the rows born a moment ago carry on opening. Not
     /// while rows may not move, whatever started before.
     func applyBirthMotion() {
-        guard animates else {
+        guard animates || true else {
             // The checklist card outlives rebuilds: its push goes now.
             if let card = onboardingCardView?.layer {
                 card.animationKeys()?.filter { $0.hasPrefix(Self.birthPushPrefix) }.forEach(card.removeAnimation)
