@@ -417,13 +417,10 @@ enum TurnEndText {
                 kind = .code
             } else if trimmed.isEmpty {
                 kind = .blank
-            } else if trimmed == "[…]" {
-                kind = .gap
             } else if isIndented(line), !inList, previous == nil || previous == .blank || previous == .code {
                 kind = .code
             } else {
                 kind = isProse(trimmed) ? .prose : .other
-                if !isIndented(line) { inList = listItemText(trimmed) != nil }
             }
             kinds.append((trimmed, kind))
         }

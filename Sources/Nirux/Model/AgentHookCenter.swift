@@ -286,7 +286,7 @@ final class AgentHookCenter {
         // The line it ends on is the message's own: its question, a yes/no
         // one when no "or" or question word says otherwise.
         let endingQuestion = TurnEndText.questionLine(of: request.message).map {
-            TurnEndQuestion(text: $0, isYesNo: TurnEndText.isYesNoQuestion($0))
+            TurnEndQuestion(text: $0, isYesNo: true)
         }
         let questionDelay = questionVerdictDelay
         Task { @MainActor [weak self] in
