@@ -76,6 +76,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 2, args[1] == "--mission" {
             exit(MissionEventCLI.main(Array(args.dropFirst(2))))
         }
+        // The nightly runs it on the app it packaged, before notarizing: a
+        // terminal runtime that doesn't load (libghostty-spm's resources
+        // left out of the app) fails the nightly, not users' first terminal.
+        if args.count == 2, args[1] == "--check-terminal-runtime" {
+            exit(MainActor.assumeIsolated { TerminalAppearance.checkRuntime() })
+        }
         // The nightly checks the app it publishes the way the merge queue
         // checks itself; with a path, another app (a downloaded nightly).
         if args.count >= 2, args[1] == "--check-release-signature" {

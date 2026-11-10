@@ -979,6 +979,10 @@ final class PtySession: @unchecked Sendable {
             setenv("PATH", effectivePath, 1)
             setenv("TERM", "xterm-256color", 1)
             setenv("LANG", "en_US.UTF-8", 1)
+            // libghostty-spm sets it in Nirux's process for its own exec
+            // backend; a shell finding it would source Ghostty's
+            // integration, which Nirux's terminals never had.
+            unsetenv("GHOSTTY_RESOURCES_DIR")
             for (name, value) in environment {
                 setenv(name, value, 1)
             }

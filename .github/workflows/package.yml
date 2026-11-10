@@ -1,0 +1,57 @@
+name: Package
+
+# The nightly packages and publishes only from main. A pull request that
+# changes how the app is built or bundled packages it here first, the way the
+# nightly does (ad-hoc signed), and checks the packaged terminal runtime.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Package.resolved
+      - scripts/bundle.sh
+      - Resources/Info.plist
+      - Sources/Nirux/NiruxApp.swift
+      - Sources/Nirux/Util/TerminalConfigBuilder.swift
+      - .github/workflows/nightly.yml
+      - .github/workflows/package.yml
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+
+      # The cache tests.yml and the nightly use (GhosttyKit's download
+      # sometimes fails to connect).
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Bundle .app
+        run: ./scripts/bundle.sh 0.0.0 0
+
+      - name: Check the packaged app's terminal runtime
+        run: Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime

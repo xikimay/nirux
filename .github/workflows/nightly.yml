@@ -154,6 +154,12 @@ jobs:
         timeout-minutes: 5
         run: scripts/launch-check.sh Nirux.app
 
+      # libghostty-spm's resources come from inside the app, not from this
+      # machine's build folder, which no other Mac has.
+      - name: Check the packaged app's terminal runtime
+        timeout-minutes: 5
+        run: Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime
+
       - name: Notarize and staple app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}

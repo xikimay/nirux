@@ -33,11 +33,12 @@ final class TerminalConfigBuilderTests: XCTestCase {
         // libghostty-spm defaults plus its Afterglow dark palette. Compared
         // with the pinned library's own Afterglow, which Nirux writes out.
         let lines = renderedLines([])
-        XCTAssertEqual(Array(lines.prefix(4)), [
-            "cursor-style = block", "cursor-style-blink = true", "font-size = 14", "font-thicken = true"
+        XCTAssertEqual(Array(lines.prefix(5)), [
+            "cursor-style = block", "cursor-style-blink = true", "font-size = 14", "font-thicken = true",
+            "copy-on-select = clipboard"
         ])
         XCTAssertEqual(
-            Array(lines.dropFirst(4).dropLast(Builder.enforced.count)),
+            Array(lines.dropFirst(5).dropLast(Builder.enforced.count)),
             TerminalConfiguration.afterglow.rendered.split(separator: "\n").map(String.init)
         )
         XCTAssertEqual(Array(lines.suffix(Builder.enforced.count)), Builder.enforced)
