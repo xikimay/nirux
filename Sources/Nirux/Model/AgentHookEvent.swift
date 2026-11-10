@@ -90,6 +90,13 @@ struct AgentHookEvent: Codable, Equatable {
     /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
     /// and when the receiver or the app drops it (see `TurnEndMarker`).
     var finalMessage: String?
+    /// On a main-thread SessionStart, UserPromptSubmit or Stop: whether
+    /// this `claude` runs on the login Nirux's own `claude -p` uses
+    /// (`TurnEndText.agentOnNiruxAccount`), which only the receiver can
+    /// tell, from the agent's environment. The CI failure triage sends
+    /// nothing to a model for a workspace whose agent is elsewhere. Nil
+    /// from older receivers and on other events: not known to be.
+    var onNiruxAccount: Bool?
     /// On a Stop, Claude's `stop_hook_active`: the turn went on because a
     /// Stop hook blocked its end, and this is the end of that continuation
     /// (the end of the turn, unless a hook blocks again).
@@ -208,6 +215,13 @@ struct AgentHookEvent: Codable, Equatable {
         }
     }
 
+    /// The main-thread events of a turn's edges, where the receiver says
+    /// which account the agent runs on (`onNiruxAccount`): often enough for
+    /// a `claude` started before Nirux, which sends no SessionStart.
+    var reportsAccount: Bool {
+        kind == .claude && agentID == nil && [.sessionStart, .userPromptSubmit, .stop].contains(name)
+    }
+
     /// Events that bind or confirm the column's session — where its
     /// transcript is worth knowing.
     static func carriesTranscriptPath(_ name: Name) -> Bool {
@@ -258,6 +272,7 @@ struct AgentHookEvent: Codable, Equatable {
         reviewHeader: String? = nil,
         finalMessage: String? = nil,
         stopHookActive: Bool? = nil,
+        onNiruxAccount: Bool? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -285,6 +300,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.reviewHeader = reviewHeader
         self.finalMessage = finalMessage
         self.stopHookActive = stopHookActive
+        self.onNiruxAccount = onNiruxAccount
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText
@@ -352,11 +368,14 @@ enum AgentHookCLI {
             now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
+        if event.reportsAccount {
+            event.onNiruxAccount = TurnEndText.agentOnNiruxAccount(
+                environment: env, cwd: event.cwd, home: env["HOME"] ?? NSHomeDirectory()
+            )
+        }
         // Written only for a running Nirux that will read it, and an agent
         // on the login its `claude -p` uses.
-        if event.finalMessage != nil,
-           !TurnEndMarker.allowsMessage(environment: env)
-            || TurnEndText.settingsUseOtherAccount(environment: env, cwd: event.cwd, home: env["HOME"] ?? NSHomeDirectory()) {
+        if event.finalMessage != nil, event.onNiruxAccount != true || !TurnEndMarker.allowsMessage(environment: env) {
             event.finalMessage = nil
         }
 

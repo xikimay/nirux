@@ -498,6 +498,22 @@ final class ColumnState {
         return admission
     }
 
+    /// Whether the column's `claude` runs on the login Nirux's own `claude
+    /// -p` uses, as its hooks last said (`AgentHookEvent.onNiruxAccount`),
+    /// and of which process: another `claude` in the column starts unknown.
+    private var claudeAccount: (process: ProcessInstance, onNiruxAccount: Bool)?
+
+    func noteClaudeAccount(onNiruxAccount: Bool, of process: ProcessInstance) {
+        claudeAccount = (process, onNiruxAccount)
+    }
+
+    /// Nil: no `claude` in front, or one that hasn't said (it fails safe:
+    /// nothing of its project goes to a model).
+    func isClaudeOnNiruxAccount(foregroundProcess: ForegroundProcess?) -> Bool? {
+        guard let claudeAccount, let foregroundProcess, foregroundProcess.instance == claudeAccount.process else { return nil }
+        return claudeAccount.onNiruxAccount
+    }
+
     /// Whether the event was fired by the column's own `claude` (or the real
     /// one under its launcher) for the session it confirmed (#23, #28): the
     /// sidebar may answer its PermissionRequest, and the session history

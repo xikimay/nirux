@@ -574,7 +574,7 @@ final class SidebarView: NSView {
 
         let cleanup = worktreeCleanupOffer?(workspaceIndex)
         menu.addClosureItem(title: "Review Branch") { act(.reviewBranch) }
-        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, act: act)
+        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, flakyReason: workspace?.ciFlakyReason, act: act)
         if cleanup == .suggested { addWorktreeCleanupItem(to: menu, act: act) }
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.

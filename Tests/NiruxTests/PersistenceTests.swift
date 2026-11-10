@@ -556,6 +556,19 @@ extension PersistedStateCodingTests {
         XCTAssertFalse(decoded.alertOnlyWhenClaudeAsks)
     }
 
+    /// The CI failure triage: on for every install, off survives.
+    func testCIFailureTriageIsOnUnlessTurnedOff() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.triageCIFailures)
+        XCTAssertTrue(PersistedSettings().triageCIFailures)
+
+        var settings = PersistedSettings()
+        settings.triageCIFailures = false
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(decoded.triageCIFailures)
+        XCTAssertTrue(decoded.alertOnlyWhenClaudeAsks, "its own key")
+    }
+
     // MARK: - cliArgs wire format
 
     /// Lock down the CLI flag mapping so a future rename in the enum doesn't

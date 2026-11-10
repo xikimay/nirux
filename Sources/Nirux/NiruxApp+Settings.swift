@@ -216,6 +216,11 @@ extension NiruxApp {
         )
         onlyAsks.state = current.alertOnlyWhenClaudeAsks ? .on : .off
         settingsAlertOnlyWhenClaudeAsksCheckbox = onlyAsks
+        let flakyCI = SettingsForm.checkbox(
+            "Say when a CI failure looks flaky", target: self, action: #selector(settingsTriageCIFailuresChanged(_:))
+        )
+        flakyCI.state = current.triageCIFailures ? .on : .off
+        settingsTriageCIFailuresCheckbox = flakyCI
 
         return SettingsForm.pane([
             [
@@ -225,6 +230,16 @@ extension NiruxApp {
                         + "subscription only) and Nirux alerts only if it asks you something. When that check "
                         + "can't run, the turn alerts. Codex and other agents alert at every turn end.",
                     under: onlyAsks
+                ),
+                flakyCI,
+                SettingsForm.hint(
+                    "When a pull request's checks fail, Nirux reads the failed job's log with gh and says \"likely "
+                        + "flaky\" when a rerun would probably pass: a job that never ran, a failed download, tests "
+                        + "that passed on a rerun before. For failing tests the pull request doesn't edit, Sonnet "
+                        + "reads their messages and source (claude -p, on a Claude subscription only, and only when "
+                        + "the workspace's Claude Code runs on that account). XCTest and Swift build logs only. "
+                        + "Nirux never reruns by itself.",
+                    under: flakyCI
                 ),
                 SettingsForm.hint(
                     "Banners and sounds, shown while Nirux is in the background, follow System Settings › "
@@ -418,17 +433,50 @@ extension NiruxApp {
         PersistedSettings.effective(Persistence.load()?.settings).alertOnlyWhenClaudeAsks
     }
 
+    @objc func settingsTriageCIFailuresChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.triageCIFailures = enabled }) else { return }
+        applyCITriage(enabled: enabled, readsFinalMessages: AgentHookCenter.shared.turnEndClassifier != nil)
+    }
+
+    static func currentTriageCIFailures() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).triageCIFailures
+    }
+
+    /// The triage on or off in the shell, the model's setup checked ahead
+    /// of the first failure, and the marker hook receivers read.
+    func applyCITriage(enabled: Bool, readsFinalMessages: Bool) {
+        shell?.setCITriage(enabled: enabled)
+        Self.publishAccountMarker(readsFinalMessages: readsFinalMessages, triagesCI: enabled)
+        if enabled { Self.prepareCITriageModel() }
+    }
+
+    /// Checks the account the triage's model would run on (`claude
+    /// --help`, `claude auth status`, in the background); tests put a
+    /// double here, so that turning the option on never runs the real
+    /// `claude`.
+    static var prepareCITriageModel: () -> Void = { CITriageModel.runner.account.prepare() }
+
     /// The classifier when the option is on, its setup checked ahead of
     /// the first turn end; the marker tells hook receivers whether to keep
     /// final messages.
     static func turnEndClassifier(enabled: Bool) -> (any TurnEndClassifier)? {
+        let isRunning = ProcessInstance.running(pid: getpid()) != nil
+        publishAccountMarker(readsFinalMessages: enabled, triagesCI: currentTriageCIFailures())
+        return enabled && isRunning ? makeTurnEndClassifier() : nil
+    }
+
+    /// The marker of this Nirux while an option needs what hook receivers
+    /// know of the agent's account (`TurnEndMarker`); none otherwise.
+    static func publishAccountMarker(readsFinalMessages: Bool, triagesCI: Bool) {
         let me = ProcessInstance.running(pid: getpid())
-        guard enabled, let me else {
+        guard let me, readsFinalMessages || triagesCI else {
             TurnEndMarker.withdraw(app: me)
-            return nil
+            return
         }
-        TurnEndMarker.publish(app: me, environment: ProcessInfo.processInfo.environment)
-        return makeTurnEndClassifier()
+        TurnEndMarker.publish(
+            app: me, environment: ProcessInfo.processInfo.environment, readsFinalMessages: readsFinalMessages
+        )
     }
 
     /// The classifier in use; tests put a double here, so that turning the
@@ -467,6 +515,7 @@ extension NiruxApp {
         settingsExplainModelPopup = nil
         settingsExplainEffortPopup = nil
         settingsAlertOnlyWhenClaudeAsksCheckbox = nil
+        settingsTriageCIFailuresCheckbox = nil
     }
 }
 

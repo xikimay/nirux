@@ -23,6 +23,8 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private static let ciFailureCategory = "ciFailure"
+    /// A failure that looks flaky: the rerun comes first.
+    private static let flakyCIFailureCategory = "ciFailureFlaky"
 
     /// UNUserNotificationCenter requires a signed bundle with an identifier;
     /// `swift run` debug binaries have neither and would raise.
@@ -35,16 +37,14 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         // Foreground: both actions act in the app, and a rerun asks first.
-        center.setNotificationCategories([UNNotificationCategory(
-            identifier: Self.ciFailureCategory,
-            actions: [
-                UNNotificationAction(identifier: CIFailureAction.whyFailed.rawValue, title: "Ask Agent Why CI Failed",
-                                     options: [.foreground]),
-                UNNotificationAction(identifier: CIFailureAction.rerunFailed.rawValue, title: "Rerun Failed CI Jobs…",
-                                     options: [.foreground])
-            ],
-            intentIdentifiers: []
-        )])
+        let whyFailed = UNNotificationAction(identifier: CIFailureAction.whyFailed.rawValue, title: "Ask Agent Why CI Failed",
+                                             options: [.foreground])
+        let rerunFailed = UNNotificationAction(identifier: CIFailureAction.rerunFailed.rawValue, title: "Rerun Failed CI Jobs…",
+                                               options: [.foreground])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.ciFailureCategory, actions: [whyFailed, rerunFailed], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Self.flakyCIFailureCategory, actions: [rerunFailed, whyFailed], intentIdentifiers: [])
+        ])
         // @Sendable keeps the closure nonisolated: UNUserNotificationCenter
         // invokes it on a background queue, and a MainActor-inferred closure
         // would trap the runtime isolation check there.
@@ -127,16 +127,31 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// "CI failed" / workspace / "#52: test, lint". Check names come from
     /// GitHub: cleaned and bounded like an agent's text.
-    func postCIFailure(workspaceID: String, workspaceTitle: String, pullRequest: Int, checkNames: [String]) {
+    func postCIFailure(
+        workspaceID: String, workspaceTitle: String, pullRequest: Int, checkNames: [String], flakyReason: String? = nil
+    ) {
         guard !NSApp.isActive else { return }
+        let text = Self.ciFailureText(pullRequest: pullRequest, checkNames: checkNames, flakyReason: flakyReason)
         let content = UNMutableNotificationContent()
-        content.title = "CI failed"
+        content.title = text.title
         content.subtitle = workspaceTitle
-        content.body = AgentText.clean("#\(pullRequest): " + checkNames.joined(separator: ", "), maxLength: 200) ?? ""
+        content.body = text.body
         content.sound = .default
-        content.categoryIdentifier = Self.ciFailureCategory
+        content.categoryIdentifier = flakyReason == nil ? Self.ciFailureCategory : Self.flakyCIFailureCategory
         content.userInfo = ["workspaceID": workspaceID]
         post(content)
+    }
+
+    /// "CI failed" and "#52: test, lint"; for a failure that looks flaky
+    /// (docs/ci-failure-triage.md), "CI failed · likely flaky" and the
+    /// reason on a line of its own. The reason is cleaned again here: it
+    /// may be a model's sentence about a log.
+    nonisolated static func ciFailureText(pullRequest: Int, checkNames: [String], flakyReason: String?) -> (title: String, body: String) {
+        let checks = AgentText.clean("#\(pullRequest): " + checkNames.joined(separator: ", "), maxLength: 200) ?? ""
+        guard let reason = flakyReason.flatMap({ AgentText.clean($0, maxLength: CITriage.reasonLength) }) else {
+            return ("CI failed", checks)
+        }
+        return ("CI failed · likely flaky", checks + "\n" + reason)
     }
 
     /// "Setup script failed" / workspace: a new worktree's setup script

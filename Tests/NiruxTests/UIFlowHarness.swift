@@ -69,6 +69,8 @@ final class UIFlowHarness {
     private(set) var setupFailures: [String] = []
     /// Workspaces whose Mission question came to the user and was notified.
     private(set) var missionQuestionNotices: [String] = []
+    /// CI failures notified: each with why it looks flaky, when it does.
+    private(set) var ciFailureNotices: [(banner: CIFailureBanner, flakyReason: String?)] = []
     /// Browser profiles the cookie double reports.
     var cookieSources: [CookieImporter.Source] = []
     /// Browsers the menu offers; the sources' browsers when nil.
@@ -201,6 +203,9 @@ final class UIFlowHarness {
         // Never UNUserNotificationCenter in xctest.
         shell.sideEffects.notifySetupFailure = { [weak self] workspaceID, _ in self?.setupFailures.append(workspaceID) }
         shell.sideEffects.notifyMissionQuestion = { [weak self] workspaceID, _, _, _ in self?.missionQuestionNotices.append(workspaceID) }
+        shell.sideEffects.notifyCIFailure = { [weak self] banner, flakyReason in self?.ciFailureNotices.append((banner, flakyReason)) }
+        // Neither GitHub nor a model: a test that turns the triage on brings its own reader.
+        shell.sideEffects.investigateCIFailure = { _ in CITriageInvestigation.Outcome() }
         // The real Trash never gets a test's file.
         shell.sideEffects.trash = { url in try FileManager.default.removeItem(at: url) }
         shell.sideEffects.claudeManagedSettings = { [root] in

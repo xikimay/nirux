@@ -125,6 +125,17 @@ final class WorkspaceState {
     /// which branch. The first call, at launch or on another branch, only
     /// records: a pull request that was already red isn't news.
     private var reportedRedChecks: (branch: String?, keys: Set<String>)?
+    /// What the triage made of the pull request's red checks
+    /// (docs/ci-failure-triage.md), and of which ones (`CITriage.signature`):
+    /// a new failure isn't the one it was about.
+    var ciTriage: (signature: String, verdict: CITriage.Verdict)?
+
+    /// Why the pull request's red checks look flaky, when the triage said
+    /// so of the checks that are red now.
+    var ciFlakyReason: String? {
+        guard let ciTriage, let prInfo, ciTriage.signature == CITriage.signature(of: CIFailure.redChecks(prInfo)) else { return nil }
+        return ciTriage.verdict.flakyReason
+    }
     var diffStats: String?
 
     // Workspace context. The purpose is the user's. `phase` is a manual
