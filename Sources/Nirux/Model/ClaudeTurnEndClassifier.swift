@@ -97,7 +97,8 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// The flags of a run: the model alone, confined, no tools, with the prompt
     /// above; the message on standard input, its events out (the first one
     /// says which account it uses). `--max-budget-usd` caps a run that
-    /// would go wrong (a normal one costs a hundredth of it).
+    /// would go wrong (a normal one costs a twenty-fifth of it, an eighth
+    /// when the prompt's cache is cold).
     static func arguments() -> [String] {
         ClaudeOneShotRunner.arguments(for: client)
     }

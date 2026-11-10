@@ -226,8 +226,9 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
     }
 
     /// `ClaudeCLI.environment`'s, without thinking (Claude Code turns it on
-    /// for Haiku, which then spends thousands of tokens on one word) and
-    /// without updates: a run of Nirux's own mustn't update `claude`.
+    /// for Haiku and Sonnet alike, which then spend hundreds to thousands
+    /// of tokens and seconds on a short answer) and without updates: a run
+    /// of Nirux's own mustn't update `claude`.
     static func environment(for cli: BranchReview.ClaudeCLI, from base: [String: String] = ProcessInfo.processInfo.environment)
         -> [String: String] {
         var environment = cli.environment(from: base)
