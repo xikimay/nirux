@@ -521,8 +521,8 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(indicator.pulsingRings, [], "an empty space keeps no ring")
     }
 
-    /// The header's working dot and the row's breathe only while
-    /// animations may run.
+    /// The header's working dot and the rail's badge breathe only while
+    /// animations may run. (A row shows work as a line: SidebarRowMotionTests.)
     func testTheWorkingDotsFollowAnimates() {
         let pill = ColumnStatusPill(frame: NSRect(x: 0, y: 0, width: 120, height: ColumnStatusPill.height))
         pill.status = ColumnHeaderView.Status("working", tone: .working)
@@ -533,25 +533,8 @@ final class AgentLightTests: XCTestCase {
         XCTAssertTrue(pill.isBreathing)
 
         let row = workspace(0, "checkout", [column(0, status: .working)])
-        let breathingDots = { (animates: Bool) in
-            SidebarWorkspaceCardRenderer(workspace: row, sidebarWidth: 260, yOffset: 500, animates: animates).render()
-                .views.filter { $0.layer?.animation(forKey: "breathe") != nil }.count
-        }
-        XCTAssertEqual(breathingDots(true), 1)
-        XCTAssertEqual(breathingDots(false), 0)
-
-        // The sidebar redraws its rows, and its rail's badges, when told.
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
-        sidebar.isExpanded = true
         sidebar.update(profiles: [], workspaces: [row])
-        let breathing = { sidebar.expandedViews.filter { $0.layer?.animation(forKey: "breathe") != nil }.count }
-        XCTAssertEqual(breathing(), 1)
-        sidebar.animates = false
-        XCTAssertEqual(breathing(), 0)
-        sidebar.animates = true
-        XCTAssertEqual(breathing(), 1)
-
-        sidebar.isExpanded = false
         XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
         sidebar.animates = false
         XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 0)
@@ -766,10 +749,13 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertTrue(light.isSoft, "the focused column")
             XCTAssertFalse(light.isSweeping)
 
+            XCTAssertTrue(shell.sidebar.turnEndedAt.isEmpty)
             try hook(.stop, on: column)
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light, "then nothing")
             XCTAssertTrue(light.isSweeping)
+            let workspaceID = try XCTUnwrap(shell.activeWorkspace?.id)
+            XCTAssertNotNil(shell.sidebar.turnEndedAt[workspaceID], "and its row draws its check")
         }
     }
 
@@ -824,6 +810,7 @@ final class AgentLightShellTests: XCTestCase {
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light)
             XCTAssertFalse(light.isSweeping)
+            XCTAssertTrue(shell.sidebar.turnEndedAt.isEmpty, "nor a check on its row")
         }
     }
 

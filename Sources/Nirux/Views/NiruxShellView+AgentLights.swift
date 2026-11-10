@@ -93,6 +93,10 @@ extension NiruxShellView {
         }
         let ended = agentLights.turnEnds.update(columns: columns)
         applyAgentLights(sweeping: ended)
+        // After the lights: the sidebar knows by now whether it may move.
+        sidebar.noteTurnEnded(workspaceIDs: Set(infos.filter { info in
+            info.columns.contains { column in column.id.map(ended.contains) ?? false }
+        }.map(\.id)))
     }
 
     /// Shows the plan as it stands. Also when only what may move changed:

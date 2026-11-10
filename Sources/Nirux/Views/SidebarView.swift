@@ -251,9 +251,25 @@ final class SidebarView: NSView {
     /// actually would.
     private var lastRenderSignature: Int?
 
-    /// The working dots breathe; false: they show steady. The shell
-    /// decides (`NiruxShellView.agentLightsMayMove`): Reduce motion, the
-    /// setting, a window nobody sees.
+    /// When the agent of a row ended its turn (`CACurrentMediaTime`), by
+    /// workspace: the row's mark draws a check for
+    /// `SidebarWorkspaceCardRenderer.checkDuration`, across rebuilds.
+    private(set) var turnEndedAt: [String: CFTimeInterval] = [:]
+
+    /// The turns that just ended in these workspaces: their rows draw a
+    /// check, if rows may move.
+    func noteTurnEnded(workspaceIDs: Set<String>, now: CFTimeInterval = CACurrentMediaTime()) {
+        turnEndedAt = turnEndedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.checkDuration }
+        guard animates, !workspaceIDs.isEmpty else { return }
+        for id in workspaceIDs { turnEndedAt[id] = now }
+        lastRenderSignature = renderSignature()
+        rebuildContent()
+    }
+
+    /// The rows move: a line of light under a working one, a check at a
+    /// turn's end, the rail's breathing badges; false: states show steady.
+    /// The shell decides (`NiruxShellView.agentLightsMayMove`): Reduce
+    /// motion, the setting, a window nobody sees.
     var animates = true {
         didSet {
             guard animates != oldValue else { return }
