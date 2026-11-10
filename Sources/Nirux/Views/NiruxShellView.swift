@@ -101,6 +101,7 @@ final class NiruxShellView: NSView {
     /// Notifications; see `SidebarCatchUp`).
     var catchUpEnabled = PersistedSettings().showCatchUp
     var catchUpState = CatchUpState(tracker: AwayTracker(now: Date().timeIntervalSince1970))
+    let catchUpObservers = ObserverBag()
     /// Mission questions handed to the user (the child's card turned
     /// amber), by question ID: the child workspace whose notification they
     /// raised, once.
@@ -298,15 +299,21 @@ final class NiruxShellView: NSView {
             self?.showMissionReplyPopover(workspaceIndex: wsIndex, columnIndex: colIndex, anchor: anchor)
         }
         sidebar.onPermissionDecision = { [weak self] wsIndex, colIndex, requestID, behavior in
+            self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.decidePermission(
                 workspaceIndex: wsIndex, columnIndex: colIndex, requestID: requestID, behavior: behavior
             )
         }
         sidebar.onAgentResume = { [weak self] wsIndex, colIndex, failedAt in
+            self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
         }
         sidebar.onTurnAnswer = { [weak self] question, answer, button in
-            self?.answerFromCard(answer, to: question, button: button)
+            guard let self else { return }
+            if let index = self.workspaces.firstIndex(where: { $0.columns.contains { $0.id == question.columnID } }) {
+                self.noteCatchUpTaskAnswered(workspaceIndex: index)
+            }
+            self.answerFromCard(answer, to: question, button: button)
         }
         wireDeferredAgentResume()
         wireAgentLights()

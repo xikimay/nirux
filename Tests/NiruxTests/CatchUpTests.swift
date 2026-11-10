@@ -10,28 +10,28 @@ final class CatchUpTests: XCTestCase {
     // MARK: - Away and back
 
     /// Another app, another macOS account, a screen asleep or locked: all
-    /// are away, until every one is over.
+    /// are away, until every one is over. Read whole each time: a lock's
+    /// notifications that reach an inactive app late leave nothing behind.
     func testEveryWayOfLeavingIsAway() {
         var tracker = AwayTracker(now: 0)
-        XCTAssertEqual(tracker.set(.appActive, holds: false, at: 10), .wentAway)
-        XCTAssertNil(tracker.set(.screenUnlocked, holds: false, at: 20))
-        XCTAssertNil(tracker.set(.appActive, holds: true, at: 30), "still locked")
-        XCTAssertEqual(tracker.set(.screenUnlocked, holds: true, at: 1_000), .cameBack(since: 10))
+        XCTAssertEqual(tracker.update(missing: [.appActive], at: 10), .wentAway)
+        XCTAssertNil(tracker.update(missing: [.appActive, .screenUnlocked], at: 20))
+        XCTAssertNil(tracker.update(missing: [.screenUnlocked], at: 30), "still locked")
+        XCTAssertEqual(tracker.update(missing: [], at: 1_000), .cameBack(since: 10))
         XCTAssertNil(tracker.awaySince)
 
-        XCTAssertEqual(tracker.set(.sessionActive, holds: false, at: 2_000), .wentAway, "the other account in front")
-        XCTAssertNil(tracker.set(.screenAwake, holds: false, at: 2_100))
-        XCTAssertNil(tracker.set(.screenAwake, holds: true, at: 2_200))
-        XCTAssertEqual(tracker.set(.sessionActive, holds: true, at: 3_000), .cameBack(since: 2_000))
-        XCTAssertNil(tracker.set(.appActive, holds: true, at: 3_100), "nothing changed")
+        XCTAssertEqual(tracker.update(missing: [.sessionActive], at: 2_000), .wentAway, "the other account in front")
+        XCTAssertNil(tracker.update(missing: [.sessionActive, .screenAwake], at: 2_100))
+        XCTAssertEqual(tracker.update(missing: [], at: 3_000), .cameBack(since: 2_000))
+        XCTAssertNil(tracker.update(missing: [], at: 3_100), "nothing changed")
 
-        let background = AwayTracker(missing: [.appActive], now: 50)
-        XCTAssertEqual(background.awaySince, 50, "started in the background")
+        let switchedOut = AwayTracker(missing: [.sessionActive], now: 50)
+        XCTAssertEqual(switchedOut.awaySince, 50, "started in a session switched out")
     }
 
     // MARK: - The card
 
-    private let t0 = Date().timeIntervalSince1970 - 3 * 3_600
+    private let t0 = Date().timeIntervalSince1970 - 5 * 3_600
 
     private func endTurn(of workspace: WorkspaceState, at time: TimeInterval) throws {
         let pty = try XCTUnwrap(workspace.columns.first?.pty)
@@ -39,42 +39,53 @@ final class CatchUpTests: XCTestCase {
         _ = pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .stop, sessionID: "s", timestamp: time), isUserFocused: false)
     }
 
+    /// Lets the card come in after the activation's own work.
+    private func settle() {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+
     /// Away an hour: the tasks whose turn ended meanwhile, latest first;
-    /// not the one on screen, the Lead's, or one that ended before. Each
-    /// goes once opened; × takes the card away; a short absence keeps it;
-    /// the next long one replaces it.
+    /// not the one on screen, the Lead's, an archived one, or one that
+    /// ended before. Each goes once opened or answered from its row; a
+    /// later absence puts its own ahead and keeps the rest; × takes the
+    /// card away.
     func testTheCardListsWhatEndedWhileAway() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            @MainActor func task(_ title: String, isLead: Bool = false) throws -> WorkspaceState {
+            @MainActor func task(_ title: String) throws -> WorkspaceState {
                 shell.addWorkspace(title: title, cwd: harness.repo)
-                let workspace = try XCTUnwrap(shell.workspaces.last)
-                workspace.isLead = isLead
-                return workspace
+                return try XCTUnwrap(shell.workspaces.last)
             }
             let early = try task("early")
             let first = try task("first")
             let second = try task("second")
-            let lead = try task("lead", isLead: true)
+            let third = try task("third")
+            let lead = try task("lead")
+            lead.isLead = true
+            let archived = try task("archived")
+            archived.isInactive = true
             let onScreen = try task("on screen")
             let leave = t0
             try endTurn(of: early, at: leave - 60)
             try endTurn(of: first, at: leave + 600)
             try endTurn(of: second, at: leave + 1_200)
+            try endTurn(of: third, at: leave + 1_250)
             try endTurn(of: lead, at: leave + 1_300)
+            try endTurn(of: archived, at: leave + 1_350)
             try endTurn(of: onScreen, at: leave + 1_400)
             XCTAssertTrue(shell.workspaces[shell.activeWSIndex] === onScreen)
 
             shell.catchUpState.tracker = AwayTracker(now: leave - 1)
-            shell.noteAway(.sessionActive, holds: false, now: leave)
-            shell.noteAway(.sessionActive, holds: true, now: leave + 3_600)
-            let card = try XCTUnwrap(shell.sidebar.catchUp, "shown at once, from the rows on screen")
-            XCTAssertEqual(card.rows.map(\.title), ["second", "first"])
-            XCTAssertEqual(card.rows.map(\.kind), [.done, .done])
+            shell.noteAway(missing: [.sessionActive], now: leave)
+            shell.noteAway(missing: [], now: leave + 3_600)
+            settle()
+            let card = try XCTUnwrap(shell.sidebar.catchUp)
+            XCTAssertEqual(card.rows.map(\.title), ["third", "second", "first"])
+            XCTAssertEqual(card.rows.map(\.kind), [.done, .done, .done])
             XCTAssertEqual(card.rows.first?.text, "Done", "no status line")
-            XCTAssertEqual(card.away, "1h")
+            XCTAssertEqual(card.since, SidebarCatchUp.sinceText(leave))
 
-            // In the flow, above every row: it covers none of their buttons.
+            // In the flow: it covers none of the rows' buttons.
             let cardAreas = shell.sidebar.hitAreas.filter { if case .catchUp = $0.region { true } else { false } }
             let rowAreas = shell.sidebar.hitAreas.filter { if case .catchUp = $0.region { false } else { true } }
             XCTAssertFalse(cardAreas.isEmpty)
@@ -84,30 +95,81 @@ final class CatchUpTests: XCTestCase {
 
             shell.handleCatchUpAction(.open(workspaceID: first.id))
             XCTAssertTrue(shell.workspaces[shell.activeWSIndex] === first)
-            XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["second"], "opened")
+            XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["third", "second"], "opened")
+            shell.noteCatchUpTaskAnswered(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === third }))
+            shell.updateSidebar()
+            XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["second"], "answered from its row")
 
-            // A short absence keeps the card; a long one with nothing
-            // ended replaces it.
-            shell.noteAway(.appActive, holds: false, now: leave + 4_000)
-            shell.noteAway(.appActive, holds: true, now: leave + 4_300)
+            // A short absence, or a long one with nothing ended, keeps it;
+            // another puts what ended ahead, and keeps where it began.
+            shell.noteAway(missing: [.appActive], now: leave + 4_000)
+            shell.noteAway(missing: [], now: leave + 4_300)
+            shell.noteAway(missing: [.screenUnlocked], now: leave + 5_000)
+            shell.noteAway(missing: [], now: leave + 6_000)
+            settle()
+            shell.updateSidebar()
             XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["second"])
-            shell.noteAway(.screenUnlocked, holds: false, now: leave + 5_000)
-            shell.noteAway(.screenUnlocked, holds: true, now: leave + 6_000)
-            XCTAssertNil(shell.sidebar.catchUp, "nothing ended during the last one")
-
-            try endTurn(of: second, at: leave + 7_000)
-            shell.noteAway(.appActive, holds: false, now: leave + 6_500)
-            shell.noteAway(.appActive, holds: true, now: leave + 7_500)
-            XCTAssertNotNil(shell.sidebar.catchUp)
+            try endTurn(of: early, at: leave + 7_000)
+            shell.noteAway(missing: [.appActive], now: leave + 6_500)
+            shell.noteAway(missing: [], now: leave + 7_500)
+            settle()
+            XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["early", "second"])
+            XCTAssertEqual(shell.sidebar.catchUp?.since, SidebarCatchUp.sinceText(leave))
             shell.handleCatchUpAction(.dismiss)
             XCTAssertNil(shell.sidebar.catchUp)
 
             // Off: no card.
             try endTurn(of: second, at: leave + 8_500)
             shell.setCatchUp(enabled: false)
-            shell.noteAway(.appActive, holds: false, now: leave + 8_000)
-            shell.noteAway(.appActive, holds: true, now: leave + 9_000)
+            shell.noteAway(missing: [.appActive], now: leave + 8_000)
+            shell.noteAway(missing: [], now: leave + 9_000)
+            settle()
             XCTAssertNil(shell.sidebar.catchUp)
+        }
+    }
+
+    /// The click that activated Nirux, or a double click, never lands on
+    /// the card's rows as they come or move.
+    func testThePressesWaitForTheCardToStand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            var tasks: [WorkspaceState] = []
+            for title in ["first", "second"] {
+                shell.addWorkspace(title: title, cwd: harness.repo)
+                tasks.append(try XCTUnwrap(shell.workspaces.last))
+            }
+            shell.addWorkspace(title: "on screen", cwd: harness.repo)
+            let onScreen = try XCTUnwrap(shell.workspaces.last)
+            for (offset, task) in tasks.enumerated() { try endTurn(of: task, at: t0 + 600 + Double(offset)) }
+            var clock: CFTimeInterval = 1_000
+            shell.sidebar.clock = { clock }
+            shell.catchUpState.tracker = AwayTracker(now: t0 - 1)
+            shell.noteAway(missing: [.appActive], now: t0)
+            shell.noteAway(missing: [], now: t0 + 1_800)
+            settle()
+            shell.sidebar.layoutSubtreeIfNeeded()
+            @MainActor func press(_ workspace: WorkspaceState, clickCount: Int, at time: TimeInterval) throws {
+                let area = try XCTUnwrap(shell.sidebar.hitAreas.first { area in
+                    guard case .catchUp(.open(let id)) = area.region else { return false }
+                    return id == workspace.id
+                })
+                shell.sidebar.mouseDown(with: try XCTUnwrap(NSEvent.mouseEvent(
+                    with: .leftMouseDown,
+                    location: shell.sidebar.contentDocumentView.convert(NSPoint(x: area.frame.midX, y: area.frame.midY), to: nil),
+                    modifierFlags: [], timestamp: time, windowNumber: harness.window.windowNumber, context: nil,
+                    eventNumber: 0, clickCount: clickCount, pressure: 0
+                )))
+            }
+            let uptime = ProcessInfo.processInfo.systemUptime
+            try press(tasks[1], clickCount: 1, at: uptime)
+            XCTAssertTrue(shell.workspaces[shell.activeWSIndex] === onScreen, "the card just came")
+            clock += SidebarView.catchUpArming
+            try press(tasks[1], clickCount: 1, at: uptime + 1)
+            XCTAssertTrue(shell.workspaces[shell.activeWSIndex] === tasks[1])
+            XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["first"])
+            clock += SidebarView.catchUpArming
+            try press(tasks[0], clickCount: 2, at: uptime + 1.1)
+            XCTAssertTrue(shell.workspaces[shell.activeWSIndex] === tasks[1], "the second press of a double click")
         }
     }
 
@@ -132,9 +194,9 @@ final class CatchUpTests: XCTestCase {
             for (offset, task) in (tasks + [elsewhere]).enumerated() { try endTurn(of: task, at: t0 + 600 + Double(offset)) }
 
             shell.catchUpState.tracker = AwayTracker(now: t0 - 1)
-            shell.noteAway(.appActive, holds: false, now: t0)
-            shell.noteAway(.appActive, holds: true, now: t0 + 1_800)
-            shell.updateSidebar()
+            shell.noteAway(missing: [.appActive], now: t0)
+            shell.noteAway(missing: [], now: t0 + 1_800)
+            settle()
             let card = try XCTUnwrap(shell.sidebar.catchUp)
             XCTAssertEqual(card.rows.count, 7)
             XCTAssertEqual(card.shownRows.count, 5)
@@ -151,10 +213,49 @@ final class CatchUpTests: XCTestCase {
         }
     }
 
-    /// A row says what its task's row says: what it asks, what broke, else
-    /// its last turn's line.
+    /// A list taller than the sidebar: the card comes into view, not above
+    /// the visible part.
+    func testTheCardComesIntoView() throws {
+        let rows = (0..<30).map { index in
+            WorkspaceInfo(
+                id: "ws\(index)", index: index, title: "task \(index)", profileID: WorkspaceProfile.defaultID,
+                isInactive: false, columnCount: 1, focusedColumn: 0, gitBranch: "feat/\(index)", notification: nil,
+                isActive: index == 29, columns: [ColumnInfo(
+                    index: 0, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
+                    terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, attentionReason: nil
+                )],
+                prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
+                lastSummary: nil, lastActivityAt: nil
+            )
+        }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 300))
+        window.contentView = sidebar
+        sidebar.layoutSubtreeIfNeeded()
+        sidebar.isExpanded = true
+        sidebar.update(profiles: [], workspaces: rows)
+        settle()
+        let visibleBefore = sidebar.contentScrollView.documentVisibleRect
+        sidebar.catchUp = SidebarCatchUp(
+            since: "since 12:40",
+            rows: (0..<3).map { SidebarCatchUp.Row(workspaceID: "ws\($0)", title: "task \($0)", kind: .done, text: "Done") },
+            otherSpaces: []
+        )
+        sidebar.refreshCatchUpCard()
+        settle()
+        let dismiss = try XCTUnwrap(sidebar.hitAreas.first { area in
+            guard case .catchUp(.dismiss) = area.region else { return false }
+            return true
+        })
+        XCTAssertTrue(sidebar.contentScrollView.documentVisibleRect.contains(dismiss.frame), "visible was \(visibleBefore)")
+    }
+
+    /// A row says what its task's row says: what it asks, what broke, that
+    /// it works or waits on something else; else its last turn's line.
     func testARowSaysWhatItsTaskRowSays() {
-        func info(_ reason: AgentAttentionReason?, status: AgentStatus, line: String? = nil) -> WorkspaceInfo {
+        func info(_ reason: AgentAttentionReason?, status: AgentStatus, blocker: String? = nil, line: String? = nil) -> WorkspaceInfo {
             var info = WorkspaceInfo(
                 id: "ws", index: 0, title: "feat/export", profileID: WorkspaceProfile.defaultID, isInactive: false,
                 columnCount: 1, focusedColumn: 0, gitBranch: "feat/export", notification: nil, isActive: false,
@@ -162,7 +263,7 @@ final class CatchUpTests: XCTestCase {
                     index: 0, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
                     terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil, attentionReason: reason
                 )],
-                prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
+                prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: blocker, phase: .active,
                 lastSummary: nil, lastActivityAt: nil
             )
             info.turnStatusLine = line
@@ -174,9 +275,18 @@ final class CatchUpTests: XCTestCase {
         let broken = SidebarCatchUp.row(for: info(.apiError(kind: nil, detail: nil), status: .needsAttention))
         XCTAssertEqual(broken.kind, .broken)
         XCTAssertEqual(broken.text, "Stopped on an API error")
+        let working = SidebarCatchUp.row(for: info(nil, status: .working, line: "fix pushed"))
+        XCTAssertEqual(working.kind, .working)
+        XCTAssertEqual(working.text, "Working", "not the former turn's line")
+        let blocked = SidebarCatchUp.row(for: info(nil, status: .idle, blocker: "waits for #212", line: "fix pushed"))
+        XCTAssertEqual(blocked.kind, .quiet)
+        XCTAssertEqual(blocked.text, "Blocked · waits for #212")
         XCTAssertEqual(SidebarCatchUp.row(for: info(nil, status: .idle, line: "fix pushed, CI green")).text, "fix pushed, CI green")
         XCTAssertEqual(SidebarCatchUp.row(for: info(nil, status: .idle)).text, "Done")
-        XCTAssertTrue(SidebarCatchUp.Kind.asks < .broken && SidebarCatchUp.Kind.broken < .done, "needs-you first")
+        XCTAssertEqual(
+            [SidebarCatchUp.Kind.working, .quiet, .done, .broken, .asks].sorted(), [.asks, .broken, .done, .quiet, .working],
+            "needs-you first, then broken, then done"
+        )
     }
 
     /// The card's views: a group VoiceOver names, buttons it can press,
@@ -184,13 +294,13 @@ final class CatchUpTests: XCTestCase {
     func testTheCardNeverTakesTheKeyboard() {
         var pressed: [SidebarCatchUpAction] = []
         let catchUp = SidebarCatchUp(
-            away: "42m",
+            since: "since 12:40",
             rows: [SidebarCatchUp.Row(workspaceID: "a", title: "feat/export", kind: .asks, text: "Needs you · Merge #41 now?")],
             otherSpaces: [SidebarCatchUp.OtherSpace(profileID: "p", name: "Client", count: 2)]
         )
         let card = SidebarCatchUpCardRenderer(catchUp: catchUp, sidebarWidth: 260, top: 500) { pressed.append($0) }.render()
         XCTAssertTrue(card.views.allSatisfy { !$0.acceptsFirstResponder })
-        XCTAssertEqual(card.views.first?.accessibilityLabel(), "While you were away, 42m: 3 tasks")
+        XCTAssertEqual(card.views.first?.accessibilityLabel(), "While you were away, since 12:40: 3 tasks")
         let buttons = card.views.filter { $0.accessibilityRole() == .button }
         XCTAssertEqual(buttons.compactMap { $0.accessibilityLabel() }, [
             "Dismiss what happened while you were away", "feat/export: Needs you · Merge #41 now?", "Also in Client · 2"
@@ -204,5 +314,7 @@ final class CatchUpTests: XCTestCase {
         XCTAssertEqual(actions, [.dismiss, .open(workspaceID: "a"), .space(profileID: "p")])
         let height = SidebarCatchUpCardRenderer.height(of: catchUp)
         XCTAssertEqual(card.views.first?.frame.minY, 500 - height)
+        // Its × doesn't reach into the first row.
+        XCTAssertFalse(card.hitAreas[0].frame.intersects(card.hitAreas[1].frame))
     }
 }

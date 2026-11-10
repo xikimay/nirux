@@ -302,7 +302,17 @@ extension SidebarView {
         ).render()
         card.views.forEach(addExpandedView)
         hitAreas += card.hitAreas
-        return top - SidebarCatchUpCardRenderer.height(of: catchUp) - SidebarCatchUpCardRenderer.Metrics.gapBelow
+        let height = SidebarCatchUpCardRenderer.height(of: catchUp)
+        // A list taller than the sidebar keeps its distance to the bottom
+        // as it grows: the card would come in above the visible part.
+        if revealsCatchUpOnNextBuild {
+            revealsCatchUpOnNextBuild = false
+            let frame = NSRect(x: 0, y: top - height, width: bounds.width, height: height)
+            DispatchQueue.main.async { [weak self] in
+                self?.contentDocumentView.scrollToVisible(frame.insetBy(dx: 0, dy: -SidebarExpandedMetrics.tasksHeaderHeight))
+            }
+        }
+        return top - height - SidebarCatchUpCardRenderer.Metrics.gapBelow
     }
 
     /// What the Tasks header's "+" and the rail's "+" open: ⌘N's sheet.

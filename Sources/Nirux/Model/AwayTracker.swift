@@ -20,20 +20,22 @@ struct AwayTracker {
     private(set) var awaySince: TimeInterval?
 
     /// `missing`: the conditions that don't hold at `now` (the app may
-    /// start in the background).
+    /// start in the background, or in a session switched out).
     init(missing: Set<Condition> = [], now: TimeInterval) {
         self.missing = missing
         awaySince = missing.isEmpty ? nil : now
     }
 
-    /// One condition changed at `now`: the user went away, came back, or
-    /// neither.
-    mutating func set(_ condition: Condition, holds: Bool, at now: TimeInterval) -> Change? {
+    /// The conditions that don't hold at `now`, read again whole: the
+    /// user went away, came back, or neither. Read whole, notifications
+    /// that come late or out of order (a locked screen's, to an inactive
+    /// app) can't leave one condition behind.
+    mutating func update(missing now: Set<Condition>, at time: TimeInterval) -> Change? {
         let wasPresent = missing.isEmpty
-        if holds { missing.remove(condition) } else { missing.insert(condition) }
+        missing = now
         switch (wasPresent, missing.isEmpty) {
         case (true, false):
-            awaySince = now
+            awaySince = time
             return .wentAway
         case (false, true):
             defer { awaySince = nil }

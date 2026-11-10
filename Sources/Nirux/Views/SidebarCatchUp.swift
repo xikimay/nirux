@@ -5,8 +5,18 @@ import AppKit
 /// list. Activating Nirux clears the rows' "finished" marks; this keeps the
 /// list until the user has opened each task or dismissed it.
 struct SidebarCatchUp: Hashable {
+    /// What a listed task is now, in the order the card lists them.
     enum Kind: Int, Hashable, Comparable {
-        case asks, broken, done
+        /// Waits on the user (amber).
+        case asks
+        /// Broke (red).
+        case broken
+        /// Its turn is over: its status line, by a grey check.
+        case done
+        /// Blocked, or asking its parent: its row's line, by a grey dot.
+        case quiet
+        /// At work again (green).
+        case working
 
         static func < (lhs: Kind, rhs: Kind) -> Bool { lhs.rawValue < rhs.rawValue }
     }
@@ -25,8 +35,8 @@ struct SidebarCatchUp: Hashable {
         let count: Int
     }
 
-    /// How long the user was away ("42m").
-    let away: String
+    /// When the absence it lists began ("since 12:40").
+    let since: String
     /// Needs-you first, then broken, then done; the latest turn end first
     /// within each.
     let rows: [Row]
@@ -41,23 +51,32 @@ struct SidebarCatchUp: Hashable {
 
     var hiddenRowCount: Int { rows.count - shownRows.count }
 
-    /// A listed task as its row says it: what it asks, what broke, else its
-    /// last turn's line.
+    /// A listed task as its row says it: what it asks, what broke, that it
+    /// works again, is blocked or asks its parent; else, its turn over (the
+    /// pull request's line aside), its last turn's line.
     @MainActor
     static func row(for info: WorkspaceInfo) -> Row {
         let summary = info.rowSummary
         let kind: Kind = switch summary.mark {
         case .needsYou: .asks
         case .error: .broken
-        default: .done
+        case .working: .working
+        case .blocked, .asking: .quiet
+        case .idle, .finished, .readyToMerge, .merged, .checksRunning: .done
         }
         let text = kind == .done ? info.turnStatusLine ?? "Done" : summary.status.text
         return Row(workspaceID: info.id, title: info.title, kind: kind, text: text)
     }
 
+    /// "since 12:40", in the user's clock format: it doesn't age on screen
+    /// as "42m" would.
+    static func sinceText(_ time: TimeInterval) -> String {
+        "since " + DateFormatter.localizedString(from: Date(timeIntervalSince1970: time), dateStyle: .none, timeStyle: .short)
+    }
+
     var accessibilityLabel: String {
         let count = rows.count + otherSpaces.reduce(0) { $0 + $1.count }
-        return "While you were away, \(away): \(count == 1 ? "1 task" : "\(count) tasks")"
+        return "While you were away, \(since): \(count == 1 ? "1 task" : "\(count) tasks")"
     }
 }
 
@@ -116,7 +135,7 @@ struct SidebarCatchUpCardRenderer {
         let textX = Row.textX
         let textWidth = card.maxX - Row.cardPaddingX - textX
         var y = card.maxY - Metrics.paddingTop - Metrics.headerHeight
-        let header = label("While you were away · \(catchUp.away)", font: Theme.Font.captionEmphasized, color: Theme.Color.textSecondary)
+        let header = label("While you were away · \(catchUp.since)", font: Theme.Font.captionEmphasized, color: Theme.Color.textSecondary)
         header.frame = NSRect(x: Row.workspaceInsetX + Row.cardPaddingX, y: y + 1, width: textWidth, height: 16)
         views.append(header)
         let dismissFrame = NSRect(
@@ -125,8 +144,6 @@ struct SidebarCatchUpCardRenderer {
         )
         let dismiss = SidebarBadgeView(text: "", textColor: Theme.Color.textTertiary, fillColor: .clear, font: Theme.Font.caption)
         dismiss.symbolName = Theme.Symbol.dismiss
-        dismiss.hoverTextColor = Theme.Color.textPrimary
-        dismiss.hoverFillColor = Theme.Color.fillPressed
         dismiss.frame = dismissFrame
         dismiss.toolTip = "Dismiss"
         dismiss.setAccessibilityElement(true)
@@ -134,7 +151,7 @@ struct SidebarCatchUpCardRenderer {
         dismiss.setAccessibilityLabel("Dismiss what happened while you were away")
         dismiss.onPress = { press(.dismiss) }
         views.append(dismiss)
-        hitAreas.append(SidebarHitArea(frame: dismissFrame.insetBy(dx: -3, dy: -2), region: .catchUp(.dismiss)))
+        hitAreas.append(SidebarHitArea(frame: dismissFrame.insetBy(dx: -3, dy: -1), region: .catchUp(.dismiss)))
 
         for row in catchUp.shownRows {
             y -= Metrics.rowHeight
@@ -145,10 +162,12 @@ struct SidebarCatchUpCardRenderer {
             views.append(title)
             let line = label(row.text, font: Theme.Font.caption, color: color(of: row.kind))
             line.frame = NSRect(x: textX, y: y + 2, width: textWidth, height: 14)
-            line.toolTip = row.text
             views.append(line)
             let action = SidebarCatchUpAction.open(workspaceID: row.workspaceID)
-            views.append(pressable(frame: frame, label: "\(row.title): \(row.text)", action: action))
+            // On top of the labels: the whole line, when the row cuts it.
+            let button = pressable(frame: frame, label: "\(row.title): \(row.text)", action: action)
+            button.toolTip = "\(row.title)\n\(row.text)"
+            views.append(button)
             hitAreas.append(SidebarHitArea(frame: frame, region: .catchUp(action)))
         }
         var links: [(String, SidebarCatchUpAction)] = []
@@ -178,25 +197,31 @@ struct SidebarCatchUpCardRenderer {
         switch kind {
         case .asks: Theme.Color.waiting
         case .broken: Theme.Color.error
-        case .done: Theme.Color.textSecondary
+        case .done, .quiet, .working: Theme.Color.textSecondary
         }
     }
 
-    /// The row's sign, in the state marks' column: amber and red dots, a
-    /// grey check for a finished turn.
+    /// The row's sign, in the state marks' column, as its row's: amber,
+    /// red, green or grey dots, a grey check for a finished turn.
     private func mark(_ kind: SidebarCatchUp.Kind, centerY: CGFloat) -> NSView {
         let centerX = SidebarExpandedMetrics.markCenterX
-        if kind == .done {
+        let color: NSColor
+        switch kind {
+        case .done:
             let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.checksPassed, color: Theme.Color.idle, pointSize: 11))
             icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
             icon.setAccessibilityElement(false)
             return icon
+        case .asks: color = Theme.Color.waiting
+        case .broken: color = Theme.Color.error
+        case .working: color = Theme.Color.working
+        case .quiet: color = Theme.Color.idle
         }
         let size = SidebarExpandedMetrics.stateDotSize
         let dot = SidebarBackgroundView(frame: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
         dot.wantsLayer = true
         dot.layer?.cornerRadius = size / 2
-        dot.layer?.backgroundColor = (kind == .asks ? Theme.Color.waiting : Theme.Color.error).cgColor
+        dot.layer?.backgroundColor = color.cgColor
         return dot
     }
 
@@ -211,12 +236,10 @@ struct SidebarCatchUpCardRenderer {
     }
 }
 
-/// An invisible button for VoiceOver over a row of the card. It never
-/// takes the keyboard.
+/// An invisible button for VoiceOver over a row of the card (an NSView:
+/// it never takes the keyboard).
 final class SidebarCatchUpPressable: NSView {
     var onPress: (() -> Void)?
-
-    override var acceptsFirstResponder: Bool { false }
 
     override func accessibilityPerformPress() -> Bool {
         onPress?()
