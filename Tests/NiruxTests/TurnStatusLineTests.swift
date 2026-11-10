@@ -262,6 +262,7 @@ final class TurnStatusLineTests: XCTestCase {
             try JSONDecoder().decode(PersistedSettings.self, from: Data(json.utf8)).showTurnStatus
         }
         XCTAssertTrue(try option(in: "{}"), "on by default")
+        XCTAssertTrue(try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8)).showCatchUp, "the catch-up too")
         XCTAssertFalse(try option(in: #"{"alertOnlyWhenClaudeAsks":false}"#), "whoever kept final messages from a model")
         XCTAssertTrue(try option(in: #"{"alertOnlyWhenClaudeAsks":false,"showTurnStatus":true}"#))
         var settings = PersistedSettings()

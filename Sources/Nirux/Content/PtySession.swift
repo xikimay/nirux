@@ -386,6 +386,9 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteSeen()
     }
 
+    /// See `AgentStatusMachine.lastTurnEndedAt`.
+    var agentLastTurnEndedAt: TimeInterval { state.machine.lastTurnEndedAt }
+
     /// See `AgentStatusMachine.isCurrentTurnEnd`.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
         state.machine.isCurrentTurnEnd(turnEndedAt)

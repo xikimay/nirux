@@ -73,6 +73,7 @@ final class SettingsWindowTests: XCTestCase {
                 ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
                 ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) }),
                 ("showTurnStatus", { try self.click(app.settingsTurnStatusCheckbox) }),
+                ("showCatchUp", { try self.click(app.settingsCatchUpCheckbox) }),
                 ("triageCIFailures", { try self.click(app.settingsTriageCIFailuresCheckbox) })
             ]
             for step in steps {
@@ -96,13 +97,16 @@ final class SettingsWindowTests: XCTestCase {
             state.settings = PersistedSettings()
             state.settings?.agentCirclingHint = false
             state.settings?.showTurnStatus = false
+            state.settings?.showCatchUp = false
             XCTAssertTrue(Persistence.save(state))
             let shell = makeShell()
             XCTAssertTrue(shell.circlingHintEnabled, "the default, before the state is read")
             XCTAssertTrue(shell.turnStatusEnabled)
+            XCTAssertTrue(shell.catchUpEnabled)
             shell.restoreState()
             XCTAssertFalse(shell.circlingHintEnabled)
             XCTAssertFalse(shell.turnStatusEnabled)
+            XCTAssertFalse(shell.catchUpEnabled)
         }
     }
 
@@ -154,6 +158,11 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertNotNil(AgentHookCenter.shared.turnStatusWriter)
             XCTAssertTrue(shell.turnStatusEnabled)
             XCTAssertNil(workspace.statusLine, "a line from before is forgotten: turns ended meanwhile without one")
+            XCTAssertEqual(app.settingsCatchUpCheckbox?.state, .on)
+            shell.catchUpState.workspaceIDs = [workspace.id]
+            try click(app.settingsCatchUpCheckbox)
+            XCTAssertFalse(shell.catchUpEnabled)
+            XCTAssertEqual(shell.catchUpState.workspaceIDs, [], "the card goes at once")
 
             // The CI failure triage: off in the shell at once, and back on
             // with its model's account checked (a double: never the real

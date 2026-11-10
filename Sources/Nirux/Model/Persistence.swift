@@ -401,6 +401,9 @@ struct PersistedSettings: Codable {
     /// `alertOnlyWhenClaudeAsks`: whoever turned that off kept final
     /// messages away from a model.
     var showTurnStatus: Bool = true
+    /// After an absence, a card lists the tasks whose turn ended meanwhile
+    /// (see `SidebarCatchUp`). On by default: missing decodes to true.
+    var showCatchUp: Bool = true
     /// A pull request whose checks failed says when the failure looks
     /// flaky (see `CITriage`). On by default: missing decodes to true.
     var triageCIFailures: Bool = true
@@ -457,6 +460,7 @@ struct PersistedSettings: Codable {
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
         case showTurnStatus
+        case showCatchUp
         case triageCIFailures
         case stuckAgentMinutes
         case agentCirclingHint
@@ -489,6 +493,7 @@ struct PersistedSettings: Codable {
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
         showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? alertOnlyWhenClaudeAsks
+        showCatchUp = (try? container.decodeIfPresent(Bool.self, forKey: .showCatchUp)) ?? true
         triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true
@@ -523,6 +528,7 @@ struct PersistedSettings: Codable {
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
         try container.encode(showTurnStatus, forKey: .showTurnStatus)
+        try container.encode(showCatchUp, forKey: .showCatchUp)
         try container.encode(triageCIFailures, forKey: .triageCIFailures)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encode(agentCirclingHint, forKey: .agentCirclingHint)
