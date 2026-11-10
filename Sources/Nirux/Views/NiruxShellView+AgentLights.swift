@@ -111,7 +111,7 @@ extension NiruxShellView {
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
             for (index, column) in workspace.columns.enumerated() {
-                let isInView = isOnScreen && workspace.showsColumn(at: index)
+                let isInView = isOnScreen && workspace.columns[index].view.frame.maxX > 0
                 column.header?.statusPill.animates = moves && isInView
                 let light = column.isClosing ? nil : plan.columns[column.id]
                 let sweeps = moves && isInView && !column.isClosing && ended.contains(column.id)

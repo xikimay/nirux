@@ -288,7 +288,7 @@ final class AgentHookCenter {
     ) {
         if let request = outcome.turnEnd, let agentUUID = event.agentUUID {
             classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent)
-        } else if !waitsOnParent, event.name == .turnComplete || event.name == .stop {
+        } else if !waitsOnParent, event.name == .stop {
             reportTurnDone(endedAt: event.timestamp, in: resolution)
         }
     }

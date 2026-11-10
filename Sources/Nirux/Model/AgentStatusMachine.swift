@@ -390,8 +390,6 @@ struct AgentStatusMachine {
         endTurn()
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         askedQuestion = nil
-        // Another conversation may run under other hooks.
-        stopHooksKeepGoing = false
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -511,7 +509,6 @@ struct AgentStatusMachine {
             // The question it ends on, else its last line.
             let line = TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
-            mainTurnEndAsks = true
             // A user looking at the column reads it there.
             if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
             // A question always alerts, even after this episode's "finished

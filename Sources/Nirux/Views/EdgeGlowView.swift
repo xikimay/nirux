@@ -459,7 +459,7 @@ final class EdgeGlowView: NSView {
         center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
         if let newWindow {
             center.addObserver(
-                self, selector: #selector(windowResignedKey), name: NSWindow.didResignKeyNotification, object: newWindow
+                self, selector: #selector(windowResignedKey), name: NSWindow.didResignKeyNotification, object: nil
             )
         } else {
             windowResignedKey()
