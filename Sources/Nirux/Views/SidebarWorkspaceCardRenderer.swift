@@ -232,7 +232,7 @@ final class SidebarWorkspaceCardRenderer {
     /// full row. An archived task's compact row stays quiet, and the
     /// Lead's row has no grey dot.
     static func showsTurnEnds(_ workspace: WorkspaceInfo) -> Bool {
-        !workspace.isLead && !workspace.showsCompactRow
+        !workspace.id.isEmpty
     }
 
     /// The rail's working badge breathes, in phase with every other one
@@ -299,7 +299,7 @@ final class SidebarWorkspaceCardRenderer {
     /// end, so a rebuild in the middle carries on; once it is over the dot
     /// alone is built.
     private func buildCheck(over dot: NSView) {
-        guard animates, let turnEndedAt, now - turnEndedAt < Self.checkDuration else { return }
+        guard animates, let turnEndedAt, now > 0 else { return }
         let size: CGFloat = 12
         let host = SidebarBackgroundView(frame: NSRect(
             x: dot.frame.midX - size / 2, y: dot.frame.midY - size / 2, width: size, height: size

@@ -295,7 +295,7 @@ final class SidebarView: NSView {
     /// A row draws turn ends: a task's full row in the list (see
     /// `SidebarWorkspaceCardRenderer.showsTurnEnds`).
     private func showsTurnEnds(on row: WorkspaceInfo) -> Bool {
-        listsWorkspace(row) && SidebarWorkspaceCardRenderer.showsTurnEnds(row)
+        SidebarWorkspaceCardRenderer.showsTurnEnds(row)
     }
 
     /// At a refresh: a row that turned grey while its turn end was owed
@@ -312,7 +312,7 @@ final class SidebarView: NSView {
             let isInTime = now - notedAt < Self.turnEndGrace
             let row = lastInfos.first { $0.id == id }
             let mark = row.flatMap { showsTurnEnds(on: $0) ? $0.rowSummary.mark : nil }
-            if mark == .working, isInTime { continue }
+            if mark == .working { continue }
             owedTurnEnds[id] = nil
             if mark == .idle, isInTime { turnEndNotedAt[id] = now }
         }
