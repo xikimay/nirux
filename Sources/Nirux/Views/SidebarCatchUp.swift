@@ -61,7 +61,7 @@ struct SidebarCatchUp: Hashable {
         case .needsYou: .asks
         case .error: .broken
         case .working: .working
-        case .blocked, .asking: .quiet
+        case .blocked, .asking: .done
         case .idle, .finished, .readyToMerge, .merged, .checksRunning: .done
         }
         let text = kind == .done ? info.turnStatusLine ?? "Done" : summary.status.text
@@ -75,7 +75,7 @@ struct SidebarCatchUp: Hashable {
     }
 
     var accessibilityLabel: String {
-        let count = rows.count + otherSpaces.reduce(0) { $0 + $1.count }
+        let count = rows.count
         return "While you were away, \(since): \(count == 1 ? "1 task" : "\(count) tasks")"
     }
 }
