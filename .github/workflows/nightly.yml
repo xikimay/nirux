@@ -20,6 +20,10 @@ jobs:
     # publish, even from a manual dispatch.
     if: github.ref == 'refs/heads/main'
     runs-on: macos-15
+    # Xcode 26.3 (Swift 6.2) rather than the image's default 16.4 (Swift
+    # 6.1): libghostty-spm 2.2 needs Swift tools 6.2.
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v5
         with:
@@ -142,6 +146,13 @@ jobs:
         env:
           NIRUX_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
         run: ./scripts/bundle.sh "$VERSION" "$BUILD_NUMBER"
+
+      # Before notarizing: an app that traps at launch (a new compiler, a
+      # dependency's missing resource) stops here instead of reaching every
+      # install through Sparkle.
+      - name: Launch check
+        timeout-minutes: 5
+        run: scripts/launch-check.sh Nirux.app
 
       - name: Notarize and staple app
         env:
