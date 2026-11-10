@@ -83,7 +83,10 @@ struct AgentStatusMachine {
     /// (a review gate). Nothing tells a Stop that such a hook is about to
     /// block from one that ends the turn: Claude only moves again seconds
     /// later. So from then on, only a Stop that follows the hook
-    /// (`stop_hook_active`) is known to end its turn.
+    /// (`stop_hook_active`) is taken for the end of its turn. The price:
+    /// in such a conversation a turn the hook lets through at once shows
+    /// no end, and a hook that blocks twice in a row shows one too early.
+    /// Better a missing "done" than a false one.
     private var stopHooksKeepGoing = false
     /// That turn end is known to be the turn's last Stop.
     private var mainTurnEndIsLast = true

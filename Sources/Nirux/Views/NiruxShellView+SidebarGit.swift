@@ -4,6 +4,7 @@ import AppKit
 
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
+        dropTurnEndsLeftBehind()
         let snapshot = snapshot ?? ProcessSnapshot()
         let processTableRead = !snapshot.isEmpty
         let now = Date().timeIntervalSince1970

@@ -394,7 +394,11 @@ final class AgentLightTests: XCTestCase {
         XCTAssertFalse(glow.isPillShown)
         XCTAssertNil(glow.hitTest(onPill), "the click goes to the terminal")
 
-        // Its first seconds are its own, key window or not.
+        // Its first seconds are its own, key window or not. (The pointer
+        // rests on the glow: nothing but the window says it is gone.)
+        glow.pointerLocation = { [unowned glow] _ in
+            glow.convert(NSPoint(x: glow.hoverStrip.midX, y: glow.hoverStrip.midY), to: nil)
+        }
         glow.show(nil, moving: false)
         glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
         glow.pointerEntered(.glow)
@@ -610,6 +614,12 @@ private final class Count: @unchecked Sendable {
     var value = 0
 }
 
+/// A classifier whose run never starts within a test: the test gives the
+/// verdicts itself.
+private final class UnreachedClassifier: TurnEndClassifier, @unchecked Sendable {
+    func classify(_ message: String) async -> TurnEndVerdict { .unknown }
+}
+
 /// The lights in a window: when they may move, the turn end's sweep, the
 /// way back from an edge, and the setting.
 @MainActor
@@ -784,11 +794,16 @@ final class AgentLightShellTests: XCTestCase {
         }
     }
 
-    /// The hook centre, wired to `shell` as the app wires the shared one.
+    /// The hook centre, wired to `shell` as the app wires the shared one,
+    /// with the turn-end classifier on: a final message waits for its
+    /// verdict, which the test gives.
     private func hookCenter(for shell: NiruxShellView) -> AgentHookCenter {
         let center = AgentHookCenter()
+        center.turnEndClassifier = UnreachedClassifier()
         center.resolver = { [weak shell] uuid in shell?.resolveAgentColumn(uuid: uuid) }
-        center.onTurnDone = { [weak shell] resolution in shell?.agentTurnDone(in: resolution.column) }
+        center.onTurnDone = { [weak shell] resolution, endedAt in
+            shell?.agentTurnDone(in: resolution.column, endedAt: endedAt)
+        }
         return center
     }
 
@@ -799,9 +814,12 @@ final class AgentLightShellTests: XCTestCase {
         _ name: AgentHookEvent.Name, kind: AgentHookEvent.Kind = .claude, finalMessage: String? = nil,
         on column: ColumnState, of shell: NiruxShellView, through center: AgentHookCenter
     ) throws -> AgentHookOutcome {
-        let event = AgentHookEvent(kind: kind, name: name, finalMessage: finalMessage, timestamp: Date().timeIntervalSince1970)
+        let uuid = try XCTUnwrap(column.agentUUID)
+        let event = AgentHookEvent(
+            kind: kind, name: name, agentUUID: uuid, finalMessage: finalMessage, timestamp: Date().timeIntervalSince1970
+        )
         let outcome = try XCTUnwrap(column.pty).applyAgentHook(event, isUserFocused: false)
-        let resolution = try XCTUnwrap(shell.resolveAgentColumn(uuid: try XCTUnwrap(column.agentUUID)))
+        let resolution = try XCTUnwrap(shell.resolveAgentColumn(uuid: uuid))
         center.settleTurnEnd(of: event, outcome: outcome, in: resolution, waitsOnParent: false)
         return outcome
     }
@@ -830,7 +848,7 @@ final class AgentLightShellTests: XCTestCase {
 
             XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty)
             try hook(.stop, on: column, of: shell, through: center)
-            XCTAssertEqual(shell.agentLights.endedTurns, [column.id])
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light, "then nothing")
             XCTAssertTrue(light.isSweeping)
@@ -887,7 +905,7 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty, "nor a check on its row")
 
             center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
-            XCTAssertEqual(shell.agentLights.endedTurns, [column.id])
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
             XCTAssertFalse(shell.isMetadataRefreshScheduled)
             shell.turnEndSettled()
             XCTAssertTrue(shell.isMetadataRefreshScheduled, "a refresh of its own, not the next heartbeat's")
@@ -911,10 +929,31 @@ final class AgentLightShellTests: XCTestCase {
             workspace.focusedIndex = 1
             shell.relayout(animated: false)
             try hook(.turnComplete, kind: .codex, on: codex, of: shell, through: center)
-            XCTAssertEqual(shell.agentLights.endedTurns, [codex.id])
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [codex.id])
             // Its closing output reads as work until it falls silent.
             shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: [.idle, .working])])
             XCTAssertEqual(codex.light?.isSweeping, true)
+        }
+    }
+
+    /// A prompt, or a tool call, that came with the Stop in the same batch
+    /// of hook events: the agent works again, and nothing sweeps "done".
+    func testATurnEndLeftBehindSweepsNothing() throws {
+        try withShell { shell, _, _ in
+            let center = hookCenter(for: shell)
+            let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
+            let unread = ProcessSnapshot(entries: [])
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
+            shell.updateSidebar(snapshot: unread)
+            let light = try XCTUnwrap(column.light)
+
+            try hook(.stop, on: column, of: shell, through: center)
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
+            shell.updateSidebar(snapshot: unread)
+            XCTAssertEqual(light.light, .working)
+            XCTAssertFalse(light.isSweeping)
+            XCTAssertTrue(shell.agentLights.endedTurns.isEmpty)
         }
     }
 
@@ -931,7 +970,7 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertFalse(light.isMoving, "steady")
 
             try hook(.stop, on: column, of: shell, through: center)
-            XCTAssertEqual(shell.agentLights.endedTurns, [column.id])
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light)
             XCTAssertFalse(light.isSweeping)
@@ -945,7 +984,7 @@ final class AgentLightShellTests: XCTestCase {
         try withShell { shell, _, _ in
             let workspace = try fourColumns(in: shell)
             let idle = Array(repeating: AgentStatus.idle, count: 4)
-            shell.agentTurnDone(in: workspace.columns[3])
+            shell.agentTurnDone(in: workspace.columns[3], endedAt: 1)
             shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: idle)])
             XCTAssertTrue(shell.agentLights.endedTurns.isEmpty)
             XCTAssertNotEqual(workspace.columns[3].light?.isSweeping, true)
@@ -1070,8 +1109,8 @@ final class AgentLightShellTests: XCTestCase {
 
             // Its turn ending meanwhile sweeps nothing: the column is leaving.
             let neighbour = try XCTUnwrap(workspace.columns[1].light)
-            shell.agentTurnDone(in: workspace.columns[0])
-            shell.agentTurnDone(in: workspace.columns[1])
+            shell.agentTurnDone(in: workspace.columns[0], endedAt: 1)
+            shell.agentTurnDone(in: workspace.columns[1], endedAt: 1)
             shell.updateAgentLights(infos: [info(
                 workspace, index: 0, in: shell, statuses: [.idle, .idle, .working, .working]
             )])
@@ -1084,19 +1123,27 @@ final class AgentLightShellTests: XCTestCase {
     }
 
     /// A close that doesn't happen after all (the column's sibling went
-    /// first) gives the column its light back at once.
+    /// first, and a workspace keeps its last column) gives the column its
+    /// light back at once.
     func testAColumnThatStaysAfterAllGetsItsLightBack() throws {
         try withShell { shell, _, _ in
-            let workspace = try fourColumns(in: shell)
-            let working = Array(repeating: AgentStatus.working, count: 4)
-            shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: working)])
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn()
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: [.working, .working])])
             let column = workspace.columns[0]
             let light = try XCTUnwrap(column.light)
             shell.closeActiveColumn()
+            XCTAssertTrue(column.isClosing)
             XCTAssertNil(light.light)
             column.view.alphaValue = 0
 
-            shell.abortColumnClose(column)
+            // Its sibling goes during the exit animation, whose end finds
+            // nothing left to remove.
+            workspace.closeColumn(at: 1)
+            shell.finishColumnClose(column, in: workspace)
+            XCTAssertEqual(workspace.columns.count, 1)
             XCTAssertFalse(column.isClosing)
             XCTAssertEqual(column.view.alphaValue, 1)
             XCTAssertEqual(light.light, .working, "not at the next refresh")
