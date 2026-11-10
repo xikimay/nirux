@@ -429,6 +429,14 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog's answer")
         at = try turn(keys: [("\r", 3), ("and add a test", 3.5)], dialog: true)
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "typed while its tool runs")
+        at = try turn(keys: [("\u{1B}[200~and add a test\u{1B}[201~", 3)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste, whatever a dialog waits for")
+        at = try turn(keys: [("ok", 3)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "text in one write")
+        // Several keys into a dialog may leave one at the prompt: refused,
+        // the safe side (the user answers at the terminal or with Reply…).
+        at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog answered with keys")
         // Its terminal still draws: a Stop hook's continuation at work.
         at = try ended()
         machine.noteRead(now: Date(timeIntervalSince1970: at + 2))
@@ -1262,6 +1270,46 @@ final class TurnEndClassificationTests: XCTestCase {
                                         for: otherRequest, agentUUID: try XCTUnwrap(otherColumn.agentUUID))
         otherPty.sendRaw("and also")
         XCTAssertFalse(otherPty.typeQuickAnswer("yes\r", to: otherRequest.turnEndedAt, foreground: claude), "a draft typed there")
+
+        // Text Ghostty writes itself: a ⌘V paste, dictation.
+        let (pasteCenter, _, pasteColumn, pasteRequest, _) = try turnEndColumn()
+        let pastePty = try XCTUnwrap(pasteColumn.pty)
+        pasteCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                        for: pasteRequest, agentUUID: try XCTUnwrap(pasteColumn.agentUUID))
+        pastePty.terminalSession.sendInput(Data("\u{1B}[200~and also\u{1B}[201~".utf8))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertFalse(pastePty.typeQuickAnswer("yes\r", to: pasteRequest.turnEndedAt, foreground: claude), "a paste")
+
+        // Pasted while a dialog waited: text, not the dialog's answer.
+        let (_, _, dialogColumn, _, _) = try turnEndColumn()
+        let dialogPty = try XCTUnwrap(dialogColumn.pty)
+        _ = dialogPty.applyAgentHook(event(.permissionRequest, at: 6, tool: "Bash"), isUserFocused: false)
+        dialogPty.terminalSession.sendInput(Data("\u{1B}[200~and also\u{1B}[201~".utf8))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        _ = dialogPty.applyAgentHook(event(.postToolUse, at: 7, tool: "Bash"), isUserFocused: false)
+        let later = try XCTUnwrap(dialogPty.applyAgentHook(event(.stop, at: 8, message: asks), isUserFocused: false).turnEnd)
+        XCTAssertFalse(dialogPty.typeQuickAnswer("yes\r", to: later.turnEndedAt, foreground: claude), "a paste during a dialog")
+    }
+
+    /// The question still waits, seen or not, until a prompt, a later turn
+    /// end or another conversation: what keeps a Reply… popover open.
+    func testTurnEndStaysCurrentUntilSomethingFollows() throws {
+        func ended() throws -> TimeInterval {
+            machine = AgentStatusMachine()
+            return try XCTUnwrap(endTurn(message: asks).turnEnd).turnEndedAt
+        }
+        var at = try ended()
+        XCTAssertTrue(machine.isCurrentTurnEnd(at))
+        machine.noteSeen()
+        XCTAssertTrue(machine.isCurrentTurnEnd(at), "read on screen")
+        _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.isCurrentTurnEnd(at), "answered at the terminal")
+        at = try ended()
+        _ = machine.apply(event(.stop, at: 9, message: "Tests passed."), isUserFocused: false)
+        XCTAssertFalse(machine.isCurrentTurnEnd(at), "a later turn end")
+        at = try ended()
+        _ = machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false)
+        XCTAssertFalse(machine.isCurrentTurnEnd(at), "another conversation")
     }
 
     /// The card offers the question while Claude waits at a prompt Nirux

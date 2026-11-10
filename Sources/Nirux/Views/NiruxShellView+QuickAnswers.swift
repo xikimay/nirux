@@ -115,25 +115,21 @@ extension NiruxShellView {
     }
 
     /// Its question went (Claude moved on, the user answered at the
-    /// terminal): the Reply… popover goes, its text kept on the clipboard.
-    /// A popover closed meanwhile is let go. The sidebar's refresh calls it.
-    func closeStaleTurnReply(_ infos: [WorkspaceInfo]) {
+    /// terminal, the column closed): the Reply… popover goes, its text kept
+    /// on the clipboard. Decided by the column's turn end, not by the card:
+    /// a question read on screen leaves the card, not the conversation. A
+    /// popover closed meanwhile is let go. The sidebar's refresh calls it.
+    func closeStaleTurnReply() {
         guard let popover = turnReplyPopover, let question = turnReplyQuestion else { return }
         guard popover.isShown else { return closeTurnReply() }
-        guard !Self.cardsStillAsk(question, infos) else { return }
+        let column = liveColumn(where: { $0.id == question.columnID })?.column
+        guard column?.pty?.isCurrentTurnEnd(question.turnEndedAt) != true else { return }
         let text = (popover.contentViewController as? TurnReplyViewController)?.replyView?.string ?? ""
         closeTurnReply()
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         showToast("Claude moved on before your reply went: it’s on the clipboard")
-    }
-
-    /// A card still offers answers to `question`: its column, its turn end.
-    static func cardsStillAsk(_ question: SidebarTurnQuestion, _ infos: [WorkspaceInfo]) -> Bool {
-        infos.contains { $0.columns.contains {
-            $0.turnQuestion?.columnID == question.columnID && $0.turnQuestion?.turnEndedAt == question.turnEndedAt
-        } }
     }
 
     private func closeTurnReply() {

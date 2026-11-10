@@ -531,11 +531,15 @@ struct AgentStatusMachine {
         guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
               foreground.instance.startedAt <= turnEndedAt
         else { return false }
-        // A prompt since sets Claude working, then its Stop ends a later
-        // turn: neither needs a check of its own.
-        return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && !hasDraft && pendingDialogs.isEmpty && !hookWorking
+        return isCurrentTurnEnd(turnEndedAt) && !hasDraft && pendingDialogs.isEmpty && !hookWorking
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
+    }
+
+    /// The turn end of `turnEndedAt` is still the last thing that happened
+    /// in this conversation: no prompt, turn end or conversation since.
+    /// Seen or not, its question still waits for an answer.
+    func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
+        mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt && (lastPromptAt ?? 0) < turnEndedAt
     }
 
     /// Output this recent says Claude draws something: its spinner at work.
@@ -835,6 +839,13 @@ struct AgentStatusMachine {
 
     private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
 
+    /// One key's bytes: a character, or a short escape sequence (a
+    /// bracketed paste is longer).
+    static func isOneKey(_ keys: Data) -> Bool {
+        if keys.first == 0x1B { return keys.count <= 8 }
+        return String(data: keys, encoding: .utf8).map { $0.count == 1 } ?? false
+    }
+
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date, keys: Data? = nil) {
@@ -846,8 +857,11 @@ struct AgentStatusMachine {
         lastInputAt = time
         // A mode switch (Shift-Tab) leaves the prompt as it was; any other
         // key may leave text there, or open a screen no hook tells of (Esc
-        // Esc's rewind picker, Ctrl-O's transcript, a slash command's).
-        if !answersDialog, keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        // Esc's rewind picker, Ctrl-O's transcript, a slash command's). A
+        // paste or dictation is text, whatever a dialog waits for: one key
+        // answers a dialog, not a write of several.
+        let oneKey = keys.map(Self.isOneKey) ?? true
+        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }

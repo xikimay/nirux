@@ -380,6 +380,11 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteSeen()
     }
 
+    /// See `AgentStatusMachine.isCurrentTurnEnd`.
+    func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
+        state.machine.isCurrentTurnEnd(turnEndedAt)
+    }
+
     /// Types a quick answer (Yes, No, a reply) to the turn end of
     /// `turnEndedAt` when it may go in (`AgentStatusMachine
     /// .acceptsQuickAnswer`), as a prompt the user's click sends; false,
@@ -1127,7 +1132,7 @@ private final class PtyState: @unchecked Sendable {
     func noteTerminalWrite(_ data: Data) {
         guard PtySession.isUserText(data) else { return }
         DispatchQueue.main.async { [self] in
-            machine.noteKeystroke(now: Date())
+            machine.noteKeystroke(now: Date(), keys: data)
         }
     }
 

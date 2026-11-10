@@ -109,17 +109,6 @@ final class TurnQuestionSidebarTests: XCTestCase {
         XCTAssertNotEqual(column(yesNo).hashValue, column(later).hashValue)
     }
 
-    /// The Reply… popover stays while a card still offers answers to its
-    /// question, and goes once none does.
-    func testReplyPopoverStaysWhileItsQuestionShows() {
-        let later = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 2_000, isYesNo: true, columnID: columnID)
-        XCTAssertTrue(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(yesNo)])]))
-        XCTAssertFalse(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(later)])]), "a later question")
-        XCTAssertFalse(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(nil)])]), "answered or moved on")
-        let elsewhere = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 1_005, isYesNo: true, columnID: UUID())
-        XCTAssertFalse(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(elsewhere)])]), "another column's")
-    }
-
     func testYesAndNoTypeAPlainWord() {
         XCTAssertEqual(SidebarTurnAnswer.yes.typedText, "yes")
         XCTAssertEqual(SidebarTurnAnswer.no.typedText, "no")

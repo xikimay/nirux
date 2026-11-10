@@ -108,7 +108,7 @@ extension NiruxShellView {
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions)
-        closeStaleTurnReply(infos)
+        closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }
