@@ -545,7 +545,6 @@ extension WorkspaceState {
         settledTurnStatus = max(settledTurnStatus ?? timestamp, timestamp)
         guard lastSummary != compactSummary || lastSummaryIsStatus else { return changed }
         lastSummary = compactSummary
-        lastSummaryIsStatus = false
         return true
     }
 
@@ -567,7 +566,6 @@ extension WorkspaceState {
         guard turnEndedAt > (awaitedTurnStatus ?? settledTurnStatus ?? -.infinity) else { return }
         awaitedTurnStatus = nil
         settledTurnStatus = turnEndedAt
-        lastSummaryIsStatus = false
     }
 
     /// The run for the turn that ended at `turnEndedAt` answered, if no
@@ -602,7 +600,7 @@ extension WorkspaceState {
     /// agent's report as it came, nor a line from before a turn whose line
     /// is unknown. One line.
     var statusLine: String? {
-        let line = lastSummaryIsManual ? lastSummary : lastSummaryIsStatus ? lastSummary : nil
+        let line = lastSummaryIsManual ? lastSummary : turnStatusLine
         return line.flatMap(Self.normalizedContextText)?
             .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }

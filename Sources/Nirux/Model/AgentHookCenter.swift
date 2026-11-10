@@ -380,7 +380,7 @@ final class AgentHookCenter {
         Task { @MainActor [weak self, weak workspace] in
             // Put behind already (a later turn end in the same drain): no
             // run for it.
-            guard let workspace, workspace.awaitedTurnStatus == time else { return }
+            guard let workspace else { return }
             let status = await writer.status(of: message)
             guard let self else { return }
             // Turned off meanwhile: no line.

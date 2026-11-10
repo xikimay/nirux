@@ -76,7 +76,7 @@ extension NiruxShellView {
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           // A status line written before the option went off is no summary.
-                          lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
+                          lastSummary: workspace.lastSummary,
                           lastActivityAt: workspace.lastActivityAt,
                           reviewBadges: workspace.reviewBadges,
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
