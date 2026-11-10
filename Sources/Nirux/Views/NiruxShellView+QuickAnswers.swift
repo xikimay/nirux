@@ -35,3 +35,79 @@ extension NiruxShellView {
         showToast("Your reply wasn’t sent: the agent moved on, or something is typed at its prompt. It’s on the clipboard.")
     }
 }
+
+extension NiruxShellView {
+    /// The question a column's Claude ended its turn on, for its card,
+    /// while it waits at a prompt Nirux could answer into: not while it
+    /// works (subagents included) or a dialog is open.
+    static func sidebarTurnQuestion(
+        of column: ColumnState, status: AgentStatus, foreground: ForegroundProcess?
+    ) -> SidebarTurnQuestion? {
+        guard status != .working, let pty = column.pty, pty.agentVisibleDialog(foreground: foreground) == nil,
+              let asked = pty.agentQuestion(foreground: foreground), let text = asked.text
+        else { return nil }
+        return SidebarTurnQuestion(text: text, turnEndedAt: asked.since, isYesNo: asked.isYesNo)
+    }
+
+    /// Yes, No or Reply… under a turn's question on a card. Yes and No go
+    /// in at once (or say why not); Reply… opens a field next to the
+    /// button.
+    func answerFromCard(
+        _ answer: SidebarTurnAnswer, workspaceIndex: Int, columnIndex: Int, turnEndedAt: TimeInterval, button: NSView?
+    ) {
+        guard let workspace = workspaces[safe: workspaceIndex], let column = workspace.columns[safe: columnIndex],
+              let agentUUID = column.agentUUID
+        else { return NSSound.beep() }
+        guard let text = answer.typedText else {
+            return showTurnReplyPopover(
+                workspace: workspace, columnIndex: columnIndex, agentUUID: agentUUID, turnEndedAt: turnEndedAt, anchor: button
+            )
+        }
+        if !answerTurnQuestion(agentUUID: agentUUID, turnEndedAt: turnEndedAt, answer: text) {
+            refuseQuickAnswer(in: workspace, columnIndex: columnIndex)
+        }
+        updateSidebar()
+    }
+
+    private func showTurnReplyPopover(
+        workspace: WorkspaceState, columnIndex: Int, agentUUID: String, turnEndedAt: TimeInterval, anchor: NSView?
+    ) {
+        let snapshot = ProcessSnapshot()
+        guard let anchor, let pty = workspace.columns[safe: columnIndex]?.pty,
+              let asked = pty.agentQuestion(foreground: pty.foregroundProcess(snapshot: snapshot)),
+              asked.since == turnEndedAt, let question = asked.text
+        else { return refuseQuickAnswer(in: workspace, columnIndex: columnIndex) }
+        turnReplyPopover?.close()
+        let controller = TurnReplyViewController(taskTitle: workspace.title, question: question) { [weak self] text in
+            guard let self else { return false }
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                self.showToast("Type an answer first")
+                return false
+            }
+            guard self.answerTurnQuestion(agentUUID: agentUUID, turnEndedAt: turnEndedAt, answer: text) else {
+                self.showToast("Not sent: Claude moved on, or something is typed at its prompt")
+                return false
+            }
+            self.turnReplyPopover?.close()
+            self.turnReplyPopover = nil
+            self.updateSidebar()
+            return true
+        }
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.appearance = Theme.appearance
+        controller.popover = popover
+        // The sidebar rebuilds its rows; the document view under them stays.
+        let host = anchor.superview ?? anchor
+        popover.show(relativeTo: host === anchor ? anchor.bounds : anchor.frame, of: host, preferredEdge: .maxX)
+        turnReplyPopover = popover
+        controller.focusReplyField()
+    }
+
+    /// A quick answer that can't go in: the column shows why.
+    private func refuseQuickAnswer(in workspace: WorkspaceState, columnIndex: Int) {
+        focusWorkspace(id: workspace.id, column: columnIndex)
+        showToast("Not sent: Claude moved on, or something is typed at its prompt")
+    }
+}

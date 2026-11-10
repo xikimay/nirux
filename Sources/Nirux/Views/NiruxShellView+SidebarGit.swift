@@ -60,6 +60,7 @@ extension NiruxShellView {
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
+                    turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
                     id: col.id
                 )
             }

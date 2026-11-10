@@ -219,6 +219,9 @@ extension WorkspaceInfo {
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
             }
+            if let question = column.turnQuestion {
+                actions.append(.turnQuestion(columnIndex: column.index, question))
+            }
             if let question = column.missionQuestion, column.index != questionShown {
                 actions.append(.missionQuestion(columnIndex: column.index, question))
             }
@@ -259,13 +262,15 @@ enum SidebarCardAction: Hashable {
     /// A Mission question the status line doesn't show: a click opens the
     /// reply popover.
     case missionQuestion(columnIndex: Int, SidebarMissionQuestion)
+    /// The question a Claude turn ended on: Yes / No / Reply….
+    case turnQuestion(columnIndex: Int, SidebarTurnQuestion)
 
     /// Information rather than something to do: no separator above.
     var isQuiet: Bool {
         switch self {
         case .next, .reviewBadges: return true
         case .missionQuestion(_, let question): return question.handOff == nil
-        case .approval, .resume, .cleanup: return false
+        case .approval, .resume, .cleanup, .turnQuestion: return false
         }
     }
 }

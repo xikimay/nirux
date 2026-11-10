@@ -1205,6 +1205,23 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt, foreground: claude), "once")
     }
 
+    /// The card offers the question while Claude waits at a prompt Nirux
+    /// could answer into: not while it works or a dialog is open.
+    func testCardTakesTheQuestionWhileClaudeWaitsAtItsPrompt() throws {
+        let (center, _, column, request, _) = try turnEndColumn()
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                   for: request, agentUUID: uuid)
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        XCTAssertEqual(
+            NiruxShellView.sidebarTurnQuestion(of: column, status: .needsAttention, foreground: claude),
+            SidebarTurnQuestion(text: "Let me know if I should merge it.", turnEndedAt: request.turnEndedAt, isYesNo: true)
+        )
+        XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .working, foreground: claude), "at work")
+        _ = column.pty?.applyAgentHook(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .needsAttention, foreground: claude), "a dialog")
+    }
+
     /// A notification's Reply carries the turn end it answers.
     func testNotificationReplyNamesItsTurnEnd() {
         let target = NiruxNotifier.QuickReplyTarget(agentUUID: "A-1", turnEndedAt: 1_005.5)
