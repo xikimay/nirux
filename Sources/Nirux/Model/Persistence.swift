@@ -389,7 +389,7 @@ struct PersistedSettings: Codable {
     /// line. Missing decodes to false.
     var showClaudeUsageLimits: Bool = false
     /// A Claude turn end alerts (banner, Dock) only when its final message
-    /// asks something (see `HaikuTurnEndClassifier`). On by default:
+    /// asks something (see `ClaudeTurnEndClassifier`). On by default:
     /// missing decodes to true.
     var alertOnlyWhenClaudeAsks: Bool = true
     /// A pull request whose checks failed says when the failure looks

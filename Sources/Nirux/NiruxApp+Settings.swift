@@ -226,7 +226,7 @@ extension NiruxApp {
             [
                 onlyAsks,
                 SettingsForm.hint(
-                    "When a Claude Code turn ends, Haiku reads its last message (claude -p, on a Claude "
+                    "When a Claude Code turn ends, Sonnet reads its last message (claude -p, on a Claude "
                         + "subscription only) and Nirux alerts only if it asks you something. When that check "
                         + "can't run, the turn alerts. Codex and other agents alert at every turn end.",
                     under: onlyAsks
@@ -482,8 +482,8 @@ extension NiruxApp {
     /// The classifier in use; tests put a double here, so that turning the
     /// option on never runs the real `claude`.
     static var makeTurnEndClassifier: () -> any TurnEndClassifier = {
-        HaikuTurnEndClassifier.shared.prepare()
-        return HaikuTurnEndClassifier.shared
+        ClaudeTurnEndClassifier.shared.prepare()
+        return ClaudeTurnEndClassifier.shared
     }
 
     private func showSettingsError(_ message: String) {

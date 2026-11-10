@@ -26,7 +26,7 @@ struct TurnEndRequest: Equatable, Sendable {
 }
 
 /// Reads a turn's final message. The seam for other classifiers (Apple's
-/// on-device model); see `HaikuTurnEndClassifier` for the one in use.
+/// on-device model); see `ClaudeTurnEndClassifier` for the one in use.
 protocol TurnEndClassifier: Sendable {
     /// Never throws: any failure is `.unknown`. May take seconds; the
     /// caller doesn't wait on the main thread.
@@ -156,9 +156,10 @@ enum TurnEndText {
     /// The message ends on a question: its last paragraph of prose (not
     /// code, a quote, a table, a heading or a rule) holds a line ending
     /// with a question mark, past trailing quotes, brackets, markdown and
-    /// emoji. Such a turn asks for sure, model or not: Haiku now and then
-    /// reads a short one as done ("Ça te va ?"). A rhetorical one costs an
-    /// extra alert, the right side to err on.
+    /// emoji. Such a turn asks for sure, model or not: Haiku and Sonnet
+    /// both now and then read a short one as done ("Ça te va ?", "Tu peux
+    /// vérifier le VPN ?"). A rhetorical one costs an extra alert, the
+    /// right side to err on.
     static func endsOnQuestion(_ message: String) -> Bool {
         questionLine(of: message) != nil
     }

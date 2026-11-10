@@ -1,22 +1,26 @@
 import Foundation
 
-/// Classifies a Claude turn's final message with Claude Haiku through a
-/// headless `claude -p`, on the account `claude` is logged in with. Chosen
-/// after a measurement on 240 real turn ends against reference labels:
-/// recall 0.99, precision 0.75, 2.1 s median, about $0.0003 a turn at API
-/// prices. A local heuristic, Apple's on-device model and Create ML
+/// Classifies a Claude turn's final message with Claude Sonnet through a
+/// headless `claude -p`, on the account `claude` is logged in with. Turns
+/// that end on a question never get here (`TurnEndText.endsOnQuestion`).
+/// Chosen over Haiku after repeated runs on 240 real turn ends and a
+/// hand-labeled set (worst run of each): Haiku missed some real questions
+/// in some runs whatever the prompt or effort, Sonnet with the question
+/// floor missed none. About $0.002 a classified turn at API prices, 2.5 s
+/// at the median. A local heuristic, Apple's on-device model and Create ML
 /// classifiers all missed more questions.
 ///
 /// The runs are `ClaudeOneShotRunner`'s: on a Claude subscription only,
 /// the message and nothing else in front of the model. Any failure is
 /// `.unknown`.
-final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
-    static let shared = HaikuTurnEndClassifier(account: .shared)
+final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
+    static let shared = ClaudeTurnEndClassifier(account: .shared)
 
     /// A full model name, not an alias that would move to the next model.
-    static let model = "claude-haiku-5-5"
-    /// Measured p90 under load: 3 s. Past it the turn alerts.
-    static let timeout: TimeInterval = 12
+    static let model = "claude-sonnet-5-5"
+    /// Measured under load, one run after another: p90 8 s, slowest 11 s.
+    /// Past it the turn alerts.
+    static let timeout: TimeInterval = 20
     /// Runs in a row without a verdict after which the classifier rests
     /// for `missingSetupLifetime` (every turn end alerting at once), rather
     /// than make each one wait for its timeout.
@@ -62,7 +66,7 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     init(
         checkSetup: @escaping @Sendable () -> Setup = ClaudeOneShotRunner.Account.defaultSetup,
         runProcess: @escaping @Sendable (BranchReview.ClaudeCLI, [String], Data) -> BoundedProcess.Outcome?
-            = HaikuTurnEndClassifier.defaultRun,
+            = ClaudeTurnEndClassifier.defaultRun,
         now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 }
     ) {
         runner = ClaudeOneShotRunner(
@@ -90,7 +94,7 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         return Data("<message>\n\(fenced)\n</message>".utf8)
     }
 
-    /// The flags of a run: Haiku alone, confined, no tools, with the prompt
+    /// The flags of a run: the model alone, confined, no tools, with the prompt
     /// above; the message on standard input, its events out (the first one
     /// says which account it uses). `--max-budget-usd` caps a run that
     /// would go wrong (a normal one costs a hundredth of it).

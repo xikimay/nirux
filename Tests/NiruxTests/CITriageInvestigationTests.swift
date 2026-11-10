@@ -229,7 +229,7 @@ final class CITriageInvestigationTests: XCTestCase {
         XCTAssertEqual(value(after: "--system-prompt"), CITriage.systemPrompt)
         XCTAssertTrue(arguments.contains("--restricted"))
         XCTAssertTrue(CITriage.systemPrompt.contains("First line: one short sentence"), "what makes the model commit")
-        XCTAssertNotEqual(CITriageModel.client.folderName, HaikuTurnEndClassifier.client.folderName)
+        XCTAssertNotEqual(CITriageModel.client.folderName, ClaudeTurnEndClassifier.client.folderName)
     }
 
     /// One account behind both clients: a run billed per call rests every
@@ -239,7 +239,7 @@ final class CITriageInvestigationTests: XCTestCase {
         try await knowsSetup(account)
         let billed = LockedFlag()
         let failing = ClaudeOneShotRunner(client: CITriageModel.client, account: account, runProcess: { _, _, _ in nil })
-        let other = ClaudeOneShotRunner(client: HaikuTurnEndClassifier.client, account: account, runProcess: { _, _, _ in
+        let other = ClaudeOneShotRunner(client: ClaudeTurnEndClassifier.client, account: account, runProcess: { _, _, _ in
             billed.value
                 ? Self.events([#"{"type":"rate_limit_event","rate_limit_info":{"isUsingOverage":true}}"#, Self.result("ok")])
                 : Self.events([Self.result("ok")])
