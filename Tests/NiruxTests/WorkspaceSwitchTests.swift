@@ -88,7 +88,7 @@ final class WorkspaceSwitchTests: XCTestCase {
     func testNoSlideWhenTheWorkspaceOnScreenStays() throws {
         try withShell { shell, _, _ in
             let first = try XCTUnwrap(shell.activeWorkspace)
-            let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere")
+            let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere", select: false)
             let oldY = shell.verticalStrip.frame.origin.y
             shell.moveWorkspaceToSpace(workspaceID: shell.workspaces[2].id, profileID: elsewhere.id)
             XCTAssertTrue(shell.activeWorkspace === first)
