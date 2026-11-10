@@ -134,9 +134,9 @@ final class CloseAgentDetectionTests: XCTestCase {
     /// --max-old-space-size=… …/gemini`: the live argv read must reach past
     /// both flags, in the foreground and in the descendant scan. (`bash
     /// --noprofile --norc` stands in for node's flags; `exec -a` sets
-    /// argv[0].) Recognized for close, yet never a remote-prompt target.
+    /// argv[0].) Recognized for close, yet never a typed-prompt target.
     @MainActor
-    func testFlaggedRuntimeLaunchOfGeminiIsProtectedButNotRemote() async throws {
+    func testFlaggedRuntimeLaunchOfGeminiIsProtectedButTakesNoTypedPrompt() async throws {
         try await withScratchStateDirectory { cwd in
             let script = (cwd as NSString).appendingPathComponent("gemini")
             try "sleep 30; :\n".write(toFile: script, atomically: true, encoding: .utf8)

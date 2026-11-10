@@ -391,8 +391,8 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertEqual(shell.activeWorkspace?.focusedIndex, 0)
         shell.refreshStuckAgents(snapshot: snapshot, now: now - 60, appIsActive: true)
         XCTAssertEqual(notified, [])
-        shell.refreshStuckAgents(snapshot: snapshot, now: now)
-        shell.refreshStuckAgents(snapshot: snapshot, now: now + 30)
+        shell.refreshStuckAgents(snapshot: snapshot, now: now, appIsActive: false)
+        shell.refreshStuckAgents(snapshot: snapshot, now: now + 30, appIsActive: false)
         let waited = AgentAttentionReason.stillWaiting(.permission(tool: "Bash", summary: nil), waited: 3_600)
         XCTAssertEqual(notified, [waited], "once")
 
