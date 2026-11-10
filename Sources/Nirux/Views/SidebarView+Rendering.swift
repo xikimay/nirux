@@ -72,6 +72,7 @@ extension SidebarView {
         refreshApprovalArming()
         followActiveWorkspace(docHeight: docHeight)
         applyBirthMotion()
+        applyMergeMotion()
         if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
             revealsOnboardingCardOnNextBuild = false
             revealOnboardingCard()
@@ -141,6 +142,8 @@ extension SidebarView {
         spacePickerHoverView = nil
         newTaskButton = nil
         archivedRowHoverView = nil
+        // The new rows' Archived count, if they have one.
+        archivedCountLabel = nil
         railTileViews.removeAll()
         hoveredTarget = nil
         hideRailTooltip()
@@ -345,6 +348,7 @@ extension SidebarView {
         )
         countLabel.setAccessibilityElement(false)
         addExpandedView(countLabel)
+        archivedCountLabel = countLabel
 
         let titleX = Metrics.textX
         let title = textLabel(Self.archivedTitle, font: Theme.Font.body, color: Theme.Color.textSecondary)
@@ -426,6 +430,8 @@ extension SidebarView {
             yOffset: yOffset,
             animates: animates,
             turnEndedAt: turnEndNotedAt[workspace.id],
+            readyAt: readyAt[workspace.id],
+            mergedAt: mergedAt[workspace.id],
             now: clock()
         ).render()
         result.views.forEach(addExpandedView)

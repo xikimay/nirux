@@ -38,6 +38,9 @@ struct SidebarStatusLine: Hashable {
 /// The sign before a row's title, in the state dots' column.
 enum SidebarRowMark: Hashable {
     case needsYou, error, working, asking, blocked, readyToMerge, merged, idle
+    /// The pull request's checks run: a ring that turns, then the check of
+    /// `readyToMerge` or the red of `error`.
+    case checksRunning
 }
 
 /// A task row's two lines, before any view exists.
@@ -217,7 +220,7 @@ extension WorkspaceInfo {
         case "OPEN":
             if pullRequest.isDraft { return row(.idle, "#\(pullRequest.number) · draft", nil, trailing: age) }
             switch pullRequest.ciStatus {
-            case "PENDING"?: return row(.idle, "#\(pullRequest.number) · checks running", nil, trailing: age)
+            case "PENDING"?: return row(.checksRunning, "#\(pullRequest.number) · checks running", nil, trailing: age)
             case "SUCCESS"?:
                 let reviewBlocks = ["REVIEW_REQUIRED", "CHANGES_REQUESTED"].contains(pullRequest.reviewDecision ?? "")
                 guard pullRequest.mergeable != "CONFLICTING", !reviewBlocks, !hasFeedback else {

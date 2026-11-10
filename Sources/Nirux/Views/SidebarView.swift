@@ -90,6 +90,9 @@ final class SidebarView: NSView {
             // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
             lastFollowedActiveIndex = Int.min
+            // The rail shows none of the rows' moments: none replays when
+            // the list opens again.
+            if !isExpanded { forgetRowMoments() }
             rebuildContent()
         }
     }
@@ -234,6 +237,13 @@ final class SidebarView: NSView {
         let spaceChanged = profiles.first(where: \.isActive)?.id != lastProfiles.first(where: \.isActive)?.id
         if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
         let spacesChanged = profiles != lastProfiles
+        // Before the rows change: what happened to them, in the same space.
+        if spaceChanged {
+            // Another space's rows: what played for the last one stops.
+            forgetRowMoments()
+        } else if !lastProfiles.isEmpty || !lastInfos.isEmpty {
+            noteRowMoments(from: lastInfos, to: workspaces)
+        }
         lastProfiles = profiles
         lastInfos = workspaces
         if spacesChanged { NotificationCenter.default.post(name: Self.spacesDidChangeNotification, object: self) }
@@ -255,6 +265,17 @@ final class SidebarView: NSView {
     /// its formatted string so the signature only changes when a label
     /// actually would.
     private var lastRenderSignature: Int?
+
+    /// The merge's moments on a row (see SidebarView+Merge), by workspace
+    /// and on the `clock`: when its checks passed, when its pull request
+    /// was merged; the rows that just left the list; when the Archived
+    /// count last went up; and that count's label, in the rows as they
+    /// are now.
+    var readyAt: [String: CFTimeInterval] = [:]
+    var mergedAt: [String: CFTimeInterval] = [:]
+    var folds: [Fold] = []
+    var archivedBumpAt: CFTimeInterval?
+    weak var archivedCountLabel: NSTextField?
 
     /// When a task's row opens (`clock`), by workspace, while its birth
     /// plays: with a spring (see SidebarView+Birth).
@@ -287,7 +308,7 @@ final class SidebarView: NSView {
         var draws = false
         for row in lastInfos where workspaceIDs.contains(row.id) && showsTurnEnds(on: row) {
             switch row.rowSummary.mark {
-            case .idle:
+            case let mark where SidebarWorkspaceCardRenderer.drawsTurnEnd(over: mark):
                 turnEndNotedAt[row.id] = now
                 draws = true
             case .working:
@@ -321,7 +342,7 @@ final class SidebarView: NSView {
             let mark = row.flatMap { showsTurnEnds(on: $0) ? $0.rowSummary.mark : nil }
             if mark == .working, isInTime { continue }
             owedTurnEnds[id] = nil
-            if mark == .idle, isInTime { turnEndNotedAt[id] = now }
+            if let mark, SidebarWorkspaceCardRenderer.drawsTurnEnd(over: mark), isInTime { turnEndNotedAt[id] = now }
         }
     }
 
