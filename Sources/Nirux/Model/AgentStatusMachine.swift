@@ -137,6 +137,9 @@ struct AgentStatusMachine {
     private(set) var lastPromptAt: TimeInterval?
     private var turnPromptID: String?
     private var recentPromptIDs: [String] = []
+    /// The main agent's tool calls of the turn in flight, for the hint
+    /// that it may be going in circles (`circlingHint`).
+    private var circling = AgentCirclingWatch()
 
     private static let echoWindow: TimeInterval = 0.3
     private static let activityWindow: TimeInterval = 3.0
@@ -261,6 +264,10 @@ struct AgentStatusMachine {
                let index = pendingDialogs.firstIndex(where: { $0.isSameCall(key: key, as: event) }) {
                 noteClosed(pendingDialogs.remove(at: index))
             }
+            // The main agent's only: a subagent's calls say nothing of it.
+            if event.agentID == nil, let tool = event.toolName {
+                circling.noteCallEnded(what: event.toolFamily ?? tool, end: event.toolEnd.flatMap(AgentToolEnd.init), at: now)
+            }
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionRequest:
@@ -338,6 +345,7 @@ struct AgentStatusMachine {
         if event.agentID == nil {
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             askedQuestion = nil
+            circling.reset()
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -744,7 +752,13 @@ struct AgentStatusMachine {
         hookWorking = false
         turnStartedAt = nil
         hookTurnInFlight = false
+        circling.reset()
     }
+
+    /// The agent may be going in circles in the turn in flight: its
+    /// commands keep hanging, or one keeps failing (see
+    /// `AgentCirclingHint`). Shown while the column works.
+    var circlingHint: AgentCirclingHint? { circling.hint }
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
     mutating func noteRead(now: Date) {
@@ -885,6 +899,9 @@ struct AgentStatusMachine {
         if fgName != "claude" {
             if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
+            // Nor are its calls those of whoever works here next (a
+            // `claude` that died mid-turn sent no Stop).
+            circling.reset()
         }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
@@ -1008,6 +1025,7 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+        circling.reset()
     }
 }
 

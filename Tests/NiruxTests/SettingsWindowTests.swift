@@ -62,6 +62,7 @@ final class SettingsWindowTests: XCTestCase {
                 ("showClaudeUsageLimits", { try self.click(app.settingsUsageLimitsCheckbox) }),
                 ("codexLaunchMode", { try self.choose(CodexLaunchMode.bypass.rawValue, in: app.settingsCodexLaunchModePopup) }),
                 ("stuckAgentMinutes", { try self.choose(30, in: app.settingsStuckAgentPopup) }),
+                ("agentCirclingHint", { try self.click(app.settingsCirclingHintCheckbox) }),
                 ("explainModel", { try self.choose("claude-sonnet-5-5", in: app.settingsExplainModelPopup) }),
                 ("explainEffort", { try self.choose("high", in: app.settingsExplainEffortPopup) }),
                 ("keepMacAwakeWhileAgentsWork", { try self.click(app.settingsKeepAwakeCheckbox) }),
@@ -95,6 +96,9 @@ final class SettingsWindowTests: XCTestCase {
 
             try choose(30, in: app.settingsStuckAgentPopup)
             XCTAssertEqual(shell.stuckAgentWaitThreshold, NiruxShellView.stuckWaitThreshold(minutes: 30))
+            XCTAssertEqual(app.settingsCirclingHintCheckbox?.state, .on)
+            try click(app.settingsCirclingHintCheckbox)
+            XCTAssertFalse(shell.circlingHintEnabled, "rows say Working again")
             try click(app.settingsMissionHandoffsCheckbox)
             XCTAssertFalse(workspace.missionHandoffsEnabled)
             let classifier = AgentHookCenter.shared.turnEndClassifier

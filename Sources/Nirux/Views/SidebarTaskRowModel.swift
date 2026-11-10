@@ -31,6 +31,8 @@ struct SidebarStatusLine: Hashable {
     var action: Action?
     /// The end of `text` that is the link ("Clean up"); nil: all of it.
     var linkText: String?
+    /// What the line can't hold, for its tooltip.
+    var detail: String?
 }
 
 /// The sign before a row's title, in the state dots' column.
@@ -68,9 +70,10 @@ struct SidebarRowSummary: Hashable {
 @MainActor
 extension WorkspaceInfo {
     /// Needs you, then broken, then a Mission question the parent may still
-    /// answer, then work, then an agent to resume, then the blocker (grey:
-    /// it doesn't ask the user), then a finished turn, then the pull
-    /// request, then the next step, else the branch.
+    /// answer, then work (in the same grey, that the agent may be going in
+    /// circles: it doesn't ask the user either), then an agent to resume,
+    /// then the blocker (grey: it doesn't ask the user), then a finished
+    /// turn, then the pull request, then the next step, else the branch.
     var rowSummary: SidebarRowSummary {
         let age = lastActivityAt.map { SidebarRowSummary.Trailing.age(SidebarView.cardAge(since: $0)) }
         func row(_ mark: SidebarRowMark, _ text: String, _ tone: SidebarStatusLine.Tone,
@@ -103,7 +106,12 @@ extension WorkspaceInfo {
         }
         let working = columns.filter { $0.agentStatus == .working }
         if !working.isEmpty {
-            return row(.working, "Working", .neutral, trailing: working.compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age)
+            let hint = working.compactMap(\.circling).first
+            return SidebarRowSummary(
+                mark: .working,
+                status: SidebarStatusLine(text: hint?.statusText ?? "Working", tone: .neutral, detail: hint?.detail),
+                trailing: working.compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age
+            )
         }
         if let answered = question?.missionQuestion {
             return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)

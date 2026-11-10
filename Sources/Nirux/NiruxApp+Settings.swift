@@ -133,6 +133,11 @@ extension NiruxApp {
         SettingsForm.select(current, in: stuck)
         settingsStuckAgentPopup = stuck
 
+        let circling = SettingsForm.checkbox(
+            "Hint when an agent may be going in circles", target: self, action: #selector(settingsCirclingHintChanged(_:))
+        )
+        circling.state = NiruxShellView.currentCirclingHintEnabled() ? .on : .off
+        settingsCirclingHintCheckbox = circling
 
         return SettingsForm.pane([
             [
@@ -160,6 +165,16 @@ extension NiruxApp {
                 SettingsForm.hint(
                     "A permission or question dialog open this long marks its agent as stuck: "
                         + "a badge on its card and one notification."
+                )
+            ],
+            [
+                SettingsForm.header("Going in circles"),
+                circling,
+                SettingsForm.hint(
+                    "A grey line on a working Claude Code task's row, in place of \"Working\", once 3 of its "
+                        + "commands ran past their time limit in a turn, or one command failed 5 times in a row. "
+                        + "Counted on your Mac from Claude Code's hooks; the agent isn't interrupted, and nothing alerts.",
+                    under: circling
                 )
             ],
             missionsSection(),
@@ -362,6 +377,13 @@ extension NiruxApp {
         shell?.stuckAgentWaitThreshold = NiruxShellView.stuckWaitThreshold(minutes: minutes)
     }
 
+    @objc func settingsCirclingHintChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.agentCirclingHint = enabled }) else { return }
+        shell?.circlingHintEnabled = enabled
+        shell?.updateSidebar()
+    }
+
     /// Only a changed choice is written, and the default as none: a later
     /// default reaches whoever didn't choose, and a value a newer build
     /// saved, which shows as the default, stays.
@@ -464,6 +486,7 @@ extension NiruxApp {
         settingsMissionHandoffsCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
         settingsStuckAgentPopup = nil
+        settingsCirclingHintCheckbox = nil
         settingsExplainModelPopup = nil
         settingsExplainEffortPopup = nil
         settingsAlertOnlyWhenClaudeAsksCheckbox = nil

@@ -33,6 +33,9 @@ struct ColumnInfo: Hashable {
     var deferredAgent: SidebarDeferredAgent?
     /// A Mission question this column's agent waits on.
     var missionQuestion: SidebarMissionQuestion?
+    /// The working agent may be going in circles (`AgentCirclingHint`);
+    /// nil with the hint turned off in Settings.
+    var circling: AgentCirclingHint?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
 
@@ -70,6 +73,7 @@ struct ColumnInfo: Hashable {
             && lhs.stuck == rhs.stuck
             && lhs.deferredAgent == rhs.deferredAgent
             && lhs.missionQuestion == rhs.missionQuestion
+            && lhs.circling == rhs.circling
     }
 
     func hash(into hasher: inout Hasher) {
@@ -92,6 +96,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(stuck)
         hasher.combine(deferredAgent)
         hasher.combine(missionQuestion)
+        hasher.combine(circling)
     }
 }
 

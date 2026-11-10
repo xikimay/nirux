@@ -394,6 +394,9 @@ struct PersistedSettings: Codable {
     var alertOnlyWhenClaudeAsks: Bool = true
     /// Minutes a dialog may wait before its agent reads as stuck; 0 = off.
     var stuckAgentMinutes: Int?
+    /// A working Claude that may be going in circles says so on its row
+    /// (see `AgentCirclingHint`). On by default: missing decodes to true.
+    var agentCirclingHint: Bool = true
     /// First-launch checklist. Nil in state files that predate it; see
     /// `OnboardingChecklist.launchState`.
     var onboardingChecklist: OnboardingChecklistState?
@@ -441,6 +444,7 @@ struct PersistedSettings: Codable {
         case showClaudeUsageLimits
         case alertOnlyWhenClaudeAsks
         case stuckAgentMinutes
+        case agentCirclingHint
         case onboardingChecklist
         case agentResumeOnLaunch
         case explainNoticeAccounts
@@ -469,6 +473,7 @@ struct PersistedSettings: Codable {
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
+        agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true
         // A value from a newer build must not make the whole state file
         // undecodable: it reads as "no record" and is written back as is.
         if let raw = try? container.decodeIfPresent(String.self, forKey: .onboardingChecklist) {
@@ -499,6 +504,7 @@ struct PersistedSettings: Codable {
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
+        try container.encode(agentCirclingHint, forKey: .agentCirclingHint)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist
         )

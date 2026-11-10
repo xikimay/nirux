@@ -402,4 +402,72 @@ final class StuckAgentSidebarTests: XCTestCase {
         shell.stopStuckWatch()
         XCTAssertNil(shell.stuckWatchTimer)
     }
+
+    // MARK: - Going in circles
+
+    /// From Claude's hook events to the task's row: a working agent whose
+    /// commands keep hanging says so (`AgentCirclingHint`), not with the
+    /// option off, and no longer once its turn is over.
+    func testAHungTurnShowsOnItsRowWhileTheAgentWorks() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-circling-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", root.path, 1)
+        defer {
+            if let previousStateDirectory { setenv("NIRUX_STATE_DIR", previousStateDirectory, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = shell
+        defer { window.close() }
+        XCTAssertTrue(shell.circlingHintEnabled, "on by default")
+
+        let pty = try XCTUnwrap(shell.workspaces.first?.columns.first?.pty)
+        let started = try await waitUntil(timeout: 10) { pty.shellPID != nil }
+        XCTAssertTrue(started)
+        let shellPID = try XCTUnwrap(pty.shellPID)
+        // A claude in front of the column's shell, as the process table
+        // would show it.
+        let now = Date().timeIntervalSince1970
+        let claudePID: pid_t = 99_998
+        let snapshot = ProcessSnapshot(entries: [
+            ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: claudePID,
+                name: "zsh", startedAt: now - 800, arguments: ["zsh"]
+            ),
+            ProcessSnapshot.Entry(
+                pid: claudePID, parentPID: shellPID, processGroupID: claudePID, terminalForegroundProcessGroupID: claudePID,
+                name: "claude", startedAt: now - 700, arguments: ["claude"]
+            )
+        ])
+        func hook(_ name: AgentHookEvent.Name, hung: Bool = false) -> AgentHookEvent {
+            AgentHookEvent(
+                kind: .claude, name: name, sessionID: "s", toolName: hung ? "Bash" : nil,
+                toolEnd: hung ? AgentToolEnd.hung.rawValue : nil, toolFamily: hung ? "ls" : nil, timestamp: now
+            )
+        }
+        @MainActor func status() throws -> String {
+            shell.updateSidebar(snapshot: snapshot)
+            return try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first).rowSummary.status.text
+        }
+        for event in [hook(.sessionStart), hook(.userPromptSubmit), hook(.postToolUse, hung: true), hook(.postToolUse, hung: true)] {
+            pty.applyAgentHook(event, isUserFocused: false)
+        }
+        XCTAssertEqual(try status(), "Working")
+        pty.applyAgentHook(hook(.postToolUse, hung: true), isUserFocused: false)
+        XCTAssertEqual(try status(), "May be stuck · 3 commands hung")
+
+        shell.circlingHintEnabled = false
+        XCTAssertEqual(try status(), "Working", "turned off in Settings")
+        shell.circlingHintEnabled = true
+        XCTAssertEqual(try status(), "May be stuck · 3 commands hung")
+        pty.applyAgentHook(hook(.stop), isUserFocused: false)
+        XCTAssertFalse(try status().hasPrefix("May be"), "its turn is over")
+    }
 }
