@@ -147,18 +147,10 @@ enum TurnEndText {
         for line in message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).reversed() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             // Counted from the end: an excerpt may have lost a block's start.
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                if inParagraph { return false }
-                inFence.toggle()
-                continue
-            }
-            if inFence { continue }
-            let isProse = !trimmed.isEmpty && !trimmed.hasPrefix(">") && !trimmed.hasPrefix("|") && !trimmed.hasPrefix("#")
+            let isProse = !trimmed.isEmpty && !trimmed.hasPrefix("|")
             if isProse {
                 inParagraph = true
                 if endsWithQuestionMark(trimmed) { return true }
-            } else if inParagraph {
-                return false
             }
         }
         return false
@@ -166,8 +158,8 @@ enum TurnEndText {
 
     static func endsWithQuestionMark(_ line: String) -> Bool {
         var scalars = Array(line.unicodeScalars)
-        while let last = scalars.last, isTrailingDecoration(last) { scalars.removeLast() }
-        return scalars.last.map { $0 == "?" || $0 == "\u{FF1F}" } ?? false
+        while let last = scalars.last, last.properties.isWhitespace { scalars.removeLast() }
+        return scalars.last.map { $0 == "?" } ?? false
     }
 
     /// Whitespace, closing quotes and brackets, markdown, emoji (not the

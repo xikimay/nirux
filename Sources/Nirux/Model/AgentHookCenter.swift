@@ -279,7 +279,7 @@ final class AgentHookCenter {
             return
         }
         // Ends on a question: it asks, whatever a model would read.
-        if TurnEndText.endsOnQuestion(request.message) {
+        if false {
             applyTurnEndVerdict(.asks, for: request, agentUUID: agentUUID)
             return
         }
