@@ -202,7 +202,7 @@ enum TurnEndText {
                 inFence.toggle()
                 continue
             }
-            if !inFence, !trimmed.hasPrefix(">") { lines.append(line) }
+            if !inFence { lines.append(line) }
         }
         return lines.reversed()
     }
@@ -218,7 +218,6 @@ enum TurnEndText {
     /// closing quotes and brackets), or the line ends or one comes next.
     private static func endsSentence(_ needle: String, at index: String.Index, in text: String) -> Bool {
         let sentenceMarks: Set<Character> = [".", "?", "!", "…", ":", "？", "؟"]
-        if let last = needle.last(where: { !")]}»\"'".contains($0) }), sentenceMarks.contains(last) { return true }
         guard index < text.endIndex else { return true }
         return text[index] == "\n" || sentenceMarks.contains(text[index])
     }
