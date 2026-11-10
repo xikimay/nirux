@@ -796,8 +796,9 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertFalse(shell.isMetadataRefreshScheduled)
             shell.turnEndSettled()
             XCTAssertTrue(shell.isMetadataRefreshScheduled, "a refresh of its own, not the next heartbeat's")
-            let deadline = Date().addingTimeInterval(10)
-            while !light.isSweeping, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+            // That refresh, without letting the run loop start the column's
+            // shell under the test (a new shell resets its agent's state).
+            shell.updateSidebar(snapshot: unread)
             XCTAssertTrue(light.isSweeping)
 
             XCTAssertGreaterThan(pty.agentTurnEndedAt, 0)
