@@ -839,6 +839,14 @@ struct AgentStatusMachine {
 
     private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
 
+    /// Arrows reached the agent without a key pressed (ghostty turns a
+    /// wheel scroll into them on the alternate screen): an old prompt may be
+    /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
+    /// keystroke: the user scrolled, typed nothing.
+    mutating func notePromptRecall(now: Date) {
+        lastDraftInputAt = now.timeIntervalSince1970
+    }
+
     /// One key's bytes: a character, or a short escape sequence (a
     /// bracketed paste is longer).
     static func isOneKey(_ keys: Data) -> Bool {
