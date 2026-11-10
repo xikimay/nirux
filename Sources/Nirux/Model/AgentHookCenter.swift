@@ -374,7 +374,7 @@ final class AgentHookCenter {
     /// launch, which is no news. True when its run is on its way.
     @discardableResult
     func writeTurnStatus(of message: String, endedAt time: TimeInterval, in workspace: WorkspaceState) -> Bool {
-        guard let writer = turnStatusWriter, !workspace.isLead, now() - time < Self.turnDoneFreshness,
+        guard let writer = turnStatusWriter, now() - time < Self.turnDoneFreshness,
               workspace.awaitTurnStatus(turnEndedAt: time)
         else { return false }
         Task { @MainActor [weak self, weak workspace] in

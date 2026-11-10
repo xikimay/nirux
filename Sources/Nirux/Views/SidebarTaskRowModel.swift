@@ -158,9 +158,6 @@ extension WorkspaceInfo {
         if let next = nextStepText {
             return row(.idle, Self.nextStepLine(next), .neutral)
         }
-        if let statusLine {
-            return row(.idle, statusLine, .neutral)
-        }
         let place = gitBranch ?? columns.first(where: \.isFocused)?.abbreviatedCwd ?? columns.first?.abbreviatedCwd
         return row(.idle, place ?? "No activity yet", place == nil ? .neutral : .branch)
     }

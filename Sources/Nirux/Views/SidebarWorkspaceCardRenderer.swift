@@ -475,7 +475,6 @@ final class SidebarWorkspaceCardRenderer {
         label.frame = NSRect(x: x, y: top - Metrics.statusRowHeight, width: layout.contentMaxX - x, height: Metrics.statusRowHeight)
         label.toolTip = statusToolTip(status)
         // The grey check says it on screen.
-        if layout.summary.mark == .finished { label.setAccessibilityLabel("Done: \(status.text)") }
         if let question = shownQuestion(status) { Self.describe(label, question: question) }
         append(label)
         guard let action = status.action else { return nil }

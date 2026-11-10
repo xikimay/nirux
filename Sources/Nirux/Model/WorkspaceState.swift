@@ -541,7 +541,6 @@ extension WorkspaceState {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         // A Claude line on its way for an older turn would replace it.
-        if let awaited = awaitedTurnStatus, awaited < timestamp { awaitedTurnStatus = nil }
         settledTurnStatus = max(settledTurnStatus ?? timestamp, timestamp)
         guard lastSummary != compactSummary || lastSummaryIsStatus else { return changed }
         lastSummary = compactSummary
@@ -594,7 +593,7 @@ extension WorkspaceState {
 
     /// The last turn end's status line, once it is known.
     var turnStatusLine: String? {
-        lastSummaryIsStatus && !lastSummaryIsManual && awaitedTurnStatus == nil ? lastSummary : nil
+        lastSummaryIsStatus && !lastSummaryIsManual ? lastSummary : nil
     }
 
     /// The task's line on its row: the summary the user wrote, else the
@@ -603,8 +602,7 @@ extension WorkspaceState {
     /// is unknown. One line.
     var statusLine: String? {
         let line = lastSummaryIsManual ? lastSummary : lastSummaryIsStatus ? lastSummary : nil
-        return line.flatMap(Self.normalizedContextText)?
-            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        return line.flatMap(Self.normalizedContextText)
     }
 
     @discardableResult
