@@ -121,7 +121,7 @@ final class SettingsWindowTests: XCTestCase {
             let classifier = AgentHookCenter.shared.turnEndClassifier
             let makeClassifier = NiruxApp.makeTurnEndClassifier
             // Never the real `claude`.
-            NiruxApp.makeTurnEndClassifier = { HaikuTurnEndClassifier(checkSetup: { .unavailable }, runProcess: { _, _, _ in nil }) }
+            NiruxApp.makeTurnEndClassifier = { ClaudeTurnEndClassifier(checkSetup: { .unavailable }, runProcess: { _, _, _ in nil }) }
             defer {
                 AgentHookCenter.shared.turnEndClassifier = classifier
                 NiruxApp.makeTurnEndClassifier = makeClassifier
