@@ -897,6 +897,18 @@ final class PtySession: @unchecked Sendable {
         return first != 0x1B || data.starts(with: [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]) // ESC[200~
     }
 
+    /// Whether ghostty writes Up or Down arrows: what it turns a wheel
+    /// scroll into on the alternate screen when the program there reports
+    /// no mouse (Claude Code under `CLAUDE_CODE_DISABLE_MOUSE`). At an
+    /// agent's prompt, Up recalls an old prompt.
+    static func isUpDownArrows(_ data: Data) -> Bool {
+        guard !data.isEmpty, data.count.isMultiple(of: 3) else { return false }
+        return stride(from: data.startIndex, to: data.endIndex, by: 3).allSatisfy { index in
+            let key = data[index..<index + 3]
+            return key.first == 0x1B && [0x5B, 0x4F].contains(key[index + 1]) && [0x41, 0x42].contains(key[index + 2])
+        }
+    }
+
     func sendRaw(_ string: String) {
         if let data = string.data(using: .utf8) {
             sendRaw(data)
@@ -1128,11 +1140,17 @@ private final class PtyState: @unchecked Sendable {
     /// paste (any way: ⌘V, the Edit menu, a right-click), dictation, the
     /// emoji picker — and for its own replies to terminal queries, which
     /// may come on the read queue. The user's text counts as a keystroke,
-    /// noted on the main queue like every other.
+    /// noted on the main queue like every other; arrows from a wheel scroll
+    /// count as what may be at the prompt.
     func noteTerminalWrite(_ data: Data) {
-        guard PtySession.isUserText(data) else { return }
-        DispatchQueue.main.async { [self] in
-            machine.noteKeystroke(now: Date(), keys: data)
+        if PtySession.isUserText(data) {
+            DispatchQueue.main.async { [self] in
+                machine.noteKeystroke(now: Date(), keys: data)
+            }
+        } else if PtySession.isUpDownArrows(data) {
+            DispatchQueue.main.async { [self] in
+                machine.notePromptRecall(now: Date())
+            }
         }
     }
 

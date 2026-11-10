@@ -1280,6 +1280,16 @@ final class TurnEndClassificationTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertFalse(pastePty.typeQuickAnswer("yes\r", to: pasteRequest.turnEndedAt, foreground: claude), "a paste")
 
+        // A wheel scroll on the alternate screen, which ghostty turns into
+        // arrows when the program reports no mouse: Up recalls an old prompt.
+        let (wheelCenter, _, wheelColumn, wheelRequest, _) = try turnEndColumn()
+        let wheelPty = try XCTUnwrap(wheelColumn.pty)
+        wheelCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                        for: wheelRequest, agentUUID: try XCTUnwrap(wheelColumn.agentUUID))
+        wheelPty.terminalSession.sendInput(Data("\u{1B}[A\u{1B}[A\u{1B}[A".utf8))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertFalse(wheelPty.typeQuickAnswer("yes\r", to: wheelRequest.turnEndedAt, foreground: claude), "a wheel scroll's arrows")
+
         // Pasted while a dialog waited: text, not the dialog's answer.
         let (_, _, dialogColumn, _, _) = try turnEndColumn()
         let dialogPty = try XCTUnwrap(dialogColumn.pty)
@@ -1289,6 +1299,19 @@ final class TurnEndClassificationTests: XCTestCase {
         _ = dialogPty.applyAgentHook(event(.postToolUse, at: 7, tool: "Bash"), isUserFocused: false)
         let later = try XCTUnwrap(dialogPty.applyAgentHook(event(.stop, at: 8, message: asks), isUserFocused: false).turnEnd)
         XCTAssertFalse(dialogPty.typeQuickAnswer("yes\r", to: later.turnEndedAt, foreground: claude), "a paste during a dialog")
+    }
+
+    /// Measured in a real ghostty surface (alternate screen, no mouse
+    /// reporting): a wheel tick up writes "ESC[A" three times, down
+    /// "ESC[B". Those count; terminal replies and mouse reports don't.
+    func testWheelArrowsAreTheOnlyEscapesThatCount() {
+        for arrows in ["\u{1B}[A", "\u{1B}[A\u{1B}[A\u{1B}[A", "\u{1B}[B", "\u{1B}OA", "\u{1B}OB\u{1B}OB"] {
+            XCTAssertTrue(PtySession.isUpDownArrows(Data(arrows.utf8)), arrows.debugDescription)
+        }
+        for other in ["", "\u{1B}[I", "\u{1B}[O", "\u{1B}[C", "\u{1B}[D", "\u{1B}[<64;10;5M", "\u{1B}[A\u{1B}[I",
+                      "\u{1B}[?62;22c", "A", "\u{1B}[AB"] {
+            XCTAssertFalse(PtySession.isUpDownArrows(Data(other.utf8)), other.debugDescription)
+        }
     }
 
     /// The question still waits, seen or not, until a prompt, a later turn
