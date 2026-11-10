@@ -197,7 +197,7 @@ enum AgentToolOutcome {
         // A `sleep 600` outlasting its limit is meant to (12 of the month's
         // 43), and a poll that finds nothing yet isn't a try.
         if command.isWait { return failure || pastItsLimit ? .waited : nil }
-        if pastItsLimit { return command.mayRunLong ? .waited : .hung }
+        if pastItsLimit { return .hung }
         guard failure else { return nil }
         switch exitCode(payload) {
         // grep found nothing, files differ, a test is false: an answer.
@@ -205,7 +205,6 @@ enum AgentToolOutcome {
         // for test, which or cmp.
         case 1? where command.exitOneAnswers: return nil
         // `gh pr checks`: checks still running.
-        case 8? where command.runsChecks: return .waited
         default: return .failed
         }
     }
@@ -321,7 +320,6 @@ struct AgentShellCommand: Equatable, Sendable {
             let waits = name == "sleep" || Self.waitingCommands.contains(named) || arguments.contains("--mission")
             if depth > 0 {
                 if Self.compoundOpeners.contains(name) { depth += 1 }
-                if Self.compoundClosers.contains(name) { depth -= 1 }
                 compoundWaits = compoundWaits || waits
                 if depth == 0 {
                     // A loop that sleeps is a poll; any other one runs things.
@@ -334,7 +332,7 @@ struct AgentShellCommand: Equatable, Sendable {
             // `cd` hardly fails; `pkill` answers "none" with exit 1.
             let mayFail = !Self.housekeeping.contains(name) || Self.clearsTheWay.contains(name)
             defer { if mayFail { chainHasProgram = true } }
-            lastAnswers = (Self.answeringPrograms.contains(name) || Self.answeringPrograms.contains(named)) && !pipelineGated
+            lastAnswers = (Self.answeringPrograms.contains(name) || Self.answeringPrograms.contains(named))
             if Self.waitingCommands.contains(named) || arguments.contains("--mission") {
                 waitParts += 1
                 runsChecks = runsChecks || named == "gh pr checks"
