@@ -17,7 +17,7 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     static let shared = ClaudeTurnEndClassifier(account: .shared)
 
     /// A full model name, not an alias that would move to the next model.
-    static let model = "claude-sonnet-5-5"
+    static let model = "claude-haiku-5-5"
     /// Measured under load, one run after another: p90 8 s, slowest 11 s.
     /// Past it the turn alerts.
     static let timeout: TimeInterval = 20
