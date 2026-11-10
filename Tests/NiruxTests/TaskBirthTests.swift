@@ -15,8 +15,14 @@ final class TaskBirthTests: UIFlowTestCase {
         )
     }
 
-    private func sidebar(_ rows: [WorkspaceInfo], expanded: Bool = true) -> SidebarView {
+    /// A clock the test moves by hand.
+    private final class Clock {
+        var time: CFTimeInterval = 7_000
+    }
+
+    private func sidebar(_ rows: [WorkspaceInfo], expanded: Bool = true, clock: Clock = Clock()) -> SidebarView {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
+        sidebar.clock = { clock.time }
         sidebar.isExpanded = expanded
         sidebar.update(profiles: [], workspaces: rows)
         return sidebar
@@ -41,11 +47,12 @@ final class TaskBirthTests: UIFlowTestCase {
     /// while.
     func testABornRowOpensAndTheTasksUnderItGiveWay() throws {
         let rows = [row("above", index: 0), row("born", index: 1), row("under", index: 2), row("old", index: 3, archived: true)]
-        let sidebar = sidebar(rows)
+        let clock = Clock()
+        let sidebar = sidebar(rows, clock: clock)
         XCTAssertTrue(views(in: sidebar, with: SidebarView.birthKey).isEmpty)
 
-        let start = CACurrentMediaTime()
-        sidebar.noteBirth(workspaceID: "born", now: start, delay: 0.2)
+        let start = clock.time
+        sidebar.noteBirth(workspaceID: "born", delay: 0.2)
         let born = try XCTUnwrap(sidebar.rowFrame(workspaceID: "born"))
         let above = try XCTUnwrap(sidebar.rowFrame(workspaceID: "above"))
         let under = try XCTUnwrap(sidebar.rowFrame(workspaceID: "under"))
@@ -80,29 +87,29 @@ final class TaskBirthTests: UIFlowTestCase {
         XCTAssertTrue(views(in: sidebar, inside: above).allSatisfy { $0.layer?.animationKeys() == nil }, "the rows above stay")
 
         // Another change rebuilds the rows in the middle of it.
+        clock.time = start + 0.6
         sidebar.update(profiles: [], workspaces: rows + [row("later", index: 4)])
         let rebuilt = try XCTUnwrap(views(in: sidebar, with: SidebarView.birthKey).first)
         XCTAssertFalse(own.contains { $0 === rebuilt }, "new views")
         XCTAssertEqual(rebuilt.layer?.animation(forKey: SidebarView.birthKey)?.beginTime, start + 0.2, "it carries on")
 
-        sidebar.noteBirth(workspaceID: "later", now: start + 0.2 + SidebarView.birthDuration + 0.1)
-        XCTAssertEqual(Array(sidebar.rowOpensAt.keys), ["later"], "the first one is over")
-    }
-
-    /// A row born long ago opens nothing on a rebuild.
-    func testABirthThatIsOverMovesNothing() {
-        let sidebar = sidebar([row("born", index: 0), row("under", index: 1)])
-        sidebar.noteBirth(workspaceID: "born", now: CACurrentMediaTime() - SidebarView.birthDuration - 1)
+        // Over: a rebuild opens nothing again, and the next birth forgets it.
+        clock.time = start + 0.2 + SidebarView.birthDuration + 0.1
+        sidebar.update(profiles: [], workspaces: rows)
         XCTAssertTrue(sidebar.expandedViews.allSatisfy { $0.layer?.animationKeys() == nil })
+        sidebar.noteBirth(workspaceID: "above")
+        XCTAssertEqual(Array(sidebar.rowOpensAt.keys), ["above"], "the first one is forgotten")
     }
 
     /// Two tasks born together (a Lead starting several): a row under
     /// both gives way to both.
     func testARowUnderTwoBirthsGivesWayToBoth() throws {
-        let sidebar = sidebar([row("first", index: 0), row("second", index: 1), row("under", index: 2)])
-        let start = CACurrentMediaTime()
-        sidebar.noteBirth(workspaceID: "first", now: start)
-        sidebar.noteBirth(workspaceID: "second", now: start + 0.1)
+        let clock = Clock()
+        let sidebar = sidebar([row("first", index: 0), row("second", index: 1), row("under", index: 2)], clock: clock)
+        let start = clock.time
+        sidebar.noteBirth(workspaceID: "first")
+        clock.time = start + 0.1
+        sidebar.noteBirth(workspaceID: "second")
         let under = views(in: sidebar, inside: try XCTUnwrap(sidebar.rowFrame(workspaceID: "under")))
         XCTAssertFalse(under.isEmpty)
         for view in under {

@@ -17,7 +17,8 @@ extension SidebarView {
 
     /// A task's workspace just opened: its row opens after `delay` (the
     /// time the sheet's picture takes to reach it), if rows may move.
-    func noteBirth(workspaceID: String, now: CFTimeInterval = CACurrentMediaTime(), delay: CFTimeInterval = 0) {
+    func noteBirth(workspaceID: String, delay: CFTimeInterval = 0) {
+        let now = clock()
         rowOpensAt = rowOpensAt.filter { now - $0.value < Self.birthDuration }
         guard animates else { return }
         rowOpensAt[workspaceID] = now + delay
@@ -37,8 +38,9 @@ extension SidebarView {
 
     /// After a rebuild: the rows born a moment ago carry on opening. Not
     /// while rows may not move, whatever started before.
-    func applyBirthMotion(now: CFTimeInterval = CACurrentMediaTime()) {
+    func applyBirthMotion() {
         guard animates else { return }
+        let now = clock()
         // In the list's own coordinates, as the views' frames are.
         let rows: [(info: WorkspaceInfo, frame: NSRect)] = hitAreas.compactMap { area in
             guard case .workspace(let index) = area.region, let info = lastInfos.first(where: { $0.index == index })

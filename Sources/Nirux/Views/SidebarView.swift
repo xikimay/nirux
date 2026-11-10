@@ -250,10 +250,10 @@ final class SidebarView: NSView {
     /// time-derived text (relative ages, elapsed durations) is hashed as
     /// its formatted string so the signature only changes when a label
     /// actually would.
-    var lastRenderSignature: Int?
+    private var lastRenderSignature: Int?
 
-    /// When a task's row opens (`CACurrentMediaTime`), by workspace, while
-    /// its birth plays: with a spring (see SidebarView+Birth).
+    /// When a task's row opens (`clock`), by workspace, while its birth
+    /// plays: with a spring (see SidebarView+Birth).
     var rowOpensAt: [String: CFTimeInterval] = [:]
 
     /// The clock the rows' movements are timed from; tests set it.
