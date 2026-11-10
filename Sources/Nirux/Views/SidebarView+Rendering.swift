@@ -423,7 +423,8 @@ extension SidebarView {
             sidebarWidth: bounds.width,
             yOffset: yOffset,
             animates: animates,
-            turnEndedAt: turnEndNotedAt[workspace.id]
+            turnEndedAt: turnEndNotedAt[workspace.id],
+            now: clock()
         ).render()
         result.views.forEach(addExpandedView)
         hitAreas.append(contentsOf: result.hitAreas)

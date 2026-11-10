@@ -873,9 +873,9 @@ final class AgentLightShellTests: XCTestCase {
                 info(first, index: 0, in: shell, statuses: [.idle]), info(second, index: 1, in: shell, statuses: [.idle])
             ]
             shell.sidebar.update(profiles: [], workspaces: infos)
-            shell.agentTurnDone(in: first.columns[0])
+            shell.agentTurnDone(in: second.columns[0], endedAt: 1)
             shell.updateAgentLights(infos: infos)
-            XCTAssertEqual(Array(shell.sidebar.turnEndNotedAt.keys), [first.id])
+            XCTAssertEqual(Array(shell.sidebar.turnEndNotedAt.keys), [second.id])
         }
     }
 
@@ -886,6 +886,7 @@ final class AgentLightShellTests: XCTestCase {
     func testAVerdictSettlesTheSweep() throws {
         try withShell { shell, _, _ in
             let center = hookCenter(for: shell)
+            shell.sidebar.isExpanded = true
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             let column = try XCTUnwrap(workspace.columns.first)
             let uuid = try XCTUnwrap(column.agentUUID)
@@ -960,6 +961,7 @@ final class AgentLightShellTests: XCTestCase {
     func testNoSweepWhileMotionIsReduced() throws {
         try withShell(reducesMotion: true) { shell, _, _ in
             let center = hookCenter(for: shell)
+            shell.sidebar.isExpanded = true
             let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
             let unread = ProcessSnapshot(entries: [])
             shell.updateSidebar(snapshot: unread)

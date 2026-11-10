@@ -119,7 +119,9 @@ final class SidebarWorkspaceCardRenderer {
     private func buildTitleRow(top: CGFloat) {
         let rowY = top - Metrics.titleRowHeight
         let mark = buildMark(layout.summary.mark, centerY: rowY + Metrics.titleRowHeight / 2)
-        if let mark, Self.drawsTurnEndCheck(workspace) { buildCheck(over: mark) }
+        // A task's full row (see `showsTurnEnds`), when its mark is the
+        // grey dot.
+        if let mark, layout.summary.mark == .idle { buildCheck(over: mark) }
 
         var maxX = layout.contentMaxX
         if let trailing = trailingLabel() {
@@ -226,13 +228,11 @@ final class SidebarWorkspaceCardRenderer {
         return dot
     }
 
-    /// Whether a turn's end shows on this workspace's row: a task's full
-    /// row whose mark is the grey dot. A row that says something else
-    /// keeps its mark (work in another column, a wait, a pull request's
-    /// state), an archived task's compact row stays quiet, and the Lead's
-    /// row has no grey dot.
-    static func drawsTurnEndCheck(_ workspace: WorkspaceInfo) -> Bool {
-        !workspace.isLead && !workspace.showsCompactRow && workspace.rowSummary.mark == .idle
+    /// Whether a turn's end can show on this workspace's row: a task's
+    /// full row. An archived task's compact row stays quiet, and the
+    /// Lead's row has no grey dot.
+    static func showsTurnEnds(_ workspace: WorkspaceInfo) -> Bool {
+        !workspace.isLead && !workspace.showsCompactRow
     }
 
     /// The rail's working badge breathes, in phase with every other one
