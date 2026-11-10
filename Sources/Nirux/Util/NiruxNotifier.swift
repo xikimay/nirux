@@ -16,6 +16,28 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     var onActivate: ((String, Int?) -> Void)?
     /// (workspaceID, action): a button of a CI failure notification.
     var onCIFailureAction: ((String, CIFailureAction) -> Void)?
+    /// A reply typed in a turn question's notification: where it goes,
+    /// its text, and the workspace and column to show when it can't go.
+    var onQuickReply: ((QuickReplyTarget, String, String, Int?) -> Void)?
+
+    /// The turn end a notification's Reply answers: that agent's, then.
+    struct QuickReplyTarget: Equatable {
+        let agentUUID: String
+        let turnEndedAt: TimeInterval
+
+        var userInfo: [String: Any] { ["agentUUID": agentUUID, "turnEndedAt": turnEndedAt] }
+
+        init(agentUUID: String, turnEndedAt: TimeInterval) {
+            self.agentUUID = agentUUID
+            self.turnEndedAt = turnEndedAt
+        }
+
+        init?(userInfo: [AnyHashable: Any]) {
+            guard let agentUUID = userInfo["agentUUID"] as? String,
+                  let turnEndedAt = userInfo["turnEndedAt"] as? TimeInterval else { return nil }
+            self.init(agentUUID: agentUUID, turnEndedAt: turnEndedAt)
+        }
+    }
 
     /// The buttons of a CI failure notification (docs/ci-failure-actions.md).
     enum CIFailureAction: String {
@@ -23,6 +45,12 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private static let ciFailureCategory = "ciFailure"
+    /// A turn that asks something: Reply…, typed into that agent. Not Yes
+    /// or No: a banner comes while the user does something else, and a
+    /// "yes" can start a merge or a push (those wait on the card, next to
+    /// the question).
+    private static let turnQuestionCategory = "turnQuestion"
+    nonisolated private static let quickReplyAction = "turnQuestionReply"
     /// A failure that looks flaky: the rerun comes first.
     private static let flakyCIFailureCategory = "ciFailureFlaky"
 
@@ -41,7 +69,13 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
                                              options: [.foreground])
         let rerunFailed = UNNotificationAction(identifier: CIFailureAction.rerunFailed.rawValue, title: "Rerun Failed CI Jobs…",
                                                options: [.foreground])
+        // A locked Mac asks for an unlock before a reply goes anywhere.
+        let reply = UNTextInputNotificationAction(
+            identifier: Self.quickReplyAction, title: "Reply…", options: [.authenticationRequired],
+            textInputButtonTitle: "Send", textInputPlaceholder: "Your answer"
+        )
         center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.turnQuestionCategory, actions: [reply], intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.ciFailureCategory, actions: [whyFailed, rerunFailed], intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.flakyCIFailureCategory, actions: [rerunFailed, whyFailed], intentIdentifiers: [])
         ])
@@ -84,7 +118,8 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         workspaceTitle: String,
         columnIndex: Int?,
         processName: String,
-        reason: AgentAttentionReason?
+        reason: AgentAttentionReason?,
+        quickReply: QuickReplyTarget? = nil
     ) {
         guard !NSApp.isActive else { return }
         let text = Self.attentionText(processName: processName, workspaceTitle: workspaceTitle, reason: reason)
@@ -95,6 +130,10 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         var info: [String: Any] = ["workspaceID": workspaceID]
         if let columnIndex { info["columnIndex"] = columnIndex }
+        if let quickReply {
+            content.categoryIdentifier = Self.turnQuestionCategory
+            info.merge(quickReply.userInfo) { current, _ in current }
+        }
         content.userInfo = info
         post(content)
     }
@@ -213,6 +252,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         let columnIndex = info["columnIndex"] as? Int
         let filePath = info["filePath"] as? String
         let ciFailureAction = CIFailureAction(rawValue: response.actionIdentifier)
+        let quickReply = response.actionIdentifier == Self.quickReplyAction
+            ? (response as? UNTextInputNotificationResponse)?.userText : nil
+        let quickReplyTarget = QuickReplyTarget(userInfo: info)
         // Answer synchronously — sending the closure into the MainActor task
         // below would risk a data race.
         completionHandler()
@@ -221,6 +263,12 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
             // workspace.
             if let filePath {
                 NSWorkspace.shared.selectFile(filePath, inFileViewerRootedAtPath: "")
+                return
+            }
+            // A reply goes in without bringing Nirux forward (the handler
+            // does when it can't).
+            if let quickReply, let quickReplyTarget, let workspaceID {
+                self.onQuickReply?(quickReplyTarget, quickReply, workspaceID, columnIndex)
                 return
             }
             NSApp.activate(ignoringOtherApps: true)

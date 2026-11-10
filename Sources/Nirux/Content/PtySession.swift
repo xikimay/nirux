@@ -380,9 +380,14 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteSeen()
     }
 
-    /// See `AgentStatusMachine.acceptsQuickAnswer`.
-    func acceptsQuickAnswer(to turnEndedAt: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
-        !hasExited && state.machine.acceptsQuickAnswer(to: turnEndedAt, foreground: foregroundProcess(snapshot: snapshot))
+    /// Types a quick answer (Yes, No, a reply) to the turn end of
+    /// `turnEndedAt` when it may go in (`AgentStatusMachine
+    /// .acceptsQuickAnswer`), as a prompt the user's click sends; false,
+    /// and nothing typed, otherwise.
+    func typeQuickAnswer(_ terminalInput: String, to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
+        guard !hasExited, state.machine.acceptsQuickAnswer(to: turnEndedAt, foreground: foreground) else { return false }
+        typePromptFromUser(terminalInput)
+        return true
     }
 
     /// Types a prompt the user's click sends into this agent (see

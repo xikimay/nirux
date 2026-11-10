@@ -141,6 +141,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NiruxNotifier.shared.onCIFailureAction = { [weak shellView] workspaceID, action in
             shellView?.handleCIFailureAction(action, workspaceID: workspaceID)
         }
+        NiruxNotifier.shared.onQuickReply = { [weak shellView] target, text, workspaceID, columnIndex in
+            shellView?.replyFromNotification(text, to: target, workspaceID: workspaceID, columnIndex: columnIndex)
+        }
 
         window.makeKeyAndOrderFront(nil)
         mainWindow = window
