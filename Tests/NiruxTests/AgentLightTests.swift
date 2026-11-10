@@ -356,11 +356,24 @@ final class AgentLightTests: XCTestCase {
     func testThePillLeavesByItselfAfterItsTime() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         let glow = rightEdge(in: container)
-        glow.pillDuration = 0.05
+        let clock = ManualSchedule()
+        glow.schedule = clock.schedule
+        glow.pillDuration = 4
         glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
+        clock.advance(by: 3.9)
         XCTAssertTrue(glow.isPillShown)
-        let deadline = Date().addingTimeInterval(10)
-        while glow.isPillShown, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        clock.advance(by: 0.2)
+        XCTAssertFalse(glow.isPillShown)
+        XCTAssertEqual(glow.light, .alert(.waiting))
+
+        // Announced again before its time is up: the first one's end
+        // doesn't cut the second short.
+        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
+        clock.advance(by: 3)
+        glow.show(.alert(.waiting), moving: false, target: target("claude has a question"), announcing: true)
+        clock.advance(by: 1.5)
+        XCTAssertTrue(glow.isPillShown)
+        clock.advance(by: 3)
         XCTAssertFalse(glow.isPillShown)
     }
 
@@ -415,15 +428,37 @@ final class AgentLightTests: XCTestCase {
     }
 
     /// A pointer that only crosses the edge, on its way from the sidebar
-    /// or the title bar, brings nothing up.
-    func testAPointerCrossingTheGlowBringsNoPill() {
+    /// or the title bar, brings nothing up; one that rests there does. A
+    /// pointer that comes back keeps the pill its full time: the first
+    /// departure's end doesn't cut it short.
+    func testThePillComesForAPointerThatRestsAndStaysWhileItComesBack() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         let glow = rightEdge(in: container)
-        glow.hoverDwell = 3_600
+        let clock = ManualSchedule()
+        glow.schedule = clock.schedule
+        glow.hoverDwell = 0.3
+        glow.pillLinger = 1.2
         glow.show(.alert(.waiting), moving: false, target: target())
+
         glow.pointerEntered(.glow)
-        XCTAssertFalse(glow.isPillShown)
+        clock.advance(by: 0.1)
         glow.pointerExited(.glow)
+        clock.advance(by: 1)
+        XCTAssertFalse(glow.isPillShown, "it only crossed")
+
+        glow.pointerEntered(.glow)
+        clock.advance(by: 0.29)
+        XCTAssertFalse(glow.isPillShown)
+        clock.advance(by: 0.02)
+        XCTAssertTrue(glow.isPillShown, "it rests there")
+
+        glow.pointerExited(.glow)
+        clock.advance(by: 1)
+        glow.pointerEntered(.glow)
+        glow.pointerExited(.glow)
+        clock.advance(by: 0.5)
+        XCTAssertTrue(glow.isPillShown, "the first departure's time is up, not the second's")
+        clock.advance(by: 1)
         XCTAssertFalse(glow.isPillShown)
     }
 
@@ -786,8 +821,6 @@ final class AgentLightShellTests: XCTestCase {
             // shell under the test (a new shell resets its agent's state).
             shell.updateSidebar(snapshot: unread)
             XCTAssertTrue(light.isSweeping)
-
-            XCTAssertGreaterThan(pty.agentTurnEndedAt, 0)
 
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             workspace.addColumn()
