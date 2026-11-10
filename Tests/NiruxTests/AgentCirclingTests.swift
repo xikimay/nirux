@@ -209,20 +209,29 @@ final class AgentCirclingTests: XCTestCase {
         }
         XCTAssertNil(machine.circlingHint)
         call("swift test")
-        call("swift build", .interrupted)
-        call("swift build", .hung)
-        call("swift build", .waited)
-        send(.postToolUse, tool: "Bash", end: "an end a newer receiver wrote", family: "swift build")
-        XCTAssertNil(machine.circlingHint, "none of these is a failure")
         call("swift build", .failed)
-        XCTAssertEqual(machine.circlingHint, .failing(name: "swift build", count: 5), "nor do they, or another command passing, end the row")
+        XCTAssertEqual(machine.circlingHint, .failing(name: "swift build", count: 5), "other commands between, passing or not")
         call("swift build", .failed)
         XCTAssertEqual(machine.circlingHint, .failing(name: "swift build", count: 6))
         call("swift build")
         XCTAssertNil(machine.circlingHint, "it passed")
 
-        for _ in 1...5 { call("Edit", .failed) }
-        XCTAssertEqual(machine.circlingHint, .failing(name: "Edit", count: 5), "any tool")
+        for _ in 1...5 { call("WebFetch", .failed) }
+        XCTAssertEqual(machine.circlingHint, .failing(name: "WebFetch", count: 5), "any tool")
+    }
+
+    /// Esc, a run past its limit, a wait, and an end only a newer receiver
+    /// knows are neither a failure nor a pass.
+    func testWhatIsNeitherAFailureNorAPassLeavesTheRowAsItIs() {
+        startTurn()
+        for neutral in ["interrupted", "hung", "waited", "an end a newer receiver wrote"] {
+            send(.userPromptSubmit)
+            for _ in 1...4 { call("swift build", .failed) }
+            send(.postToolUse, tool: "Bash", end: neutral, family: "swift build")
+            XCTAssertNil(machine.circlingHint, "\(neutral) is no failure")
+            call("swift build", .failed)
+            XCTAssertEqual(machine.circlingHint, .failing(name: "swift build", count: 5), "\(neutral) is no pass")
+        }
     }
 
     /// A loop the agent left no longer shows; one that takes many calls
