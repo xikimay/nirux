@@ -41,7 +41,7 @@ extension SidebarView {
             activeInfos: activeInfos,
             archivedHeight: inactiveInfos.isEmpty ? nil : archivedListHeight,
             onboardingHeight: onboardingCard?.height
-        )
+        ) + (catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0)
 
         let docHeight = max(bounds.height, contentH)
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: docHeight)
@@ -56,6 +56,9 @@ extension SidebarView {
             yOffset -= SidebarExpandedMetrics.leadGap
         }
         yOffset = buildTasksHeader(top: yOffset)
+        if let catchUp {
+            yOffset = buildCatchUpCard(catchUp, top: yOffset)
+        }
         yOffset = buildWorkspaceGroup(activeInfos, yOffset: yOffset)
         if let onboardingCard {
             yOffset -= SidebarExpandedMetrics.onboardingCardGap
@@ -288,6 +291,18 @@ extension SidebarView {
         newTaskButton = button
         hitAreas.append(SidebarHitArea(frame: buttonFrame.insetBy(dx: -4, dy: -3), region: .newTask))
         return rowY
+    }
+
+    /// The catch-up card under the Tasks header, in the flow: the rows
+    /// start under it.
+    private func buildCatchUpCard(_ catchUp: SidebarCatchUp, top: CGFloat) -> CGFloat {
+        let card = SidebarCatchUpCardRenderer(
+            catchUp: catchUp, sidebarWidth: bounds.width, top: top,
+            press: { [weak self] action in self?.onCatchUpAction?(action) }
+        ).render()
+        card.views.forEach(addExpandedView)
+        hitAreas += card.hitAreas
+        return top - SidebarCatchUpCardRenderer.height(of: catchUp) - SidebarCatchUpCardRenderer.Metrics.gapBelow
     }
 
     /// What the Tasks header's "+" and the rail's "+" open: ⌘N's sheet.

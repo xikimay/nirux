@@ -109,6 +109,7 @@ extension NiruxShellView {
                     }.max()
             )
         }
+        sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.update(profiles: profileInfos, workspaces: infos)
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()

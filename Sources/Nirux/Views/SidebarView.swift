@@ -111,6 +111,19 @@ final class SidebarView: NSView {
         }
     }
     var onOnboardingAction: ((OnboardingChecklistAction) -> Void)?
+    /// What happened while the user was away, above the task list (see
+    /// `SidebarCatchUp`); nil shows nothing. Set before `update`, or
+    /// followed by `refreshCatchUpCard`.
+    var catchUp: SidebarCatchUp?
+    var onCatchUpAction: ((SidebarCatchUpAction) -> Void)?
+
+    /// The card changed outside a refresh (the user just came back).
+    func refreshCatchUpCard() {
+        let signature = renderSignature()
+        guard signature != lastRenderSignature else { return }
+        lastRenderSignature = signature
+        rebuildContent()
+    }
     /// Kept across rebuilds (see OnboardingChecklistView).
     var onboardingCardView: OnboardingChecklistView?
     /// Set by `revealOnboardingCard()` while the card isn't laid out yet.
@@ -365,6 +378,7 @@ final class SidebarView: NSView {
         hasher.combine(isExpanded)
         hasher.combine(isInactiveSectionCollapsed)
         hasher.combine(onboardingChecklist)
+        hasher.combine(catchUp)
         hasher.combine(animates)
         for workspace in lastInfos {
             if let lastActivityAt = workspace.lastActivityAt {
@@ -518,6 +532,10 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(Self.hoverTarget(of: area.region))
             NSCursor.pointingHand.set()
+        case .catchUp:
+            clearHover()
+            setHoverTarget(nil)
+            NSCursor.pointingHand.set()
         case .workspace(let workspaceIndex):
             clearHover()
             setHoverTarget(.workspaceCard(workspaceIndex))
@@ -560,6 +578,8 @@ final class SidebarView: NSView {
             onNewWorkspace?()
         case .archivedToggle:
             toggleInactiveSection()
+        case .catchUp(let action):
+            onCatchUpAction?(action)
         case .link(let url, let label):
             if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
@@ -765,7 +785,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spacePicker, .newTask, .archivedToggle, .link, .railButton:
+            case .spacePicker, .newTask, .archivedToggle, .link, .railButton, .catchUp:
                 continue
             }
         }

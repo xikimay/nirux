@@ -97,6 +97,10 @@ final class NiruxShellView: NSView {
     var circlingHintEnabled = PersistedSettings().agentCirclingHint
     /// Rows show their task's status line (Settings → Notifications).
     var turnStatusEnabled = PersistedSettings().showTurnStatus
+    /// The card of what happened while the user was away (Settings →
+    /// Notifications; see `SidebarCatchUp`).
+    var catchUpEnabled = PersistedSettings().showCatchUp
+    var catchUpState = CatchUpState(tracker: AwayTracker(now: Date().timeIntervalSince1970))
     /// Mission questions handed to the user (the child's card turned
     /// amber), by question ID: the child workspace whose notification they
     /// raised, once.
@@ -306,6 +310,8 @@ final class NiruxShellView: NSView {
         }
         wireDeferredAgentResume()
         wireAgentLights()
+        sidebar.onCatchUpAction = { [weak self] action in self?.handleCatchUpAction(action) }
+        wireCatchUp()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
