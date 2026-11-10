@@ -340,7 +340,6 @@ final class ColumnState {
     private func scheduleShellStart(cwd: String, args: [String], environment: [String: String]) {
         isShellStartScheduled = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak pty] in
-            MainActor.assumeIsolated { self?.onShellStarting?() }
             pty?.start(
                 shell: PtySession.defaultShell,
                 args: args,
