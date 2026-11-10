@@ -445,9 +445,9 @@ final class SidebarWorkspaceCardRenderer {
                 kind: kind, detail: detail, failedAt: failedAt, resume: resume,
                 workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
-        case let .turnQuestion(columnIndex, question):
+        case let .turnQuestion(columnIndex, question, showsQuestion):
             add(SidebarTurnQuestionBlockRenderer(
-                question: question, workspaceIndex: workspace.index, columnIndex: columnIndex,
+                question: question, showsQuestion: showsQuestion, workspaceIndex: workspace.index, columnIndex: columnIndex,
                 x: x, width: width, top: top
             ).render())
         case .reviewBadges(let badges):

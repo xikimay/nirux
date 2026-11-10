@@ -1,12 +1,14 @@
 import AppKit
 
 /// The block of a card whose Claude ended its turn on a question: the
-/// question, then Reply…, and No and Yes when a plain yes or no answers it
-/// (macOS order, the yes last at the right edge). The buttons arm like
-/// Allow / Deny: "yes" can start a merge or a push.
+/// question (unless the status line above says it), then Reply…, and No
+/// and Yes when a plain yes or no answers it (macOS order, the yes last at
+/// the right edge). The buttons arm like Allow / Deny: "yes" can start a
+/// merge or a push.
 @MainActor
 struct SidebarTurnQuestionBlockRenderer {
     let question: SidebarTurnQuestion
+    let showsQuestion: Bool
     let workspaceIndex: Int
     let columnIndex: Int
     /// Left edge and width of the card's content.
@@ -41,7 +43,9 @@ struct SidebarTurnQuestionBlockRenderer {
             if let key = SidebarView.armedButtonKey(for: region) { buttons[key] = button }
             hitAreas.append(SidebarHitArea(frame: button.frame.insetBy(dx: -3, dy: -3), region: region))
         }
-        views.append(questionLine(y: top - (height + metrics.actionLineHeight) / 2, width: right - x))
+        if showsQuestion {
+            views.append(questionLine(y: top - (height + metrics.actionLineHeight) / 2, width: right - x))
+        }
         hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
         return SidebarApprovalBlockRenderer.Result(views: views, hitAreas: hitAreas, buttons: buttons)
     }

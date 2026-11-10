@@ -36,11 +36,11 @@ final class TurnQuestionSidebarTests: XCTestCase {
 
     func testCardOffersYesAndNoOnlyForAYesNoQuestion() {
         let card = workspace([column(yesNo)])
-        XCTAssertEqual(card.cardActions, [.turnQuestion(columnIndex: 1, yesNo)])
+        XCTAssertEqual(card.cardActions, [.turnQuestion(columnIndex: 1, yesNo, showsQuestion: false)], "the status line says it")
         let result = SidebarWorkspaceCardRenderer(workspace: card, sidebarWidth: 260, yOffset: 800).render()
         XCTAssertEqual(Set(answers(result.hitAreas)), [.yes, .no, .reply])
         XCTAssertEqual(result.approvalButtons.count, 3, "they arm like Allow / Deny")
-        XCTAssertTrue(result.views.contains { ($0 as? NSTextField)?.stringValue == "Shall I merge it?" })
+        XCTAssertFalse(result.views.contains { ($0 as? NSTextField)?.stringValue == "Shall I merge it?" }, "said once")
         XCTAssertEqual(
             800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5,
             "layout matches the metrics the scroll view is sized with"
@@ -50,6 +50,20 @@ final class TurnQuestionSidebarTests: XCTestCase {
             .render()
         XCTAssertEqual(answers(openResult.hitAreas), [.reply])
         XCTAssertEqual(workspace([column(nil)]).cardActions, [])
+    }
+
+    /// When the status line says something else first (another column's
+    /// dialog), the question comes with its buttons.
+    func testQuestionComesWithItsButtonsUnderAnotherStatus() {
+        let permission = ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .needsAttention, isEditor: false, editorFileName: nil,
+            attentionReason: .permission(tool: "Bash", summary: "npm run migrate")
+        )
+        let card = workspace([permission, column(yesNo)])
+        XCTAssertEqual(card.cardActions, [.turnQuestion(columnIndex: 1, yesNo, showsQuestion: true)])
+        let result = SidebarWorkspaceCardRenderer(workspace: card, sidebarWidth: 260, yOffset: 800).render()
+        XCTAssertTrue(result.views.contains { ($0 as? NSTextField)?.stringValue == "Shall I merge it?" })
     }
 
     func testOnlyASingleClickReleasedOnTheSameAnswerAnswers() {

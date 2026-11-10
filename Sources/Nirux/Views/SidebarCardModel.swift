@@ -220,7 +220,9 @@ extension WorkspaceInfo {
                 ))
             }
             if let question = column.turnQuestion {
-                actions.append(.turnQuestion(columnIndex: column.index, question))
+                // Under a status line that says it, the buttons alone.
+                let said = !isLead && summary.mark == .needsYou && summary.focusColumn == column.index
+                actions.append(.turnQuestion(columnIndex: column.index, question, showsQuestion: !said))
             }
             if let question = column.missionQuestion, column.index != questionShown {
                 actions.append(.missionQuestion(columnIndex: column.index, question))
@@ -262,8 +264,9 @@ enum SidebarCardAction: Hashable {
     /// A Mission question the status line doesn't show: a click opens the
     /// reply popover.
     case missionQuestion(columnIndex: Int, SidebarMissionQuestion)
-    /// The question a Claude turn ended on: Yes / No / Reply….
-    case turnQuestion(columnIndex: Int, SidebarTurnQuestion)
+    /// The question a Claude turn ended on: Yes / No / Reply…, after the
+    /// question unless the status line above says it.
+    case turnQuestion(columnIndex: Int, SidebarTurnQuestion, showsQuestion: Bool)
 
     /// Information rather than something to do: no separator above.
     var isQuiet: Bool {
