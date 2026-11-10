@@ -26,6 +26,8 @@ final class NiruxShellView: NSView {
     /// What the columns' lights and the edge glows show (see
     /// NiruxShellView+AgentLights).
     let agentLights = AgentLightState()
+    let workspaceSwitch = WorkspaceSwitchState()
+    let workspaceNameCard = WorkspaceNameCard()
     /// Settings › General › "Animate the interface": off, states show
     /// without moving.
     var animatesInterface = NiruxShellView.currentAnimatesInterface() {
@@ -215,6 +217,7 @@ final class NiruxShellView: NSView {
         addSubview(edgeGlowRight)
         addSubview(edgeGlowTop)
         addSubview(edgeGlowBottom)
+        addSubview(workspaceNameCard)
         addSubview(statusBar)
         statusBar.onContentChange = { [weak self] in self?.relayout(animated: false) }
 
@@ -227,7 +230,8 @@ final class NiruxShellView: NSView {
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
-        sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
+        // A click on a workspace's own row: no card to say where it went.
+        sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index, announces: false) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
         sidebar.workspaceIndexForID = { [weak self] id in self?.workspaces.firstIndex { $0.id == id && !$0.isClosing } }
@@ -254,7 +258,7 @@ final class NiruxShellView: NSView {
         sidebar.prFeedbackMenu = { [weak self] workspaceID in self?.prFeedbackMenu(workspaceID: workspaceID) }
         sidebar.onWorkspaceURLClicked = { [weak self] index, url in
             guard let self else { return }
-            if self.activeWSIndex != index { self.switchToWorkspace(index) }
+            if self.activeWSIndex != index { self.switchToWorkspace(index, announces: false) }
             self.openWebView(url: url, in: self.workspaces[index])
         }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
@@ -274,7 +278,7 @@ final class NiruxShellView: NSView {
         wireAgentLights()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
-            if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
+            if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex, announces: false) }
             guard self.activeWSIndex == wsIndex else { return }
             self.goToColumn(colIndex)
         }
@@ -379,6 +383,9 @@ final class NiruxShellView: NSView {
         )
         applyChromeLayout(frames, animated: animated)
         layoutToast(frames)
+        if workspaceNameCard.isShown, let content = workspaceNameCard.content {
+            workspaceNameCard.show(content, centredIn: frames.viewport.insetBy(dx: 24, dy: 24), animated: false)
+        }
 
         // Each workspace fills the viewport; the strip stacks them and is
         // positioned so the active workspace is the one on screen.
@@ -406,13 +413,16 @@ final class NiruxShellView: NSView {
     /// surface's CVDisplayLink would still hit `waitUntilCompleted` on the
     /// main thread, which freezes the app once a few Claude/Codex sessions
     /// pile up. Only the active workspace is visible.
-    private func syncTerminalOcclusion() {
+    func syncTerminalOcclusion() {
         // A minimized or fully covered window reports itself non-visible via
         // occlusionState; without this AND every surface keeps drawing.
         let windowVisible = window?.occlusionState.contains(.visible) ?? true
         for (index, workspace) in workspaces.enumerated() {
             let isInActiveProfile = workspace.profileID == activeProfileID
-            let visible = windowVisible && isInActiveProfile && index == activeWSIndex
+            // The one the strip is leaving too, until it has left (see
+            // NiruxShellView+WorkspaceSwitch).
+            let visible = windowVisible && isInActiveProfile
+                && drawsTerminals(of: workspace, isActive: index == activeWSIndex)
             for col in workspace.columns {
                 col.terminalView?.setSurfaceVisible(visible)
             }
