@@ -310,7 +310,6 @@ struct AgentStatusMachine {
             endTurn()
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             askedQuestion = nil
-            conversationChangedAt = now
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -532,8 +531,8 @@ struct AgentStatusMachine {
         else { return false }
         // A prompt since sets Claude working, then its Stop ends a later
         // turn: neither needs a check of its own.
-        return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && lastDraftInputAt <= (lastPromptAt ?? 0) && pendingDialogs.isEmpty && !hookWorking
+        return conversationChangedAt < turnEndedAt
+            && lastDraftInputAt <= turnEndedAt && pendingDialogs.isEmpty
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
     }
 

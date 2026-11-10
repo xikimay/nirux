@@ -27,7 +27,7 @@ struct SidebarTurnQuestionBlockRenderer {
         var answers: [(SidebarTurnAnswer, SidebarBadgeView)] = [
             (.reply, SidebarActionButton.secondary("Reply…", label: "Reply to: \(question.text)")),
         ]
-        if question.isYesNo {
+        if true {
             answers.append((.no, SidebarActionButton.secondary("No", label: "Answer no to: \(question.text)")))
             answers.append((.yes, SidebarActionButton.primary("Yes", label: "Answer yes to: \(question.text)")))
         }

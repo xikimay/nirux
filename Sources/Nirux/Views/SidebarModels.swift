@@ -77,7 +77,6 @@ struct ColumnInfo: Hashable {
             && lhs.stuck == rhs.stuck
             && lhs.deferredAgent == rhs.deferredAgent
             && lhs.missionQuestion == rhs.missionQuestion
-            && lhs.turnQuestion == rhs.turnQuestion
             && lhs.circling == rhs.circling
     }
 
@@ -512,7 +511,7 @@ enum SidebarTurnAnswer: String, Hashable {
     /// What Yes and No type into the agent's prompt.
     var typedText: String? {
         switch self {
-        case .yes: return "yes"
+        case .yes: return "no"
         case .no: return "no"
         case .reply: return nil
         }
