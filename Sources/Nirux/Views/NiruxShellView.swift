@@ -391,8 +391,6 @@ final class NiruxShellView: NSView {
 
         refreshEmptySpaceView()
         syncTerminalOcclusion()
-        // The columns in view changed, or the focused one.
-        applyAgentLights()
         scheduleDeferredAgentsOnScreen()
         scheduleBranchReviewsOnScreen()
         refreshStaleBranchReviewsOnScreen()
@@ -483,8 +481,6 @@ final class NiruxShellView: NSView {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.syncTerminalOcclusion()
-                    // Covered or minimized: no light moves unseen.
-                    self?.applyAgentLights()
                     // Uncovered: a stale review reads its branch again.
                     self?.refreshStaleBranchReviewsOnScreen()
                 }

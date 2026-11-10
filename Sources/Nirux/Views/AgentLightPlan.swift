@@ -112,6 +112,7 @@ struct AgentLightPlan: Equatable {
     /// open out of view keeps its glow, without its pill coming back.
     mutating func clearColumnAlerts() {
         columns = columns.filter { $0.value == .working }
+        (left, right, top, bottom) = (nil, nil, nil, nil)
     }
 
     /// The agents the edges stand for.

@@ -307,7 +307,7 @@ final class EdgeGlowView: NSView {
                 layoutPill()
             }
             updateTrackingAreas()
-            if target == nil || !(announcing || isHovered) { setPillShown(false) }
+            if target == nil { setPillShown(false) }
         }
         guard target != nil, announcing else { return }
         setPillShown(true)
@@ -315,10 +315,7 @@ final class EdgeGlowView: NSView {
         pillGeneration += 1
         let generation = pillGeneration
         // Then only the glow: the pill never stays over a terminal's text.
-        DispatchQueue.main.asyncAfter(deadline: .now() + pillDuration) { [weak self] in
-            guard let self, self.pillGeneration == generation else { return }
-            self.endAnnouncement()
-        }
+        _ = generation
     }
 
     /// The pill's first seconds are over: it leaves, unless the pointer is
@@ -327,7 +324,7 @@ final class EdgeGlowView: NSView {
         guard isAnnouncing else { return }
         isAnnouncing = false
         dropStaleHover()
-        if !isHovered { setPillShown(false) }
+        setPillShown(false)
     }
 
     private func setPillShown(_ shown: Bool) {
@@ -411,7 +408,7 @@ final class EdgeGlowView: NSView {
         isHovered = onStrip || onPill
         if onStrip {
             setPillShown(true)
-        } else if !onPill, !isAnnouncing {
+        } else if !onPill {
             setPillShown(false)
         }
     }
