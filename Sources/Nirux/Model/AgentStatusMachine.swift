@@ -114,9 +114,6 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
-    /// The last key that may have left something at Claude's prompt
-    /// (`noteTypedKeys`, `hasKeysAtThePrompt`).
-    private var lastPromptKeyAt: TimeInterval = 0
 
     /// The user has typed at least once since the shell started. Fallback
     /// attention is gated on this: output before the first keystroke is
@@ -523,9 +520,9 @@ struct AgentStatusMachine {
     /// A quick answer (Yes, No, a reply) to the turn end of `turnEndedAt`
     /// may be typed now: that turn end is still the last thing that
     /// happened (no prompt, turn end or conversation change since, the
-    /// same `claude`), no keys left at the prompt since the last prompt (a
-    /// draft started during the turn stays there: `hasKeysAtThePrompt`), no
-    /// dialog
+    /// same `claude`), no keys at the prompt since the last prompt (a draft
+    /// started during the turn stays there, a screen no hook tells of may
+    /// be open: `hasDraft`), no dialog
     /// waits, Claude isn't working, and its terminal is quiet (a Stop
     /// hook's continuation runs its spinner before any hook says so).
     /// Anything else, and "yes" could land in a draft, a dialog or a later
@@ -537,7 +534,7 @@ struct AgentStatusMachine {
         // A prompt since sets Claude working, then its Stop ends a later
         // turn: neither needs a check of its own.
         return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && !hasKeysAtThePrompt && pendingDialogs.isEmpty && !hookWorking
+            && !hasDraft && pendingDialogs.isEmpty && !hookWorking
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
     }
 
@@ -836,37 +833,21 @@ struct AgentStatusMachine {
         lastInteractionAt = now.timeIntervalSince1970
     }
 
-    /// The keys Nirux sent, for `hasKeysAtThePrompt`. Keys while a dialog
-    /// waits answer it; a mode switch (Shift-Tab), the transcript or todo
-    /// toggles (Ctrl-O, Ctrl-T) and Esc leave the prompt as it was. Enter
-    /// isn't spared: a slash command it sends may open a picker no hook
-    /// tells of.
-    mutating func noteTypedKeys(_ data: Data, now: Date) {
-        guard pendingDialogs.isEmpty, !Self.keysLeavingThePrompt.contains(data) else { return }
-        lastPromptKeyAt = now.timeIntervalSince1970
-    }
-
-    private static let keysLeavingThePrompt: Set<Data> = [
-        Data([0x1B, 0x5B, 0x5A]), Data([0x0F]), Data([0x14]), Data([0x1B]),
-    ]
-
-    /// Keys may have left something at Claude's prompt since the last
-    /// prompt went in: a draft (typed during the turn or after), a
-    /// recalled prompt, a picker.
-    var hasKeysAtThePrompt: Bool {
-        lastPromptKeyAt > (lastPromptAt ?? 0)
-    }
+    private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
 
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
-    mutating func noteKeystroke(now: Date) {
+    mutating func noteKeystroke(now: Date, keys: Data? = nil) {
         let time = now.timeIntervalSince1970
         // A key answers a dialog only while none reached it yet: answered, it stays
         // listed until its tool ends (no hook between); later keys reach the prompt.
         let answersDialog = openDialogs.contains { $0.requestedAt >= lastKeystrokeAt }
         lastKeystrokeAt = time
         lastInputAt = time
-        if !answersDialog { lastDraftInputAt = time }
+        // A mode switch (Shift-Tab) leaves the prompt as it was; any other
+        // key may leave text there, or open a screen no hook tells of (Esc
+        // Esc's rewind picker, Ctrl-O's transcript, a slash command's).
+        if !answersDialog, keys != Self.modeSwitchKey { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
@@ -1110,7 +1091,6 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
-        lastPromptKeyAt = 0
         circling.reset()
     }
 }

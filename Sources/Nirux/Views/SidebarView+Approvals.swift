@@ -27,9 +27,7 @@ struct SidebarResumeClick: Equatable {
 
 /// Yes, No or Reply… clicked under a turn's question.
 struct SidebarTurnAnswerClick: Equatable {
-    let workspaceIndex: Int
-    let columnIndex: Int
-    let turnEndedAt: TimeInterval
+    let question: SidebarTurnQuestion
     let answer: SidebarTurnAnswer
 }
 
@@ -75,10 +73,8 @@ extension SidebarView {
             return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         case let .deferredAgentResume(_, _, columnID):
             return SidebarHoverTarget.deferredResumeButtonKey(columnID: columnID)
-        case let .turnAnswer(workspaceIndex, columnIndex, turnEndedAt, answer):
-            return SidebarHoverTarget.turnAnswerButtonKey(
-                workspaceIndex: workspaceIndex, columnIndex: columnIndex, turnEndedAt: turnEndedAt, answer: answer
-            )
+        case let .turnAnswer(_, _, question, answer):
+            return SidebarHoverTarget.turnAnswerButtonKey(question: question, answer: answer)
         default:
             return nil
         }
@@ -154,6 +150,14 @@ extension SidebarView {
         return SidebarDeferredResumeClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, columnID: releasedColumn)
     }
 
+    /// A one-point spot under the pointer in the scrolled rows, for a
+    /// popover whose button a rebuild replaced between press and release.
+    func anchorAtPointer() -> (view: NSView, rect: NSRect)? {
+        guard let window else { return nil }
+        let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return (contentDocumentView, NSRect(origin: point, size: NSSize(width: 1, height: 1)))
+    }
+
     /// The quick answer a click makes, if any: the same rules, for the same
     /// question and answer ("yes" can start a merge or a push).
     static func turnAnswerClick(
@@ -164,12 +168,11 @@ extension SidebarView {
         armedAtRelease: Bool
     ) -> SidebarTurnAnswerClick? {
         guard clickCount == 1, armedAtPress, armedAtRelease,
-              case let .turnAnswer(_, _, pressedTurnEnd, pressedAnswer) = pressed,
-              case let .turnAnswer(workspaceIndex, columnIndex, releasedTurnEnd, releasedAnswer)? = released,
-              releasedTurnEnd == pressedTurnEnd, releasedAnswer == pressedAnswer else { return nil }
-        return SidebarTurnAnswerClick(
-            workspaceIndex: workspaceIndex, columnIndex: columnIndex, turnEndedAt: releasedTurnEnd, answer: releasedAnswer
-        )
+              case let .turnAnswer(_, _, pressedQuestion, pressedAnswer) = pressed,
+              case let .turnAnswer(_, _, releasedQuestion, releasedAnswer)? = released,
+              releasedQuestion.columnID == pressedQuestion.columnID, releasedQuestion.turnEndedAt == pressedQuestion.turnEndedAt,
+              releasedAnswer == pressedAnswer else { return nil }
+        return SidebarTurnAnswerClick(question: releasedQuestion, answer: releasedAnswer)
     }
 
     /// The second press of a double-click whose first click made a button
@@ -223,7 +226,7 @@ extension SidebarView {
                 armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
             ) {
                 lastButtonActionAt = next.timestamp
-                onTurnAnswer?(answer.workspaceIndex, answer.columnIndex, answer.turnEndedAt, answer.answer, approvalButtonViews[key])
+                onTurnAnswer?(answer.question, answer.answer, approvalButtonViews[key])
             }
             return
         }

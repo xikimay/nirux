@@ -403,7 +403,7 @@ enum SidebarHitRegion {
     /// Resume on the row of a restored agent that hasn't resumed yet.
     case deferredAgentResume(workspaceIndex: Int, columnIndex: Int, columnID: UUID)
     /// Yes, No or Reply… under the question a Claude turn ended on.
-    case turnAnswer(workspaceIndex: Int, columnIndex: Int, turnEndedAt: TimeInterval, answer: SidebarTurnAnswer)
+    case turnAnswer(workspaceIndex: Int, columnIndex: Int, question: SidebarTurnQuestion, answer: SidebarTurnAnswer)
     /// The rest of an Allow / Deny or Resume block: clicks there do nothing
     /// (a press meant for a button that just moved must not reach the card
     /// below).
@@ -481,12 +481,11 @@ enum SidebarHoverTarget: Hashable {
         "resume|\(workspaceIndex)|\(columnIndex)|\(failedAt)"
     }
 
-    /// Key of a Yes / No / Reply… button, among the approval buttons: a
-    /// later question at the same place arms again.
-    static func turnAnswerButtonKey(
-        workspaceIndex: Int, columnIndex: Int, turnEndedAt: TimeInterval, answer: SidebarTurnAnswer
-    ) -> String {
-        "turn-answer|\(workspaceIndex)|\(columnIndex)|\(turnEndedAt)|\(answer.rawValue)"
+    /// Key of a Yes / No / Reply… button, among the approval buttons: its
+    /// column and question, wherever the card moves; a later question arms
+    /// again.
+    static func turnAnswerButtonKey(question: SidebarTurnQuestion, answer: SidebarTurnAnswer) -> String {
+        "turn-answer|\(question.columnID.uuidString)|\(question.turnEndedAt)|\(answer.rawValue)"
     }
 
     /// Key of a not-resumed agent's Resume button: its column, wherever
@@ -503,6 +502,9 @@ struct SidebarTurnQuestion: Hashable {
     let text: String
     let turnEndedAt: TimeInterval
     let isYesNo: Bool
+    /// Its column (`ColumnState.id`): a click finds it there, wherever a
+    /// rebuild moved the card.
+    let columnID: UUID
 }
 
 /// A quick answer's button under a turn's question.

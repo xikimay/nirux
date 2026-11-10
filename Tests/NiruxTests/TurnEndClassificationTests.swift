@@ -389,21 +389,29 @@ final class TurnEndClassificationTests: XCTestCase {
         _ = machine.apply(event(.sessionEnd, at: 6), isUserFocused: false)
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "the conversation ended")
         at = try ended()
-        machine.noteTypedKeys(Data("a".utf8), now: Date(timeIntervalSince1970: at + 1))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1), keys: Data("a".utf8))
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a draft at the prompt")
         at = try ended()
-        machine.noteTypedKeys(Data("\r".utf8), now: Date(timeIntervalSince1970: at + 1))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1), keys: Data("\r".utf8))
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Enter may have opened a picker")
+        at = try ended()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1), keys: Data([0x1B]))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1.2), keys: Data([0x1B]))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Esc Esc's rewind picker")
 
-        // Keys during the turn: a draft stays in the prompt; a mode switch
-        // or a dialog's answer leaves nothing there, nor do the prompt's own.
-        func turn(keys: [(String, TimeInterval)], dialog: Bool = false) throws -> TimeInterval {
+        // Keys during the turn: a draft stays in the prompt, and so do keys
+        // typed while an answered dialog's tool runs; a mode switch, the
+        // dialog's own answer and the prompt's own keys leave nothing there,
+        // nor does a message sent mid-turn (its UserPromptSubmit comes as
+        // it is queued).
+        func turn(keys: [(String, TimeInterval)], dialog: Bool = false, queued: Bool = false) throws -> TimeInterval {
             machine = AgentStatusMachine()
             _ = machine.apply(event(.sessionStart, at: 0, source: "startup"), isUserFocused: false)
-            machine.noteTypedKeys(Data("fix it".utf8), now: Date(timeIntervalSince1970: t0 + 0.5))
+            machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 0.5), keys: Data("fix it".utf8))
             _ = machine.apply(event(.userPromptSubmit, at: 1), isUserFocused: false)
             if dialog { _ = machine.apply(event(.permissionRequest, at: 2, tool: "Bash"), isUserFocused: false) }
-            for (key, offset) in keys { machine.noteTypedKeys(Data(key.utf8), now: Date(timeIntervalSince1970: t0 + offset)) }
+            for (key, offset) in keys { machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + offset), keys: Data(key.utf8)) }
+            if queued { _ = machine.apply(event(.userPromptSubmit, at: 3.5), isUserFocused: false) }
             if dialog { _ = machine.apply(event(.postToolUse, at: 4, tool: "Bash"), isUserFocused: false) }
             return try XCTUnwrap(machine.apply(event(.stop, at: 5, message: asks), isUserFocused: false).turnEnd).turnEndedAt
         }
@@ -411,10 +419,16 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "the prompt's own keys")
         at = try turn(keys: [("and add a test", 3)])
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a draft from during the turn")
+        at = try turn(keys: [("and add a test", 3), ("\r", 3.2)], queued: true)
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a message sent mid-turn")
         at = try turn(keys: [("\u{1B}[Z", 3)])
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a mode switch")
-        at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
+        at = try turn(keys: [("\u{0F}", 3)])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Ctrl-O's transcript")
+        at = try turn(keys: [("\r", 3)], dialog: true)
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog's answer")
+        at = try turn(keys: [("\r", 3), ("and add a test", 3.5)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "typed while its tool runs")
         // Its terminal still draws: a Stop hook's continuation at work.
         at = try ended()
         machine.noteRead(now: Date(timeIntervalSince1970: at + 2))
@@ -1233,13 +1247,21 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
         XCTAssertFalse(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt, foreground: claude), "once")
 
-        // Keys typed in the column itself leave a draft there.
         let (draftCenter, _, draftColumn, draftRequest, _) = try turnEndColumn()
         let draftPty = try XCTUnwrap(draftColumn.pty)
         draftCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
                                         for: draftRequest, agentUUID: try XCTUnwrap(draftColumn.agentUUID))
-        draftPty.sendRaw("and also")
-        XCTAssertFalse(draftPty.typeQuickAnswer("yes\r", to: draftRequest.turnEndedAt, foreground: claude), "a draft typed there")
+        // Through the column's own key path: a mode switch leaves the prompt
+        // as it was; text typed there leaves a draft.
+        draftPty.sendRaw("\u{1B}[Z")
+        XCTAssertTrue(draftPty.typeQuickAnswer("yes\r", to: draftRequest.turnEndedAt, foreground: claude), "a mode switch")
+
+        let (otherCenter, _, otherColumn, otherRequest, _) = try turnEndColumn()
+        let otherPty = try XCTUnwrap(otherColumn.pty)
+        otherCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                        for: otherRequest, agentUUID: try XCTUnwrap(otherColumn.agentUUID))
+        otherPty.sendRaw("and also")
+        XCTAssertFalse(otherPty.typeQuickAnswer("yes\r", to: otherRequest.turnEndedAt, foreground: claude), "a draft typed there")
     }
 
     /// The card offers the question while Claude waits at a prompt Nirux
@@ -1252,7 +1274,9 @@ final class TurnEndClassificationTests: XCTestCase {
         let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
         XCTAssertEqual(
             NiruxShellView.sidebarTurnQuestion(of: column, status: .needsAttention, foreground: claude),
-            SidebarTurnQuestion(text: "Let me know if I should merge it.", turnEndedAt: request.turnEndedAt, isYesNo: true)
+            SidebarTurnQuestion(
+                text: "Let me know if I should merge it.", turnEndedAt: request.turnEndedAt, isYesNo: true, columnID: column.id
+            )
         )
         XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .working, foreground: claude), "at work")
         _ = column.pty?.applyAgentHook(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)

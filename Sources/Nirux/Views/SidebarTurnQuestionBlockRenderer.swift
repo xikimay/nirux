@@ -38,7 +38,7 @@ struct SidebarTurnQuestionBlockRenderer {
             right = button.frame.minX - metrics.buttonGap
             views.append(button)
             let region = SidebarHitRegion.turnAnswer(
-                workspaceIndex: workspaceIndex, columnIndex: columnIndex, turnEndedAt: question.turnEndedAt, answer: answer
+                workspaceIndex: workspaceIndex, columnIndex: columnIndex, question: question, answer: answer
             )
             if let key = SidebarView.armedButtonKey(for: region) { buttons[key] = button }
             hitAreas.append(SidebarHitArea(frame: button.frame.insetBy(dx: -3, dy: -3), region: region))

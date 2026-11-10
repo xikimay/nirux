@@ -24,12 +24,17 @@ final class TurnQuestionSidebarTests: XCTestCase {
         )
     }
 
-    private let yesNo = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 1_005, isYesNo: true)
-    private let open = SidebarTurnQuestion(text: "Which branch should this go on?", turnEndedAt: 1_005, isYesNo: false)
+    private let columnID = UUID()
+    private var yesNo: SidebarTurnQuestion {
+        SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 1_005, isYesNo: true, columnID: columnID)
+    }
+    private var open: SidebarTurnQuestion {
+        SidebarTurnQuestion(text: "Which branch should this go on?", turnEndedAt: 1_005, isYesNo: false, columnID: columnID)
+    }
 
     private func answers(_ hitAreas: [SidebarHitArea]) -> [SidebarTurnAnswer] {
         hitAreas.compactMap {
-            if case let .turnAnswer(2, 1, 1_005, answer) = $0.region { return answer }
+            if case let .turnAnswer(2, 1, question, answer) = $0.region, question.turnEndedAt == 1_005 { return answer }
             return nil
         }
     }
@@ -67,9 +72,11 @@ final class TurnQuestionSidebarTests: XCTestCase {
     }
 
     func testOnlyASingleClickReleasedOnTheSameAnswerAnswers() {
-        let yes = SidebarHitRegion.turnAnswer(workspaceIndex: 2, columnIndex: 1, turnEndedAt: 1_005, answer: .yes)
-        let no = SidebarHitRegion.turnAnswer(workspaceIndex: 2, columnIndex: 1, turnEndedAt: 1_005, answer: .no)
-        let laterYes = SidebarHitRegion.turnAnswer(workspaceIndex: 2, columnIndex: 1, turnEndedAt: 2_000, answer: .yes)
+        let later = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 2_000, isYesNo: true, columnID: columnID)
+        let yes = SidebarHitRegion.turnAnswer(workspaceIndex: 2, columnIndex: 1, question: yesNo, answer: .yes)
+        let no = SidebarHitRegion.turnAnswer(workspaceIndex: 2, columnIndex: 1, question: yesNo, answer: .no)
+        let laterYes = SidebarHitRegion.turnAnswer(workspaceIndex: 2, columnIndex: 1, question: later, answer: .yes)
+        let moved = SidebarHitRegion.turnAnswer(workspaceIndex: 0, columnIndex: 3, question: yesNo, answer: .yes)
         func answers(
             _ released: SidebarHitRegion?, clicks: Int = 1, armedAtPress: Bool = true, armedAtRelease: Bool = true
         ) -> SidebarTurnAnswerClick? {
@@ -77,9 +84,13 @@ final class TurnQuestionSidebarTests: XCTestCase {
                 pressed: yes, released: released, clickCount: clicks, armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
             )
         }
-        XCTAssertEqual(answers(yes), SidebarTurnAnswerClick(workspaceIndex: 2, columnIndex: 1, turnEndedAt: 1_005, answer: .yes))
+        XCTAssertEqual(answers(yes), SidebarTurnAnswerClick(question: yesNo, answer: .yes))
+        XCTAssertEqual(answers(moved), SidebarTurnAnswerClick(question: yesNo, answer: .yes), "its card moved meanwhile")
+        XCTAssertEqual(SidebarView.armedButtonKey(for: yes), SidebarView.armedButtonKey(for: moved), "the same button wherever it is")
         XCTAssertNil(answers(no), "slid onto No")
         XCTAssertNil(answers(laterYes), "a question the button didn't show")
+        let otherColumn = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 1_005, isYesNo: true, columnID: UUID())
+        XCTAssertNil(answers(.turnAnswer(workspaceIndex: 2, columnIndex: 2, question: otherColumn, answer: .yes)), "another column's")
         XCTAssertNil(answers(.actionBlock(workspaceIndex: 2)))
         XCTAssertNil(answers(nil))
         XCTAssertNil(answers(yes, clicks: 2))
@@ -91,9 +102,20 @@ final class TurnQuestionSidebarTests: XCTestCase {
 
     /// A new question redraws the card, whatever else stays the same.
     func testANewQuestionIsAChangeOfTheRow() {
-        let later = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 2_000, isYesNo: true)
+        let later = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 2_000, isYesNo: true, columnID: columnID)
         XCTAssertNotEqual(column(yesNo), column(later))
         XCTAssertNotEqual(column(yesNo).hashValue, column(later).hashValue)
+    }
+
+    /// The Reply… popover stays while a card still offers answers to its
+    /// question, and goes once none does.
+    func testReplyPopoverStaysWhileItsQuestionShows() {
+        let later = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 2_000, isYesNo: true, columnID: columnID)
+        XCTAssertTrue(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(yesNo)])]))
+        XCTAssertFalse(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(later)])]), "a later question")
+        XCTAssertFalse(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(nil)])]), "answered or moved on")
+        let elsewhere = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 1_005, isYesNo: true, columnID: UUID())
+        XCTAssertFalse(NiruxShellView.cardsStillAsk(yesNo, [workspace([column(elsewhere)])]), "another column's")
     }
 
     func testYesAndNoTypeAPlainWord() {

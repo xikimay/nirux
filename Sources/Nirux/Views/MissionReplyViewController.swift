@@ -111,42 +111,9 @@ final class MissionReplyViewController: NSViewController {
     }
 
     private func replyField() -> NSView {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = false
-        scroll.autohidesScrollers = true
-        scroll.drawsBackground = true
-        scroll.backgroundColor = Theme.Color.canvas
-        scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = Theme.Radius.card
-        scroll.layer?.borderWidth = 1
-        scroll.layer?.borderColor = Theme.Color.accent.cgColor
-        scroll.heightAnchor.constraint(equalToConstant: 76).isActive = true
-
-        // Sized like a scrollable text view: without a large maxSize it can't
-        // grow past its first frame, and text below it would be clipped.
-        let text = MissionReplyTextView(frame: NSRect(x: 0, y: 0, width: Self.width - 2 * Theme.Space.lg, height: 76))
-        text.minSize = NSSize(width: 0, height: 76)
-        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        text.isHorizontallyResizable = false
-        text.textContainer?.containerSize = NSSize(width: text.frame.width, height: CGFloat.greatestFiniteMagnitude)
-        text.isRichText = false
-        text.allowsUndo = true
-        text.isAutomaticQuoteSubstitutionEnabled = false
-        text.isAutomaticDashSubstitutionEnabled = false
-        text.drawsBackground = false
-        text.font = Theme.Font.body
-        text.textColor = Theme.Color.textPrimary
-        text.insertionPointColor = Theme.Color.textPrimary
-        text.textContainerInset = NSSize(width: Theme.Space.xs, height: Theme.Space.sm)
-        text.isVerticallyResizable = true
-        text.autoresizingMask = [.width]
-        text.textContainer?.widthTracksTextView = true
-        text.setAccessibilityLabel("Your answer")
-        text.onCommandReturn = { [weak self] in self?.send() }
-        scroll.documentView = text
-        replyView = text
-        return scroll
+        let field = MissionReplyTextView.field(width: Self.width - 2 * Theme.Space.lg) { [weak self] in self?.send() }
+        replyView = field.text
+        return field.scroll
     }
 
     private func buttonRow() -> NSView {
@@ -196,6 +163,46 @@ final class MissionReplyViewController: NSViewController {
 
 /// The answer field: ⌘↩ sends instead of making a new line.
 final class MissionReplyTextView: NSTextView {
+    /// The answer field of a reply popover (a Mission question's, a turn's
+    /// question's): plain text in a bordered scroll view, ⌘↩ sending.
+    static func field(width: CGFloat, onCommandReturn: @escaping () -> Void) -> (scroll: NSScrollView, text: MissionReplyTextView) {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = true
+        scroll.backgroundColor = Theme.Color.canvas
+        scroll.wantsLayer = true
+        scroll.layer?.cornerRadius = Theme.Radius.card
+        scroll.layer?.borderWidth = 1
+        scroll.layer?.borderColor = Theme.Color.accent.cgColor
+        scroll.heightAnchor.constraint(equalToConstant: 76).isActive = true
+
+        // Sized like a scrollable text view: without a large maxSize it can't
+        // grow past its first frame, and text below it would be clipped.
+        let text = MissionReplyTextView(frame: NSRect(x: 0, y: 0, width: width, height: 76))
+        text.minSize = NSSize(width: 0, height: 76)
+        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        text.isHorizontallyResizable = false
+        text.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        text.isRichText = false
+        text.allowsUndo = true
+        text.isAutomaticQuoteSubstitutionEnabled = false
+        text.isAutomaticDashSubstitutionEnabled = false
+        text.drawsBackground = false
+        text.font = Theme.Font.body
+        text.textColor = Theme.Color.textPrimary
+        text.insertionPointColor = Theme.Color.textPrimary
+        text.textContainerInset = NSSize(width: Theme.Space.xs, height: Theme.Space.sm)
+        text.isVerticallyResizable = true
+        text.autoresizingMask = [.width]
+        text.textContainer?.widthTracksTextView = true
+        text.setAccessibilityLabel("Your answer")
+        text.onCommandReturn = onCommandReturn
+        scroll.documentView = text
+        return (scroll, text)
+    }
+
     var onCommandReturn: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {

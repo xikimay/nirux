@@ -67,38 +67,9 @@ final class TurnReplyViewController: NSViewController {
     }
 
     private func replyField(width: CGFloat) -> NSView {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.drawsBackground = true
-        scroll.backgroundColor = Theme.Color.canvas
-        scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = Theme.Radius.card
-        scroll.layer?.borderWidth = 1
-        scroll.layer?.borderColor = Theme.Color.accent.cgColor
-        scroll.heightAnchor.constraint(equalToConstant: 76).isActive = true
-        let text = MissionReplyTextView(frame: NSRect(x: 0, y: 0, width: width, height: 76))
-        text.minSize = NSSize(width: 0, height: 76)
-        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        text.isHorizontallyResizable = false
-        text.isVerticallyResizable = true
-        text.autoresizingMask = [.width]
-        text.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        text.textContainer?.widthTracksTextView = true
-        text.isRichText = false
-        text.allowsUndo = true
-        text.isAutomaticQuoteSubstitutionEnabled = false
-        text.isAutomaticDashSubstitutionEnabled = false
-        text.drawsBackground = false
-        text.font = Theme.Font.body
-        text.textColor = Theme.Color.textPrimary
-        text.insertionPointColor = Theme.Color.textPrimary
-        text.textContainerInset = NSSize(width: Theme.Space.xs, height: Theme.Space.sm)
-        text.setAccessibilityLabel("Your answer")
-        text.onCommandReturn = { [weak self] in self?.send() }
-        scroll.documentView = text
-        replyView = text
-        return scroll
+        let field = MissionReplyTextView.field(width: width) { [weak self] in self?.send() }
+        replyView = field.text
+        return field.scroll
     }
 
     private func buttonRow() -> NSView {

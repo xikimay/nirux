@@ -40,9 +40,9 @@ final class SidebarView: NSView {
     var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
     /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
     var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
-    /// (workspace, column, turn end, answer, the button): Yes, No or
-    /// Reply… under a turn's question.
-    var onTurnAnswer: ((Int, Int, TimeInterval, SidebarTurnAnswer, NSView?) -> Void)?
+    /// (question, answer, the button): Yes, No or Reply… under a turn's
+    /// question.
+    var onTurnAnswer: ((SidebarTurnQuestion, SidebarTurnAnswer, NSView?) -> Void)?
     /// Resume on the row of a restored agent that hasn't resumed yet:
     /// (workspaceIndex, columnIndex, column id).
     var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
