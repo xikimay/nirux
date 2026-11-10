@@ -356,6 +356,49 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(machine.isQuietTurnEnd)
     }
 
+    /// A quick answer goes in only while the turn end it answers is the
+    /// last thing that happened, nothing is typed at the prompt, no dialog
+    /// waits and Claude is idle: else "yes" could land in a draft, a
+    /// dialog or a later turn.
+    func testQuickAnswerOnlyToTheLastTurnEndAtAQuietPrompt() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        func ended() throws -> TimeInterval {
+            machine = AgentStatusMachine()
+            return try XCTUnwrap(endTurn(message: asks).turnEnd).turnEndedAt
+        }
+        var at = try ended()
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at - 1, foreground: claude), "another turn end's")
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: nil))
+        let shell = ForegroundProcess(instance: ProcessInstance(pid: 8, startedAt: 0), name: "zsh", arguments: ["zsh"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: shell))
+        let newer = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: at + 1), name: "claude", arguments: ["claude"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: newer), "another claude")
+        let headless = ForegroundProcess(instance: ProcessInstance(pid: 11, startedAt: 0), name: "claude", arguments: ["claude", "-p"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: headless))
+
+        _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "answered already")
+        at = try ended()
+        _ = machine.apply(event(.stop, at: 9, message: "Tests passed."), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "a later turn end")
+        at = try ended()
+        _ = machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "another conversation")
+        at = try ended()
+        _ = machine.apply(event(.sessionEnd, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "the conversation ended")
+        at = try ended()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "a draft at the prompt")
+        at = try ended()
+        _ = machine.apply(event(.permissionRequest, at: 6, tool: "Bash"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "a dialog")
+        at = try ended()
+        _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude), "at work, if only through a subagent")
+    }
+
     /// The alert names the question the classifier quoted, wherever it
     /// sits in the message.
     func testTurnThatAsksShowsTheQuotedQuestion() throws {
