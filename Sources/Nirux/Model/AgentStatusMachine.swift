@@ -264,10 +264,7 @@ struct AgentStatusMachine {
                let index = pendingDialogs.firstIndex(where: { $0.isSameCall(key: key, as: event) }) {
                 noteClosed(pendingDialogs.remove(at: index))
             }
-            // The main agent's only: a subagent's calls say nothing of it.
-            if event.agentID == nil, let tool = event.toolName {
-                circling.noteCallEnded(what: event.toolFamily ?? tool, end: event.toolEnd.flatMap(AgentToolEnd.init), at: now)
-            }
+            noteCallEnded(event, at: now)
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionRequest:
@@ -759,6 +756,21 @@ struct AgentStatusMachine {
     /// commands keep hanging, or one keeps failing (see
     /// `AgentCirclingHint`). Shown while the column works.
     var circlingHint: AgentCirclingHint? { circling.hint }
+
+    /// A tool call ended, for `circlingHint`. The main agent's only: a
+    /// subagent's calls say nothing of it. A shell command counts with
+    /// those of its program, one nothing names with its exact repeats (the
+    /// call's key); an end a newer receiver wrote says nothing.
+    private mutating func noteCallEnded(_ event: AgentHookEvent, at time: TimeInterval) {
+        guard event.agentID == nil, let tool = event.toolName else { return }
+        let end = event.toolEnd.map(AgentToolEnd.init(rawValue:))
+        if case .some(.none) = end { return }
+        let isShell = AgentToolOutcome.shellTools.contains(tool)
+        circling.noteCallEnded(
+            key: isShell ? event.toolFamily ?? event.toolKey.map { "\(tool) \($0)" } : tool,
+            name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
+        )
+    }
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
     mutating func noteRead(now: Date) {

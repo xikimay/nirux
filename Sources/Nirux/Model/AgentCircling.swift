@@ -15,17 +15,19 @@ import Foundation
 enum AgentCirclingHint: Hashable, Sendable {
     /// `count` commands of the turn ran past their time limit.
     case hung(count: Int)
-    /// `what` failed `count` times in a row: a shell command's program
-    /// ("swift build"), else the tool ("Edit").
-    case failing(what: String, count: Int)
+    /// One command failed `count` times in a row: `name` is a shell
+    /// command's program ("swift build") or a tool ("Edit"), nil for a
+    /// command nothing names.
+    case failing(name: String?, count: Int)
 
-    /// The row's status line.
+    /// The row's status line, short enough for the reason to show in a
+    /// sidebar 260 points wide.
     var statusText: String {
         switch self {
         case .hung(let count):
             return "May be stuck · \(count) commands hung"
-        case .failing(let what, let count):
-            return "May be going in circles · \(Self.subject(what, count: count))"
+        case .failing(let name, let count):
+            return "May be stuck · \(Self.display(name)) failed \(count)×"
         }
     }
 
@@ -35,18 +37,16 @@ enum AgentCirclingHint: Hashable, Sendable {
         switch self {
         case .hung(let count):
             reason = "\(count) commands of this turn ran past their time limit."
-        case .failing(let what, let count):
-            reason = "In this turn, \(Self.subject(what, count: count)) in a row."
+        case .failing(let name, let count):
+            reason = "In this turn, \(Self.display(name)) failed \(count) times in a row."
         }
         return reason + " The agent goes on: Nirux only tells you."
     }
 
-    /// "swift build failed 5 times"; a command Nirux couldn't name, "5
-    /// commands failed"; an MCP tool by its own name.
-    private static func subject(_ what: String, count: Int) -> String {
-        if AgentToolOutcome.shellTools.contains(what) { return "\(count) commands failed" }
-        let name = what.hasPrefix("mcp__") ? what.components(separatedBy: "__").last ?? what : what
-        return "\(name) failed \(count) times"
+    /// An MCP tool by its own name, without its server's.
+    private static func display(_ name: String?) -> String {
+        guard let name else { return "a command" }
+        return name.hasPrefix("mcp__") ? name.components(separatedBy: "__").last ?? name : name
     }
 }
 
@@ -59,29 +59,35 @@ struct AgentCirclingWatch: Equatable, Sendable {
     static let hungThreshold = 3
     /// Failures in a row of one command. Measured: never more than 3.
     static let failureThreshold = 5
-    /// Calls ending after a hung command without another one: the agent
-    /// got past it, and a later one starts the count again.
-    static let callsThatClearHangs = 10
-    /// Commands followed at once; the one that failed longest ago goes.
-    static let maxStreaks = 16
+    /// Calls that end without a command hanging again, or without that
+    /// command failing again: the agent moved on. What happens later
+    /// counts from zero, and the hint goes. (The stuck agent measured had
+    /// 2 to 4 calls between hung commands.)
+    static let callsThatClear = 15
 
     private struct Streak: Equatable, Sendable {
-        let what: String
+        let key: String
+        let name: String?
         var count: Int
         var lastAt: TimeInterval
+        var callsSince = 0
     }
 
     private var hungCount = 0
     private var lastHungAt: TimeInterval = 0
     private var callsSinceHang = 0
+    /// Commands failing in a row. At most `callsThatClear` of them: each
+    /// goes once that many other calls ended since it last failed.
     private var streaks: [Streak] = []
 
-    /// A tool call of the main agent ended: `end` nil, it ran. `what`
-    /// names what ran: a shell command's program, else the tool.
-    mutating func noteCallEnded(what: String, end: AgentToolEnd?, at time: TimeInterval) {
+    /// A tool call of the main agent ended: `end` nil, it ran. `key` tells
+    /// what ran from the rest (a shell command's program, a tool; nil: no
+    /// telling), `name` says it to people.
+    mutating func noteCallEnded(key: String?, name: String?, end: AgentToolEnd?, at time: TimeInterval) {
         switch end {
-        case .interrupted?:
-            // The user's doing: it says nothing of the agent.
+        case .interrupted?, .waited?:
+            // The user's doing, or waiting for something: it says nothing
+            // of an agent going in circles, either way.
             return
         case .hung?:
             // Neither a failure nor a success of its command.
@@ -94,9 +100,12 @@ struct AgentCirclingWatch: Equatable, Sendable {
         }
         if hungCount > 0 {
             callsSinceHang += 1
-            if callsSinceHang >= Self.callsThatClearHangs { hungCount = 0 }
+            if callsSinceHang >= Self.callsThatClear { hungCount = 0 }
         }
-        let index = streaks.firstIndex { $0.what == what }
+        for index in streaks.indices where streaks[index].key != key { streaks[index].callsSince += 1 }
+        streaks.removeAll { $0.callsSince >= Self.callsThatClear }
+        guard let key else { return }
+        let index = streaks.firstIndex { $0.key == key }
         guard end == .failed else {
             if let index { streaks.remove(at: index) }
             return
@@ -104,11 +113,9 @@ struct AgentCirclingWatch: Equatable, Sendable {
         if let index {
             streaks[index].count += 1
             streaks[index].lastAt = time
+            streaks[index].callsSince = 0
         } else {
-            if streaks.count >= Self.maxStreaks, let oldest = streaks.indices.min(by: { streaks[$0].lastAt < streaks[$1].lastAt }) {
-                streaks.remove(at: oldest)
-            }
-            streaks.append(Streak(what: what, count: 1, lastAt: time))
+            streaks.append(Streak(key: key, name: name, count: 1, lastAt: time))
         }
     }
 
@@ -123,7 +130,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
         let failing = streaks.filter { $0.count >= Self.failureThreshold }.max { $0.lastAt < $1.lastAt }
         let hung = hungCount >= Self.hungThreshold
         if let failing, !hung || failing.lastAt > lastHungAt {
-            return .failing(what: failing.what, count: failing.count)
+            return .failing(name: failing.name, count: failing.count)
         }
         return hung ? .hung(count: hungCount) : nil
     }
@@ -138,6 +145,9 @@ enum AgentToolEnd: String, Sendable {
     case hung
     /// The user interrupted it (Esc).
     case interrupted
+    /// A command that waits (`AgentShellCommand.isWait`) came back with a
+    /// failure, or outlasted its time limit: neither.
+    case waited
 }
 
 /// What the end of a tool call tells `AgentCirclingWatch`, read by the hook
@@ -147,43 +157,98 @@ enum AgentToolEnd: String, Sendable {
 enum AgentToolOutcome {
     static let shellTools: Set<String> = ["Bash", "PowerShell"]
 
-    /// Nil: the call ran, or a command that waits (`isWait`) came back
-    /// with nothing yet, or outlasted its time limit.
-    static func end(toolName: String, hookName: String, payload: [String: Any]) -> AgentToolEnd? {
-        if hung(toolName: toolName, hookName: hookName, payload: payload) { return .hung }
-        guard hookName == "PostToolUseFailure" else { return nil }
-        if payload["is_interrupt"] as? Bool == true { return .interrupted }
-        if shellTools.contains(toolName), let command = (payload["tool_input"] as? [String: Any])?["command"] as? String,
-           isWait(command: command) {
-            return nil
-        }
-        return .failed
+    /// Nil: the call ran. `command`: a shell tool's, nil for other tools.
+    ///
+    /// A shell command past its time limit is hung. An interactive Claude
+    /// moves it to the background and goes on; a headless one kills it and
+    /// reports a failure. Read from Claude Code 2.1.321's hook payloads and
+    /// a month of results (2.1.111 to 2.1.321).
+    static func end(hookName: String, payload: [String: Any], command: AgentShellCommand?) -> AgentToolEnd? {
+        let failure = hookName == "PostToolUseFailure"
+        if failure, payload["is_interrupt"] as? Bool == true { return .interrupted }
+        guard let command else { return failure ? .failed : nil }
+        let pastItsLimit = failure ? wasKilledAtItsLimit(payload) : wasMovedToTheBackground(payload)
+        // A `sleep 600` outlasting its limit is meant to (12 of the month's
+        // 43), and a poll that finds nothing yet isn't an attempt.
+        if command.isWait { return failure || pastItsLimit ? .waited : nil }
+        if pastItsLimit { return .hung }
+        return failure ? .failed : nil
     }
 
-    /// A shell command ran past its time limit. An interactive Claude
-    /// moves it to the background and goes on (`backgroundTaskId` in a
-    /// result nobody asked to run in the background: not the agent with
-    /// `run_in_background`, nor the user, a message that had to get
-    /// through, or assistant mode's own budget); a headless one kills it
-    /// and reports a failure whose error says so. Read from Claude Code
-    /// 2.1.321's hook payloads and a month of results (2.1.111 to 2.1.321).
-    /// Not a command that waits (`isWait`): a `sleep 600` outlasting its
-    /// limit is meant to, and was 12 of the month's 43.
-    static func hung(toolName: String, hookName: String, payload: [String: Any]) -> Bool {
-        guard shellTools.contains(toolName) else { return false }
-        if let command = (payload["tool_input"] as? [String: Any])?["command"] as? String, isWait(command: command) { return false }
-        if hookName == "PostToolUseFailure" {
-            // Esc on a command that would have timed out is still the user's.
-            guard payload["is_interrupt"] as? Bool != true else { return false }
-            if payload["is_timeout"] as? Bool == true { return true }
-            return (payload["error"] as? String).map { $0.prefix(400).contains("Command timed out after") } ?? false
-        }
+    /// `backgroundTaskId` in a result nobody asked to run in the
+    /// background: not the agent with `run_in_background`, nor the user, a
+    /// message that had to get through, or assistant mode's own budget.
+    private static func wasMovedToTheBackground(_ payload: [String: Any]) -> Bool {
         guard let response = payload["tool_response"] as? [String: Any],
               let task = response["backgroundTaskId"] as? String, !task.isEmpty,
               (payload["tool_input"] as? [String: Any])?["run_in_background"] as? Bool != true
         else { return false }
         let otherReasons = ["backgroundedByUser", "backgroundedToDeliverMessage", "backgroundedByTurnAbort", "assistantAutoBackgrounded"]
         return !otherReasons.contains { response[$0] as? Bool == true }
+    }
+
+    /// "Exit code 143", then "Command timed out after 2s": Claude's own
+    /// first lines of the error, before the command's output (which may
+    /// hold the same words: a test log, a grep of this file).
+    private static func wasKilledAtItsLimit(_ payload: [String: Any]) -> Bool {
+        if payload["is_timeout"] as? Bool == true { return true }
+        guard let error = payload["error"] as? String else { return false }
+        let lines = error.prefix(200).split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
+        let notice = "Command timed out after"
+        guard let first = lines.first else { return false }
+        return first.hasPrefix(notice) || first.hasPrefix("Exit code ") && lines.dropFirst().first?.hasPrefix(notice) == true
+    }
+}
+
+/// What a shell command is, as far as its text says: the program it runs
+/// and whether it waits. A label for people and a key to count by, not a
+/// shell parser: quotes, `$(…)` and comments are followed only to find
+/// where commands and words end, in the first 2,000 characters.
+struct AgentShellCommand: Equatable, Sendable {
+    /// "swift build", "gh pr checks", "python3": the program, with its
+    /// subcommand for the tools that have one, past `cd … &&`, variables,
+    /// wrappers and preparations. Nil when nothing names the command (a
+    /// loop, a path held in a variable).
+    let family: String?
+    /// The command waits for something: it starts by sleeping (a poll:
+    /// `sleep 60; gh run view 9`), it is a loop that sleeps (`until curl
+    /// -sf :3000; do sleep 2; done`), or one of GitHub's that exit non-zero
+    /// while checks run. Coming back with a failure, or running past its
+    /// time limit, is then part of waiting (for CI, a server).
+    let isWait: Bool
+
+    init(_ text: String) {
+        let commands = Self.simpleCommands(in: text)
+        var preparation: String?
+        var sleeps = false
+        for (index, words) in commands.enumerated() {
+            guard let (name, arguments) = Self.program(in: words) else { continue }
+            if name == "sleep" { sleeps = true }
+            if Self.housekeeping.contains(name) {
+                preparation = preparation ?? name
+                continue
+            }
+            if Self.compound.contains(name) {
+                family = nil
+                isWait = sleeps || commands[index...].contains { Self.program(in: $0)?.name == "sleep" }
+                return
+            }
+            guard Self.isProgramName(name) else {
+                family = nil
+                isWait = sleeps
+                return
+            }
+            let named = ([name] + Self.subcommands(of: name, in: arguments)).joined(separator: " ")
+            if Self.preparations.contains(named) {
+                preparation = preparation ?? named
+                continue
+            }
+            family = named
+            isWait = sleeps || Self.waitingCommands.contains(named)
+            return
+        }
+        family = preparation
+        isWait = sleeps
     }
 
     /// Programs whose first plain argument says what they do.
@@ -196,49 +261,24 @@ enum AgentToolOutcome {
         "-C", "-c", "-f", "-R", "-n", "-H", "--repo", "--git-dir", "--work-tree", "--prefix", "--cwd", "--filter",
         "--manifest-path", "--context", "--namespace", "--kubeconfig", "--directory", "--project", "--package-path"
     ]
-    /// What runs a command rather than being one, and the shell's own
-    /// housekeeping: the command that follows is the one to name.
+    /// What runs a command rather than being one.
     private static let wrappers: Set<String> = ["time", "sudo", "env", "nohup", "command", "exec", "nice", "caffeinate", "timeout", "gtimeout"]
     private static let wrapperOptionsWithValue: Set<String> = ["-u", "-k", "-s", "-n", "-g", "-C"]
+    /// The shell's own housekeeping and what clears the way: the command
+    /// that follows is the one to name. Alone, they name themselves.
     private static let housekeeping: Set<String> = [
         "cd", "pushd", "popd", "export", "set", "unset", "source", ".", "echo", "printf", "mkdir", "true", ":", "sleep",
-        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare"
+        "wait", "test", "[", "[[", "umask", "ulimit", "trap", "local", "declare", "rm", "touch", "chmod", "kill", "pkill",
+        "killall"
     ]
+    /// The same for a program's subcommand: `git add -A && git commit`.
+    private static let preparations: Set<String> = ["git add"]
     private static let compound: Set<String> = ["for", "while", "until", "if", "case", "select", "function"]
-
     /// GitHub's commands that exit non-zero while checks run, and once
     /// they failed: repeated on purpose.
     private static let waitingCommands: Set<String> = ["gh pr checks", "gh run watch"]
-
-    /// "swift build", "gh pr checks", "python3": the program a shell
-    /// command runs, with its subcommand for the tools that have one, past
-    /// `cd … &&`, variables and wrappers. Nil when nothing names it (a
-    /// loop, a path held in a variable): the caller says "commands". A
-    /// label for people and a key to count by, not a parser: quotes are
-    /// followed only to find where a command ends.
-    static func family(ofCommand command: String) -> String? {
-        var housekeepingFound: String?
-        for words in simpleCommands(in: command) {
-            guard let (name, arguments) = program(in: words) else { continue }
-            if housekeeping.contains(name) {
-                housekeepingFound = housekeepingFound ?? name
-                continue
-            }
-            guard !compound.contains(name), isProgramName(name) else { return nil }
-            return ([name] + subcommands(of: name, in: arguments)).joined(separator: " ")
-        }
-        return housekeepingFound
-    }
-
-    /// The command waits for something: it sleeps (a poll: `sleep 60; gh
-    /// run view 9`, `until curl -sf :3000; do sleep 2; done`), or it is one
-    /// of `waitingCommands`. Coming back with a failure, or running past
-    /// its time limit, is then part of waiting (for CI, a server): neither
-    /// an attempt that failed nor a command that hung.
-    static func isWait(command: String) -> Bool {
-        simpleCommands(in: command).contains { program(in: $0)?.name == "sleep" }
-            || family(ofCommand: command).map(waitingCommands.contains) ?? false
-    }
+    /// Quotes, and where a subshell or a group opens and closes.
+    private static let punctuation = CharacterSet(charactersIn: "\"'`(){}")
 
     /// The program a simple command runs and its arguments, past what
     /// comes before it: `!`, `{`, variables, wrappers with their own
@@ -254,7 +294,7 @@ enum AgentToolOutcome {
                 words = words.dropFirst()
                 // Its own options and durations: `timeout -k 5 120 swift
                 // build`, `env -u NAME node x.js`.
-                while let next = words.first, next.hasPrefix("-") || next.first?.isNumber == true || isAssignment(next) {
+                while let next = words.first, next.hasPrefix("-") || isDuration(next) || isAssignment(next) {
                     words = words.dropFirst(wrapperOptionsWithValue.contains(next) ? 2 : 1)
                 }
             } else {
@@ -266,35 +306,62 @@ enum AgentToolOutcome {
     }
 
     /// The words of each simple command, of the first ones in a long
-    /// script: split at `;`, `&`, `|` and line ends outside quotes, then at
-    /// spaces.
-    private static func simpleCommands(in command: String) -> [[String]] {
+    /// script: commands end at `;`, `&`, `|` and line ends, words at
+    /// spaces, both outside quotes and `$(…)`; a `#` starts a comment.
+    private static func simpleCommands(in text: String) -> [[String]] {
         var commands: [[String]] = []
-        var current = ""
+        var words: [String] = []
+        var word = ""
         var quote: Character?
+        var substitutionDepth = 0
         var escaped = false
-        func close() {
-            let words = current.split(whereSeparator: \.isWhitespace).map(String.init)
-            if !words.isEmpty { commands.append(words) }
-            current = ""
+        var inComment = false
+        var previous: Character = " "
+        func endWord() {
+            if !word.isEmpty { words.append(word) }
+            word = ""
         }
-        for character in command.prefix(2_000) {
+        func endCommand() {
+            endWord()
+            if !words.isEmpty { commands.append(words) }
+            words = []
+        }
+        for character in text.prefix(2_000) {
             if commands.count >= 12 { return commands }
-            if escaped {
+            defer { previous = character }
+            if inComment {
+                if character.isNewline { inComment = false }
+            } else if escaped {
                 escaped = false
+                word.append(character)
             } else if character == "\\", quote != "'" {
                 escaped = true
+                word.append(character)
             } else if let open = quote {
                 if character == open { quote = nil }
-            } else if character == "'" || character == "\"" {
+                word.append(character)
+            } else if character == "'" || character == "\"" || character == "`" {
                 quote = character
-            } else if character == ";" || character == "|" || character.isNewline || character == "&" && current.last != ">" {
-                close()
-                continue
+                word.append(character)
+            } else if substitutionDepth > 0 {
+                if character == "(" { substitutionDepth += 1 }
+                if character == ")" { substitutionDepth -= 1 }
+                word.append(character)
+            } else if character == "(", previous == "$" {
+                substitutionDepth = 1
+                word.append(character)
+            } else if character == "#", word.isEmpty {
+                inComment = true
+                endCommand()
+            } else if character == ";" || character == "|" || character.isNewline || character == "&" && previous != ">" {
+                endCommand()
+            } else if character.isWhitespace {
+                endWord()
+            } else {
+                word.append(character)
             }
-            current.append(character)
         }
-        close()
+        endCommand()
         return commands
     }
 
@@ -319,9 +386,6 @@ enum AgentToolOutcome {
         return found
     }
 
-    /// Quotes, and where a subshell or a group opens and closes.
-    private static let punctuation = CharacterSet(charactersIn: "\"'(){}")
-
     /// `/usr/bin/swift` → `swift`, quotes around a path dropped.
     private static func name(of word: String) -> String {
         (word.trimmingCharacters(in: punctuation) as NSString).lastPathComponent
@@ -337,5 +401,11 @@ enum AgentToolOutcome {
         guard let equals = word.firstIndex(of: "="), equals != word.startIndex else { return false }
         let name = word[..<equals]
         return name.first?.isNumber == false && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
+    }
+
+    /// `120`, `2.5`, `90s`, `5m`: a wrapper's duration, not `7z`.
+    private static func isDuration(_ word: String) -> Bool {
+        let digits = word.last.map { "smhd".contains($0) } == true ? word.dropLast() : word[...]
+        return !digits.isEmpty && digits.allSatisfy { $0.isNumber || $0 == "." }
     }
 }

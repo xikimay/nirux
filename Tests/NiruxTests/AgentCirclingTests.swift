@@ -52,42 +52,48 @@ final class AgentCirclingTests: XCTestCase {
         let moved: [String: Any] = ["stdout": "", "stderr": "", "interrupted": false, "backgroundTaskId": "b12"]
         XCTAssertEqual(end("PostToolUse", ["tool_response": moved.merging(["timedOutAfterMs": 120_000]) { $1 }]), "hung", "interactive, 2.1.321")
         XCTAssertEqual(end("PostToolUse", ["tool_response": moved.merging(["assistantAutoBackgrounded": false]) { $1 }]), "hung", "2.1.111")
+        let killed = "Exit code 143\nCommand timed out after 2s"
+        XCTAssertEqual(end("PostToolUseFailure", ["error": killed, "is_interrupt": false]), "hung", "headless: killed there")
+        XCTAssertEqual(end("PostToolUseFailure", ["error": killed, "is_interrupt": true]), "interrupted", "Esc is the user's")
         XCTAssertEqual(
-            end("PostToolUseFailure", input: ["command": "ls /Volumes/x", "timeout": 2_000],
-                ["error": "Exit code 143\nCommand timed out after 2s", "is_interrupt": false]),
-            "hung", "headless: killed there"
+            end("PostToolUseFailure", ["error": "Exit code 1\nXCTAssertEqual failed: (\"\(killed)\")"]), "failed",
+            "the words in the command's own output: a test log, a grep of the code that reads them"
         )
-        XCTAssertEqual(end("PostToolUseFailure", ["error": "Exit code 143\nCommand timed out after 2s", "is_interrupt": true]), "interrupted")
 
         XCTAssertNil(end("PostToolUse", input: ["command": "npm run dev", "run_in_background": true], ["tool_response": moved]), "asked for")
         for reason in ["backgroundedByUser", "backgroundedToDeliverMessage", "backgroundedByTurnAbort", "assistantAutoBackgrounded"] {
             XCTAssertNil(end("PostToolUse", ["tool_response": moved.merging([reason: true]) { $1 }]), reason)
         }
         XCTAssertNil(end("PostToolUse", tool: "Agent", input: ["description": "review"], ["tool_response": moved]), "not a command")
-        XCTAssertNil(end("PostToolUse", input: ["command": "sleep 600; gh run view 9"], ["tool_response": moved]), "it waits on purpose")
-        XCTAssertEqual(
-            end("PostToolUseFailure", tool: "WebFetch", input: ["url": "https://example.test"], ["error": "Command timed out after 2s"]),
-            "failed", "not a command"
-        )
+        XCTAssertEqual(end("PostToolUseFailure", tool: "WebFetch", input: ["url": "https://example.test"], ["error": killed]), "failed", "not a command")
     }
 
     /// Waiting for CI or a server repeats a command that "fails" until
-    /// there is something: not an agent going in circles.
+    /// there is something, and a long sleep outlasts its time limit on
+    /// purpose: not an agent going in circles.
     func testACommandThatWaitsNeitherFailsNorHangs() {
         let waits = [
-            "sleep 60; gh run view 99 --json status", "cd repo && gh pr checks 412", "gh run watch 5 --exit-status",
-            "until curl -sf localhost:3000; do sleep 2; done", "for i in 1 2 3; do\n  curl -sf :3000 && break\n  sleep 2\ndone"
+            "sleep 60; gh run view 99 --json status", "echo waiting; sleep 30; gh pr view 3", "cd repo && gh pr checks 412",
+            "gh run watch 5 --exit-status", "until curl -sf localhost:3000; do sleep 2; done",
+            "for i in 1 2 3; do\n  curl -sf :3000 && break\n  sleep 2\ndone"
         ]
+        let moved: [String: Any] = ["stdout": "", "interrupted": false, "backgroundTaskId": "b12", "timedOutAfterMs": 120_000]
         for command in waits {
-            XCTAssertTrue(AgentToolOutcome.isWait(command: command), command)
-            XCTAssertNil(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 8"])?.toolEnd, command)
-            let pastItsLimit = toolEvent(
-                "PostToolUseFailure", input: ["command": command], ["error": "Exit code 143\nCommand timed out after 2m 0s"]
-            )
-            XCTAssertNil(pastItsLimit?.toolEnd, command)
+            XCTAssertTrue(AgentShellCommand(command).isWait, command)
+            XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 8"])?.toolEnd, "waited", command)
+            let killed = toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 143\nCommand timed out after 2m 0s"])
+            XCTAssertEqual(killed?.toolEnd, "waited", command)
+            XCTAssertEqual(toolEvent("PostToolUse", input: ["command": command], ["tool_response": moved])?.toolEnd, "waited", command)
+            XCTAssertNil(toolEvent("PostToolUse", input: ["command": command], ["tool_response": ["stdout": "ok"]])?.toolEnd, command)
         }
-        for command in ["swift build", "gh pr view 3", "gh run view 99", "echo 'sleep 5' > run.sh", "timeout 120 swift test"] {
-            XCTAssertFalse(AgentToolOutcome.isWait(command: command), command)
+        // A sleep somewhere in a command, or written into a file, doesn't
+        // make it a wait: restarting a server and probing it is an attempt.
+        let attempts = [
+            "swift build", "gh pr view 3", "gh run view 99", "echo 'sleep 5' > run.sh", "timeout 120 swift test",
+            "./start.sh & sleep 3; curl -sf :3000/health", "cat > run.sh <<'EOF'\nsleep 5\n./run\nEOF\nbash run.sh"
+        ]
+        for command in attempts {
+            XCTAssertFalse(AgentShellCommand(command).isWait, command)
             XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 1"])?.toolEnd, "failed", command)
         }
     }
@@ -98,15 +104,21 @@ final class AgentCirclingTests: XCTestCase {
             ("cd /Users/me/proj && swift build 2>&1 | tail -20", "swift build"),
             ("cd x 2>&1 && swift test --filter Foo", "swift test"),
             ("FOO=1 BAR=2 timeout -k 5 120 swift build -c release", "swift build"),
+            ("MSG=\"hello world\" VERSION=$(git describe --tags) swift build", "swift build"),
             ("env -u NAME node build.js", "node"),
+            ("timeout 10 7z x a.7z", "7z"),
             ("git -C /tmp/repo status --short", "git status"),
             ("git -c user.name=x commit -m 'a; b && c'", "git commit"),
+            ("git add -A && git commit -m x && git push", "git commit"),
+            ("git add -A", "git add"),
             ("sleep 60; gh run view 99 --json status", "gh run view"),
             ("gh -R owner/repo pr checks 3 --watch", "gh pr checks"),
             ("gh api repos/x/y", "gh api"),
+            ("# build the app; then test it\nswift build # quick", "swift build"),
             ("/usr/bin/python3 - <<'EOF'\nimport os\nprint(1); x = 2\nEOF", "python3"),
             ("echo \"a; rm -rf x\" && npm --prefix web run build", "npm run"),
             ("echo x &> /dev/null; cargo +nightly test", "cargo test"),
+            ("pkill -f Nirux; rm -rf out; swift run", "swift run"),
             ("(cd sub && make -j8 test)", "make test"),
             ("{ \"/usr/local/bin/gh\" pr checks 3; }", "gh pr checks"),
             ("./scripts/run-tests.sh Foo", "run-tests.sh"),
@@ -119,7 +131,7 @@ final class AgentCirclingTests: XCTestCase {
             ("", nil)
         ]
         for (command, name) in names {
-            XCTAssertEqual(AgentToolOutcome.family(ofCommand: command), name, command)
+            XCTAssertEqual(AgentShellCommand(command).family, name, command)
         }
     }
 
@@ -129,12 +141,12 @@ final class AgentCirclingTests: XCTestCase {
     private var clock: TimeInterval = 1_000
 
     private func send(
-        _ name: AgentHookEvent.Name, tool: String? = nil, end: AgentToolEnd? = nil, family: String? = nil,
+        _ name: AgentHookEvent.Name, tool: String? = nil, key: String? = nil, end: String? = nil, family: String? = nil,
         agent: String? = nil, source: String? = nil
     ) {
         clock += 1
         _ = machine.apply(AgentHookEvent(
-            kind: .claude, name: name, sessionID: "s", source: source, toolName: tool, toolEnd: end?.rawValue,
+            kind: .claude, name: name, sessionID: "s", source: source, toolName: tool, toolKey: key, toolEnd: end,
             toolFamily: family, agentID: agent, timestamp: clock
         ), isUserFocused: false)
     }
@@ -147,7 +159,7 @@ final class AgentCirclingTests: XCTestCase {
     /// A shell command by its program; another tool by its name.
     private func call(_ what: String, _ end: AgentToolEnd? = nil, agent: String? = nil) {
         let isTool = what.first?.isUppercase == true
-        send(.postToolUse, tool: isTool ? what : "Bash", end: end, family: isTool ? nil : what, agent: agent)
+        send(.postToolUse, tool: isTool ? what : "Bash", end: end?.rawValue, family: isTool ? nil : what, agent: agent)
     }
 
     /// The one stuck agent of the month measured: `ls`, `stat` and `test`
@@ -166,10 +178,13 @@ final class AgentCirclingTests: XCTestCase {
         call("stat", .hung)
         XCTAssertEqual(machine.circlingHint, .hung(count: 4))
 
-        for _ in 1..<AgentCirclingWatch.callsThatClearHangs { call("grep") }
-        XCTAssertEqual(machine.circlingHint, .hung(count: 4), "still close")
+        for _ in 1..<AgentCirclingWatch.callsThatClear {
+            call("grep")
+            call("sleep", .waited)
+        }
+        XCTAssertEqual(machine.circlingHint, .hung(count: 4), "still close: polls aren't calls that got past them")
         call("grep")
-        XCTAssertNil(machine.circlingHint, "it got past them")
+        XCTAssertNil(machine.circlingHint, "it moved on")
         for _ in 1...2 { call("ls", .hung) }
         XCTAssertNil(machine.circlingHint, "later ones count from zero")
     }
@@ -184,16 +199,49 @@ final class AgentCirclingTests: XCTestCase {
         call("swift test")
         call("swift build", .interrupted)
         call("swift build", .hung)
-        XCTAssertNil(machine.circlingHint, "Esc and a hung run aren't failures")
+        call("swift build", .waited)
+        send(.postToolUse, tool: "Bash", end: "an end a newer receiver wrote", family: "swift build")
+        XCTAssertNil(machine.circlingHint, "none of these is a failure")
         call("swift build", .failed)
-        XCTAssertEqual(machine.circlingHint, .failing(what: "swift build", count: 5), "nor do they, or another command passing, end the row")
+        XCTAssertEqual(machine.circlingHint, .failing(name: "swift build", count: 5), "nor do they, or another command passing, end the row")
         call("swift build", .failed)
-        XCTAssertEqual(machine.circlingHint, .failing(what: "swift build", count: 6))
+        XCTAssertEqual(machine.circlingHint, .failing(name: "swift build", count: 6))
         call("swift build")
         XCTAssertNil(machine.circlingHint, "it passed")
 
         for _ in 1...5 { call("Edit", .failed) }
-        XCTAssertEqual(machine.circlingHint, .failing(what: "Edit", count: 5), "any tool")
+        XCTAssertEqual(machine.circlingHint, .failing(name: "Edit", count: 5), "any tool")
+    }
+
+    /// "In a row" means close together: failures of one program scattered
+    /// through a long turn aren't a loop, and a loop the agent left isn't
+    /// one any more.
+    func testFailuresFarApartDontAddUp() {
+        startTurn()
+        for _ in 1...5 { call("gh pr merge", .failed) }
+        for _ in 1..<AgentCirclingWatch.callsThatClear { call("grep") }
+        XCTAssertEqual(machine.circlingHint, .failing(name: "gh pr merge", count: 5))
+        call("grep")
+        XCTAssertNil(machine.circlingHint, "it moved on")
+        for _ in 1...4 {
+            call("gh pr merge", .failed)
+            for _ in 1...AgentCirclingWatch.callsThatClear { call("grep") }
+        }
+        call("gh pr merge", .failed)
+        XCTAssertNil(machine.circlingHint, "each started again from one")
+    }
+
+    /// A command nothing names counts only with its exact repeats.
+    func testACommandNothingNamesCountsWithItsExactRepeats() {
+        startTurn()
+        for index in 1...6 { send(.postToolUse, tool: "Bash", key: "loop-\(index)", end: "failed") }
+        XCTAssertNil(machine.circlingHint, "six different loops that failed")
+        for _ in 1...5 { send(.postToolUse, tool: "Bash", key: "same", end: "failed") }
+        XCTAssertEqual(machine.circlingHint, .failing(name: nil, count: 5))
+        send(.postToolUse, tool: "Bash", key: "another")
+        XCTAssertEqual(machine.circlingHint, .failing(name: nil, count: 5), "another one passing says nothing of it")
+        send(.postToolUse, tool: "Bash", key: "same")
+        XCTAssertNil(machine.circlingHint)
     }
 
     func testOnlyTheMainAgentsCallsOfTheTurnCount() {
@@ -232,41 +280,10 @@ final class AgentCirclingTests: XCTestCase {
         for _ in 1...3 { call("ls", .hung) }
         XCTAssertEqual(machine.circlingHint, .hung(count: 3))
         call("npm publish", .failed)
-        XCTAssertEqual(machine.circlingHint, .failing(what: "npm publish", count: 6))
-    }
-
-    /// Memory stays bounded through a turn of hundreds of commands.
-    func testTheCommandThatFailedLongestAgoIsForgotten() {
-        var watch = AgentCirclingWatch()
-        for index in 0...AgentCirclingWatch.maxStreaks {
-            watch.noteCallEnded(what: "cmd\(index)", end: .failed, at: TimeInterval(index))
-        }
-        for step in 1..<AgentCirclingWatch.failureThreshold {
-            watch.noteCallEnded(what: "cmd\(AgentCirclingWatch.maxStreaks)", end: .failed, at: 100 + TimeInterval(step))
-            watch.noteCallEnded(what: "cmd0", end: .failed, at: 200 + TimeInterval(step))
-        }
-        XCTAssertEqual(
-            watch.hint, .failing(what: "cmd\(AgentCirclingWatch.maxStreaks)", count: AgentCirclingWatch.failureThreshold),
-            "the first one, which failed last, started again from one"
-        )
+        XCTAssertEqual(machine.circlingHint, .failing(name: "npm publish", count: 6))
     }
 
     // MARK: - What the row shows
-
-    func testTheHintNamesWhatFailed() {
-        XCTAssertEqual(AgentCirclingHint.hung(count: 3).statusText, "May be stuck · 3 commands hung")
-        XCTAssertEqual(
-            AgentCirclingHint.failing(what: "swift build", count: 6).statusText, "May be going in circles · swift build failed 6 times"
-        )
-        XCTAssertEqual(
-            AgentCirclingHint.failing(what: "Bash", count: 5).statusText, "May be going in circles · 5 commands failed",
-            "commands nothing names"
-        )
-        XCTAssertEqual(
-            AgentCirclingHint.failing(what: "mcp__claude-in-chrome__computer", count: 5).statusText,
-            "May be going in circles · computer failed 5 times"
-        )
-    }
 
     private func column(_ index: Int, _ status: AgentStatus, circling: AgentCirclingHint? = nil) -> ColumnInfo {
         ColumnInfo(
@@ -288,10 +305,12 @@ final class AgentCirclingTests: XCTestCase {
     }
 
     /// Grey like "Working", whose place it takes: amber is for an agent
-    /// that waits on the user, and this one doesn't.
+    /// that waits on the user, and this one doesn't. What failed and how
+    /// often fits the row; the tooltip says the rest.
     @MainActor
     func testTheRowSaysItInGreyInPlaceOfWorking() throws {
-        let hint = AgentCirclingHint.failing(what: "swift build", count: 5)
+        let hint = AgentCirclingHint.failing(name: "swift build", count: 5)
+        XCTAssertEqual(hint.statusText, "May be stuck · swift build failed 5×")
         let circling = workspace([column(0, .working), column(1, .working, circling: hint)])
         XCTAssertEqual(circling.rowSummary.status, SidebarStatusLine(text: hint.statusText, tone: .neutral, detail: hint.detail))
         XCTAssertEqual(circling.rowSummary.mark, .working)
@@ -299,11 +318,22 @@ final class AgentCirclingTests: XCTestCase {
         XCTAssertEqual(circling.cardState, .working)
         XCTAssertNil(circling.attention, "nothing alerts")
 
-        let result = SidebarWorkspaceCardRenderer(workspace: circling, sidebarWidth: 260, yOffset: 500).render()
-        let line = try XCTUnwrap(result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == hint.statusText })
-        XCTAssertEqual(line.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.Color.textSecondary)
-        XCTAssertEqual(line.toolTip, "\(hint.statusText)\nIn this turn, swift build failed 5 times in a row. The agent goes on: Nirux only tells you.")
-        XCTAssertEqual(AgentCirclingHint.hung(count: 3).detail, "3 commands of this turn ran past their time limit. The agent goes on: Nirux only tells you.")
+        @MainActor func line(_ hint: AgentCirclingHint) throws -> NSTextField {
+            let info = workspace([column(0, .working, circling: hint)])
+            let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
+            return try XCTUnwrap(result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == hint.statusText })
+        }
+        let label = try line(hint)
+        XCTAssertEqual(label.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.Color.textSecondary)
+        XCTAssertEqual(label.toolTip, "\(hint.statusText)\nIn this turn, swift build failed 5 times in a row. The agent goes on: Nirux only tells you.")
+        for shown in [hint, .hung(count: 3), .failing(name: nil, count: 5), .failing(name: "mcp__claude-in-chrome__computer", count: 5)] {
+            let label = try line(shown)
+            XCTAssertLessThanOrEqual(label.attributedStringValue.size().width, label.frame.width, "\(shown.statusText) isn't cut")
+        }
+        XCTAssertEqual(try line(.hung(count: 3)).toolTip, "May be stuck · 3 commands hung\n3 commands of this turn ran past their time limit. "
+            + "The agent goes on: Nirux only tells you.")
+        XCTAssertEqual(AgentCirclingHint.failing(name: nil, count: 5).statusText, "May be stuck · a command failed 5×")
+        XCTAssertEqual(AgentCirclingHint.failing(name: "mcp__claude-in-chrome__computer", count: 5).statusText, "May be stuck · computer failed 5×")
 
         XCTAssertEqual(
             workspace([column(0, .needsAttention), column(1, .working, circling: hint)]).rowSummary.status.text, "Needs you · Which?",

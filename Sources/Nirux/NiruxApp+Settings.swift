@@ -171,8 +171,8 @@ extension NiruxApp {
                 SettingsForm.header("Going in circles"),
                 circling,
                 SettingsForm.hint(
-                    "A grey line on a working Claude Code task's row, in place of \"Working\", once 3 of its "
-                        + "commands ran past their time limit in a turn, or one command failed 5 times in a row. "
+                    "A working Claude Code task's row says \"May be stuck\" in grey, in place of \"Working\", once 3 "
+                        + "of its commands ran past their time limit in a turn, or one command failed 5 times in a row. "
                         + "Counted on your Mac from Claude Code's hooks; the agent isn't interrupted, and nothing alerts.",
                     under: circling
                 )

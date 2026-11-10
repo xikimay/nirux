@@ -33,8 +33,9 @@ struct ColumnInfo: Hashable {
     var deferredAgent: SidebarDeferredAgent?
     /// A Mission question this column's agent waits on.
     var missionQuestion: SidebarMissionQuestion?
-    /// The working agent may be going in circles (`AgentCirclingHint`);
-    /// nil with the hint turned off in Settings.
+    /// The agent may be going in circles in its turn in flight
+    /// (`AgentCirclingHint`), which the row says while it works; nil with
+    /// the hint turned off in Settings.
     var circling: AgentCirclingHint?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?

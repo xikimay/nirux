@@ -61,7 +61,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// didn't simply run (an `AgentToolEnd` raw value; a string, so an app
     /// older than its receiver skips an end it doesn't know, not the whole
     /// event), and the program a shell command ran ("swift build"; see
-    /// `AgentToolOutcome`). Nil from older receivers too.
+    /// `AgentShellCommand`). Nil from older receivers too.
     let toolEnd: String?
     let toolFamily: String?
     /// Subagent the event came from (Claude `agent_id`); nil on the main
@@ -155,10 +155,11 @@ struct AgentHookEvent: Codable, Equatable {
                 toolKey = nil
             }
             if let toolName, name == .postToolUse {
-                toolEnd = AgentToolOutcome.end(toolName: toolName, hookName: hookName, payload: payload)?.rawValue
-                toolFamily = AgentToolOutcome.shellTools.contains(toolName)
-                    ? ((payload["tool_input"] as? [String: Any])?["command"] as? String).flatMap(AgentToolOutcome.family(ofCommand:))
+                let command = AgentToolOutcome.shellTools.contains(toolName)
+                    ? ((payload["tool_input"] as? [String: Any])?["command"] as? String).map(AgentShellCommand.init)
                     : nil
+                toolEnd = AgentToolOutcome.end(hookName: hookName, payload: payload, command: command)?.rawValue
+                toolFamily = command?.family
             } else {
                 toolEnd = nil
                 toolFamily = nil
