@@ -251,9 +251,9 @@ final class SidebarView: NSView {
     /// actually would.
     var lastRenderSignature: Int?
 
-    /// When a task's row was born (`CACurrentMediaTime`), by workspace: it
-    /// opens with a spring (see SidebarView+Birth).
-    var bornAt: [String: CFTimeInterval] = [:]
+    /// When a task's row opens (`CACurrentMediaTime`), by workspace, while
+    /// its birth plays: with a spring (see SidebarView+Birth).
+    var rowOpensAt: [String: CFTimeInterval] = [:]
 
     /// When the agent of a row ended its turn (`CACurrentMediaTime`), by
     /// workspace: the row's mark draws a check for
