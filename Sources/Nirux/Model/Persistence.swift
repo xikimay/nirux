@@ -502,7 +502,6 @@ struct PersistedSettings: Codable {
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
-        try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)

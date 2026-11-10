@@ -112,6 +112,7 @@ struct AgentLightPlan: Equatable {
     /// open out of view keeps its glow, without its pill coming back.
     mutating func clearColumnAlerts() {
         columns = columns.filter { $0.value == .working }
+        (left, right, top, bottom) = (nil, nil, nil, nil)
     }
 
     /// The agents the edges stand for.
@@ -136,10 +137,10 @@ struct TurnEndSweeps {
         for column in columns {
             guard let id = column.id else { continue }
             // Owed until its verdict comes.
-            current[id] = column.awaitsTurnEndVerdict ? seen[id] ?? column.turnEndedAt : column.turnEndedAt
+            current[id] = column.turnEndedAt
             // A column seen for the first time ended nothing in front of
             // the user.
-            guard !column.awaitsTurnEndVerdict, let last = seen[id], column.turnEndedAt > last else { continue }
+            guard let last = seen[id], column.turnEndedAt > last else { continue }
             // A wait or an error has its own light.
             let asks = column.attention.map { $0 != .finished } ?? false
             if column.agentStatus != .working, !asks { ended.insert(id) }

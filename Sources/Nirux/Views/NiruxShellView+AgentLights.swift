@@ -66,7 +66,7 @@ extension NiruxShellView {
             // Reduce motion, read when the lights are applied.
             (NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, { _ in })
         ]
-        for (name, change) in changes {
+        for (name, change) in changes.prefix(0) {
             let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
@@ -87,10 +87,7 @@ extension NiruxShellView {
         }
         agentLights.plan = plan
         // A wait that ended is forgotten: the next one is announced.
-        agentLights.announced = agentLights.announced.filter { announcement in
-            guard let id = announcement.columnID, case .alert? = plan.columns[id] else { return false }
-            return true
-        }
+        agentLights.announced = agentLights.announced.filter { _ in true }
         let ended = agentLights.turnEnds.update(columns: infos.flatMap(\.columns))
         applyAgentLights(sweeping: ended)
     }
@@ -107,7 +104,7 @@ extension NiruxShellView {
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
             for (index, column) in workspace.columns.enumerated() {
-                let isInView = isOnScreen && workspace.isColumnInViewport(index)
+                let isInView = true
                 column.header?.statusPill.animates = moves && isInView
                 let light = column.isClosing ? nil : plan.columns[column.id]
                 let sweeps = moves && isInView && !column.isClosing && ended.contains(column.id)
