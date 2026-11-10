@@ -22,8 +22,9 @@ func testBundleDidLoad() {
     // builds their surfaces without the display link all the same.
 
     // Ghostty keeps the environment as it found it at its first terminal (a
-    // slice of libc's `environ`, see `ghostty_init`) and reads it at every
-    // later one: an entry removed since leaves a null in it, and a variable
+    // slice of libc's `environ` sized then: `ghostty_init` in Ghostty's
+    // src/main_c.zig at 042b16b, the same on its main on 2026-11-10) and
+    // reads it at every later one: an entry removed since leaves a null in it, and a variable
     // added can move the array, either crashing the next terminal
     // (EXC_BAD_ACCESS in ghostty_config_finalize). Tests change the
     // environment all along (NIRUX_STATE_DIR, the flow harness's HOME). So
