@@ -772,10 +772,35 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(read("ASK\nQ: Should I merge PR #41 now?\nA: YESNO"), .asks(nil), "reworded")
         XCTAssertEqual(read("ASK\nQ: Let me know if I should merge it, please.\nA: YESNO"), .asks(nil), "added to")
         XCTAssertEqual(read("ASK\nA: YESNO"), .asks(nil))
-        XCTAssertEqual(read("ASK\nQ: it\nA: YESNO"), .asks(nil), "too short to be a sentence")
+        XCTAssertEqual(read("ASK\nQ: it\nA: YESNO"), .asks(nil), "a piece of a sentence")
+        XCTAssertEqual(read("ASK\nQ: \nA: YESNO"), .asks(nil), "nothing quoted")
         XCTAssertEqual(read(" \nDONE\nQ: \(merge)"), .done, "a blank line first")
+        XCTAssertEqual(read("ask\nq: \(merge)\na: yesno"), .asks(TurnEndQuestion(text: merge, isYesNo: true)), "any case")
         XCTAssertNil(read("Maybe.\nASK"))
         XCTAssertNil(read(""))
+    }
+
+    /// A whole sentence of the agent's prose: not cut short, not from code
+    /// or a quoted text, not a piece of a word.
+    func testQuoteIsAWholeSentenceOfTheProse() {
+        let choice = "Let me know if I should merge it or close it."
+        XCTAssertTrue(TurnEndText.quotes(choice, in: choice))
+        XCTAssertFalse(TurnEndText.quotes("Let me know if I should merge it", in: choice), "half a choice")
+        XCTAssertFalse(TurnEndText.quotes("if I should merge it or close it.", in: choice), "the end of it")
+        XCTAssertTrue(TurnEndText.quotes("Waiting for your go-ahead to push", in: "Done. Waiting for your go-ahead to push."))
+        XCTAssertTrue(TurnEndText.quotes("Shall I merge it?", in: "Shall I merge it? I can also close it."))
+        XCTAssertTrue(TurnEndText.quotes("Want me to merge it?", in: "Fixed.\n\n- Want me to merge it?"))
+        XCTAssertFalse(TurnEndText.quotes("ok?", in: "Can you take a look?"), "a piece of a word")
+
+        let script = "Run this and tell me what it prints:\n```\nProceed with deploy? (y/n)\n```"
+        XCTAssertFalse(TurnEndText.quotes("Proceed with deploy? (y/n)", in: script), "code")
+        XCTAssertTrue(TurnEndText.quotes("Run this and tell me what it prints:", in: script))
+        let quoted = "> Can you delete the old branches?\n\nDone, they're gone."
+        XCTAssertFalse(TurnEndText.quotes("Can you delete the old branches?", in: quoted), "the user's own words")
+
+        XCTAssertTrue(TurnEndText.quotes("Tell me if you'd rather split it.", in: "Tell me if you’d rather split it."))
+        XCTAssertTrue(TurnEndText.quotes("Should I rename user_id?", in: "Should I rename `user_id`?"), "Markdown aside")
+        XCTAssertTrue(TurnEndText.quotes("Keep the \"Resume\" label?", in: "Keep the “Resume” label?"))
     }
 
     func testReportReadsTheRunsEvents() {

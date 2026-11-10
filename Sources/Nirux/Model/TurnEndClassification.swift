@@ -162,21 +162,65 @@ enum TurnEndText {
         return head + "\n[…]\n" + tail
     }
 
-    /// `quote` is a sentence of `message`, give or take whitespace,
-    /// Markdown marks and the quotation marks around it: the classifier
-    /// quoted it, not reworded it. A Yes button sits next to that text.
+    /// `quote` is a whole sentence of `message`'s prose, give or take
+    /// whitespace, Markdown marks and the quotation marks around it: the
+    /// classifier quoted it, not reworded it, cut it short, or took it from
+    /// code or a quoted text. A Yes button sits next to that text.
     static func quotes(_ quote: String, in message: String) -> Bool {
         let needle = normalizedForQuote(quote.trimmingCharacters(in: quotationMarks))
-        return needle.count >= 3 && normalizedForQuote(message).contains(needle)
+        let prose = proseLines(of: message).map { normalizedForQuote(String($0)) }.joined(separator: "\n")
+        var start = prose.startIndex
+        while let found = prose.range(of: needle, range: start..<prose.endIndex) {
+            if startsSentence(at: found.lowerBound, in: prose), endsSentence(needle, at: found.upperBound, in: prose) {
+                return true
+            }
+            start = prose.index(after: found.lowerBound)
+        }
+        return false
     }
 
     /// Around a quote: the model's, not the message's.
     static let quotationMarks = CharacterSet(charactersIn: "\"“”«» ")
 
+    /// Markdown marks out, typographic quotes and apostrophes plain, the
+    /// spaces of a line made single.
     private static func normalizedForQuote(_ text: String) -> String {
         let unmarked = String(text.unicodeScalars.filter { !"*_`>#".unicodeScalars.contains($0) }.map(Character.init))
-            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .replacingOccurrences(of: "\u{2019}", with: "'").replacingOccurrences(of: "\u{2018}", with: "'")
+            .replacingOccurrences(of: "\u{201C}", with: "\"").replacingOccurrences(of: "\u{201D}", with: "\"")
         return unmarked.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
+    /// The message's lines outside fenced code and quoted text (`>`):
+    /// fences counted from the end, as `questionLine` does.
+    private static func proseLines(of message: String) -> [Substring] {
+        var inFence = false
+        var lines: [Substring] = []
+        for line in message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).reversed() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                inFence.toggle()
+                continue
+            }
+            if !inFence, !trimmed.hasPrefix(">") { lines.append(line) }
+        }
+        return lines.reversed()
+    }
+
+    /// Nothing of its sentence before it: the start of a line, or no
+    /// letter or digit right before ("Done. Want…", "- Want…", "…, shall I…").
+    private static func startsSentence(at index: String.Index, in text: String) -> Bool {
+        guard let previous = text[..<index].last(where: { $0 != " " }) else { return true }
+        return previous == "\n" || !(previous.isLetter || previous.isNumber)
+    }
+
+    /// Nothing of its sentence after it: it ends on a sentence mark (past
+    /// closing quotes and brackets), or the line ends or one comes next.
+    private static func endsSentence(_ needle: String, at index: String.Index, in text: String) -> Bool {
+        let sentenceMarks: Set<Character> = [".", "?", "!", "…", ":", "？", "؟"]
+        if let last = needle.last(where: { !")]}»\"'".contains($0) }), sentenceMarks.contains(last) { return true }
+        guard index < text.endIndex else { return true }
+        return text[index] == "\n" || sentenceMarks.contains(text[index])
     }
 
     /// The message ends on a question: its last paragraph of prose (not
