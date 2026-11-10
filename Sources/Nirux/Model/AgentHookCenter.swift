@@ -291,7 +291,6 @@ final class AgentHookCenter {
         // The status line reads the message whether or not the classifier
         // does; the column reads it for the verdict only.
         let statusMessage = turnStatusWriter == nil ? nil : event.finalMessage
-        if turnEndClassifier == nil { event.finalMessage = nil }
         let outcome = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
         for request in outcome.abandonedApprovals {
             release(request, agentUUID: event.agentUUID)
@@ -307,7 +306,7 @@ final class AgentHookCenter {
         // Every turn end of the main thread the column took: watched or
         // not, ending on a question or not. One without a run leaves the
         // line from before it behind.
-        if event.kind == .claude, event.name == .stop, event.agentID == nil, pty.isCurrentTurnEnd(event.timestamp),
+        if event.kind == .claude, event.name == .stop, event.agentID == nil,
            !(statusMessage.map { writeTurnStatus(of: $0, endedAt: event.timestamp, in: resolution.workspace) } ?? false) {
             resolution.workspace.forgetTurnStatus(turnEndedAt: event.timestamp)
         }
@@ -384,7 +383,7 @@ final class AgentHookCenter {
             let status = await writer.status(of: message)
             guard let self else { return }
             // Turned off meanwhile: no line.
-            if workspace.settleTurnStatus(self.turnStatusWriter == nil ? nil : status, turnEndedAt: time) {
+            if workspace.settleTurnStatus(status, turnEndedAt: time) {
                 self.onTurnStatus?(workspace)
             }
         }

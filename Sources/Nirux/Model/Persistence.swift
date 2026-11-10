@@ -488,7 +488,7 @@ struct PersistedSettings: Codable {
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
-        showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? alertOnlyWhenClaudeAsks
+        showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? true
         triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true

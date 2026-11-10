@@ -82,7 +82,7 @@ extension NiruxShellView {
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                           isLead: workspace.isLead,
                           parentTitle: parents[index].map { workspaces[$0].title },
-                          statusLine: turnStatusEnabled ? workspace.statusLine : nil,
+                          statusLine: workspace.statusLine,
                           turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil)
         }
         tickHiddenSpaceAgents(
@@ -366,7 +366,6 @@ extension NiruxShellView {
     func setTurnStatus(enabled: Bool) {
         turnStatusEnabled = enabled
         if enabled {
-            for workspace in workspaces where workspace.lastSummaryIsStatus { workspace.lastSummaryIsStatus = false }
             saveState()
         }
         updateSidebar()

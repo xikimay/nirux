@@ -264,7 +264,7 @@ final class SidebarWorkspaceCardRenderer {
     /// check of a finished turn, and the ring of checks that run (an agent
     /// that pushed, then stopped).
     static func drawsTurnEnd(over mark: SidebarRowMark) -> Bool {
-        mark == .idle || mark == .finished || mark == .checksRunning
+        mark == .idle || mark == .checksRunning
     }
 
     /// The rail's working badge breathes, in phase with every other one

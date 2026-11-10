@@ -88,7 +88,6 @@ final class ClaudeTurnStatusWriter: TurnStatusWriter, @unchecked Sendable {
         guard var line = text.split(whereSeparator: \.isNewline).lazy
             .map({ $0.trimmingCharacters(in: marks) }).first(where: { !$0.isEmpty })
         else { return nil }
-        if line.uppercased().hasPrefix("S:") { line = String(line.dropFirst(2)).trimmingCharacters(in: marks) }
         if line.hasSuffix("."), !line.hasSuffix("..") { line.removeLast() }
         if ["-", "–", "—"].contains(line) { return .unchanged }
         return AgentText.clean(line, maxLength: maxLength).map(TurnStatus.line)

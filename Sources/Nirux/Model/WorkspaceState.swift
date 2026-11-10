@@ -554,7 +554,6 @@ extension WorkspaceState {
     /// older turn. False for a turn end older than one already known.
     @discardableResult
     func awaitTurnStatus(turnEndedAt: TimeInterval) -> Bool {
-        guard turnEndedAt > (awaitedTurnStatus ?? settledTurnStatus ?? -.infinity) else { return false }
         awaitedTurnStatus = turnEndedAt
         return true
     }
@@ -594,7 +593,7 @@ extension WorkspaceState {
 
     /// The last turn end's status line, once it is known.
     var turnStatusLine: String? {
-        lastSummaryIsStatus && !lastSummaryIsManual && awaitedTurnStatus == nil ? lastSummary : nil
+        lastSummaryIsStatus && awaitedTurnStatus == nil ? lastSummary : nil
     }
 
     /// The task's line on its row: the summary the user wrote, else the
@@ -755,7 +754,6 @@ extension WorkspaceState {
         environment[Self.leadEnvironmentKey] = isLead ? "1" : ""
         // Nor from an SDK run's: its agents would read as headless
         // (`TurnEndText.isHeadless`). Blank, Claude Code sets its own.
-        environment["CLAUDE_CODE_ENTRYPOINT"] = ""
         guard !startedOutsideNirux else {
             // Its agents' nirux:// requests ask first, as its own did: they
             // come from outside Nirux too.
