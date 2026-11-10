@@ -157,24 +157,25 @@ final class WorkspaceSwitchTests: XCTestCase {
         }
     }
 
-    /// A held key passes many workspaces: only the last two it left stay
-    /// drawn, and each slide taken on mid-way keeps going instead of
-    /// starting again from rest.
-    func testAHeldKeyKeepsFewWorkspacesDrawn() throws {
+    /// A held key passes many workspaces: only those the slide still shows
+    /// on its way stay drawn, and each slide taken on mid-way keeps going
+    /// instead of starting again from rest.
+    func testAHeldKeyKeepsOnlyWhatTheSlideShowsDrawn() throws {
         try withShell { shell, clock, folder in
             shell.addWorkspace(title: "fourth", cwd: folder)
             shell.switchToWorkspace(0)
             clock.advance(by: 5)
-            let leaving = shell.workspaces
+            let all = shell.workspaces
             shell.focusWorkspace(.down)
             let first = try XCTUnwrap(self.slide(of: shell)?.timingFunction)
             shell.focusWorkspace(.down)
+            // The strip lags a row behind where it was headed when the
+            // third press comes: the slide shows two rows on its way.
+            shell.workspaceSwitch.shownStripOffset = { _ in -shell.viewport.bounds.height }
             shell.focusWorkspace(.down)
             XCTAssertEqual(shell.activeWSIndex, 3)
-            XCTAssertEqual(shell.workspaceSwitch.keepsDrawn.count, WorkspaceSwitchState.keptDrawnAtMost)
-            XCTAssertFalse(shell.drawsTerminals(of: leaving[0], isActive: false), "passed long ago")
-            XCTAssertTrue(shell.drawsTerminals(of: leaving[1], isActive: false))
-            XCTAssertTrue(shell.drawsTerminals(of: leaving[2], isActive: false))
+            XCTAssertEqual(shell.workspaceSwitch.keepsDrawn, [all[1].id, all[2].id])
+            XCTAssertFalse(shell.drawsTerminals(of: all[0], isActive: false), "out of the way")
             var start = [Float](repeating: 0, count: 2)
             first.getControlPoint(at: 1, values: &start)
             XCTAssertGreaterThan(start[0], 0, "from rest the first time")
@@ -250,9 +251,11 @@ final class WorkspaceSwitchTests: XCTestCase {
             let card = shell.workspaceNameCard
             var input: (@MainActor () -> Void)?
             var watching = 0
+            var installs = 0
             shell.sideEffects.watchUserInput = { seen in
                 input = seen
                 watching += 1
+                installs += 1
                 return NSObject()
             }
             shell.sideEffects.stopWatchingUserInput = { _ in watching -= 1 }
@@ -262,7 +265,8 @@ final class WorkspaceSwitchTests: XCTestCase {
             seen()
             XCTAssertTrue(card.isShown, "the view still moves")
             shell.focusWorkspace(.down)
-            XCTAssertEqual(watching, 1, "one watch")
+            XCTAssertEqual(installs, 1, "one card, kept: its words changed, it didn't come in again")
+            XCTAssertEqual(watching, 1)
             clock.advance(by: NiruxShellView.workspaceSlideDuration + 0.01)
             XCTAssertTrue(card.isShown)
             seen()
@@ -270,6 +274,60 @@ final class WorkspaceSwitchTests: XCTestCase {
             XCTAssertEqual(watching, 0, "no more watching")
             clock.advance(by: 5)
             XCTAssertEqual(watching, 0)
+        }
+    }
+
+    /// Keys come through the app's interceptor, before a terminal takes
+    /// them: one typed once the view stopped takes the card away, a
+    /// workspace step (⌘↓) changes its words instead.
+    func testATypedKeyTakesTheCardAwayButAStepDoesnt() throws {
+        try withShell { shell, clock, _ in
+            let card = shell.workspaceNameCard
+            let key = { (code: UInt16, flags: NSEvent.ModifierFlags) in
+                try XCTUnwrap(NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                    characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: code
+                ))
+            }
+            shell.focusWorkspace(.down)
+            clock.advance(by: NiruxShellView.workspaceSlideDuration + 0.01)
+            shell.workspaceCardSawKey(try key(125, .command))
+            XCTAssertTrue(card.isShown, "⌘↓")
+            shell.workspaceCardSawKey(try key(126, .control))
+            XCTAssertTrue(card.isShown, "⌃↑")
+            shell.workspaceCardSawKey(try key(7, []))
+            XCTAssertFalse(card.isShown, "typing")
+        }
+    }
+
+    /// A relayout that isn't animated (a task started in the background)
+    /// doesn't cut a slide that plays.
+    func testABackgroundTaskDoesntCutTheSlide() throws {
+        try withShell { shell, _, folder in
+            shell.focusWorkspace(.down)
+            XCTAssertNotNil(self.slide(of: shell))
+            // Mid-way: the strip shows 300 short of its place.
+            shell.workspaceSwitch.shownStripOffset = { _ in -300 }
+            let oldY = shell.verticalStrip.frame.origin.y
+            shell.addWorkspace(title: "background", cwd: folder, activate: false)
+            XCTAssertNotEqual(shell.verticalStrip.frame.origin.y, oldY, "the strip moved")
+            let slide = try XCTUnwrap(self.slide(of: shell), "the slide goes on")
+            XCTAssertEqual((slide.fromValue as? NSNumber)?.doubleValue ?? 0, -300, accuracy: 0.5, "from where it is")
+            XCTAssertTrue(shell.workspaceSwitch.isSliding)
+        }
+    }
+
+    /// A strip of another space never slides in from this one's place.
+    func testAnotherSpacesStripDoesntSlideIn() throws {
+        try withShell { shell, _, folder in
+            let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere", select: false)
+            shell.addWorkspace(title: "there", cwd: folder, profileID: elsewhere.id, activate: false)
+            let there = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "there" })
+            shell.verticalStrip.layer?.removeAllAnimations()
+            XCTAssertTrue(shell.workspaceStore.selectWorkspace(at: there))
+            shell.relayout(animated: true)
+            XCTAssertEqual(shell.activeProfileID, elsewhere.id)
+            XCTAssertNil(self.slide(of: shell))
         }
     }
 
@@ -347,10 +405,28 @@ final class WorkspaceSwitchTests: XCTestCase {
         XCTAssertEqual(card.dotCount, 14, "a space of fourteen still shows its dots")
         XCTAssertEqual(card.place, "")
         XCTAssertLessThanOrEqual(card.frame.width, area.width)
+        XCTAssertGreaterThanOrEqual(card.frame.width, WorkspaceNameCard.minWidth)
+
+        // As wide as the space's longest name, whichever it names.
+        let longest = "feat/a-branch-name-as-long-as-they-come"
+        card.show(
+            .init(workspaceID: "c", name: longest, state: Theme.Color.idle, position: 1, count: 14, widestName: longest),
+            centredIn: area, animated: false
+        )
         let width = card.frame.width
-        card.show(.init(workspaceID: "c", name: "x", state: Theme.Color.idle, position: 1, count: 14), centredIn: area, animated: false)
+        card.show(
+            .init(workspaceID: "c", name: "x", state: Theme.Color.idle, position: 1, count: 14, widestName: longest),
+            centredIn: area, animated: false
+        )
         XCTAssertEqual(card.frame.width, width, "a short name doesn't make it jump")
-        XCTAssertGreaterThanOrEqual(width, WorkspaceNameCard.minWidth)
+
+        // Twenty dots don't fit a narrow viewport: the place in words.
+        card.show(
+            .init(workspaceID: "e", name: "x", state: Theme.Color.idle, position: 4, count: 20),
+            centredIn: NSRect(x: 0, y: 0, width: 200, height: 300), animated: false
+        )
+        XCTAssertEqual(card.dotCount, 0)
+        XCTAssertEqual(card.place, "5 of 20")
 
         // A very long name stays inside the area.
         let long = String(repeating: "a long workspace name ", count: 20)
@@ -397,5 +473,6 @@ final class WorkspaceSwitchTests: XCTestCase {
         )
         XCTAssertEqual(NiruxShellView.cardStateColor(info([.needsAttention], reason: .turnFinished)), Theme.Color.idle)
         XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle], ci: "FAILURE")), Theme.Color.error, "as its row says")
+        XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle], ci: "SUCCESS")), Theme.Color.success, "ready to merge")
     }
 }

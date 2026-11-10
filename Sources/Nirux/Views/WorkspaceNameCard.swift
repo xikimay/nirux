@@ -17,12 +17,14 @@ final class WorkspaceNameCard: NSView {
         /// Its place among the space's workspaces, from 0.
         let position: Int
         let count: Int
+        /// The space's longest name: the card's width, so that going
+        /// through workspaces it doesn't jump with each name.
+        var widestName: String = ""
     }
 
     /// More workspaces than this: "3 of 30" instead of the dots.
     static let maxDots = 20
-    /// The card keeps this width at least: going through workspaces, it
-    /// doesn't jump with each name's length.
+    /// The card keeps this width at least.
     static let minWidth: CGFloat = 240
     static let fadeIn: CFTimeInterval = 0.15
     static let fadeOut: CFTimeInterval = 0.2
@@ -80,9 +82,9 @@ final class WorkspaceNameCard: NSView {
     /// change at once, the card comes in only if it wasn't there.
     /// `animated`: it fades and settles in; else it is just there.
     func show(_ content: Content, centredIn area: NSRect, animated: Bool) {
-        if content != self.content {
+        if content != self.content || area.width != configuredWidth {
             self.content = content
-            configure(content)
+            configure(content, width: area.width)
         }
         layOut(centredIn: area)
         guard !isShown else { return }
@@ -136,12 +138,21 @@ final class WorkspaceNameCard: NSView {
     var place: String { placeLabel.isHidden ? "" : placeLabel.stringValue }
     var stateColor: CGColor? { stateView.layer?.backgroundColor }
 
-    private func configure(_ content: Content) {
+    /// Its dots fit in `width`, else it says the place in words.
+    private static func dotsFit(_ count: Int, in width: CGFloat) -> Bool {
+        count <= maxDots
+            && CGFloat(count) * positionDot + CGFloat(max(0, count - 1)) * positionGap <= width - paddingX * 2
+    }
+
+    private var configuredWidth: CGFloat = 0
+
+    private func configure(_ content: Content, width: CGFloat) {
+        configuredWidth = width
         nameLabel.stringValue = content.name
         stateView.layer?.backgroundColor = content.state.cgColor
         positionDots.forEach { $0.removeFromSuperview() }
         positionDots = []
-        let usesDots = content.count <= Self.maxDots
+        let usesDots = Self.dotsFit(content.count, in: width)
         placeLabel.isHidden = usesDots
         placeLabel.stringValue = "\(content.position + 1) of \(content.count)"
         guard usesDots else { return }
@@ -159,14 +170,21 @@ final class WorkspaceNameCard: NSView {
     private func layOut(centredIn area: NSRect) {
         let nameSize = nameLabel.fittingSize
         let maxNameWidth = max(0, area.width - Self.paddingX * 2 - Self.stateDot - 8)
+        let widest = content.map { content -> CGFloat in
+            let probe = NSTextField(labelWithString: content.widestName)
+            probe.font = nameLabel.font
+            return ceil(probe.fittingSize.width)
+        } ?? 0
+        // Its own name, centred; the card as wide as the longest one.
         let nameWidth = min(ceil(nameSize.width), maxNameWidth)
         let topWidth = Self.stateDot + 8 + nameWidth
+        let widestTop = Self.stateDot + 8 + min(max(nameWidth, widest), maxNameWidth)
         let placeSize = placeLabel.fittingSize
         let dotsWidth = positionDots.isEmpty
             ? ceil(placeSize.width)
             : CGFloat(positionDots.count) * Self.positionDot + CGFloat(positionDots.count - 1) * Self.positionGap
         let bottomHeight = positionDots.isEmpty ? ceil(placeSize.height) : Self.positionDot
-        let width = min(area.width, max(Self.minWidth, max(topWidth, dotsWidth) + Self.paddingX * 2))
+        let width = min(area.width, max(Self.minWidth, max(widestTop, dotsWidth) + Self.paddingX * 2))
         let nameHeight = ceil(nameSize.height)
         let height = Self.paddingY * 2 + nameHeight + Self.rowGap + bottomHeight
         frame = NSRect(x: area.midX - width / 2, y: area.midY - height / 2, width: width, height: height).integral

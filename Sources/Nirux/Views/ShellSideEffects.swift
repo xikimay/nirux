@@ -64,10 +64,12 @@ struct ShellSideEffects {
     /// covered, its display not asleep.
     var windowShows: @MainActor (NSWindow?) -> Bool = { $0?.occlusionState.contains(.visible) ?? false }
 
-    /// Calls back at each key, click or scroll the app receives, until
-    /// stopped; the events go on as they were. Tests watch nothing.
+    /// Calls back at each click or scroll the app receives, until stopped;
+    /// the events go on as they were. Keys come through the app's key
+    /// interceptor, which consumes the terminals' own. Tests watch
+    /// nothing.
     var watchUserInput: @MainActor (@escaping @MainActor () -> Void) -> Any? = { seen in
-        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel]) { event in
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .scrollWheel]) { event in
             MainActor.assumeIsolated { seen() }
             return event
         }

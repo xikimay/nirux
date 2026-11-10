@@ -294,7 +294,10 @@ extension NiruxShellView {
         let delta = dir == .up ? -1 : 1
         let before = activeWorkspace
         guard workspaceStore.selectAdjacentWorkspace(delta: delta) != nil else { return }
+        // The card, if up, keeps through the relayout: its words change.
+        workspaceSwitch.isAnnouncing = activeWorkspace !== before
         refreshAfterWorkspaceSelection(animated: true)
+        workspaceSwitch.isAnnouncing = false
         if activeWorkspace !== before { announceWorkspaceSwitch() }
     }
 

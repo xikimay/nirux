@@ -219,6 +219,7 @@ extension NiruxApp {
             guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
             // Before the key is handled, so a toast it shows stays.
             shell.dismissToastOnInput()
+            shell.workspaceCardSawKey(event)
 
             // Don't intercept when an overlay is active (picker, etc.)
             if shell.isOverlayActive { return event }

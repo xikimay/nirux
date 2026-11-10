@@ -4,12 +4,16 @@ import AppKit
 @MainActor
 final class WorkspaceSwitchState {
     /// The workspaces whose terminals stay drawn until the slide ends: the
-    /// ones the strip is leaving, so they don't go blank while seen. The
-    /// last two at most: a held key passes many, each one only briefly.
-    var keepsDrawn: [String] = []
-    static let keptDrawnAtMost = 2
+    /// ones the slide shows on its way, so none goes blank while seen.
+    var keepsDrawn: Set<String> = []
     /// A slide plays.
     var isSliding = false
+    /// A ⌘↑ ⌘↓ is being handled: its relayout keeps the card, whose words
+    /// are about to change.
+    var isAnnouncing = false
+    /// The space the strip showed at its last layout: a strip of another
+    /// space doesn't slide in from this one's place.
+    var shownSpaceID: String?
     /// Takes the card away at the user's first key, click or scroll once
     /// the view stopped, while the card shows.
     var inputMonitor: Any?
@@ -74,6 +78,8 @@ extension NiruxShellView {
         let state = workspaceSwitch
         let targetY = verticalStrip.frame.origin.y
         state.shownWorkspaceID = activeWorkspace?.id
+        let sameSpace = state.shownSpaceID == nil || state.shownSpaceID == activeProfileID
+        state.shownSpaceID = activeProfileID
         // The strip didn't move (a relayout for something else): a slide
         // that plays carries on.
         guard oldY != targetY, let layer = verticalStrip.layer else { return }
@@ -85,14 +91,16 @@ extension NiruxShellView {
             oldY: oldY, targetY: targetY, shownOffset: shownOffset,
             leavingWas: stillListed == nil ? nil : leaving?.y, leavingIs: stillListed?.containerView.frame.origin.y
         )
-        guard animated, agentLightsMayMove, abs(start) > 0.5 else {
+        // A relayout that isn't animated (the status bar, a task started
+        // in the background) doesn't cut a slide that plays: it goes on
+        // from where it is.
+        let slides = animated || (isRetarget && stillListed != nil)
+        guard slides, sameSpace, agentLightsMayMove, abs(start) > 0.5 else {
             layer.removeAnimation(forKey: Self.workspaceSlideKey)
             endWorkspaceSlide()
             return
         }
-        if let leaving = leaving?.workspace.id, leaving != activeWorkspace?.id {
-            state.keepsDrawn = Array((state.keepsDrawn.filter { $0 != leaving } + [leaving]).suffix(WorkspaceSwitchState.keptDrawnAtMost))
-        }
+        state.keepsDrawn = workspacesShown(slidingFrom: start, to: targetY)
         state.isSliding = true
         let slide = CABasicAnimation(keyPath: "transform.translation.y")
         slide.fromValue = start
@@ -113,6 +121,21 @@ extension NiruxShellView {
             guard let self, self.workspaceSwitch.slideGeneration == generation else { return }
             self.endWorkspaceSlide()
         }
+    }
+
+    /// The workspaces other than the one on screen that a slide shows on
+    /// its way, from `start` off the strip's place `targetY` back to it.
+    func workspacesShown(slidingFrom start: CGFloat, to targetY: CGFloat) -> Set<String> {
+        let height = viewport.bounds.height
+        // The part of the strip in view at an offset: from -(targetY +
+        // offset), the viewport's height up.
+        let low = -(targetY + max(start, 0))
+        let high = -(targetY + min(start, 0)) + height
+        return Set(workspaces.filter { workspace in
+            guard workspace !== activeWorkspace, !workspace.containerView.isHidden else { return false }
+            let frame = workspace.containerView.frame
+            return frame.maxY > low + 0.5 && frame.minY < high - 0.5
+        }.map(\.id))
     }
 
     /// The strip settled: only the workspace on screen draws its terminals.
@@ -145,9 +168,10 @@ extension NiruxShellView {
             return
         }
         let info = sidebar.lastInfos.first { $0.id == workspace.id }
+        let names = visibleWorkspaceIndices.map { workspaces[$0].title }
         let content = WorkspaceNameCard.Content(
             workspaceID: workspace.id, name: workspace.title, state: info.map(Self.cardStateColor) ?? Theme.Color.idle,
-            position: position, count: visibleWorkspaceIndices.count
+            position: position, count: names.count, widestName: names.max { $0.count < $1.count } ?? workspace.title
         )
         workspaceNameCard.show(content, centredIn: viewport.frame.insetBy(dx: 24, dy: 24), animated: true)
         let state = workspaceSwitch
@@ -166,8 +190,17 @@ extension NiruxShellView {
     /// stopped, the user reads or works there, and the card goes. During
     /// the slide (another ⌘↓) it stays.
     func workspaceCardSawInput() {
-        guard !workspaceSwitch.isSliding else { return }
+        guard workspaceNameCard.isShown, !workspaceSwitch.isSliding else { return }
         hideWorkspaceCard(animated: agentLightsMayMove)
+    }
+
+    /// A key the app is about to handle (see `NiruxApp.setupKeyInterceptor`,
+    /// which sees the terminals' keys before they are consumed). The
+    /// workspace steps (⌘↑ ⌘↓, ⌃↑ ⌃↓) change the card's words instead.
+    func workspaceCardSawKey(_ event: NSEvent) {
+        let steps = event.modifierFlags.intersection([.command, .control]).isEmpty == false
+            && [125, 126].contains(event.keyCode)
+        if !steps { workspaceCardSawInput() }
     }
 
     func hideWorkspaceCard(animated: Bool) {
@@ -184,7 +217,9 @@ extension NiruxShellView {
     /// another row, a space switch, a close).
     func layOutWorkspaceCard(in viewportFrame: NSRect) {
         guard workspaceNameCard.isShown, let content = workspaceNameCard.content else { return }
-        guard content.workspaceID == activeWorkspace?.id else { return hideWorkspaceCard(animated: false) }
+        guard content.workspaceID == activeWorkspace?.id || workspaceSwitch.isAnnouncing else {
+            return hideWorkspaceCard(animated: false)
+        }
         workspaceNameCard.show(content, centredIn: viewportFrame.insetBy(dx: 24, dy: 24), animated: false)
     }
 
@@ -196,6 +231,8 @@ extension NiruxShellView {
         case .needsYou: return Theme.Color.waiting
         case .error: return Theme.Color.error
         case .working: return Theme.Color.working
+        case .readyToMerge: return Theme.Color.success
+        case .merged: return Theme.Color.done
         default: return Theme.Color.idle
         }
     }
