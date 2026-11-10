@@ -143,7 +143,6 @@ extension NiruxShellView {
     /// of one that asks.
     func turnEndSettled() {
         typeMissionMessages()
-        scheduleMetadataRefresh()
     }
 
     /// The user is back in the app and every attention was cleared: the
