@@ -241,13 +241,14 @@ enum AgentToolOutcome {
     }
 
     /// The program a simple command runs and its arguments, past what
-    /// comes before it: `!`, variables, wrappers with their own options,
-    /// the shell's `do` and `then`. Nil for what a redirection left behind
-    /// (`> log`, the `1` of `2>&1`).
+    /// comes before it: `!`, `{`, variables, wrappers with their own
+    /// options, the shell's `do` and `then`. Nil for what a redirection
+    /// left behind (`> log`, the `1` of `2>&1`).
     private static func program(in words: [String]) -> (name: String, arguments: ArraySlice<String>)? {
         var words = words[...]
         while let first = words.first {
-            if ["!", "do", "then", "else"].contains(first) || isAssignment(first) {
+            if ["!", "do", "then", "else"].contains(first) || isAssignment(first)
+                || first.trimmingCharacters(in: punctuation).isEmpty {
                 words = words.dropFirst()
             } else if wrappers.contains(name(of: first)) {
                 words = words.dropFirst()
@@ -302,8 +303,10 @@ enum AgentToolOutcome {
         var found: [String] = []
         var arguments = arguments
         // `gh pr checks`: two words say what gh does.
-        while found.count < (program == "gh" ? 2 : 1), let argument = arguments.first {
+        while found.count < (program == "gh" ? 2 : 1), let word = arguments.first {
             arguments = arguments.dropFirst()
+            // `(cd sub && make test)`: the subshell's end isn't the word's.
+            let argument = word.trimmingCharacters(in: punctuation)
             if argument.hasPrefix("-") || argument.hasPrefix("+") {
                 if optionsWithValue.contains(argument) { arguments = arguments.dropFirst() }
                 continue
@@ -316,9 +319,12 @@ enum AgentToolOutcome {
         return found
     }
 
+    /// Quotes, and where a subshell or a group opens and closes.
+    private static let punctuation = CharacterSet(charactersIn: "\"'(){}")
+
     /// `/usr/bin/swift` → `swift`, quotes around a path dropped.
     private static func name(of word: String) -> String {
-        (word.trimmingCharacters(in: CharacterSet(charactersIn: "\"'(){}")) as NSString).lastPathComponent
+        (word.trimmingCharacters(in: punctuation) as NSString).lastPathComponent
     }
 
     private static func isProgramName(_ name: String) -> Bool {

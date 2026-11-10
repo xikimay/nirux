@@ -456,6 +456,9 @@ final class StuckAgentSidebarTests: XCTestCase {
             shell.updateSidebar(snapshot: snapshot)
             return try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first).rowSummary.status.text
         }
+        // Nirux sees the claude in front before its hooks come in: a new
+        // foreground program starts from nothing.
+        XCTAssertNotEqual(try status(), "Working")
         for event in [hook(.sessionStart), hook(.userPromptSubmit), hook(.postToolUse, hung: true), hook(.postToolUse, hung: true)] {
             pty.applyAgentHook(event, isUserFocused: false)
         }

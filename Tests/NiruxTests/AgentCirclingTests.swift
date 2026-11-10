@@ -108,6 +108,7 @@ final class AgentCirclingTests: XCTestCase {
             ("echo \"a; rm -rf x\" && npm --prefix web run build", "npm run"),
             ("echo x &> /dev/null; cargo +nightly test", "cargo test"),
             ("(cd sub && make -j8 test)", "make test"),
+            ("{ \"/usr/local/bin/gh\" pr checks 3; }", "gh pr checks"),
             ("./scripts/run-tests.sh Foo", "run-tests.sh"),
             ("swift script.swift arg", "swift"),
             ("! grep -q x file", "grep"),
