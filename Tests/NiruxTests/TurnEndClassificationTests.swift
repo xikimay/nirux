@@ -391,9 +391,9 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false).firedAttention)
     }
 
-    /// A prompt that goes in before the verdict (one Nirux types, for PR
-    /// Feedback's Address say) alerts as the turn end would have, unless
-    /// the user looks at the column.
+    /// A prompt that goes in before the verdict, the user not at the
+    /// column, alerts as the turn end would have (unless their click typed
+    /// it: see `testPromptFromTheUsersClickReadsTheTurnEnd`).
     func testPromptBeforeTheVerdictAlertsAsBefore() throws {
         endTurn()
         let prompt = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
@@ -560,6 +560,33 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(machine.attentionReason, .message(nil), "the notification still says why")
         // Settled with it: a prompt hours later alerts for nothing.
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 9_000), isUserFocused: false).firedAttention)
+    }
+
+    /// The user's click types a prompt (Address PR Feedback, Why Failed):
+    /// the turn end before is read and its question behind them, so
+    /// neither the prompt nor a late verdict alerts.
+    func testPromptFromTheUsersClickReadsTheTurnEnd() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        machine.notePromptFromUser()
+        XCTAssertTrue(machine.isQuietTurnEnd, "read, and still quiet: no attention that never alerted")
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "a late verdict drops")
+        XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
+
+        // A question already asked is behind them too.
+        machine = AgentStatusMachine()
+        let asked = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.applyTurnEndVerdict(.asks, for: asked, isUserFocused: false)
+        XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
+        machine.notePromptFromUser()
+        XCTAssertNil(machine.visibleQuestion(foreground: claude))
+
+        // Claude went on before its verdict: that turn end is read as well.
+        machine = AgentStatusMachine()
+        endTurn()
+        _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
+        machine.notePromptFromUser()
+        XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 7), isUserFocused: false).firedAttention)
     }
 
     /// Nirux types nothing (Mission messages, Lead notices) into a prompt
@@ -902,6 +929,18 @@ final class TurnEndClassificationTests: XCTestCase {
         let (asksCenter, _, asksColumn, asksRequest, asksAlerts) = try turnEndColumn()
         asksCenter.applyTurnEndVerdict(.asks, for: asksRequest, agentUUID: try XCTUnwrap(asksColumn.agentUUID))
         XCTAssertEqual(asksAlerts.value, [.askedInReply("Let me know if I should merge it.")])
+    }
+
+    /// Through the column method `sendTypedPrompt` types with (reaching
+    /// `sendTypedPrompt` itself takes a live `claude` process): the
+    /// verdict on its way drops and the prompt alerts for nothing.
+    func testPromptTypedForTheUserAlertsForNothing() throws {
+        let (center, _, column, request, alerts) = try turnEndColumn()
+        let pty = try XCTUnwrap(column.pty)
+        pty.typePromptFromUser("Address this feedback\r")
+        center.applyTurnEndVerdict(.asks, for: request, agentUUID: try XCTUnwrap(column.agentUUID))
+        XCTAssertEqual(alerts.value, [])
+        XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
     }
 
     func testClassifierVerdictReachesTheColumn() async throws {
