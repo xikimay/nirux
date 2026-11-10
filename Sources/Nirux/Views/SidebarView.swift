@@ -241,6 +241,8 @@ final class SidebarView: NSView {
         // row's tooltip tracking rect (the system tooltip delay never
         // elapses) and blanks the hover highlight under a stationary
         // cursor. Skip when the rendered output would be identical.
+        // (A row whose check starts changed its mark: the rebuild follows.)
+        settleOwedTurnEnds()
         let signature = renderSignature()
         guard signature != lastRenderSignature else { return }
         lastRenderSignature = signature
@@ -251,35 +253,86 @@ final class SidebarView: NSView {
     /// time-derived text (relative ages, elapsed durations) is hashed as
     /// its formatted string so the signature only changes when a label
     /// actually would.
-    var lastRenderSignature: Int?
+    private var lastRenderSignature: Int?
 
-    /// The merge's moments on a row (see SidebarView+Merge), by workspace:
-    /// when its checks passed, when its pull request was merged; the rows
-    /// that just left the list; when the Archived count last went up; and
-    /// that count's label, in the rows as they are now.
+    /// The merge's moments on a row (see SidebarView+Merge), by workspace
+    /// and on the `clock`: when its checks passed, when its pull request
+    /// was merged; the rows that just left the list; when the Archived
+    /// count last went up; and that count's label, in the rows as they
+    /// are now.
     var readyAt: [String: CFTimeInterval] = [:]
     var mergedAt: [String: CFTimeInterval] = [:]
     var folds: [Fold] = []
     var archivedBumpAt: CFTimeInterval?
     weak var archivedCountLabel: NSTextField?
 
-    /// When a task's row was born (`CACurrentMediaTime`), by workspace: it
-    /// opens with a spring (see SidebarView+Birth).
-    var bornAt: [String: CFTimeInterval] = [:]
+    /// When a task's row opens (`clock`), by workspace, while its birth
+    /// plays: with a spring (see SidebarView+Birth).
+    var rowOpensAt: [String: CFTimeInterval] = [:]
 
-    /// When the agent of a row ended its turn (`CACurrentMediaTime`), by
-    /// workspace: the row's mark draws a check for
+    /// The clock the rows' movements are timed from; tests set it.
+    var clock: () -> CFTimeInterval = { CACurrentMediaTime() }
+
+    /// When a row began to draw its turn end's check (`clock`), by
+    /// workspace: its mark draws it for
     /// `SidebarWorkspaceCardRenderer.checkDuration`, across rebuilds.
-    private(set) var turnEndedAt: [String: CFTimeInterval] = [:]
+    private(set) var turnEndNotedAt: [String: CFTimeInterval] = [:]
+    /// The turn ends noted while their row still read "working", and when:
+    /// Codex's closing output reads as work for a few seconds, and another
+    /// agent of the task may work on. The check is owed for
+    /// `turnEndGrace`, and draws if the row turns grey meanwhile.
+    private(set) var owedTurnEnds: [String: CFTimeInterval] = [:]
+    static let turnEndGrace: CFTimeInterval = 5
 
-    /// The turns that just ended in these workspaces: their rows draw a
-    /// check, if rows may move.
-    func noteTurnEnded(workspaceIDs: Set<String>, now: CFTimeInterval = CACurrentMediaTime()) {
-        turnEndedAt = turnEndedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.checkDuration }
-        guard animates, !workspaceIDs.isEmpty else { return }
-        for id in workspaceIDs { turnEndedAt[id] = now }
-        lastRenderSignature = renderSignature()
-        rebuildContent()
+    /// The turns that just ended in these workspaces: each of their rows
+    /// that shows the grey dot now draws its check, if rows may move. A
+    /// row still at work is owed its check for a moment (`owedTurnEnds`).
+    /// Nothing is kept for a row that says something else (a wait, a pull
+    /// request's state), nor for the rail: a check never shows up late,
+    /// and nothing is rebuilt for nothing.
+    func noteTurnEnded(workspaceIDs: Set<String>) {
+        let now = clock()
+        turnEndNotedAt = turnEndNotedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.checkDuration }
+        guard animates, isExpanded, !workspaceIDs.isEmpty else { return }
+        var draws = false
+        for row in lastInfos where workspaceIDs.contains(row.id) && showsTurnEnds(on: row) {
+            switch row.rowSummary.mark {
+            case .idle:
+                turnEndNotedAt[row.id] = now
+                draws = true
+            case .working:
+                owedTurnEnds[row.id] = now
+            default:
+                break
+            }
+        }
+        if draws { rebuildContent() }
+    }
+
+    /// A row draws turn ends: a task's full row in the list (see
+    /// `SidebarWorkspaceCardRenderer.showsTurnEnds`).
+    private func showsTurnEnds(on row: WorkspaceInfo) -> Bool {
+        listsWorkspace(row) && SidebarWorkspaceCardRenderer.showsTurnEnds(row)
+    }
+
+    /// At a refresh: a row that turned grey while its turn end was owed
+    /// draws its check now, from the start. One that says something else
+    /// by now, or that took too long, draws none.
+    private func settleOwedTurnEnds() {
+        guard !owedTurnEnds.isEmpty else { return }
+        guard animates, isExpanded else {
+            owedTurnEnds = [:]
+            return
+        }
+        let now = clock()
+        for (id, notedAt) in owedTurnEnds {
+            let isInTime = now - notedAt < Self.turnEndGrace
+            let row = lastInfos.first { $0.id == id }
+            let mark = row.flatMap { showsTurnEnds(on: $0) ? $0.rowSummary.mark : nil }
+            if mark == .working, isInTime { continue }
+            owedTurnEnds[id] = nil
+            if mark == .idle, isInTime { turnEndNotedAt[id] = now }
+        }
     }
 
     /// The rows move: a line of light under a working one, a check at a

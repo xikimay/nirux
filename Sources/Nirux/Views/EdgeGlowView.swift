@@ -58,8 +58,9 @@ final class EdgeGlowView: NSView {
     /// Read off the layers: a movement Core Animation dropped starts again
     /// at the next `show`.
     var isMoving: Bool { movement != nil }
-    /// The repeating animation that breathes or pulses.
-    var movement: CAAnimation? { glows.first?.layer.animation(forKey: Self.movementKey) }
+    /// The repeating animation that breathes or pulses: one for the whole
+    /// light, on the layer that holds its ring and glows.
+    var movement: CAAnimation? { lightLayer.animation(forKey: Self.movementKey) }
     private static let movementKey = "move"
     /// The focused column's light: fainter, and inside its focus ring.
     private(set) var isSoft = false
@@ -79,16 +80,21 @@ final class EdgeGlowView: NSView {
     var pillLinger: TimeInterval = 1.2
     /// Runs the pill's delays; tests pass a clock they advance by hand.
     var schedule: MainActorSchedule = mainQueueSchedule
+    /// Whether the window's pointer is tracked (the areas follow the key
+    /// window only), and where it is, in the window; tests say.
+    var tracksPointer: (NSWindow) -> Bool = { $0.isKeyWindow }
+    var pointerLocation: (NSWindow) -> NSPoint = { $0.mouseLocationOutsideOfEventStream }
 
     /// Fades the light in and out.
     private let fadeLayer = CALayer()
-    /// Holds the ring and the glows.
+    /// Holds the ring and the glows, and moves them as one.
     private let lightLayer = CALayer()
     private let ring = CALayer()
     private var glows: [(side: Edge, layer: CAGradientLayer)] = []
     private let sweepHost = CALayer()
     private let sweepBand = CAGradientLayer()
-    private let pill = EdgeGlowPill()
+    /// A viewport edge's only: a column's light never makes one.
+    private lazy var pill = EdgeGlowPill()
     /// Tells a pending pill dismissal whether it still applies.
     private var pillGeneration = 0
     /// The pill's first seconds are still running.
@@ -110,8 +116,8 @@ final class EdgeGlowView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         fadeLayer.opacity = 0
-        // Thin layers each blended on their own: no column-sized offscreen
-        // pass for a ring and four strips.
+        // The ring and the strips are each blended on their own, at their
+        // holders' opacity: no column-sized offscreen pass for them.
         fadeLayer.allowsGroupOpacity = false
         lightLayer.allowsGroupOpacity = false
         fadeLayer.addSublayer(lightLayer)
@@ -162,7 +168,7 @@ final class EdgeGlowView: NSView {
             guard self.light != nil else { return }
             // From the level it shows now, mid-breath or steady: stopping
             // the movement must not flash before the fade.
-            let level = (glows.first?.layer.presentation()?.opacity ?? 1) * lightLayer.opacity
+            let level = lightLayer.presentation()?.opacity ?? lightLayer.opacity
             self.light = nil
             setMoving(false)
             // The level is in the fade now, steady light or not.
@@ -248,16 +254,14 @@ final class EdgeGlowView: NSView {
         fadeLayer.add(fade, forKey: "fade")
     }
 
-    /// The ring and each glow move on their own: what changes on screen is
-    /// their thin strips, not the column they frame.
+    /// One animation moves the whole light, whatever it is made of: what
+    /// changes on screen is its thin strips, not the column they frame.
     private func setMoving(_ moving: Bool) {
         guard moving != isMoving else { return }
-        let layers = glows.map { $0.layer as CALayer } + (edge == .around ? [ring] : [])
         if moving, let light {
-            let move = CABasicAnimation.lightMovement(for: light)
-            layers.forEach { $0.add(move, forKey: Self.movementKey) }
+            lightLayer.add(CABasicAnimation.lightMovement(for: light), forKey: Self.movementKey)
         } else {
-            layers.forEach { $0.removeAnimation(forKey: Self.movementKey) }
+            lightLayer.removeAnimation(forKey: Self.movementKey)
         }
         applySteadyLevel()
     }
@@ -308,10 +312,13 @@ final class EdgeGlowView: NSView {
     /// Where the light is drawn, for tests: the ring, and each glow.
     var ringFrame: NSRect { ring.frame }
     var glowFrames: [NSRect] { glows.map(\.layer.frame) }
-    /// How it is drawn, for tests: the layers that move, the level a
-    /// steady light shows at, and whether its layers blend as one group.
+    /// How it is drawn, for tests: the repeating animations a moving light
+    /// runs, the level a steady light shows at, and whether its layers
+    /// blend as one group.
     var movingLayerCount: Int {
-        (glows.map { $0.layer as CALayer } + [ring]).filter { $0.animation(forKey: Self.movementKey) != nil }.count
+        ([lightLayer, fadeLayer, ring] + glows.map { $0.layer as CALayer }).filter { layer in
+            layer.animationKeys()?.contains { layer.animation(forKey: $0)?.repeatCount == .infinity } ?? false
+        }.count
     }
     var steadyLevel: Float { lightLayer.opacity }
     var blendsAsAGroup: Bool { fadeLayer.allowsGroupOpacity || lightLayer.allowsGroupOpacity }
@@ -321,7 +328,15 @@ final class EdgeGlowView: NSView {
     /// The agent the glow stands for. `announcing` shows its pill for
     /// `pillDuration`; without it a new agent's pill waits for the pointer.
     private func setTarget(_ target: Target?, announcing: Bool) {
+        var announcing = announcing
         if target != self.target {
+            // The same agent says something else while its pill is up (a
+            // message turns into a permission request, a verdict into a
+            // question): the pill stays, for its full time again.
+            if isAnnouncing, let target, target.workspaceID == self.target?.workspaceID,
+               target.columnID == self.target?.columnID {
+                announcing = true
+            }
             self.target = target
             pillGeneration += 1
             isAnnouncing = false
@@ -354,8 +369,9 @@ final class EdgeGlowView: NSView {
         isAnnouncing = false
         dropStaleHover()
         // The pill came up under a pointer that was already there: no
-        // entry was reported for it.
-        if let window, pill.frame.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+        // entry was reported for it. Only in the key window, whose pointer
+        // the areas track: elsewhere no exit would ever take the pill away.
+        if let window, tracksPointer(window), pill.frame.contains(convert(pointerLocation(window), from: nil)) {
             pointerOnPill = true
         }
         if !isHovered { setPillShown(false) }
@@ -433,10 +449,33 @@ final class EdgeGlowView: NSView {
         if let zone = zone(of: event) { pointerEntered(zone) }
     }
 
-    /// Also when the window stops being the key one: the pointer is gone
-    /// as far as the pill goes.
     override func mouseExited(with event: NSEvent) {
         if let zone = zone(of: event) { pointerExited(zone) }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        guard edge != .around else { return }
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        if let newWindow {
+            center.addObserver(
+                self, selector: #selector(windowResignedKey), name: NSWindow.didResignKeyNotification, object: newWindow
+            )
+        } else {
+            windowResignedKey()
+        }
+    }
+
+    /// The window stopped being the key one: its pointer is no longer
+    /// tracked, so no exit would be reported for it. It is gone as far as
+    /// the pill goes: a pill the pointer kept leaves now, and none stays
+    /// over a terminal's text or takes a click there.
+    @objc func windowResignedKey() {
+        guard isHovered else { return }
+        hoverGeneration += 1
+        (pointerOnGlow, pointerOnPill) = (false, false)
+        if !isAnnouncing { setPillShown(false) }
     }
 
     /// The zone an event's tracking area stands for; nil for an area this
@@ -492,7 +531,7 @@ final class EdgeGlowView: NSView {
     /// hover the pointer is no longer in must not keep the pill.
     private func dropStaleHover() {
         guard isHovered, let window else { return }
-        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let point = convert(pointerLocation(window), from: nil)
         if pointerOnGlow, !hoverStrip.contains(point) { pointerExited(.glow) }
         if pointerOnPill, !pill.frame.contains(point) { pointerExited(.pill) }
     }
@@ -538,8 +577,9 @@ extension CABasicAnimation {
         move.repeatCount = .infinity
         move.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         move.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: move.duration * 2)
-        // A slow fade for hours: no need for 120 frames a second.
-        move.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 15)
+        // A slow fade for hours: no need for more frames than the
+        // sidebar's dots ever asked for.
+        move.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
         return move
     }
 }

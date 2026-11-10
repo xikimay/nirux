@@ -164,6 +164,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             // Not inside the drain that may have settled it.
             DispatchQueue.main.async { shellView?.turnEndSettled() }
         }
+        hooks.onTurnDone = { [weak shellView] resolution, endedAt in
+            shellView?.agentTurnDone(in: resolution.column, endedAt: endedAt)
+        }
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }

@@ -32,12 +32,14 @@ final class SidebarWorkspaceCardRenderer {
     /// turn ends.
     private let animates: Bool
     /// When the row's agent ended its turn (`CACurrentMediaTime`), while
-    /// its check may still be drawing (see `SidebarView.turnEndedAt`).
+    /// its check may still be drawing (see `SidebarView.turnEndNotedAt`).
     private let turnEndedAt: CFTimeInterval?
     /// When the row's pull request became ready to merge, and when it was
     /// merged, while the row still shows it (see SidebarView+Merge).
     private let readyAt: CFTimeInterval?
     private let mergedAt: CFTimeInterval?
+    /// The clock the row's movements are timed from (`CACurrentMediaTime`).
+    private let now: CFTimeInterval
 
     private var views: [NSView] = []
     private var hitAreas: [SidebarHitArea] = []
@@ -49,7 +51,8 @@ final class SidebarWorkspaceCardRenderer {
 
     init(
         workspace: WorkspaceInfo, sidebarWidth: CGFloat, yOffset: CGFloat, animates: Bool = true,
-        turnEndedAt: CFTimeInterval? = nil, readyAt: CFTimeInterval? = nil, mergedAt: CFTimeInterval? = nil
+        turnEndedAt: CFTimeInterval? = nil, readyAt: CFTimeInterval? = nil, mergedAt: CFTimeInterval? = nil,
+        now: CFTimeInterval = CACurrentMediaTime()
     ) {
         layout = SidebarCardLayout(workspace: workspace, sidebarWidth: sidebarWidth)
         self.yOffset = yOffset
@@ -57,6 +60,7 @@ final class SidebarWorkspaceCardRenderer {
         self.turnEndedAt = turnEndedAt
         self.readyAt = readyAt
         self.mergedAt = mergedAt
+        self.now = now
     }
 
     func render() -> SidebarWorkspaceCardRenderResult {
@@ -122,7 +126,10 @@ final class SidebarWorkspaceCardRenderer {
 
     private func buildTitleRow(top: CGFloat) {
         let rowY = top - Metrics.titleRowHeight
-        buildMark(layout.summary.mark, centerY: rowY + Metrics.titleRowHeight / 2)
+        let mark = buildMark(layout.summary.mark, centerY: rowY + Metrics.titleRowHeight / 2)
+        // A task's full row (see `showsTurnEnds`), when its mark is the
+        // grey dot.
+        if let mark, layout.summary.mark == .idle { buildCheck(over: mark, startedAt: turnEndedAt, holds: true) }
 
         var maxX = layout.contentMaxX
         if let trailing = trailingLabel() {
@@ -195,29 +202,33 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// The sign in the state marks' column: amber for the user, red for
-    /// something broken, a breathing green dot for work, a speech bubble
-    /// for a question to the parent, a slashed circle for a blocker, a
-    /// check, the merge sign, else grey.
-    private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) {
+    /// something broken, a green dot for work, a speech bubble for a
+    /// question to the parent, a slashed circle for a blocker, a check,
+    /// the merge sign, else grey. Returns the dot, when the mark is one.
+    @discardableResult
+    private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) -> NSView? {
         let centerX = (Metrics.markCenterX + layout.nestIndent)
         // The status line says it to VoiceOver.
-        func symbol(_ name: String, _ color: NSColor, _ label: String?) {
+        func symbol(_ name: String, _ color: NSColor, _ label: String?) -> NSView? {
             let icon = SidebarImageView(image: SidebarRenderer.symbol(name, color: color, pointSize: 11))
             icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
             icon.setAccessibilityElement(false)
             append(icon)
+            return nil
         }
         let color: NSColor
         switch mark {
         case .asking: return symbol(Theme.Symbol.question, Theme.Color.textSecondary, nil)
         case .blocked: return symbol(Theme.Symbol.blocked, Theme.Color.textSecondary, nil)
         case .readyToMerge:
-            symbol(Theme.Symbol.checksPassed, Theme.Color.success, nil)
+            _ = symbol(Theme.Symbol.checksPassed, Theme.Color.success, nil)
             // Drawn once, when the checks pass in front of the user.
             if let icon = views.last { buildCheck(over: icon, startedAt: readyAt, holds: false) }
-            return
+            return nil
         case .merged: return symbol(Theme.Symbol.merged, Theme.Color.done, nil)
-        case .checksRunning: return buildChecksRing(center: NSPoint(x: centerX, y: centerY))
+        case .checksRunning:
+            buildChecksRing(center: NSPoint(x: centerX, y: centerY))
+            return nil
         case .needsYou: color = Theme.Color.waiting
         case .error: color = Theme.Color.error
         case .working: color = Theme.Color.working
@@ -229,7 +240,14 @@ final class SidebarWorkspaceCardRenderer {
         dot.layer?.cornerRadius = size / 2
         dot.layer?.backgroundColor = color.cgColor
         append(dot)
-        if mark == .idle { buildCheck(over: dot, startedAt: turnEndedAt, holds: true) }
+        return dot
+    }
+
+    /// Whether a turn's end can show on this workspace's row: a task's
+    /// full row. An archived task's compact row stays quiet, and the
+    /// Lead's row has no grey dot.
+    static func showsTurnEnds(_ workspace: WorkspaceInfo) -> Bool {
+        !workspace.isLead && !workspace.showsCompactRow
     }
 
     /// The rail's working badge breathes, in phase with every other one
@@ -253,13 +271,18 @@ final class SidebarWorkspaceCardRenderer {
     static let mergeSweepKey = "sweep"
     /// How long the merge's sweep takes to cross its row.
     static let mergeSweepDuration: CFTimeInterval = 1.0
+    /// The check drawn when a pull request's checks pass.
+    static let readyCheckDuration: CFTimeInterval = 0.6
     /// How long a turn's end shows on its row: the check draws, holds,
     /// then gives way to the grey dot.
     static let checkDuration: CFTimeInterval = 1.6
+    /// One pass of a working row's line.
+    static let workingLineDuration: CFTimeInterval = 3
 
     /// A thin line of light running along the row's bottom edge while its
-    /// agent works. Timed from the clock: every row's line runs in step,
-    /// and a rebuilt row's carries on where the old one was.
+    /// agent works. Timed from the clock, not from when the row was built:
+    /// every row's line runs in step, and a rebuilt row's carries on
+    /// exactly where the old one was.
     private func buildWorkingLine(frame: NSRect) {
         let inset = Theme.Radius.card
         let line = SidebarBackgroundView(frame: NSRect(
@@ -282,14 +305,20 @@ final class SidebarWorkspaceCardRenderer {
         let run = CABasicAnimation(keyPath: "position.x")
         run.fromValue = -bandWidth / 2
         run.toValue = width + bandWidth / 2
-        run.duration = 1.8
+        run.duration = Self.workingLineDuration
         run.repeatCount = .infinity
-        run.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: run.duration)
-        // Smooth enough for a line this thin, without 120 frames a second.
-        run.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+        // Began when the clock's current pass did.
+        run.beginTime = now - now.truncatingRemainder(dividingBy: run.duration)
+        // Under the same cap as every light (`CABasicAnimation.lightMovement`):
+        // a working row asks for no more frames than the dots ever did,
+        // and its pass is slow enough to stay smooth at that rate.
+        run.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
         band.add(run, forKey: Self.workingLineKey)
         append(line)
     }
+
+    /// One turn of the ring that says a pull request's checks run.
+    static let checksRingDuration: CFTimeInterval = 1.6
 
     /// The pull request's checks run: a grey ring turns where the row's
     /// mark is, in step with every other one. A still dashed ring while
@@ -312,10 +341,15 @@ final class SidebarWorkspaceCardRenderer {
             let turn = CABasicAnimation(keyPath: "transform.rotation.z")
             turn.fromValue = 0
             turn.toValue = -2 * Double.pi
-            turn.duration = 1
+            turn.duration = Self.checksRingDuration
             turn.repeatCount = .infinity
-            turn.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: turn.duration)
-            turn.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+            // Began when the clock's current turn did: a rebuilt row's
+            // ring carries on exactly where the old one was.
+            turn.beginTime = now - now.truncatingRemainder(dividingBy: turn.duration)
+            // Endless, so under the lights' cap
+            // (`CABasicAnimation.lightMovement`), and slow enough to stay
+            // smooth at that rate.
+            turn.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
             ring.add(turn, forKey: Self.checksRingKey)
         } else {
             ring.lineDashPattern = [2, 2.7]
@@ -328,7 +362,7 @@ final class SidebarWorkspaceCardRenderer {
     /// moment the pull request was seen merged: a rebuild in the middle
     /// carries on, and once it is over nothing is built.
     private func buildMergeSweep(frame: NSRect) {
-        guard animates, let mergedAt, CACurrentMediaTime() - mergedAt < Self.mergeSweepDuration else { return }
+        guard animates, let mergedAt, now - mergedAt < Self.mergeSweepDuration else { return }
         let host = SidebarBackgroundView(frame: frame)
         host.identifier = Self.mergeSweepID
         host.wantsLayer = true
@@ -360,8 +394,8 @@ final class SidebarWorkspaceCardRenderer {
     /// check the row keeps. Timed from `startedAt`, so a rebuild in the
     /// middle carries on; once it is over the mark alone is built.
     private func buildCheck(over dot: NSView, startedAt: CFTimeInterval?, holds: Bool) {
-        let duration = holds ? Self.checkDuration : 0.6
-        guard animates, let turnEndedAt = startedAt, CACurrentMediaTime() - turnEndedAt < duration else { return }
+        let duration = holds ? Self.checkDuration : Self.readyCheckDuration
+        guard animates, let turnEndedAt = startedAt, now - turnEndedAt < duration else { return }
         let size: CGFloat = 12
         let host = SidebarBackgroundView(frame: NSRect(
             x: dot.frame.midX - size / 2, y: dot.frame.midY - size / 2, width: size, height: size

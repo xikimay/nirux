@@ -10,17 +10,20 @@ struct TaskSheetPicture {
 // MARK: - A task's birth
 
 /// On Start, once the worktree is ready: the sheet's picture folds toward
-/// the sidebar, the task's row opens there with a spring, then the agent's
-/// column slides in from the right. Until then the sheet stays up: a start
-/// that fails shows its error there. Nothing of this plays while the
-/// interface may not move (`agentLightsMayMove`): the sheet closes and the
-/// workspace shows as before.
+/// the sidebar, the task's row opens there with a spring, and the agent's
+/// column slides in from the right, as fast as a workspace shows today.
+/// Until then the sheet stays up: a start that fails shows its error
+/// there. Nothing of this plays while the interface may not move
+/// (`agentLightsMayMove`): the sheet closes and the workspace shows as
+/// before.
 extension NiruxShellView {
     static let taskBirthGhostName = "nirux.taskBirth.ghost"
     static let taskBirthSlideKey = "taskBirthSlide"
-    /// When the row opens and the column starts in, after the fold began.
+    static let taskBirthBackdropKey = "taskBirthBackdrop"
+    /// When the row opens, after the fold began: as the picture reaches it.
     static let taskBirthRowDelay: CFTimeInterval = 0.2
-    static let taskBirthSlideDelay: CFTimeInterval = 0.3
+    /// The column's way in: a workspace switch's time (`wsSlide`).
+    static let taskBirthSlideDuration: CFTimeInterval = 0.3
 
     /// Before the sheet closes on a task that starts: its picture, for the
     /// fold. None for a sheet the user closed meanwhile.
@@ -42,8 +45,9 @@ extension NiruxShellView {
         let picture = pendingTaskSheet
         pendingTaskSheet = nil
         guard agentLightsMayMove else { return }
-        let now = CACurrentMediaTime()
-        sidebar.noteBirth(workspaceID: workspace.id, now: now)
+        // Without a sheet (a task its Lead starts) nothing travels to the
+        // row: it opens at once.
+        sidebar.noteBirth(workspaceID: workspace.id, delay: picture == nil ? 0 : Self.taskBirthRowDelay)
         guard let picture, let shellLayer = layer else { return }
         // Toward the row, or the rail's tile; the top of the sidebar when
         // the row isn't listed.
@@ -80,25 +84,32 @@ extension NiruxShellView {
     }
 
     /// The new workspace's column slides in from the right, over a picture
-    /// of what was on screen. The container moves, as column scrolling
-    /// does: the terminal's own layer is never transformed.
+    /// of what was on screen that fades away under it: a new task shows
+    /// one column, and nothing stale may stay beside it. The container
+    /// moves, as column scrolling does: the terminal's own layer is never
+    /// transformed.
     func slideInNewWorkspace(_ workspace: WorkspaceState, over snapshot: NSView) {
+        let curve = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
         viewport.addSubview(snapshot, positioned: .below, relativeTo: verticalStrip)
+        // Gone unless its fade runs: a dropped animation leaves nothing.
+        snapshot.alphaValue = 0
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        fade.duration = Self.taskBirthSlideDuration
+        fade.timingFunction = curve
+        snapshot.layer?.add(fade, forKey: Self.taskBirthBackdropKey)
         if let container = workspace.containerView.layer {
-            let slide = CASpringAnimation(keyPath: "transform.translation.x")
+            let slide = CABasicAnimation(keyPath: "transform.translation.x")
             slide.fromValue = viewport.bounds.width
             slide.toValue = 0
-            slide.damping = 18
-            slide.stiffness = 170
-            slide.duration = slide.settlingDuration
-            // Held off to the right until the row has opened.
-            slide.beginTime = CACurrentMediaTime() + Self.taskBirthSlideDelay
-            slide.fillMode = .backwards
+            slide.duration = Self.taskBirthSlideDuration
+            slide.timingFunction = curve
             container.add(slide, forKey: Self.taskBirthSlideKey)
         }
-        // Not on the animation's completion, which a window out of view
-        // may never report.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.taskBirthSlideDelay + 0.9) { [weak snapshot] in
+        // Not on an animation's completion, which a window out of view may
+        // never report.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.taskBirthSlideDuration + 0.2) { [weak snapshot] in
             snapshot?.removeFromSuperview()
         }
     }

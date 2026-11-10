@@ -6,6 +6,14 @@ import AppKit
 /// Close Column / Close Workspace — goes through `WorkspaceClosePolicy`,
 /// so a live agent is never killed without confirmation.
 extension NiruxShellView {
+    /// A column that was closing stays after all (its sibling went first):
+    /// it isn't left invisible, nor without its light.
+    private func abortColumnClose(_ column: ColumnState) {
+        column.isClosing = false
+        column.view.alphaValue = 1
+        applyAgentLights()
+    }
+
     func closeActiveColumn() {
         guard let workspace = activeWorkspace,
               let closingColumn = workspace.columns[safe: workspace.focusedIndex],
@@ -26,36 +34,35 @@ extension NiruxShellView {
             closingView.animator().alphaValue = 0
             closingView.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
         }, completionHandler: {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                closingView.layer?.setAffineTransform(.identity)
-                // By identity: the index can shift during the animation.
-                guard workspace.columns.count > 1,
-                      let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })
-                else {
-                    // Nothing to remove after all — don't leave it invisible.
-                    closingColumn.isClosing = false
-                    closingView.alphaValue = 1
-                    return
-                }
-                // Still focused: the user lands on its neighbour. An
-                // agent's open during the animation focused its editor
-                // without the keyboard instead.
-                let landsOnNeighbour = workspace.columns[safe: workspace.focusedIndex] === closingColumn
-                workspace.closeColumn(at: closingIndex)
-                self.relayout(animated: false)
-                // Animate remaining columns sliding into place
-                workspace.layoutAndScroll(
-                    viewportWidth: self.viewport.frame.width,
-                    height: workspace.containerView.frame.height,
-                    animated: true
-                )
-                self.updateSidebar()
-                self.focusActiveTerminal(
-                    in: self.window, editorTakesKeyboard: landsOnNeighbour && self.activeWorkspace === workspace
-                )
-            }
+            DispatchQueue.main.async { [weak self] in self?.finishColumnClose(closingColumn, in: workspace) }
         })
+    }
+
+    /// The exit animation of `closingColumn` is over: it goes, unless
+    /// nothing is left to remove after all.
+    func finishColumnClose(_ closingColumn: ColumnState, in workspace: WorkspaceState) {
+        closingColumn.view.layer?.setAffineTransform(.identity)
+        // By identity: the index can shift during the animation.
+        guard workspace.columns.count > 1,
+              let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })
+        else {
+            abortColumnClose(closingColumn)
+            return
+        }
+        // Still focused: the user lands on its neighbour. An agent's open
+        // during the animation focused its editor without the keyboard
+        // instead.
+        let landsOnNeighbour = workspace.columns[safe: workspace.focusedIndex] === closingColumn
+        workspace.closeColumn(at: closingIndex)
+        relayout(animated: false)
+        // Animate remaining columns sliding into place
+        workspace.layoutAndScroll(
+            viewportWidth: viewport.frame.width,
+            height: workspace.containerView.frame.height,
+            animated: true
+        )
+        updateSidebar()
+        focusActiveTerminal(in: window, editorTakesKeyboard: landsOnNeighbour && activeWorkspace === workspace)
     }
 
     /// Close-workspace entry point for the sidebar menu and for ⌘W on a
