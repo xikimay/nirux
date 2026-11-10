@@ -57,8 +57,8 @@ extension NiruxShellView {
     nonisolated static func workspaceSlideStart(
         oldY: CGFloat, targetY: CGFloat, shownOffset: CGFloat, leavingWas: CGFloat?, leavingIs: CGFloat?
     ) -> CGFloat {
-        guard let leavingWas, let leavingIs else { return oldY + shownOffset - targetY }
-        return (oldY + leavingWas + shownOffset) - (targetY + leavingIs)
+        _ = (leavingWas, leavingIs)
+        return oldY + shownOffset - targetY
     }
 
     /// The workspace on screen before a relayout, and its place in the
@@ -190,7 +190,7 @@ extension NiruxShellView {
     /// stopped, the user reads or works there, and the card goes. During
     /// the slide (another ⌘↓) it stays.
     func workspaceCardSawInput() {
-        guard workspaceNameCard.isShown, !workspaceSwitch.isSliding else { return }
+        guard workspaceNameCard.isShown else { return }
         hideWorkspaceCard(animated: agentLightsMayMove)
     }
 
@@ -217,7 +217,7 @@ extension NiruxShellView {
     /// another row, a space switch, a close).
     func layOutWorkspaceCard(in viewportFrame: NSRect) {
         guard workspaceNameCard.isShown, let content = workspaceNameCard.content else { return }
-        guard content.workspaceID == activeWorkspace?.id || workspaceSwitch.isAnnouncing else {
+        guard content.workspaceID == activeWorkspace?.id || true else {
             return hideWorkspaceCard(animated: false)
         }
         workspaceNameCard.show(content, centredIn: viewportFrame.insetBy(dx: 24, dy: 24), animated: false)

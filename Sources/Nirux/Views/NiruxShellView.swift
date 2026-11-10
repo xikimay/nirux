@@ -422,7 +422,7 @@ final class NiruxShellView: NSView {
             // The one the strip is leaving too, until it has left (see
             // NiruxShellView+WorkspaceSwitch).
             let visible = windowVisible && isInActiveProfile
-                && drawsTerminals(of: workspace, isActive: index == activeWSIndex)
+                && index == activeWSIndex
             for col in workspace.columns {
                 sideEffects.setSurfaceVisible(col, visible)
             }
