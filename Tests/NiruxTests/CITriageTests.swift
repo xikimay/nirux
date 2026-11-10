@@ -512,6 +512,43 @@ final class CITriageTests: XCTestCase {
                        ["    func testDefaults() { fromTheExtension() }"])
         XCTAssertNil(CITriage.testBody(method: "testInit", inTypes: ["Empty"], in: "final class Empty: GearTests {}\n"),
                      "a class whose body is on its line declares nothing")
+
+        // Bounded by indentation: a brace in a string, a member's nested
+        // type or local function, a block comment, a long signature.
+        let tricky = """
+            final class AxleTests {
+                let broken = "{ not json"
+
+                /*
+                 func testTurns() { inAComment() }
+                func testTurns() { stillInTheComment() }
+                */
+                struct Nested {
+                    func testTurns() { nestedOnly() }
+                }
+
+                func testSpins() {
+                    func testTurns() { localOnly() }
+                    testTurns()
+                }
+
+                func testTurns(
+                    by angle: Double = 1
+                ) throws {
+                    let set: Set<String> = ["}"]
+                    turn(set)
+                }
+
+                func testLast() {}
+            }
+            """
+        XCTAssertEqual(try XCTUnwrap(CITriage.testBody(method: "testTurns", inTypes: ["AxleTests"], in: tricky)), [
+            "    func testTurns(", "        by angle: Double = 1", "    ) throws {", "        let set: Set<String> = [\"}\"]",
+            "        turn(set)", "    }"
+        ])
+        XCTAssertEqual(CITriage.testBody(method: "testLast", inTypes: ["AxleTests"], in: tricky), ["    func testLast() {}"])
+        XCTAssertEqual(CITriage.superclass(of: "Gear", in: "final class Gear<T: Part>: BaseTests {\n}\n"), "BaseTests",
+                       "past its generic clause")
         XCTAssertEqual(CITriage.superclass(of: "GearTests", in: file), "BaseTests")
         XCTAssertNil(CITriage.superclass(of: "Helper", in: file))
         XCTAssertNil(CITriage.superclass(of: "AxleTests", in: file))
@@ -703,6 +740,13 @@ final class CITriageTests: XCTestCase {
         XCTAssertTrue(record("first", tests: [], verdict: .real, isUnanswered: true).isFinal, "a verdict came")
         var store = CITriageStore()
         store.keep(owed, of: widgetsRun)
+        XCTAssertFalse(try XCTUnwrap(store.record(of: widgetsRun)).isFinal)
+        // Owed a second time for the same failure: given up, kept as it is.
+        store.keep(owed, of: widgetsRun)
+        XCTAssertTrue(try XCTUnwrap(store.record(of: widgetsRun)).isFinal)
+        XCTAssertEqual(store.record(of: widgetsRun)?.shown, .unsure)
+        store.keep(record("second", tests: ["GearTests.testStops"], isUnanswered: true), of: widgetsRun)
+        XCTAssertFalse(try XCTUnwrap(store.record(of: widgetsRun)).isFinal, "another failure is asked about afresh")
         XCTAssertTrue(store.learn(fromPassedRunsOf: checks([("test", .success)]), now: 200), "its tests still teach")
     }
 
