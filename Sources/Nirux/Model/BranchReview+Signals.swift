@@ -83,7 +83,6 @@ extension BranchReview {
             LineRule(.security, "nirux://", nil, .prefix),
             LineRule(.security, "NiruxURLRequest"),
             LineRule(.security, "HandoverFile"),
-            LineRule(.security, "Telegram", nil, .prefix),
             LineRule(.security, "/tmp"),
             LineRule(
                 .security, "Process arguments",
@@ -231,7 +230,6 @@ extension BranchReview {
             PathRule(kind: .security, label: "HandoverFile*") { _, name in name.hasPrefix("HandoverFile") },
             PathRule(kind: .security, label: "NiruxURLRequest*") { _, name in name.hasPrefix("NiruxURLRequest") },
             PathRule(kind: .security, label: "*+URLScheme*") { _, name in name.contains("+URLScheme") },
-            PathRule(kind: .security, label: "Telegram*") { _, name in name.hasPrefix("Telegram") },
             PathRule(kind: .launch, label: "app delegate") { _, name in name == "NiruxApp.swift" || name == "AppDelegate.swift" },
             PathRule(kind: .launch, label: "Info.plist") { _, name in name == "Info.plist" },
             PathRule(kind: .launch, label: "bundle.sh") { _, name in name == "bundle.sh" },

@@ -5,20 +5,21 @@ import AppKit
 extension NiruxShellView {
     /// After each pull request read: a red run not reported yet marks the
     /// card like an agent asking for attention, and notifies while Nirux is
-    /// in the background. The caller refreshes the sidebar.
-    func reportNewRedChecks(in workspace: WorkspaceState) {
+    /// in the background. The notification says when the failure looks
+    /// flaky (docs/ci-failure-triage.md), which it may wait a few seconds
+    /// to know. The caller refreshes the sidebar.
+    func reportNewRedChecks(in workspace: WorkspaceState, isAppActive: Bool = NSApp.isActive) {
+        triageRedChecks(in: workspace)
         let red = workspace.takeNewRedChecks()
         guard !red.isEmpty, let pullRequest = workspace.prInfo,
-              !(NSApp.isActive && workspace === activeWorkspace) else { return }
+              !(isAppActive && workspace === activeWorkspace) else { return }
         workspace.raiseNotification(.error)
-        guard !NSApp.isActive else { return }
+        guard !isAppActive else { return }
         NSApp.requestUserAttention(.informationalRequest)
-        NiruxNotifier.shared.postCIFailure(
-            workspaceID: workspace.id,
-            workspaceTitle: workspace.title,
-            pullRequest: pullRequest.number,
-            checkNames: red.map(\.name)
-        )
+        postCIFailureBanner(CIFailureBanner(
+            workspaceID: workspace.id, workspaceTitle: workspace.title, pullRequest: pullRequest.number,
+            checkNames: red.map(\.name), signature: CITriage.signature(of: CIFailure.redChecks(pullRequest))
+        ), for: workspace)
     }
 
     func handleCIFailureAction(_ action: NiruxNotifier.CIFailureAction, workspaceID: String) {
@@ -32,17 +33,17 @@ extension NiruxShellView {
 
     /// Types the `gh run view --log-failed` of each red Actions run into the
     /// workspace's agent (the focused column's, else the first), through the
-    /// remote prompt path. No agent, or no such run: the check opens instead.
+    /// typed prompt path. No agent, or no such run: the check opens instead.
     func askAgentWhyCIFailed(_ workspace: WorkspaceState) {
         guard let pullRequest = workspace.prInfo, !CIFailure.redChecks(pullRequest).isEmpty else {
             NSSound.beep()
             return
         }
         let runs = CIFailure.runs(pullRequest)
-        let sessions = remoteAgentSessions().filter { $0.workspaceID == workspace.id }
+        let sessions = typedPromptTargets().filter { $0.workspaceID == workspace.id }
         if !runs.isEmpty,
            let session = sessions.first(where: { $0.columnIndex == workspace.focusedIndex }) ?? sessions.first {
-            let result = sendRemotePrompt(
+            let result = sendTypedPrompt(
                 agentUUID: session.id,
                 prompt: CIFailure.whyFailedPrompt(pullRequest: pullRequest.number, runs: runs)
             )

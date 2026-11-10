@@ -29,7 +29,7 @@ extension BranchReview {
     /// no line number. A comment that doesn't fit within `maxMessageBytes`
     /// is left out; the next ones may fit.
     /// Sanitized as a whole: nothing in it reads as a key
-    /// (`RemotePromptSanitizer.filtered`), so it can't end the paste.
+    /// (`TypedPromptSanitizer.filtered`), so it can't end the paste.
     static func agentMessage(for comments: [Comment], snapshot: Snapshot, files: [FileChange]) -> AgentMessage {
         // The branch's names and paths are a branch's text: what would
         // break a line or hide shows as its code point.
@@ -61,7 +61,7 @@ extension BranchReview {
             body += lines
             ids.append(comment.id)
         }
-        let text = RemotePromptSanitizer.filtered((header + body + footer).joined(separator: "\n"))
+        let text = TypedPromptSanitizer.filtered((header + body + footer).joined(separator: "\n"))
         return AgentMessage(text: text, ids: ids, leftOut: comments.count - ids.count)
     }
 

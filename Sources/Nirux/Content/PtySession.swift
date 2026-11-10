@@ -357,6 +357,67 @@ final class PtySession: @unchecked Sendable {
     /// Why the agent waits on the user, while it does.
     var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
 
+    /// See `AgentStatusMachine.circlingHint`.
+    var agentCirclingHint: AgentCirclingHint? { state.machine.circlingHint }
+
+    /// A Claude turn end that hasn't alerted (see
+    /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
+    var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
+
+    /// The question the foreground `claude`'s last turn ended on (see
+    /// `AgentStatusMachine.askedQuestion`).
+    func agentAskedQuestion(foreground: ForegroundProcess?) -> AgentAttentionReason? {
+        agentQuestion(foreground: foreground).map { .askedInReply($0.text) }
+    }
+
+    /// The same, with when it was asked and whether a yes or no answers it.
+    func agentQuestion(foreground: ForegroundProcess?) -> AgentStatusMachine.AskedQuestion? {
+        state.machine.visibleQuestion(foreground: foreground)
+    }
+
+    /// The user looks at this column: see `AgentStatusMachine.noteSeen`.
+    func noteAgentSeen() {
+        state.machine.noteSeen()
+    }
+
+    /// See `AgentStatusMachine.isCurrentTurnEnd`.
+    func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
+        state.machine.isCurrentTurnEnd(turnEndedAt)
+    }
+
+    /// Types a quick answer (Yes, No, a reply) to the turn end of
+    /// `turnEndedAt` when it may go in (`AgentStatusMachine
+    /// .acceptsQuickAnswer`), as a prompt the user's click sends; false,
+    /// and nothing typed, otherwise.
+    func typeQuickAnswer(_ terminalInput: String, to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
+        guard !hasExited, state.machine.acceptsQuickAnswer(
+            to: turnEndedAt, foreground: foreground, now: Date().timeIntervalSince1970
+        ) else { return false }
+        typePromptFromUser(terminalInput)
+        return true
+    }
+
+    /// Types a prompt the user's click sends into this agent (see
+    /// `AgentStatusMachine.notePromptFromUser`).
+    func typePromptFromUser(_ terminalInput: String) {
+        state.machine.notePromptFromUser()
+        sendRaw(terminalInput)
+    }
+
+    /// See `AgentStatusMachine.awaitsVerdict`.
+    func awaitsTurnEndVerdict(_ request: TurnEndRequest) -> Bool {
+        state.machine.awaitsVerdict(request)
+    }
+
+    /// See `AgentStatusMachine.applyTurnEndVerdict`.
+    func applyTurnEndVerdict(
+        _ verdict: TurnEndVerdict,
+        for request: TurnEndRequest,
+        isUserFocused: Bool
+    ) -> AgentAttentionReason? {
+        state.machine.applyTurnEndVerdict(verdict, for: request, isUserFocused: isUserFocused)
+    }
+
     /// When the user last typed into this terminal (0: never).
     var lastKeystrokeAt: TimeInterval { state.machine.lastKeystrokeAt }
 
@@ -447,7 +508,7 @@ final class PtySession: @unchecked Sendable {
     func resumeFailedTurn(snapshot: ProcessSnapshot, now: TimeInterval) -> AgentResumeRefusal? {
         let foreground = foregroundProcess(snapshot: snapshot)
         if let refusal = agentResumeRefusal(foreground: foreground, snapshot: snapshot, now: now) { return refusal }
-        guard let input = RemotePromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
+        guard let input = TypedPromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
         state.machine.markResumeSent(now: now)
         sendRaw(input)
         state.machine.noteResumeTyped()
@@ -734,19 +795,15 @@ final class PtySession: @unchecked Sendable {
         return [state.machine.lastForegroundName, state.machine.hookKind].compactMap { $0 }.first(where: isAgent)
     }
 
-    /// Remote prompts are accepted only while an integrated agent process
+    /// Nirux types a prompt only while an integrated agent process
     /// (Claude Code, Codex) is currently in the foreground. A stable UUID
     /// alone is not enough: the same column can later fall back to an idle
     /// shell.
-    func acceptsRemotePrompts(snapshot: ProcessSnapshot) -> Bool {
+    func acceptsTypedPrompts(snapshot: ProcessSnapshot) -> Bool {
         guard !hasExited,
               let process = foregroundProcessName(snapshot: snapshot)
         else { return false }
-        return AgentStatusMachine.acceptsRemotePrompts(processName: process)
-    }
-
-    func recentOutput(maxLines: Int = 40, maxCharacters: Int = 3_500) -> String {
-        state.outputBuffer.tail(maxLines: maxLines, maxCharacters: maxCharacters)
+        return AgentStatusMachine.acceptsTypedPrompts(processName: process)
     }
 
     /// Clear attention flag (user has seen it)
@@ -838,6 +895,18 @@ final class PtySession: @unchecked Sendable {
     static func isUserText(_ data: Data) -> Bool {
         guard let first = data.first else { return false }
         return first != 0x1B || data.starts(with: [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]) // ESC[200~
+    }
+
+    /// Whether ghostty writes Up or Down arrows: what it turns a wheel
+    /// scroll into on the alternate screen when the program there reports
+    /// no mouse (Claude Code under `CLAUDE_CODE_DISABLE_MOUSE`). At an
+    /// agent's prompt, Up recalls an old prompt.
+    static func isUpDownArrows(_ data: Data) -> Bool {
+        guard !data.isEmpty, data.count.isMultiple(of: 3) else { return false }
+        return stride(from: data.startIndex, to: data.endIndex, by: 3).allSatisfy { index in
+            let key = data[index..<index + 3]
+            return key.first == 0x1B && [0x5B, 0x4F].contains(key[index + 1]) && [0x41, 0x42].contains(key[index + 2])
+        }
     }
 
     func sendRaw(_ string: String) {
@@ -1047,7 +1116,6 @@ private final class PtyState: @unchecked Sendable {
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
-    let outputBuffer = TerminalOutputBuffer()
     /// Read-queue only. A (re)start sets `localServerStateIsStale` from
     /// main instead of resetting them, so a straggling read handler of the
     /// previous shell never sees them replaced mid-scan.
@@ -1057,7 +1125,7 @@ private final class PtyState: @unchecked Sendable {
     private static let localServerForwardInterval: TimeInterval = 1
     /// Something reached the PTY through `sendRaw` — keystrokes (including
     /// the Enter after a ⌘V paste, which itself goes through ghostty),
-    /// dropped files, remote prompts, commands Nirux types. Unlike
+    /// dropped files, prompts and commands Nirux types. Unlike
     /// `machine.hasUserInput` it ignores ghostty's own writes (replies to
     /// the terminal queries Claude Code sends at startup) and the lone
     /// Ctrl+L redraw nudge. Once open, a TUI repaint can still resurface
@@ -1066,7 +1134,7 @@ private final class PtyState: @unchecked Sendable {
 
     func noteTypedInput(_ data: Data) {
         guard data != Self.redrawNudge else { return }
-        machine.noteKeystroke(now: Date())
+        machine.noteKeystroke(now: Date(), keys: data)
         hasTypedInput = true
     }
 
@@ -1076,11 +1144,17 @@ private final class PtyState: @unchecked Sendable {
     /// paste (any way: ⌘V, the Edit menu, a right-click), dictation, the
     /// emoji picker — and for its own replies to terminal queries, which
     /// may come on the read queue. The user's text counts as a keystroke,
-    /// noted on the main queue like every other.
+    /// noted on the main queue like every other; arrows from a wheel scroll
+    /// count as what may be at the prompt.
     func noteTerminalWrite(_ data: Data) {
-        guard PtySession.isUserText(data) else { return }
-        DispatchQueue.main.async { [self] in
-            machine.noteKeystroke(now: Date())
+        if PtySession.isUserText(data) {
+            DispatchQueue.main.async { [self] in
+                machine.noteKeystroke(now: Date(), keys: data)
+            }
+        } else if PtySession.isUpDownArrows(data) {
+            DispatchQueue.main.async { [self] in
+                machine.notePromptRecall(now: Date())
+            }
         }
     }
 
@@ -1285,7 +1359,6 @@ private final class PtyState: @unchecked Sendable {
         }
         let data = Data(buffer[0..<bytesRead])
         machine.noteRead(now: Date())
-        outputBuffer.append(data)
         session.receive(data)
         if let str = String(bytes: data, encoding: .utf8),
            str.contains("\u{1b}]") {

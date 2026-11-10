@@ -6,7 +6,7 @@ import Foundation
 /// anyone who can post a check chooses its URL, and what GitHub returns is
 /// never typed into an agent or passed to `gh` as is.
 enum CIFailure {
-    struct Run: Equatable, Sendable {
+    struct Run: Hashable, Sendable {
         /// `host/owner/name`, as `gh --repo` takes it.
         let repository: String
         let id: Int
@@ -32,6 +32,35 @@ enum CIFailure {
             runs.append(run)
         }
         return runs
+    }
+
+    /// The red checks of each Actions run of the pull request's repository,
+    /// runs in order. Nil when a red check is anything else (a commit
+    /// status, another repository's run) or the pull request has none:
+    /// what can't be read can't be called flaky (see `CITriage`).
+    static func redChecksByRun(_ pullRequest: PRInfo) -> [(run: Run, checks: [ProjectBoard.Check])]? {
+        guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return nil }
+        var byRun: [(run: Run, checks: [ProjectBoard.Check])] = []
+        for check in redChecks(pullRequest) {
+            guard let run = run(of: check), run.repository.lowercased() == own.repository.lowercased() else { return nil }
+            if let index = byRun.firstIndex(where: { $0.run == run }) {
+                byRun[index].checks.append(check)
+            } else {
+                byRun.append((run, [check]))
+            }
+        }
+        return byRun.isEmpty ? nil : byRun
+    }
+
+    /// Every check of the pull request that is an Actions run of its
+    /// repository, with its name and result: what tells a run that passes
+    /// now.
+    static func ownRunResults(_ pullRequest: PRInfo) -> [(run: Run, name: String, result: ProjectBoard.CheckResult)] {
+        guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return [] }
+        return pullRequest.checks.compactMap { check in
+            guard let run = run(of: check), run.repository.lowercased() == own.repository.lowercased() else { return nil }
+            return (run, check.name, check.result)
+        }
     }
 
     /// A red check is reported once: a rerun or a new status starts again.

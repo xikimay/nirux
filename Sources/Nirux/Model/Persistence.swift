@@ -388,17 +388,18 @@ struct PersistedSettings: Codable {
     /// `ClaudeUsageLimits`). Opt-in: it makes Nirux Claude Code's status
     /// line. Missing decodes to false.
     var showClaudeUsageLimits: Bool = false
-    /// Master gate. Secrets never live here; the bot token is in Keychain.
-    var telegramRemoteAccessEnabled: Bool = false
-    var telegramPairedUserID: Int64?
-    var telegramPairedChatID: Int64?
-    var telegramNotifyOnCompletion: Bool = true
-    var telegramNotifyOnAttention: Bool = true
-    /// Last update claimed before execution, giving prompt delivery
-    /// at-most-once semantics across app restarts.
-    var telegramLastUpdateID: Int64?
+    /// A Claude turn end alerts (banner, Dock) only when its final message
+    /// asks something (see `ClaudeTurnEndClassifier`). On by default:
+    /// missing decodes to true.
+    var alertOnlyWhenClaudeAsks: Bool = true
+    /// A pull request whose checks failed says when the failure looks
+    /// flaky (see `CITriage`). On by default: missing decodes to true.
+    var triageCIFailures: Bool = true
     /// Minutes a dialog may wait before its agent reads as stuck; 0 = off.
     var stuckAgentMinutes: Int?
+    /// A working Claude that may be going in circles says so on its row
+    /// (see `AgentCirclingHint`). On by default: missing decodes to true.
+    var agentCirclingHint: Bool = true
     /// First-launch checklist. Nil in state files that predate it; see
     /// `OnboardingChecklist.launchState`.
     var onboardingChecklist: OnboardingChecklistState?
@@ -424,12 +425,6 @@ struct PersistedSettings: Codable {
         sidebarExpanded: Bool? = nil,
         missionHandoffsEnabled: Bool = true,
         sidebarApprovalsEnabled: Bool = true,
-        telegramRemoteAccessEnabled: Bool = false,
-        telegramPairedUserID: Int64? = nil,
-        telegramPairedChatID: Int64? = nil,
-        telegramNotifyOnCompletion: Bool = true,
-        telegramNotifyOnAttention: Bool = true,
-        telegramLastUpdateID: Int64? = nil,
         onboardingChecklist: OnboardingChecklistState? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
@@ -438,12 +433,6 @@ struct PersistedSettings: Codable {
         self.sidebarExpanded = sidebarExpanded
         self.missionHandoffsEnabled = missionHandoffsEnabled
         self.sidebarApprovalsEnabled = sidebarApprovalsEnabled
-        self.telegramRemoteAccessEnabled = telegramRemoteAccessEnabled
-        self.telegramPairedUserID = telegramPairedUserID
-        self.telegramPairedChatID = telegramPairedChatID
-        self.telegramNotifyOnCompletion = telegramNotifyOnCompletion
-        self.telegramNotifyOnAttention = telegramNotifyOnAttention
-        self.telegramLastUpdateID = telegramLastUpdateID
         self.onboardingChecklist = onboardingChecklist
     }
 
@@ -456,13 +445,10 @@ struct PersistedSettings: Codable {
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
         case showClaudeUsageLimits
-        case telegramRemoteAccessEnabled
-        case telegramPairedUserID
-        case telegramPairedChatID
-        case telegramNotifyOnCompletion
-        case telegramNotifyOnAttention
-        case telegramLastUpdateID
+        case alertOnlyWhenClaudeAsks
+        case triageCIFailures
         case stuckAgentMinutes
+        case agentCirclingHint
         case onboardingChecklist
         case agentResumeOnLaunch
         case explainNoticeAccounts
@@ -489,19 +475,10 @@ struct PersistedSettings: Codable {
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
-        telegramRemoteAccessEnabled = try container.decodeIfPresent(
-            Bool.self, forKey: .telegramRemoteAccessEnabled
-        ) ?? false
-        telegramPairedUserID = try container.decodeIfPresent(Int64.self, forKey: .telegramPairedUserID)
-        telegramPairedChatID = try container.decodeIfPresent(Int64.self, forKey: .telegramPairedChatID)
-        telegramNotifyOnCompletion = try container.decodeIfPresent(
-            Bool.self, forKey: .telegramNotifyOnCompletion
-        ) ?? true
-        telegramNotifyOnAttention = try container.decodeIfPresent(
-            Bool.self, forKey: .telegramNotifyOnAttention
-        ) ?? true
-        telegramLastUpdateID = try container.decodeIfPresent(Int64.self, forKey: .telegramLastUpdateID)
+        alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
+        triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
+        agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true
         // A value from a newer build must not make the whole state file
         // undecodable: it reads as "no record" and is written back as is.
         if let raw = try? container.decodeIfPresent(String.self, forKey: .onboardingChecklist) {
@@ -530,13 +507,10 @@ struct PersistedSettings: Codable {
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
-        try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)
-        try container.encodeIfPresent(telegramPairedUserID, forKey: .telegramPairedUserID)
-        try container.encodeIfPresent(telegramPairedChatID, forKey: .telegramPairedChatID)
-        try container.encode(telegramNotifyOnCompletion, forKey: .telegramNotifyOnCompletion)
-        try container.encode(telegramNotifyOnAttention, forKey: .telegramNotifyOnAttention)
-        try container.encodeIfPresent(telegramLastUpdateID, forKey: .telegramLastUpdateID)
+        try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
+        try container.encode(triageCIFailures, forKey: .triageCIFailures)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
+        try container.encode(agentCirclingHint, forKey: .agentCirclingHint)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist
         )

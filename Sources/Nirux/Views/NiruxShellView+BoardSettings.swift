@@ -11,11 +11,24 @@ extension NiruxShellView {
         let sections: [BoardSections.Section]
         let section: BoardSections.Section
         let suggestions: BoardConfigSuggestions
+        /// Where the other unsaved repositories' pull requests live, as
+        /// the board reads them: two never show one repository.
+        var baseRemotes: [String: BoardSections.BaseRemote] = [:]
     }
 
-    /// "Board Settings…" in the Board's ⋯ menu: Space Settings on its Board tab.
-    func showBoardSettings(profileID: String) {
-        showSpaceSettings(profileID: profileID, tab: .board)
+    /// "Board Settings…" in the Board's ⋯ menu: Space Settings on its Board
+    /// tab, on `repository` (a section's id) when given.
+    func showBoardSettings(profileID: String, repository: String? = nil) {
+        let openForm = boardSettingsPanel?.spaceID == profileID ? boardSettingsPanel : nil
+        // A window opening reads the tab once, on that repository.
+        showSpaceSettings(profileID: profileID, tab: .board, boardRepository: openForm == nil ? repository : nil)
+        // A form showing another repository switches to it: what is typed
+        // there is saved, or let go, first. (A read under way reads again
+        // on the repository just set, once it lands.)
+        guard let repository, let openForm, let settings = spaceSettings, settings.spaceID == profileID,
+              settings.boardRepository != repository
+        else { return }
+        openForm.requestRepository(repository)
     }
 
     /// Fills the Board tab, on `repository` (a section's id) when given,
@@ -87,9 +100,12 @@ extension NiruxShellView {
                 workspaceFolders: section.checkoutFolder.map { [$0] } ?? workspaceFolders,
                 repository: shown?.repository, baseBranch: shown?.baseBranch
             )
-            let read = BoardSettingsRead(
+            var read = BoardSettingsRead(
                 loaded: loaded, context: context, sections: sections, section: section, suggestions: suggestions
             )
+            if loaded.status == .missing || loaded.status == .loaded {
+                read.baseRemotes = BoardSections.readBaseRemotes(sections.filter { $0.id != section.id })
+            }
             DispatchQueue.main.async { @MainActor in
                 completion(read)
             }
@@ -152,6 +168,22 @@ extension NiruxShellView {
            let other = read.sections.first(where: { $0.id != read.section.id && $0.config?.gitHubRepository == repository }) {
             return "“\(other.name ?? "Another repository")” of this space already uses \(repository.ownerAndName): "
                 + "each repository needs its own GitHub repository."
+        }
+        // Nor one another section shows read-only, which saving this one
+        // would take from it. The board shows it in this section when it
+        // is saved with it already, else in the first unsaved section
+        // reading it; this one reads what the form suggests.
+        if let repository = config.gitHubRepository, read.section.config?.gitHubRepository != repository,
+           let reader = read.sections.first(where: { section in
+               guard section.config == nil else { return false }
+               let shown = section.id == read.section.id
+                   ? read.suggestions.repository
+                   : section.commonDir.flatMap { read.baseRemotes[$0] }?.gitHubRepository
+               return shown.flatMap(GitHubRepository.init(ownerAndName:)) == repository
+           }),
+           reader.id != read.section.id {
+            return "“\(reader.name ?? "Another repository")” of this space shows \(repository.ownerAndName) already, "
+                + "read-only: set it up there, or use another GitHub repository here."
         }
         // Which repository schema 1's config belongs to rests on every
         // anchor's remotes.

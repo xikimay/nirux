@@ -2,10 +2,10 @@ import Foundation
 
 /// An agent blocked on the user: it won't go on until they answer its
 /// dialog (permission, question, plan approval), get it past an API error,
-/// or start it again after it exited mid-turn. Unlike `AgentStuckState`, a
-/// dialog counts as soon as it opens, whatever the long-wait threshold. A
-/// finished turn doesn't count: the agent merely waits for its next
-/// prompt.
+/// or start it again after it exited mid-turn, or answer the question its
+/// last turn ended on. Unlike `AgentStuckState`, a dialog counts as soon as
+/// it opens, whatever the long-wait threshold. A finished turn that asks
+/// nothing doesn't count: the agent merely waits for its next prompt.
 struct AgentWait: Equatable, Sendable {
     let reason: AgentAttentionReason
     /// Epoch seconds the agent got blocked: the dialog opened, the turn
@@ -24,8 +24,14 @@ extension AgentStatusMachine {
             return AgentWait(reason: failure.reason, since: failure.failedAt)
         case .waiting?, nil:
             // Without a threshold no wait is `.waiting`: any dialog on
-            // screen blocks, however young.
-            return visibleDialog(foreground: foreground).map { AgentWait(reason: $0.reason, since: $0.requestedAt) }
+            // screen blocks, however young. Then a question the last turn
+            // ended on: the agent goes on only with an answer.
+            if let dialog = visibleDialog(foreground: foreground) {
+                return AgentWait(reason: dialog.reason, since: dialog.requestedAt)
+            }
+            return visibleQuestion(foreground: foreground).map {
+                AgentWait(reason: .askedInReply($0.text), since: $0.since)
+            }
         }
     }
 }

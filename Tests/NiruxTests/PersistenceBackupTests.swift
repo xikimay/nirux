@@ -394,6 +394,46 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertEqual(files(prefix: "state.corrupt.").count, 1)
     }
 
+    // MARK: - A state file from an older build
+
+    /// A state file from a build that had Telegram Remote Access loads
+    /// whole, its Telegram settings ignored (even one a hand edit broke),
+    /// and the next save leaves them out.
+    func testStateWithTelegramSettingsLoadsAndTheNextSaveForgetsThem() throws {
+        try write(Data("""
+        {
+          "workspaces": [{"title": "kept", "cwd": "/tmp/kept", "columns": [], "focusedColumnIndex": 0}],
+          "activeWorkspaceIndex": 0,
+          "settings": {
+            "claudeLaunchMode": "plan",
+            "telegramRemoteAccessEnabled": true,
+            "telegramPairedUserID": 123456,
+            "telegramPairedChatID": 654321,
+            "telegramNotifyOnCompletion": false,
+            "telegramNotifyOnAttention": true,
+            "telegramLastUpdateID": "88",
+            "stuckAgentMinutes": 30
+          }
+        }
+        """.utf8), "state.json")
+
+        let loaded = try XCTUnwrap(Persistence.load())
+        XCTAssertEqual(loaded.workspaces.map(\.title), ["kept"])
+        XCTAssertEqual(loaded.settings?.claudeLaunchMode, .plan)
+        XCTAssertEqual(loaded.settings?.stuckAgentMinutes, 30)
+
+        XCTAssertTrue(Persistence.updateSettings(liveLayout: nil) { $0.codexLaunchMode = .fullAuto })
+
+        let saved = try XCTUnwrap(contents("state.json").flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertFalse(saved.localizedCaseInsensitiveContains("telegram"))
+        let reloaded = try XCTUnwrap(Persistence.load())
+        XCTAssertEqual(reloaded.workspaces.map(\.title), ["kept"])
+        XCTAssertEqual(reloaded.settings?.claudeLaunchMode, .plan)
+        XCTAssertEqual(reloaded.settings?.stuckAgentMinutes, 30)
+        XCTAssertEqual(reloaded.settings?.codexLaunchMode, .fullAuto)
+        XCTAssertEqual(files(prefix: "state.corrupt."), [], "read as it was, not set aside")
+    }
+
     // MARK: - Helpers
 
     private func state(_ title: String) -> PersistedState {

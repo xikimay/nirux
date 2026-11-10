@@ -45,15 +45,19 @@ final class AgentHookCenter {
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
     var resolver: ((String) -> Resolution?)?
     var onEventsApplied: (([AppliedEvent]) -> Void)?
-    /// Every routed event, after its column applied it. The outcome says
-    /// what it asked of the user (from the column's state when it has one,
-    /// else from the event alone).
-    var onEventReceived: ((AgentHookEvent, Resolution?, AgentHookOutcome) -> Void)?
     /// Sidebar approvals (Settings → Agents). Off, every request a
     /// receiver still holds for a decision is released.
     var approvalsEnabled = false
     /// Where sidebar decisions go; tests point it at a temporary directory.
     var approvalChannel: () -> PermissionApprovalChannel = { .standard }
+    /// Reads Claude turn ends' final messages (Settings → Notifications):
+    /// only a turn that asks something alerts. Nil: every turn end alerts,
+    /// and the messages are dropped as they arrive.
+    var turnEndClassifier: (any TurnEndClassifier)?
+    /// A turn end got its verdict: its prompt, which Nirux leaves alone
+    /// meanwhile (`AgentStatusMachine.awaitsAnyVerdict`), may take the
+    /// messages waiting for it.
+    var onTurnEndSettled: (() -> Void)?
     private var lastApprovalSweep: TimeInterval = 0
 
     private var dirSource: DispatchSourceFileSystemObject?
@@ -185,6 +189,7 @@ final class AgentHookCenter {
     /// of the drain — one process-table scan per burst, not per event.
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         var event = event
+        if !Self.keepsFinalMessage(classifierOn: turnEndClassifier != nil, foreground: nil) { event.finalMessage = nil }
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
         var claudeSessionAgent: ForegroundProcess?
@@ -219,6 +224,14 @@ final class AgentHookCenter {
                 if isFromOwnClaude, !Self.isHeadlessClaude(foregroundProcess) {
                     claudeSessionAgent = foregroundProcess
                 }
+                if isFromOwnClaude, event.reportsAccount, let onNiruxAccount = event.onNiruxAccount, let foregroundProcess {
+                    resolution.column.noteClaudeAccount(
+                        onNiruxAccount: onNiruxAccount, of: foregroundProcess.instance, cwd: event.cwd
+                    )
+                }
+                if event.name == .stop, !Self.keepsFinalMessage(classifierOn: true, foreground: foregroundProcess) {
+                    event.finalMessage = nil
+                }
                 isApprovalEligible = event.name == .permissionRequest && event.approvalRequestID != nil
                     && PermissionApproval.isDisplayable(toolName: event.toolName, text: event.approvalText)
                     && isFromOwnClaude
@@ -241,13 +254,18 @@ final class AgentHookCenter {
         }
         let outcome = resolution?.column.pty.map {
             $0.applyAgentHook(event, isUserFocused: resolution?.isUserFocused ?? false)
-        } ?? AgentStatusMachine.standaloneOutcome(for: event)
+        } ?? AgentHookOutcome()
         for request in outcome.abandonedApprovals {
             release(request, agentUUID: event.agentUUID)
         }
-        onEventReceived?(event, resolution, outcome)
         if outcome.firedAttention, let resolution {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
+        }
+        if let request = outcome.turnEnd, let resolution, let agentUUID = event.agentUUID {
+            classifyTurnEnd(
+                request, agentUUID: agentUUID,
+                waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
+            )
         }
         return resolution.map {
             AppliedEvent(
@@ -255,6 +273,60 @@ final class AgentHookCenter {
                 claudeSessionAgent: claudeSessionAgent
             )
         }
+    }
+
+    /// Asks the classifier about a turn end, then applies its verdict. A
+    /// Mission child that asked its parent before ending its turn waits on
+    /// it, not on the user: done, as far as the user is concerned.
+    func classifyTurnEnd(_ request: TurnEndRequest, agentUUID: String, waitsOnParent: Bool) {
+        guard !waitsOnParent, let classifier = turnEndClassifier else {
+            applyTurnEndVerdict(waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID)
+            return
+        }
+        // The line it ends on is the message's own: its question, a yes/no
+        // one when no "or" or question word says otherwise.
+        let endingQuestion = TurnEndText.questionLine(of: request.message).map {
+            TurnEndQuestion(text: $0, isYesNo: TurnEndText.isYesNoQuestion($0))
+        }
+        let questionDelay = questionVerdictDelay
+        Task { @MainActor [weak self] in
+            // Put behind already (a later Stop in the same drain, a replayed
+            // backlog): no run for it.
+            guard let self, self.awaitsVerdict(request, agentUUID: agentUUID) else { return }
+            // Ends on a question: it asks, whatever a model would read. A
+            // moment's wait first, as a model call would take: a Stop hook
+            // that blocked this end (a review gate) keeps the turn going,
+            // and its continuation puts this turn end behind (the verdict
+            // then drops, as a late one does).
+            if let endingQuestion {
+                try? await Task.sleep(for: .seconds(questionDelay))
+                self.applyTurnEndVerdict(.asks(endingQuestion), for: request, agentUUID: agentUUID)
+                return
+            }
+            let verdict = await classifier.classify(request.message)
+            // Turned off meanwhile: every turn end alerts.
+            self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
+        }
+    }
+
+    /// How long a turn end that ends on a question waits before it asks
+    /// (see `classifyTurnEnd`); tests shorten it.
+    var questionVerdictDelay: TimeInterval = 1.5
+
+    private func awaitsVerdict(_ request: TurnEndRequest, agentUUID: String) -> Bool {
+        resolver?(agentUUID)?.column.pty?.awaitsTurnEndVerdict(request) == true
+    }
+
+    /// The verdict on a turn end, applied to its column found again (the
+    /// user may look at it now): an alert when the turn asks something, or
+    /// when the classifier couldn't tell. The alert refreshes the sidebar
+    /// and the Dock badge; nothing else a verdict does shows.
+    func applyTurnEndVerdict(_ verdict: TurnEndVerdict, for request: TurnEndRequest, agentUUID: String) {
+        guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty else { return }
+        if let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused) {
+            resolution.column.notifyAgentAttention(reason: reason)
+        }
+        onTurnEndSettled?()
     }
 
     /// Whether the sidebar holds a request its receiver waits on:
@@ -308,6 +380,13 @@ final class AgentHookCenter {
             behavior: .release,
             issuedAt: now
         ))
+    }
+
+    /// Whether a Stop's final message goes on to the classifier: none reads
+    /// it with the option off, and a `claude -p` run in the terminal asks
+    /// nobody at its turn end.
+    nonisolated static func keepsFinalMessage(classifierOn: Bool, foreground: ForegroundProcess?) -> Bool {
+        classifierOn && !isHeadlessClaude(foreground)
     }
 
     nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {

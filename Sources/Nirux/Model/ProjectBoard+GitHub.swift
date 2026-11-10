@@ -28,6 +28,10 @@ extension ProjectBoard {
     enum FetchError: Error, Equatable, Sendable {
         /// The GitHub CLI isn't where Nirux looks for it.
         case ghMissing
+        /// gh has no GitHub account to read with (its status 4), or GitHub
+        /// refuses its token: what gh said, when it says more than to run
+        /// `gh auth login`.
+        case notSignedIn(String?)
         /// gh failed: its first line of error, or why it didn't run.
         case failed(String)
         /// gh answered with something that isn't the JSON asked for.
@@ -36,6 +40,9 @@ extension ProjectBoard {
         var message: String {
             switch self {
             case .ghMissing: return "gh isn’t installed: pull requests can’t be read."
+            case .notSignedIn(let detail):
+                return "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+                    + (detail.map { " (gh: \($0))" } ?? "")
             case .failed(let reason): return "gh: \(reason)"
             case .unreadable: return "gh answered with something Nirux can’t read."
             }
@@ -108,14 +115,17 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     /// gh at `ghPath`, from a folder outside every checkout, with the
     /// neutral environment. Nil when it didn't start or timed out. The
     /// merge queue and the PR feedback read run gh through it too.
-    static func runGH(_ ghPath: String, arguments: [String], timeout: TimeInterval) -> BoundedProcessResult? {
+    static func runGH(
+        _ ghPath: String, arguments: [String], timeout: TimeInterval, maxStandardOutputBytes: Int? = nil
+    ) -> BoundedProcessResult? {
         BoundedProcess.run(
             executableURL: URL(fileURLWithPath: ghPath),
             arguments: arguments,
             currentDirectoryURL: FileManager.default.temporaryDirectory,
             environment: environment,
             timeout: timeout,
-            captureStandardError: true
+            captureStandardError: true,
+            maxStandardOutputBytes: maxStandardOutputBytes
         )
     }
 
@@ -125,6 +135,14 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             return .failure(.failed("it couldn’t start, or took longer than \(Int(timeout)) s"))
         }
         guard result.terminationStatus == 0 else {
+            // No account signed in, or a token GitHub refuses: as the merge
+            // queue tells them.
+            let output = GitHubCLIQueueClient.Output(
+                status: result.terminationStatus, standardOutput: result.standardOutput, standardError: result.standardError
+            )
+            if case .notSignedIn(let message) = GitHubCLIQueueClient.classify(output) {
+                return .failure(.notSignedIn(message.lowercased().contains("gh auth login") ? nil : message))
+            }
             let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
             return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
         }

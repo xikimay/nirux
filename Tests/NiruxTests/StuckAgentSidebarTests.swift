@@ -287,8 +287,10 @@ final class StuckAgentSidebarTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let pty = PtySession()
-        // Echoes what it is sent, under the name `claude`.
-        pty.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: directory.path)
+        // Keeps what it is sent, under the name `claude`.
+        let agent = AgentStandIn()
+        defer { agent.remove() }
+        pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
         let started = try await waitUntil { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         XCTAssertTrue(started)
         let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
@@ -311,11 +313,11 @@ final class StuckAgentSidebarTests: XCTestCase {
         }
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now), .notAtPrompt)
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertFalse(pty.recentOutput().contains("continue"), "nothing typed into a dialog")
+        XCTAssertFalse(agent.input.contains("continue"), "nothing typed into a dialog")
 
         pty.applyAgentHook(hook(.subagentStop, agent: "sub"), isUserFocused: false)
         XCTAssertNil(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 1))
-        let typed = try await waitUntil { pty.recentOutput().contains("continue") }
+        let typed = try await waitUntil { agent.input.contains("continue") }
         XCTAssertTrue(typed)
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 2), .alreadySent, "one click, one continue")
         XCTAssertNil(
@@ -330,8 +332,8 @@ final class StuckAgentSidebarTests: XCTestCase {
     // MARK: - Nirux in the background
 
     /// The heartbeat stops in the background, and a blocked agent fires no
-    /// hook: the slow watch still alerts, once, and hands the alert on (to
-    /// Telegram).
+    /// hook: the slow watch still alerts, once — also for a dialog that
+    /// crossed the threshold on screen, with Nirux in front.
     func testStuckWatchAlertsWhileNiruxIsInTheBackground() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-stuck-watch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -382,23 +384,102 @@ final class StuckAgentSidebarTests: XCTestCase {
         // The system notification needs an app bundle, which xctest isn't.
         var notified: [AgentAttentionReason?] = []
         column.onAgentAttention = { notified.append($0) }
-        var alerts: [AgentAttentionReason] = []
-        shell.onStuckAgentAlert = { reason, _, columnIndex, alerted in
-            XCTAssertEqual(columnIndex, 0)
-            XCTAssertTrue(alerted === column)
-            alerts.append(reason)
-        }
         shell.stuckAgentWaitThreshold = 600
-        shell.refreshStuckAgents(snapshot: snapshot, now: now)
-        shell.refreshStuckAgents(snapshot: snapshot, now: now + 30)
+        // On screen in front of the user, the alert stays owed: taken
+        // there it would reach nobody, and never go out again.
+        XCTAssertTrue(shell.activeWorkspace === shell.workspaces.first)
+        XCTAssertEqual(shell.activeWorkspace?.focusedIndex, 0)
+        shell.refreshStuckAgents(snapshot: snapshot, now: now - 60, appIsActive: true)
+        XCTAssertEqual(notified, [])
+        shell.refreshStuckAgents(snapshot: snapshot, now: now, appIsActive: false)
+        shell.refreshStuckAgents(snapshot: snapshot, now: now + 30, appIsActive: false)
         let waited = AgentAttentionReason.stillWaiting(.permission(tool: "Bash", summary: nil), waited: 3_600)
-        XCTAssertEqual(alerts, [waited], "once")
-        XCTAssertEqual(notified, [waited])
+        XCTAssertEqual(notified, [waited], "once")
 
         // Nirux leaving the front starts the watch as the heartbeat stops.
         NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
         XCTAssertNotNil(shell.stuckWatchTimer)
         shell.stopStuckWatch()
         XCTAssertNil(shell.stuckWatchTimer)
+    }
+
+    // MARK: - Going in circles
+
+    /// From Claude's hook events to the task's row: a working agent whose
+    /// commands keep hanging says so (`AgentCirclingHint`), and not with
+    /// the option off.
+    func testAHungTurnShowsOnItsRowWhileTheAgentWorks() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-circling-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", root.path, 1)
+        defer {
+            if let previousStateDirectory { setenv("NIRUX_STATE_DIR", previousStateDirectory, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = shell
+        defer { window.close() }
+        XCTAssertTrue(shell.circlingHintEnabled, "on by default")
+
+        let pty = try XCTUnwrap(shell.workspaces.first?.columns.first?.pty)
+        let started = try await waitUntil(timeout: 10) { pty.shellPID != nil }
+        XCTAssertTrue(started)
+        let shellPID = try XCTUnwrap(pty.shellPID)
+        // A claude in front of the column's shell, as the process table
+        // would show it.
+        let now = Date().timeIntervalSince1970
+        let claudePID: pid_t = 99_998
+        let snapshot = ProcessSnapshot(entries: [
+            ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: claudePID,
+                name: "zsh", startedAt: now - 800, arguments: ["zsh"]
+            ),
+            ProcessSnapshot.Entry(
+                pid: claudePID, parentPID: shellPID, processGroupID: claudePID, terminalForegroundProcessGroupID: claudePID,
+                name: "claude", startedAt: now - 700, arguments: ["claude"]
+            )
+        ])
+        func hook(_ name: AgentHookEvent.Name, hung: Bool = false) -> AgentHookEvent {
+            AgentHookEvent(
+                kind: .claude, name: name, sessionID: "s", toolName: hung ? "Bash" : nil,
+                toolEnd: hung ? AgentToolEnd.hung.rawValue : nil, toolFamily: hung ? "ls" : nil, timestamp: now
+            )
+        }
+        // What the sidebar draws, not only what it was told: a hint that
+        // changes must redraw the row.
+        shell.isSidebarExpanded = true
+        shell.sidebar.isExpanded = true
+        shell.relayout(animated: false)
+        @MainActor func shows(_ text: String) -> Bool {
+            shell.updateSidebar(snapshot: snapshot)
+            var views: [NSView] = [shell.sidebar]
+            while let view = views.popLast() {
+                if (view as? NSTextField)?.stringValue == text { return true }
+                views += view.subviews
+            }
+            return false
+        }
+        // Nirux sees the claude in front before its hooks come in: a new
+        // foreground program starts from nothing.
+        XCTAssertFalse(shows("Working"))
+        for event in [hook(.sessionStart), hook(.userPromptSubmit), hook(.postToolUse, hung: true), hook(.postToolUse, hung: true)] {
+            pty.applyAgentHook(event, isUserFocused: false)
+        }
+        XCTAssertTrue(shows("Working"))
+        pty.applyAgentHook(hook(.postToolUse, hung: true), isUserFocused: false)
+        XCTAssertTrue(shows("Stuck? · 3 timeouts"))
+        XCTAssertFalse(shows("Working"))
+
+        shell.circlingHintEnabled = false
+        XCTAssertTrue(shows("Working"), "turned off in Settings")
+        shell.circlingHintEnabled = true
+        XCTAssertTrue(shows("Stuck? · 3 timeouts"))
     }
 }

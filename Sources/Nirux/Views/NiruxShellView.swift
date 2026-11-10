@@ -73,6 +73,9 @@ final class NiruxShellView: NSView {
     )
     /// Keeps stuck-agent alerts going while the heartbeat is stopped.
     var stuckWatchTimer: Timer?
+    /// A working agent that may be going in circles says so on its row
+    /// (Settings; see `AgentCirclingHint`). Read with the restored state.
+    var circlingHintEnabled = PersistedSettings().agentCirclingHint
     /// Mission questions handed to the user (the child's card turned
     /// amber), by question ID: the child workspace whose notification they
     /// raised, once.
@@ -83,6 +86,10 @@ final class NiruxShellView: NSView {
     /// The reply popover, and the question it shows.
     var missionReplyPopover: NSPopover?
     var missionReplyQuestionID: String?
+    /// The Reply… popover of a turn's question, and that question
+    /// (`showTurnReplyPopover`, `closeStaleTurnReply`).
+    var turnReplyPopover: NSPopover?
+    var turnReplyQuestion: SidebarTurnQuestion?
     /// Lines for a Lead's prompt (the user answered a question it handed
     /// over), typed once that prompt is free (`typeMissionMessages`).
     var pendingLeadNotices: [LeadNotice] = []
@@ -94,23 +101,26 @@ final class NiruxShellView: NSView {
     /// (`queue_merge`), by `<space id> <owner/name>`: a Lead may replace its
     /// own, never the user's.
     var leadQueueProposals: [String: [Int]] = [:]
-    /// A stuck-agent alert went out (Telegram relays it): the reason, the
-    /// workspace, the column's index, the column.
-    var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
-    /// A new worktree's setup script failed in that column (Telegram).
-    var onSetupScriptFailed: ((WorkspaceState, Int, ColumnState) -> Void)?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
     let quickSwitch = QuickSwitchState()
 
     /// Agent launches, the home folder, cookies and modal alerts; tests
     /// replace them (see ShellSideEffects).
     var sideEffects = ShellSideEffects()
+    /// The CI failure triage's state (docs/ci-failure-triage.md).
+    let ciTriageCenter = CITriageCenter()
 
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?
     var commandPalette: CommandPalette?
     var urlPanel: URLInputPanel?
+    /// A cookie import is under way, from reading the profiles to its
+    /// result: one at a time (see importBrowserCookies).
+    var isImportingCookies = false
+    /// Its profiles are being read; the import that started the read.
+    var isReadingCookieProfiles = false
+    var cookieImportGeneration = 0
     var filePickerPanel: FilePickerPanel?
     var searchPanel: EditorSearchPanel?
     var globalSearchPanel: GlobalSearchPanel?
@@ -265,6 +275,9 @@ final class NiruxShellView: NSView {
         }
         sidebar.onAgentResume = { [weak self] wsIndex, colIndex, failedAt in
             self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
+        }
+        sidebar.onTurnAnswer = { [weak self] question, answer, button in
+            self?.answerFromCard(answer, to: question, button: button)
         }
         wireDeferredAgentResume()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in

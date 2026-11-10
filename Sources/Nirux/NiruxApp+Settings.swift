@@ -8,13 +8,10 @@ import AppKit
 /// another value nobody chose. A failed write puts the control back.
 ///
 /// It is a panel that doesn't float or hide: like Nirux's other panels, it
-/// doesn't keep the app running once the main window closes, keys typed in
-/// it never reach a terminal (isOverlayActive), and Edit > Undo works in its
-/// text field (PanelTextUndo).
+/// doesn't keep the app running once the main window closes, and keys typed
+/// in it never reach a terminal (isOverlayActive).
 extension NiruxApp {
     private static let settingsWriteFailure = "Could not write the settings file. Check the disk and try again."
-    private static let storedTokenPlaceholder = "Stored in Keychain — paste one to replace it"
-    private static let missingTokenPlaceholder = "Paste the token from @BotFather"
 
     @objc func showSettings(_ sender: Any?) {
         if let existing = settingsWindow {
@@ -27,7 +24,6 @@ extension NiruxApp {
         tabs.addTabViewItem(settingsTab("General", symbol: "gearshape", generalPane()))
         tabs.addTabViewItem(settingsTab("Agents", symbol: "sparkles", agentsPane()))
         tabs.addTabViewItem(settingsTab("Notifications", symbol: "bell", notificationsPane()))
-        tabs.addTabViewItem(settingsTab("Telegram", symbol: "paperplane", telegramPane()))
 
         // This initializer also titles the window after the tab picked.
         let window = NSPanel(contentViewController: tabs)
@@ -44,7 +40,6 @@ extension NiruxApp {
         tabs.fitWindowToSelectedPane(animated: false)
         window.center()
         window.makeKeyAndOrderFront(nil)
-        refreshTelegramSettingsState()
     }
 
     private func settingsTab(_ label: String, symbol: String, _ pane: NSView) -> NSTabViewItem {
@@ -138,6 +133,17 @@ extension NiruxApp {
         SettingsForm.select(current, in: stuck)
         settingsStuckAgentPopup = stuck
 
+        // A tooltip, not a paragraph under it: the pane is as tall as a
+        // 13-inch screen allows.
+        let circling = SettingsForm.checkbox(
+            "Hint when a working agent may be stuck", target: self, action: #selector(settingsCirclingHintChanged(_:))
+        )
+        circling.state = NiruxShellView.currentCirclingHintEnabled() ? .on : .off
+        circling.toolTip = "A working Claude Code task's row says \"Stuck?\" in grey, in place of \"Working\", once 3 "
+            + "of its commands ran past their time limit close together, or one command failed 5 times in a row. Counted on "
+            + "your Mac from Claude Code's hooks: the agent isn't interrupted, and nothing alerts."
+        circling.setAccessibilityHelp(circling.toolTip)
+        settingsCirclingHintCheckbox = circling
 
         return SettingsForm.pane([
             [
@@ -160,12 +166,13 @@ extension NiruxApp {
                 )
             ],
             [
-                SettingsForm.header("Waiting dialogs"),
+                SettingsForm.header("Stuck agents"),
                 SettingsForm.row("Flag a dialog waiting after", stuck),
                 SettingsForm.hint(
                     "A permission or question dialog open this long marks its agent as stuck: "
                         + "a badge on its card and one notification."
-                )
+                ),
+                circling
             ],
             missionsSection(),
             explainSection()
@@ -215,31 +222,41 @@ extension NiruxApp {
     }
 
     private func notificationsPane() -> NSView {
-        let current = Persistence.load()?.settings ?? PersistedSettings()
-        let completion = SettingsForm.checkbox(
-            "Notify when an agent turn completes", target: self, action: #selector(settingsTelegramCompletionChanged(_:))
+        let current = PersistedSettings.effective(Persistence.load()?.settings)
+        let onlyAsks = SettingsForm.checkbox(
+            "Alert only when Claude asks something", target: self, action: #selector(settingsAlertOnlyWhenClaudeAsksChanged(_:))
         )
-        completion.state = current.telegramNotifyOnCompletion ? .on : .off
-        settingsTelegramCompletionCheckbox = completion
-        let attention = SettingsForm.checkbox(
-            "Notify when an agent needs attention", target: self, action: #selector(settingsTelegramAttentionChanged(_:))
+        onlyAsks.state = current.alertOnlyWhenClaudeAsks ? .on : .off
+        settingsAlertOnlyWhenClaudeAsksCheckbox = onlyAsks
+        let flakyCI = SettingsForm.checkbox(
+            "Say when a CI failure looks flaky", target: self, action: #selector(settingsTriageCIFailuresChanged(_:))
         )
-        attention.state = current.telegramNotifyOnAttention ? .on : .off
-        settingsTelegramAttentionCheckbox = attention
+        flakyCI.state = current.triageCIFailures ? .on : .off
+        settingsTriageCIFailuresCheckbox = flakyCI
 
         return SettingsForm.pane([
             [
-                SettingsForm.header("On this Mac"),
+                onlyAsks,
+                SettingsForm.hint(
+                    "When a Claude Code turn ends, Sonnet reads its last message (claude -p, on a Claude "
+                        + "subscription only) and Nirux alerts only if it asks you something. When that check "
+                        + "can't run, the turn alerts. Codex and other agents alert at every turn end.",
+                    under: onlyAsks
+                ),
+                flakyCI,
+                SettingsForm.hint(
+                    "When a pull request's checks fail, Nirux reads the failed job's log with gh and says \"likely "
+                        + "flaky\" when a rerun would probably pass: a job that never ran, a failed download, tests "
+                        + "that passed on a rerun before. For failing tests the pull request doesn't edit, Sonnet "
+                        + "reads their messages and source (claude -p, on a Claude subscription only, and only when "
+                        + "the workspace's Claude Code runs on that account). XCTest and Swift build logs only. "
+                        + "Nirux never reruns by itself.",
+                    under: flakyCI
+                ),
                 SettingsForm.hint(
                     "Banners and sounds, shown while Nirux is in the background, follow System Settings › "
                         + "Notifications › Nirux."
                 )
-            ],
-            [
-                SettingsForm.header("Telegram"),
-                completion,
-                attention,
-                SettingsForm.hint("Sent to the paired chat while Telegram Remote Access is on (Telegram tab).")
             ]
         ])
     }
@@ -271,51 +288,6 @@ extension NiruxApp {
                 under: approvals
             )
         ]
-    }
-
-    private func telegramPane() -> NSView {
-        let enabled = SettingsForm.checkbox(
-            "Enable Telegram Remote Access", target: self, action: #selector(settingsTelegramEnabledChanged(_:))
-        )
-        enabled.state = Persistence.load()?.settings?.telegramRemoteAccessEnabled == true ? .on : .off
-        settingsTelegramEnabledCheckbox = enabled
-
-        let token = NSSecureTextField(frame: .zero)
-        token.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        token.placeholderString = (try? telegramTokenLoader()) != nil
-            ? Self.storedTokenPlaceholder
-            : Self.missingTokenPlaceholder
-        // Return stores it; leaving the field doesn't.
-        token.cell?.sendsActionOnEndEditing = false
-        token.target = self
-        token.action = #selector(settingsTelegramSaveToken(_:))
-        settingsTelegramTokenField = token
-
-        let saveToken = NSButton(title: "Save Token", target: self, action: #selector(settingsTelegramSaveToken(_:)))
-        let clearToken = NSButton(title: "Clear Token", target: self, action: #selector(settingsTelegramClearToken(_:)))
-
-        let status = NSTextField(wrappingLabelWithString: "")
-        status.textColor = .secondaryLabelColor
-        status.isSelectable = false
-        status.preferredMaxLayoutWidth = SettingsForm.textWidth
-        settingsTelegramStatusLabel = status
-
-        let pair = NSButton(title: "Generate Pairing Code", target: self, action: #selector(settingsTelegramPair(_:)))
-        settingsTelegramPairButton = pair
-
-        return SettingsForm.pane([
-            [
-                SettingsForm.header("Telegram Remote Access"),
-                enabled,
-                SettingsForm.row("Bot token", token, trailing: saveToken),
-                SettingsForm.hint(
-                    "Use a dedicated bot. The token is stored only in macOS Keychain, with Return, Save Token or "
-                        + "when Settings closes; pairing IDs and preferences are stored in state.json. Alerts are "
-                        + "chosen in the Notifications tab."
-                )
-            ],
-            [status, SettingsForm.buttons([pair, clearToken])]
-        ])
     }
 
     /// What turning the usage limits on does to Claude Code's status line,
@@ -351,7 +323,7 @@ extension NiruxApp {
     private func saveSetting(revert: () -> Void, _ update: (inout PersistedSettings) -> Void) -> Bool {
         guard Persistence.updateSettings(liveLayout: shell?.persistedState(), update) else {
             revert()
-            showSettingsError(Self.settingsWriteFailure, title: "Settings")
+            showSettingsError(Self.settingsWriteFailure)
             return false
         }
         return true
@@ -417,6 +389,13 @@ extension NiruxApp {
         shell?.stuckAgentWaitThreshold = NiruxShellView.stuckWaitThreshold(minutes: minutes)
     }
 
+    @objc func settingsCirclingHintChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.agentCirclingHint = enabled }) else { return }
+        shell?.circlingHintEnabled = enabled
+        shell?.updateSidebar()
+    }
+
     /// Only a changed choice is written, and the default as none: a later
     /// default reaches whoever didn't choose, and a value a newer build
     /// saved, which shows as the default, stays.
@@ -463,162 +442,73 @@ extension NiruxApp {
         }
     }
 
-    // MARK: - Telegram
-
-    @objc func settingsTelegramCompletionChanged(_ sender: NSButton) {
+    @objc func settingsAlertOnlyWhenClaudeAsksChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
-        guard saveSetting(revert: Self.toggledBack(sender), { $0.telegramNotifyOnCompletion = enabled }) else { return }
-        telegramRemoteAccessController?.reloadFromPersistence()
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.alertOnlyWhenClaudeAsks = enabled }) else { return }
+        AgentHookCenter.shared.turnEndClassifier = Self.turnEndClassifier(enabled: enabled)
     }
 
-    @objc func settingsTelegramAttentionChanged(_ sender: NSButton) {
+    static func currentAlertOnlyWhenClaudeAsks() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).alertOnlyWhenClaudeAsks
+    }
+
+    @objc func settingsTriageCIFailuresChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
-        guard saveSetting(revert: Self.toggledBack(sender), { $0.telegramNotifyOnAttention = enabled }) else { return }
-        telegramRemoteAccessController?.reloadFromPersistence()
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.triageCIFailures = enabled }) else { return }
+        applyCITriage(enabled: enabled, readsFinalMessages: AgentHookCenter.shared.turnEndClassifier != nil)
     }
 
-    /// Turning it on stores a token typed in the field first, and needs one.
-    @objc func settingsTelegramEnabledChanged(_ sender: NSButton) {
-        let enabling = sender.state == .on
-        if enabling {
-            guard commitTelegramToken() else {
-                sender.state = .off
-                return
-            }
-            let token: String?
-            do {
-                token = try telegramTokenLoader()
-            } catch {
-                sender.state = .off
-                showKeychainReadError(error)
-                return
-            }
-            guard token != nil else {
-                sender.state = .off
-                showSettingsError("Add a Telegram bot token before enabling Remote Access.")
-                return
-            }
-        }
-        guard saveSetting(revert: Self.toggledBack(sender), { $0.telegramRemoteAccessEnabled = enabling }) else { return }
-        telegramRemoteAccessController?.reloadFromPersistence()
-        refreshTelegramSettingsState()
+    static func currentTriageCIFailures() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).triageCIFailures
     }
 
-    @objc func settingsTelegramSaveToken(_ sender: Any?) {
-        commitTelegramToken()
+    /// The triage on or off in the shell, the model's setup checked ahead
+    /// of the first failure, and the marker hook receivers read.
+    func applyCITriage(enabled: Bool, readsFinalMessages: Bool) {
+        shell?.setCITriage(enabled: enabled)
+        Self.publishAccountMarker(readsFinalMessages: readsFinalMessages, triagesCI: enabled)
+        if enabled { Self.prepareCITriageModel() }
     }
 
-    /// Stores the token typed in the field, if any. A different bot has a
-    /// different trust boundary and update stream: its pairing reset is on
-    /// disk before the token reaches Keychain, so a retry after a Keychain
-    /// failure still sees the token as new. The field keeps a token that
-    /// wasn't stored.
-    @discardableResult
-    private func commitTelegramToken() -> Bool {
-        guard let field = settingsTelegramTokenField else { return true }
-        let entered = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !entered.isEmpty else { return true }
-        let existing: String?
-        do {
-            existing = try telegramTokenLoader()
-        } catch {
-            showKeychainReadError(error)
-            return false
-        }
-        guard TelegramBotToken.isPlausible(entered) else {
-            showSettingsError("The Telegram bot token does not match BotFather's token format.")
-            return false
-        }
-        if entered != existing {
-            let reset = Persistence.updateSettings(liveLayout: shell?.persistedState(), Self.forgetTelegramPairing)
-            guard reset else {
-                showSettingsError(Self.settingsWriteFailure, title: "Settings")
-                return false
-            }
-            do {
-                try telegramTokenSaver(entered)
-            } catch {
-                // The running bot must not keep the pairing just cleared.
-                telegramRemoteAccessController?.reloadFromPersistence()
-                refreshTelegramSettingsState()
-                showSettingsError(
-                    "The pairing was reset, but the new Telegram token could not be stored in Keychain: "
-                        + error.localizedDescription
-                )
-                return false
-            }
-        }
-        field.stringValue = ""
-        field.placeholderString = Self.storedTokenPlaceholder
-        telegramRemoteAccessController?.reloadFromPersistence()
-        refreshTelegramSettingsState()
-        return true
+    /// Checks the account the triage's model would run on (`claude
+    /// --help`, `claude auth status`, in the background); tests put a
+    /// double here, so that turning the option on never runs the real
+    /// `claude`.
+    static var prepareCITriageModel: () -> Void = { CITriageModel.runner.account.prepare() }
+
+    /// The classifier when the option is on, its setup checked ahead of
+    /// the first turn end; the marker tells hook receivers whether to keep
+    /// final messages.
+    static func turnEndClassifier(enabled: Bool) -> (any TurnEndClassifier)? {
+        let isRunning = ProcessInstance.running(pid: getpid()) != nil
+        publishAccountMarker(readsFinalMessages: enabled, triagesCI: currentTriageCIFailures())
+        return enabled && isRunning ? makeTurnEndClassifier() : nil
     }
 
-    /// A token typed in the field is stored first: pairing goes to that bot.
-    @objc func settingsTelegramPair(_ sender: NSButton) {
-        guard commitTelegramToken() else { return }
-        if telegramRemoteAccessController?.displayState.isPaired == true {
-            telegramRemoteAccessController?.unpair()
-        } else {
-            _ = telegramRemoteAccessController?.beginPairing()
-        }
-        refreshTelegramSettingsState()
-    }
-
-    /// Turns Remote Access off and forgets the pairing on disk first: a
-    /// failed write leaves the token and every control as they were.
-    @objc func settingsTelegramClearToken(_ sender: NSButton) {
-        let saved = Persistence.updateSettings(liveLayout: shell?.persistedState()) { settings in
-            settings.telegramRemoteAccessEnabled = false
-            Self.forgetTelegramPairing(&settings)
-        }
-        guard saved else {
-            showSettingsError(Self.settingsWriteFailure, title: "Settings")
+    /// The marker of this Nirux while an option needs what hook receivers
+    /// know of the agent's account (`TurnEndMarker`); none otherwise.
+    static func publishAccountMarker(readsFinalMessages: Bool, triagesCI: Bool) {
+        let me = ProcessInstance.running(pid: getpid())
+        guard let me, readsFinalMessages || triagesCI else {
+            TurnEndMarker.withdraw(app: me)
             return
         }
-        settingsTelegramEnabledCheckbox?.state = .off
-        telegramRemoteAccessController?.reloadFromPersistence()
-        do {
-            try telegramTokenDeleter()
-        } catch {
-            refreshTelegramSettingsState()
-            showSettingsError("Could not remove the Telegram token from Keychain: \(error.localizedDescription)")
-            return
-        }
-        settingsTelegramTokenField?.stringValue = ""
-        settingsTelegramTokenField?.placeholderString = Self.missingTokenPlaceholder
-        telegramRemoteAccessController?.reloadFromPersistence()
-        refreshTelegramSettingsState()
+        TurnEndMarker.publish(
+            app: me, environment: ProcessInfo.processInfo.environment, readsFinalMessages: readsFinalMessages
+        )
     }
 
-    /// A different bot has a different trust boundary and update stream.
-    private static func forgetTelegramPairing(_ settings: inout PersistedSettings) {
-        settings.telegramPairedUserID = nil
-        settings.telegramPairedChatID = nil
-        settings.telegramLastUpdateID = nil
+    /// The classifier in use; tests put a double here, so that turning the
+    /// option on never runs the real `claude`.
+    static var makeTurnEndClassifier: () -> any TurnEndClassifier = {
+        ClaudeTurnEndClassifier.shared.prepare()
+        return ClaudeTurnEndClassifier.shared
     }
 
-    func refreshTelegramSettingsState() {
-        guard settingsWindow != nil else { return }
-        let display = telegramRemoteAccessController?.displayState
-        settingsTelegramStatusLabel?.stringValue = display?.statusText ?? "Remote Access is unavailable."
-        settingsTelegramPairButton?.title = display?.isPaired == true
-            ? "Unpair"
-            : (display?.pairingCode == nil ? "Generate Pairing Code" : "Regenerate Code")
-        settingsTelegramPairButton?.isEnabled = display?.enabled == true && display?.hasToken == true
-        // A status that wraps to another line needs the room.
-        (settingsWindow?.contentViewController as? SettingsTabViewController)?.fitWindowToSelectedPane(animated: true)
-    }
-
-    private func showKeychainReadError(_ error: Error) {
-        showSettingsError("Could not read the Telegram token from Keychain: \(error.localizedDescription)")
-    }
-
-    private func showSettingsError(_ message: String, title: String = "Telegram Remote Access") {
+    private func showSettingsError(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = title
+        alert.messageText = "Settings"
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         if let settingsWindow {
@@ -641,23 +531,18 @@ extension NiruxApp {
         settingsMissionHandoffsCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
         settingsStuckAgentPopup = nil
+        settingsCirclingHintCheckbox = nil
         settingsExplainModelPopup = nil
         settingsExplainEffortPopup = nil
-        settingsTelegramEnabledCheckbox = nil
-        settingsTelegramTokenField = nil
-        settingsTelegramCompletionCheckbox = nil
-        settingsTelegramAttentionCheckbox = nil
-        settingsTelegramStatusLabel = nil
-        settingsTelegramPairButton = nil
+        settingsAlertOnlyWhenClaudeAsksCheckbox = nil
+        settingsTriageCIFailuresCheckbox = nil
     }
 }
 
 // The main window's close button quits Nirux: a running merge queue asks
-// first. Settings stores a token left in its field as it closes, and stays
-// open, saying why, when it can't.
+// first.
 extension NiruxApp: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if sender === settingsWindow { return commitTelegramToken() }
         guard sender === mainWindow, let shell else { return true }
         return shell.mainWindowShouldClose()
     }

@@ -198,6 +198,10 @@ final class ColumnHeaderViewTests: XCTestCase {
             ColumnHeaderView.Status.agent(info(.needsAttention, reason: .message("Claude needs you")), wait: nil, now: 0)?.tone,
             .waiting
         )
+        // A turn that ended asking the user something.
+        let asks = ColumnHeaderView.Status.agent(info(.needsAttention, reason: .askedInReply("Merge?")), wait: nil, now: 0)
+        XCTAssertEqual(asks?.tone, .waiting)
+        XCTAssertEqual(asks?.text, "asks you")
 
         let permission = try XCTUnwrap(ColumnHeaderView.Status.agent(
             info(.needsAttention, reason: .permission(tool: "Bash", summary: "git push")), wait: nil, now: 0
@@ -471,7 +475,7 @@ final class ProjectBoardHeaderTests: XCTestCase {
         var picked: [String] = []
         var settingsOpened = 0
         board.onSelectProject = { picked.append($0) }
-        board.onBoardSettings = { settingsOpened += 1 }
+        board.onBoardSettings = { _ in settingsOpened += 1 }
         let header = ProjectBoardView.Header(
             projectName: "Board", repository: "acme/widgets", status: "Updated 21:14",
             projects: [.init(id: "a", name: "Board"), .init(id: "b", name: "Tools")], projectID: "a"

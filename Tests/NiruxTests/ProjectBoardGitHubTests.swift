@@ -216,6 +216,33 @@ final class ProjectBoardGitHubTests: XCTestCase {
         )
     }
 
+    /// gh signed out (its status 4), or with a token GitHub refuses, is
+    /// said in plain words.
+    func testGhSignedOutSaysSo() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-fake-gh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fakeGH = { (name: String, stderr: String, status: Int) throws -> GitHubCLIBoardClient in
+            let path = folder.appendingPathComponent(name).path
+            try Data("#!/bin/sh\necho '\(stderr)' >&2\nexit \(status)\n".utf8).write(to: URL(fileURLWithPath: path))
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+            return GitHubCLIBoardClient(findGH: { path })
+        }
+        let signedOut = try fakeGH("signed-out", "To get started with GitHub CLI, please run:  gh auth login", 4)
+        XCTAssertEqual(signedOut.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(nil)))
+        let revoked = try fakeGH("revoked", "HTTP 401: Bad credentials (https://api.github.com/graphql)", 1)
+        let refusal = "HTTP 401: Bad credentials (https://api.github.com/graphql)"
+        XCTAssertEqual(revoked.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(refusal)))
+        XCTAssertEqual(
+            ProjectBoard.FetchError.notSignedIn(nil).message,
+            "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+        )
+        XCTAssertEqual(
+            ProjectBoard.FetchError.notSignedIn(refusal).message,
+            "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh. (gh: \(refusal))"
+        )
+    }
+
     func testWithoutGhNothingRuns() {
         let client = GitHubCLIBoardClient(findGH: { nil })
         XCTAssertEqual(client.pullRequests(repository: "acme/widgets", state: .open), .failure(.ghMissing))
