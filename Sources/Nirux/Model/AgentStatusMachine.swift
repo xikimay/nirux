@@ -152,6 +152,11 @@ struct AgentStatusMachine {
         integratedAgentProcesses.contains(name)
     }
 
+    /// Epoch seconds of the last turn end an agent reported itself
+    /// (Claude's Stop or StopFailure, Codex's turn-complete); 0: none yet.
+    /// Silence that ends an output-fallback turn reports nothing.
+    var lastTurnEndedAt: TimeInterval { max(turnEndedAt, mainTurnEndedAt) }
+
     /// Why the column wants the user, while it does: the oldest dialog
     /// still believed open, else the last attention event's reason.
     var attentionReason: AgentAttentionReason? {

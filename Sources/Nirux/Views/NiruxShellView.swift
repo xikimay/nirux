@@ -366,7 +366,7 @@ final class NiruxShellView: NSView {
         )
 
         // Deeper than the glows themselves: each holds its pill.
-        let glowWidth = EdgeGlowView.depth
+        let glowWidth = EdgeGlowView.pillStrip
         let sideGlowWidth = min(viewportW, 320)
         let bottomGlowHeight = min(viewportH, 56)
         let vpX = sidebarW + 1

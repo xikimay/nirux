@@ -35,6 +35,10 @@ struct ColumnInfo: Hashable {
     var missionQuestion: SidebarMissionQuestion?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
+    /// When the agent last reported a turn's end (`PtySession.agentTurnEndedAt`),
+    /// for the column's sweep of light. Left out of `==` and the hash: the
+    /// sidebar draws nothing of it.
+    var turnEndedAt: TimeInterval = 0
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw

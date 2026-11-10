@@ -27,6 +27,8 @@ final class SidebarWorkspaceCardRenderer {
 
     private let layout: SidebarCardLayout
     private let yOffset: CGFloat
+    /// The working dot breathes (see `SidebarView.animates`).
+    private let animates: Bool
 
     private var views: [NSView] = []
     private var hitAreas: [SidebarHitArea] = []
@@ -36,9 +38,10 @@ final class SidebarWorkspaceCardRenderer {
 
     private var workspace: WorkspaceInfo { layout.workspace }
 
-    init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, yOffset: CGFloat) {
+    init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, yOffset: CGFloat, animates: Bool = true) {
         layout = SidebarCardLayout(workspace: workspace, sidebarWidth: sidebarWidth)
         self.yOffset = yOffset
+        self.animates = animates
     }
 
     func render() -> SidebarWorkspaceCardRenderResult {
@@ -203,25 +206,15 @@ final class SidebarWorkspaceCardRenderer {
         dot.wantsLayer = true
         dot.layer?.cornerRadius = size / 2
         dot.layer?.backgroundColor = color.cgColor
-        if mark == .working { Self.breathe(dot.layer) }
+        if mark == .working, animates { Self.breathe(dot.layer) }
         append(dot)
     }
 
-    /// The working dot breathes, in phase with every other one: a rebuild
-    /// doesn't restart it.
+    /// The working dot breathes, in phase with every other one and with
+    /// the columns' lights: a rebuild doesn't restart it.
     static func breathe(_ layer: CALayer?) {
         guard let layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let animation = CABasicAnimation(keyPath: "opacity")
-        animation.fromValue = 1.0
-        animation.toValue = 0.35
-        animation.duration = 0.9
-        animation.autoreverses = true
-        animation.repeatCount = .infinity
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        animation.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: animation.duration * 2)
-        // A slow fade all day long: no need for 120 frames a second.
-        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
-        layer.add(animation, forKey: "breathe")
+        layer.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")
     }
 
     // MARK: - Status line
@@ -602,7 +595,7 @@ final class SidebarWorkspaceCardRenderer {
             dot.wantsLayer = true
             dot.layer?.cornerRadius = size / 2
             dot.layer?.backgroundColor = state.cgColor
-            if layout.summary.mark == .working { Self.breathe(dot.layer) }
+            if layout.summary.mark == .working, animates { Self.breathe(dot.layer) }
             append(dot)
             maxX = dot.frame.minX - Theme.Space.sm
         }

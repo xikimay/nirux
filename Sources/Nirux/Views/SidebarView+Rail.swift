@@ -59,7 +59,8 @@ extension SidebarView {
                 addRailTile(tile, target: .railButton(.inactiveSection), region: .railButton(.inactiveSection), top: top)
             case .workspace(let info, let initials):
                 // The Lead's tile shows its sign, not initials.
-                let style = SidebarRailTileStyle.workspace(state: info.railState, isSelected: info.isActive, isInactive: info.isInactive)
+                var style = SidebarRailTileStyle.workspace(state: info.railState, isSelected: info.isActive, isInactive: info.isInactive)
+                if !animates { style.breathes = false }
                 let tile = info.isLead
                     ? SidebarRailTileView(style: style, symbolName: Theme.Symbol.lead)
                     : SidebarRailTileView(style: style, text: initials)

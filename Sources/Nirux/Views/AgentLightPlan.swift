@@ -40,18 +40,18 @@ struct AgentLightPlan: Equatable {
     /// A name longer than this is cut in a pill.
     static let nameLimit = 28
 
-    /// A column's light. A wait or an error shows while the user looks
-    /// elsewhere (the focused column says it in its header); a finished
+    /// A column's light: a wait or an error first, then work. The focused
+    /// column lights up too (more softly, see `EdgeGlowView.isSoft`): its
+    /// dialog still waits while the user is in another app. A finished
     /// turn shows none.
     static func light(of column: ColumnInfo) -> AgentLight? {
         if let signal = alert(of: column) { return .alert(signal) }
         return column.agentStatus == .working ? .working : nil
     }
 
-    /// What a column asks of the user while they look elsewhere, a
-    /// finished turn left out.
+    /// What a column asks of the user, a finished turn left out.
     static func alert(of column: ColumnInfo) -> AttentionSignal? {
-        column.offScreenAttention.flatMap { $0 == .finished ? nil : $0 }
+        column.attention.flatMap { $0 == .finished ? nil : $0 }
     }
 
     /// `infos`: the workspaces of the space on screen, top to bottom.
@@ -106,44 +106,43 @@ struct AgentLightPlan: Equatable {
         name.count > nameLimit ? name.prefix(nameLimit - 1).trimmingCharacters(in: .whitespaces) + "…" : name
     }
 
-    /// The user is back in the app: every wait and error is seen, work
-    /// goes on (see `NiruxShellView.clearAllAgentAttention`).
-    mutating func clearAlerts() {
+    /// The user is back in the app: the columns' waits and errors are
+    /// seen, work goes on (see `NiruxShellView.clearAllAgentAttention`).
+    /// The edges stay as they are until the next refresh: a dialog still
+    /// open out of view keeps its glow, without its pill coming back.
+    mutating func clearColumnAlerts() {
         columns = columns.filter { $0.value == .working }
-        left = nil
-        right = nil
-        top = nil
-        bottom = nil
     }
+
+    /// The agents the edges stand for.
+    var edgeAlerts: [EdgeAlert] { [left, right, top, bottom].compactMap { $0 } }
 }
 
-/// Finds the turns that just ended: a column that worked and no longer
-/// does, with nothing to ask, gets one sweep of light.
+/// Finds the turns that just ended, for one sweep of light each: only
+/// those an agent reported itself (`ColumnInfo.turnEndedAt`). An agent
+/// without hooks that falls silent may sit in its own prompt, and one that
+/// died reports nothing: neither sweeps.
 struct TurnEndSweeps {
-    /// Work shorter than this is a blip (a hook between two tool calls),
-    /// not a turn.
-    static let minimumWork: TimeInterval = 2
+    /// The last turn end seen of each column.
+    private var seen: [UUID: TimeInterval] = [:]
 
-    private var workingSince: [UUID: TimeInterval] = [:]
-
-    /// The columns whose turn ended since the last call. `now`: any
-    /// monotonic clock, in seconds.
-    mutating func update(columns: [ColumnInfo], now: TimeInterval) -> Set<UUID> {
+    /// The columns whose turn ended since the last call, with nothing to
+    /// ask and no work going on.
+    mutating func update(columns: [ColumnInfo]) -> Set<UUID> {
         var ended: Set<UUID> = []
-        var seen: Set<UUID> = []
+        var current: [UUID: TimeInterval] = [:]
         for column in columns {
             guard let id = column.id else { continue }
-            seen.insert(id)
-            if column.agentStatus == .working {
-                if workingSince[id] == nil { workingSince[id] = now }
-            } else if let since = workingSince.removeValue(forKey: id) {
-                // A wait or an error has its own light.
-                let asks = column.attention.map { $0 != .finished } ?? false
-                if now - since >= Self.minimumWork, !asks { ended.insert(id) }
-            }
+            current[id] = column.turnEndedAt
+            // A column seen for the first time ended nothing in front of
+            // the user.
+            guard let last = seen[id], column.turnEndedAt > last else { continue }
+            // A wait or an error has its own light.
+            let asks = column.attention.map { $0 != .finished } ?? false
+            if column.agentStatus != .working, !asks { ended.insert(id) }
         }
-        // Closed columns.
-        workingSince = workingSince.filter { seen.contains($0.key) }
+        // Closed columns, and those of a space left behind, are forgotten.
+        seen = current
         return ended
     }
 }

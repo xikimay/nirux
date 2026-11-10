@@ -251,6 +251,16 @@ final class SidebarView: NSView {
     /// actually would.
     private var lastRenderSignature: Int?
 
+    /// The working dots breathe; false: they show steady (see
+    /// `NiruxShellView.agentLightsMayMove`).
+    var animates = true {
+        didSet {
+            guard animates != oldValue else { return }
+            lastRenderSignature = renderSignature()
+            rebuildContent()
+        }
+    }
+
     private func renderSignature() -> Int {
         var hasher = Hasher()
         hasher.combine(lastProfiles)
@@ -258,6 +268,7 @@ final class SidebarView: NSView {
         hasher.combine(isExpanded)
         hasher.combine(isInactiveSectionCollapsed)
         hasher.combine(onboardingChecklist)
+        hasher.combine(animates)
         for workspace in lastInfos {
             if let lastActivityAt = workspace.lastActivityAt {
                 hasher.combine(Self.cardAge(since: lastActivityAt))

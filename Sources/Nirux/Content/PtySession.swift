@@ -357,6 +357,10 @@ final class PtySession: @unchecked Sendable {
     /// Why the agent waits on the user, while it does.
     var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
 
+    /// When the agent last reported a turn's end (see
+    /// `AgentStatusMachine.lastTurnEndedAt`); 0: never.
+    var agentTurnEndedAt: TimeInterval { state.machine.lastTurnEndedAt }
+
     /// When the user last typed into this terminal (0: never).
     var lastKeystrokeAt: TimeInterval { state.machine.lastKeystrokeAt }
 

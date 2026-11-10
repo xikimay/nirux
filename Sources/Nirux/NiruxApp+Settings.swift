@@ -94,8 +94,8 @@ extension NiruxApp {
             [
                 animations,
                 SettingsForm.hint(
-                    "A column breathes in green while its agent works and pulses in amber when it waits for you. "
-                        + "Off, the same colors show without moving, as they do while macOS reduces motion.",
+                    "A column's edge breathes in green while its agent works and pulses in amber when it waits for "
+                        + "you. Off, the same colors show without moving, as they do while macOS reduces motion.",
                     under: animations
                 )
             ],

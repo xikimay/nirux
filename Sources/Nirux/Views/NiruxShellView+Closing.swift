@@ -15,6 +15,8 @@ extension NiruxShellView {
         guard workspace.openColumns.count > 1 else { return requestCloseWorkspace(at: activeWSIndex) }
         guard confirmCloseColumn(closingColumn, in: workspace) else { return }
         closingColumn.isClosing = true
+        // Its light leaves with it.
+        applyAgentLights()
         let closingView = closingColumn.view
 
         // Animate out, then remove

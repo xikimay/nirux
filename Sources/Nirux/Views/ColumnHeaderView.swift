@@ -613,6 +613,13 @@ final class ColumnStatusPill: NSView {
     var status: ColumnHeaderView.Status? {
         didSet { if status != oldValue { apply() } }
     }
+    /// A working agent's dot breathes; false: it shows steady (see
+    /// `NiruxShellView.agentLightsMayMove`).
+    var animates = true {
+        didSet { if animates != oldValue { updateBreathing() } }
+    }
+    /// The dot breathes now, for tests.
+    var isBreathing: Bool { dot.layer?.animation(forKey: "breathe") != nil }
 
     let label = NSTextField(labelWithString: "")
     private let symbolView = NSImageView()
@@ -691,20 +698,14 @@ final class ColumnStatusPill: NSView {
         needsLayout = true
     }
 
-    /// A working agent's dot breathes, unless the user reduces motion.
+    /// A working agent's dot breathes with its column's light, unless
+    /// animations are off or the user reduces motion.
     private func updateBreathing() {
         guard let dotLayer = dot.layer else { return }
-        let breathes = status?.tone == .working && status?.symbol == nil
+        let breathes = animates && status?.tone == .working && status?.symbol == nil
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if breathes, dotLayer.animation(forKey: "breathe") == nil {
-            let breathe = CABasicAnimation(keyPath: "opacity")
-            breathe.fromValue = 1.0
-            breathe.toValue = 0.35
-            breathe.duration = 0.9
-            breathe.autoreverses = true
-            breathe.repeatCount = .infinity
-            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            dotLayer.add(breathe, forKey: "breathe")
+            dotLayer.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")
         } else if !breathes {
             dotLayer.removeAnimation(forKey: "breathe")
         }
