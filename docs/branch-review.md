@@ -1033,7 +1033,7 @@ say why and change nothing for it. Then say what you did for each number.
   doesn't fit stays unsent (the next ones may fit), and the sheet counts
   those.
 - **The message is sanitized as a whole**, paths and quoted lines included,
-  by the scalar filter of `RemotePromptSanitizer`, factored out: keep `\n` and
+  by the scalar filter of `TypedPromptSanitizer`, factored out: keep `\n` and
   `\t`, turn `\r` and `\r\n` into `\n`, drop the other C0 controls, DEL and
   C1. Not its `sanitize` as is, which also trims and caps at 8,000 Unicode
   scalars, nor its `terminalInput`, which appends a Return:

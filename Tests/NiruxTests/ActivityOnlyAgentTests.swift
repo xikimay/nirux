@@ -140,7 +140,7 @@ final class ActivityOnlyAgentTests: XCTestCase {
 
     // MARK: - Capabilities
 
-    func testRecognizedButNotARemotePromptTarget() {
+    func testRecognizedButNotATypedPromptTarget() {
         for name in ["gemini", "opencode"] {
             XCTAssertTrue(AgentStatusMachine.isRecognizedAgentProcess(name), name)
             XCTAssertTrue(AgentStatusMachine.activityOnlyAgentProcesses.contains(name), name)
@@ -149,14 +149,14 @@ final class ActivityOnlyAgentTests: XCTestCase {
         XCTAssertFalse(AgentStatusMachine.isRecognizedAgentProcess("node"))
     }
 
-    func testRemotePromptsReachOnlyIntegratedAgents() {
-        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "claude"))
-        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "codex"))
+    func testTypedPromptsReachOnlyIntegratedAgents() {
+        XCTAssertTrue(AgentStatusMachine.acceptsTypedPrompts(processName: "claude"))
+        XCTAssertTrue(AgentStatusMachine.acceptsTypedPrompts(processName: "codex"))
         // Recognized, but without hooks Nirux can't see their permission
-        // prompts: a remote prompt could answer one blindly.
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "gemini"))
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "opencode"))
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "zsh"))
+        // prompts: a typed prompt could answer one blindly.
+        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "gemini"))
+        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "opencode"))
+        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "zsh"))
     }
 
     // MARK: - Close confirmation
