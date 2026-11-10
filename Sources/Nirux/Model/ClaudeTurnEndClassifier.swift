@@ -104,10 +104,10 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     }
 
     /// ASK or DONE on the first line of the model's answer; nil for
-    /// anything else. After ASK, the "Q:" line is the question only when
-    /// `message` holds it word for word (a reworded one could put a Yes
-    /// next to words the agent never wrote), and "A: YESNO" says a plain
-    /// yes or no answers it.
+    /// anything else. After ASK, the question is the sentence of `message`
+    /// the "Q:" line quotes, as the message writes it (a reworded one could
+    /// put a Yes next to words the agent never wrote), and "A: YESNO" says
+    /// a plain yes or no answers it.
     static func verdict(fromAnswer text: String, message: String) -> TurnEndVerdict? {
         let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
         guard let first = lines.first(where: { !$0.isEmpty })?.uppercased() else { return nil }
@@ -116,8 +116,7 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         func value(_ key: String) -> String? {
             lines.first { $0.uppercased().hasPrefix(key) }.map { $0.dropFirst(key.count).trimmingCharacters(in: .whitespaces) }
         }
-        let quote = value("Q:")?.trimmingCharacters(in: TurnEndText.quotationMarks)
-        guard let quote, TurnEndText.quotes(quote, in: message) else { return .asks(nil) }
-        return .asks(TurnEndQuestion(text: quote, isYesNo: value("A:")?.uppercased() == "YESNO"))
+        guard let quote = value("Q:"), let sentence = TurnEndText.quotedSentence(quote, in: message) else { return .asks(nil) }
+        return .asks(TurnEndQuestion(text: sentence, isYesNo: value("A:")?.uppercased() == "YESNO"))
     }
 }

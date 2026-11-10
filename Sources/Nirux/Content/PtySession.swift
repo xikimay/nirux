@@ -367,7 +367,12 @@ final class PtySession: @unchecked Sendable {
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).
     func agentAskedQuestion(foreground: ForegroundProcess?) -> AgentAttentionReason? {
-        state.machine.visibleQuestion(foreground: foreground).map { .askedInReply($0.text) }
+        agentQuestion(foreground: foreground).map { .askedInReply($0.text) }
+    }
+
+    /// The same, with when it was asked and whether a yes or no answers it.
+    func agentQuestion(foreground: ForegroundProcess?) -> AgentStatusMachine.AskedQuestion? {
+        state.machine.visibleQuestion(foreground: foreground)
     }
 
     /// The user looks at this column: see `AgentStatusMachine.noteSeen`.

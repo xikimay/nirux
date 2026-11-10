@@ -283,7 +283,11 @@ final class AgentHookCenter {
             applyTurnEndVerdict(waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID)
             return
         }
-        let endsOnQuestion = TurnEndText.endsOnQuestion(request.message)
+        // The line it ends on is the message's own: its question, a yes/no
+        // one when no "or" or question word says otherwise.
+        let endingQuestion = TurnEndText.questionLine(of: request.message).map {
+            TurnEndQuestion(text: $0, isYesNo: TurnEndText.isYesNoQuestion($0))
+        }
         let questionDelay = questionVerdictDelay
         Task { @MainActor [weak self] in
             // Put behind already (a later Stop in the same drain, a replayed
@@ -294,9 +298,9 @@ final class AgentHookCenter {
             // that blocked this end (a review gate) keeps the turn going,
             // and its continuation puts this turn end behind (the verdict
             // then drops, as a late one does).
-            if endsOnQuestion {
+            if let endingQuestion {
                 try? await Task.sleep(for: .seconds(questionDelay))
-                self.applyTurnEndVerdict(.asks(nil), for: request, agentUUID: agentUUID)
+                self.applyTurnEndVerdict(.asks(endingQuestion), for: request, agentUUID: agentUUID)
                 return
             }
             let verdict = await classifier.classify(request.message)

@@ -64,7 +64,8 @@ final class TurnEndClassificationTests: XCTestCase {
             "Why did it fail? A stale build cache. I cleaned it.", "Pourquoi ça cassait ? Un cache périmé.",
             "```\nShall I?\n```", "> Should we keep v1?", "Done.\n\n## Why does it fail?",
             "Shall I merge?\n\nNo need: merged it already.", "The URL now carries ?ref=main and opens the tab.", "",
-            "Use `WHERE id = ?`", "Ready? 42", "Ready?\n```\nmake\n```\nDone.", "~~~\nShall I?\n~~~"
+            "Use `WHERE id = ?`", "Ready? 42", "Ready?\n```\nmake\n```\nDone.", "~~~\nShall I?\n~~~",
+            "Run this:\n\n    read -p \"Proceed?\""
         ]
         for message in model { XCTAssertFalse(TurnEndText.endsOnQuestion(message), message) }
         // The notification names the question, not what follows it.
@@ -766,7 +767,7 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(read("ASK\nQ: “\(merge)”\nA: OPEN"), .asks(TurnEndQuestion(text: merge, isYesNo: false)))
         XCTAssertEqual(
             read("ASK\nQ: PR #41 is open and CI is green.\nA: yesno"),
-            .asks(TurnEndQuestion(text: "PR #41 is open and CI is green.", isYesNo: true)), "Markdown aside"
+            .asks(TurnEndQuestion(text: "PR #41 is **open** and CI is green.", isYesNo: true)), "the message's own words"
         )
         XCTAssertEqual(read("ASK\nQ: \(merge)"), .asks(TurnEndQuestion(text: merge, isYesNo: false)), "no kind: open")
         XCTAssertEqual(read("ASK\nQ: Should I merge PR #41 now?\nA: YESNO"), .asks(nil), "reworded")
@@ -780,27 +781,87 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(read(""))
     }
 
-    /// A whole sentence of the agent's prose: not cut short, not from code
-    /// or a quoted text, not a piece of a word.
+    /// A whole sentence of the agent's prose, shown as the agent wrote it:
+    /// not cut short (at a line break, a period inside a word, an "e.g."),
+    /// not a piece of a word, not from code, a quoted text, a heading or a
+    /// table.
     func testQuoteIsAWholeSentenceOfTheProse() {
+        func quotes(_ quote: String, in message: String) -> Bool { TurnEndText.quotedSentence(quote, in: message) != nil }
         let choice = "Let me know if I should merge it or close it."
-        XCTAssertTrue(TurnEndText.quotes(choice, in: choice))
-        XCTAssertFalse(TurnEndText.quotes("Let me know if I should merge it", in: choice), "half a choice")
-        XCTAssertFalse(TurnEndText.quotes("if I should merge it or close it.", in: choice), "the end of it")
-        XCTAssertTrue(TurnEndText.quotes("Waiting for your go-ahead to push", in: "Done. Waiting for your go-ahead to push."))
-        XCTAssertTrue(TurnEndText.quotes("Shall I merge it?", in: "Shall I merge it? I can also close it."))
-        XCTAssertTrue(TurnEndText.quotes("Want me to merge it?", in: "Fixed.\n\n- Want me to merge it?"))
-        XCTAssertFalse(TurnEndText.quotes("ok?", in: "Can you take a look?"), "a piece of a word")
+        XCTAssertTrue(quotes(choice, in: choice))
+        XCTAssertFalse(quotes("Let me know if I should merge it", in: choice), "half a choice")
+        XCTAssertFalse(quotes("if I should merge it or close it.", in: choice), "the end of it")
+        XCTAssertTrue(quotes("Waiting for your go-ahead to push", in: "Done. Waiting for your go-ahead to push."))
+        XCTAssertTrue(quotes("Shall I merge it?", in: "Shall I merge it? I can also close it."))
+        XCTAssertTrue(quotes("Want me to merge it?", in: "Fixed.\n\n- Want me to merge it?"))
+        XCTAssertFalse(quotes("ok?", in: "Can you take a look?"), "a piece of a word")
+        XCTAssertFalse(quotes("t merge?", in: "Can't merge?"), "after an apostrophe")
+        XCTAssertFalse(quotes("Merge?", in: "re-Merge?"), "after a hyphen")
+        XCTAssertFalse(quotes("Should I delete config.", in: "Should I delete config.json?"), "a period inside a word")
+        XCTAssertFalse(quotes("Should I delete config", in: "Should I delete config.json?"), "before a period inside a word")
+        XCTAssertTrue(quotes("Want me to merge it", in: "Fixed.\n\nWant me to merge it"), "at the paragraph's end")
+        XCTAssertTrue(quotes("Shall I merge it (now?)", in: "Shall I merge it (now?) Tell me."), "past a closing bracket")
+        XCTAssertFalse(quotes("Should I add a cache, e.g.", in: "Should I add a cache, e.g. Redis?"), "an e.g.")
+
+        // A paragraph's lines are one text: a line break ends no sentence.
+        XCTAssertEqual(
+            TurnEndText.quotedSentence("Let me know if I should merge it.", in: "Let me know if I\nshould merge it."),
+            "Let me know if I should merge it."
+        )
+        XCTAssertFalse(quotes("Should I merge PR", in: "Should I merge PR\n#41?"), "cut at a line break")
 
         let script = "Run this and tell me what it prints:\n```\nProceed with deploy? (y/n)\n```"
-        XCTAssertFalse(TurnEndText.quotes("Proceed with deploy? (y/n)", in: script), "code")
-        XCTAssertTrue(TurnEndText.quotes("Run this and tell me what it prints:", in: script))
+        XCTAssertFalse(quotes("Proceed with deploy? (y/n)", in: script), "code")
+        XCTAssertTrue(quotes("Run this and tell me what it prints:", in: script))
+        XCTAssertFalse(quotes("Should I deploy to prod?", in: "Done.\n\n    Should I deploy to prod?"), "indented code")
+        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Done:\n\n    - Should I deploy to prod?"), "a list item")
+        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Steps:\n\n    1. Should I deploy to prod?"), "a numbered one")
         let quoted = "> Can you delete the old branches?\n\nDone, they're gone."
-        XCTAssertFalse(TurnEndText.quotes("Can you delete the old branches?", in: quoted), "the user's own words")
+        XCTAssertFalse(quotes("Can you delete the old branches?", in: quoted), "the user's own words")
+        XCTAssertFalse(quotes("Should I deploy to prod?", in: "## Should I deploy to prod?\n\nIt's green."), "a heading")
+        XCTAssertFalse(quotes("Should I deploy?", in: "| Should I deploy? | yes |"), "a table")
 
-        XCTAssertTrue(TurnEndText.quotes("Tell me if you'd rather split it.", in: "Tell me if you’d rather split it."))
-        XCTAssertTrue(TurnEndText.quotes("Should I rename user_id?", in: "Should I rename `user_id`?"), "Markdown aside")
-        XCTAssertTrue(TurnEndText.quotes("Keep the \"Resume\" label?", in: "Keep the “Resume” label?"))
+        // Shown as the agent wrote it, whatever the model's copy dropped.
+        XCTAssertEqual(
+            TurnEndText.quotedSentence("Should I run rm -rf build/?", in: "Done.\n\nShould I run `rm -rf build/*`?"),
+            "Should I run `rm -rf build/*`?"
+        )
+        XCTAssertEqual(TurnEndText.quotedSentence("Tell me if you'd rather split it.", in: "Tell me if you’d rather split it."),
+                       "Tell me if you’d rather split it.")
+        XCTAssertEqual(TurnEndText.quotedSentence("“Keep the \"Resume\" label?”", in: "Keep the “Resume” label?"),
+                       "Keep the “Resume” label?")
+        XCTAssertFalse(quotes("\"Resume\" or \"Restart\"?", in: "Keep \"Resume\" or \"Restart\"?"), "the end of it, quoted")
+    }
+
+    /// Whether a yes or no answers the question stays with it: a quoted
+    /// one keeps the model's kind, a turn ending on "?" the local rule's.
+    func testQuestionKeepsWhetherAYesOrNoAnswersIt() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        for (verdict, isYesNo) in [
+            (TurnEndVerdict.asks(TurnEndQuestion(text: "Shall I merge it?", isYesNo: true)), true),
+            (.asks(TurnEndQuestion(text: "Shall I merge it?", isYesNo: false)), false),
+            (.asks(nil), false),
+        ] {
+            machine = AgentStatusMachine()
+            let request = try XCTUnwrap(endTurn(message: asks).turnEnd)
+            _ = machine.applyTurnEndVerdict(verdict, for: request, isUserFocused: false)
+            XCTAssertEqual(machine.visibleQuestion(foreground: claude)?.isYesNo, isYesNo, "\(verdict)")
+        }
+    }
+
+    /// The rule for a question line a turn ends on: a yes or no answers it
+    /// unless it holds "or" or a question word.
+    func testYesNoRuleForTheLineATurnEndsOn() {
+        for line in ["Shall I merge it?", "Ready to push?", "Je merge ?", "Tu veux que je la merge ? 👍",
+                     "OK pour toi si je supprime l'ancien réglage ?", "Do you approve deleting the old bucket?"] {
+            XCTAssertTrue(TurnEndText.isYesNoQuestion(line), line)
+        }
+        for line in ["Merge it or keep it open?", "Which one do you prefer?", "What should the label say?",
+                     "On part sur la version courte ou la version complète ?", "Tu préfères laquelle ?",
+                     "Quel nom tu veux pour le réglage ?", "Qu’est-ce que tu en penses ?", "Comment je le nomme ?",
+                     "OK — which branch should this go on?", "Where does it go: `main`?"] {
+            XCTAssertFalse(TurnEndText.isYesNoQuestion(line), line)
+        }
     }
 
     func testReportReadsTheRunsEvents() {
@@ -1089,7 +1150,16 @@ final class TurnEndClassificationTests: XCTestCase {
         while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(alerts.value, [.askedInReply("Tests pass. Ready to push?")])
         XCTAssertEqual(classifier.messages.value, [], "no model call")
-        withExtendedLifetime(center) {}
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        XCTAssertEqual(column.pty?.agentQuestion(foreground: claude)?.isYesNo, true, "the message's own line, plain yes or no")
+
+        let (openCenter, _, openColumn, openRequest, openAlerts) = try turnEndColumn(message: "Merge it or keep it open?")
+        openCenter.turnEndClassifier = classifier
+        openCenter.questionVerdictDelay = 0.05
+        openCenter.classifyTurnEnd(openRequest, agentUUID: try XCTUnwrap(openColumn.agentUUID), waitsOnParent: false)
+        while openAlerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(openColumn.pty?.agentQuestion(foreground: claude)?.isYesNo, false, "a choice")
+        withExtendedLifetime([center, openCenter]) {}
     }
 
     /// A Stop hook blocked that end (a review gate) and the turn went on:
