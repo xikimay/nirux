@@ -9,9 +9,13 @@ let package = Package(
     ],
     dependencies: [
         // Exact: TerminalScreenText reaches private parts of this version.
+        // Temporary pin: libghostty-spm 2.2.2026110702 plus upstream PR #105
+        // (Lakr233/libghostty-spm#105, finds the resource bundle in
+        // Contents/Resources), one commit on the release tag, same binary.
+        // Switch back to Lakr233's release once #105 ships.
         .package(
-            url: "https://github.com/Lakr233/libghostty-spm.git",
-            exact: "2.2.2026110702"
+            url: "https://github.com/ventsislav-georgiev/libghostty-spm.git",
+            revision: "634ffdf77f22132fc502374c8fd1819241b5693f"
         ),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
     ],
