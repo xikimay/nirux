@@ -152,6 +152,15 @@ final class WorkspaceState {
     var phase: WorkspacePhase?
     var lastSummary: String?
     var lastSummaryIsManual: Bool = false
+    /// `lastSummary` is the status line of the task's last turn end
+    /// (`settleTurnStatus`), not an agent's report as it came (Codex's
+    /// message), nor one from before a turn whose line is unknown.
+    var lastSummaryIsStatus = false
+    /// The newest turn end whose status line is on its way, and the newest
+    /// one settled (its line, "unchanged", or none). In memory only: runs
+    /// don't outlive the app.
+    private(set) var awaitedTurnStatus: TimeInterval?
+    private(set) var settledTurnStatus: TimeInterval?
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
@@ -533,9 +542,72 @@ extension WorkspaceState {
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        guard lastSummary != compactSummary else { return changed }
+        // A Claude line on its way for an older turn would replace it.
+        if let awaited = awaitedTurnStatus, awaited < timestamp { awaitedTurnStatus = nil }
+        settledTurnStatus = max(settledTurnStatus ?? timestamp, timestamp)
+        guard lastSummary != compactSummary || lastSummaryIsStatus else { return changed }
         lastSummary = compactSummary
+        lastSummaryIsStatus = false
         return true
+    }
+
+    /// A run started for the status line of the turn that ended at
+    /// `turnEndedAt`: until it settles, the row shows no line from an
+    /// older turn. False for a turn end older than one already known.
+    @discardableResult
+    func awaitTurnStatus(turnEndedAt: TimeInterval) -> Bool {
+        guard turnEndedAt > (awaitedTurnStatus ?? settledTurnStatus ?? -.infinity) else { return false }
+        awaitedTurnStatus = turnEndedAt
+        return true
+    }
+
+    /// A turn ended at `turnEndedAt` with no run for its line (no final
+    /// message: another account, a headless run; the option off): the
+    /// line from before it says nothing of it. Unless a newer turn end is
+    /// known already.
+    func forgetTurnStatus(turnEndedAt: TimeInterval) {
+        guard turnEndedAt > (awaitedTurnStatus ?? settledTurnStatus ?? -.infinity) else { return }
+        awaitedTurnStatus = nil
+        settledTurnStatus = turnEndedAt
+        lastSummaryIsStatus = false
+    }
+
+    /// The run for the turn that ended at `turnEndedAt` answered, if no
+    /// newer turn end's run started since: its line goes in `lastSummary`
+    /// unless the user wrote it; "unchanged" keeps the line as it was; no
+    /// answer leaves the row without a line until the next turn. True when
+    /// the row may have changed.
+    @discardableResult
+    func settleTurnStatus(_ status: TurnStatus?, turnEndedAt: TimeInterval) -> Bool {
+        guard awaitedTurnStatus == turnEndedAt else { return false }
+        awaitedTurnStatus = nil
+        settledTurnStatus = turnEndedAt
+        switch status {
+        case .line(let line)? where !lastSummaryIsManual:
+            lastSummary = line
+            lastSummaryIsStatus = true
+        case .unchanged?, .line?:
+            break
+        case nil:
+            lastSummaryIsStatus = false
+        }
+        return true
+    }
+
+    /// The last turn end's status line, once it is known. (Never the
+    /// user's summary: writing one clears `lastSummaryIsStatus`.)
+    var turnStatusLine: String? {
+        lastSummaryIsStatus && awaitedTurnStatus == nil ? lastSummary : nil
+    }
+
+    /// The task's line on its row: the summary the user wrote, else the
+    /// last status line (still while the next one is on its way). Never an
+    /// agent's report as it came, nor a line from before a turn whose line
+    /// is unknown. One line.
+    var statusLine: String? {
+        let line = lastSummaryIsManual ? lastSummary : lastSummaryIsStatus ? lastSummary : nil
+        return line.flatMap(Self.normalizedContextText)?
+            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     @discardableResult
@@ -688,6 +760,9 @@ extension WorkspaceState {
         // Blank elsewhere: a Nirux started from a Lead's shell must not
         // pass the role on to every terminal it opens.
         environment[Self.leadEnvironmentKey] = isLead ? "1" : ""
+        // Nor from an SDK run's: its agents would read as headless
+        // (`TurnEndText.isHeadless`). Blank, Claude Code sets its own.
+        environment["CLAUDE_CODE_ENTRYPOINT"] = ""
         guard !startedOutsideNirux else {
             // Its agents' nirux:// requests ask first, as its own did: they
             // come from outside Nirux too.

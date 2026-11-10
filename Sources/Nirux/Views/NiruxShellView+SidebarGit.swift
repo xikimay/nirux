@@ -75,11 +75,15 @@ extension NiruxShellView {
                           diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
-                          lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
+                          // A status line written before the option went off is no summary.
+                          lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
+                          lastActivityAt: workspace.lastActivityAt,
                           reviewBadges: workspace.reviewBadges,
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                           isLead: workspace.isLead,
-                          parentTitle: parents[index].map { workspaces[$0].title })
+                          parentTitle: parents[index].map { workspaces[$0].title },
+                          statusLine: turnStatusEnabled ? workspace.statusLine : nil,
+                          turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil)
         }
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead
@@ -348,6 +352,24 @@ extension NiruxShellView {
         if events.contains(where: { [.stop, .stopFailure].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
+    }
+
+    /// A turn's status line landed on its task: its row says it, and the
+    /// state file keeps it.
+    func turnStatusChanged() {
+        updateSidebar()
+        saveState()
+    }
+
+    /// The status lines on or off on the rows at once. Back on, the lines
+    /// written before are forgotten: turns ended meanwhile without one.
+    func setTurnStatus(enabled: Bool) {
+        turnStatusEnabled = enabled
+        if enabled {
+            for workspace in workspaces where workspace.lastSummaryIsStatus { workspace.lastSummaryIsStatus = false }
+            saveState()
+        }
+        updateSidebar()
     }
 
     /// HEAD is read in the agent's own directory, now: the workspace's git

@@ -86,6 +86,17 @@ final class TurnEndClassificationTests: XCTestCase {
         }
         XCTAssertEqual(try XCTUnwrap(event("Stop")).finalMessage, "Shall I merge?")
         XCTAssertNil(try XCTUnwrap(event("Stop", extra: ["agent_id": "sub"])).finalMessage)
+        // A headless `claude -p`: told by the environment its hooks inherit.
+        let headless = AgentHookEvent(
+            kind: .claude, payload: ["hook_event_name": "Stop", "session_id": "s", "last_assistant_message": "Done."],
+            env: ["NIRUX_AGENT_UUID": "u", "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"], now: now
+        )
+        XCTAssertNil(try XCTUnwrap(headless).finalMessage)
+        let interactive = AgentHookEvent(
+            kind: .claude, payload: ["hook_event_name": "Stop", "session_id": "s", "last_assistant_message": "Done."],
+            env: ["NIRUX_AGENT_UUID": "u", "CLAUDE_CODE_ENTRYPOINT": "cli"], now: now
+        )
+        XCTAssertEqual(try XCTUnwrap(interactive).finalMessage, "Done.")
         XCTAssertNil(try XCTUnwrap(event("SubagentStop")).finalMessage)
         XCTAssertNil(try XCTUnwrap(event("StopFailure", extra: ["error": "overloaded"])).finalMessage)
         XCTAssertNil(try XCTUnwrap(event("Stop", extra: ["last_assistant_message": " "])).finalMessage)
@@ -1642,10 +1653,10 @@ final class TurnEndClassificationTests: XCTestCase {
         func claude(_ arguments: [String]) -> ForegroundProcess {
             ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: arguments)
         }
-        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(classifierOn: false, foreground: claude(["claude"])))
-        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: claude(["claude", "-p", "review"])))
-        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: claude(["claude"])))
-        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(classifierOn: true, foreground: nil), "no column: no machine reads it")
+        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(readsFinalMessages: false, foreground: claude(["claude"])))
+        XCTAssertFalse(AgentHookCenter.keepsFinalMessage(readsFinalMessages: true, foreground: claude(["claude", "-p", "review"])))
+        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(readsFinalMessages: true, foreground: claude(["claude"])))
+        XCTAssertTrue(AgentHookCenter.keepsFinalMessage(readsFinalMessages: true, foreground: nil), "no column: no machine reads it")
     }
 
     // MARK: - Sidebar and Dock

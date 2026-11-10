@@ -335,6 +335,12 @@ struct WorkspaceInfo: Hashable {
     /// The task this one is listed under (a sub-task, or a Mission child):
     /// drawn indented, moved among its siblings only, never dragged.
     var parentTitle: String?
+    /// Where the task stands (`WorkspaceState.statusLine`), when rows show
+    /// it: the user's summary, else the last turn end's line.
+    var statusLine: String?
+    /// The last turn end's line alone (`WorkspaceState.turnStatusLine`):
+    /// what a finished turn says beside its check.
+    var turnStatusLine: String?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }

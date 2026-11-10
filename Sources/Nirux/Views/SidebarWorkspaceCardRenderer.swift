@@ -197,7 +197,7 @@ final class SidebarWorkspaceCardRenderer {
         if let stats = workspace.diffStats { lines.append("Changes: \(SidebarRenderer.formatDiffStats(stats))") }
         lines.append("Phase: \(workspace.phase.displayName)")
         if let purpose = workspace.purpose { lines.append("Purpose: \(purpose)") }
-        if let summary = workspace.lastSummary { lines.append("Last: \(summary)") }
+        if let summary = workspace.lastSummary, summary != layout.summary.status.text { lines.append("Last: \(summary)") }
         if let blocker = workspace.blockerText { lines.append("Blocker: \(blocker)") }
         if let next = workspace.nextStepText { lines.append("Next: \(next)") }
         if workspace.columns.contains(where: { $0.isEditor && $0.editorIsDirty }) { lines.append("Unsaved changes in the editor") }
@@ -208,7 +208,8 @@ final class SidebarWorkspaceCardRenderer {
     /// The sign in the state marks' column: amber for the user, red for
     /// something broken, a green dot for work, a speech bubble for a
     /// question to the parent, a slashed circle for a blocker, a check,
-    /// the merge sign, else grey. Returns the dot, when the mark is one.
+    /// the merge sign, a grey check for a finished turn, else grey. Returns
+    /// the dot, or the grey check, which a turn's end draws over.
     @discardableResult
     private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) -> NSView? {
         let centerX = (Metrics.markCenterX + layout.nestIndent)
@@ -232,6 +233,10 @@ final class SidebarWorkspaceCardRenderer {
             if let icon = views.last { buildCheck(over: icon, startedAt: readyAt, holds: false) }
             return nil
         case .merged: return symbol(Theme.Symbol.merged, Theme.Color.done, nil)
+        case .finished:
+            _ = symbol(Theme.Symbol.checksPassed, Theme.Color.idle, nil)
+            // The green check of a turn's end draws over it, as over the dot.
+            return views.last
         case .checksRunning:
             return buildChecksRing(center: NSPoint(x: centerX, y: centerY))
         case .needsYou: color = Theme.Color.waiting
@@ -255,10 +260,11 @@ final class SidebarWorkspaceCardRenderer {
         !workspace.isLead && !workspace.showsCompactRow
     }
 
-    /// The marks a turn's end draws its check over: the grey dot, and the
-    /// ring of checks that run (an agent that pushed, then stopped).
+    /// The marks a turn's end draws its check over: the grey dot, the grey
+    /// check of a finished turn, and the ring of checks that run (an agent
+    /// that pushed, then stopped).
     static func drawsTurnEnd(over mark: SidebarRowMark) -> Bool {
-        mark == .idle || mark == .checksRunning
+        mark == .idle || mark == .finished || mark == .checksRunning
     }
 
     /// The rail's working badge breathes, in phase with every other one
@@ -468,6 +474,8 @@ final class SidebarWorkspaceCardRenderer {
         let x = layout.indentX
         label.frame = NSRect(x: x, y: top - Metrics.statusRowHeight, width: layout.contentMaxX - x, height: Metrics.statusRowHeight)
         label.toolTip = statusToolTip(status)
+        // The grey check says it on screen.
+        if layout.summary.mark == .finished { label.setAccessibilityLabel("Done: \(status.text)") }
         if let question = shownQuestion(status) { Self.describe(label, question: question) }
         append(label)
         guard let action = status.action else { return nil }

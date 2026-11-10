@@ -95,6 +95,8 @@ final class NiruxShellView: NSView {
     /// A working agent that may be going in circles says so on its row
     /// (Settings; see `AgentCirclingHint`). Read with the restored state.
     var circlingHintEnabled = PersistedSettings().agentCirclingHint
+    /// Rows show their task's status line (Settings → Notifications).
+    var turnStatusEnabled = PersistedSettings().showTurnStatus
     /// Mission questions handed to the user (the child's card turned
     /// amber), by question ID: the child workspace whose notification they
     /// raised, once.
@@ -688,6 +690,7 @@ extension NiruxShellView {
             if savedSummary != presentedSummary {
                 workspace.lastSummary = savedSummary
                 workspace.lastSummaryIsManual = savedSummary != nil
+                workspace.lastSummaryIsStatus = false
             }
             self.updateSidebar()
             self.saveState()

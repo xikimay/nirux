@@ -55,6 +55,15 @@ enum TurnEndText {
         BranchReview.ClaudeCLI.accountVariables.contains { environment[$0].map { !$0.isEmpty && $0 != "0" } ?? false }
     }
 
+    /// The agent is a headless `claude -p` (or another SDK run): Claude
+    /// Code says so in the environment its hooks inherit ("sdk-cli" where
+    /// an interactive `claude` has "cli"). Nobody is asked at its turn end,
+    /// and it is no task: told from the run itself, since it may have left
+    /// the column's foreground by the time Nirux reads its hook events.
+    static func isHeadless(_ environment: [String: String]) -> Bool {
+        environment["CLAUDE_CODE_ENTRYPOINT"]?.hasPrefix("sdk-") == true
+    }
+
     /// The agent whose hook runs with `environment` uses the login Nirux's
     /// own `claude -p` does: no account variable in its environment, the
     /// configuration folder of a running Nirux, no settings file that

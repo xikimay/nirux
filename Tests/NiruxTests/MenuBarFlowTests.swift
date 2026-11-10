@@ -185,6 +185,7 @@ extension MenuBarFlowTests {
             let plain = try XCTUnwrap(shell.activeWorkspace)
             let plainEnvironment = plain.terminalEnvironment(agentUUID: UUID().uuidString)
             XCTAssertEqual(plainEnvironment["NIRUX_LEAD"], "", "blank, not inherited")
+            XCTAssertEqual(plainEnvironment["CLAUDE_CODE_ENTRYPOINT"], "", "an SDK run's would make its agents headless")
             XCTAssertNil(plainEnvironment["NIRUX_MISSION_HANDOFFS"])
             XCTAssertTrue(bar.isEnabled(["Space", "Start a Lead"]))
             bar.run(["Space", "Lead"])
