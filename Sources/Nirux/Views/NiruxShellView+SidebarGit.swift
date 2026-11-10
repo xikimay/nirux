@@ -55,7 +55,7 @@ extension NiruxShellView {
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     id: col.id,
-                    turnEndedAt: col.pty?.agentTurnEndedAt ?? 0
+                    turnEndedAt: 0
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
