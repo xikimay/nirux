@@ -39,7 +39,6 @@ func testBundleDidLoad() {
     let room = (0..<64).map { "NIRUX_TESTS_ENVIRONMENT_ROOM_\($0)" }
     room.forEach { setenv($0, "", 1) }
     room.reversed().forEach { unsetenv($0) }
-    MainActor.assumeIsolated { ghosttyRuntime = TerminalAppearance.makeController() }
 }
 
 /// Keeps Ghostty's first terminal app, created at load (see above).
