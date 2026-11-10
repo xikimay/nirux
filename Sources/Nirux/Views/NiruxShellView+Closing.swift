@@ -46,7 +46,8 @@ extension NiruxShellView {
         guard workspace.columns.count > 1,
               let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })
         else {
-            abortColumnClose(closingColumn)
+            closingColumn.isClosing = false
+            closingColumn.view.alphaValue = 1
             return
         }
         // Still focused: the user lands on its neighbour. An agent's open

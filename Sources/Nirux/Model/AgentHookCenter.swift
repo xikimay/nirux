@@ -266,13 +266,7 @@ final class AgentHookCenter {
         if outcome.firedAttention, let resolution {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
-        if let resolution {
-            // (Read only for an event that ends a turn.)
-            settleTurnEnd(
-                of: event, outcome: outcome, in: resolution,
-                waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
-            )
-        }
+        _ = outcome
         return resolution.map {
             AppliedEvent(
                 event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,
@@ -361,7 +355,7 @@ final class AgentHookCenter {
     private func reportTurnDone(endedAt time: TimeInterval, in resolution: Resolution) {
         guard now() - time < Self.turnDoneFreshness, resolution.column.pty?.isAgentTurnDone(endedAt: time) == true
         else { return }
-        onTurnDone?(resolution, time)
+        onTurnDone?(resolution, now())
     }
 
     /// Epoch seconds; tests set the clock their events are stamped from.

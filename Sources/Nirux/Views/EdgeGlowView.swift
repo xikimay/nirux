@@ -474,7 +474,7 @@ final class EdgeGlowView: NSView {
     @objc func windowResignedKey() {
         guard isHovered else { return }
         hoverGeneration += 1
-        (pointerOnGlow, pointerOnPill) = (false, false)
+        pointerOnPill = false
         if !isAnnouncing { setPillShown(false) }
     }
 
