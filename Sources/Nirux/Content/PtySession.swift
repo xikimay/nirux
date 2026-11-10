@@ -1113,7 +1113,7 @@ private final class PtyState: @unchecked Sendable {
 
     func noteTypedInput(_ data: Data) {
         guard data != Self.redrawNudge else { return }
-        machine.noteKeystroke(now: Date(), keys: data)
+        machine.noteKeystroke(now: Date())
         hasTypedInput = true
     }
 
