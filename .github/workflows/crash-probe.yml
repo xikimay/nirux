@@ -31,26 +31,19 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
       - name: Build tests
         run: swift build --build-tests
-      - name: The display test alone
-        run: swift test --skip-build --filter 'TerminalDisplayIDTests/testTheDisplayReachesALiveSurfaceOnly' || echo "EXIT $?"
-      - name: The whole class
-        run: swift test --skip-build --filter TerminalDisplayIDTests || echo "EXIT $?"
-      - name: Crash reports
-        if: always()
+      - name: The class under lldb
         run: |
-          ls -la ~/Library/Logs/DiagnosticReports/ || true
-          for f in ~/Library/Logs/DiagnosticReports/*.ips; do
-            [ -f "$f" ] || continue
-            echo "=== $f"
-            python3 - "$f" <<'PY'
-          import json, sys
-          lines = open(sys.argv[1]).read().split("\n", 1)
-          report = json.loads(lines[1])
-          print("exception:", report.get("exception"), report.get("termination", {}).get("indicator"))
-          ft = report.get("faultingThread", 0)
-          images = report.get("usedImages", [])
-          for frame in report["threads"][ft]["frames"][:40]:
-              img = images[frame["imageIndex"]]["name"] if frame.get("imageIndex") is not None and frame["imageIndex"] < len(images) else "?"
-              print(f'  {img:30} {frame.get("symbol", "?")} +{frame.get("symbolLocation", 0)}')
-          PY
+          platform="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
+          xctest="$(xcrun --sdk macosx --find xctest)"
+          bundle="$(swift build --show-bin-path)/NiruxPackageTests.xctest"
+          for attempt in 1 2; do
+            echo "=== attempt $attempt"
+            lldb --batch \
+              -o "settings set target.env-vars DYLD_FRAMEWORK_PATH=$platform/Library/Frameworks DYLD_LIBRARY_PATH=$platform/usr/lib NO_COLOR=1" \
+              -o "process handle SIGPIPE -n true -p true -s false" \
+              -o run \
+              -k "thread backtrace -c 40" \
+              -k "thread backtrace all -c 12" \
+              -k "kill" \
+              -- "$xctest" -XCTest NiruxTests.TerminalDisplayIDTests "$bundle" 2>&1 | tail -250 || true
           done
