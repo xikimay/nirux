@@ -569,6 +569,13 @@ extension PersistedStateCodingTests {
         XCTAssertTrue(decoded.alertOnlyWhenClaudeAsks, "its own key")
     }
 
+    /// The hint that an agent may be going in circles is on for a state
+    /// file that predates it (SettingsWindowTests saves and reads it back).
+    func testCirclingHintIsOnForAStateFileThatPredatesIt() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.agentCirclingHint)
+    }
+
     // MARK: - cliArgs wire format
 
     /// Lock down the CLI flag mapping so a future rename in the enum doesn't

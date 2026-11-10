@@ -61,6 +61,9 @@ enum CITriageInvestigation {
         /// model would (`NiruxShellView.isCITriageModelAllowed`).
         let isModelAllowed: Bool
         let knownFlaky: Set<String>
+        /// The names of the run's checks the pull request showed red: the
+        /// verdict is shown for them, so it is made of their jobs only.
+        var redChecks: Set<String> = []
     }
 
     struct Outcome: Equatable, Sendable {
@@ -112,7 +115,10 @@ enum CITriageInvestigation {
     private static func read(_ request: Request, effects: Effects) -> Reading {
         let run = request.run
         guard let facts = effects.gh(runViewArguments(run), 30, 1 << 20).flatMap(CITriage.runFacts(fromRunView:)),
-              !facts.redJobs.isEmpty
+              !facts.redJobs.isEmpty,
+              // A job rerun since the pull request was read (red then,
+              // running now) would be judged by the others: read later.
+              request.redChecks.isEmpty || Set(facts.redJobs.map(\.name)) == request.redChecks
         else { return .settled(Outcome()) }
         // Each red job gets its decision: one that ran no step from why it
         // didn't, the others from their part of the failed log.
@@ -191,8 +197,12 @@ enum CITriageInvestigation {
         guard !ranAgain.isEmpty else { return [:] }
         guard let log = effects.gh(failedLogArguments(run, attempt: facts.attempt - 1), 90, maxLogBytes) else { return unreadable }
         let found = CITriage.findings(inFailedLog: log)
+        // A job that failed then and left nothing the parser reads (a hang
+        // cancelled at its timeout leaves no failed step) may have failed
+        // the same way: unreadable, not clean.
         return Dictionary(ranAgain.map { job in
-            (job.name, .failed(found.first { $0.job == job.name }?.findings ?? CITriage.LogFindings()))
+            let before = found.first { $0.job == job.name }?.findings
+            return (job.name, before.map { $0.isEmpty ? .unreadable : .failed($0) } ?? .unreadable)
         }) { first, _ in first }
     }
 
@@ -249,7 +259,10 @@ enum CITriageInvestigation {
         var evidence = CITriage.Evidence(jobs: facts.jobs, attempt: facts.attempt, findings: findings)
         evidence.changes = files.map { CITriage.Change(path: $0.path) }
         let commit = facts.headSHA
-        guard let root = request.repositoryRoot, effects.git(["cat-file", "-e", "\(commit)^{commit}"], root) != nil
+        // A partial clone fetches what it lacks on read (git older than
+        // 2.44 ignores GIT_NO_LAZY_FETCH): names only, nothing read.
+        guard let root = request.repositoryRoot, effects.git(["config", "--get", "extensions.partialClone"], root) == nil,
+              effects.git(["cat-file", "-e", "\(commit)^{commit}"], root) != nil
         else { return evidence }
         func sources(at paths: [String]) -> [String?] {
             // A path with a newline can't be asked for on a line.

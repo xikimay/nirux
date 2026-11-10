@@ -28,6 +28,7 @@ final class CITriageInvestigationTests: XCTestCase {
         var annotations: String?
         var files: String? = #"{"filename":"Sources/Widgets/Axle.swift","patch":"@@ -1,2 +1,2 @@\n struct Axle {\n-    var speed = 1\n+    var speed = 2"}"#
         var commitIsLocal = true
+        var isPartialClone = false
         var tree = ["Sources/Widgets/Axle.swift", "Tests/WidgetTests/GearTests.swift"]
         /// What `git grep` finds declaring a class.
         var declaring: [String] = []
@@ -83,6 +84,7 @@ final class CITriageInvestigationTests: XCTestCase {
             git: { arguments, _ in
                 calls.git(arguments)
                 switch arguments.first {
+                case "config": return world.isPartialClone && arguments.last == "extensions.partialClone" ? Data("origin\n".utf8) : nil
                 case "cat-file": return world.commitIsLocal ? Data() : nil
                 case "ls-tree": return Data(world.tree.map { $0 + "\u{0}" }.joined().utf8)
                 case "grep": return Data(world.declaring.map { "\(Self.commit):\($0)\u{0}" }.joined().utf8)
@@ -103,10 +105,12 @@ final class CITriageInvestigationTests: XCTestCase {
         )
     }
 
-    private func request(isModelAllowed: Bool = true, flaky: Set<String> = [], root: String? = "/repo") -> CITriageInvestigation.Request {
+    private func request(
+        isModelAllowed: Bool = true, flaky: Set<String> = [], root: String? = "/repo", redChecks: Set<String> = []
+    ) -> CITriageInvestigation.Request {
         CITriageInvestigation.Request(
             run: CIFailure.Run(repository: "github.com/acme/widgets", id: 7), pullRequest: 52, repositoryRoot: root,
-            isModelAllowed: isModelAllowed, knownFlaky: flaky
+            isModelAllowed: isModelAllowed, knownFlaky: flaky, redChecks: redChecks
         )
     }
 
@@ -194,6 +198,26 @@ final class CITriageInvestigationTests: XCTestCase {
         let unknown = await investigate(world, request(flaky: [Self.gear]))
         XCTAssertEqual(unknown.outcome.verdict, .unsure)
         XCTAssertFalse(unknown.outcome.isUnanswered, "the rules' answer, not the model's")
+
+        // Nor when the job failed then and left nothing the parser reads
+        // (a hang cancelled at its timeout has no failed step).
+        world.earlierRunView = Self.runView(attempt: 1)
+        world.earlierLog = "test\tRun tests\t2026-11-09T23:09:12.1234567Z ##[error]Process completed with exit code 1."
+        let silent = await investigate(world, request(flaky: [Self.gear]))
+        XCTAssertEqual(silent.outcome.verdict, .unsure)
+        world.earlierLog = "lint\tLint\t2026-11-09T23:09:12.1234567Z ##[error]1 file needs formatting"
+        let elsewhere = await investigate(world, request(flaky: [Self.gear]))
+        XCTAssertEqual(elsewhere.outcome.verdict, .unsure, "the job has no line in that log at all")
+    }
+
+    /// The verdict is shown for the checks the pull request showed red: a
+    /// job rerun since (running now) would leave it made of the others.
+    func testARunWhoseRedJobsChangedSinceIsReadLater() async {
+        let same = await investigate(World(), request(flaky: [Self.gear], redChecks: ["test"]))
+        XCTAssertEqual(same.outcome.verdict, .flaky(reason: CITriage.knownFlakyReason([Self.gear])))
+        let changed = await investigate(World(), request(flaky: [Self.gear], redChecks: ["test", "lint"]))
+        XCTAssertEqual(changed.outcome, CITriageInvestigation.Outcome(), "not read: asked again")
+        XCTAssertEqual(changed.calls.asked, ["run"])
     }
 
     /// One red job the rules can't read keeps the whole run from being
@@ -245,7 +269,7 @@ final class CITriageInvestigationTests: XCTestCase {
         XCTAssertTrue(input.contains("The pull request changes 1 files:\nSources/Widgets/Axle.swift: var speed"), input)
         // Read at the run's commit, in the workspace's repository, the
         // changed files in one batch.
-        XCTAssertEqual(calls.git.first, ["cat-file", "-e", "\(Self.commit)^{commit}"])
+        XCTAssertTrue(calls.git.contains(["cat-file", "-e", "\(Self.commit)^{commit}"]))
         XCTAssertEqual(calls.blobsAsked, [["\(Self.commit):Tests/WidgetTests/GearTests.swift"], ["\(Self.commit):Sources/Widgets/Axle.swift"]])
     }
 
@@ -281,8 +305,17 @@ final class CITriageInvestigationTests: XCTestCase {
         let input = try XCTUnwrap(calls.inputs.first)
         XCTAssertFalse(input.contains("Source of the failing tests"))
         XCTAssertTrue(input.hasSuffix("The pull request changes 1 files:\nSources/Widgets/Axle.swift\n</failure>"), input)
-        XCTAssertEqual(calls.git, [["cat-file", "-e", "\(Self.commit)^{commit}"]], "nothing else is asked of a commit that isn't there")
+        XCTAssertEqual(calls.git, [["config", "--get", "extensions.partialClone"], ["cat-file", "-e", "\(Self.commit)^{commit}"]],
+                       "nothing else is asked of a commit that isn't there")
         XCTAssertEqual(calls.blobsAsked, [])
+
+        // A partial clone would fetch what it lacks: nothing is read.
+        world.commitIsLocal = true
+        world.isPartialClone = true
+        let (_, partial) = await investigate(world)
+        XCTAssertEqual(partial.git, [["config", "--get", "extensions.partialClone"]])
+        XCTAssertEqual(partial.blobsAsked, [])
+        XCTAssertNotNil(partial.inputs.first)
 
         let (rootless, rootlessCalls) = await investigate(World(), request(root: nil))
         XCTAssertNotNil(rootless.verdict.flakyReason)
@@ -422,7 +455,7 @@ final class CITriageInvestigationTests: XCTestCase {
     }
 
     /// A run billed per call rests every client until the plan's limit
-    /// resets, a week at most, and a relaunch rests too.
+    /// resets, a day at most, and a relaunch rests too.
     func testABilledRunRestsUntilTheLimitResetsAcrossRelaunches() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("claude-runs-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -446,10 +479,26 @@ final class CITriageInvestigationTests: XCTestCase {
         clock.value = TimeInterval(resetsAt + 1)
         XCTAssertEqual(relaunched.setup(), .ready(cli))
 
-        // A reset a year away rests a week.
+        // A reset a year away rests a day at most.
         relaunched.restAfterBilledRun(resetsAt: clock.value + 365 * 24 * 60 * 60)
-        clock.value += ClaudeOneShotRunner.Account.longestBilledRest + 1
+        clock.value += ClaudeOneShotRunner.Account.longestBilledRest - 60
+        XCTAssertEqual(relaunched.setup(), .unavailable)
+        clock.value += 61
         XCTAssertEqual(relaunched.setup(), .ready(cli))
+
+        // A later, shorter rest doesn't shorten one kept on disk.
+        let third = ClaudeOneShotRunner.Account(checkSetup: { [cli] in .ready(cli) }, now: { clock.value }, restURL: restURL)
+        try await knowsSetup(third)
+        relaunched.restAfterBilledRun(resetsAt: clock.value + 3 * 60 * 60)
+        third.restAfterBilledRun()
+        clock.value += 2 * 60 * 60
+        XCTAssertEqual(third.setup(), .unavailable)
+        // One written under another clock, further ahead than any rest can
+        // be, would never end: it doesn't count.
+        try Data(String(Int(clock.value + 30 * 24 * 60 * 60)).utf8).write(to: restURL)
+        let fourth = ClaudeOneShotRunner.Account(checkSetup: { [cli] in .ready(cli) }, now: { clock.value }, restURL: restURL)
+        try await knowsSetup(fourth)
+        XCTAssertEqual(fourth.setup(), .ready(cli))
         XCTAssertEqual(
             ClaudeOneShotRunner.report(from: Self.events([#"{"type":"rate_limit_event","rate_limit_info":{"isUsingOverage":true,"resetsAt":42}}"#])),
             ClaudeOneShotRunner.RunReport(text: nil, billedPerCall: true, overageResetsAt: 42)

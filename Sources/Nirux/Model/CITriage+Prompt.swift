@@ -118,7 +118,7 @@ extension CITriage {
                 + unfinished.prefix(promptTests).joined(separator: ", ") + signal)
         }
         for crash in evidence.findings.crashes.prefix(promptFailuresPerTest) {
-            lines.append("Crash: \(clipped(crash.file, maxNameLength)):\(crash.line): Fatal error: \(clipped(crash.message, promptMessageLength))")
+            lines.append("Crash: \(clipped(crash.file, maxNameLength)):\(crash.line): \(clipped(crash.message, promptMessageLength))")
         }
         if !evidence.sources.isEmpty {
             lines.append("Source of the failing tests:")
@@ -235,10 +235,17 @@ extension CITriage {
     static func declarations(editedBy patch: String, in source: String) -> [String] {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         var result: [String] = []
+        func note(_ name: String?) {
+            if let name, !result.contains(name) { result.append(name) }
+        }
+        // What the changed lines declare themselves: a function added or
+        // removed is named, not its neighbour.
+        for line in patch.split(whereSeparator: \.isNewline).prefix(20 * maxChangesPerFile)
+        where (line.hasPrefix("+") || line.hasPrefix("-")) && !line.hasPrefix("+++") && !line.hasPrefix("---") {
+            if let found = parsedDeclaration(in: line.dropFirst()), found.kind != .property { note(found.text) }
+        }
         for number in changedLines(inPatch: patch).prefix(maxChangesPerFile) {
-            guard let name = enclosingDeclaration(ofLine: min(number, lines.count) - 1, in: lines), !result.contains(name)
-            else { continue }
-            result.append(name)
+            note(enclosingDeclaration(ofLine: min(number, lines.count) - 1, in: lines))
         }
         return result
     }
@@ -247,7 +254,7 @@ extension CITriage {
     /// this many lines up: a generated table has thousands of both, and
     /// names none.
     static let maxChangesPerFile = 100
-    static let maxDeclarationWalk = 400
+    static let maxDeclarationWalk = 1_500
 
     /// What the line at `index` belongs to, by indentation: a line that is
     /// itself a function or a type; else the nearest function above it
@@ -257,7 +264,12 @@ extension CITriage {
     static func enclosingDeclaration(ofLine index: Int, in lines: [Substring]) -> String? {
         guard lines.indices.contains(index) else { return nil }
         var property: String?
-        if let own = parsedDeclaration(in: lines[index]) {
+        // An attribute on its own line belongs to what follows it.
+        var own = parsedDeclaration(in: lines[index])
+        if own == nil, isAttributeLine(lines[index]) {
+            own = lines[(index + 1)...].prefix(4).lazy.compactMap { parsedDeclaration(in: $0) }.first
+        }
+        if let own {
             guard own.kind == .property else { return own.text }
             property = own.text
         }
@@ -295,6 +307,38 @@ extension CITriage {
         return first == "}" || first == ")" || first == "]"
     }
 
+    /// `@MainActor`, `@available(macOS 14, *)`… and nothing else.
+    private static func isAttributeLine(_ line: Substring) -> Bool {
+        let text = withoutAttributes(line.drop { $0 == " " || $0 == "\t" })
+        return line.contains("@") && text.allSatisfy { $0 == " " || $0 == "\t" }
+    }
+
+    /// The line without its leading attributes, parenthesized arguments
+    /// and all (`@available(macOS 14, *)`), so that their spaces split no
+    /// word.
+    private static func withoutAttributes(_ text: Substring) -> Substring {
+        var rest = text
+        while rest.first == "@" {
+            rest = rest.dropFirst().drop { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." }
+            if rest.first == "(" {
+                var depth = 0
+                var end = rest.startIndex
+                for index in rest.indices.prefix(400) {
+                    if rest[index] == "(" { depth += 1 }
+                    if rest[index] == ")" { depth -= 1 }
+                    if depth == 0 {
+                        end = rest.index(after: index)
+                        break
+                    }
+                }
+                guard depth == 0 else { return rest }
+                rest = rest[end...]
+            }
+            rest = rest.drop { $0 == " " || $0 == "\t" }
+        }
+        return rest
+    }
+
     /// `#if` sits at the margin whatever it is in, and a comment is in
     /// nothing.
     private static func isDirectiveOrComment(_ line: Substring) -> Bool {
@@ -322,7 +366,8 @@ extension CITriage {
     }
 
     static func parsedDeclaration(in line: Substring) -> Declaration? {
-        var words = line.prefix(2_000).split(whereSeparator: { $0 == " " || $0 == "\t" })[...]
+        var words = withoutAttributes(line.prefix(2_000).drop { $0 == " " || $0 == "\t" })
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })[...]
         guard words.count <= 64 else { return nil }
         while let first = words.first {
             // "@MainActor", "@objc(name)", "private(set)".
@@ -343,7 +388,10 @@ extension CITriage {
         }
         guard let next = words.dropFirst().first else { return nil }
         let isNameCharacter: (Character) -> Bool = { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "`" || $0 == "." }
-        let name = String(next.prefix(while: isNameCharacter).prefix(maxNameLength))
+        // An operator: `static func == (lhs:`.
+        let isOperatorCharacter: (Character) -> Bool = { "=-+!*%<>&|^~?/.".contains($0) }
+        let isOperator = head == "func" && next.first.map { isOperatorCharacter($0) && $0 != "." } == true
+        let name = String(next.prefix(while: isOperator ? isOperatorCharacter : isNameCharacter).prefix(maxNameLength))
         guard !name.isEmpty else { return nil }
         switch head {
         case "func": return Declaration(kind: .function, text: "func \(name)")

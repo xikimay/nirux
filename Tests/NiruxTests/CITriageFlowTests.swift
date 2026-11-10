@@ -90,17 +90,25 @@ class CITriageFlowTests: XCTestCase {
         }
     }
 
-    /// A shell with the triage on and its reader replaced, its workspace's
-    /// repository known: one found later would clear the pull request a
-    /// test set, and make a red check read as on another branch.
+    /// A shell with the triage on and its reader replaced. (The harness
+    /// stops the heartbeat: no git context comes to clear a pull request a
+    /// test sets.)
     private func triaging(_ harness: UIFlowHarness, releasesAll: Bool = true) throws -> (WorkspaceState, Reader) {
         ZZMutant.current = type(of: self).mutant
         let reader = Reader(releasesAll: releasesAll)
         harness.shell.sideEffects.investigateCIFailure = { await reader.read($0, isStillWanted: $1) }
         harness.shell.setCITriage(enabled: true)
-        let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
-        harness.waitUntil("the workspace's repository") { workspace.gitContext != nil }
-        return (workspace, reader)
+        return (try XCTUnwrap(harness.shell.activeWorkspace), reader)
+    }
+
+    /// Gives the workspace its repository, as a git read would. Before a
+    /// pull request is set: a new context clears it.
+    private func giveRepository(_ root: String, to workspace: WorkspaceState) throws {
+        let observation = try XCTUnwrap(workspace.beginGitContextObservation(at: root))
+        _ = workspace.applyGitContextObservation(
+            .observed(GitContext(branch: "main", identity: GitIdentity(repositoryRoot: root, head: nil))), observation: observation
+        )
+        XCTAssertEqual(workspace.gitContext?.identity.repositoryRoot, root)
     }
 
     private func rowText(of workspace: WorkspaceState, in shell: NiruxShellView) throws -> String {
@@ -339,7 +347,6 @@ class CITriageFlowTests: XCTestCase {
             let shell = harness.shell
             ZZMutant.current = type(of: self).mutant
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            harness.waitUntil("the workspace's repository") { workspace.gitContext != nil }
             let reader = Reader(releasesAll: false)
             shell.sideEffects.investigateCIFailure = { await reader.read($0, isStillWanted: $1) }
             workspace.prInfo = Self.red
@@ -378,7 +385,6 @@ class CITriageFlowTests: XCTestCase {
             let (_, reader) = try triaging(harness, releasesAll: false)
             shell.addWorkspace(title: "closing", cwd: harness.repo)
             let closing = try XCTUnwrap(shell.workspaces.first { $0.title == "closing" })
-            harness.waitUntil("its repository") { closing.gitContext != nil }
             let id = closing.id
             closing.prInfo = Self.red
             shell.triageRedChecks(in: closing)
@@ -398,6 +404,8 @@ class CITriageFlowTests: XCTestCase {
             let shell = harness.shell
             let (workspace, reader) = try triaging(harness, releasesAll: false)
             let column = try XCTUnwrap(workspace.columns.first)
+            XCTAssertFalse(shell.isCITriageModelAllowed(in: workspace), "no repository known")
+            try giveRepository(harness.repo, to: workspace)
             // The shell at its prompt: the process in front stays the same.
             var foreground: ForegroundProcess?
             harness.waitUntil("the column's shell at its prompt") {
