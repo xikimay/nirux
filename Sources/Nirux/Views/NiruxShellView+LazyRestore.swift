@@ -78,14 +78,9 @@ extension NiruxShellView {
     private func deferredColumnsOnScreen() -> (workspace: WorkspaceState, columns: [ColumnState])? {
         guard let workspace = activeWorkspace, workspace.columns.contains(where: \.isAwaitingResume) else { return nil }
         let focused = workspace.focusedIndex
-        let viewportWidth = workspace.containerView.frame.width
         let columns = ([focused] + workspace.columns.indices.filter { $0 != focused }).compactMap { index -> ColumnState? in
             guard let column = workspace.columns[safe: index], column.isAwaitingResume else { return nil }
-            let frame = column.view.frame
-            let shows = index == focused || Self.showsColumn(
-                left: frame.minX, width: frame.width, cameraX: workspace.attentionCameraX, viewportWidth: viewportWidth
-            )
-            return shows ? column : nil
+            return index == focused || workspace.showsColumn(at: index) ? column : nil
         }
         return columns.isEmpty ? nil : (workspace, columns)
     }

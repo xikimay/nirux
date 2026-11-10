@@ -57,6 +57,13 @@ struct ShellSideEffects {
         try await CookieImporter.importCookies(from: source, into: WebViewColumn.sharedDataStore)
     }
 
+    /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
+    var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    /// Whether any of the window shows on screen: not minimized, not
+    /// covered, its display not asleep.
+    var windowShows: @MainActor (NSWindow?) -> Bool = { $0?.occlusionState.contains(.visible) ?? false }
+
     /// Opens a link in the default browser.
     var openURL: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
 

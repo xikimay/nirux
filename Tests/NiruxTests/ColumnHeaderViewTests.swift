@@ -170,10 +170,16 @@ final class ColumnHeaderViewTests: XCTestCase {
 
     /// The edge glows sit over the headers' strip: clicks go through them.
     func testEdgeGlowLetsClicksThrough() {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let glow = EdgeGlowView(edge: .top)
-        glow.frame = NSRect(x: 0, y: 0, width: 400, height: 32)
-        glow.setVisible(true)
-        XCTAssertNil(glow.hitTest(NSPoint(x: 380, y: 16)))
+        glow.frame = NSRect(x: 0, y: 268, width: 400, height: 32)
+        container.addSubview(glow)
+        glow.show(
+            .alert(.waiting), moving: false,
+            target: EdgeGlowView.Target(workspaceID: "above", columnID: nil, text: "above needs permission")
+        )
+        XCTAssertNil(glow.hitTest(NSPoint(x: 380, y: 284)))
+        XCTAssertNil(glow.hitTest(NSPoint(x: 200, y: 299)), "the edge itself too")
     }
 
     // MARK: - Agent status

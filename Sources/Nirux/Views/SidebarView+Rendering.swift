@@ -421,7 +421,10 @@ extension SidebarView {
         let result = SidebarWorkspaceCardRenderer(
             workspace: workspace,
             sidebarWidth: bounds.width,
-            yOffset: yOffset
+            yOffset: yOffset,
+            animates: animates,
+            turnEndedAt: turnEndNotedAt[workspace.id],
+            now: clock()
         ).render()
         result.views.forEach(addExpandedView)
         hitAreas.append(contentsOf: result.hitAreas)

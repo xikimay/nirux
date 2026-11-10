@@ -27,6 +27,15 @@ final class SidebarWorkspaceCardRenderer {
 
     private let layout: SidebarCardLayout
     private let yOffset: CGFloat
+    /// The row moves (see `SidebarView.animates`): a line of light runs
+    /// under it while its agent works, and its mark draws a check when a
+    /// turn ends.
+    private let animates: Bool
+    /// When the row's agent ended its turn (`CACurrentMediaTime`), while
+    /// its check may still be drawing (see `SidebarView.turnEndNotedAt`).
+    private let turnEndedAt: CFTimeInterval?
+    /// The clock the row's movements are timed from (`CACurrentMediaTime`).
+    private let now: CFTimeInterval
 
     private var views: [NSView] = []
     private var hitAreas: [SidebarHitArea] = []
@@ -36,9 +45,15 @@ final class SidebarWorkspaceCardRenderer {
 
     private var workspace: WorkspaceInfo { layout.workspace }
 
-    init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, yOffset: CGFloat) {
+    init(
+        workspace: WorkspaceInfo, sidebarWidth: CGFloat, yOffset: CGFloat, animates: Bool = true,
+        turnEndedAt: CFTimeInterval? = nil, now: CFTimeInterval = CACurrentMediaTime()
+    ) {
         layout = SidebarCardLayout(workspace: workspace, sidebarWidth: sidebarWidth)
         self.yOffset = yOffset
+        self.animates = animates
+        self.turnEndedAt = turnEndedAt
+        self.now = now
     }
 
     func render() -> SidebarWorkspaceCardRenderResult {
@@ -63,6 +78,7 @@ final class SidebarWorkspaceCardRenderer {
         } else {
             buildRow(frame: frame)
         }
+        if animates, layout.summary.mark == .working { buildWorkingLine(frame: frame) }
         // Last: the first area under the pointer takes the click.
         hitAreas.append(SidebarHitArea(frame: frame, region: .workspace(workspace.index)))
 
@@ -102,7 +118,10 @@ final class SidebarWorkspaceCardRenderer {
 
     private func buildTitleRow(top: CGFloat) {
         let rowY = top - Metrics.titleRowHeight
-        buildMark(layout.summary.mark, centerY: rowY + Metrics.titleRowHeight / 2)
+        let mark = buildMark(layout.summary.mark, centerY: rowY + Metrics.titleRowHeight / 2)
+        // A task's full row (see `showsTurnEnds`), when its mark is the
+        // grey dot.
+        if let mark, layout.summary.mark == .idle { buildCheck(over: mark) }
 
         var maxX = layout.contentMaxX
         if let trailing = trailingLabel() {
@@ -175,17 +194,19 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// The sign in the state marks' column: amber for the user, red for
-    /// something broken, a breathing green dot for work, a speech bubble
-    /// for a question to the parent, a slashed circle for a blocker, a
-    /// check, the merge sign, else grey.
-    private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) {
+    /// something broken, a green dot for work, a speech bubble for a
+    /// question to the parent, a slashed circle for a blocker, a check,
+    /// the merge sign, else grey. Returns the dot, when the mark is one.
+    @discardableResult
+    private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) -> NSView? {
         let centerX = (Metrics.markCenterX + layout.nestIndent)
         // The status line says it to VoiceOver.
-        func symbol(_ name: String, _ color: NSColor, _ label: String?) {
+        func symbol(_ name: String, _ color: NSColor, _ label: String?) -> NSView? {
             let icon = SidebarImageView(image: SidebarRenderer.symbol(name, color: color, pointSize: 11))
             icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
             icon.setAccessibilityElement(false)
             append(icon)
+            return nil
         }
         let color: NSColor
         switch mark {
@@ -203,25 +224,126 @@ final class SidebarWorkspaceCardRenderer {
         dot.wantsLayer = true
         dot.layer?.cornerRadius = size / 2
         dot.layer?.backgroundColor = color.cgColor
-        if mark == .working { Self.breathe(dot.layer) }
         append(dot)
+        return dot
     }
 
-    /// The working dot breathes, in phase with every other one: a rebuild
-    /// doesn't restart it.
+    /// Whether a turn's end can show on this workspace's row: a task's
+    /// full row. An archived task's compact row stays quiet, and the
+    /// Lead's row has no grey dot.
+    static func showsTurnEnds(_ workspace: WorkspaceInfo) -> Bool {
+        !workspace.isLead && !workspace.showsCompactRow
+    }
+
+    /// The rail's working badge breathes, in phase with every other one
+    /// and with the columns' lights: a rebuild doesn't restart it. Only
+    /// where `SidebarView.animates` allows it (Reduce motion, the setting,
+    /// a window nobody sees). A row shows work as a line of light instead
+    /// (`buildWorkingLine`).
     static func breathe(_ layer: CALayer?) {
-        guard let layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let animation = CABasicAnimation(keyPath: "opacity")
-        animation.fromValue = 1.0
-        animation.toValue = 0.35
-        animation.duration = 0.9
-        animation.autoreverses = true
-        animation.repeatCount = .infinity
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        animation.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: animation.duration * 2)
-        // A slow fade all day long: no need for 120 frames a second.
-        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
-        layer.add(animation, forKey: "breathe")
+        layer?.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")
+    }
+
+    // MARK: - Motion
+
+    static let workingLineID = NSUserInterfaceItemIdentifier("nirux.sidebar.workingLine")
+    static let turnEndCheckID = NSUserInterfaceItemIdentifier("nirux.sidebar.turnEndCheck")
+    static let workingLineKey = "run"
+    static let checkDrawKey = "draw"
+    /// How long a turn's end shows on its row: the check draws, holds,
+    /// then gives way to the grey dot.
+    static let checkDuration: CFTimeInterval = 1.6
+    /// One pass of a working row's line.
+    static let workingLineDuration: CFTimeInterval = 3
+
+    /// A thin line of light running along the row's bottom edge while its
+    /// agent works. Timed from the clock, not from when the row was built:
+    /// every row's line runs in step, and a rebuilt row's carries on
+    /// exactly where the old one was.
+    private func buildWorkingLine(frame: NSRect) {
+        let inset = Theme.Radius.card
+        let line = SidebarBackgroundView(frame: NSRect(
+            x: frame.minX + inset, y: frame.minY + 1, width: max(0, frame.width - inset * 2), height: 2
+        ))
+        line.identifier = Self.workingLineID
+        line.wantsLayer = true
+        line.layer?.masksToBounds = true
+        line.layer?.cornerRadius = 1
+        let width = line.frame.width
+        let bandWidth = width * 0.3
+        let green = Theme.Color.working
+        let band = CAGradientLayer()
+        band.startPoint = CGPoint(x: 0, y: 0.5)
+        band.endPoint = CGPoint(x: 1, y: 0.5)
+        band.colors = ([0, 0.9, 0] as [CGFloat]).map { green.withAlphaComponent($0).cgColor }
+        // Rests out of sight: a run that never starts shows nothing.
+        band.frame = CGRect(x: -bandWidth, y: 0, width: bandWidth, height: line.frame.height)
+        line.layer?.addSublayer(band)
+        let run = CABasicAnimation(keyPath: "position.x")
+        run.fromValue = -bandWidth / 2
+        run.toValue = width + bandWidth / 2
+        run.duration = Self.workingLineDuration
+        run.repeatCount = .infinity
+        // Began when the clock's current pass did.
+        run.beginTime = now - now.truncatingRemainder(dividingBy: run.duration)
+        // Under the same cap as every light (`CABasicAnimation.lightMovement`):
+        // a working row asks for no more frames than the dots ever did,
+        // and its pass is slow enough to stay smooth at that rate.
+        run.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
+        band.add(run, forKey: Self.workingLineKey)
+        append(line)
+    }
+
+    /// The turn that just ended draws a green check where the row's mark
+    /// is, then the check gives way to the grey dot. Timed from the turn's
+    /// end, so a rebuild in the middle carries on; once it is over the dot
+    /// alone is built.
+    private func buildCheck(over dot: NSView) {
+        guard animates, let turnEndedAt, now - turnEndedAt < Self.checkDuration else { return }
+        let size: CGFloat = 12
+        let host = SidebarBackgroundView(frame: NSRect(
+            x: dot.frame.midX - size / 2, y: dot.frame.midY - size / 2, width: size, height: size
+        ))
+        host.identifier = Self.turnEndCheckID
+        host.wantsLayer = true
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 2.25, y: 5.6))
+        path.addLine(to: CGPoint(x: 4.65, y: 3.2))
+        path.addLine(to: CGPoint(x: 9.75, y: 8.4))
+        let check = CAShapeLayer()
+        check.frame = host.bounds
+        check.path = path
+        check.fillColor = nil
+        check.strokeColor = Theme.Color.working.cgColor
+        check.lineWidth = 1.6
+        check.lineCap = .round
+        check.lineJoin = .round
+        // Gone once its time is over, whether or not the animations ran.
+        check.opacity = 0
+        host.layer?.addSublayer(check)
+
+        let draw = CABasicAnimation(keyPath: "strokeEnd")
+        draw.fromValue = 0
+        draw.toValue = 1
+        draw.duration = 0.45
+        draw.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+        let show = CAKeyframeAnimation(keyPath: "opacity")
+        show.values = [1, 1, 0]
+        show.keyTimes = [0, 0.75, 1]
+        show.duration = Self.checkDuration
+        // The dot waits for the check to leave.
+        let wait = CAKeyframeAnimation(keyPath: "opacity")
+        wait.values = [0, 0, 1]
+        wait.keyTimes = [0, 0.75, 1]
+        wait.duration = Self.checkDuration
+        for animation in [draw, show, wait] as [CAAnimation] {
+            animation.beginTime = turnEndedAt
+            animation.fillMode = .backwards
+        }
+        check.add(draw, forKey: Self.checkDrawKey)
+        check.add(show, forKey: "show")
+        dot.layer?.add(wait, forKey: "wait")
+        append(host)
     }
 
     // MARK: - Status line
@@ -607,7 +729,6 @@ final class SidebarWorkspaceCardRenderer {
             dot.wantsLayer = true
             dot.layer?.cornerRadius = size / 2
             dot.layer?.backgroundColor = state.cgColor
-            if layout.summary.mark == .working { Self.breathe(dot.layer) }
             append(dot)
             maxX = dot.frame.minX - Theme.Space.sm
         }

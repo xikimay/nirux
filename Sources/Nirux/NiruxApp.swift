@@ -10,6 +10,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var updateDot: NSView?
     var settingsWindow: NSWindow?
     weak var settingsKeepAwakeCheckbox: NSButton?
+    weak var settingsAnimationsCheckbox: NSButton?
     weak var settingsUsageLimitsCheckbox: NSButton?
     weak var settingsAgentResumePopup: NSPopUpButton?
     weak var settingsLaunchModePopup: NSPopUpButton?
@@ -167,7 +168,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         applyCITriage(enabled: Self.currentTriageCIFailures(), readsFinalMessages: hooks.turnEndClassifier != nil)
         hooks.onTurnEndSettled = { [weak shellView] in
             // Not inside the drain that may have settled it.
-            DispatchQueue.main.async { shellView?.typeMissionMessages() }
+            DispatchQueue.main.async { shellView?.turnEndSettled() }
+        }
+        hooks.onTurnDone = { [weak shellView] resolution, endedAt in
+            shellView?.agentTurnDone(in: resolution.column, endedAt: endedAt)
         }
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)

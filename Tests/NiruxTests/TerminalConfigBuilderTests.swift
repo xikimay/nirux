@@ -37,9 +37,10 @@ final class TerminalConfigBuilderTests: XCTestCase {
             "cursor-style = block", "cursor-style-blink = true", "font-size = 14", "font-thicken = true"
         ])
         XCTAssertEqual(
-            Array(lines.dropFirst(4).dropLast()),
+            Array(lines.dropFirst(4).dropLast(Builder.enforced.count)),
             TerminalConfiguration.afterglow.rendered.split(separator: "\n").map(String.init)
         )
+        XCTAssertEqual(Array(lines.suffix(Builder.enforced.count)), Builder.enforced)
         XCTAssertTrue(lines.contains("background = 212121"))
         XCTAssertEqual(lines.last, "term = xterm-256color")
     }
