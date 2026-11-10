@@ -842,12 +842,11 @@ struct AgentStatusMachine {
     /// isn't spared: a slash command it sends may open a picker no hook
     /// tells of.
     mutating func noteTypedKeys(_ data: Data, now: Date) {
-        guard pendingDialogs.isEmpty, !Self.keysLeavingThePrompt.contains(data) else { return }
+        guard !Self.keysLeavingThePrompt.contains(data) else { return }
         lastPromptKeyAt = now.timeIntervalSince1970
     }
 
     private static let keysLeavingThePrompt: Set<Data> = [
-        Data([0x1B, 0x5B, 0x5A]), Data([0x0F]), Data([0x14]), Data([0x1B]),
     ]
 
     /// Keys may have left something at Claude's prompt since the last
