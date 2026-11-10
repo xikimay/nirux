@@ -21,12 +21,13 @@ final class SidebarMergeMotionTests: XCTestCase {
 
     private func row(
         _ id: String, index: Int, pr: PRInfo? = nil, archived: Bool = false, active: Bool = false, isLead: Bool = false,
-        columns: Int = 0
+        columns: Int = 0, working: Bool = false
     ) -> WorkspaceInfo {
         let columns = (0..<columns).map { column in
             ColumnInfo(
-                index: column, processName: "zsh", abbreviatedCwd: "~/\(id)", isFocused: false, isWebView: false,
-                webTitle: nil, terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil
+                index: column, processName: working ? "claude" : "zsh", abbreviatedCwd: "~/\(id)", isFocused: false,
+                isWebView: false, webTitle: nil, terminalTitle: nil, agentStatus: working ? .working : .idle, isEditor: false,
+                editorFileName: nil
             )
         }
         return WorkspaceInfo(
@@ -231,6 +232,9 @@ final class SidebarMergeMotionTests: XCTestCase {
         let count = try XCTUnwrap(sidebar.archivedCountLabel, "this space's own Archived count")
         XCTAssertEqual(count.stringValue, "1")
         XCTAssertNil(count.layer?.animation(forKey: SidebarView.archivedBumpKey), "doesn't bump for the last space")
+        // Rows with no Archived block: no count at all, not the last one's.
+        sidebar.update(profiles: [here], workspaces: [row("e", index: 0)])
+        XCTAssertNil(sidebar.archivedCountLabel)
     }
 
     /// The rail shows none of it: nothing is noted while it shows, and
@@ -245,6 +249,15 @@ final class SidebarMergeMotionTests: XCTestCase {
         sidebar.isExpanded = true
         XCTAssertTrue(ghosts(in: sidebar).isEmpty)
         XCTAssertTrue(views(in: sidebar, SidebarWorkspaceCardRenderer.mergeSweepID).isEmpty)
+
+        // Noted while the list showed, then the rail: forgotten.
+        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest("MERGED")), row("c", index: 2)])
+        sidebar.update(profiles: [], workspaces: [row("a", index: 0, pr: pullRequest("MERGED"))])
+        XCTAssertFalse(sidebar.folds.isEmpty)
+        sidebar.isExpanded = false
+        XCTAssertTrue(sidebar.folds.isEmpty)
+        sidebar.isExpanded = true
+        XCTAssertTrue(ghosts(in: sidebar).isEmpty)
     }
 
     /// The Lead's row sits apart from the tasks: turning the Lead off folds
@@ -286,7 +299,7 @@ final class SidebarMergeMotionTests: XCTestCase {
         XCTAssertEqual(leave.beginTime, moment)
         XCTAssertEqual(leave.fillMode, .backwards)
 
-        let pullKey = SidebarView.foldPullKey("leaving")
+        let pullKey = SidebarView.foldPullKey
         let pulled = sidebar.expandedViews.filter { $0.layer?.animation(forKey: pullKey) != nil }
         let under = try XCTUnwrap(sidebar.rowFrame(workspaceID: "under"))
         XCTAssertFalse(pulled.isEmpty)
@@ -336,22 +349,80 @@ final class SidebarMergeMotionTests: XCTestCase {
     func testClosedRowsFoldWithoutABump() throws {
         let rows = [row("first", index: 0), row("second", index: 1), row("under", index: 2)]
         let sidebar = sidebar(rows)
-        sidebar.update(profiles: [], workspaces: [row("under", index: 0)])
+        let oldUnder = try XCTUnwrap(sidebar.rowFrame(workspaceID: "under"))
+        sidebar.update(profiles: [], workspaces: [row("under", index: 2)])
         XCTAssertEqual(Set(sidebar.folds.map(\.workspaceID)), ["first", "second"])
         XCTAssertNil(sidebar.archivedBumpAt)
-        XCTAssertEqual(views(in: sidebar, SidebarView.foldGhostID).count, 2)
-        let under = views(in: sidebar, inside: try XCTUnwrap(sidebar.rowFrame(workspaceID: "under")))
-            .filter { $0.identifier != SidebarView.foldGhostID }
+        XCTAssertEqual(ghosts(in: sidebar).count, 2)
+        let newUnder = try XCTUnwrap(sidebar.rowFrame(workspaceID: "under"))
+        let under = views(in: sidebar, inside: newUnder).filter { $0.identifier != SidebarView.foldGhostID }
         XCTAssertFalse(under.isEmpty)
         for view in under {
-            XCTAssertNotNil(view.layer?.animation(forKey: SidebarView.foldPullKey("first")))
-            XCTAssertNotNil(view.layer?.animation(forKey: SidebarView.foldPullKey("second")))
+            let pull = try XCTUnwrap(view.layer?.animation(forKey: SidebarView.foldPullKey) as? CASpringAnimation)
+            XCTAssertEqual(
+                (pull.fromValue as? NSNumber)?.doubleValue ?? 0, -Double(newUnder.maxY - oldUnder.maxY), accuracy: 0.5,
+                "from where it was, once: not twice for two folds"
+            )
         }
         // The first one's picture, where the task under now is, doesn't
         // come up for the second.
         for ghost in ghosts(in: sidebar) {
             XCTAssertNil(ghost.layer?.animationKeys())
         }
+    }
+
+    /// The picture of a row that leaves stays under the row above it, which
+    /// grows when the selection moves there (its terminals' line).
+    func testThePictureStaysUnderARowAboveThatGrows() throws {
+        let rows = [row("above", index: 0, columns: 1), row("leaving", index: 1, active: true, columns: 1)]
+        let sidebar = sidebar(rows)
+        let oldAbove = try XCTUnwrap(sidebar.rowFrame(workspaceID: "above"))
+        let oldLeaving = try XCTUnwrap(sidebar.rowFrame(workspaceID: "leaving"))
+        sidebar.update(profiles: [], workspaces: [
+            row("above", index: 0, active: true, columns: 1), row("leaving", index: 1, archived: true, columns: 1)
+        ])
+        let newAbove = try XCTUnwrap(sidebar.rowFrame(workspaceID: "above"))
+        XCTAssertLessThan(newAbove.minY, oldAbove.minY, "it grew")
+        let ghost = try XCTUnwrap(ghosts(in: sidebar).first)
+        let frame = sidebar.convert(ghost.frame, from: ghost.superview)
+        XCTAssertEqual(newAbove.minY - frame.maxY, oldAbove.minY - oldLeaving.maxY, accuracy: 0.5, "the same gap under it")
+    }
+
+    /// A row that leaves while the list scrolled before, or scrolls after:
+    /// rows take their places at once, with no picture over them.
+    func testNoFoldWhenTheListScrolledBeforeOrAfter() throws {
+        // The fewest rows that scroll: one less fits.
+        var count = 2
+        var probe = sidebar((0..<count).map { row("task-\($0)", index: $0) })
+        while probe.contentDocumentView.frame.height <= probe.bounds.height + 0.5, count < 60 {
+            count += 1
+            probe = sidebar((0..<count).map { row("task-\($0)", index: $0) })
+        }
+        let rows = (0..<count).map { row("task-\($0)", index: $0) }
+        probe.update(profiles: [], workspaces: rows.filter { $0.id != "task-0" })
+        XCTAssertLessThanOrEqual(probe.contentDocumentView.frame.height, probe.bounds.height + 0.5, "fits after")
+        XCTAssertEqual(probe.folds.first?.fitted, false)
+        XCTAssertTrue(ghosts(in: probe).isEmpty)
+        XCTAssertTrue(probe.expandedViews.allSatisfy { $0.layer?.animation(forKey: SidebarView.foldPullKey) == nil })
+
+        let few = sidebar([row("a", index: 0), row("b", index: 1)])
+        few.update(profiles: [], workspaces: [row("b", index: 1)] + (2..<(count + 2)).map { row("more-\($0)", index: $0) })
+        XCTAssertGreaterThan(few.contentDocumentView.frame.height, few.bounds.height, "scrolls after")
+        XCTAssertEqual(few.folds.first?.fitted, true)
+        XCTAssertTrue(ghosts(in: few).isEmpty)
+        XCTAssertTrue(few.expandedViews.allSatisfy { $0.layer?.animation(forKey: SidebarView.foldPullKey) == nil })
+    }
+
+    /// A turn that ends while the row still works, with the checks its
+    /// push started: its check is owed, and drawn over the ring when the
+    /// row stops working.
+    func testAnOwedCheckIsDrawnOverTheRing() throws {
+        let sidebar = sidebar([row("pr", index: 0, pr: pullRequest(ci: "PENDING"), columns: 1, working: true)])
+        sidebar.noteTurnEnded(workspaceIDs: ["pr"])
+        XCTAssertNotNil(sidebar.owedTurnEnds["pr"])
+        sidebar.update(profiles: [], workspaces: [row("pr", index: 0, pr: pullRequest(ci: "PENDING"), columns: 1)])
+        XCTAssertNotNil(sidebar.turnEndNotedAt["pr"])
+        XCTAssertEqual(views(in: sidebar, SidebarWorkspaceCardRenderer.turnEndCheckID).count, 1)
     }
 
     /// Each task comes up from where it was, by its own way: archiving the
@@ -370,7 +441,7 @@ final class SidebarMergeMotionTests: XCTestCase {
         let newNext = try XCTUnwrap(sidebar.rowFrame(workspaceID: "next"))
         let newLast = try XCTUnwrap(sidebar.rowFrame(workspaceID: "last"))
         XCTAssertNotEqual(newNext.maxY - oldNext.maxY, newLast.maxY - oldLast.maxY, "the selected row grew")
-        let key = SidebarView.foldPullKey("leaving")
+        let key = SidebarView.foldPullKey
         let pull = { (frame: NSRect) -> Double? in
             (self.views(in: sidebar, inside: frame).first { $0.identifier != SidebarView.foldGhostID }?
                 .layer?.animation(forKey: key) as? CASpringAnimation)?.fromValue.flatMap { ($0 as? NSNumber)?.doubleValue }
@@ -421,6 +492,6 @@ final class SidebarMergeMotionTests: XCTestCase {
         XCTAssertGreaterThan(sidebar.contentDocumentView.frame.height, sidebar.bounds.height, "it scrolls")
         XCTAssertEqual(sidebar.folds.count, 1, "noted")
         XCTAssertTrue(ghosts(in: sidebar).isEmpty, "no picture over rows that took its place at once")
-        XCTAssertTrue(sidebar.expandedViews.allSatisfy { $0.layer?.animation(forKey: SidebarView.foldPullKey("task-5")) == nil })
+        XCTAssertTrue(sidebar.expandedViews.allSatisfy { $0.layer?.animation(forKey: SidebarView.foldPullKey) == nil })
     }
 }

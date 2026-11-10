@@ -26,6 +26,10 @@ extension SidebarView {
         /// was there: how far from the document's top each one's top was.
         let under: [String: CGFloat]
         let cardTop: CGFloat?
+        /// The task listed right above it, and how far from the document's
+        /// top its bottom was: the picture stays under it if it grows (the
+        /// selection moving there).
+        let above: (id: String, bottom: CGFloat)?
         /// The list fitted the sidebar: rows were where the list put them,
         /// whatever the scroll.
         let fitted: Bool
@@ -33,10 +37,9 @@ extension SidebarView {
 
     static let foldGhostID = NSUserInterfaceItemIdentifier("nirux.sidebar.fold")
     static let foldLeaveKey = "leave"
-    /// One pull per fold: a row under two tasks that left together comes
-    /// up for both.
-    static func foldPullKey(_ workspaceID: String) -> String { foldPullPrefix + workspaceID }
-    private static let foldPullPrefix = "foldPull."
+    /// One pull per row, whatever the folds above it: it comes up by its
+    /// own way, once.
+    static let foldPullKey = "foldPull"
     static let archivedBumpKey = "bump"
     /// The row's picture closing.
     static let foldDuration: CFTimeInterval = 0.36
@@ -52,6 +55,8 @@ extension SidebarView {
         mergedAt = [:]
         folds = []
         archivedBumpAt = nil
+        // The checklist card outlives rebuilds: its pull goes now.
+        onboardingCardView?.layer?.removeAnimation(forKey: Self.foldPullKey)
     }
 
     /// Between two refreshes: what changed on the rows that both list.
@@ -104,9 +109,15 @@ extension SidebarView {
             under[info.id] = height - area.frame.maxY
         }
         let card = onboardingCardView.flatMap { card in card.frame.maxY <= frame.minY + 1 ? height - card.frame.maxY : nil }
+        let above = hitAreas.compactMap { area -> (id: String, bottom: CGFloat)? in
+            guard case .workspace(let index) = area.region, area.frame.minY >= frame.maxY - 1,
+                  let info = lastInfos.first(where: { $0.index == index })
+            else { return nil }
+            return (info.id, height - area.frame.minY)
+        }.max { $0.bottom < $1.bottom }
         folds.append(Fold(
             workspaceID: workspace.id, startedAt: now, top: height - frame.maxY, frame: frame, picture: picture,
-            under: under, cardTop: card, fitted: contentDocumentView.frame.height <= bounds.height + 0.5
+            under: under, cardTop: card, above: above, fitted: contentDocumentView.frame.height <= bounds.height + 0.5
         ))
         return true
     }
@@ -115,51 +126,53 @@ extension SidebarView {
     /// the rows under them coming up, and the Archived count its bump. Not
     /// while rows may not move, whatever started before.
     func applyMergeMotion() {
-        guard isExpanded, animates else {
-            // The checklist card outlives rebuilds: its pull goes now.
-            if let card = onboardingCardView?.layer {
-                card.animationKeys()?.filter { $0.hasPrefix(Self.foldPullPrefix) }.forEach(card.removeAnimation)
-            }
-            return
-        }
+        // The checklist card outlives rebuilds: its pull, if any, is
+        // given again below.
+        onboardingCardView?.layer?.removeAnimation(forKey: Self.foldPullKey)
+        guard isExpanded, animates else { return }
         let now = clock()
         let height = contentDocumentView.bounds.height
         // A list taller than the sidebar scrolls: where rows were on screen
         // depended on the scroll, so nothing folds or comes up; the rows
         // just take their places, as they did.
         let fits = contentDocumentView.frame.height <= bounds.height + 0.5
-        // Before any ghost joins the views: a later fold doesn't pull an
-        // earlier one's picture.
-        let rows = expandedViews.filter { $0.identifier != Self.foldGhostID }
-        for fold in folds where now - fold.startedAt < Self.foldMotionDuration && fold.fitted && fits {
-            // Each task that was under it comes up from where it was: by
-            // its own way, as the rows above may have changed too (another
-            // one selected grows by its links).
-            for area in hitAreas {
-                guard case .workspace(let index) = area.region,
-                      let info = lastInfos.first(where: { $0.index == index }), !info.isInactive,
-                      let oldTop = fold.under[info.id]
-                else { continue }
-                let moved = oldTop - (height - area.frame.maxY)
-                guard moved > 0.5 else { continue }
-                let pull = Self.foldPull(by: moved, at: fold.startedAt)
-                let place = area.frame.insetBy(dx: -1, dy: -1)
-                for view in rows where place.contains(view.frame) {
-                    view.wantsLayer = true
-                    view.layer?.add(pull, forKey: Self.foldPullKey(fold.workspaceID))
-                }
+        let live = folds.filter { now - $0.startedAt < Self.foldMotionDuration && $0.fitted && fits }
+            .sorted { $0.startedAt < $1.startedAt }
+        // Each task that was under a fold comes up from where it was, by
+        // its own way (the rows above may have changed too: another one
+        // selected grows by its links), from the first fold that moved it:
+        // once, however many left.
+        let rows = expandedViews
+        for area in hitAreas {
+            guard case .workspace(let index) = area.region,
+                  let info = lastInfos.first(where: { $0.index == index }), !info.isInactive,
+                  let fold = live.first(where: { $0.under[info.id] != nil }), let oldTop = fold.under[info.id]
+            else { continue }
+            let moved = oldTop - (height - area.frame.maxY)
+            guard moved > 0.5 else { continue }
+            let pull = Self.foldPull(by: moved, at: fold.startedAt)
+            let place = area.frame.insetBy(dx: -1, dy: -1)
+            for view in rows where place.contains(view.frame) {
+                view.wantsLayer = true
+                view.layer?.add(pull, forKey: Self.foldPullKey)
             }
-            if let card = onboardingCardView, let oldTop = fold.cardTop {
-                let moved = oldTop - (height - card.frame.maxY)
-                if moved > 0.5 {
-                    card.wantsLayer = true
-                    card.layer?.add(Self.foldPull(by: moved, at: fold.startedAt), forKey: Self.foldPullKey(fold.workspaceID))
-                }
+        }
+        if let card = onboardingCardView, let fold = live.first(where: { $0.cardTop != nil }), let oldTop = fold.cardTop {
+            let moved = oldTop - (height - card.frame.maxY)
+            if moved > 0.5 {
+                card.wantsLayer = true
+                card.layer?.add(Self.foldPull(by: moved, at: fold.startedAt), forKey: Self.foldPullKey)
             }
-            guard now - fold.startedAt < Self.foldDuration else { continue }
+        }
+        for fold in live where now - fold.startedAt < Self.foldDuration {
+            // Under the row above it, which may have grown since.
+            var top = fold.top
+            if let above = fold.above, let index = lastInfos.first(where: { $0.id == above.id })?.index,
+               let area = hitAreas.first(where: { if case .workspace(index) = $0.region { true } else { false } }) {
+                top += (height - area.frame.minY) - above.bottom
+            }
             addFoldGhost(for: fold, at: NSRect(
-                x: fold.frame.minX, y: height - fold.top - fold.frame.height,
-                width: fold.frame.width, height: fold.frame.height
+                x: fold.frame.minX, y: height - top - fold.frame.height, width: fold.frame.width, height: fold.frame.height
             ))
         }
         if let archivedBumpAt, now - archivedBumpAt < Self.bumpDuration, let count = archivedCountLabel {

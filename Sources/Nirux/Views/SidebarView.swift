@@ -87,6 +87,9 @@ final class SidebarView: NSView {
             // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
             lastFollowedActiveIndex = Int.min
+            // The rail shows none of the rows' moments: none replays when
+            // the list opens again.
+            if !isExpanded { forgetRowMoments() }
             rebuildContent()
         }
     }
