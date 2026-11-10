@@ -37,6 +37,9 @@ struct ColumnInfo: Hashable {
     /// (`AgentCirclingHint`), which the row says while it works; nil with
     /// the hint turned off in Settings.
     var circling: AgentCirclingHint?
+    /// The question this column's Claude ended its turn on, while it waits
+    /// at a quiet prompt: Yes / No / Reply… answer it from the card.
+    var turnQuestion: SidebarTurnQuestion?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
 
@@ -397,6 +400,8 @@ enum SidebarHitRegion {
     case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
     /// Resume on the row of a restored agent that hasn't resumed yet.
     case deferredAgentResume(workspaceIndex: Int, columnIndex: Int, columnID: UUID)
+    /// Yes, No or Reply… under the question a Claude turn ended on.
+    case turnAnswer(workspaceIndex: Int, columnIndex: Int, turnEndedAt: TimeInterval, answer: SidebarTurnAnswer)
     /// The rest of an Allow / Deny or Resume block: clicks there do nothing
     /// (a press meant for a button that just moved must not reach the card
     /// below).
@@ -474,9 +479,40 @@ enum SidebarHoverTarget: Hashable {
         "resume|\(workspaceIndex)|\(columnIndex)|\(failedAt)"
     }
 
+    /// Key of a Yes / No / Reply… button, among the approval buttons: a
+    /// later question at the same place arms again.
+    static func turnAnswerButtonKey(
+        workspaceIndex: Int, columnIndex: Int, turnEndedAt: TimeInterval, answer: SidebarTurnAnswer
+    ) -> String {
+        "turn-answer|\(workspaceIndex)|\(columnIndex)|\(turnEndedAt)|\(answer.rawValue)"
+    }
+
     /// Key of a not-resumed agent's Resume button: its column, wherever
     /// the row moves.
     static func deferredResumeButtonKey(columnID: UUID) -> String {
         "deferred-resume|\(columnID.uuidString)"
+    }
+}
+
+/// The question a Claude turn ended on, for its card: the sentence that
+/// asks (`AgentStatusMachine.AskedQuestion`), when it was asked, and
+/// whether Yes and No may answer it.
+struct SidebarTurnQuestion: Hashable {
+    let text: String
+    let turnEndedAt: TimeInterval
+    let isYesNo: Bool
+}
+
+/// A quick answer's button under a turn's question.
+enum SidebarTurnAnswer: String, Hashable {
+    case yes, no, reply
+
+    /// What Yes and No type into the agent's prompt.
+    var typedText: String? {
+        switch self {
+        case .yes: return "yes"
+        case .no: return "no"
+        case .reply: return nil
+        }
     }
 }
