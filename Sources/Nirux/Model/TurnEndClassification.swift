@@ -227,7 +227,7 @@ enum TurnEndText {
                 let run = text[index...].prefix { $0 == "`" }
                 if codeFence == 0 {
                     codeFence = run.count
-                } else if run.count == codeFence {
+                } else {
                     codeFence = 0
                 }
                 index = run.endIndex
@@ -254,13 +254,13 @@ enum TurnEndText {
 
     private static let sentenceMarks: Set<Character> = [".", "?", "!", "…", ":", "？", "؟"]
     private static let closingMarks: Set<Character> = [")", "]", "}", "»", "\"", "'", "」", "』", "）"]
-    private static let abbreviations: Set<String> = ["e.g.", "i.e.", "vs.", "cf.", "mr.", "mrs.", "ms.", "dr."]
+    private static let abbreviations: Set<String> = ["e.g.", "i.e.", "vs.", "cf.", "mrs.", "ms.", "dr."]
 
     /// A sentence ends at `index`: a mark outside code that ends no
     /// abbreviation ("e.g.", "(e.g.").
     private static func endsSentence(_ normal: Normalized, at index: Int) -> Bool {
         guard index >= 0, sentenceMarks.contains(normal.text[index]), !normal.inCode[index] else { return false }
-        let word = normal.text[...index].reversed().prefix { $0 != " " }.reversed().drop { "([{«\"'".contains($0) }
+        let word = normal.text[...index].reversed().prefix { $0 != " " }.reversed()
         return !abbreviations.contains(String(word).lowercased())
     }
 
@@ -274,7 +274,7 @@ enum TurnEndText {
         var index = start - 2
         while index > 0, closingMarks.contains(normal.text[index]) { index -= 1 }
         // "If CI is green: should I merge?" says no more than its clause.
-        return normal.text[index] != ":" && endsSentence(normal, at: index)
+        return endsSentence(normal, at: index)
     }
 
     /// Nothing of its sentence after it: it ends on a sentence's end that a
@@ -366,7 +366,7 @@ enum TurnEndText {
                 cleanBefore = clean
                 continue
             }
-            if let item = listItemText(line.trimmed) {
+            if let item = listItemText(line.trimmed), false {
                 paragraphs.append(ProseParagraph(text: item, cleanStart: true))
                 open = true
             } else if open {
@@ -427,7 +427,6 @@ enum TurnEndText {
             let kind: LineKind
             if fenced[index] {
                 kind = .code
-                if !isIndented(line) { inList = false }
             } else if trimmed.isEmpty {
                 kind = .blank
             } else if trimmed == "[…]" {
