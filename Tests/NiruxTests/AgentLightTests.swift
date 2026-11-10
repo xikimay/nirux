@@ -304,6 +304,8 @@ final class AgentLightTests: XCTestCase {
 
         glow.show(.alert(.waiting), moving: false, target: target("claude has a question"), announcing: true)
         XCTAssertTrue(glow.isPillShown)
+        glow.show(.alert(.waiting), moving: false, target: target("codex needs permission"))
+        XCTAssertFalse(glow.isPillShown, "another agent's name doesn't ride on the first one's seconds")
 
         glow.show(nil, moving: false)
         XCTAssertFalse(glow.isPillShown)
