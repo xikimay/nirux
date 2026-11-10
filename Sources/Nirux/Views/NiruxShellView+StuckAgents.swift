@@ -17,36 +17,33 @@ extension NiruxShellView {
         minutes > 0 ? TimeInterval(minutes) * 60 : nil
     }
 
-    /// Where a column sits on a status refresh.
-    struct StuckAgentPlace {
-        let workspace: WorkspaceState
-        let columnIndex: Int
+    static func currentCirclingHintEnabled() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).agentCirclingHint
     }
 
     /// One column on a status refresh: follow its foreground agent, send
     /// the alert a stuck state owes (once), and show or take down the
-    /// notice of an agent that died mid-turn. The alert goes out (Telegram)
-    /// even for the column on screen: a dialog nobody touched for
-    /// the whole threshold says nobody is watching. Only the in-app flag,
-    /// the Dock badge and the system banner skip that column while Nirux is
-    /// in front.
+    /// notice of an agent that died mid-turn. The alert (the in-app flag,
+    /// the Dock badge, the system banner) is not for the column on screen
+    /// while Nirux is in front: it stays owed, and goes out once the
+    /// column or Nirux leaves the front with the agent still stuck.
     func refreshStuckAgent(
         _ column: ColumnState,
-        at place: StuckAgentPlace,
+        in workspace: WorkspaceState,
         foregroundProcess: ForegroundProcess?,
         snapshot: ProcessSnapshot,
-        now: TimeInterval
+        now: TimeInterval,
+        appIsActive: Bool = NSApp.isActive
     ) {
-        let workspace = place.workspace
         column.trackForegroundAgent(foregroundProcess, snapshot: snapshot, now: now)
         guard let pty = column.pty else { return }
-        if let reason = pty.takeAgentStuckAlert(
+        let onScreen = appIsActive && workspace === activeWorkspace
+            && workspace.columns[safe: workspace.focusedIndex] === column
+        // Taken only when it can be delivered: an alert goes out once.
+        if !onScreen, let reason = pty.takeAgentStuckAlert(
             now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess
         ) {
-            let onScreen = NSApp.isActive && workspace === activeWorkspace
-                && workspace.columns[safe: workspace.focusedIndex] === column
-            if !onScreen { column.notifyAgentAttention(reason: reason) }
-            onStuckAgentAlert?(reason, workspace, place.columnIndex, column)
+            column.notifyAgentAttention(reason: reason)
         }
         let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess)
         if case .exitedMidTurn(let exit)? = stuck {
@@ -77,12 +74,17 @@ extension NiruxShellView {
 
     /// The stuck-agent pass alone, for every column: no status tick, no
     /// sidebar rebuild.
-    func refreshStuckAgents(snapshot: ProcessSnapshot = ProcessSnapshot(), now: TimeInterval = Date().timeIntervalSince1970) {
+    func refreshStuckAgents(
+        snapshot: ProcessSnapshot = ProcessSnapshot(),
+        now: TimeInterval = Date().timeIntervalSince1970,
+        appIsActive: Bool = NSApp.isActive
+    ) {
         for workspace in workspaces {
-            for (columnIndex, column) in workspace.columns.enumerated() {
+            for column in workspace.columns {
                 refreshStuckAgent(
-                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex),
-                    foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot), snapshot: snapshot, now: now
+                    column, in: workspace,
+                    foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot), snapshot: snapshot, now: now,
+                    appIsActive: appIsActive
                 )
             }
         }

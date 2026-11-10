@@ -71,7 +71,7 @@ extension NiruxShellView {
     }
 
     /// Why Address can't type into the agent now; nil when it can.
-    static func prFeedbackAddressRefusal(_ session: RemoteAgentSession?) -> String? {
+    static func prFeedbackAddressRefusal(_ session: TypedPromptTarget?) -> String? {
         guard let session else { return "no Claude agent running" }
         if session.pendingDialog != nil { return "the agent is waiting on a dialog" }
         if session.status == .working { return "the agent is working" }
@@ -79,13 +79,13 @@ extension NiruxShellView {
     }
 
     /// The workspace's focused Claude agent, else its first one, in the
-    /// PR's checkout: the skill is Claude's. Telegram's rules decide what
-    /// is live.
-    private func prFeedbackAgent(in workspace: WorkspaceState) -> RemoteAgentSession? {
+    /// PR's checkout: the skill is Claude's. `typedPromptTargets` decides
+    /// what is live.
+    private func prFeedbackAgent(in workspace: WorkspaceState) -> TypedPromptTarget? {
         guard let root = workspace.gitContext?.identity.repositoryRoot else { return nil }
         let resolvedRoot = Self.comparablePath(root)
         let snapshot = ProcessSnapshot()
-        let sessions = remoteAgentSessions().filter {
+        let sessions = typedPromptTargets().filter {
             $0.workspaceID == workspace.id
                 && workspace.columns[$0.columnIndex].pty?.foregroundProcessName(snapshot: snapshot) == "claude"
                 && ProjectBoard.contains(resolvedRoot, Self.comparablePath($0.cwd))
@@ -98,7 +98,7 @@ extension NiruxShellView {
     private func addressPRFeedback(in workspace: WorkspaceState, prompt: String) {
         AgentHookCenter.shared.drain()
         if let session = prFeedbackAgent(in: workspace), Self.prFeedbackAddressRefusal(session) == nil,
-           case .sent = sendRemotePrompt(agentUUID: session.id, prompt: prompt) {
+           case .sent = sendTypedPrompt(agentUUID: session.id, prompt: prompt) {
             return
         }
         NSSound.beep()

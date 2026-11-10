@@ -299,7 +299,7 @@ extension NiruxShellView {
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
                   ),
-                  let input = RemotePromptSanitizer.terminalInput(for: text),
+                  let input = TypedPromptSanitizer.terminalInput(for: text),
                   // Recorded first: a failed save must not type it twice.
                   MissionStore.shared.markTyped(delivery, at: now)
             else { continue }
@@ -323,7 +323,7 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
             else { return false }
             guard let pty = column.pty, pty.acceptsMissionMessage(runningSince: now, snapshot: snapshot),
-                  let input = RemotePromptSanitizer.terminalInput(for: notice.text)
+                  let input = TypedPromptSanitizer.terminalInput(for: notice.text)
             else { return true }
             pty.sendRaw(input)
             return false

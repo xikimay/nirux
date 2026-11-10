@@ -96,28 +96,19 @@ enum SettingsForm {
         return popup
     }
 
-    /// A label, then its control (a pop-up at its natural width, a text field
-    /// up to an optional trailing button). The label titles the control for
-    /// VoiceOver.
-    static func row(_ title: String, _ control: NSView, trailing: NSView? = nil) -> NSView {
+    /// A label, then its control (a pop-up at its natural width). The label
+    /// titles the control for VoiceOver.
+    static func row(_ title: String, _ control: NSView) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         control.setContentHuggingPriority(.defaultLow, for: .horizontal)
         control.setAccessibilityTitleUIElement(label)
-        let row = NSStackView(views: [label, control] + (trailing.map { [$0] } ?? []))
+        let row = NSStackView(views: [label, control])
         row.orientation = .horizontal
         row.alignment = .firstBaseline
         row.spacing = 8
         row.widthAnchor.constraint(equalToConstant: textWidth).isActive = true
-        return row
-    }
-
-    /// Buttons side by side, at their natural width.
-    static func buttons(_ views: [NSView]) -> NSView {
-        let row = NSStackView(views: views)
-        row.orientation = .horizontal
-        row.spacing = 8
         return row
     }
 

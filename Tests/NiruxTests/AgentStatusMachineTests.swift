@@ -123,7 +123,6 @@ final class AgentStatusMachineTests: XCTestCase {
         let outcome = machine.apply(
             event(.permissionRequest, at: 1, tool: "Bash", summary: "git push", key: "k1"), isUserFocused: false
         )
-        XCTAssertEqual(outcome.attention, .permission(tool: "Bash", summary: "git push"))
         XCTAssertFalse(outcome.firedAttention, "the alert waits for Claude's own reminder")
         XCTAssertEqual(machine.state, .needsAttention)
         XCTAssertEqual(machine.attentionReason, .permission(tool: "Bash", summary: "git push"))
@@ -146,7 +145,6 @@ final class AgentStatusMachineTests: XCTestCase {
             event(.notification, at: 7, type: "permission_prompt", message: "Claude needs your permission to use Bash"),
             isUserFocused: false
         )
-        XCTAssertTrue(reminder.isRepeat)
         XCTAssertTrue(reminder.firedAttention)
         XCTAssertEqual(reminder.attention, .permission(tool: "Bash", summary: "rm x"))
         XCTAssertEqual(machine.pendingDialogs.count, 1)
@@ -192,7 +190,7 @@ final class AgentStatusMachineTests: XCTestCase {
         _ = machine.apply(event(.preToolUse, at: 20, tool: "Edit"), isUserFocused: false)
         XCTAssertEqual(machine.state, .working)
         XCTAssertNil(machine.attentionReason)
-        XCTAssertEqual(machine.pendingDialogs.count, 1, "remote prompts stay refused")
+        XCTAssertEqual(machine.pendingDialogs.count, 1, "typed prompts stay refused")
         // Claude's reminder says a dialog does wait: blocked again.
         let reminder = machine.apply(event(.notification, at: 26, type: "permission_prompt"), isUserFocused: false)
         XCTAssertTrue(reminder.firedAttention)
@@ -230,7 +228,6 @@ final class AgentStatusMachineTests: XCTestCase {
             event(.notification, type: "permission_prompt", message: "Claude needs your permission"),
             isUserFocused: false
         )
-        XCTAssertFalse(outcome.isRepeat)
         XCTAssertTrue(outcome.firedAttention)
         XCTAssertEqual(outcome.attention, .permission(tool: nil, summary: "Claude needs your permission"))
         XCTAssertEqual(machine.pendingDialogs.count, 1)
@@ -391,8 +388,7 @@ final class AgentStatusMachineTests: XCTestCase {
     // MARK: - Idle reminder, idle compaction
 
     /// Claude's `idle_prompt` comes a minute after a turn its Stop already
-    /// reported: no second alert, nothing for Telegram (which pings on any
-    /// attention), and a turn the user looked at stays seen.
+    /// reported: no second alert, and a turn the user looked at stays seen.
     func testIdleReminderAfterAFinishedTurnSaysNothingNew() {
         startTurn()
         XCTAssertTrue(machine.apply(event(.stop, at: 10), isUserFocused: false).firedAttention)
@@ -594,7 +590,7 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 11.5), .working)
         machine.noteRead(now: t0 + 60)
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 61), .working)
-        XCTAssertEqual(machine.pendingDialogs.count, 1, "remote prompts stay blocked until hooks confirm")
+        XCTAssertEqual(machine.pendingDialogs.count, 1, "typed prompts stay blocked until hooks confirm")
 
         // Silence (a denial ended the turn): idle, never attention.
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 70), .idle)
@@ -635,18 +631,6 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
         XCTAssertNil(machine.turnStartedAt)
         XCTAssertNil(machine.attentionReason)
-    }
-
-    func testStandaloneOutcomeReadsTheEventAlone() {
-        XCTAssertEqual(
-            AgentStatusMachine.standaloneOutcome(for: event(.permissionRequest, tool: "Bash", summary: "ls", key: "k"))
-                .attention,
-            .permission(tool: "Bash", summary: "ls")
-        )
-        let prompt = AgentStatusMachine.standaloneOutcome(for: event(.notification, type: "permission_prompt", message: "m"))
-        XCTAssertFalse(prompt.isRepeat)
-        XCTAssertFalse(prompt.firedAttention)
-        XCTAssertNil(AgentStatusMachine.standaloneOutcome(for: event(.notification, type: "auth_success")).attention)
     }
 
     // MARK: - Fallback path (no hooks — codex, unhooked claude)

@@ -31,6 +31,8 @@ struct SidebarStatusLine: Hashable {
     var action: Action?
     /// The end of `text` that is the link ("Clean up"); nil: all of it.
     var linkText: String?
+    /// What the line can't hold, for its tooltip.
+    var detail: String?
 }
 
 /// The sign before a row's title, in the state dots' column.
@@ -61,16 +63,18 @@ struct SidebarRowSummary: Hashable {
     let status: SidebarStatusLine
     let trailing: Trailing?
     /// The column a click on the row brings up: the one that waits on the
-    /// user or broke. Nil: the workspace's focused column.
+    /// user, broke, or may be going in circles. Nil: the workspace's
+    /// focused column.
     var focusColumn: Int?
 }
 
 @MainActor
 extension WorkspaceInfo {
     /// Needs you, then broken, then a Mission question the parent may still
-    /// answer, then work, then an agent to resume, then the blocker (grey:
-    /// it doesn't ask the user), then a finished turn, then the pull
-    /// request, then the next step, else the branch.
+    /// answer, then work (in the same grey, that the agent may be going in
+    /// circles: it doesn't ask the user either), then an agent to resume,
+    /// then the blocker (grey: it doesn't ask the user), then a finished
+    /// turn, then the pull request, then the next step, else the branch.
     var rowSummary: SidebarRowSummary {
         let age = lastActivityAt.map { SidebarRowSummary.Trailing.age(SidebarView.cardAge(since: $0)) }
         func row(_ mark: SidebarRowMark, _ text: String, _ tone: SidebarStatusLine.Tone,
@@ -92,7 +96,8 @@ extension WorkspaceInfo {
         }
         if let pullRequest = prInfo, pullRequest.state == "OPEN", pullRequest.ciStatus == "FAILURE",
            !columns.contains(where: { $0.agentStatus == .working }) {
-            return row(.error, "#\(pullRequest.number) · checks failed", .error)
+            // Only a likely flake says more (docs/ci-failure-triage.md).
+            return row(.error, "#\(pullRequest.number) · checks failed" + (ciFlakyReason == nil ? "" : " · likely flaky"), .error)
         }
         // A child that asked ended its turn to wait (a Codex one blocks):
         // asking comes before work. An answer waiting to be typed comes
@@ -103,7 +108,17 @@ extension WorkspaceInfo {
         }
         let working = columns.filter { $0.agentStatus == .working }
         if !working.isEmpty {
-            return row(.working, "Working", .neutral, trailing: working.compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age)
+            // The one that may be going in circles: its hint, its turn's
+            // time, and a click on the row brings it up.
+            let circling = circlingColumn
+            return SidebarRowSummary(
+                mark: .working,
+                status: SidebarStatusLine(
+                    text: circling?.circling?.statusText ?? "Working", tone: .neutral, detail: circling?.circling?.detail
+                ),
+                trailing: (circling.map { [$0] } ?? working).compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age,
+                focusColumn: circling?.index
+            )
         }
         if let answered = question?.missionQuestion {
             return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)
@@ -137,6 +152,11 @@ extension WorkspaceInfo {
         }
         let place = gitBranch ?? columns.first(where: \.isFocused)?.abbreviatedCwd ?? columns.first?.abbreviatedCwd
         return row(.idle, place ?? "No activity yet", place == nil ? .neutral : .branch)
+    }
+
+    /// The working column that may be going in circles, if any.
+    var circlingColumn: ColumnInfo? {
+        columns.first { $0.agentStatus == .working && $0.circling != nil }
     }
 
     /// The next step on the status line: "Next · write the import side".

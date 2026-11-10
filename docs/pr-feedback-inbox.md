@@ -30,7 +30,7 @@ that sends `/receiving-code-review` to the workspace's agent.
 | --- | --- | --- |
 | Feedback read | Unresolved threads and new comments of the workspace's open PR | One `gh api graphql` call per PR, on the existing PR refresh |
 | Card line | "💬 2 · 🤖 3", hidden at zero, a menu on click | One more row under the PR rows of the card |
-| Address | Types `/receiving-code-review …` into the agent | `sendRemotePrompt(agentUUID:prompt:)`, the Telegram path |
+| Address | Types `/receiving-code-review …` into the agent | `sendTypedPrompt(agentUUID:prompt:)`, the guarded typing path |
 
 ## 1. What counts as feedback
 
@@ -92,10 +92,10 @@ Source: [PullRequestReviewThread](https://docs.github.com/en/graphql/reference/o
 - Target: the workspace's focused Claude agent, else its first one, among
   those whose folder is in the PR's checkout. The menu disables Address, with
   the reason, when there is none, when it is working or when a dialog is open.
-  The click drains the hook queue and checks again, then `sendRemotePrompt`
+  The click drains the hook queue and checks again, then `sendTypedPrompt`
   checks the dialog once more before typing.
 - feat/review-ritual-badges needs the same injection. Both call the existing
-  `sendRemotePrompt` unchanged, so neither branch touches it.
+  `sendTypedPrompt` unchanged, so neither branch touches it.
 
 ## 5. Not now
 

@@ -27,7 +27,9 @@ question: why not connect Nirux to claude.ai instead?
   Codex. A claude.ai doc is only an option, for editing from the phone.
 - **No direct sync with claude.ai Projects.** There is no public API, and
   scraping with cookies is ruled out.
-- **Telegram stays as it is.** Projects don't build on it.
+- **Telegram Remote Access is gone** (November 2026): it wasn't used, and
+  Claude Code's Remote Control covers Claude sessions. Codex has no remote
+  path.
 - **Routing is sticky.** A workspace stays in the project it was assigned to,
   even if its shell later `cd`s into another repository.
 - **The Project view is a dedicated column type.**
@@ -78,8 +80,7 @@ What *is* possible, all documented:
    Claude decides a task is worth reporting ("Push when Claude decides"). Both
    are toggled in `/config`. Claude Code skips the push while the user is typing
    in or focused on the connected terminal ([Remote Control][rc], Mobile push
-   notifications). For Claude sessions this overlaps with Telegram. Telegram
-   still covers Codex, which Remote Control doesn't reach.
+   notifications). Remote Control doesn't reach Codex.
 4. Claude Code fetches the user's claude.ai connectors (for example Claude Docs)
    in terminal sessions ([MCP][mcp]). That makes a claude.ai doc possible as an
    optional brief (section 4).
@@ -528,7 +529,7 @@ What shipped differs from the proposal below in these ways:
   payload it can't parse and exits, instead of opening a second window on the
   same state. It reaches the running Nirux as a distributed notification
   naming its state folder; the workspace's card turns red, with a native
-  notification and the Telegram alert.
+  notification.
 - **From outside Nirux.** A workspace opened by a `nirux://` request the
   user confirmed (no launch ID) is marked so in `state.json`: its shells
   never get the space's environment nor a launch ID (its agents' requests

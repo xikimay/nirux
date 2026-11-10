@@ -70,6 +70,27 @@ struct ShellSideEffects {
     /// accepted it, else why not. Called off the main thread.
     var rerunFailedJobs: @Sendable (CIFailure.Run) -> String? = { CIFailure.rerun($0) }
 
+    /// Reads a failed run to tell a flaky failure from a real one (`gh`,
+    /// the local repository, a model: see `CITriageInvestigation`). Tests
+    /// replace it: a flow test reaches neither GitHub nor `claude`.
+    /// The second parameter says, before anything goes to the model,
+    /// whether the triage is still on.
+    var investigateCIFailure: @Sendable (
+        CITriageInvestigation.Request, _ isStillWanted: @escaping @Sendable () async -> Bool
+    ) async -> CITriageInvestigation.Outcome = { request, isStillWanted in
+        await CITriageInvestigation.investigate(request, isStillWanted: isStillWanted)
+    }
+
+    /// The native notification of a pull request whose checks failed, with
+    /// why the failure looks flaky when it does. Tests replace it: xctest
+    /// must never reach UNUserNotificationCenter.
+    var notifyCIFailure: @MainActor (_ banner: CIFailureBanner, _ flakyReason: String?) -> Void = { banner, flakyReason in
+        NiruxNotifier.shared.postCIFailure(
+            workspaceID: banner.workspaceID, workspaceTitle: banner.workspaceTitle, pullRequest: banner.pullRequest,
+            checkNames: banner.checkNames, flakyReason: flakyReason
+        )
+    }
+
     /// Looks for the claude Branch Review's Explain runs, and its account
     /// (`claude --help`, `claude auth status`). Called off the main thread.
     var checkExplain: @Sendable () -> BranchReview.ExplainAvailability = { BranchReview.ExplainAvailability.check() }

@@ -33,6 +33,13 @@ struct ColumnInfo: Hashable {
     var deferredAgent: SidebarDeferredAgent?
     /// A Mission question this column's agent waits on.
     var missionQuestion: SidebarMissionQuestion?
+    /// The agent may be going in circles in its turn in flight
+    /// (`AgentCirclingHint`), which the row says while it works; nil with
+    /// the hint turned off in Settings.
+    var circling: AgentCirclingHint?
+    /// The question this column's Claude ended its turn on, while it waits
+    /// at a quiet prompt: Yes / No / Reply… answer it from the card.
+    var turnQuestion: SidebarTurnQuestion?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
 
@@ -70,6 +77,8 @@ struct ColumnInfo: Hashable {
             && lhs.stuck == rhs.stuck
             && lhs.deferredAgent == rhs.deferredAgent
             && lhs.missionQuestion == rhs.missionQuestion
+            && lhs.turnQuestion == rhs.turnQuestion
+            && lhs.circling == rhs.circling
     }
 
     func hash(into hasher: inout Hasher) {
@@ -92,6 +101,8 @@ struct ColumnInfo: Hashable {
         hasher.combine(stuck)
         hasher.combine(deferredAgent)
         hasher.combine(missionQuestion)
+        hasher.combine(turnQuestion)
+        hasher.combine(circling)
     }
 }
 
@@ -306,6 +317,9 @@ struct WorkspaceInfo: Hashable {
     let prInfo: PRInfo?
     /// The open PR's feedback: the card shows the counts only.
     var prFeedback: SidebarPRFeedback?
+    /// Why the pull request's red checks look flaky
+    /// (`WorkspaceState.ciFlakyReason`); nil: a failure like any other.
+    var ciFlakyReason: String?
     let diffStats: String?
     let purpose: String?
     let nextStep: String?
@@ -388,6 +402,8 @@ enum SidebarHitRegion {
     case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
     /// Resume on the row of a restored agent that hasn't resumed yet.
     case deferredAgentResume(workspaceIndex: Int, columnIndex: Int, columnID: UUID)
+    /// Yes, No or Reply… under the question a Claude turn ended on.
+    case turnAnswer(workspaceIndex: Int, columnIndex: Int, question: SidebarTurnQuestion, answer: SidebarTurnAnswer)
     /// The rest of an Allow / Deny or Resume block: clicks there do nothing
     /// (a press meant for a button that just moved must not reach the card
     /// below).
@@ -465,9 +481,42 @@ enum SidebarHoverTarget: Hashable {
         "resume|\(workspaceIndex)|\(columnIndex)|\(failedAt)"
     }
 
+    /// Key of a Yes / No / Reply… button, among the approval buttons: its
+    /// column and question, wherever the card moves; a later question arms
+    /// again.
+    static func turnAnswerButtonKey(question: SidebarTurnQuestion, answer: SidebarTurnAnswer) -> String {
+        "turn-answer|\(question.columnID.uuidString)|\(question.turnEndedAt)|\(answer.rawValue)"
+    }
+
     /// Key of a not-resumed agent's Resume button: its column, wherever
     /// the row moves.
     static func deferredResumeButtonKey(columnID: UUID) -> String {
         "deferred-resume|\(columnID.uuidString)"
+    }
+}
+
+/// The question a Claude turn ended on, for its card: the sentence that
+/// asks (`AgentStatusMachine.AskedQuestion`), when it was asked, and
+/// whether Yes and No may answer it.
+struct SidebarTurnQuestion: Hashable {
+    let text: String
+    let turnEndedAt: TimeInterval
+    let isYesNo: Bool
+    /// Its column (`ColumnState.id`): a click finds it there, wherever a
+    /// rebuild moved the card.
+    let columnID: UUID
+}
+
+/// A quick answer's button under a turn's question.
+enum SidebarTurnAnswer: String, Hashable {
+    case yes, no, reply
+
+    /// What Yes and No type into the agent's prompt.
+    var typedText: String? {
+        switch self {
+        case .yes: return "yes"
+        case .no: return "no"
+        case .reply: return nil
+        }
     }
 }

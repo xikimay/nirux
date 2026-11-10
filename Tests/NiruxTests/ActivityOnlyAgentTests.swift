@@ -104,7 +104,7 @@ final class ActivityOnlyAgentTests: XCTestCase {
 
     func testActivityOnlyAgentKeepsASuspendedClaudesDialogs() {
         // claude shows a dialog, ^Z, the user runs gemini: on `fg` the dialog
-        // is back, and it must still keep Telegram from typing into it.
+        // is back, and it must still keep Nirux from typing a prompt into it.
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .permissionRequest), isUserFocused: false)
@@ -140,7 +140,7 @@ final class ActivityOnlyAgentTests: XCTestCase {
 
     // MARK: - Capabilities
 
-    func testRecognizedButNotARemotePromptTarget() {
+    func testRecognizedButNotATypedPromptTarget() {
         for name in ["gemini", "opencode"] {
             XCTAssertTrue(AgentStatusMachine.isRecognizedAgentProcess(name), name)
             XCTAssertTrue(AgentStatusMachine.activityOnlyAgentProcesses.contains(name), name)
@@ -149,14 +149,14 @@ final class ActivityOnlyAgentTests: XCTestCase {
         XCTAssertFalse(AgentStatusMachine.isRecognizedAgentProcess("node"))
     }
 
-    func testRemotePromptsReachOnlyIntegratedAgents() {
-        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "claude"))
-        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "codex"))
+    func testTypedPromptsReachOnlyIntegratedAgents() {
+        XCTAssertTrue(AgentStatusMachine.acceptsTypedPrompts(processName: "claude"))
+        XCTAssertTrue(AgentStatusMachine.acceptsTypedPrompts(processName: "codex"))
         // Recognized, but without hooks Nirux can't see their permission
-        // prompts: a remote prompt could answer one blindly.
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "gemini"))
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "opencode"))
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "zsh"))
+        // prompts: a typed prompt could answer one blindly.
+        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "gemini"))
+        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "opencode"))
+        XCTAssertFalse(AgentStatusMachine.acceptsTypedPrompts(processName: "zsh"))
     }
 
     // MARK: - Close confirmation
