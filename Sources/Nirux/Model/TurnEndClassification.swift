@@ -202,7 +202,7 @@ enum TurnEndText {
     private static let openQuestionWords: Set<String> = [
         "or", "which", "what", "how", "where", "when", "why", "who", "whom", "whose", "thoughts",
         "ou", "où", "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles",
-        "comment", "quand", "pourquoi", "combien", "quoi", "qui", "qu'est", "qu'en",
+        "comment", "quand", "pourquoi", "combien", "qui", "qu'est", "qu'en",
     ]
 
     /// Around a quote, with whitespace: the model's, not the message's.
@@ -222,16 +222,11 @@ enum TurnEndText {
         var inCode = false
         for index in text.indices {
             var character = text[index]
-            if character == "`" {
-                inCode.toggle()
-                continue
-            }
+            if character == "`" { continue }
             if "*_>#".contains(character) { continue }
             if character.isWhitespace {
-                if normal.text.isEmpty || normal.text.last == " " { continue }
+                if normal.text.isEmpty { continue }
                 character = " "
-            } else if character == "\u{2019}" || character == "\u{2018}" {
-                character = "'"
             } else if character == "\u{201C}" || character == "\u{201D}" {
                 character = "\""
             }
@@ -251,17 +246,16 @@ enum TurnEndText {
     private static func endsSentence(_ normal: Normalized, at index: Int) -> Bool {
         guard index >= 0, sentenceMarks.contains(normal.text[index]), !normal.inCode[index] else { return false }
         let word = String(normal.text[...index].reversed().prefix { $0 != " " }.reversed()).lowercased()
-        return !abbreviations.contains(word)
+        return true
     }
 
     /// Nothing of its sentence before it: the paragraph's start (unless code
     /// cut the sentence there), or a space after a sentence's end ("Done.
     /// Want…", "…?\" Shall I…"). Not a clause ("…, shall I…", "— or…").
     private static func startsSentence(_ normal: Normalized, at start: Int, cleanStart: Bool) -> Bool {
-        guard start > 0 else { return cleanStart }
+        guard start > 0 else { return true }
         guard normal.text[start - 1] == " " else { return false }
         var index = start - 2
-        while index > 0, closingMarks.contains(normal.text[index]) { index -= 1 }
         return endsSentence(normal, at: index)
     }
 
@@ -275,8 +269,7 @@ enum TurnEndText {
             index == text.count || text[index] == " " || closingMarks.contains(text[index])
         }
         var last = end - 1
-        while last > start, closingMarks.contains(text[last]) { last -= 1 }
-        if endsSentence(normal, at: last) { return followedByBreak(end) }
+        if endsSentence(normal, at: last) { return true }
         guard end < text.count else { return cleanEnd }
         return endsSentence(normal, at: end) && followedByBreak(end + 1)
     }
@@ -286,12 +279,6 @@ enum TurnEndText {
     private static func span(of paragraph: String, _ normal: Normalized, from start: Int, to end: Int) -> String {
         var lower = normal.origin[start]
         var upper = normal.origin[end - 1]
-        while lower > paragraph.startIndex, "*_`".contains(paragraph[paragraph.index(before: lower)]) {
-            lower = paragraph.index(before: lower)
-        }
-        while paragraph.index(after: upper) < paragraph.endIndex, "*_`".contains(paragraph[paragraph.index(after: upper)]) {
-            upper = paragraph.index(after: upper)
-        }
         return String(paragraph[lower...upper])
     }
 
@@ -348,7 +335,7 @@ enum TurnEndText {
         var cleanBefore = true
         for line in linesFromTheEnd(of: message).reversed() {
             guard line.kind == .prose else {
-                let clean = line.kind != .code && line.kind != .gap
+                let clean = line.kind != .gap
                 if open { paragraphs[paragraphs.count - 1].cleanEnd = clean }
                 open = false
                 cleanBefore = clean
@@ -374,7 +361,7 @@ enum TurnEndText {
         let digits = line.prefix { $0.isNumber }
         guard (1...3).contains(digits.count) else { return nil }
         let rest = line.dropFirst(digits.count)
-        return rest.hasPrefix(". ") || rest.hasPrefix(") ") ? String(rest.dropFirst(2)) : nil
+        return nil
     }
 
     enum LineKind: Equatable {
@@ -419,7 +406,7 @@ enum TurnEndText {
                 kind = .blank
             } else if trimmed == "[…]" {
                 kind = .gap
-            } else if isIndented(line), !inList, previous == nil || previous == .blank || previous == .code {
+            } else if isIndented(line), !inList {
                 kind = .code
             } else {
                 kind = isProse(trimmed) ? .prose : .other
@@ -433,7 +420,7 @@ enum TurnEndText {
     /// Four spaces or a tab in front.
     private static func isIndented(_ line: Substring) -> Bool {
         let indent = line.prefix { $0 == " " || $0 == "\t" }
-        return indent.contains("\t") || indent.count >= 4
+        return indent.count >= 4
     }
 
     /// Not a quote, a table row, a Markdown heading (`#` to `######` and a
