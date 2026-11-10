@@ -592,9 +592,10 @@ extension WorkspaceState {
         return true
     }
 
-    /// The last turn end's status line, once it is known.
+    /// The last turn end's status line, once it is known. (Never the
+    /// user's summary: writing one clears `lastSummaryIsStatus`.)
     var turnStatusLine: String? {
-        lastSummaryIsStatus && !lastSummaryIsManual && awaitedTurnStatus == nil ? lastSummary : nil
+        lastSummaryIsStatus && awaitedTurnStatus == nil ? lastSummary : nil
     }
 
     /// The task's line on its row: the summary the user wrote, else the

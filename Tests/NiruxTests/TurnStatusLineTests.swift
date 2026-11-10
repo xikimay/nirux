@@ -135,9 +135,13 @@ final class TurnStatusLineTests: XCTestCase {
         let writer = FakeWriter(.line("fix pushed"))
         center.turnStatusWriter = writer
         center.apply(event(.stop, at: 0.5, message: "Old.", uuid: uuid), to: resolution)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(writer.messages.value, [], "older than the last prompt")
         let start = t0
         center.now = { start + 5 + AgentHookCenter.turnDoneFreshness }
         center.apply(event(.stop, at: 5, message: "Replayed.", uuid: uuid), to: resolution)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(writer.messages.value, [], "replayed at launch")
         center.now = { start + 10 }
         center.apply(event(.userPromptSubmit, at: 6, uuid: uuid), to: resolution)
         center.apply(event(.stop, at: 7, message: "Behind.", uuid: uuid), to: resolution)
