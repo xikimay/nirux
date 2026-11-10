@@ -190,7 +190,7 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = name == .userPromptSubmit
                 ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
                 : nil
-            finalMessage = name == .stop && agentID == nil && !TurnEndText.usesOtherAccount(env) && !TurnEndText.isHeadless(env)
+            finalMessage = name == .stop && agentID == nil && !TurnEndText.usesOtherAccount(env)
                 ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
                 : nil
             stopHookActive = name == .stop ? payload["stop_hook_active"] as? Bool : nil

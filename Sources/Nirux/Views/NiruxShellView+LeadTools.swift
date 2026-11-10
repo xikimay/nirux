@@ -243,7 +243,7 @@ extension NiruxShellView {
             }
             // Where it stands, as its row says it: a model's reading of its
             // last turn's message, or the user's own summary.
-            if turnStatusEnabled, let status = Self.leadContextText(task.statusLine) {
+            if let status = Self.leadContextText(task.statusLine) {
                 let source = task.lastSummaryIsManual ? "summary (the user wrote it)" : "last turn, as Sonnet read it"
                 line += "\n  \(source): “\(status)”"
             }

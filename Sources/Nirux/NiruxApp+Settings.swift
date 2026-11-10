@@ -493,7 +493,7 @@ extension NiruxApp {
         guard saveSetting(revert: Self.toggledBack(sender), { $0.showTurnStatus = enabled }) else { return }
         AgentHookCenter.shared.turnStatusWriter = Self.turnStatusWriter(enabled: enabled)
         Self.publishAccountMarker(
-            readsFinalMessages: AgentHookCenter.shared.readsFinalMessages, triagesCI: Self.currentTriageCIFailures()
+            readsFinalMessages: AgentHookCenter.shared.turnEndClassifier != nil, triagesCI: Self.currentTriageCIFailures()
         )
         shell?.setTurnStatus(enabled: enabled)
     }

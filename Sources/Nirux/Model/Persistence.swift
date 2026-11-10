@@ -704,7 +704,6 @@ struct PersistedWorkspace: Codable {
         )
         try container.encodeIfPresent(lastSummary, forKey: .lastSummary)
         try container.encode(lastSummaryIsManual, forKey: .lastSummaryIsManual)
-        if lastSummaryIsStatus { try container.encode(true, forKey: .lastSummaryIsStatus) }
         try container.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)

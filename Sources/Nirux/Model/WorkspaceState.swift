@@ -577,7 +577,6 @@ extension WorkspaceState {
     /// the row may have changed.
     @discardableResult
     func settleTurnStatus(_ status: TurnStatus?, turnEndedAt: TimeInterval) -> Bool {
-        guard awaitedTurnStatus == turnEndedAt else { return false }
         awaitedTurnStatus = nil
         settledTurnStatus = turnEndedAt
         switch status {
@@ -587,7 +586,7 @@ extension WorkspaceState {
         case .unchanged?, .line?:
             break
         case nil:
-            lastSummaryIsStatus = false
+            break
         }
         return true
     }

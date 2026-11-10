@@ -235,8 +235,7 @@ final class SidebarWorkspaceCardRenderer {
         case .merged: return symbol(Theme.Symbol.merged, Theme.Color.done, nil)
         case .finished:
             _ = symbol(Theme.Symbol.checksPassed, Theme.Color.idle, nil)
-            // The green check of a turn's end draws over it, as over the dot.
-            return views.last
+            return nil
         case .checksRunning:
             return buildChecksRing(center: NSPoint(x: centerX, y: centerY))
         case .needsYou: color = Theme.Color.waiting

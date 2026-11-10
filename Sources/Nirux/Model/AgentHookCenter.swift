@@ -307,7 +307,7 @@ final class AgentHookCenter {
         // Every turn end of the main thread the column took: watched or
         // not, ending on a question or not. One without a run leaves the
         // line from before it behind.
-        if event.kind == .claude, event.name == .stop, event.agentID == nil, pty.isCurrentTurnEnd(event.timestamp),
+        if event.kind == .claude, event.name == .stop, event.agentID == nil, !resolution.isUserFocused, pty.isCurrentTurnEnd(event.timestamp),
            !(statusMessage.map { writeTurnStatus(of: $0, endedAt: event.timestamp, in: resolution.workspace) } ?? false) {
             resolution.workspace.forgetTurnStatus(turnEndedAt: event.timestamp)
         }
@@ -374,7 +374,7 @@ final class AgentHookCenter {
     /// launch, which is no news. True when its run is on its way.
     @discardableResult
     func writeTurnStatus(of message: String, endedAt time: TimeInterval, in workspace: WorkspaceState) -> Bool {
-        guard let writer = turnStatusWriter, !workspace.isLead, now() - time < Self.turnDoneFreshness,
+        guard let writer = turnStatusWriter, !workspace.isLead,
               workspace.awaitTurnStatus(turnEndedAt: time)
         else { return false }
         Task { @MainActor [weak self, weak workspace] in
