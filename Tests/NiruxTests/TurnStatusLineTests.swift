@@ -172,7 +172,7 @@ final class TurnStatusLineTests: XCTestCase {
         center.apply(event(.userPromptSubmit, at: 3, uuid: uuid), to: resolution)
         center.apply(event(.stop, at: 4, message: "Fixed.", uuid: uuid), to: resolution)
         XCTAssertNil(workspace.turnStatusLine, "not the former turn's")
-        XCTAssertNil(workspace.statusLine)
+        XCTAssertEqual(workspace.statusLine, "tests fail on CI", "the resting line, meanwhile")
         try await waitFor { landed == 2 }
         XCTAssertEqual(workspace.turnStatusLine, "fix pushed, CI green")
 
@@ -195,6 +195,17 @@ final class TurnStatusLineTests: XCTestCase {
         center.turnStatusWriter = nil
         try await waitFor { landed == 5 }
         XCTAssertNil(workspace.turnStatusLine)
+
+        // A turn end with no message to read (another account, a headless
+        // run): the line from before says nothing of it.
+        center.turnStatusWriter = FakeWriter(.line("PR #41 merged"))
+        center.apply(event(.userPromptSubmit, at: 10, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 10.5, message: "Merged.", uuid: uuid), to: resolution)
+        try await waitFor { landed == 6 }
+        center.apply(event(.userPromptSubmit, at: 11, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 11.5, uuid: uuid), to: resolution)
+        XCTAssertNil(workspace.turnStatusLine)
+        XCTAssertNil(workspace.statusLine)
     }
 
     // MARK: - On the task
@@ -202,8 +213,8 @@ final class TurnStatusLineTests: XCTestCase {
     /// The newest turn end's run decides, whatever order the runs end in;
     /// a newer Codex report wins over an older Claude run; the user's own
     /// summary is never replaced, and never said beside a finished turn's
-    /// check; another branch checked out drops the line.
-    func testNewestTurnDecidesAndTheUsersSummaryStays() throws {
+    /// check.
+    func testNewestTurnDecidesAndTheUsersSummaryStays() {
         let workspace = WorkspaceState(title: "ws", cwd: NSTemporaryDirectory())
         XCTAssertNil(workspace.statusLine)
         XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 10))
@@ -213,7 +224,7 @@ final class TurnStatusLineTests: XCTestCase {
         XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 12))
         XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 14))
         XCTAssertFalse(workspace.settleTurnStatus(.line("fix in progress"), turnEndedAt: 12), "put behind")
-        XCTAssertNil(workspace.statusLine, "the newest turn's is on its way")
+        XCTAssertNil(workspace.turnStatusLine, "the newest turn's is on its way")
         XCTAssertTrue(workspace.settleTurnStatus(.line("fix pushed, CI green"), turnEndedAt: 14))
         XCTAssertEqual(workspace.lastSummary, "fix pushed, CI green", "the context panel's summary")
 
@@ -222,21 +233,6 @@ final class TurnStatusLineTests: XCTestCase {
         XCTAssertNil(workspace.statusLine, "Codex's message as it came")
         XCTAssertFalse(workspace.settleTurnStatus(.line("parser half done"), turnEndedAt: 20), "older than Codex's report")
         XCTAssertTrue(workspace.lastSummary?.hasPrefix("Codex") == true)
-
-        let root = NSTemporaryDirectory()
-        func checkOut(_ branch: String) throws {
-            let observation = try XCTUnwrap(workspace.beginGitContextObservation(at: root))
-            workspace.applyGitContextObservation(
-                .observed(GitContext(branch: branch, identity: GitIdentity(repositoryRoot: root, head: nil))), observation: observation
-            )
-        }
-        try checkOut("feat/a")
-        XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 30))
-        XCTAssertTrue(workspace.settleTurnStatus(.line("export done"), turnEndedAt: 30))
-        try checkOut("feat/a")
-        XCTAssertEqual(workspace.statusLine, "export done")
-        try checkOut("feat/b")
-        XCTAssertNil(workspace.statusLine, "the former branch's")
 
         workspace.lastSummary = "Ships Friday\nthen the import side"
         workspace.lastSummaryIsManual = true
@@ -286,6 +282,23 @@ final class TurnStatusLineTests: XCTestCase {
         let views = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render().views
         let line = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "fix pushed, CI green" })
         XCTAssertEqual(line.accessibilityLabel(), "Done: fix pushed, CI green")
+    }
+
+    /// The title's tooltip says the last summary when the row doesn't.
+    func testTitleTooltipSaysTheSummaryTheRowDoesNot() throws {
+        func tooltip(statusLine: String?) throws -> String {
+            var info = WorkspaceInfo(
+                id: "ws", index: 0, title: "checkout", profileID: WorkspaceProfile.defaultID, isInactive: false,
+                columnCount: 0, focusedColumn: 0, gitBranch: "feat/checkout", notification: nil, isActive: false,
+                columns: [], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+                phase: .active, lastSummary: "fix pushed, CI green", lastActivityAt: nil
+            )
+            info.statusLine = statusLine
+            let views = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render().views
+            return try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "checkout" }?.toolTip)
+        }
+        XCTAssertTrue(try tooltip(statusLine: nil).contains("Last: fix pushed, CI green"))
+        XCTAssertFalse(try tooltip(statusLine: "fix pushed, CI green").contains("Last:"), "the row says it")
     }
 }
 

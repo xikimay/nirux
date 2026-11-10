@@ -374,12 +374,6 @@ extension WorkspaceState {
         diffStatsObservationGeneration &+= 1
         let previousContext = gitContext
         gitContext = context
-        // Another branch checked out in the same folder: the line was the
-        // former branch's.
-        if let branch = previousContext?.branch, branch != context?.branch,
-           previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot {
-            lastSummaryIsStatus = false
-        }
         let sameRevision = previousContext?.branch == context?.branch
             && previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot
             && previousContext?.identity.head == context?.identity.head
@@ -565,6 +559,17 @@ extension WorkspaceState {
         return true
     }
 
+    /// A turn ended at `turnEndedAt` with no run for its line (no final
+    /// message: another account, a headless run; the option off): the
+    /// line from before it says nothing of it. Unless a newer turn end is
+    /// known already.
+    func forgetTurnStatus(turnEndedAt: TimeInterval) {
+        guard turnEndedAt > (awaitedTurnStatus ?? settledTurnStatus ?? -.infinity) else { return }
+        awaitedTurnStatus = nil
+        settledTurnStatus = turnEndedAt
+        lastSummaryIsStatus = false
+    }
+
     /// The run for the turn that ended at `turnEndedAt` answered, if no
     /// newer turn end's run started since: its line goes in `lastSummary`
     /// unless the user wrote it; "unchanged" keeps the line as it was; no
@@ -593,10 +598,11 @@ extension WorkspaceState {
     }
 
     /// The task's line on its row: the summary the user wrote, else the
-    /// last turn end's status line. Never an agent's report as it came,
-    /// nor a line from before a turn whose line is unknown. One line.
+    /// last status line (still while the next one is on its way). Never an
+    /// agent's report as it came, nor a line from before a turn whose line
+    /// is unknown. One line.
     var statusLine: String? {
-        let line = lastSummaryIsManual ? lastSummary : turnStatusLine
+        let line = lastSummaryIsManual ? lastSummary : lastSummaryIsStatus ? lastSummary : nil
         return line.flatMap(Self.normalizedContextText)?
             .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
@@ -747,6 +753,9 @@ extension WorkspaceState {
         // Blank elsewhere: a Nirux started from a Lead's shell must not
         // pass the role on to every terminal it opens.
         environment[Self.leadEnvironmentKey] = isLead ? "1" : ""
+        // Nor from an SDK run's: its agents would read as headless
+        // (`TurnEndText.isHeadless`). Blank, Claude Code sets its own.
+        environment["CLAUDE_CODE_ENTRYPOINT"] = ""
         guard !startedOutsideNirux else {
             // Its agents' nirux:// requests ask first, as its own did: they
             // come from outside Nirux too.

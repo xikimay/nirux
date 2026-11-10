@@ -271,6 +271,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(try status(), "import side half done")
             shell.turnStatusEnabled = false
             XCTAssertNotEqual(try status(), "import side half done", "the option is off")
+            XCTAssertNil(shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspaceID }?.lastSummary, "nor the tooltip's")
             XCTAssertFalse(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("last turn"))
             shell.turnStatusEnabled = true
             (task.nextStep, task.blocker) = ("write the import side", blocker)
@@ -335,7 +336,13 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(task.settleTurnStatus(.line("export done"), turnEndedAt: 2))
             shell.saveState()
             shell.restoreState()
-            XCTAssertEqual(shell.workspaces.first { $0.id == workspaceID }?.statusLine, "export done")
+            let restored = try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID })
+            XCTAssertEqual(restored.statusLine, "export done")
+            // Quit while the next turn's line was on its way: unknown.
+            restored.awaitTurnStatus(turnEndedAt: 3)
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertNil(shell.workspaces.first { $0.id == workspaceID }?.statusLine)
         }
     }
 

@@ -60,8 +60,8 @@ final class AgentHookCenter {
     /// Something reads Claude turns' final messages. Not: they're dropped
     /// as they arrive.
     var readsFinalMessages: Bool { turnEndClassifier != nil || turnStatusWriter != nil }
-    /// A turn's status line landed on its task
-    /// (`WorkspaceState.recordTurnStatus`): its row and the state file
+    /// A turn end's status line settled on its task
+    /// (`WorkspaceState.settleTurnStatus`): its row and the state file
     /// should learn it.
     var onTurnStatus: ((WorkspaceState) -> Void)?
     /// A turn end got its verdict: its prompt, which Nirux leaves alone
@@ -305,9 +305,11 @@ final class AgentHookCenter {
             waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
         )
         // Every turn end of the main thread the column took: watched or
-        // not, ending on a question or not.
-        if let statusMessage, pty.isCurrentTurnEnd(event.timestamp) {
-            writeTurnStatus(of: statusMessage, endedAt: event.timestamp, in: resolution.workspace)
+        // not, ending on a question or not. One without a run leaves the
+        // line from before it behind.
+        if event.kind == .claude, event.name == .stop, event.agentID == nil, pty.isCurrentTurnEnd(event.timestamp),
+           !(statusMessage.map { writeTurnStatus(of: $0, endedAt: event.timestamp, in: resolution.workspace) } ?? false) {
+            resolution.workspace.forgetTurnStatus(turnEndedAt: event.timestamp)
         }
         return outcome
     }
@@ -369,11 +371,12 @@ final class AgentHookCenter {
     /// `workspace`, then settles it there (`WorkspaceState.settleTurnStatus`):
     /// meanwhile the row shows no line from an older turn. None for the
     /// Lead, whose row has no status line, nor for a turn end replayed at
-    /// launch, which is no news.
-    func writeTurnStatus(of message: String, endedAt time: TimeInterval, in workspace: WorkspaceState) {
+    /// launch, which is no news. True when its run is on its way.
+    @discardableResult
+    func writeTurnStatus(of message: String, endedAt time: TimeInterval, in workspace: WorkspaceState) -> Bool {
         guard let writer = turnStatusWriter, !workspace.isLead, now() - time < Self.turnDoneFreshness,
               workspace.awaitTurnStatus(turnEndedAt: time)
-        else { return }
+        else { return false }
         Task { @MainActor [weak self, weak workspace] in
             // Put behind already (a later turn end in the same drain): no
             // run for it.
@@ -385,6 +388,7 @@ final class AgentHookCenter {
                 self.onTurnStatus?(workspace)
             }
         }
+        return true
     }
 
     /// How long a turn end that ends on a question waits before it asks
