@@ -853,6 +853,7 @@ extension WorkspaceState {
         let previousFocusedIndex = focusedIndex
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
+        col.light?.removeFromSuperview()
         if resizeHandles.indices.contains(index) {
             let handle = resizeHandles.remove(at: index)
             handle.removeFromSuperview()
@@ -924,6 +925,7 @@ extension WorkspaceState {
             // window resize before this layout pass runs (garbled display).
             col.terminalView?.autoresizingMask = []
             col.view.frame = NSRect(x: xOffset, y: 0, width: widths[index], height: height)
+            col.light?.frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: height, resizeTerminal: !skipTerminalResize)
             col.view.layer?.masksToBounds = true
 
@@ -986,17 +988,28 @@ extension WorkspaceState {
         }
     }
 
-    /// Current horizontal scroll offset (for determining off-screen columns)
-    var attentionCameraX: CGFloat { lastCameraX }
+    /// The column's light (see `EdgeGlowView`), made on first use. It lies
+    /// over the column, as its sibling: above the column's focus border,
+    /// and never a layer of the terminal's own.
+    func light(for column: ColumnState) -> EdgeGlowView {
+        if let light = column.light { return light }
+        let light = EdgeGlowView(edge: .around)
+        light.frame = column.view.frame
+        stripView.addSubview(light, positioned: .above, relativeTo: column.view)
+        column.light = light
+        return light
+    }
 
-    /// Whether a column is currently visible in the viewport (not scrolled off-screen)
-    func isColumnInViewport(_ index: Int) -> Bool {
-        guard columns.indices.contains(index) else { return false }
-        let viewportWidth = containerView.frame.width
-        guard viewportWidth > 0 else { return true }
-        let col = columns[index]
-        let colLeft = col.view.frame.origin.x
-        let colRight = colLeft + col.view.frame.width
-        return colRight > lastCameraX && colLeft < lastCameraX + viewportWidth
+    /// Whether the viewport shows the column at `index`: enough of it for
+    /// its agent to be seen, not an edge sliver (see
+    /// `NiruxShellView.showsColumn(left:width:cameraX:viewportWidth:)`).
+    /// The one definition of "in view": for the lights, the agents
+    /// restored on sight, a branch review.
+    func showsColumn(at index: Int) -> Bool {
+        guard let column = columns[safe: index] else { return false }
+        let frame = column.view.frame
+        return NiruxShellView.showsColumn(
+            left: frame.minX, width: frame.width, cameraX: lastCameraX, viewportWidth: containerView.frame.width
+        )
     }
 }

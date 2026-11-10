@@ -4,6 +4,7 @@ import AppKit
 
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
+        dropTurnEndsLeftBehind()
         let snapshot = snapshot ?? ProcessSnapshot()
         let processTableRead = !snapshot.isEmpty
         let now = Date().timeIntervalSince1970
@@ -229,25 +230,14 @@ extension NiruxShellView {
                 columnCount: workspace.columns.count, focusedIndex: workspace.focusedIndex,
                 columnSignals: wsInfo.columns.map(\.offScreenAttention)
             )
-
-            // Horizontal edge glow: a column left/right of the focused one
-            // waits on the user or broke.
-            let focused = workspace.focusedIndex
-            edgeGlowLeft.show(Self.alert(in: wsInfo.columns.enumerated().filter { $0.offset < focused }.map(\.element)))
-            edgeGlowRight.show(Self.alert(in: wsInfo.columns.enumerated().filter { $0.offset > focused }.map(\.element)))
         } else {
             // An empty space: no columns to point at.
             columnIndicator.update(columnCount: 0, focusedIndex: 0)
-            edgeGlowLeft.show(nil)
-            edgeGlowRight.show(nil)
         }
 
-        // Vertical edge glow: a workspace above/below the active one
-        let activePosition = infos.firstIndex { $0.index == activeWSIndex } ?? 0
-        edgeGlowTop.show(Self.alert(in: infos.prefix(activePosition).flatMap(\.columns)))
-        edgeGlowBottom.show(Self.alert(in: infos.dropFirst(activePosition + 1).flatMap(\.columns)))
-
-        updateAttentionBorders(infos: infos)
+        // Each column's light, and the viewport's edges for the agents out
+        // of view.
+        updateAgentLights(infos: infos)
     }
 
     /// Whether a column counts in the Dock badge: its agent waits on the
@@ -265,76 +255,21 @@ extension NiruxShellView {
         return missionQuestion == nil || reason?.isTurnEnd != true
     }
 
-    /// The most urgent wait or error among `columns` while the user looks
-    /// elsewhere; a finished turn doesn't glow.
-    private static func alert(in columns: [ColumnInfo]) -> AttentionSignal? {
-        columns.compactMap(\.offScreenAttention).filter { $0 != .finished }.max()
-    }
-
-    /// A pulsing border on columns that wait on the user (amber) or broke
-    /// (red); a finished turn gets none.
-    private func updateAttentionBorders(infos: [WorkspaceInfo]) {
-        let infoByIndex = Dictionary(uniqueKeysWithValues: infos.map { ($0.index, $0) })
-        for (wsIndex, workspace) in workspaces.enumerated() {
-            for (colIndex, col) in workspace.columns.enumerated() {
-                let signal = infoByIndex[wsIndex]?.columns[safe: colIndex]
-                    .flatMap { Self.alert(in: [$0]) }
-                let colLayer = col.view.layer
-                if let signal {
-                    let color = SidebarRenderer.color(for: signal)
-                    let attentionBorder = color.cgColor
-                    // A wait that turns into an error pulses red from then on.
-                    if colLayer?.borderColor != attentionBorder { colLayer?.removeAnimation(forKey: "attentionPulse") }
-                    colLayer?.cornerRadius = 6
-                    colLayer?.borderWidth = 2
-                    colLayer?.borderColor = attentionBorder
-                    if colLayer?.animation(forKey: "attentionPulse") == nil {
-                        let pulse = CABasicAnimation(keyPath: "borderColor")
-                        pulse.fromValue = attentionBorder
-                        pulse.toValue = color.withAlphaComponent(0.15).cgColor
-                        pulse.duration = 0.6
-                        pulse.autoreverses = true
-                        pulse.repeatCount = .infinity
-                        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                        colLayer?.add(pulse, forKey: "attentionPulse")
-                    }
-                } else if colLayer?.animation(forKey: "attentionPulse") != nil {
-                    colLayer?.removeAnimation(forKey: "attentionPulse")
-                    // Restore focus border if this is the focused column
-                    let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
-                    let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
-                    colLayer?.cornerRadius = isFocus ? 6 : 0
-                    colLayer?.borderWidth = isFocus ? 2 : 0
-                    colLayer?.borderColor = isFocus ? accent : nil
-                }
-            }
-        }
-    }
-
     func clearAllAgentAttention() {
         // Called from `didBecomeActiveNotification`. Must stay cheap — the
         // full `updateSidebar()` does a `sysctl(KERN_PROC_ALL)` plus a
         // `proc_pidinfo` per column, and on resume that can land in the same
         // tick as Metal restoring every Ghostty surface, freezing the UI for
         // seconds when many agents are running. Just clear the flags and the
-        // attention borders directly; the next heartbeat (2s) refreshes the
+        // lights of what waited; the next heartbeat (2s) refreshes the
         // sidebar with fresh process info.
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         NiruxNotifier.shared.clearDelivered()
-        for (wsIndex, workspace) in workspaces.enumerated() {
+        for workspace in workspaces {
             workspace.notification = nil
-            for (colIndex, col) in workspace.columns.enumerated() {
-                col.pty?.clearAgentAttention()
-                let colLayer = col.view.layer
-                guard colLayer?.animation(forKey: "attentionPulse") != nil else { continue }
-                colLayer?.removeAnimation(forKey: "attentionPulse")
-                let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
-                let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
-                colLayer?.cornerRadius = isFocus ? 6 : 0
-                colLayer?.borderWidth = isFocus ? 2 : 0
-                colLayer?.borderColor = isFocus ? accent : nil
-            }
+            for col in workspace.columns { col.pty?.clearAgentAttention() }
         }
+        clearAgentAlertLights()
     }
 
     private static let flashOverlayID = NSUserInterfaceItemIdentifier("nirux.focusFlashOverlay")

@@ -54,8 +54,15 @@ enum TerminalConfigBuilder {
     ] + ["#151515", "#AC4142", "#7E8E50", "#E4B567", "#6C99BB", "#9F4E86", "#7DD5CF", "#D0D0D0",
          "#505050", "#AC4142", "#7E8E50", "#E4B567", "#6C99BB", "#9F4E86", "#7DD5CF", "#F5F5F5"]
         .enumerated().map { "palette = \($0.offset)=\($0.element)" }
+    /// Points between the cells and a terminal's edges: Ghostty's default,
+    /// written out because a column's light draws its ring on it
+    /// (`EdgeGlowView.ringWidth`) so that it covers no text.
+    static let padding = 2
     /// Applied last so nothing overrides them.
-    static let enforced = ["term = xterm-256color"]
+    static let enforced = [
+        "window-padding-x = \(padding)", "window-padding-y = \(padding)", "window-padding-balance = false",
+        "term = xterm-256color"
+    ]
 
     /// A setting kept for the final config, from the user's config or from
     /// the theme it selects.

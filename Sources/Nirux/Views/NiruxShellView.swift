@@ -32,6 +32,16 @@ final class NiruxShellView: NSView {
     let edgeGlowRight = EdgeGlowView(edge: .right)
     let edgeGlowTop = EdgeGlowView(edge: .top)
     let edgeGlowBottom = EdgeGlowView(edge: .bottom)
+    /// What the columns' lights and the edge glows show (see
+    /// NiruxShellView+AgentLights).
+    let agentLights = AgentLightState()
+    let workspaceSwitch = WorkspaceSwitchState()
+    let workspaceNameCard = WorkspaceNameCard()
+    /// Settings › General › "Animate the interface": off, states show
+    /// without moving.
+    var animatesInterface = NiruxShellView.currentAnimatesInterface() {
+        didSet { if animatesInterface != oldValue { applyAgentLights() } }
+    }
 
     let workspaceStore = WorkspaceStore()
     let projectStore = ProjectStore()
@@ -163,6 +173,9 @@ final class NiruxShellView: NSView {
     /// ⌘N sheets closed while their task starts, set aside for a new one:
     /// each comes back if its start fails.
     var startingTaskPanels: [NewTaskPanel] = []
+    /// The picture of the ⌘N sheet whose task is opening, until its fold
+    /// plays (see NiruxShellView+TaskBirth).
+    var pendingTaskSheet: TaskSheetPicture?
     var newSpacePanel: NewSpacePanel?
     /// The banner of a workspace that opened in the default space (see
     /// NiruxShellView+SpaceRouting), and a count that tells a pending
@@ -230,6 +243,7 @@ final class NiruxShellView: NSView {
         addSubview(edgeGlowRight)
         addSubview(edgeGlowTop)
         addSubview(edgeGlowBottom)
+        addSubview(workspaceNameCard)
         addSubview(statusBar)
         statusBar.onContentChange = { [weak self] in self?.relayout(animated: false) }
 
@@ -289,6 +303,7 @@ final class NiruxShellView: NSView {
             self?.answerFromCard(answer, to: question, button: button)
         }
         wireDeferredAgentResume()
+        wireAgentLights()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -381,22 +396,26 @@ final class NiruxShellView: NSView {
                 + "viewport=\(viewportW)x\(viewportH)"
         )
 
-        let glowWidth: CGFloat = 32
+        // Deeper than the glows themselves: each holds its pill.
+        let glowWidth = min(viewportH, EdgeGlowView.topHeight)
+        let sideGlowWidth = min(viewportW, 320)
+        let bottomGlowHeight = min(viewportH, 56)
         let vpX = sidebarW + 1
 
         let frames = ChromeFrames(
             sidebar: NSRect(x: 0, y: statusH, width: sidebarW, height: bounds.height - statusH),
             divider: NSRect(x: sidebarW, y: statusH, width: 1, height: bounds.height - statusH),
             viewport: NSRect(x: vpX, y: statusH, width: viewportW, height: viewportH),
-            glowLeft: NSRect(x: vpX, y: statusH, width: glowWidth, height: viewportH),
-            glowRight: NSRect(x: vpX + viewportW - glowWidth, y: statusH, width: glowWidth, height: viewportH),
+            glowLeft: NSRect(x: vpX, y: statusH, width: sideGlowWidth, height: viewportH),
+            glowRight: NSRect(x: vpX + viewportW - sideGlowWidth, y: statusH, width: sideGlowWidth, height: viewportH),
             glowTop: NSRect(x: vpX, y: statusH + viewportH - glowWidth, width: viewportW, height: glowWidth),
-            glowBottom: NSRect(x: vpX, y: statusH, width: viewportW, height: glowWidth),
+            glowBottom: NSRect(x: vpX, y: statusH, width: viewportW, height: bottomGlowHeight),
             indicator: NSRect(x: vpX, y: 4, width: viewportW, height: 16),
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
         applyChromeLayout(frames, animated: animated)
         layoutToast(frames)
+        layOutWorkspaceCard(in: frames.viewport)
 
         // Each workspace fills the viewport; the strip stacks them and is
         // positioned so the active workspace is the one on screen.
@@ -409,6 +428,8 @@ final class NiruxShellView: NSView {
 
         refreshEmptySpaceView()
         syncTerminalOcclusion()
+        // The columns in view changed, or the focused one.
+        applyAgentLights()
         scheduleDeferredAgentsOnScreen()
         scheduleBranchReviewsOnScreen()
         refreshStaleBranchReviewsOnScreen()
@@ -422,15 +443,18 @@ final class NiruxShellView: NSView {
     /// surface's CVDisplayLink would still hit `waitUntilCompleted` on the
     /// main thread, which freezes the app once a few Claude/Codex sessions
     /// pile up. Only the active workspace is visible.
-    private func syncTerminalOcclusion() {
+    func syncTerminalOcclusion() {
         // A minimized or fully covered window reports itself non-visible via
         // occlusionState; without this AND every surface keeps drawing.
-        let windowVisible = window?.occlusionState.contains(.visible) ?? true
+        let windowVisible = window.map { sideEffects.windowShows($0) } ?? true
         for (index, workspace) in workspaces.enumerated() {
             let isInActiveProfile = workspace.profileID == activeProfileID
-            let visible = windowVisible && isInActiveProfile && index == activeWSIndex
+            // The one the strip is leaving too, until it has left (see
+            // NiruxShellView+WorkspaceSwitch).
+            let visible = windowVisible && isInActiveProfile
+                && drawsTerminals(of: workspace, isActive: index == activeWSIndex)
             for col in workspace.columns {
-                col.terminalView?.setSurfaceVisible(visible)
+                sideEffects.setSurfaceVisible(col, visible)
             }
         }
     }
@@ -512,6 +536,8 @@ final class NiruxShellView: NSView {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.syncTerminalOcclusion()
+                    // Covered or minimized: no light moves unseen.
+                    self?.applyAgentLights()
                     // Uncovered: a stale review reads its branch again.
                     self?.refreshStaleBranchReviewsOnScreen()
                     // Shown, so on a display that is on: told again after a

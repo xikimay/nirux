@@ -357,6 +357,12 @@ final class PtySession: @unchecked Sendable {
     /// Why the agent waits on the user, while it does.
     var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
 
+    /// The turn end the agent reported at `time` is done and still stands
+    /// (see `AgentStatusMachine.isTurnDone`).
+    func isAgentTurnDone(endedAt time: TimeInterval) -> Bool {
+        state.machine.isTurnDone(endedAt: time)
+    }
+
     /// See `AgentStatusMachine.circlingHint`.
     var agentCirclingHint: AgentCirclingHint? { state.machine.circlingHint }
 
