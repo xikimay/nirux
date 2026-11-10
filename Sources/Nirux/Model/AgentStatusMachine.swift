@@ -285,7 +285,6 @@ struct AgentStatusMachine {
             // planning"): the earlier dialog is gone.
             if let key = request.key { pendingDialogs.removeAll { $0.isSameCall(key: key, as: event) } }
             pendingDialogs.append(request)
-            outcome.attention = request.reason
             _ = block(for: request.reason, isUserFocused: isUserFocused, alert: false)
         case .notification:
             hookKind = event.kind.rawValue
@@ -628,13 +627,11 @@ struct AgentStatusMachine {
             lastKeystrokeAt = 0
             if let open = openDialogs.first {
                 reason = open.reason
-                outcome.isRepeat = true
             } else if !pendingDialogs.isEmpty {
                 // Every entry looked answered, yet one waits: the newest
                 // (older ones were likely denied, which fires no hook).
                 pendingDialogs[pendingDialogs.count - 1].mayBeAnswered = false
                 reason = pendingDialogs[pendingDialogs.count - 1].reason
-                outcome.isRepeat = true
             } else if now - lastDialogClosedAt < Self.reminderRaceWindow,
                       now - lastClosedDialogRequestedAt >= Self.reminderDelay {
                 // The hook is async: this reminder raced the close of the

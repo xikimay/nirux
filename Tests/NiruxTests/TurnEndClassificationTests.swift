@@ -201,7 +201,6 @@ final class TurnEndClassificationTests: XCTestCase {
         let outcome = endTurn(message: asks)
         XCTAssertFalse(outcome.firedAttention, "no alert before the verdict")
         XCTAssertEqual(outcome.turnEnd, TurnEndRequest(message: asks, turnEndedAt: t0 + 5))
-        XCTAssertEqual(outcome.attention, .turnFinished, "Telegram's completion setting sees the same turn end")
         XCTAssertEqual(machine.state, .needsAttention)
         XCTAssertEqual(machine.attentionReason, .turnFinished, "grey \"done\" meanwhile")
         XCTAssertTrue(machine.isQuietTurnEnd)
@@ -296,9 +295,9 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false).firedAttention)
     }
 
-    /// A prompt typed before the verdict (by Nirux: a Mission message, a
-    /// Telegram prompt) alerts as the turn end would have, unless the user
-    /// looks at the column.
+    /// A prompt typed before the verdict (by Nirux: a Mission message)
+    /// alerts as the turn end would have, unless the user looks at the
+    /// column.
     func testPromptBeforeTheVerdictAlertsAsBefore() throws {
         endTurn()
         let prompt = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)

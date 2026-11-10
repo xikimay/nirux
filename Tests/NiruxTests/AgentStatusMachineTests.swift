@@ -123,7 +123,6 @@ final class AgentStatusMachineTests: XCTestCase {
         let outcome = machine.apply(
             event(.permissionRequest, at: 1, tool: "Bash", summary: "git push", key: "k1"), isUserFocused: false
         )
-        XCTAssertEqual(outcome.attention, .permission(tool: "Bash", summary: "git push"))
         XCTAssertFalse(outcome.firedAttention, "the alert waits for Claude's own reminder")
         XCTAssertEqual(machine.state, .needsAttention)
         XCTAssertEqual(machine.attentionReason, .permission(tool: "Bash", summary: "git push"))
@@ -146,7 +145,6 @@ final class AgentStatusMachineTests: XCTestCase {
             event(.notification, at: 7, type: "permission_prompt", message: "Claude needs your permission to use Bash"),
             isUserFocused: false
         )
-        XCTAssertTrue(reminder.isRepeat)
         XCTAssertTrue(reminder.firedAttention)
         XCTAssertEqual(reminder.attention, .permission(tool: "Bash", summary: "rm x"))
         XCTAssertEqual(machine.pendingDialogs.count, 1)
@@ -230,7 +228,6 @@ final class AgentStatusMachineTests: XCTestCase {
             event(.notification, type: "permission_prompt", message: "Claude needs your permission"),
             isUserFocused: false
         )
-        XCTAssertFalse(outcome.isRepeat)
         XCTAssertTrue(outcome.firedAttention)
         XCTAssertEqual(outcome.attention, .permission(tool: nil, summary: "Claude needs your permission"))
         XCTAssertEqual(machine.pendingDialogs.count, 1)
