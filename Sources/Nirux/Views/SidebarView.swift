@@ -133,7 +133,7 @@ final class SidebarView: NSView {
     /// The card changed outside a refresh (the user just came back);
     /// `reveal` brings it into view.
     func refreshCatchUpCard(reveal: Bool = false) {
-        revealsCatchUpOnNextBuild = reveal && isExpanded && catchUp != nil
+        revealsCatchUpOnNextBuild = false
         let signature = renderSignature()
         guard signature != lastRenderSignature else { return }
         lastRenderSignature = signature
