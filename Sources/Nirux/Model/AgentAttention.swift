@@ -13,6 +13,10 @@ enum AgentAttentionReason: Hashable, Sendable {
     case question(String?)
     /// The turn is over: the agent waits for the next prompt.
     case turnFinished
+    /// The turn is over and its final message asks the user something
+    /// (`TurnEndVerdict.asks`): the message's last line. Typed input
+    /// answers it at the prompt, as any prompt; no dialog is open.
+    case askedInReply(String?)
     /// Any other notification, with its message.
     case message(String?)
     /// The turn ended on an API error (Claude's StopFailure): what ended it
@@ -30,8 +34,17 @@ enum AgentAttentionReason: Hashable, Sendable {
     var isBlockingDialog: Bool {
         switch self {
         case .permission, .question: return true
-        case .turnFinished, .message, .apiError, .exitedMidTurn: return false
+        case .turnFinished, .askedInReply, .message, .apiError, .exitedMidTurn: return false
         case .stillWaiting(let dialog, _): return dialog.isBlockingDialog
+        }
+    }
+
+    /// The turn ended, whatever its final message says: the agent waits
+    /// for its next prompt.
+    var isTurnEnd: Bool {
+        switch self {
+        case .turnFinished, .askedInReply: return true
+        default: return false
         }
     }
 
@@ -58,6 +71,7 @@ enum AgentAttentionReason: Hashable, Sendable {
             return tool.map { "permission · \($0)" } ?? "permission"
         case .question: return "question"
         case .turnFinished: return "done"
+        case .askedInReply: return "asks you"
         case .message: return "needs you"
         case .apiError: return "API error"
         case .exitedMidTurn: return "exited mid-turn"
@@ -72,6 +86,7 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .permission: return isPlanApproval ? "needs plan approval" : "needs permission"
         case .question: return "has a question"
         case .turnFinished: return "finished its turn"
+        case .askedInReply: return "asks you something"
         case .message: return "needs you"
         case .apiError: return "stopped on an API error"
         case .exitedMidTurn: return "exited mid-turn"
@@ -91,7 +106,7 @@ enum AgentAttentionReason: Hashable, Sendable {
             case let (tool?, nil): return tool
             case let (nil, summary): return summary
             }
-        case .question(let text), .message(let text): return text
+        case .question(let text), .message(let text), .askedInReply(let text): return text
         case .turnFinished, .exitedMidTurn: return nil
         case .apiError(let kind, let detail):
             let parts = [kind, detail].compactMap { $0 }
@@ -145,7 +160,7 @@ extension WorkspaceState {
 extension AgentAttentionReason {
     var signal: AttentionSignal {
         switch self {
-        case .permission, .question, .message: return .waiting
+        case .permission, .question, .askedInReply, .message: return .waiting
         case .apiError, .exitedMidTurn: return .error
         case .turnFinished: return .finished
         case .stillWaiting(let dialog, _): return dialog.signal
@@ -214,12 +229,18 @@ struct AgentPermissionRequest: Hashable, Sendable {
 /// What applying one hook event meant, for the surfaces that report it.
 struct AgentHookOutcome: Equatable {
     /// The column flipped into needsAttention: alert (dock, notification).
+    /// Also an event that put a turn end behind before its verdict came (a
+    /// prompt, the conversation changing or ending): it alerts as that turn
+    /// end would have.
     var firedAttention = false
     /// What the event asks of the user, when it asks something.
     var attention: AgentAttentionReason?
     /// The event reports a request already reported: the delayed
     /// `permission_prompt` notification after its PermissionRequest.
     var isRepeat = false
+    /// A Claude turn end whose alert waits for the classifier's verdict
+    /// (`AgentStatusMachine.applyTurnEndVerdict`).
+    var turnEnd: TurnEndRequest?
     /// Requests whose receiver still waits for a sidebar decision that
     /// the event closed by other means (answered at the terminal, turn or
     /// session over): release them, nothing will be decided.

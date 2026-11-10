@@ -9,12 +9,12 @@ import XCTest
 final class AgentLightTests: XCTestCase {
     private func column(
         _ index: Int, status: AgentStatus = .idle, reason: AgentAttentionReason? = nil, focused: Bool = false,
-        process: String = "claude", id: UUID = UUID(), turnEndedAt: TimeInterval = 0
+        process: String = "claude", id: UUID = UUID(), turnEndedAt: TimeInterval = 0, awaitsVerdict: Bool = false
     ) -> ColumnInfo {
         ColumnInfo(
             index: index, processName: process, abbreviatedCwd: nil, isFocused: focused, isWebView: false,
             webTitle: nil, terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil,
-            attentionReason: reason, id: id, turnEndedAt: turnEndedAt
+            attentionReason: reason, id: id, turnEndedAt: turnEndedAt, awaitsTurnEndVerdict: awaitsVerdict
         )
     }
 
@@ -155,6 +155,24 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(sweeps.update(columns: [column(0, id: busy, turnEndedAt: 20)]), [], "that end is past")
 
         XCTAssertEqual(sweeps.update(columns: [column(0, id: UUID(), turnEndedAt: 30)]), [], "first seen")
+    }
+
+    /// A Claude turn end whose final message is still being read sweeps
+    /// only once it is known to be done; one that asks turns amber instead.
+    func testATurnEndWaitsForItsVerdictBeforeItSweeps() {
+        var sweeps = TurnEndSweeps()
+        let done = UUID()
+        let asks = UUID()
+        _ = sweeps.update(columns: [column(0, status: .working, id: done), column(1, status: .working, id: asks)])
+        let pending = [done, asks].enumerated().map { index, id in
+            column(index, status: .needsAttention, reason: .turnFinished, id: id, turnEndedAt: 50, awaitsVerdict: true)
+        }
+        XCTAssertEqual(sweeps.update(columns: pending), [])
+        XCTAssertEqual(sweeps.update(columns: pending), [], "still being read")
+        XCTAssertEqual(sweeps.update(columns: [
+            column(0, status: .needsAttention, reason: .turnFinished, id: done, turnEndedAt: 50),
+            column(1, status: .needsAttention, reason: .askedInReply("Shall I merge?"), id: asks, turnEndedAt: 50)
+        ]), [done])
     }
 
     // MARK: - The light's view

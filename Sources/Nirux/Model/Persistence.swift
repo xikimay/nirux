@@ -392,6 +392,10 @@ struct PersistedSettings: Codable {
     /// `ClaudeUsageLimits`). Opt-in: it makes Nirux Claude Code's status
     /// line. Missing decodes to false.
     var showClaudeUsageLimits: Bool = false
+    /// A Claude turn end alerts (banner, Dock) only when its final message
+    /// asks something (see `HaikuTurnEndClassifier`). On by default:
+    /// missing decodes to true.
+    var alertOnlyWhenClaudeAsks: Bool = true
     /// Minutes a dialog may wait before its agent reads as stuck; 0 = off.
     var stuckAgentMinutes: Int?
     /// First-launch checklist. Nil in state files that predate it; see
@@ -440,6 +444,7 @@ struct PersistedSettings: Codable {
         case keepMacAwakeWhileAgentsWork
         case animatesInterface
         case showClaudeUsageLimits
+        case alertOnlyWhenClaudeAsks
         case stuckAgentMinutes
         case onboardingChecklist
         case agentResumeOnLaunch
@@ -468,6 +473,7 @@ struct PersistedSettings: Codable {
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
+        alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         // A value from a newer build must not make the whole state file
         // undecodable: it reads as "no record" and is written back as is.
@@ -498,6 +504,7 @@ struct PersistedSettings: Codable {
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
         try container.encode(animatesInterface, forKey: .animatesInterface)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
+        try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist

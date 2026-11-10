@@ -121,7 +121,9 @@ struct AgentLightPlan: Equatable {
 /// Finds the turns that just ended, for one sweep of light each: only
 /// those an agent reported itself (`ColumnInfo.turnEndedAt`). An agent
 /// without hooks that falls silent may sit in its own prompt, and one that
-/// died reports nothing: neither sweeps.
+/// died reports nothing: neither sweeps. A Claude turn end whose final
+/// message is still being read waits: it sweeps if the turn is done, and
+/// turns amber instead if it asks something.
 struct TurnEndSweeps {
     /// The last turn end seen of each column.
     private var seen: [UUID: TimeInterval] = [:]
@@ -133,10 +135,11 @@ struct TurnEndSweeps {
         var current: [UUID: TimeInterval] = [:]
         for column in columns {
             guard let id = column.id else { continue }
-            current[id] = column.turnEndedAt
+            // Owed until its verdict comes.
+            current[id] = column.awaitsTurnEndVerdict ? seen[id] ?? column.turnEndedAt : column.turnEndedAt
             // A column seen for the first time ended nothing in front of
             // the user.
-            guard let last = seen[id], column.turnEndedAt > last else { continue }
+            guard !column.awaitsTurnEndVerdict, let last = seen[id], column.turnEndedAt > last else { continue }
             // A wait or an error has its own light.
             let asks = column.attention.map { $0 != .finished } ?? false
             if column.agentStatus != .working, !asks { ended.insert(id) }

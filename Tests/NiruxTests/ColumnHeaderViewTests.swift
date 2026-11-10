@@ -204,6 +204,10 @@ final class ColumnHeaderViewTests: XCTestCase {
             ColumnHeaderView.Status.agent(info(.needsAttention, reason: .message("Claude needs you")), wait: nil, now: 0)?.tone,
             .waiting
         )
+        // A turn that ended asking the user something.
+        let asks = ColumnHeaderView.Status.agent(info(.needsAttention, reason: .askedInReply("Merge?")), wait: nil, now: 0)
+        XCTAssertEqual(asks?.tone, .waiting)
+        XCTAssertEqual(asks?.text, "asks you")
 
         let permission = try XCTUnwrap(ColumnHeaderView.Status.agent(
             info(.needsAttention, reason: .permission(tool: "Bash", summary: "git push")), wait: nil, now: 0
