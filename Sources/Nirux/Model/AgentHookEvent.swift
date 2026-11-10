@@ -222,6 +222,27 @@ struct AgentHookEvent: Codable, Equatable {
         kind == .claude && agentID == nil && [.sessionStart, .userPromptSubmit, .stop].contains(name)
     }
 
+    /// What only the receiver can tell, from the agent's environment: on
+    /// the events that report it, whether the agent runs on the login
+    /// Nirux's own `claude -p` uses; and the final message kept only for
+    /// such an agent, and a running Nirux that reads final messages.
+    mutating func applyAccount(
+        environment: [String: String], markers directory: URL = TurnEndMarker.directory,
+        running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:),
+        read: (String) -> Data? = { FileManager.default.contents(atPath: $0) }
+    ) {
+        if reportsAccount {
+            onNiruxAccount = TurnEndText.agentOnNiruxAccount(
+                environment: environment, cwd: cwd, home: environment["HOME"] ?? NSHomeDirectory(),
+                markers: directory, running: running, read: read
+            )
+        }
+        if finalMessage != nil,
+           onNiruxAccount != true || !TurnEndMarker.allowsMessage(environment: environment, in: directory, running: running) {
+            finalMessage = nil
+        }
+    }
+
     /// Events that bind or confirm the column's session — where its
     /// transcript is worth knowing.
     static func carriesTranscriptPath(_ name: Name) -> Bool {
@@ -368,16 +389,7 @@ enum AgentHookCLI {
             now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
-        if event.reportsAccount {
-            event.onNiruxAccount = TurnEndText.agentOnNiruxAccount(
-                environment: env, cwd: event.cwd, home: env["HOME"] ?? NSHomeDirectory()
-            )
-        }
-        // Written only for a running Nirux that will read it, and an agent
-        // on the login its `claude -p` uses.
-        if event.finalMessage != nil, event.onNiruxAccount != true || !TurnEndMarker.allowsMessage(environment: env) {
-            event.finalMessage = nil
-        }
+        event.applyAccount(environment: env)
 
         let channel = PermissionApprovalChannel.standard
         // The watch comes before the request shows in the queue: from then

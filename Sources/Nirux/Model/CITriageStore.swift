@@ -11,20 +11,29 @@ import Foundation
 ///   the next failure made only of such tests is called so (rule 6 of
 ///   `CITriage.decide`).
 ///
-/// Read and written on the main actor only (`CITriageCenter`).
+/// Read and written on the main actor only (`CITriageCenter`), which reads
+/// the file again when another Nirux on the same state directory wrote it.
 struct CITriageStore: Codable, Equatable {
     struct RunRecord: Codable, Equatable {
         /// `CITriage.signature` of the run's red checks when triaged: a
         /// later attempt that fails has another.
         var signature: String
+        /// The names of those checks: the run passes once each of them
+        /// does.
+        var redChecks: [String]
         /// The failing tests of that attempt.
         var tests: [String]
         /// Those of the run's earlier attempts.
         var earlierTests: [String] = []
-        /// "flaky", "real" or "unsure".
+        /// "flaky", "real", "unsure", or "open": the rules left it to a
+        /// model that gave no answer (it couldn't run), so it is asked
+        /// again another time.
         var verdict: String
         var reason: String?
         var triagedAt: TimeInterval
+
+        /// Nothing more to ask about this failure.
+        var isFinal: Bool { verdict != "open" }
 
         var shown: CITriage.Verdict {
             switch verdict {
@@ -34,10 +43,13 @@ struct CITriageStore: Codable, Equatable {
             }
         }
 
-        init(signature: String, tests: [String], earlierTests: [String] = [], verdict: CITriage.Verdict, triagedAt: TimeInterval) {
+        init(
+            signature: String, redChecks: [String], tests: [String], verdict: CITriage.Verdict, isUnanswered: Bool = false,
+            triagedAt: TimeInterval
+        ) {
             self.signature = signature
+            self.redChecks = redChecks
             self.tests = tests
-            self.earlierTests = earlierTests
             self.triagedAt = triagedAt
             switch verdict {
             case .flaky(let reason):
@@ -46,7 +58,7 @@ struct CITriageStore: Codable, Equatable {
             case .real:
                 self.verdict = "real"
             case .unsure:
-                self.verdict = "unsure"
+                self.verdict = isUnanswered ? "open" : "unsure"
             }
         }
     }
@@ -80,13 +92,16 @@ struct CITriageStore: Codable, Equatable {
         return Set(tests.filter { now - $0.value < Self.flakyLifetime }.keys)
     }
 
-    /// Keeps a triaged run; the tests of the attempt it replaces become
-    /// earlier ones. The oldest runs go past `maxRunsPerRepository`.
+    /// Keeps a triaged run. The tests of an attempt it replaces become
+    /// earlier ones; read again (the same red checks), it keeps the earlier
+    /// ones it had. The oldest runs go past `maxRunsPerRepository`.
     mutating func keep(_ record: RunRecord, of run: CIFailure.Run) {
         var repository = repositories[Self.key(run.repository)] ?? Repository()
         var record = record
-        if let previous = repository.runs["\(run.id)"], previous.signature != record.signature {
-            record.earlierTests = Array(Set(previous.tests + previous.earlierTests + record.earlierTests)).sorted()
+        if let previous = repository.runs["\(run.id)"] {
+            record.earlierTests = previous.signature == record.signature
+                ? previous.earlierTests
+                : Array(Set(previous.tests + previous.earlierTests)).sorted()
         }
         repository.runs["\(run.id)"] = record
         if repository.runs.count > Self.maxRunsPerRepository {
@@ -99,16 +114,22 @@ struct CITriageStore: Codable, Equatable {
 
     /// Learns from the pull request's runs that pass now and failed when
     /// Nirux triaged them: their failing tests are flaky. A run passes
-    /// when its checks hold a success and neither a failure nor one still
-    /// going. Returns whether the store changed.
-    mutating func learn(fromPassedRunsOf checks: [(run: CIFailure.Run, result: ProjectBoard.CheckResult)], now: TimeInterval) -> Bool {
-        var results: [CIFailure.Run: [ProjectBoard.CheckResult]] = [:]
-        for check in checks { results[check.run, default: []].append(check.result) }
+    /// when each check that was red is there and green, and none of its
+    /// checks is red or still going. (A check another run of the same
+    /// workflow took over is not there: that run says nothing of this
+    /// one.) Returns whether the store changed.
+    mutating func learn(
+        fromPassedRunsOf checks: [(run: CIFailure.Run, name: String, result: ProjectBoard.CheckResult)], now: TimeInterval
+    ) -> Bool {
+        var results: [CIFailure.Run: [String: [ProjectBoard.CheckResult]]] = [:]
+        for check in checks { results[check.run, default: [:]][check.name, default: []].append(check.result) }
         var changed = false
-        for (run, results) in results
-        where results.contains(.success) && !results.contains(.failure) && !results.contains(.pending) {
+        for (run, byName) in results {
             let key = Self.key(run.repository)
-            guard var repository = repositories[key], let record = repository.runs["\(run.id)"] else { continue }
+            guard var repository = repositories[key], let record = repository.runs["\(run.id)"], !record.redChecks.isEmpty,
+                  byName.values.allSatisfy({ !$0.contains(.failure) && !$0.contains(.pending) }),
+                  record.redChecks.allSatisfy({ byName[$0]?.allSatisfy { $0 == .success } == true })
+            else { continue }
             for test in Set(record.tests + record.earlierTests) { repository.flakyTests[test] = now }
             // Once: the run's record goes with what it taught.
             repository.runs["\(run.id)"] = nil

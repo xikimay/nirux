@@ -45,8 +45,6 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
     /// in the background and kept for a while, and the rest after a run
     /// that would be billed per call.
     final class Account: @unchecked Sendable {
-        static let shared = Account()
-
         /// How long a found setup (or its absence) is trusted before being
         /// checked again: `claude` may be logged out, or updated,
         /// meanwhile. A billed run rests the clients for the first.
@@ -60,12 +58,24 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
             case unavailable
         }
 
+        /// The account every client of the app uses. Its rest after a
+        /// billed run is kept in the state directory: a relaunch, or a
+        /// second Nirux on that directory, rests too.
+        static let shared = Account(restURL: Persistence.stateDirectory.appendingPathComponent("claude-runs-rest"))
+
+        /// The longest a billed run rests the clients, whatever it says of
+        /// when the plan's limit resets.
+        static let longestBilledRest: TimeInterval = 7 * 24 * 60 * 60
+
         /// Guards everything below but `setupLock`.
         private let lock = NSLock()
         private var cachedSetup: (setup: Setup, checkedAt: TimeInterval)?
         private var isRefreshingSetup = false
         /// No run before then: one was billed per call.
         private var billedRestUntil: TimeInterval = 0
+        /// Where `billedRestUntil` is kept (epoch seconds); nil: in memory
+        /// only.
+        private let restURL: URL?
         /// Held while the setup is checked: one check at a time.
         private let setupLock = NSLock()
         private let checkSetup: @Sendable () -> Setup
@@ -73,10 +83,12 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
 
         init(
             checkSetup: @escaping @Sendable () -> Setup = Account.defaultSetup,
-            now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 }
+            now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 },
+            restURL: URL? = nil
         ) {
             self.checkSetup = checkSetup
             self.now = now
+            self.restURL = restURL
         }
 
         /// Checks the setup in the background (at launch, or when an
@@ -94,8 +106,11 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
         /// there is none.
         func setup() -> Setup {
             let time = now()
+            // A rest another Nirux, or this one before a relaunch, began.
+            let kept = restURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+                .flatMap { TimeInterval($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
             return lock.withLock {
-                if time < billedRestUntil { return .unavailable }
+                if time < max(billedRestUntil, min(kept, time + Self.longestBilledRest)) { return .unavailable }
                 guard let cached = cachedSetup else {
                     refreshSetupLocked()
                     return .unavailable
@@ -106,10 +121,16 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
         }
 
         /// A run was billed per call (an API key, or extra usage): a
-        /// subscription's runs only, for every client.
-        func restAfterBilledRun() {
-            let until = now() + Self.readySetupLifetime
-            lock.withLock { billedRestUntil = until }
+        /// subscription's runs only, for every client. The rest lasts until
+        /// the plan's limit resets when the run said when (`resetsAt`,
+        /// epoch seconds), an hour at least, a week at most.
+        func restAfterBilledRun(resetsAt: TimeInterval? = nil) {
+            let time = now()
+            let until = min(max(resetsAt ?? 0, time + Self.readySetupLifetime), time + Self.longestBilledRest)
+            lock.withLock { billedRestUntil = max(billedRestUntil, until) }
+            guard let restURL else { return }
+            try? FileManager.default.createDirectory(at: restURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data(String(Int(until)).utf8).write(to: restURL, options: .atomic)
         }
 
         /// Under `lock`: one background check at a time.
@@ -189,7 +210,7 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
         let report = Self.report(from: runProcess(cli, Self.arguments(for: client), input))
         let answer = report.text.flatMap(read)
         // Paid already: the answer of a billed run is kept.
-        if report.billedPerCall { account.restAfterBilledRun() }
+        if report.billedPerCall { account.restAfterBilledRun(resetsAt: report.overageResetsAt) }
         lock.withLock {
             if report.billedPerCall || answer != nil {
                 failuresInARow = 0
@@ -245,6 +266,9 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
     struct RunReport: Equatable {
         var text: String?
         var billedPerCall = false
+        /// When the limit that put the run on extra usage resets (epoch
+        /// seconds), when the run said.
+        var overageResetsAt: TimeInterval?
     }
 
     static func report(from outcome: BoundedProcess.Outcome?) -> RunReport {
@@ -260,6 +284,7 @@ final class ClaudeOneShotRunner: @unchecked Sendable {
                 let info = event["rate_limit_info"] as? [String: Any]
                 if info?["isUsingOverage"] as? Bool == true || info?["overageInUse"] as? Bool == true {
                     report.billedPerCall = true
+                    if let resetsAt = (info?["resetsAt"] as? NSNumber)?.doubleValue { report.overageResetsAt = resetsAt }
                 }
             case "result":
                 result = event

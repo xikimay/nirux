@@ -500,17 +500,25 @@ final class ColumnState {
 
     /// Whether the column's `claude` runs on the login Nirux's own `claude
     /// -p` uses, as its hooks last said (`AgentHookEvent.onNiruxAccount`),
-    /// and of which process: another `claude` in the column starts unknown.
-    private var claudeAccount: (process: ProcessInstance, onNiruxAccount: Bool)?
+    /// of which process (another `claude` in the column starts unknown)
+    /// and from which folder.
+    private var claudeAccount: (process: ProcessInstance, onNiruxAccount: Bool, cwd: String?)?
 
-    func noteClaudeAccount(onNiruxAccount: Bool, of process: ProcessInstance) {
-        claudeAccount = (process, onNiruxAccount)
+    func noteClaudeAccount(onNiruxAccount: Bool, of process: ProcessInstance, cwd: String?) {
+        claudeAccount = (process, onNiruxAccount, cwd)
     }
 
-    /// Nil: no `claude` in front, or one that hasn't said (it fails safe:
-    /// nothing of its project goes to a model).
-    func isClaudeOnNiruxAccount(foregroundProcess: ForegroundProcess?) -> Bool? {
-        guard let claudeAccount, let foregroundProcess, foregroundProcess.instance == claudeAccount.process else { return nil }
+    /// What the `claude` in front said, when it works in `repositoryRoot`
+    /// (a `claude` of another project says nothing of this one). Nil: none
+    /// in front, one that hasn't said, or one working elsewhere. It fails
+    /// safe: nothing of the project goes to a model.
+    func isClaudeOnNiruxAccount(foregroundProcess: ForegroundProcess?, inRepository repositoryRoot: String) -> Bool? {
+        guard let claudeAccount, let foregroundProcess, foregroundProcess.instance == claudeAccount.process,
+              let cwd = claudeAccount.cwd
+        else { return nil }
+        let root = (repositoryRoot as NSString).resolvingSymlinksInPath
+        let folder = (cwd as NSString).resolvingSymlinksInPath
+        guard folder == root || folder.hasPrefix(root.hasSuffix("/") ? root : root + "/") else { return nil }
         return claudeAccount.onNiruxAccount
     }
 

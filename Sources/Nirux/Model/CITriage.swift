@@ -41,6 +41,9 @@ enum CITriage {
 
     /// One job of the run, as `gh run view --json jobs` gives it.
     struct Job: Equatable, Sendable {
+        /// Its id on GitHub (`databaseId`): a job run again in a later
+        /// attempt has another, one carried over keeps its own.
+        var id: Int?
         let name: String
         let conclusion: String
         /// The steps it has, run or not: none when it never got a runner.
@@ -73,6 +76,7 @@ enum CITriage {
             guard let name = job["name"] as? String else { return nil }
             let steps = job["steps"] as? [[String: Any]] ?? []
             return Job(
+                id: job["databaseId"] as? Int,
                 name: name,
                 conclusion: (job["conclusion"] as? String ?? "").lowercased(),
                 stepCount: steps.count,
@@ -90,50 +94,103 @@ enum CITriage {
 
     // MARK: - Rules
 
-    static let neverRanReason = "The job never started: no step ran."
     static let downloadReason = "A dependency download failed before any test ran."
 
-    /// Before the log is read: every red job of the run ended without a
-    /// single step (no runner took it, or the runner was lost). Not a run
-    /// without jobs: a workflow file GitHub refuses is a real failure.
-    static func decisionBeforeLog(_ facts: RunFacts) -> Decision? {
-        let red = facts.redJobs
-        guard !red.isEmpty, red.allSatisfy({ $0.stepCount == 0 }) else { return nil }
-        return .flaky(reason: neverRanReason)
+    /// Why a job that ended without a single step did, from its check
+    /// run's annotations: no runner took it, or the runner was lost. Nil
+    /// for any other reason: a job GitHub refuses to start (its `runs-on`
+    /// or matrix doesn't evaluate) is the pull request's doing, and one
+    /// cancelled by hand is nobody's flake.
+    static func neverRanReason(annotations: [String]) -> String? {
+        if annotations.contains(where: { $0.contains("was not acquired by Runner") }) {
+            return "No runner took the job: no step ran."
+        }
+        if annotations.contains(where: { $0.contains("lost communication with the server") }) {
+            return "The runner was lost before any step ran."
+        }
+        return nil
     }
 
-    /// The rules on a log's findings, in the order measured:
-    /// compile errors are real; with no failing test, a dependency
-    /// download that failed is flaky; a test that fails again on a rerun
-    /// of the same commit is real; so is a failing test whose file the
-    /// pull request changes; failing tests all known to have failed and
-    /// then passed on a rerun are flaky; any other failing test is open.
+    /// What an earlier attempt of the run says of a job that is red now.
+    enum EarlierAttempt: Equatable, Sendable {
+        /// The run's first attempt, a job this attempt didn't run again
+        /// (its failure is the same one, not a second), or one that
+        /// passed before.
+        case none
+        /// The job ran in the attempt before, and failed with these.
+        case failed(LogFindings)
+        /// It ran before, and what it did couldn't be read: nothing says
+        /// this failure isn't the second in a row.
+        case unreadable
+    }
+
+    /// The rules on one red job's findings, in the order measured:
+    ///
+    /// - compile errors are real, and so is a crash in a file the pull
+    ///   request changes;
+    /// - with no failing test, a dependency download that failed is
+    ///   flaky, unless the pull request changes the dependencies or the
+    ///   attempt before failed the same way;
+    /// - a test that fails again on a rerun of the same commit is real;
+    /// - so is a failing test whose file the pull request changes: the
+    ///   file of its class's name, or the one a failure was reported in;
+    /// - failing tests all known to have failed and then passed on a
+    ///   rerun are flaky;
+    /// - any other failing test is open.
+    ///
+    /// Nothing is flaky in a job whose log holds an error no rule reads
+    /// (`LogFindings.otherErrors`, a signal with no test left unfinished)
+    /// or whose earlier attempt is unknown.
     ///
     /// - `changedFiles`: the pull request's, nil when they couldn't be
-    ///   read (then failing tests stay without a verdict: nothing says the
-    ///   pull request leaves them alone).
-    /// - `previousAttemptTests`: what failed in an earlier attempt of this
-    ///   run.
+    ///   read (then nothing says it leaves the failure alone).
     /// - `knownFlaky`: see `CITriageStore`.
     static func decide(
-        _ findings: LogFindings, changedFiles: [String]?,
-        previousAttemptTests: Set<String>, knownFlaky: Set<String>
+        _ findings: LogFindings, changedFiles: [String]?, earlier: EarlierAttempt, knownFlaky: Set<String>
     ) -> Decision {
         if !findings.compileErrors.isEmpty { return .real }
+        if let changedFiles, findings.crashes.contains(where: { changes($0.file, in: changedFiles) }) { return .real }
         let names = findings.failingTestNames
+        let isExplained = findings.otherErrors.isEmpty && (findings.signals.isEmpty || !findings.unfinished.isEmpty)
         guard !names.isEmpty else {
-            return findings.downloadFailures.isEmpty ? .unknown : .flaky(reason: downloadReason)
+            guard !findings.downloadFailures.isEmpty, isExplained, findings.crashes.isEmpty, let changedFiles else { return .unknown }
+            switch earlier {
+            case .none: break
+            case .unreadable: return .unknown
+            case .failed(let before): if !before.downloadFailures.isEmpty { return .unknown }
+            }
+            if changedFiles.contains(where: isDependencyManifest) { return .unknown }
+            return .flaky(reason: downloadReason)
         }
-        if names.contains(where: previousAttemptTests.contains) { return .real }
+        if case .failed(let before) = earlier, names.contains(where: Set(before.failingTestNames).contains) { return .real }
         guard let changedFiles else { return .unknown }
         let changedNames = Set(changedFiles.map { ($0 as NSString).lastPathComponent })
         if names.contains(where: { changedNames.contains(testFileName(of: $0)) }) { return .real }
-        if names.allSatisfy(knownFlaky.contains) { return .flaky(reason: knownFlakyReason(names)) }
+        if findings.tests.contains(where: { $0.failures.contains { changes(repositoryPath($0.file), in: changedFiles) } }) { return .real }
+        if earlier == .unreadable { return .unknown }
+        if isExplained, names.allSatisfy(knownFlaky.contains) { return .flaky(reason: knownFlakyReason(names)) }
         return .open
     }
 
-    /// `FooTests.swift` for `FooTests.testBar`: a test class sits in the
-    /// file of its name (what the rule was measured with).
+    /// Whether `path`, as a log names a file, is one of the changed files:
+    /// the same path, one ending the other at a folder, or Swift's
+    /// `Module/File.swift` form (a crash's) with a changed file's name.
+    static func changes(_ path: String, in changedFiles: [String]) -> Bool {
+        let parts = path.split(separator: "/")
+        return changedFiles.contains { changed in
+            changed == path || path.hasSuffix("/" + changed) || changed.hasSuffix("/" + path)
+                || (parts.count == 2 && (changed as NSString).lastPathComponent == String(parts[1]))
+        }
+    }
+
+    /// SwiftPM's manifest and its pins: a pull request that changes them
+    /// changes what is downloaded.
+    static func isDependencyManifest(_ path: String) -> Bool {
+        ["Package.swift", "Package.resolved"].contains((path as NSString).lastPathComponent)
+    }
+
+    /// `FooTests.swift` for `FooTests.testBar`: a test class usually sits
+    /// in the file of its name (what the rule was measured with).
     static func testFileName(of testName: String) -> String {
         className(of: testName) + ".swift"
     }
@@ -150,6 +207,15 @@ enum CITriage {
         names.count == 1
             ? "\(names[0]) has failed, then passed on a rerun of the same commit before."
             : "The \(names.count) failing tests have failed, then passed on a rerun of the same commit before."
+    }
+
+    /// A run's decision from its red jobs': real as soon as one is; none
+    /// when one can't be read (what it hides may be real); open when one
+    /// is; flaky only when every red job is (the first one's reason).
+    static func combine(jobs decisions: [Decision]) -> Decision {
+        if decisions.contains(.real) { return .real }
+        guard let first = decisions.first, !decisions.contains(.unknown) else { return .unknown }
+        return decisions.contains(.open) ? .open : first
     }
 
     /// A pull request's verdict from its runs': flaky only when every red
