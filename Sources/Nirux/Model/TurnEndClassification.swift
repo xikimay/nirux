@@ -197,7 +197,7 @@ enum TurnEndText {
     }
 
     private static let openQuestionWords: Set<String> = [
-        "or", "which", "what", "how", "where", "when", "why", "who", "whom", "whose",
+        "which", "what", "how", "where", "when", "why", "who", "whom", "whose",
         "ou", "où", "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles",
         "comment", "quand", "pourquoi", "combien", "qu'est",
     ]
@@ -213,12 +213,9 @@ enum TurnEndText {
         var origin: [String.Index] = []
         for index in text.indices {
             var character = text[index]
-            if "*_`>#".contains(character) { continue }
             if character.isWhitespace {
                 if characters.isEmpty || characters.last == " " { continue }
                 character = " "
-            } else if character == "\u{2019}" || character == "\u{2018}" {
-                character = "'"
             } else if character == "\u{201C}" || character == "\u{201D}" {
                 character = "\""
             }
@@ -236,7 +233,6 @@ enum TurnEndText {
     /// "- Want…", "…, shall I…"). Not "t merge?" of "Can't merge?".
     private static func startsSentence(_ text: [Character], at start: Int) -> Bool {
         guard start > 0 else { return true }
-        guard text[start - 1] == " " else { return false }
         return start < 2 || !(text[start - 2].isLetter || text[start - 2].isNumber)
     }
 
@@ -250,9 +246,9 @@ enum TurnEndText {
         while last > start, closingMarks.contains(text[last]) { last -= 1 }
         if sentenceMarks.contains(text[last]) {
             let word = String(text[start...last].reversed().prefix { $0 != " " }.reversed()).lowercased()
-            return endsHere(end) && !["e.g.", "i.e.", "etc.", "vs.", "cf."].contains(word)
+            return !["e.g.", "i.e.", "etc.", "vs.", "cf."].contains(word)
         }
-        guard end < text.count else { return true }
+        guard end < text.count else { return false }
         return sentenceMarks.contains(text[end]) && endsHere(end + 1)
     }
 
@@ -303,7 +299,7 @@ enum TurnEndText {
                 paragraphs.append([])
             }
         }
-        return paragraphs.filter { !$0.isEmpty }.map { $0.joined(separator: " ") }
+        return paragraphs.filter { !$0.isEmpty }.map { $0.joined(separator: "\n") }
     }
 
     enum LineKind: Equatable {
@@ -332,8 +328,6 @@ enum TurnEndText {
                 lines.append((trimmed, .code))
             } else if trimmed.isEmpty {
                 lines.append((trimmed, .blank))
-            } else if isIndentedCode(line, trimmed: trimmed) {
-                lines.append((trimmed, .code))
             } else {
                 lines.append((trimmed, isProse(trimmed) ? .prose : .other))
             }

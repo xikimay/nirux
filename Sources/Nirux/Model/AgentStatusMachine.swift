@@ -486,7 +486,7 @@ struct AgentStatusMachine {
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
             if !isUserFocused {
-                askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true)
+                askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt, isYesNo: false)
             }
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
