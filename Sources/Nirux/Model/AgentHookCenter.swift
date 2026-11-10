@@ -278,14 +278,34 @@ final class AgentHookCenter {
             applyTurnEndVerdict(waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID)
             return
         }
+        let endsOnQuestion = TurnEndText.endsOnQuestion(request.message)
+        let questionDelay = questionVerdictDelay
         Task { @MainActor [weak self] in
             // Put behind already (a later Stop in the same drain, a replayed
             // backlog): no run for it.
-            guard let self, self.resolver?(agentUUID)?.column.pty?.awaitsTurnEndVerdict(request) == true else { return }
+            guard let self, self.awaitsVerdict(request, agentUUID: agentUUID) else { return }
+            // Ends on a question: it asks, whatever a model would read. A
+            // moment's wait first, as a model call would take: a Stop hook
+            // that blocked this end (a review gate) keeps the turn going,
+            // and its continuation puts this turn end behind (the verdict
+            // then drops, as a late one does).
+            if endsOnQuestion {
+                try? await Task.sleep(for: .seconds(questionDelay))
+                self.applyTurnEndVerdict(.asks, for: request, agentUUID: agentUUID)
+                return
+            }
             let verdict = await classifier.classify(request.message)
             // Turned off meanwhile: every turn end alerts.
             self.applyTurnEndVerdict(self.turnEndClassifier == nil ? .unknown : verdict, for: request, agentUUID: agentUUID)
         }
+    }
+
+    /// How long a turn end that ends on a question waits before it asks
+    /// (see `classifyTurnEnd`); tests shorten it.
+    var questionVerdictDelay: TimeInterval = 1.5
+
+    private func awaitsVerdict(_ request: TurnEndRequest, agentUUID: String) -> Bool {
+        resolver?(agentUUID)?.column.pty?.awaitsTurnEndVerdict(request) == true
     }
 
     /// The verdict on a turn end, applied to its column found again (the
