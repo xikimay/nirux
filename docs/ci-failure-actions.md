@@ -1,6 +1,8 @@
 # CI Failure Actions
 
-Status: validated by the user on 2026-10-02, implemented.
+Status: validated by the user on 2026-10-02, implemented. Since 2026-11-10 a
+failure that looks flaky says so, and its rerun comes first: see
+[CI Failure Triage](ci-failure-triage.md).
 
 In three weeks the user typed 16 prompts like "pk la CI fail ?" or "relance le
 job qui a fail". Nirux already polls each workspace's pull request and shows
@@ -34,7 +36,7 @@ are typed by hand.
   check's URL.
   - **Ask Agent Why CI Failed:** types into the workspace's agent (the focused
     column's, else the first column whose agent accepts prompts, through the
-    remote prompt path: sanitized, bracketed paste, refused while a dialog is
+    typed prompt path: sanitized, bracketed paste, refused while a dialog is
     open) "CI failed on PR #52. Run `gh run view 123 --repo
     github.com/owner/name --log-failed`, then tell me why it failed." Built
     only from the run id and repository parsed out of a GitHub Actions URL
@@ -59,7 +61,8 @@ are typed by hand.
 `PRDetect` and `ProjectBoard.latest` (red rule, `PRInfo.checks`),
 `WorkspaceState.takeNewRedChecks` (notify-once), `CIFailure` (red checks to
 act on, run URL parsing, prompt, rerun),
-`NiruxNotifier` (category with two buttons), the card menu in
+`NiruxNotifier` (two categories of two buttons: the rerun first for a likely
+flake), the card menu in
 `SidebarMenuSupport`, `NiruxShellView+CIFailure` for the two actions, and
 `ShellSideEffects.rerunFailedJobs`, which tests replace.
 Tests: `CIFailureTests`, and `SidebarPanelFlowTests.testCIFailureMenuItems`.

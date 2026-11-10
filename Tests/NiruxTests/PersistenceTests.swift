@@ -544,38 +544,36 @@ final class PersistedStateCodingTests: XCTestCase {
 }
 
 extension PersistedStateCodingTests {
-    func testTelegramRemoteAccessSettingsRoundTripWithoutToken() throws {
-        let original = PersistedSettings(
-            telegramRemoteAccessEnabled: true,
-            telegramPairedUserID: 123_456,
-            telegramPairedChatID: 654_321,
-            telegramNotifyOnCompletion: false,
-            telegramNotifyOnAttention: true,
-            telegramLastUpdateID: 88
-        )
-        let data = try JSONEncoder().encode(original)
-        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: data)
+    /// On for every install, the ones that predate it too; off survives.
+    func testAlertOnlyWhenClaudeAsksIsOnUnlessTurnedOff() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.alertOnlyWhenClaudeAsks)
+        XCTAssertTrue(PersistedSettings().alertOnlyWhenClaudeAsks)
 
-        XCTAssertTrue(decoded.telegramRemoteAccessEnabled)
-        XCTAssertEqual(decoded.telegramPairedUserID, 123_456)
-        XCTAssertEqual(decoded.telegramPairedChatID, 654_321)
-        XCTAssertFalse(decoded.telegramNotifyOnCompletion)
-        XCTAssertTrue(decoded.telegramNotifyOnAttention)
-        XCTAssertEqual(decoded.telegramLastUpdateID, 88)
-        XCTAssertFalse(json.localizedCaseInsensitiveContains("token"))
+        var settings = PersistedSettings()
+        settings.alertOnlyWhenClaudeAsks = false
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(decoded.alertOnlyWhenClaudeAsks)
     }
 
-    func testLegacySettingsDefaultTelegramRemoteAccessOff() throws {
-        let json = Data("""
-        { "claudeLaunchMode": "plan", "claudeNoFlicker": true }
-        """.utf8)
-        let settings = try JSONDecoder().decode(PersistedSettings.self, from: json)
-        XCTAssertFalse(settings.telegramRemoteAccessEnabled)
-        XCTAssertNil(settings.telegramPairedUserID)
-        XCTAssertNil(settings.telegramPairedChatID)
-        XCTAssertTrue(settings.telegramNotifyOnCompletion)
-        XCTAssertTrue(settings.telegramNotifyOnAttention)
+    /// The CI failure triage: on for every install, off survives.
+    func testCIFailureTriageIsOnUnlessTurnedOff() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.triageCIFailures)
+        XCTAssertTrue(PersistedSettings().triageCIFailures)
+
+        var settings = PersistedSettings()
+        settings.triageCIFailures = false
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(decoded.triageCIFailures)
+        XCTAssertTrue(decoded.alertOnlyWhenClaudeAsks, "its own key")
+    }
+
+    /// The hint that an agent may be going in circles is on for a state
+    /// file that predates it (SettingsWindowTests saves and reads it back).
+    func testCirclingHintIsOnForAStateFileThatPredatesIt() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.agentCirclingHint)
     }
 
     // MARK: - cliArgs wire format

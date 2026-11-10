@@ -56,6 +56,17 @@ struct AgentHookEvent: Codable, Equatable {
     let toolName: String?
     let toolSummary: String?
     let toolKey: String?
+    /// On the end of a Claude tool call (PostToolUse*), what tells an agent
+    /// going in circles (`AgentCirclingWatch`): how the call ended when it
+    /// didn't simply run (an `AgentToolEnd` raw value; a string, so an app
+    /// older than its receiver skips an end it doesn't know, not the whole
+    /// event), and the program a shell command ran ("swift build"; see
+    /// `AgentShellCommand`), and for a command that counts by its exact
+    /// text (nothing names it, or `python3 x.py`), what tells its text from
+    /// another's (`repeatKey`). Nil from older receivers too.
+    let toolEnd: String?
+    let toolFamily: String?
+    let toolCommandKey: String?
     /// Subagent the event came from (Claude `agent_id`); nil on the main
     /// thread.
     let agentID: String?
@@ -83,6 +94,24 @@ struct AgentHookEvent: Codable, Equatable {
     /// pasted went to Claude (docs/branch-review.md, section 6.2). Only
     /// that line is kept of the prompt.
     let reviewHeader: String?
+    /// On a main-thread Stop, Claude's final message
+    /// (`last_assistant_message`), as `TurnEndText.excerpt` bounds it: what
+    /// tells a turn that asks the user something from one that is done
+    /// (see `TurnEndVerdict`). Nil elsewhere, from Claude versions without
+    /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
+    /// and when the receiver or the app drops it (see `TurnEndMarker`).
+    var finalMessage: String?
+    /// On a main-thread SessionStart or Stop: whether
+    /// this `claude` runs on the login Nirux's own `claude -p` uses
+    /// (`TurnEndText.agentOnNiruxAccount`), which only the receiver can
+    /// tell, from the agent's environment. The CI failure triage sends
+    /// nothing to a model for a workspace whose agent is elsewhere. Nil
+    /// from older receivers and on other events: not known to be.
+    var onNiruxAccount: Bool?
+    /// On a Stop, Claude's `stop_hook_active`: the turn went on because a
+    /// Stop hook blocked its end, and this is the end of that continuation
+    /// (the end of the turn, unless a hook blocks again).
+    let stopHookActive: Bool?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -135,6 +164,18 @@ struct AgentHookEvent: Codable, Equatable {
                 toolSummary = nil
                 toolKey = nil
             }
+            if let toolName, name == .postToolUse {
+                let command = AgentToolInput.shellTools.contains(toolName)
+                    ? ((payload["tool_input"] as? [String: Any])?["command"] as? String).map(AgentShellCommand.init)
+                    : nil
+                toolEnd = AgentToolOutcome.end(hookName: hookName, payload: payload, command: command)?.rawValue
+                toolFamily = command?.family
+                toolCommandKey = command.flatMap { $0.countsByText ? $0.repeatKey : nil }
+            } else {
+                toolEnd = nil
+                toolFamily = nil
+                toolCommandKey = nil
+            }
             transcriptPath = Self.carriesTranscriptPath(name)
                 ? (payload["transcript_path"] as? String).flatMap(Self.validTranscriptPath)
                 : nil
@@ -148,6 +189,10 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = name == .userPromptSubmit
                 ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
                 : nil
+            finalMessage = name == .stop && agentID == nil && !TurnEndText.usesOtherAccount(env)
+                ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
+                : nil
+            stopHookActive = name == .stop ? payload["stop_hook_active"] as? Bool : nil
             reviewPasses = switch name {
             case .userPromptSubmit:
                 (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)
@@ -181,6 +226,9 @@ struct AgentHookEvent: Codable, Equatable {
             toolName = nil
             toolSummary = nil
             toolKey = nil
+            toolEnd = nil
+            toolFamily = nil
+            toolCommandKey = nil
             agentID = nil
             notificationType = nil
             errorKind = nil
@@ -188,6 +236,38 @@ struct AgentHookEvent: Codable, Equatable {
             transcriptPath = nil
             reviewPasses = nil
             reviewHeader = nil
+            finalMessage = nil
+            stopHookActive = nil
+        }
+    }
+
+    /// The main-thread SessionStart and Stop, where the receiver says which
+    /// account the agent runs on (`onNiruxAccount`): a `claude` started
+    /// before Nirux, which sends no SessionStart, says so at its first turn
+    /// end. Not UserPromptSubmit: Claude waits for that hook before it goes
+    /// on, and the check reads several files.
+    var reportsAccount: Bool {
+        kind == .claude && agentID == nil && [.sessionStart, .stop].contains(name)
+    }
+
+    /// What only the receiver can tell, from the agent's environment: on
+    /// the events that report it, whether the agent runs on the login
+    /// Nirux's own `claude -p` uses; and the final message kept only for
+    /// such an agent, and a running Nirux that reads final messages.
+    mutating func applyAccount(
+        environment: [String: String], markers directory: URL = TurnEndMarker.directory,
+        running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:),
+        read: (String) -> Data? = { FileManager.default.contents(atPath: $0) }
+    ) {
+        if reportsAccount {
+            onNiruxAccount = TurnEndText.agentOnNiruxAccount(
+                environment: environment, cwd: cwd, home: environment["HOME"] ?? NSHomeDirectory(),
+                markers: directory, running: running, read: read
+            )
+        }
+        if finalMessage != nil,
+           onNiruxAccount != true || !TurnEndMarker.allowsMessage(environment: environment, in: directory, running: running) {
+            finalMessage = nil
         }
     }
 
@@ -232,6 +312,9 @@ struct AgentHookEvent: Codable, Equatable {
         toolName: String? = nil,
         toolSummary: String? = nil,
         toolKey: String? = nil,
+        toolEnd: String? = nil,
+        toolFamily: String? = nil,
+        toolCommandKey: String? = nil,
         agentID: String? = nil,
         notificationType: String? = nil,
         errorKind: String? = nil,
@@ -239,6 +322,9 @@ struct AgentHookEvent: Codable, Equatable {
         transcriptPath: String? = nil,
         reviewPasses: [String]? = nil,
         reviewHeader: String? = nil,
+        finalMessage: String? = nil,
+        stopHookActive: Bool? = nil,
+        onNiruxAccount: Bool? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -257,6 +343,9 @@ struct AgentHookEvent: Codable, Equatable {
         self.toolName = toolName
         self.toolSummary = toolSummary
         self.toolKey = toolKey
+        self.toolEnd = toolEnd
+        self.toolFamily = toolFamily
+        self.toolCommandKey = toolCommandKey
         self.agentID = agentID
         self.notificationType = notificationType
         self.errorKind = errorKind
@@ -264,6 +353,9 @@ struct AgentHookEvent: Codable, Equatable {
         self.transcriptPath = transcriptPath
         self.reviewPasses = reviewPasses
         self.reviewHeader = reviewHeader
+        self.finalMessage = finalMessage
+        self.stopHookActive = stopHookActive
+        self.onNiruxAccount = onNiruxAccount
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText
@@ -331,18 +423,28 @@ enum AgentHookCLI {
             now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
+        event.applyAccount(environment: env)
 
         let channel = PermissionApprovalChannel.standard
-        let wait = event.name == .permissionRequest && parent > 1
-            ? PermissionApprovalWait.prepare(payload: raw, env: env, now: now) { channel.isAppListening() }
-            : nil
-        event.approvalRequestID = wait?.requestID
-        event.approvalDeadline = wait?.deadline
-        event.approvalText = wait?.text
+        // The watch comes before the request shows in the queue: from then
+        // on the app holds it, and Claude giving up on the hook must still
+        // be reported. Without a watch the request isn't held.
+        guard event.name == .permissionRequest, parent > 1,
+              let wait = PermissionApprovalWait.prepare(payload: raw, env: env, now: now, isAppListening: {
+                  channel.isAppListening()
+              }),
+              let termination = TerminationWatch()
+        else {
+            append(event)
+            return 0
+        }
+        defer { termination.stop() }
+        event.approvalRequestID = wait.requestID
+        event.approvalDeadline = wait.deadline
+        event.approvalText = wait.text
         append(event)
-        guard let wait else { return 0 }
 
-        let outcome = waitForDecision(wait, on: channel, parent: parent)
+        let outcome = waitForDecision(wait, on: channel, parent: parent, terminated: termination.terminated)
         // Reported before the decision reaches Claude, so it precedes the
         // events the decision causes (PostToolUse) in the queue.
         append(.approvalResolved(event, outcome: outcome, now: Date().timeIntervalSince1970))
@@ -358,22 +460,15 @@ enum AgentHookCLI {
     }
 
     /// Waits on a monotonic clock, so a wall-clock step never stretches
-    /// the wait; stops early once Claude abandons the hook or the app that
-    /// would answer is gone (checked about once a second). Claude abandons
-    /// a hook with SIGTERM (then SIGKILL): caught, so the report still
-    /// goes out and the app drops the request at once.
+    /// the wait; stops early once Claude abandons the hook (see
+    /// `TerminationWatch`) or the app that would answer is gone (checked
+    /// about once a second).
     private static func waitForDecision(
         _ wait: PermissionApprovalWait,
         on channel: PermissionApprovalChannel,
-        parent: pid_t
+        parent: pid_t,
+        terminated: SignalFlag
     ) -> PermissionApproval.Outcome {
-        let terminated = SignalFlag()
-        signal(SIGTERM, SIG_IGN)
-        let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
-        termination.setEventHandler { terminated.raise() }
-        termination.resume()
-        defer { termination.cancel() }
-
         let start = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         var checks = 0
         return wait.waitForDecision(
@@ -386,6 +481,35 @@ enum AgentHookCLI {
                 return checks % 10 == 0 && !channel.isAppListening()
             }
         )
+    }
+
+    /// Claude abandons a hook with SIGTERM (then SIGKILL): caught, so the
+    /// report still goes out and the app drops the request at once.
+    private struct TerminationWatch {
+        let terminated = SignalFlag()
+        private let source: DispatchSourceSignal
+
+        /// SIGTERM is ignored only once the source that sees it is
+        /// registered: ignored any earlier, one could be lost, and the
+        /// request held for a Claude that gave up. Until then it ends the
+        /// process, with nothing queued. Nil if the source doesn't register
+        /// in time (it takes microseconds; nothing here may hang the hook).
+        init?() {
+            source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+            let registered = DispatchSemaphore(value: 0)
+            source.setRegistrationHandler { registered.signal() }
+            source.setEventHandler { [terminated] in terminated.raise() }
+            source.resume()
+            guard registered.wait(timeout: .now() + 1) == .success else {
+                source.cancel()
+                return nil
+            }
+            signal(SIGTERM, SIG_IGN)
+        }
+
+        func stop() {
+            source.cancel()
+        }
     }
 
     /// Set from a signal handler's queue, read by the waiting loop.
@@ -418,9 +542,11 @@ enum AgentHookCLI {
         env["NIRUX_AGENT_UUID"]?.isEmpty == false
     }
 
-    /// Append one JSON line. O_APPEND keeps concurrent writers (several
-    /// agents across columns) from interleaving mid-line for lines under
-    /// PIPE_BUF; lines are small.
+    /// Append one JSON line in one `write`. O_APPEND keeps concurrent
+    /// writers (several agents across columns) from interleaving mid-line:
+    /// the file system serializes writes to one file (PIPE_BUF bounds
+    /// pipes, not files). Lines are small, a Stop's final message excerpt
+    /// (`TurnEndText.excerpt`, 3,000 characters) the largest.
     private static func append(_ event: AgentHookEvent) {
         guard var line = try? JSONEncoder().encode(event) else { return }
         line.append(0x0A) // \n

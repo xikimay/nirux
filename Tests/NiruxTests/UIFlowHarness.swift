@@ -56,6 +56,10 @@ final class UIFlowHarness {
     var alertResponses: [NSApplication.ModalResponse] = []
     /// Items to pick, in order, in the next alerts that show a pop-up menu.
     var alertMenuChoices: [Int] = []
+    /// The items of every alert's pop-up menu, in order.
+    private(set) var alertMenuTitles: [[String]] = []
+    /// Every alert's default (Return) button, "" for none, in order.
+    private(set) var alertDefaultButtons: [String] = []
     /// Links opened in the default browser, in order.
     private(set) var openedURLs: [URL] = []
     /// Folders the folder picker double returns, in order; Cancel once
@@ -65,8 +69,14 @@ final class UIFlowHarness {
     private(set) var setupFailures: [String] = []
     /// Workspaces whose Mission question came to the user and was notified.
     private(set) var missionQuestionNotices: [String] = []
+    /// CI failures notified: each with why it looks flaky, when it does.
+    private(set) var ciFailureNotices: [(banner: CIFailureBanner, flakyReason: String?)] = []
     /// Browser profiles the cookie double reports.
     var cookieSources: [CookieImporter.Source] = []
+    /// Browsers the menu offers; the sources' browsers when nil.
+    var offeredBrowsers: [CookieImporter.Browser]?
+    /// The cookie double never answers the profile read.
+    var cookieSourcesNeverAnswer = false
     /// Profiles the cookie double was asked to import from.
     private(set) var cookieImports: [CookieImporter.Source] = []
     /// What the cookie double throws instead of importing.
@@ -193,6 +203,9 @@ final class UIFlowHarness {
         // Never UNUserNotificationCenter in xctest.
         shell.sideEffects.notifySetupFailure = { [weak self] workspaceID, _ in self?.setupFailures.append(workspaceID) }
         shell.sideEffects.notifyMissionQuestion = { [weak self] workspaceID, _, _, _ in self?.missionQuestionNotices.append(workspaceID) }
+        shell.sideEffects.notifyCIFailure = { [weak self] banner, flakyReason in self?.ciFailureNotices.append((banner, flakyReason)) }
+        // Neither GitHub nor a model: a test that turns the triage on brings its own reader.
+        shell.sideEffects.investigateCIFailure = { _, _ in CITriageInvestigation.Outcome() }
         // The real Trash never gets a test's file.
         shell.sideEffects.trash = { url in try FileManager.default.removeItem(at: url) }
         shell.sideEffects.claudeManagedSettings = { [root] in
@@ -204,10 +217,14 @@ final class UIFlowHarness {
         shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.checkExplain = { .unavailable("Explain doesn’t run in flow tests.") }
         shell.sideEffects.cookieBrowsers = { [weak self] in
+            if let offered = self?.offeredBrowsers { return offered }
             let sources = self?.cookieSources ?? []
             return CookieImporter.Browser.allCases.filter { browser in sources.contains { $0.browser == browser } }
         }
-        shell.sideEffects.cookieSources = { [weak self] in self?.cookieSources ?? [] }
+        shell.sideEffects.cookieSources = { [weak self] completion in
+            guard let self, !cookieSourcesNeverAnswer else { return }
+            completion(cookieSources)
+        }
         shell.sideEffects.importCookies = { [weak self] source in
             self?.cookieImports.append(source)
             if let error = self?.cookieImportError { throw error }
@@ -223,8 +240,10 @@ final class UIFlowHarness {
             guard let self else { return .alertFirstButtonReturn }
             alerts.append(alert.messageText)
             alertDetails.append(alert.informativeText)
-            if let menu = alert.accessoryView as? NSPopUpButton, !alertMenuChoices.isEmpty {
-                menu.selectItem(at: alertMenuChoices.removeFirst())
+            alertDefaultButtons.append(alert.buttons.first { $0.keyEquivalent == "\r" }?.title ?? "")
+            if let menu = alert.accessoryView as? NSPopUpButton {
+                alertMenuTitles.append(menu.itemTitles)
+                if !alertMenuChoices.isEmpty { menu.selectItem(at: alertMenuChoices.removeFirst()) }
             }
             return alertResponses.isEmpty ? .alertFirstButtonReturn : alertResponses.removeFirst()
         }

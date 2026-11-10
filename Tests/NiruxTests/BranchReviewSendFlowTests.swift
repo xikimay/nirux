@@ -25,8 +25,11 @@ final class BranchReviewSendFlowTests: XCTestCase {
             // The workspace's own shell runs there too: not an agent, even
             // once hooks named one.
             let shellColumn = try XCTUnwrap(workspace.columns.first?.pty)
-            for cwd in [harness.worktree, harness.repo, nested] {
-                workspace.addColumn(command: "exec -a claude /bin/cat", cwd: cwd)
+            // Each keeps what it is sent.
+            let agents = [AgentStandIn(), AgentStandIn(), AgentStandIn()]
+            defer { agents.forEach { $0.remove() } }
+            for (cwd, agent) in zip([harness.worktree, harness.repo, nested], agents) {
+                workspace.addColumn(command: agent.command(), cwd: cwd)
             }
             // An agent under a launcher in front, and one in the background
             // of its shell.
@@ -100,9 +103,9 @@ final class BranchReviewSendFlowTests: XCTestCase {
             }
             panel.sendButton?.performClick(nil)
 
-            harness.waitUntil("the paste") { shell.reviewSendPanel == nil && claudes[0].recentOutput().contains("Say why, please.") }
-            XCTAssertFalse(claudes[1].recentOutput().contains("Say why"))
-            XCTAssertFalse(claudes[2].recentOutput().contains("Say why"))
+            harness.waitUntil("the paste") { shell.reviewSendPanel == nil && agents[0].input.contains("Say why, please.") }
+            XCTAssertFalse(agents[1].input.contains("Say why"))
+            XCTAssertFalse(agents[2].input.contains("Say why"))
             XCTAssertTrue(workspace.columns[workspace.focusedIndex].pty === claudes[0], "the user reads it there")
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             XCTAssertNil(review.review?.record.comment(id: "c1")?.sent, "not before Claude takes it")

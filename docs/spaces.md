@@ -44,7 +44,7 @@ space, and strips the interface down to what is used.
 - **Isolation by place and by view.** Each task has its own worktree and
   branch; a space shows only itself. No sandbox (out of scope).
 - **The sidebar Activity section goes.** Cards, native notifications, the Dock
-  badge, Telegram and ⌘J cover it.
+  badge and ⌘J cover it.
 - **Missions are rebuilt before the Lead**, in their own PR: messages are typed
   into prompts both ways.
 - **Clean, minimal interface, the Apple way**, with only what is used. Dark
@@ -180,7 +180,7 @@ New flow, built on the guarded typing `tell` already uses
   Nirux can't tell its prompt is free).
 - `receive` keeps working for old skills but leaves the skill text.
 - The Activity section, its store and its reply alert go. Native
-  notifications, the Dock badge, Telegram and ⌘J stay.
+  notifications, the Dock badge and ⌘J stay.
 
 ## The Lead
 
@@ -289,7 +289,14 @@ Mockups were validated in the design session. What changes:
 - **Sidebar:** a space picker at the top (name, task count, amber when an agent
   waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
-  "Working", "#39 · checks passed"). No chips on every row. A blocker says
+  "Working", "#39 · checks passed"). A working Claude that may be going in
+  circles says so in the same grey, in place of "Working" ("Stuck? · 3
+  timeouts", "Stuck? · swift build failed 5×"): 3 commands past their
+  time limit close together, or 5 failures in a row of one command, counted
+  from its hooks over the turn. A command that only waits (a `sleep`, a poll
+  loop, `gh pr checks`) counts as neither, nor does an exit 1 that answers
+  (grep found nothing, a test is false). It never alerts or interrupts the
+  agent; Settings › Agents turns it off. No chips on every row. A blocker says
   "Blocked · …" in grey after needs you, broken (failed checks too), asking,
   working and "Paused · Resume", before a finished turn and the pull request;
   the next step ("Next · …") takes the branch's place, and the selected row

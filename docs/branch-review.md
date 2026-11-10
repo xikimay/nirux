@@ -654,7 +654,7 @@ notes are shown apart and never change these signals.
 | Signal | Raised by | Why it matters |
 | --- | --- | --- |
 | Persistence and state | `Codable` types, `CodingKeys`, `decodeIfPresent`, `*Persistence*`, `*Store.swift`, keys of `state.json` or `board.json` | Defaults for missing keys, rollback to an older nightly, data loss |
-| Security | Keychain (`SecItem`), `SecCode`/`SecStaticCode`, entitlements, the `nirux://` scheme (`NiruxURLRequest`), `HandoverFile`, Telegram remote access, `/tmp` paths, `Process` arguments | Input from outside, secrets, signing |
+| Security | Keychain (`SecItem`), `SecCode`/`SecStaticCode`, entitlements, the `nirux://` scheme (`NiruxURLRequest`), `HandoverFile`, `/tmp` paths, `Process` arguments | Input from outside, secrets, signing |
 | Concurrency | `@MainActor`, `nonisolated`, `@Sendable`, `@unchecked Sendable`, `DispatchQueue`, `OperationQueue`, `Task {`, `MainActor.assumeIsolated`, `RunLoop.main.perform` | CI's Swift 6.1 is stricter than local 6.2; a main-actor closure run off the main thread crashed a nightly (#48) |
 | App launch and quit | `applicationDidFinishLaunching`, `applicationWillTerminate`, the `--hook` mode, `NIRUX_*` variables, `Info.plist`, Sparkle, `bundle.sh` | Paths that only the installed, notarized app takes |
 | CI workflows | `.github/`, scripts the workflows call | The nightly publishes to every install |
@@ -667,10 +667,10 @@ signal, not a side effect, so that every git run doesn't raise two chips. A
 line rule matches anywhere in a `+` or `-` line, strings included, but not
 in a line that is only a comment, nor in a doc or a folded file: a generated
 file can say anything, and a reindented line changes nothing. In Swift, no
-comment counts, trailing or spanning lines (`code // Telegram`). A folded file raises only its path rules. A test ships
+comment counts, trailing or spanning lines (`code // HandoverFile`). A folded file raises only its path rules. A test ships
 nothing: it raises only the concurrency rules, which CI checks more strictly.
 Path rules also cover the files whose changes may name no rule: a name with
-`Persistence`, `HandoverFile`, `NiruxURLRequest`, `+URLScheme`, `Telegram`,
+`Persistence`, `HandoverFile`, `NiruxURLRequest`, `+URLScheme`,
 the app delegate (`NiruxApp.swift`), the hook and skill installers.
 "Scripts the workflows call" are the changed files, docs and tests aside,
 whose path a workflow (`.github/workflows/*.yml`) or an action
@@ -1006,8 +1006,8 @@ say why and change nothing for it. Then say what you did for each number.
   hookKind == "claude"`). Every other agent is
   refused, with the reason: Codex's notify hook reports turn ends only, so an
   open approval prompt would read as idle; Gemini CLI and OpenCode report
-  nothing. It is checked when the sheet opens and again on Send: a Telegram
-  prompt or a merge-queue prompt may start a turn meanwhile.
+  nothing. It is checked when the sheet opens and again on Send: a
+  merge-queue prompt may start a turn meanwhile.
 - **Drafts don't go.** The sheet says how many it leaves out. Sending a
   comment that is being edited sends it as it was saved; the edit becomes
   the draft of a new comment where it is, so nothing typed is lost, and
@@ -1033,7 +1033,7 @@ say why and change nothing for it. Then say what you did for each number.
   doesn't fit stays unsent (the next ones may fit), and the sheet counts
   those.
 - **The message is sanitized as a whole**, paths and quoted lines included,
-  by the scalar filter of `RemotePromptSanitizer`, factored out: keep `\n` and
+  by the scalar filter of `TypedPromptSanitizer`, factored out: keep `\n` and
   `\t`, turn `\r` and `\r\n` into `\n`, drop the other C0 controls, DEL and
   C1. Not its `sanitize` as is, which also trims and caps at 8,000 Unicode
   scalars, nor its `terminalInput`, which appends a Return:

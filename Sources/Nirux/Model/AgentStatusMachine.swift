@@ -22,6 +22,40 @@ struct AgentStatusMachine {
         // Leaving attention ends the episode: the next one alerts again.
         didSet { if state != .needsAttention { attentionAlerted = false } }
     }
+    /// The last Claude turn end, while it hasn't alerted: its verdict is on
+    /// its way (`AgentHookOutcome.turnEnd`), or it came back done. The
+    /// column says "done" without counting in the Dock badge (see
+    /// `isQuietTurnEnd`). It lasts until the next main-thread prompt, turn
+    /// end or conversation, whatever the column's status does meanwhile:
+    /// the sidebar idles the focused column of a Nirux in the background,
+    /// a subagent's tool call sets it working, activating Nirux idles every
+    /// column, and none of these means the user read the message.
+    private(set) var quietTurnEnd: QuietTurnEnd?
+
+    enum QuietTurnEnd: Equatable {
+        case pending(turnEndedAt: TimeInterval)
+        case done
+        /// Claude went on by itself (a tool call) before the verdict: no
+        /// verdict applies to an agent at work, and the next turn end, or a
+        /// prompt, alerts for this unread one as before.
+        case superseded
+    }
+
+    /// The last turn end's final message asks the user something (its
+    /// verdict): the message's last line, and when the turn ended. Unlike
+    /// the attention, which activating Nirux clears, it lasts like an open
+    /// dialog, so the sidebar, the column's header and ⌘J keep saying who
+    /// waits for an answer: until the next prompt (the answer), turn end or
+    /// conversation, or until the user looks at the column (`noteSeen`).
+    private(set) var askedQuestion: AskedQuestion?
+
+    struct AskedQuestion: Equatable {
+        let text: String?
+        let since: TimeInterval
+        /// A plain yes or no answers it, and its text is the message's
+        /// own (`TurnEndQuestion`).
+        var isYesNo = false
+    }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
     private(set) var hookWorking = false
@@ -30,7 +64,7 @@ struct AgentStatusMachine {
     /// column shows `.idle` while its dialog stays open. Entries leave only
     /// on hook evidence that the dialog closed — the matching tool call
     /// finishing, a new prompt, the turn or session ending — never on a
-    /// guess: remote prompts are refused while any is pending, and a
+    /// guess: typed prompts are refused while any is pending, and a
     /// prompt typed into an open dialog would answer it. A manual denial
     /// fires no hook, so an entry can outlive its dialog until then.
     private(set) var pendingDialogs: [AgentPermissionRequest] = []
@@ -48,6 +82,9 @@ struct AgentStatusMachine {
     private var turnEndedAt: TimeInterval = 0
     /// Claude's last main-thread turn end (Stop, StopFailure).
     private var mainTurnEndedAt: TimeInterval = 0
+    /// The last new conversation in this process, or its end: a quick
+    /// answer never crosses one (`acceptsQuickAnswer`).
+    private var conversationChangedAt: TimeInterval = 0
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
@@ -106,6 +143,9 @@ struct AgentStatusMachine {
     private(set) var lastPromptAt: TimeInterval?
     private var turnPromptID: String?
     private var recentPromptIDs: [String] = []
+    /// The main agent's tool calls of the turn in flight, for the hint
+    /// that it may be going in circles (`circlingHint`).
+    private var circling = AgentCirclingWatch()
 
     private static let echoWindow: TimeInterval = 0.3
     private static let activityWindow: TimeInterval = 3.0
@@ -142,13 +182,13 @@ struct AgentStatusMachine {
         integratedAgentProcesses.contains(name) || activityOnlyAgentProcesses.contains(name)
     }
 
-    /// Telegram injects prompts only into integrated agents. Claude's hooks
-    /// report the dialogs a remote prompt must not answer; an activity-only
-    /// agent reports nothing, so its permission prompt looks like any
-    /// silence and a prompt could land on it. (Codex's notify reports turn
-    /// ends only — the same blind spot, accepted before this tier existed.)
-    /// Bot commands themselves stay agent-agnostic.
-    static func acceptsRemotePrompts(processName name: String) -> Bool {
+    /// Nirux types prompts (PR Feedback's Address, "Ask Agent Why CI
+    /// Failed") only into integrated agents. Claude's hooks report the
+    /// dialogs such a prompt must not answer; an activity-only agent
+    /// reports nothing, so its permission prompt looks like any silence and
+    /// a prompt could land on it. (Codex's notify reports turn ends only —
+    /// the same blind spot, accepted before this tier existed.)
+    static func acceptsTypedPrompts(processName name: String) -> Bool {
         integratedAgentProcesses.contains(name)
     }
 
@@ -212,9 +252,9 @@ struct AgentStatusMachine {
     ) {
         switch event.name {
         case .sessionStart:
-            startConversation(event)
+            startConversation(event, isUserFocused: isUserFocused, outcome: &outcome)
         case .userPromptSubmit:
-            startTurn(event, now: now)
+            startTurn(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .preToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
@@ -230,6 +270,7 @@ struct AgentStatusMachine {
                let index = pendingDialogs.firstIndex(where: { $0.isSameCall(key: key, as: event) }) {
                 noteClosed(pendingDialogs.remove(at: index))
             }
+            noteCallEnded(event, at: now)
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionRequest:
@@ -254,7 +295,6 @@ struct AgentStatusMachine {
             // planning"): the earlier dialog is gone.
             if let key = request.key { pendingDialogs.removeAll { $0.isSameCall(key: key, as: event) } }
             pendingDialogs.append(request)
-            outcome.attention = request.reason
             _ = block(for: request.reason, isUserFocused: isUserFocused, alert: false)
         case .notification:
             hookKind = event.kind.rawValue
@@ -268,6 +308,9 @@ struct AgentStatusMachine {
             applyTurnEnd(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .sessionEnd:
             endTurn()
+            settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+            askedQuestion = nil
+            conversationChangedAt = now
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -287,7 +330,12 @@ struct AgentStatusMachine {
         }
     }
 
-    private mutating func startTurn(_ event: AgentHookEvent, now: TimeInterval) {
+    private mutating func startTurn(
+        _ event: AgentHookEvent,
+        now: TimeInterval,
+        isUserFocused: Bool,
+        outcome: inout AgentHookOutcome
+    ) {
         hookKind = event.kind.rawValue
         // A prompt was typed at the session's input, which no dialog of
         // it covered: they are all closed. This also frees the subagent
@@ -299,6 +347,9 @@ struct AgentStatusMachine {
         hookTurnInFlight = true
         turnFailure = nil
         if event.agentID == nil {
+            settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+            askedQuestion = nil
+            circling.reset()
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -306,7 +357,11 @@ struct AgentStatusMachine {
         resumeUnlessBlocked()
     }
 
-    private mutating func startConversation(_ event: AgentHookEvent) {
+    private mutating func startConversation(
+        _ event: AgentHookEvent,
+        isUserFocused: Bool,
+        outcome: inout AgentHookOutcome
+    ) {
         hookKind = event.kind.rawValue
         // Auto (mid-turn) or /compact: same conversation, no turn ends.
         guard event.source != "compact" else { return }
@@ -314,6 +369,9 @@ struct AgentStatusMachine {
         // whatever dialogs the old one showed are gone. `/clear` took what
         // was typed at the prompt, but fires no UserPromptSubmit.
         endTurn()
+        settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+        askedQuestion = nil
+        conversationChangedAt = event.timestamp
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -343,6 +401,16 @@ struct AgentStatusMachine {
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
+        if event.stopHookActive == true {
+            // The last Stop wasn't the end: a Stop hook kept the turn going,
+            // and this one ends it (read below).
+            quietTurnEnd = nil
+        } else {
+            // A turn Claude started by itself (no prompt) ended before the
+            // last one's verdict.
+            settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
+        }
+        askedQuestion = nil
         mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
@@ -352,12 +420,162 @@ struct AgentStatusMachine {
             : nil
         let reason = turnFailure?.reason ?? .turnFinished
         outcome.attention = reason
+        // Its final message may ask something or not: the alert waits for
+        // the verdict (`applyTurnEndVerdict`). Nobody needs one while the
+        // user looks at the column, and a dialog still open (a subagent's)
+        // waits on the user whatever the message says.
+        if turnFailure == nil, openDialogs.isEmpty, event.kind == .claude, let message = event.finalMessage,
+           !isUserFocused {
+            _ = block(for: reason, isUserFocused: false, alert: false)
+            // The earlier turn end just alerted (`settleQuietTurnEnd`): that
+            // was this episode's alert, the verdict only says why.
+            if outcome.firedAttention { attentionAlerted = true }
+            quietTurnEnd = .pending(turnEndedAt: now)
+            outcome.turnEnd = TurnEndRequest(message: message, turnEndedAt: now)
+            return
+        }
         outcome.firedAttention = block(for: reason, isUserFocused: isUserFocused)
+    }
+
+    /// The last turn end is behind: a prompt went in, the conversation
+    /// changed or ended, another turn ended. One not read yet (its verdict
+    /// on its way, or superseded) alerts as every turn end did, unless the
+    /// user looks at the column: they may not have read it (Nirux types
+    /// Mission messages, a `claude -p` ends its session with its turn).
+    private mutating func settleQuietTurnEnd(isUserFocused: Bool, outcome: inout AgentHookOutcome) {
+        if quietTurnEnd?.isUnread == true, !isUserFocused {
+            outcome.attention = .turnFinished
+            outcome.firedAttention = true
+        }
+        quietTurnEnd = nil
+    }
+
+    /// The turn end `request` asked about still waits for its verdict.
+    func awaitsVerdict(_ request: TurnEndRequest) -> Bool {
+        quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt)
+    }
+
+    /// The column shows a turn end that hasn't alerted (`attentionReason`
+    /// is nil out of attention), and nothing else waits: no dialog, no
+    /// failed turn, no other attention since.
+    var isQuietTurnEnd: Bool {
+        quietTurnEnd != nil && attentionReason == .turnFinished
+    }
+
+    /// The verdict on the turn end `request` asked about: the reason to
+    /// alert with, or nil. A turn that asks alerts, amber; one the
+    /// classifier couldn't read alerts as every turn end did; one that's
+    /// done stays quiet. `isUserFocused` is now's: a user looking at the
+    /// column needs no alert. Dropped once that turn end is behind (a new
+    /// prompt, a later turn end, another conversation) or another attention
+    /// alerted since (see `block`). A dialog opened since doesn't drop it:
+    /// it may close without alerting (another hook answers it), and while
+    /// it waits the user is needed anyway.
+    mutating func applyTurnEndVerdict(
+        _ verdict: TurnEndVerdict,
+        for request: TurnEndRequest,
+        isUserFocused: Bool
+    ) -> AgentAttentionReason? {
+        guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
+        // Settled, whichever way: nothing is left to alert for later.
+        quietTurnEnd = nil
+        let reason: AgentAttentionReason
+        switch verdict {
+        case .done:
+            quietTurnEnd = .done
+            return nil
+        case .asks(let question):
+            // The question the classifier quoted, else the one it ends on,
+            // else its last line.
+            let line = question?.text ?? TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
+            reason = .askedInReply(line)
+            // A user looking at the column reads it there.
+            if !isUserFocused {
+                askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true)
+            }
+            // A question always alerts, even after this episode's "finished
+            // its turn": missing one is what this is all about.
+            attentionAlerted = false
+        case .unknown:
+            reason = .turnFinished
+        }
+        return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
+    }
+
+    /// The question the foreground `claude` asked at its last turn end, if
+    /// any: as `visibleDialog`, this very `claude`'s.
+    func visibleQuestion(foreground: ForegroundProcess?) -> AskedQuestion? {
+        guard let askedQuestion, let foreground, foreground.name == "claude",
+              askedQuestion.since >= foreground.instance.startedAt
+        else { return nil }
+        return askedQuestion
+    }
+
+    /// The user looks at the column (Nirux active, the column focused):
+    /// they read the question there.
+    mutating func noteSeen() {
+        askedQuestion = nil
+    }
+
+    /// A quick answer (Yes, No, a reply) to the turn end of `turnEndedAt`
+    /// may be typed now: that turn end is still the last thing that
+    /// happened (no prompt, turn end or conversation change since, the
+    /// same `claude`), no keys at the prompt since the last prompt (a draft
+    /// started during the turn stays there, a screen no hook tells of may
+    /// be open: `hasDraft`), no dialog
+    /// waits, Claude isn't working, and its terminal is quiet (a Stop
+    /// hook's continuation runs its spinner before any hook says so).
+    /// Anything else, and "yes" could land in a draft, a dialog or a later
+    /// turn.
+    func acceptsQuickAnswer(to turnEndedAt: TimeInterval, foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
+        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
+              foreground.instance.startedAt <= turnEndedAt
+        else { return false }
+        return isCurrentTurnEnd(turnEndedAt) && !hasDraft && pendingDialogs.isEmpty && !hookWorking
+            && now - lastReadAt >= Self.quietBeforeQuickAnswer
+    }
+
+    /// The turn end of `turnEndedAt` is still the last thing that happened
+    /// in this conversation: no prompt, turn end or conversation since.
+    /// Seen or not, its question still waits for an answer.
+    func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
+        mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt && (lastPromptAt ?? 0) < turnEndedAt
+    }
+
+    /// Output this recent says Claude draws something: its spinner at work.
+    static let quietBeforeQuickAnswer: TimeInterval = 1.5
+
+    /// The user's click types a prompt into this agent (Address PR
+    /// Feedback, Why Failed): they engage with it. The turn end before is
+    /// read, so the prompt alerts for nothing and a verdict on its way
+    /// drops; the question it asked is behind them.
+    mutating func notePromptFromUser() {
+        if quietTurnEnd != nil { quietTurnEnd = .done }
+        askedQuestion = nil
+    }
+
+    /// A turn end waits for its verdict: Nirux types nothing of its own
+    /// into the prompt meanwhile (see `isPromptFree`). A prompt would
+    /// settle it as unread, alerting for a turn the verdict may find done.
+    /// A prompt the user's click sends goes in (`notePromptFromUser`).
+    var awaitsAnyVerdict: Bool {
+        if case .pending = quietTurnEnd { return true }
+        return false
     }
 
     /// A main-thread tool event: the failed turn is behind.
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
-        if event.agentID == nil { turnFailure = nil }
+        guard event.agentID == nil else { return }
+        turnFailure = nil
+        // Went on by itself (a Stop hook blocked its end, a background
+        // task, a wakeup): a verdict would land on an agent at work, and
+        // the question is behind it. A turn end not read yet stays owed.
+        switch quietTurnEnd {
+        case .pending?: quietTurnEnd = .superseded
+        case .done?: quietTurnEnd = nil
+        case .superseded?, nil: break
+        }
+        askedQuestion = nil
     }
 
     /// The receiver's report on a sidebar approval. A decision that
@@ -431,13 +649,6 @@ struct AgentStatusMachine {
         return taken
     }
 
-    /// What an event asks of the user, read without column state (its
-    /// column is gone): as if it reached a fresh, focused column.
-    static func standaloneOutcome(for event: AgentHookEvent) -> AgentHookOutcome {
-        var machine = AgentStatusMachine()
-        return machine.apply(event, isUserFocused: true)
-    }
-
     /// Claude notifications by `notification_type`. Informational types
     /// change nothing; untyped ones (older Claude) keep asking for
     /// attention with their message, as before types existed.
@@ -471,13 +682,11 @@ struct AgentStatusMachine {
             lastKeystrokeAt = 0
             if let open = openDialogs.first {
                 reason = open.reason
-                outcome.isRepeat = true
             } else if !pendingDialogs.isEmpty {
                 // Every entry looked answered, yet one waits: the newest
                 // (older ones were likely denied, which fires no hook).
                 pendingDialogs[pendingDialogs.count - 1].mayBeAnswered = false
                 reason = pendingDialogs[pendingDialogs.count - 1].reason
-                outcome.isRepeat = true
             } else if now - lastDialogClosedAt < Self.reminderRaceWindow,
                       now - lastClosedDialogRequestedAt >= Self.reminderDelay {
                 // The hook is async: this reminder raced the close of the
@@ -500,8 +709,8 @@ struct AgentStatusMachine {
         case "idle_prompt":
             // Claude finished responding a minute ago: the main thread sits
             // at its prompt, not in a dialog. Its Stop said so already: the
-            // reminder alerts nobody, asks nothing over Telegram, and
-            // leaves a finished turn the user looked at seen. Only a turn
+            // reminder alerts nobody and leaves a finished turn the user
+            // looked at seen. Only a turn
             // still believed running (Esc fires no Stop, a Stop can get
             // lost) ends here.
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
@@ -535,15 +744,20 @@ struct AgentStatusMachine {
             return false
         }
         state = .needsAttention
+        // An alerting attention (alerted now, or earlier in this episode)
+        // speaks for a turn end not read yet: it needs no alert of its
+        // own, nor to take this attention's reason.
+        if alert, quietTurnEnd?.isUnread == true { quietTurnEnd = nil }
         guard alert, !attentionAlerted else { return false }
         attentionAlerted = true
         return true
     }
 
     /// A tool event from an agent: it got past its dialogs — answered, or
-    /// denied, which fires no hook. The status believes it; the Telegram
-    /// gate keeps the entries until proof (a call can run beside an open
-    /// dialog). Claude's `permission_prompt` reopens them if one still waits.
+    /// denied, which fires no hook. The status believes it; the gate on
+    /// prompts Nirux types keeps the entries until proof (a call can run
+    /// beside an open dialog). Claude's `permission_prompt` reopens them if
+    /// one still waits.
     private mutating func noteProgress(of event: AgentHookEvent) {
         for index in pendingDialogs.indices
         where pendingDialogs[index].agentID == event.agentID && pendingDialogs[index].sessionID == event.sessionID {
@@ -584,6 +798,29 @@ struct AgentStatusMachine {
         hookWorking = false
         turnStartedAt = nil
         hookTurnInFlight = false
+        circling.reset()
+    }
+
+    /// The agent may be going in circles in the turn in flight: its
+    /// commands keep hanging, or one keeps failing (see
+    /// `AgentCirclingHint`). Shown while the column works.
+    var circlingHint: AgentCirclingHint? { circling.hint }
+
+    /// A tool call ended, for `circlingHint`. The main agent's only: a
+    /// subagent's calls say nothing of it, nor does the bookkeeping of
+    /// background commands. A shell command counts with those of its
+    /// program, unless it counts by its exact text; any other tool with its
+    /// exact repeats (the same URL, file, action: `toolKey`). An end a
+    /// newer receiver wrote says nothing.
+    private mutating func noteCallEnded(_ event: AgentHookEvent, at time: TimeInterval) {
+        guard event.agentID == nil, let tool = event.toolName, !AgentToolOutcome.taskTools.contains(tool) else { return }
+        let end = event.toolEnd.map(AgentToolEnd.init(rawValue:))
+        if case .some(.none) = end { return }
+        let isShell = AgentToolInput.shellTools.contains(tool)
+        let exact = (isShell ? event.toolCommandKey : event.toolKey).map { "\(tool) \($0)" }
+        circling.noteCallEnded(
+            key: isShell ? exact ?? event.toolFamily : exact ?? tool, name: isShell ? event.toolFamily : tool, end: end ?? nil, at: time
+        )
     }
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
@@ -600,16 +837,39 @@ struct AgentStatusMachine {
         lastInteractionAt = now.timeIntervalSince1970
     }
 
+    private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
+
+    /// Arrows reached the agent without a key pressed (ghostty turns a
+    /// wheel scroll into them on the alternate screen): an old prompt may be
+    /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
+    /// keystroke: the user scrolled, typed nothing.
+    mutating func notePromptRecall(now: Date) {
+        lastDraftInputAt = now.timeIntervalSince1970
+    }
+
+    /// One key's bytes: a character, or a short escape sequence (a
+    /// bracketed paste is longer).
+    static func isOneKey(_ keys: Data) -> Bool {
+        if keys.first == 0x1B { return keys.count <= 8 }
+        return String(data: keys, encoding: .utf8).map { $0.count == 1 } ?? false
+    }
+
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
-    mutating func noteKeystroke(now: Date) {
+    mutating func noteKeystroke(now: Date, keys: Data? = nil) {
         let time = now.timeIntervalSince1970
         // A key answers a dialog only while none reached it yet: answered, it stays
         // listed until its tool ends (no hook between); later keys reach the prompt.
         let answersDialog = openDialogs.contains { $0.requestedAt >= lastKeystrokeAt }
         lastKeystrokeAt = time
         lastInputAt = time
-        if !answersDialog { lastDraftInputAt = time }
+        // A mode switch (Shift-Tab) leaves the prompt as it was; any other
+        // key may leave text there, or open a screen no hook tells of (Esc
+        // Esc's rewind picker, Ctrl-O's transcript, a slash command's). A
+        // paste or dictation is text, whatever a dialog waits for: one key
+        // answers a dialog, not a write of several.
+        let oneKey = keys.map(Self.isOneKey) ?? true
+        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
@@ -718,13 +978,25 @@ struct AgentStatusMachine {
         // it, which can come first too: a Stop while the heartbeat waited
         // with Nirux in the background.
         if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
+        // A turn end found done, and the question asked, are behind with
+        // it. One still waiting for its verdict gets it, and alerts as its
+        // Stop would have: a `claude -p` or a crash leaves before its
+        // SessionEnd is applied.
+        if fgName != "claude" {
+            if quietTurnEnd == .done { quietTurnEnd = nil }
+            askedQuestion = nil
+        }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears
         // them.) An activity-only agent keeps them: it may run in front of a
         // suspended claude whose dialog is back on `fg`, and they are what
-        // keeps Telegram from typing into it.
+        // keeps Nirux from typing a prompt into it.
         if Self.integratedAgentProcesses.contains(fgName), fgName != "claude" { pendingDialogs.removeAll() }
+        // Another agent works here now: the calls of a `claude` that died
+        // mid-turn (no Stop) aren't its own. A shell in front may be a
+        // suspended claude's (^Z, Ctrl-G's editor), whose turn goes on.
+        if Self.isRecognizedAgentProcess(fgName), fgName != "claude" { circling.reset() }
         // No hook ever drives an activity-only agent (a Claude or Codex hook
         // under it is a nested run's); a claude's leftover kind would mute
         // its OSC 9 notifications.
@@ -813,6 +1085,8 @@ struct AgentStatusMachine {
     /// New shell in the same terminal (start/restart) — everything resets.
     mutating func reset() {
         state = .idle
+        quietTurnEnd = nil
+        askedQuestion = nil
         hookWorking = false
         hookKind = nil
         pendingDialogs.removeAll()
@@ -822,6 +1096,7 @@ struct AgentStatusMachine {
         lastEventAt = 0
         turnEndedAt = 0
         mainTurnEndedAt = 0
+        conversationChangedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0
@@ -838,5 +1113,16 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+        circling.reset()
+    }
+}
+
+extension AgentStatusMachine.QuietTurnEnd {
+    /// Not read yet: a verdict on its way, or superseded by Claude going on.
+    var isUnread: Bool {
+        switch self {
+        case .pending, .superseded: return true
+        case .done: return false
+        }
     }
 }

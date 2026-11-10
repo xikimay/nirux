@@ -147,6 +147,15 @@ jobs:
           NIRUX_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
         run: ./scripts/bundle.sh "$VERSION" "$BUILD_NUMBER"
 
+      # Before notarizing: an app that traps at launch (a new compiler, a
+      # dependency's missing resource) stops here instead of reaching every
+      # install through Sparkle.
+      - name: Launch check
+        timeout-minutes: 5
+        run: scripts/launch-check.sh Nirux.app
+
+      # libghostty-spm's resources come from inside the app, not from this
+      # machine's build folder, which no other Mac has.
       - name: Check the packaged app's terminal runtime
         timeout-minutes: 5
         run: Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime

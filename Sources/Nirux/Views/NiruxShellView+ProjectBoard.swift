@@ -85,12 +85,12 @@ extension NiruxShellView {
             self.showBoardSettings(profileID: board.projectID)
         }
         board.view.onRefresh = { [weak board] in board?.reload() }
-        board.view.onBoardSettings = { [weak self, weak board] in
+        board.view.onBoardSettings = { [weak self, weak board] section in
             guard let self, let board else { return }
             guard self.profiles.contains(where: { $0.id == board.projectID }) else {
                 return self.showToast("This board’s space was deleted")
             }
-            self.showBoardSettings(profileID: board.projectID)
+            self.showBoardSettings(profileID: board.projectID, repository: section)
         }
         board.view.onSelectProject = { [weak self, weak board] projectID in
             guard let self, let board else { return }
@@ -264,6 +264,8 @@ extension NiruxShellView {
             hasAgent: agentInFront || pty.agentProcessName(snapshot: snapshot) != nil,
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
+            // A dialog only: the Merge Queue holds a pull request while its
+            // agent waits there, not while it waits for an answer in prose.
             openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason,
             workingFor: pty.agentTurnStartedAt.map { SidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )

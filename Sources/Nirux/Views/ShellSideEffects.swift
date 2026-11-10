@@ -42,12 +42,20 @@ struct ShellSideEffects {
     /// thread.
     var trash: ProjectMemory.Trash = ProjectMemory.systemTrash
 
-    /// Chromium browsers to offer the cookie import for: a click would
-    /// find a profile, or why it can't.
+    /// Chromium browsers to offer the cookie import for: those that ran
+    /// here. The click says when none of their profiles has cookies.
     var cookieBrowsers: @MainActor () -> [CookieImporter.Browser] = { CookieImporter.browsersToOffer() }
 
-    /// Their profiles with a cookie database, read once the user asked.
-    var cookieSources: @MainActor () -> [CookieImporter.Source] = { CookieImporter.availableSources() }
+    /// Their profiles with a cookie database, read once the user asked, off
+    /// the main thread (a macOS privacy prompt or a stalled volume would
+    /// hold it), handed back on it.
+    var cookieSources: @MainActor (_ completion: @escaping @MainActor @Sendable ([CookieImporter.Source]) -> Void) -> Void = {
+        ShellSideEffects.readCookieSources(then: $0)
+    }
+
+    /// How long reading the profiles may take before the import stops
+    /// waiting and can be asked again.
+    var cookieReadTimeout: TimeInterval = 20
 
     /// Reads the browser's key from the Keychain and imports the profile's
     /// cookies.
@@ -61,6 +69,27 @@ struct ShellSideEffects {
     /// Reruns the failed jobs of a GitHub Actions run: nil once GitHub
     /// accepted it, else why not. Called off the main thread.
     var rerunFailedJobs: @Sendable (CIFailure.Run) -> String? = { CIFailure.rerun($0) }
+
+    /// Reads a failed run to tell a flaky failure from a real one (`gh`,
+    /// the local repository, a model: see `CITriageInvestigation`). Tests
+    /// replace it: a flow test reaches neither GitHub nor `claude`.
+    /// The second parameter says, before anything goes to the model,
+    /// whether the triage is still on.
+    var investigateCIFailure: @Sendable (
+        CITriageInvestigation.Request, _ isStillWanted: @escaping @Sendable () async -> Bool
+    ) async -> CITriageInvestigation.Outcome = { request, isStillWanted in
+        await CITriageInvestigation.investigate(request, isStillWanted: isStillWanted)
+    }
+
+    /// The native notification of a pull request whose checks failed, with
+    /// why the failure looks flaky when it does. Tests replace it: xctest
+    /// must never reach UNUserNotificationCenter.
+    var notifyCIFailure: @MainActor (_ banner: CIFailureBanner, _ flakyReason: String?) -> Void = { banner, flakyReason in
+        NiruxNotifier.shared.postCIFailure(
+            workspaceID: banner.workspaceID, workspaceTitle: banner.workspaceTitle, pullRequest: banner.pullRequest,
+            checkNames: banner.checkNames, flakyReason: flakyReason
+        )
+    }
 
     /// Looks for the claude Branch Review's Explain runs, and its account
     /// (`claude --help`, `claude auth status`). Called off the main thread.
@@ -85,6 +114,16 @@ struct ShellSideEffects {
         NiruxNotifier.shared.postMissionEvent(
             workspaceID: workspaceID, workspaceTitle: title, columnIndex: column, kind: .question, message: question
         )
+    }
+
+    /// Through this nonisolated function's `@Sendable` parameter, so the
+    /// read doesn't inherit the caller's main-actor isolation (see
+    /// MergeQueueDriver.runOffMain).
+    nonisolated static func readCookieSources(then completion: @escaping @MainActor @Sendable ([CookieImporter.Source]) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let sources = CookieImporter.availableSources()
+            DispatchQueue.main.async { @MainActor in completion(sources) }
+        }
     }
 
     /// Shows an app-modal alert and waits for its answer.
