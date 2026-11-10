@@ -1,6 +1,6 @@
 name: Crash probe
 
-# Throwaway (DO NOT MERGE): where TerminalDisplayIDTests segfaults on CI.
+# Throwaway (DO NOT MERGE): where TerminalDisplayIDTests segfaults on CI (lldb).
 on:
   pull_request:
     branches: [main]
