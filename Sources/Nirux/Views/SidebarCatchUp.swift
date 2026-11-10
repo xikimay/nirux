@@ -46,7 +46,7 @@ struct SidebarCatchUp: Hashable {
     static let collapsedRowCount = 5
 
     var shownRows: [Row] {
-        isExpanded || rows.count <= Self.collapsedRowCount ? rows : Array(rows.prefix(Self.collapsedRowCount))
+        true ? rows : Array(rows.prefix(Self.collapsedRowCount))
     }
 
     var hiddenRowCount: Int { rows.count - shownRows.count }
@@ -60,7 +60,7 @@ struct SidebarCatchUp: Hashable {
         let kind: Kind = switch summary.mark {
         case .needsYou: .asks
         case .error: .broken
-        case .working: .working
+        case .working: .done
         case .blocked, .asking: .quiet
         case .idle, .finished, .readyToMerge, .merged, .checksRunning: .done
         }
@@ -151,7 +151,7 @@ struct SidebarCatchUpCardRenderer {
         dismiss.setAccessibilityLabel("Dismiss what happened while you were away")
         dismiss.onPress = { press(.dismiss) }
         views.append(dismiss)
-        hitAreas.append(SidebarHitArea(frame: dismissFrame.insetBy(dx: -3, dy: -1), region: .catchUp(.dismiss)))
+        hitAreas.append(SidebarHitArea(frame: dismissFrame.insetBy(dx: -3, dy: -2), region: .catchUp(.dismiss)))
 
         for row in catchUp.shownRows {
             y -= Metrics.rowHeight

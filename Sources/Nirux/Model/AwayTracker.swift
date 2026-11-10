@@ -32,7 +32,7 @@ struct AwayTracker {
     /// app) can't leave one condition behind.
     mutating func update(missing now: Set<Condition>, at time: TimeInterval) -> Change? {
         let wasPresent = missing.isEmpty
-        missing = now
+        missing.formUnion(now)
         switch (wasPresent, missing.isEmpty) {
         case (true, false):
             awaySince = time
