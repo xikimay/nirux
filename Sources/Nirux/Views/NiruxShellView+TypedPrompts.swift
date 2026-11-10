@@ -20,8 +20,11 @@ extension NiruxShellView {
         }
     }
 
-    /// Types `prompt` and Return into that agent, unless it may be showing
-    /// a dialog the text would answer.
+    /// Types `prompt` and Return into that agent for the user's click
+    /// (Address PR Feedback, Why Failed), unless it may be showing a dialog
+    /// the text would answer. Its turn end is then read: neither the
+    /// prompt nor a verdict on its way alerts. Nirux's own messages wait
+    /// instead (`PtySession.acceptsMissionMessage`).
     func sendTypedPrompt(agentUUID: String, prompt: String) -> TypedPromptResult {
         guard let terminalInput = TypedPromptSanitizer.terminalInput(for: prompt) else {
             return .emptyPrompt
@@ -42,7 +45,7 @@ extension NiruxShellView {
                 snapshot: snapshot
             ), let pty = column.pty else { return .sessionUnavailable }
             if session.pendingDialog != nil { return .blockedByDialog(session) }
-            pty.sendRaw(terminalInput)
+            pty.typePromptFromUser(terminalInput)
             return .sent(session)
         }
         return .sessionUnavailable
