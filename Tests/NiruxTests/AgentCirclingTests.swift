@@ -53,7 +53,7 @@ final class AgentCirclingTests: XCTestCase {
         XCTAssertEqual(end("PostToolUse", ["tool_response": moved.merging(["timedOutAfterMs": 120_000]) { $1 }]), "hung", "interactive, 2.1.321")
         XCTAssertEqual(end("PostToolUse", ["tool_response": moved.merging(["assistantAutoBackgrounded": false]) { $1 }]), "hung", "2.1.111")
         XCTAssertEqual(
-            end("PostToolUseFailure", input: ["command": "sleep 9", "timeout": 2_000],
+            end("PostToolUseFailure", input: ["command": "ls /Volumes/x", "timeout": 2_000],
                 ["error": "Exit code 143\nCommand timed out after 2s", "is_interrupt": false]),
             "hung", "headless: killed there"
         )
@@ -64,10 +64,32 @@ final class AgentCirclingTests: XCTestCase {
             XCTAssertNil(end("PostToolUse", ["tool_response": moved.merging([reason: true]) { $1 }]), reason)
         }
         XCTAssertNil(end("PostToolUse", tool: "Agent", input: ["description": "review"], ["tool_response": moved]), "not a command")
+        XCTAssertNil(end("PostToolUse", input: ["command": "sleep 600; gh run view 9"], ["tool_response": moved]), "it waits on purpose")
         XCTAssertEqual(
             end("PostToolUseFailure", tool: "WebFetch", input: ["url": "https://example.test"], ["error": "Command timed out after 2s"]),
             "failed", "not a command"
         )
+    }
+
+    /// Waiting for CI or a server repeats a command that "fails" until
+    /// there is something: not an agent going in circles.
+    func testACommandThatWaitsNeitherFailsNorHangs() {
+        let waits = [
+            "sleep 60; gh run view 99 --json status", "cd repo && gh pr checks 412", "gh run watch 5 --exit-status",
+            "until curl -sf localhost:3000; do sleep 2; done", "for i in 1 2 3; do\n  curl -sf :3000 && break\n  sleep 2\ndone"
+        ]
+        for command in waits {
+            XCTAssertTrue(AgentToolOutcome.isWait(command: command), command)
+            XCTAssertNil(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 8"])?.toolEnd, command)
+            let pastItsLimit = toolEvent(
+                "PostToolUseFailure", input: ["command": command], ["error": "Exit code 143\nCommand timed out after 2m 0s"]
+            )
+            XCTAssertNil(pastItsLimit?.toolEnd, command)
+        }
+        for command in ["swift build", "gh pr view 3", "gh run view 99", "echo 'sleep 5' > run.sh", "timeout 120 swift test"] {
+            XCTAssertFalse(AgentToolOutcome.isWait(command: command), command)
+            XCTAssertEqual(toolEvent("PostToolUseFailure", input: ["command": command], ["error": "Exit code 1"])?.toolEnd, "failed", command)
+        }
     }
 
     func testCommandsAreNamedByTheProgramTheyRun() {
