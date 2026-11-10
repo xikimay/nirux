@@ -779,7 +779,9 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertFalse(light.isSweeping, "not before it is known to be done")
 
             XCTAssertNil(pty.applyTurnEndVerdict(.done, for: request, isUserFocused: false))
+            XCTAssertFalse(shell.isMetadataRefreshScheduled)
             shell.turnEndSettled()
+            XCTAssertTrue(shell.isMetadataRefreshScheduled, "a refresh of its own, not the next heartbeat's")
             let deadline = Date().addingTimeInterval(10)
             while !light.isSweeping, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
             XCTAssertTrue(light.isSweeping)
