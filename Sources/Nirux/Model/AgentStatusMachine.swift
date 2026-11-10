@@ -52,6 +52,9 @@ struct AgentStatusMachine {
     struct AskedQuestion: Equatable {
         let text: String?
         let since: TimeInterval
+        /// A plain yes or no answers it, and its text is the message's
+        /// own (`TurnEndQuestion`).
+        var isYesNo = false
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
@@ -476,12 +479,15 @@ struct AgentStatusMachine {
         case .done:
             quietTurnEnd = .done
             return nil
-        case .asks:
-            // The question it ends on, else its last line.
-            let line = TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
+        case .asks(let question):
+            // The question the classifier quoted, else the one it ends on,
+            // else its last line.
+            let line = question?.text ?? TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
-            if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
+            if !isUserFocused {
+                askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true)
+            }
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
             attentionAlerted = false

@@ -7,14 +7,24 @@ import Foundation
 /// alerts (notification, Dock bounce and badge); a done turn stays quiet.
 enum TurnEndVerdict: Equatable, Sendable {
     /// The message hands something back to the user: a question, a choice,
-    /// an action only they can do, an offer waiting for a yes.
-    case asks
+    /// an action only they can do, an offer waiting for a yes. With the
+    /// sentence that asks when the classifier quoted one found in the
+    /// message.
+    case asks(TurnEndQuestion?)
     /// It reports or answers, and asks nothing.
     case done
     /// No answer (the classifier failed, refused, or can't run here): the
     /// turn alerts as every turn end did before, since a missed question
     /// costs more than an extra notification.
     case unknown
+}
+
+/// The sentence of a final message that asks the user, word for word
+/// (`TurnEndText.quotedSentence`), and whether a plain yes or no answers
+/// it.
+struct TurnEndQuestion: Equatable, Sendable {
+    let text: String
+    let isYesNo: Bool
 }
 
 /// A Claude turn end waiting for its verdict. `turnEndedAt` (the Stop's
@@ -153,6 +163,150 @@ enum TurnEndText {
         return head + "\n[…]\n" + tail
     }
 
+    /// The sentence of `message`'s prose that `quote` quotes, as the
+    /// message writes it (cleaned for one line): `quote` may differ in
+    /// whitespace, Markdown marks, typographic quotes and the quotation
+    /// marks around it, never in words. Nil when it is no whole sentence of
+    /// the prose: reworded, cut short, a clause or a piece of a word, or
+    /// taken from code, a quoted text, a heading or a table. A Yes button
+    /// sits next to that text, so it is always the agent's own.
+    static func quotedSentence(_ quote: String, in message: String, maxLength: Int = 200) -> String? {
+        let needle = normalizedForQuote(quote.trimmingCharacters(in: quotationMarks)).text
+        guard !needle.isEmpty else { return nil }
+        for paragraph in proseParagraphs(of: message) {
+            let normal = normalizedForQuote(paragraph.text)
+            var start = 0
+            while start + needle.count <= normal.text.count {
+                let end = start + needle.count
+                if normal.text[start..<end].elementsEqual(needle), !normal.inCode[start..<end].allSatisfy({ $0 }),
+                   startsSentence(normal, at: start, cleanStart: paragraph.cleanStart),
+                   endsSentence(normal, from: start, to: end, cleanEnd: paragraph.cleanEnd) {
+                    return AgentText.clean(span(of: paragraph.text, normal, from: start, to: end), maxLength: maxLength)
+                }
+                start += 1
+            }
+        }
+        return nil
+    }
+
+    /// A question line a plain yes or no answers: none of "or", "ou" or a
+    /// question word (which, what, quel, quoi, comment…) in it. Measured
+    /// against Sonnet's own reading on the turns that end on "?": 34 of 36
+    /// agree, and the two others would offer Yes and No next to an open
+    /// question the user reads right there.
+    static func isYesNoQuestion(_ line: String) -> Bool {
+        let words = line.lowercased().split { !($0.isLetter || $0.isNumber || $0 == "'" || $0 == "\u{2019}") }
+        return !words.contains { openQuestionWords.contains($0.replacingOccurrences(of: "\u{2019}", with: "'")) }
+    }
+
+    private static let openQuestionWords: Set<String> = [
+        "or", "which", "what", "how", "where", "when", "why", "who", "whom", "whose", "thoughts",
+        "ou", "où", "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles",
+        "comment", "quand", "pourquoi", "combien", "quoi", "qui", "qu'est", "qu'en",
+    ]
+
+    /// Around a quote, with whitespace: the model's, not the message's.
+    static let quotationMarks = CharacterSet(charactersIn: "\"“”«»").union(.whitespacesAndNewlines)
+
+    /// A paragraph's text with Markdown marks out (code spans noted),
+    /// typographic quotes and apostrophes plain, whitespace runs one space;
+    /// each kept character's place in it, to give back the agent's words.
+    private struct Normalized {
+        var text: [Character] = []
+        var origin: [String.Index] = []
+        var inCode: [Bool] = []
+    }
+
+    private static func normalizedForQuote(_ text: String) -> Normalized {
+        var normal = Normalized()
+        // A run of backticks opens a code span that a run as long closes.
+        var codeFence = 0
+        var index = text.startIndex
+        while index < text.endIndex {
+            if text[index] == "`" {
+                let run = text[index...].prefix { $0 == "`" }
+                if codeFence == 0 {
+                    codeFence = run.count
+                } else if run.count == codeFence {
+                    codeFence = 0
+                }
+                index = run.endIndex
+                continue
+            }
+            defer { index = text.index(after: index) }
+            let inCode = codeFence > 0
+            var character = text[index]
+            if "*_>#".contains(character) { continue }
+            if character.isWhitespace {
+                if normal.text.isEmpty || normal.text.last == " " { continue }
+                character = " "
+            } else if character == "\u{2019}" || character == "\u{2018}" {
+                character = "'"
+            } else if character == "\u{201C}" || character == "\u{201D}" {
+                character = "\""
+            }
+            normal.text.append(character)
+            normal.origin.append(index)
+            normal.inCode.append(inCode)
+        }
+        return normal
+    }
+
+    private static let sentenceMarks: Set<Character> = [".", "?", "!", "…", ":", "？", "؟"]
+    private static let closingMarks: Set<Character> = [")", "]", "}", "»", "\"", "'", "」", "』", "）"]
+    private static let abbreviations: Set<String> = ["e.g.", "i.e.", "vs.", "cf.", "mr.", "mrs.", "ms.", "dr."]
+
+    /// A sentence ends at `index`: a mark outside code that ends no
+    /// abbreviation ("e.g.", "(e.g.").
+    private static func endsSentence(_ normal: Normalized, at index: Int) -> Bool {
+        guard index >= 0, sentenceMarks.contains(normal.text[index]), !normal.inCode[index] else { return false }
+        let word = normal.text[...index].reversed().prefix { $0 != " " }.reversed().drop { "([{«\"'".contains($0) }
+        return !abbreviations.contains(String(word).lowercased())
+    }
+
+    /// Nothing of its sentence before it: the paragraph's start (unless code
+    /// cut the sentence there), or a space after a sentence's end ("Done.
+    /// Want…", "…?\" Shall I…"). Not a clause ("…, shall I…", "— or…",
+    /// "…: should I…").
+    private static func startsSentence(_ normal: Normalized, at start: Int, cleanStart: Bool) -> Bool {
+        guard start > 0 else { return cleanStart }
+        guard normal.text[start - 1] == " " else { return false }
+        var index = start - 2
+        while index > 0, closingMarks.contains(normal.text[index]) { index -= 1 }
+        // "If CI is green: should I merge?" says no more than its clause.
+        return normal.text[index] != ":" && endsSentence(normal, at: index)
+    }
+
+    /// Nothing of its sentence after it: it ends on a sentence's end that a
+    /// space, a closing mark or the paragraph's end follows (not "config."
+    /// of "config.json", nor `try?` in code), or it stops just before one,
+    /// or at the paragraph's end (unless code goes on with the sentence).
+    private static func endsSentence(_ normal: Normalized, from start: Int, to end: Int, cleanEnd: Bool) -> Bool {
+        let text = normal.text
+        func followedByBreak(_ index: Int) -> Bool {
+            index == text.count || text[index] == " " || closingMarks.contains(text[index])
+        }
+        var last = end - 1
+        while last > start, closingMarks.contains(text[last]) { last -= 1 }
+        if endsSentence(normal, at: last) { return followedByBreak(end) }
+        guard end < text.count else { return cleanEnd }
+        return endsSentence(normal, at: end) && followedByBreak(end + 1)
+    }
+
+    /// The matched characters in the paragraph, with the emphasis and code
+    /// marks right around them ("**Should I merge** PR #41?" whole).
+    private static func span(of paragraph: String, _ normal: Normalized, from start: Int, to end: Int) -> String {
+        var lower = normal.origin[start]
+        var upper = normal.origin[end - 1]
+        while lower > paragraph.startIndex, "*_`".contains(paragraph[paragraph.index(before: lower)]) {
+            lower = paragraph.index(before: lower)
+        }
+        while paragraph.index(after: upper) < paragraph.endIndex, "*_`".contains(paragraph[paragraph.index(after: upper)]) {
+            upper = paragraph.index(after: upper)
+        }
+        return String(paragraph[lower...upper])
+    }
+
     /// The message ends on a question: its last paragraph of prose (not
     /// code, a quote, a table, a heading or a rule) holds a line ending
     /// with a question mark, past trailing quotes, brackets, markdown and
@@ -167,20 +321,11 @@ enum TurnEndText {
     /// The line `endsOnQuestion` found, cleaned for one line of a
     /// notification (the last such line of that paragraph).
     static func questionLine(of message: String, maxLength: Int = 200) -> String? {
-        var inFence = false
         var inParagraph = false
-        for line in message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).reversed() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            // Counted from the end: an excerpt may have lost a block's start.
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                if inParagraph { return nil }
-                inFence.toggle()
-                continue
-            }
-            if inFence { continue }
-            if isProse(trimmed) {
+        for line in linesFromTheEnd(of: message) {
+            if line.kind == .prose {
                 inParagraph = true
-                if endsWithQuestionMark(trimmed) { return AgentText.clean(trimmed, maxLength: maxLength) }
+                if endsWithQuestionMark(line.trimmed) { return AgentText.clean(line.trimmed, maxLength: maxLength) }
             } else if inParagraph {
                 return nil
             }
@@ -188,10 +333,126 @@ enum TurnEndText {
         return nil
     }
 
-    /// Not blank, a quote, a table row, a Markdown heading (`#` to `######`
-    /// and a space: "#298 is green" is prose) or a rule (`---`, `***`).
+    /// The message's last line of prose, cleaned for one line of a
+    /// notification: what a turn that asks most likely asks. Headings,
+    /// tables and quotes count; code doesn't.
+    static func lastLine(of message: String, maxLength: Int = 200) -> String? {
+        for line in linesFromTheEnd(of: message) where line.kind == .prose || line.kind == .other {
+            if let cleaned = AgentText.clean(line.trimmed, maxLength: maxLength) { return cleaned }
+        }
+        return nil
+    }
+
+    /// A prose paragraph (a list item is one of its own, its marker left
+    /// out), lines joined with a space: a line break ends no sentence.
+    /// Clean at a side where a blank line, the message's edge or another
+    /// block (a heading, a table, a quote, a list item) meets it; not where
+    /// code or an excerpt's cut does (the sentence may go on there).
+    private struct ProseParagraph {
+        var text: String
+        var cleanStart: Bool
+        var cleanEnd = true
+    }
+
+    private static func proseParagraphs(of message: String) -> [ProseParagraph] {
+        var paragraphs: [ProseParagraph] = []
+        var open = false
+        var cleanBefore = true
+        for line in linesFromTheEnd(of: message).reversed() {
+            guard line.kind == .prose else {
+                let clean = line.kind != .code && line.kind != .gap
+                if open { paragraphs[paragraphs.count - 1].cleanEnd = clean }
+                open = false
+                cleanBefore = clean
+                continue
+            }
+            if let item = listItemText(line.trimmed) {
+                paragraphs.append(ProseParagraph(text: item, cleanStart: true))
+                open = true
+            } else if open {
+                paragraphs[paragraphs.count - 1].text += " " + line.trimmed
+            } else {
+                paragraphs.append(ProseParagraph(text: line.trimmed, cleanStart: cleanBefore))
+                open = true
+            }
+        }
+        return paragraphs
+    }
+
+    /// A list item's text without its marker ("- ", "* ", "+ ", "1. ",
+    /// "12) "); nil for another line.
+    private static func listItemText(_ line: String) -> String? {
+        if let marker = ["- ", "* ", "+ "].first(where: line.hasPrefix) { return String(line.dropFirst(marker.count)) }
+        let digits = line.prefix { $0.isNumber }
+        guard (1...3).contains(digits.count) else { return nil }
+        let rest = line.dropFirst(digits.count)
+        return rest.hasPrefix(". ") || rest.hasPrefix(") ") ? String(rest.dropFirst(2)) : nil
+    }
+
+    enum LineKind: Equatable {
+        /// What the agent writes to the user.
+        case prose
+        /// A heading, a table row, a quote (`>`) or a rule.
+        case other
+        /// A fence, a line inside one, or an indented code block.
+        case code
+        /// Where `excerpt` left out the middle of a long message.
+        case gap
+        case blank
+    }
+
+    /// The message's lines, last first, with what each is. Fences are
+    /// counted from the end: an excerpt may have lost the start of a
+    /// block, never its end. Indented code is as Markdown has it: four
+    /// spaces or a tab, not going on with a paragraph, outside a list.
+    /// The one reader of `questionLine`, `lastLine` and `quotedSentence`.
+    static func linesFromTheEnd(of message: String) -> [(trimmed: String, kind: LineKind)] {
+        let lines = message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        var fenced = [Bool](repeating: false, count: lines.count)
+        var inFence = false
+        for index in lines.indices.reversed() {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                inFence.toggle()
+                fenced[index] = true
+            } else {
+                fenced[index] = inFence
+            }
+        }
+        var kinds: [(trimmed: String, kind: LineKind)] = []
+        var inList = false
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let previous = kinds.last?.kind
+            let kind: LineKind
+            if fenced[index] {
+                kind = .code
+                if !isIndented(line) { inList = false }
+            } else if trimmed.isEmpty {
+                kind = .blank
+            } else if trimmed == "[…]" {
+                kind = .gap
+            } else if isIndented(line), !inList, previous != .prose {
+                kind = .code
+            } else {
+                kind = isProse(trimmed) ? .prose : .other
+                if !isIndented(line) { inList = listItemText(trimmed) != nil }
+            }
+            kinds.append((trimmed, kind))
+        }
+        return kinds.reversed()
+    }
+
+    /// Four spaces or a tab in front.
+    private static func isIndented(_ line: Substring) -> Bool {
+        let indent = line.prefix { $0 == " " || $0 == "\t" }
+        return indent.contains("\t") || indent.count >= 4
+    }
+
+    /// Not a quote, a table row, a Markdown heading (`#` to `######` and a
+    /// space: "#298 is green" is prose) or a rule (`---`, `***`).
     private static func isProse(_ line: String) -> Bool {
-        guard !line.isEmpty, !line.hasPrefix(">"), !line.hasPrefix("|") else { return false }
+        guard !line.hasPrefix(">"), !line.hasPrefix("|") else { return false }
         let hashes = line.prefix { $0 == "#" }.count
         if (1...6).contains(hashes), line.dropFirst(hashes).first == " " || line.count == hashes { return false }
         if line.count >= 3, let first = line.first, "-*_".contains(first), line.allSatisfy({ $0 == first || $0 == " " }) {
@@ -220,23 +481,6 @@ enum TurnEndText {
         if scalar.properties.isWhitespace || "!\"'»”’“‘)]}>*_~」』）】〉》".unicodeScalars.contains(scalar) { return true }
         if [0xFE0F, 0xFE0E, 0x200D, 0x20E3].contains(scalar.value) || (0xE0020...0xE007F).contains(scalar.value) { return true }
         return scalar.value > 0x7F && scalar.properties.isEmoji
-    }
-
-    /// The message's last line of prose, cleaned for one line of a
-    /// notification: what a turn that asks most likely asks. Lines inside
-    /// fenced code are skipped, counting fences from the end: an excerpt
-    /// may have lost the start of a block, never its end.
-    static func lastLine(of message: String, maxLength: Int = 200) -> String? {
-        var inFence = false
-        for line in message.split(whereSeparator: \.isNewline).reversed() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                inFence.toggle()
-                continue
-            }
-            if !inFence, let cleaned = AgentText.clean(String(line), maxLength: maxLength) { return cleaned }
-        }
-        return nil
     }
 }
 

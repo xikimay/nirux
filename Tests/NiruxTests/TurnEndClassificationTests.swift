@@ -56,6 +56,7 @@ final class TurnEndClassificationTests: XCTestCase {
             "Which one?\n\n| A | B |\n|---|---|", "Run it?\n```\nmake test\n```", "Fixed.\r\nShall I push?\r\n",
             "合并吗？", "Deux options :\n1. Garder le cache ?\n2. Relire la table", "Tu veux que je la merge ? 👍🏽",
             "#298 is green. Merge it?", "Tu valides ❓", "Ready?!", "Really‽", "هل أدمج؟", "Merge it?\n\n---",
+            "1. Merge\n2. Close\n\n    Which one?", "10. Merge now and\n    keep it open?", "Ready to ship\n    when CI is green?",
             "Fertig. Mergen?“", "「マージしますか？」", "On y va ? 👨‍👩‍👧", "Tu valides ? ❤️"
         ]
         for message in asks { XCTAssertTrue(TurnEndText.endsOnQuestion(message), message) }
@@ -64,7 +65,9 @@ final class TurnEndClassificationTests: XCTestCase {
             "Why did it fail? A stale build cache. I cleaned it.", "Pourquoi ça cassait ? Un cache périmé.",
             "```\nShall I?\n```", "> Should we keep v1?", "Done.\n\n## Why does it fail?",
             "Shall I merge?\n\nNo need: merged it already.", "The URL now carries ?ref=main and opens the tab.", "",
-            "Use `WHERE id = ?`", "Ready? 42", "Ready?\n```\nmake\n```\nDone.", "~~~\nShall I?\n~~~"
+            "Use `WHERE id = ?`", "Ready? 42", "Ready?\n```\nmake\n```\nDone.", "~~~\nShall I?\n~~~",
+            "Run this:\n\n    read -p \"Proceed?\"", "Head\n[…]\n    let x = try? foo()\n    return x?",
+            "## Usage\n    make?", "- item\n```\nls\n```\n\n    SELECT * FROM t WHERE id = ?"
         ]
         for message in model { XCTAssertFalse(TurnEndText.endsOnQuestion(message), message) }
         // The notification names the question, not what follows it.
@@ -334,12 +337,12 @@ final class TurnEndClassificationTests: XCTestCase {
 
     func testTurnThatAsksAlertsAmberWithItsLastLine() throws {
         let request = try XCTUnwrap(endTurn(message: asks).turnEnd)
-        let reason = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
+        let reason = machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false)
         XCTAssertEqual(reason, .askedInReply("Shall I merge it?"))
         XCTAssertEqual(machine.attentionReason, .askedInReply("Shall I merge it?"))
         XCTAssertEqual(AttentionSignal.of(machine.attentionReason), .waiting)
         XCTAssertFalse(machine.isQuietTurnEnd)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "once")
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false), "once")
     }
 
     func testTurnFoundDoneStaysQuiet() throws {
@@ -353,11 +356,23 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(machine.isQuietTurnEnd)
     }
 
+    /// The alert names the question the classifier quoted, wherever it
+    /// sits in the message.
+    func testTurnThatAsksShowsTheQuotedQuestion() throws {
+        let message = "PR #41 is open.\n\nLet me know if I should merge it.\n\nSee the checks for details."
+        let request = try XCTUnwrap(endTurn(message: message).turnEnd)
+        let question = TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)
+        XCTAssertEqual(
+            machine.applyTurnEndVerdict(.asks(question), for: request, isUserFocused: false),
+            .askedInReply("Let me know if I should merge it.")
+        )
+    }
+
     /// The alert names the question the message ends on, even when a
     /// table or a list item follows it.
     func testTurnThatAsksNamesItsQuestion() throws {
         let request = try XCTUnwrap(endTurn(message: "Which one?\n\n| A | B |\n|---|---|").turnEnd)
-        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Which one?"))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false), .askedInReply("Which one?"))
     }
 
     func testUnreadableTurnAlertsAsEveryTurnEndDid() throws {
@@ -371,7 +386,7 @@ final class TurnEndClassificationTests: XCTestCase {
         // A new prompt went in first.
         var request = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: true)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false))
         XCTAssertEqual(machine.state, .working)
 
         // A later turn end came before the first one's verdict.
@@ -379,14 +394,14 @@ final class TurnEndClassificationTests: XCTestCase {
         let first = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
         let second = try XCTUnwrap(machine.apply(event(.stop, at: 9, message: "Done."), isUserFocused: false).turnEnd)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: first, isUserFocused: false))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: first, isUserFocused: false))
         XCTAssertNil(machine.applyTurnEndVerdict(.done, for: second, isUserFocused: false))
         XCTAssertTrue(machine.isQuietTurnEnd)
 
         // The user looks at the column as the verdict comes back.
         machine = AgentStatusMachine()
         request = try XCTUnwrap(endTurn().turnEnd)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: true))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: true))
         XCTAssertEqual(machine.state, .idle)
     }
 
@@ -396,7 +411,7 @@ final class TurnEndClassificationTests: XCTestCase {
     func testIdlingTheColumnKeepsTheVerdict() throws {
         var request = try XCTUnwrap(endTurn().turnEnd)
         machine.clearAttention()
-        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
         XCTAssertEqual(machine.state, .needsAttention)
 
         machine = AgentStatusMachine()
@@ -409,7 +424,7 @@ final class TurnEndClassificationTests: XCTestCase {
         request = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
         XCTAssertEqual(machine.state, .working)
-        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
     }
 
     /// A conversation that ends or changes before the verdict (a `claude
@@ -488,7 +503,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let later = machine.apply(event(.stop, at: 9), isUserFocused: false)
         XCTAssertTrue(later.firedAttention)
         XCTAssertFalse(machine.isQuietTurnEnd)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false))
     }
 
     /// A subagent's dialog opened since (it hasn't alerted yet, and may
@@ -497,7 +512,7 @@ final class TurnEndClassificationTests: XCTestCase {
     func testDialogOpenedSinceKeepsTheVerdict() throws {
         let request = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
-        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false), .askedInReply("Shall I merge?"))
         XCTAssertEqual(machine.attentionReason, .permission(tool: "Bash", summary: nil), "the open dialog shows first")
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 9_000), isUserFocused: false).firedAttention, "settled")
 
@@ -505,7 +520,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let again = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
         _ = machine.apply(event(.postToolUse, at: 7, agent: "sub", tool: "Bash"), isUserFocused: false)
-        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: again, isUserFocused: false), .askedInReply("Shall I merge?"))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks(nil), for: again, isUserFocused: false), .askedInReply("Shall I merge?"))
     }
 
     /// A turn Claude started by itself (no prompt) and ended before the
@@ -515,7 +530,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let later = machine.apply(event(.stop, at: 9, message: "Done."), isUserFocused: false)
         XCTAssertTrue(later.firedAttention)
         XCTAssertNotNil(later.turnEnd, "the later one waits for its own verdict")
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: first, isUserFocused: false))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: first, isUserFocused: false))
     }
 
     /// Two turn ends in one episode (Claude went on by itself, without a
@@ -526,7 +541,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let later = machine.apply(event(.stop, at: 9, message: "Shall I push?"), isUserFocused: false)
         XCTAssertTrue(later.firedAttention, "the first turn end alerts as before")
         let request = try XCTUnwrap(later.turnEnd)
-        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), .askedInReply("Shall I push?"))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false), .askedInReply("Shall I push?"))
         // Unknown says nothing new: one alert per episode, as before.
         machine = AgentStatusMachine()
         endTurn()
@@ -546,7 +561,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let outcome = machine.apply(end, isUserFocused: false)
         XCTAssertFalse(outcome.firedAttention)
         XCTAssertNotNil(outcome.turnEnd)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: first, isUserFocused: false))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: first, isUserFocused: false))
     }
 
     /// Claude went on working by itself before the verdict came back: the
@@ -556,7 +571,7 @@ final class TurnEndClassificationTests: XCTestCase {
     func testMainThreadWorkSupersedesThePendingVerdict() throws {
         var request = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false))
         XCTAssertEqual(machine.state, .working)
         let next = machine.apply(event(.stop, at: 30, message: "Tests passed."), isUserFocused: false)
         XCTAssertTrue(next.firedAttention, "the unread turn end alerts")
@@ -584,7 +599,7 @@ final class TurnEndClassificationTests: XCTestCase {
         endTurn(message: nil)
         let request = try XCTUnwrap(machine.apply(event(.stop, at: 9, message: "Shall I push?"), isUserFocused: false).turnEnd)
         XCTAssertFalse(machine.apply(event(.notification, at: 10, notificationType: "other"), isUserFocused: false).firedAttention)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false))
         XCTAssertEqual(machine.attentionReason, .message(nil))
     }
 
@@ -607,13 +622,13 @@ final class TurnEndClassificationTests: XCTestCase {
         let request = try XCTUnwrap(endTurn().turnEnd)
         machine.notePromptFromUser()
         XCTAssertTrue(machine.isQuietTurnEnd, "read, and still quiet: no attention that never alerted")
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "a late verdict drops")
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false), "a late verdict drops")
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
 
         // A question already asked is behind them too.
         machine = AgentStatusMachine()
         let asked = try XCTUnwrap(endTurn().turnEnd)
-        _ = machine.applyTurnEndVerdict(.asks, for: asked, isUserFocused: false)
+        _ = machine.applyTurnEndVerdict(.asks(nil), for: asked, isUserFocused: false)
         XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
         machine.notePromptFromUser()
         XCTAssertNil(machine.visibleQuestion(foreground: claude))
@@ -643,7 +658,7 @@ final class TurnEndClassificationTests: XCTestCase {
         func ask() throws {
             machine = AgentStatusMachine()
             let request = try XCTUnwrap(endTurn().turnEnd)
-            _ = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
+            _ = machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false)
         }
         try ask()
         machine.clearAttention()
@@ -673,7 +688,7 @@ final class TurnEndClassificationTests: XCTestCase {
 
         machine = AgentStatusMachine()
         let seen = try XCTUnwrap(endTurn().turnEnd)
-        _ = machine.applyTurnEndVerdict(.asks, for: seen, isUserFocused: true)
+        _ = machine.applyTurnEndVerdict(.asks(nil), for: seen, isUserFocused: true)
         XCTAssertNil(machine.visibleQuestion(foreground: claude), "read as it came")
     }
 
@@ -687,7 +702,7 @@ final class TurnEndClassificationTests: XCTestCase {
 
         machine = AgentStatusMachine()
         request = try XCTUnwrap(endTurn().turnEnd)
-        _ = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
+        _ = machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false)
         machine.tick(fgName: "zsh", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 6))
         XCTAssertNil(machine.askedQuestion)
 
@@ -704,7 +719,7 @@ final class TurnEndClassificationTests: XCTestCase {
     /// the question behind; a subagent's work doesn't (see above).
     func testMainThreadGoingOnEndsTheQuestion() throws {
         let request = try XCTUnwrap(endTurn().turnEnd)
-        _ = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
+        _ = machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false)
         XCTAssertNotNil(machine.askedQuestion)
         _ = machine.apply(event(.preToolUse, at: 20, tool: "Bash"), isUserFocused: false)
         XCTAssertNil(machine.askedQuestion)
@@ -743,9 +758,150 @@ final class TurnEndClassificationTests: XCTestCase {
         return classifier
     }
 
+    /// The question is the model's quote only when the message holds it
+    /// word for word (whitespace, Markdown marks and quotation marks
+    /// aside): a Yes button will sit next to that text.
+    func testAnswerQuotesTheQuestionOnlyWhenTheMessageHoldsIt() {
+        let message = "PR #41 is **open** and CI is green.\n\nLet me know if I  should merge it."
+        let read = { ClaudeTurnEndClassifier.verdict(fromAnswer: $0, message: message) }
+        let merge = "Let me know if I should merge it."
+        XCTAssertEqual(read("ASK\nQ: \(merge)\nA: YESNO"), .asks(TurnEndQuestion(text: merge, isYesNo: true)))
+        XCTAssertEqual(read("ASK\nQ: “\(merge)”\nA: OPEN"), .asks(TurnEndQuestion(text: merge, isYesNo: false)))
+        XCTAssertEqual(
+            read("ASK\nQ: PR #41 is open and CI is green.\nA: yesno"),
+            .asks(TurnEndQuestion(text: "PR #41 is **open** and CI is green.", isYesNo: true)), "the message's own words"
+        )
+        XCTAssertEqual(read("ASK\nQ: \(merge)"), .asks(TurnEndQuestion(text: merge, isYesNo: false)), "no kind: open")
+        XCTAssertEqual(read("ASK\nQ: Should I merge PR #41 now?\nA: YESNO"), .asks(nil), "reworded")
+        XCTAssertEqual(read("ASK\nQ: Let me know if I should merge it, please.\nA: YESNO"), .asks(nil), "added to")
+        XCTAssertEqual(read("ASK\nA: YESNO"), .asks(nil))
+        XCTAssertEqual(read("ASK\nQ: it\nA: YESNO"), .asks(nil), "a piece of a sentence")
+        XCTAssertEqual(read("ASK\nQ: \nA: YESNO"), .asks(nil), "nothing quoted")
+        XCTAssertEqual(read(" \nDONE\nQ: \(merge)"), .done, "a blank line first")
+        XCTAssertEqual(read("ask\nq: \(merge)\na: yesno"), .asks(TurnEndQuestion(text: merge, isYesNo: true)), "any case")
+        XCTAssertNil(read("Maybe.\nASK"))
+        XCTAssertNil(read(""))
+    }
+
+    /// A whole sentence of the agent's prose, shown as the agent wrote it:
+    /// not cut short (at a line break, a period inside a word, an "e.g."),
+    /// not a piece of a word, not from code, a quoted text, a heading or a
+    /// table.
+    func testQuoteIsAWholeSentenceOfTheProse() {
+        func quotes(_ quote: String, in message: String) -> Bool { TurnEndText.quotedSentence(quote, in: message) != nil }
+        let choice = "Let me know if I should merge it or close it."
+        XCTAssertTrue(quotes(choice, in: choice))
+        XCTAssertFalse(quotes("Let me know if I should merge it", in: choice), "half a choice")
+        XCTAssertFalse(quotes("if I should merge it or close it.", in: choice), "the end of it")
+        XCTAssertTrue(quotes("Waiting for your go-ahead to push", in: "Done. Waiting for your go-ahead to push."))
+        XCTAssertTrue(quotes("Shall I merge it?", in: "Shall I merge it? I can also close it."))
+        XCTAssertTrue(quotes("Want me to merge it?", in: "Fixed.\n\n- Want me to merge it?"))
+        XCTAssertFalse(quotes("ok?", in: "Can you take a look?"), "a piece of a word")
+        XCTAssertFalse(quotes("t merge?", in: "Can't merge?"), "after an apostrophe")
+        XCTAssertFalse(quotes("Merge?", in: "re-Merge?"), "after a hyphen")
+        XCTAssertFalse(quotes("Merge it?", in: "(Done.)Merge it?"), "glued to the last sentence")
+        XCTAssertTrue(quotes("Shall I merge it?", in: "\"Done.\" Shall I merge it?"), "after a closing quote")
+        XCTAssertFalse(quotes("or close it?", in: "Should I merge it — or close it?"), "a clause")
+        XCTAssertFalse(quotes("should I merge?", in: "If CI is green, should I merge?"), "without its condition")
+        XCTAssertFalse(quotes("Redis?", in: "Should I add a cache, e.g. Redis?"), "after an e.g.")
+        XCTAssertFalse(quotes("Redis)?", in: "Should I add a cache (e.g. Redis)?"), "after an e.g. in brackets")
+        XCTAssertFalse(quotes("should I merge?", in: "If CI is green: should I merge?"), "after a colon")
+        XCTAssertFalse(quotes("Proceed? [y/N]", in: "The script then prints:\n\n`Proceed? [y/N]`"), "inline code")
+        XCTAssertFalse(quotes("Type ok?", in: "Type ``ok? `x`` to confirm."), "a mark in a double-backtick span")
+        XCTAssertTrue(quotes("Proceed?", in: "Run ``a `b`` now. Proceed?"), "a single backtick closes no double one")
+        XCTAssertFalse(quotes("Smith, can you review it?", in: "Thanks, Mr. Smith, can you review it?"), "after a title")
+        XCTAssertFalse(quotes("Should I keep try?", in: "Should I keep `try?` here or switch to a do/catch?"), "a mark in code")
+        XCTAssertEqual(
+            TurnEndText.quotedSentence(
+                "Should I keep try? here or switch to a do/catch?", in: "Should I keep `try?` here or switch to a do/catch?"
+            ),
+            "Should I keep `try?` here or switch to a do/catch?"
+        )
+        XCTAssertFalse(quotes("Should I delete config.", in: "Should I delete config.json?"), "a period inside a word")
+        XCTAssertFalse(quotes("Should I delete config", in: "Should I delete config.json?"), "before a period inside a word")
+        XCTAssertTrue(quotes("Want me to merge it", in: "Fixed.\n\nWant me to merge it"), "at the paragraph's end")
+        XCTAssertTrue(quotes("Shall I merge it (now?)", in: "Shall I merge it (now?) Tell me."), "past a closing bracket")
+        XCTAssertFalse(quotes("Should I add a cache, e.g.", in: "Should I add a cache, e.g. Redis?"), "an e.g.")
+
+        // A paragraph's lines are one text: a line break ends no sentence.
+        XCTAssertEqual(
+            TurnEndText.quotedSentence("Let me know if I should merge it.", in: "Let me know if I\nshould merge it."),
+            "Let me know if I should merge it."
+        )
+        XCTAssertFalse(quotes("Should I merge PR", in: "Should I merge PR\n#41?"), "cut at a line break")
+
+        let script = "Run this and tell me what it prints:\n```\nProceed with deploy? (y/n)\n```"
+        XCTAssertFalse(quotes("Proceed with deploy? (y/n)", in: script), "code")
+        XCTAssertTrue(quotes("Run this and tell me what it prints:", in: script))
+        XCTAssertFalse(quotes("Should I deploy to prod?", in: "Done.\n\n    Should I deploy to prod?"), "indented code")
+        XCTAssertFalse(quotes("Should I deploy to prod?", in: "Done.\n\n\tShould I deploy to prod?"), "tab-indented code")
+        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Done:\n\n  - Should I deploy to prod?"), "a list item")
+        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Steps:\n\n  1. Should I deploy to prod?"), "a numbered one")
+        XCTAssertEqual(TurnEndText.quotedSentence("Want me to merge it?", in: "Fixed.\n\n- Want me to merge it?"),
+                       "Want me to merge it?", "without its marker")
+        XCTAssertTrue(quotes("Which one?", in: "1. Merge\n2. Close\n\n    Which one?"), "indented in a list")
+        let cut = "Run this\n```\nls\n```\nand tell me what it prints."
+        XCTAssertFalse(quotes("Run this", in: cut), "the sentence goes on after the code")
+        XCTAssertFalse(quotes("and tell me what it prints.", in: cut), "it started before the code")
+        XCTAssertFalse(quotes("rge it?", in: "Start.\n[…]\nrge it?"), "after an excerpt's cut")
+        let quoted = "> Can you delete the old branches?\n\nDone, they're gone."
+        XCTAssertFalse(quotes("Can you delete the old branches?", in: quoted), "the user's own words")
+        XCTAssertFalse(quotes("Should I deploy to prod?", in: "## Should I deploy to prod?\n\nIt's green."), "a heading")
+        XCTAssertFalse(quotes("Should I deploy?", in: "| Should I deploy? | yes |"), "a table")
+
+        // Shown as the agent wrote it, whatever the model's copy dropped.
+        XCTAssertEqual(
+            TurnEndText.quotedSentence("Should I run rm -rf build/?", in: "Done.\n\nShould I run `rm -rf build/*`?"),
+            "Should I run `rm -rf build/*`?"
+        )
+        XCTAssertEqual(TurnEndText.quotedSentence("Should I merge PR #41?", in: "**Should I merge** PR #41?"),
+                       "**Should I merge** PR #41?", "its emphasis whole")
+        XCTAssertEqual(TurnEndText.quotedSentence("Should I merge?", in: "**Should I merge?** Then tag."), "**Should I merge?**")
+        XCTAssertEqual(TurnEndText.quotedSentence("Tell me if you'd rather split it.", in: "Tell me if you’d rather split it."),
+                       "Tell me if you’d rather split it.")
+        XCTAssertEqual(TurnEndText.quotedSentence("“Keep the \"Resume\" label?”", in: "Keep the “Resume” label?"),
+                       "Keep the “Resume” label?")
+        XCTAssertFalse(quotes("\"Resume\" or \"Restart\"?", in: "Keep \"Resume\" or \"Restart\"?"), "the end of it, quoted")
+    }
+
+    /// Whether a yes or no answers the question stays with it: a quoted
+    /// one keeps the model's kind, a turn ending on "?" the local rule's.
+    func testQuestionKeepsWhetherAYesOrNoAnswersIt() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        for (verdict, isYesNo) in [
+            (TurnEndVerdict.asks(TurnEndQuestion(text: "Shall I merge it?", isYesNo: true)), true),
+            (.asks(TurnEndQuestion(text: "Shall I merge it?", isYesNo: false)), false),
+            (.asks(nil), false),
+        ] {
+            machine = AgentStatusMachine()
+            let request = try XCTUnwrap(endTurn(message: asks).turnEnd)
+            _ = machine.applyTurnEndVerdict(verdict, for: request, isUserFocused: false)
+            XCTAssertEqual(machine.visibleQuestion(foreground: claude)?.isYesNo, isYesNo, "\(verdict)")
+        }
+    }
+
+    /// The rule for a question line a turn ends on: a yes or no answers it
+    /// unless it holds "or" or a question word.
+    func testYesNoRuleForTheLineATurnEndsOn() {
+        for line in ["Shall I merge it?", "Ready to push?", "Je merge ?", "Tu veux que je la merge ? 👍",
+                     "OK pour toi si je supprime l'ancien réglage ?", "Do you approve deleting the old bucket?"] {
+            XCTAssertTrue(TurnEndText.isYesNoQuestion(line), line)
+        }
+        for line in ["Merge it or keep it open?", "Which one do you prefer?", "What should the label say?",
+                     "On part sur la version courte ou la version complète ?", "Tu préfères laquelle ?",
+                     "Quel nom tu veux pour le réglage ?", "Qu’est-ce que tu en penses ?", "Comment je le nomme ?",
+                     "OK — which branch should this go on?", "Where does it go: `main`?", "Je mets quoi comme nom ?",
+                     "Thoughts?"] {
+            XCTAssertFalse(TurnEndText.isYesNoQuestion(line), line)
+        }
+    }
+
     func testReportReadsTheRunsEvents() {
-        let report = { ClaudeOneShotRunner.report(from: $0).text.flatMap(ClaudeTurnEndClassifier.verdict(fromAnswer:)) ?? .unknown }
-        XCTAssertEqual(report(Self.run([Self.initOnLogin, Self.result("ASK")])), .asks)
+        let report = {
+            ClaudeOneShotRunner.report(from: $0).text.flatMap { ClaudeTurnEndClassifier.verdict(fromAnswer: $0, message: "") }
+                ?? .unknown
+        }
+        XCTAssertEqual(report(Self.run([Self.initOnLogin, Self.result("ASK")])), .asks(nil))
         XCTAssertEqual(report(Self.run([Self.initOnLogin, Self.result(" done.\\n")])), .done)
         XCTAssertEqual(report(Self.run([Self.result("Maybe")])), .unknown)
         XCTAssertEqual(report(Self.run([Self.result("API Error: overloaded", isError: true)])), .unknown)
@@ -822,7 +978,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let deadline = Date().addingTimeInterval(10)
         while !classifier.knowsSetup, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         let later = await classifier.classify(asks)
-        XCTAssertEqual(later, .asks)
+        XCTAssertEqual(later, .asks(nil))
     }
 
     func testClassifierKeepsItsSetupForAWhile() async throws {
@@ -853,8 +1009,15 @@ final class TurnEndClassificationTests: XCTestCase {
             return Self.run([Self.initOnLogin, Self.result("ASK")])
         }
         let verdict = await ready.classify(asks)
-        XCTAssertEqual(verdict, .asks)
+        XCTAssertEqual(verdict, .asks(nil))
         XCTAssertEqual(inputs.value, ["<message>\n\(asks)\n</message>"])
+
+        // The quote is checked against the message classified.
+        let quoting = try await prepared { _, _, _ in
+            Self.run([Self.initOnLogin, Self.result("ASK\\nQ: Shall I merge it?\\nA: YESNO")])
+        }
+        let quoted = await quoting.classify(asks)
+        XCTAssertEqual(quoted, .asks(TurnEndQuestion(text: "Shall I merge it?", isYesNo: true)))
     }
 
     func testMessageCantCloseItsOwnTag() {
@@ -888,7 +1051,7 @@ final class TurnEndClassificationTests: XCTestCase {
             ])
         }
         let paid = await classifier.classify(asks)
-        XCTAssertEqual(paid, .asks)
+        XCTAssertEqual(paid, .asks(nil))
         let next = await classifier.classify(asks)
         XCTAssertEqual(next, .unknown)
         XCTAssertEqual(runs.value, 1, "no run after one that billed")
@@ -966,7 +1129,7 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(settled, 1, "Nirux's waiting messages may go in now")
 
         let (asksCenter, _, asksColumn, asksRequest, asksAlerts) = try turnEndColumn()
-        asksCenter.applyTurnEndVerdict(.asks, for: asksRequest, agentUUID: try XCTUnwrap(asksColumn.agentUUID))
+        asksCenter.applyTurnEndVerdict(.asks(nil), for: asksRequest, agentUUID: try XCTUnwrap(asksColumn.agentUUID))
         XCTAssertEqual(asksAlerts.value, [.askedInReply("Let me know if I should merge it.")])
     }
 
@@ -977,14 +1140,14 @@ final class TurnEndClassificationTests: XCTestCase {
         let (center, _, column, request, alerts) = try turnEndColumn()
         let pty = try XCTUnwrap(column.pty)
         pty.typePromptFromUser("Address this feedback\r")
-        center.applyTurnEndVerdict(.asks, for: request, agentUUID: try XCTUnwrap(column.agentUUID))
+        center.applyTurnEndVerdict(.asks(nil), for: request, agentUUID: try XCTUnwrap(column.agentUUID))
         XCTAssertEqual(alerts.value, [])
         XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
     }
 
     func testClassifierVerdictReachesTheColumn() async throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
-        let classifier = FakeClassifier(verdict: .asks)
+        let classifier = FakeClassifier(verdict: .asks(nil))
         center.turnEndClassifier = classifier
         center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
         let deadline = Date().addingTimeInterval(10)
@@ -1019,14 +1182,23 @@ final class TurnEndClassificationTests: XCTestCase {
         while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(alerts.value, [.askedInReply("Tests pass. Ready to push?")])
         XCTAssertEqual(classifier.messages.value, [], "no model call")
-        withExtendedLifetime(center) {}
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        XCTAssertEqual(column.pty?.agentQuestion(foreground: claude)?.isYesNo, true, "the message's own line, plain yes or no")
+
+        let (openCenter, _, openColumn, openRequest, openAlerts) = try turnEndColumn(message: "Merge it or keep it open?")
+        openCenter.turnEndClassifier = classifier
+        openCenter.questionVerdictDelay = 0.05
+        openCenter.classifyTurnEnd(openRequest, agentUUID: try XCTUnwrap(openColumn.agentUUID), waitsOnParent: false)
+        while openAlerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(openColumn.pty?.agentQuestion(foreground: claude)?.isYesNo, false, "a choice")
+        withExtendedLifetime([center, openCenter]) {}
     }
 
     /// A Stop hook blocked that end (a review gate) and the turn went on:
     /// the question it ended on is behind before it alerts.
     func testQuestionPutBehindByAStopHookDoesNotAlert() async throws {
         let (center, _, column, request, alerts) = try turnEndColumn(message: "The PR is ready. Shall I merge it?")
-        center.turnEndClassifier = FakeClassifier(verdict: .asks)
+        center.turnEndClassifier = FakeClassifier(verdict: .asks(nil))
         center.questionVerdictDelay = 0.3
         center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
         let end = AgentHookEvent(
@@ -1042,7 +1214,7 @@ final class TurnEndClassificationTests: XCTestCase {
     /// A turn end put behind before its run starts gets no run.
     func testTurnEndAlreadyBehindIsNotClassified() async throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
-        let classifier = FakeClassifier(verdict: .asks)
+        let classifier = FakeClassifier(verdict: .asks(nil))
         center.turnEndClassifier = classifier
         let pty = try XCTUnwrap(column.pty)
         center.classifyTurnEnd(request, agentUUID: try XCTUnwrap(column.agentUUID), waitsOnParent: false)
@@ -1062,14 +1234,14 @@ final class TurnEndClassificationTests: XCTestCase {
     /// A Mission child that asked its parent waits on it: quiet, unread.
     func testChildWaitingOnItsParentStaysQuiet() throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
-        let classifier = FakeClassifier(verdict: .asks)
+        let classifier = FakeClassifier(verdict: .asks(nil))
         center.turnEndClassifier = classifier
         let uuid = try XCTUnwrap(column.agentUUID)
         center.classifyTurnEnd(request, agentUUID: uuid, waitsOnParent: true)
         XCTAssertEqual(alerts.value.count, 0)
         XCTAssertEqual(column.pty?.isQuietTurnEnd, true)
         // Settled as done at once: no verdict is awaited any more.
-        center.applyTurnEndVerdict(.asks, for: request, agentUUID: uuid)
+        center.applyTurnEndVerdict(.asks(nil), for: request, agentUUID: uuid)
         XCTAssertEqual(alerts.value.count, 0)
         XCTAssertEqual(classifier.messages.value, [])
     }
