@@ -5,9 +5,10 @@ import AppKit
 final class AgentLightState {
     /// What the lights show, as of the last sidebar refresh.
     var plan = AgentLightPlan()
-    /// The columns whose agent just ended its turn (`agentTurnDone`), until
-    /// the next refresh shows it: one sweep of light each.
-    var endedTurns: Set<UUID> = []
+    /// The columns whose agent just ended its turn, and when
+    /// (`agentTurnDone`), until the next refresh shows it: one sweep of
+    /// light each.
+    var endedTurns: [UUID: TimeInterval] = [:]
     /// The columns out of view whose pill already showed: scrolling,
     /// switching workspaces or spaces, or coming back to the app doesn't
     /// announce a wait twice. Forgotten once the column no longer waits.
@@ -94,8 +95,8 @@ extension NiruxShellView {
             return false
         }
         // Now or never: a sweep says the turn just ended.
-        let ended = agentLights.endedTurns
-        agentLights.endedTurns = []
+        let ended = Set(agentLights.endedTurns.keys)
+        agentLights.endedTurns = [:]
         applyAgentLights(sweeping: ended)
     }
 
@@ -150,12 +151,27 @@ extension NiruxShellView {
         scheduleMetadataRefresh()
     }
 
-    /// The agent of `column` ended its turn, and it is done as far as its
-    /// hooks can tell (`AgentHookCenter.onTurnDone`): its column sweeps at
-    /// the refresh that follows the hook event or the verdict, if it is in
-    /// view then.
-    func agentTurnDone(in column: ColumnState) {
-        agentLights.endedTurns.insert(column.id)
+    /// The agent of `column` ended its turn at `endedAt`, and it is done as
+    /// far as its hooks can tell (`AgentHookCenter.onTurnDone`): its column
+    /// sweeps at the refresh that follows the hook event or the verdict,
+    /// if it is in view then and the turn end still stands.
+    func agentTurnDone(in column: ColumnState, endedAt: TimeInterval) {
+        agentLights.endedTurns[column.id] = endedAt
+    }
+
+    /// At the start of a refresh, before it reads the agents again: a turn
+    /// end the agent already left behind sweeps nothing (a prompt or a
+    /// tool call that came with it in the same batch of hook events, or
+    /// between its verdict and this refresh). Codex's closing output only
+    /// reads as work once the refresh has read it: its sweep stays.
+    func dropTurnEndsLeftBehind() {
+        guard !agentLights.endedTurns.isEmpty else { return }
+        let columns = Dictionary(
+            workspaces.flatMap(\.columns).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+        agentLights.endedTurns = agentLights.endedTurns.filter { id, endedAt in
+            columns[id]?.pty?.isAgentTurnDone(endedAt: endedAt) == true
+        }
     }
 
     /// The user is back in the app and every attention was cleared: the

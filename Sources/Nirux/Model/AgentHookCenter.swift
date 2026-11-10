@@ -61,8 +61,10 @@ final class AgentHookCenter {
     /// An agent's turn just ended and is done, as far as hooks can tell
     /// (`AgentStatusMachine.isTurnDone`): its column shows it. Said once
     /// per turn end, when it is known: at Codex's report, at Claude's Stop
-    /// when nothing reads its final message, else at its verdict.
-    var onTurnDone: ((Resolution) -> Void)?
+    /// when nothing reads its final message, else at its verdict. With
+    /// the time the turn ended, for whoever shows it to check that it
+    /// still stands by then.
+    var onTurnDone: ((Resolution, TimeInterval) -> Void)?
     /// A turn end older than this is no news: a backlog replayed at
     /// launch, a verdict that took too long.
     static let turnDoneFreshness: TimeInterval = 30
@@ -265,6 +267,7 @@ final class AgentHookCenter {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
         if let resolution {
+            // (Read only for an event that ends a turn.)
             settleTurnEnd(
                 of: event, outcome: outcome, in: resolution,
                 waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
@@ -284,11 +287,12 @@ final class AgentHookCenter {
     /// turn is done now (`onTurnDone`). `waitsOnParent`: a Mission child
     /// that asked its parent ended its turn to wait for the answer.
     func settleTurnEnd(
-        of event: AgentHookEvent, outcome: AgentHookOutcome, in resolution: Resolution, waitsOnParent: Bool
+        of event: AgentHookEvent, outcome: AgentHookOutcome, in resolution: Resolution,
+        waitsOnParent: @autoclosure () -> Bool
     ) {
         if let request = outcome.turnEnd, let agentUUID = event.agentUUID {
-            classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent)
-        } else if !waitsOnParent, event.name == .turnComplete || event.name == .stop {
+            classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent())
+        } else if event.name == .turnComplete || event.name == .stop, !waitsOnParent() {
             reportTurnDone(endedAt: event.timestamp, in: resolution)
         }
     }
@@ -357,7 +361,7 @@ final class AgentHookCenter {
     private func reportTurnDone(endedAt time: TimeInterval, in resolution: Resolution) {
         guard now() - time < Self.turnDoneFreshness, resolution.column.pty?.isAgentTurnDone(endedAt: time) == true
         else { return }
-        onTurnDone?(resolution)
+        onTurnDone?(resolution, time)
     }
 
     /// Epoch seconds; tests set the clock their events are stamped from.

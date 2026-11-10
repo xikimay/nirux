@@ -1060,22 +1060,27 @@ final class TurnEndClassificationTests: XCTestCase {
         let (center, _, column, request, _) = try turnEndColumn()
         let uuid = try XCTUnwrap(column.agentUUID)
         center.now = { start + 6 }
-        center.onTurnDone = { done.append(ObjectIdentifier($0.column)) }
+        var endedAt: [TimeInterval] = []
+        center.onTurnDone = { resolution, time in
+            done.append(ObjectIdentifier(resolution.column))
+            endedAt.append(time)
+        }
         center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
         XCTAssertEqual(done, [ObjectIdentifier(column)])
+        XCTAssertEqual(endedAt, [start + 5], "the turn's end, not the verdict's time")
         center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
         XCTAssertEqual(done.count, 1, "a verdict nobody waits for says nothing")
 
         let (asking, _, askingColumn, askingRequest, _) = try turnEndColumn()
         asking.now = { start + 6 }
-        asking.onTurnDone = { done.append(ObjectIdentifier($0.column)) }
+        asking.onTurnDone = { resolution, _ in done.append(ObjectIdentifier(resolution.column)) }
         asking.applyTurnEndVerdict(.asks, for: askingRequest, agentUUID: try XCTUnwrap(askingColumn.agentUUID))
         XCTAssertEqual(done.count, 1, "a turn that asks isn't done")
 
         // A verdict that took too long, a backlog replayed at launch.
         let (late, _, lateColumn, lateRequest, _) = try turnEndColumn()
         late.now = { start + 5 + AgentHookCenter.turnDoneFreshness }
-        late.onTurnDone = { done.append(ObjectIdentifier($0.column)) }
+        late.onTurnDone = { resolution, _ in done.append(ObjectIdentifier(resolution.column)) }
         late.applyTurnEndVerdict(.done, for: lateRequest, agentUUID: try XCTUnwrap(lateColumn.agentUUID))
         XCTAssertEqual(done.count, 1, "no news")
     }
@@ -1094,7 +1099,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let start = t0
         center.now = { start + 6 }
         var done = 0
-        center.onTurnDone = { _ in done += 1 }
+        center.onTurnDone = { _, _ in done += 1 }
         let settle = { (event: AgentHookEvent, waitsOnParent: Bool) in
             center.settleTurnEnd(
                 of: event, outcome: pty.applyAgentHook(event, isUserFocused: false), in: resolution,
@@ -1112,6 +1117,12 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(done, 1)
         settle(event(.turnComplete, at: 5.6, kind: .codex), false)
         XCTAssertEqual(done, 2, "Codex's report")
+
+        // And the way a hook event really comes in: routed by its UUID.
+        center.resolver = { _ in resolution }
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.dispatch(AgentHookEvent(kind: .codex, name: .turnComplete, agentUUID: uuid, timestamp: start + 5.8))
+        XCTAssertEqual(done, 3)
     }
 
     /// A Mission child that asked its parent waits on it: quiet, unread,
@@ -1123,7 +1134,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let start = t0
         center.now = { start + 6 }
         var done = 0
-        center.onTurnDone = { _ in done += 1 }
+        center.onTurnDone = { _, _ in done += 1 }
         let uuid = try XCTUnwrap(column.agentUUID)
         center.classifyTurnEnd(request, agentUUID: uuid, waitsOnParent: true)
         XCTAssertEqual(done, 0)

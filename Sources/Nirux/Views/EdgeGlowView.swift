@@ -93,7 +93,8 @@ final class EdgeGlowView: NSView {
     private var glows: [(side: Edge, layer: CAGradientLayer)] = []
     private let sweepHost = CALayer()
     private let sweepBand = CAGradientLayer()
-    private let pill = EdgeGlowPill()
+    /// A viewport edge's only: a column's light never makes one.
+    private lazy var pill = EdgeGlowPill()
     /// Tells a pending pill dismissal whether it still applies.
     private var pillGeneration = 0
     /// The pill's first seconds are still running.
