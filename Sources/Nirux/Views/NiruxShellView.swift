@@ -86,6 +86,10 @@ final class NiruxShellView: NSView {
     /// The reply popover, and the question it shows.
     var missionReplyPopover: NSPopover?
     var missionReplyQuestionID: String?
+    /// The Reply… popover of a turn's question, and that question
+    /// (`showTurnReplyPopover`, `closeStaleTurnReply`).
+    var turnReplyPopover: NSPopover?
+    var turnReplyQuestion: SidebarTurnQuestion?
     /// Lines for a Lead's prompt (the user answered a question it handed
     /// over), typed once that prompt is free (`typeMissionMessages`).
     var pendingLeadNotices: [LeadNotice] = []
@@ -266,6 +270,9 @@ final class NiruxShellView: NSView {
         }
         sidebar.onAgentResume = { [weak self] wsIndex, colIndex, failedAt in
             self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
+        }
+        sidebar.onTurnAnswer = { [weak self] question, answer, button in
+            self?.answerFromCard(answer, to: question, button: button)
         }
         wireDeferredAgentResume()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in

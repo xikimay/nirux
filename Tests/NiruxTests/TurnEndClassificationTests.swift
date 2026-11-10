@@ -356,6 +356,100 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(machine.isQuietTurnEnd)
     }
 
+    /// A quick answer goes in only while the turn end it answers is the
+    /// last thing that happened, nothing is typed at the prompt, no dialog
+    /// waits and Claude is idle: else "yes" could land in a draft, a
+    /// dialog or a later turn.
+    func testQuickAnswerOnlyToTheLastTurnEndAtAQuietPrompt() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        func ended() throws -> TimeInterval {
+            machine = AgentStatusMachine()
+            return try XCTUnwrap(endTurn(message: asks).turnEnd).turnEndedAt
+        }
+        var at = try ended()
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at - 1, foreground: claude, now: at + 9), "another turn end's")
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: nil, now: at + 9))
+        let shell = ForegroundProcess(instance: ProcessInstance(pid: 8, startedAt: 0), name: "zsh", arguments: ["zsh"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: shell, now: at + 9))
+        let newer = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: at + 1), name: "claude", arguments: ["claude"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: newer, now: at + 9), "another claude")
+        let headless = ForegroundProcess(instance: ProcessInstance(pid: 11, startedAt: 0), name: "claude", arguments: ["claude", "-p"])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: headless, now: at + 9))
+
+        _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "answered already")
+        at = try ended()
+        _ = machine.apply(event(.stop, at: 9, message: "Tests passed."), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a later turn end")
+        at = try ended()
+        _ = machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "another conversation")
+        at = try ended()
+        _ = machine.apply(event(.sessionEnd, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "the conversation ended")
+        at = try ended()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1), keys: Data("a".utf8))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a draft at the prompt")
+        at = try ended()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1), keys: Data("\r".utf8))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Enter may have opened a picker")
+        at = try ended()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1), keys: Data([0x1B]))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: at + 1.2), keys: Data([0x1B]))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Esc Esc's rewind picker")
+
+        // Keys during the turn: a draft stays in the prompt, and so do keys
+        // typed while an answered dialog's tool runs; a mode switch, the
+        // dialog's own answer and the prompt's own keys leave nothing there,
+        // nor does a message sent mid-turn (its UserPromptSubmit comes as
+        // it is queued).
+        func turn(keys: [(String, TimeInterval)], dialog: Bool = false, queued: Bool = false) throws -> TimeInterval {
+            machine = AgentStatusMachine()
+            _ = machine.apply(event(.sessionStart, at: 0, source: "startup"), isUserFocused: false)
+            machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 0.5), keys: Data("fix it".utf8))
+            _ = machine.apply(event(.userPromptSubmit, at: 1), isUserFocused: false)
+            if dialog { _ = machine.apply(event(.permissionRequest, at: 2, tool: "Bash"), isUserFocused: false) }
+            for (key, offset) in keys { machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + offset), keys: Data(key.utf8)) }
+            if queued { _ = machine.apply(event(.userPromptSubmit, at: 3.5), isUserFocused: false) }
+            if dialog { _ = machine.apply(event(.postToolUse, at: 4, tool: "Bash"), isUserFocused: false) }
+            return try XCTUnwrap(machine.apply(event(.stop, at: 5, message: asks), isUserFocused: false).turnEnd).turnEndedAt
+        }
+        at = try turn(keys: [])
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "the prompt's own keys")
+        at = try turn(keys: [("and add a test", 3)])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a draft from during the turn")
+        at = try turn(keys: [("and add a test", 3), ("\r", 3.2)], queued: true)
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a message sent mid-turn")
+        at = try turn(keys: [("\u{1B}[Z", 3)])
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a mode switch")
+        at = try turn(keys: [("\u{0F}", 3)])
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Ctrl-O's transcript")
+        at = try turn(keys: [("\r", 3)], dialog: true)
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog's answer")
+        at = try turn(keys: [("\r", 3), ("and add a test", 3.5)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "typed while its tool runs")
+        at = try turn(keys: [("\u{1B}[200~and add a test\u{1B}[201~", 3)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste, whatever a dialog waits for")
+        at = try turn(keys: [("ok", 3)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "text in one write")
+        // Several keys into a dialog may leave one at the prompt: refused,
+        // the safe side (the user answers at the terminal or with Reply…).
+        at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog answered with keys")
+        // Its terminal still draws: a Stop hook's continuation at work.
+        at = try ended()
+        machine.noteRead(now: Date(timeIntervalSince1970: at + 2))
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 2.5), "output a moment ago")
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 4), "quiet since")
+        at = try ended()
+        _ = machine.apply(event(.permissionRequest, at: 6, tool: "Bash"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog")
+        at = try ended()
+        _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "at work, if only through a subagent")
+    }
+
     /// The alert names the question the classifier quoted, wherever it
     /// sits in the message.
     func testTurnThatAsksShowsTheQuotedQuestion() throws {
@@ -1143,6 +1237,107 @@ final class TurnEndClassificationTests: XCTestCase {
         center.applyTurnEndVerdict(.asks(nil), for: request, agentUUID: try XCTUnwrap(column.agentUUID))
         XCTAssertEqual(alerts.value, [])
         XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
+    }
+
+    /// A quick answer goes in as the user's own prompt (no alert for the
+    /// turn end it answers), once: after it, that turn end is behind.
+    func testQuickAnswerGoesInOnceAsTheUsersPrompt() throws {
+        let (center, _, column, request, alerts) = try turnEndColumn()
+        let pty = try XCTUnwrap(column.pty)
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                   for: request, agentUUID: uuid)
+        XCTAssertEqual(alerts.value.count, 1)
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        XCTAssertFalse(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt - 1, foreground: claude), "another turn end's")
+        XCTAssertTrue(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt, foreground: claude))
+        XCTAssertNil(pty.agentQuestion(foreground: claude), "answered")
+        XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
+        XCTAssertFalse(pty.typeQuickAnswer("yes\r", to: request.turnEndedAt, foreground: claude), "once")
+
+        let (draftCenter, _, draftColumn, draftRequest, _) = try turnEndColumn()
+        let draftPty = try XCTUnwrap(draftColumn.pty)
+        draftCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                        for: draftRequest, agentUUID: try XCTUnwrap(draftColumn.agentUUID))
+        // Through the column's own key path: a mode switch leaves the prompt
+        // as it was; text typed there leaves a draft.
+        draftPty.sendRaw("\u{1B}[Z")
+        XCTAssertTrue(draftPty.typeQuickAnswer("yes\r", to: draftRequest.turnEndedAt, foreground: claude), "a mode switch")
+
+        let (otherCenter, _, otherColumn, otherRequest, _) = try turnEndColumn()
+        let otherPty = try XCTUnwrap(otherColumn.pty)
+        otherCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                        for: otherRequest, agentUUID: try XCTUnwrap(otherColumn.agentUUID))
+        otherPty.sendRaw("and also")
+        XCTAssertFalse(otherPty.typeQuickAnswer("yes\r", to: otherRequest.turnEndedAt, foreground: claude), "a draft typed there")
+
+        // Text Ghostty writes itself: a ⌘V paste, dictation.
+        let (pasteCenter, _, pasteColumn, pasteRequest, _) = try turnEndColumn()
+        let pastePty = try XCTUnwrap(pasteColumn.pty)
+        pasteCenter.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                        for: pasteRequest, agentUUID: try XCTUnwrap(pasteColumn.agentUUID))
+        pastePty.terminalSession.sendInput(Data("\u{1B}[200~and also\u{1B}[201~".utf8))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertFalse(pastePty.typeQuickAnswer("yes\r", to: pasteRequest.turnEndedAt, foreground: claude), "a paste")
+
+        // Pasted while a dialog waited: text, not the dialog's answer.
+        let (_, _, dialogColumn, _, _) = try turnEndColumn()
+        let dialogPty = try XCTUnwrap(dialogColumn.pty)
+        _ = dialogPty.applyAgentHook(event(.permissionRequest, at: 6, tool: "Bash"), isUserFocused: false)
+        dialogPty.terminalSession.sendInput(Data("\u{1B}[200~and also\u{1B}[201~".utf8))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        _ = dialogPty.applyAgentHook(event(.postToolUse, at: 7, tool: "Bash"), isUserFocused: false)
+        let later = try XCTUnwrap(dialogPty.applyAgentHook(event(.stop, at: 8, message: asks), isUserFocused: false).turnEnd)
+        XCTAssertFalse(dialogPty.typeQuickAnswer("yes\r", to: later.turnEndedAt, foreground: claude), "a paste during a dialog")
+    }
+
+    /// The question still waits, seen or not, until a prompt, a later turn
+    /// end or another conversation: what keeps a Reply… popover open.
+    func testTurnEndStaysCurrentUntilSomethingFollows() throws {
+        func ended() throws -> TimeInterval {
+            machine = AgentStatusMachine()
+            return try XCTUnwrap(endTurn(message: asks).turnEnd).turnEndedAt
+        }
+        var at = try ended()
+        XCTAssertTrue(machine.isCurrentTurnEnd(at))
+        machine.noteSeen()
+        XCTAssertTrue(machine.isCurrentTurnEnd(at), "read on screen")
+        _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
+        XCTAssertFalse(machine.isCurrentTurnEnd(at), "answered at the terminal")
+        at = try ended()
+        _ = machine.apply(event(.stop, at: 9, message: "Tests passed."), isUserFocused: false)
+        XCTAssertFalse(machine.isCurrentTurnEnd(at), "a later turn end")
+        at = try ended()
+        _ = machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false)
+        XCTAssertFalse(machine.isCurrentTurnEnd(at), "another conversation")
+    }
+
+    /// The card offers the question while Claude waits at a prompt Nirux
+    /// could answer into: not while it works or a dialog is open.
+    func testCardTakesTheQuestionWhileClaudeWaitsAtItsPrompt() throws {
+        let (center, _, column, request, _) = try turnEndColumn()
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.applyTurnEndVerdict(.asks(TurnEndQuestion(text: "Let me know if I should merge it.", isYesNo: true)),
+                                   for: request, agentUUID: uuid)
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        XCTAssertEqual(
+            NiruxShellView.sidebarTurnQuestion(of: column, status: .needsAttention, foreground: claude),
+            SidebarTurnQuestion(
+                text: "Let me know if I should merge it.", turnEndedAt: request.turnEndedAt, isYesNo: true, columnID: column.id
+            )
+        )
+        XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .working, foreground: claude), "at work")
+        _ = column.pty?.applyAgentHook(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .needsAttention, foreground: claude), "a dialog")
+    }
+
+    /// A notification's Reply carries the turn end it answers.
+    func testNotificationReplyNamesItsTurnEnd() {
+        let target = NiruxNotifier.QuickReplyTarget(agentUUID: "A-1", turnEndedAt: 1_005.5)
+        var info: [AnyHashable: Any] = ["workspaceID": "w", "columnIndex": 2]
+        for (key, value) in target.userInfo { info[key] = value }
+        XCTAssertEqual(NiruxNotifier.QuickReplyTarget(userInfo: info), target)
+        XCTAssertNil(NiruxNotifier.QuickReplyTarget(userInfo: ["workspaceID": "w", "agentUUID": "A-1"]), "no turn end")
     }
 
     func testClassifierVerdictReachesTheColumn() async throws {

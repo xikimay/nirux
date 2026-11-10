@@ -82,6 +82,9 @@ struct AgentStatusMachine {
     private var turnEndedAt: TimeInterval = 0
     /// Claude's last main-thread turn end (Stop, StopFailure).
     private var mainTurnEndedAt: TimeInterval = 0
+    /// The last new conversation in this process, or its end: a quick
+    /// answer never crosses one (`acceptsQuickAnswer`).
+    private var conversationChangedAt: TimeInterval = 0
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
@@ -307,6 +310,7 @@ struct AgentStatusMachine {
             endTurn()
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
             askedQuestion = nil
+            conversationChangedAt = now
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -367,6 +371,7 @@ struct AgentStatusMachine {
         endTurn()
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         askedQuestion = nil
+        conversationChangedAt = event.timestamp
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -511,6 +516,34 @@ struct AgentStatusMachine {
     mutating func noteSeen() {
         askedQuestion = nil
     }
+
+    /// A quick answer (Yes, No, a reply) to the turn end of `turnEndedAt`
+    /// may be typed now: that turn end is still the last thing that
+    /// happened (no prompt, turn end or conversation change since, the
+    /// same `claude`), no keys at the prompt since the last prompt (a draft
+    /// started during the turn stays there, a screen no hook tells of may
+    /// be open: `hasDraft`), no dialog
+    /// waits, Claude isn't working, and its terminal is quiet (a Stop
+    /// hook's continuation runs its spinner before any hook says so).
+    /// Anything else, and "yes" could land in a draft, a dialog or a later
+    /// turn.
+    func acceptsQuickAnswer(to turnEndedAt: TimeInterval, foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
+        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
+              foreground.instance.startedAt <= turnEndedAt
+        else { return false }
+        return isCurrentTurnEnd(turnEndedAt) && !hasDraft && pendingDialogs.isEmpty && !hookWorking
+            && now - lastReadAt >= Self.quietBeforeQuickAnswer
+    }
+
+    /// The turn end of `turnEndedAt` is still the last thing that happened
+    /// in this conversation: no prompt, turn end or conversation since.
+    /// Seen or not, its question still waits for an answer.
+    func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
+        mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt && (lastPromptAt ?? 0) < turnEndedAt
+    }
+
+    /// Output this recent says Claude draws something: its spinner at work.
+    static let quietBeforeQuickAnswer: TimeInterval = 1.5
 
     /// The user's click types a prompt into this agent (Address PR
     /// Feedback, Why Failed): they engage with it. The turn end before is
@@ -804,16 +837,31 @@ struct AgentStatusMachine {
         lastInteractionAt = now.timeIntervalSince1970
     }
 
+    private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
+
+    /// One key's bytes: a character, or a short escape sequence (a
+    /// bracketed paste is longer).
+    static func isOneKey(_ keys: Data) -> Bool {
+        if keys.first == 0x1B { return keys.count <= 8 }
+        return String(data: keys, encoding: .utf8).map { $0.count == 1 } ?? false
+    }
+
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
-    mutating func noteKeystroke(now: Date) {
+    mutating func noteKeystroke(now: Date, keys: Data? = nil) {
         let time = now.timeIntervalSince1970
         // A key answers a dialog only while none reached it yet: answered, it stays
         // listed until its tool ends (no hook between); later keys reach the prompt.
         let answersDialog = openDialogs.contains { $0.requestedAt >= lastKeystrokeAt }
         lastKeystrokeAt = time
         lastInputAt = time
-        if !answersDialog { lastDraftInputAt = time }
+        // A mode switch (Shift-Tab) leaves the prompt as it was; any other
+        // key may leave text there, or open a screen no hook tells of (Esc
+        // Esc's rewind picker, Ctrl-O's transcript, a slash command's). A
+        // paste or dictation is text, whatever a dialog waits for: one key
+        // answers a dialog, not a write of several.
+        let oneKey = keys.map(Self.isOneKey) ?? true
+        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
@@ -1040,6 +1088,7 @@ struct AgentStatusMachine {
         lastEventAt = 0
         turnEndedAt = 0
         mainTurnEndedAt = 0
+        conversationChangedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0

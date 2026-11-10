@@ -380,6 +380,23 @@ final class PtySession: @unchecked Sendable {
         state.machine.noteSeen()
     }
 
+    /// See `AgentStatusMachine.isCurrentTurnEnd`.
+    func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
+        state.machine.isCurrentTurnEnd(turnEndedAt)
+    }
+
+    /// Types a quick answer (Yes, No, a reply) to the turn end of
+    /// `turnEndedAt` when it may go in (`AgentStatusMachine
+    /// .acceptsQuickAnswer`), as a prompt the user's click sends; false,
+    /// and nothing typed, otherwise.
+    func typeQuickAnswer(_ terminalInput: String, to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
+        guard !hasExited, state.machine.acceptsQuickAnswer(
+            to: turnEndedAt, foreground: foreground, now: Date().timeIntervalSince1970
+        ) else { return false }
+        typePromptFromUser(terminalInput)
+        return true
+    }
+
     /// Types a prompt the user's click sends into this agent (see
     /// `AgentStatusMachine.notePromptFromUser`).
     func typePromptFromUser(_ terminalInput: String) {
@@ -1101,7 +1118,7 @@ private final class PtyState: @unchecked Sendable {
 
     func noteTypedInput(_ data: Data) {
         guard data != Self.redrawNudge else { return }
-        machine.noteKeystroke(now: Date())
+        machine.noteKeystroke(now: Date(), keys: data)
         hasTypedInput = true
     }
 
@@ -1115,7 +1132,7 @@ private final class PtyState: @unchecked Sendable {
     func noteTerminalWrite(_ data: Data) {
         guard PtySession.isUserText(data) else { return }
         DispatchQueue.main.async { [self] in
-            machine.noteKeystroke(now: Date())
+            machine.noteKeystroke(now: Date(), keys: data)
         }
     }
 
