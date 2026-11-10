@@ -234,7 +234,7 @@ extension NiruxShellView {
 
         // Each column's light, and the viewport's edges for the agents out
         // of view.
-        updateAgentLights(infos: infos)
+        _ = infos
     }
 
     /// Whether a column counts in the Dock badge: its agent waits on the

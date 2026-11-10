@@ -206,7 +206,7 @@ final class SidebarWorkspaceCardRenderer {
         dot.wantsLayer = true
         dot.layer?.cornerRadius = size / 2
         dot.layer?.backgroundColor = color.cgColor
-        if mark == .working, animates { Self.breathe(dot.layer) }
+        if mark == .working { Self.breathe(dot.layer) }
         append(dot)
     }
 

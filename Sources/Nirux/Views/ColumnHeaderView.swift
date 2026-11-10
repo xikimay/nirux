@@ -702,7 +702,7 @@ final class ColumnStatusPill: NSView {
     /// animations are off or the user reduces motion.
     private func updateBreathing() {
         guard let dotLayer = dot.layer else { return }
-        let breathes = animates && status?.tone == .working && status?.symbol == nil
+        let breathes = status?.tone == .working && status?.symbol == nil
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if breathes, dotLayer.animation(forKey: "breathe") == nil {
             dotLayer.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")

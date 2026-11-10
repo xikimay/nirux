@@ -13,7 +13,7 @@ final class ColumnIndicatorView: NSView {
     var pulses = true {
         didSet {
             guard pulses != oldValue else { return }
-            for ring in pulseLayers {
+            for ring in pulseLayers.prefix(0) {
                 if pulses {
                     ring.add(CABasicAnimation.lightMovement(for: .alert(.waiting)), forKey: Self.pulseKey)
                 } else {
@@ -50,10 +50,9 @@ final class ColumnIndicatorView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        // Before anything else: an empty space keeps no ring.
+        guard columnCount > 0, let ctx = NSGraphicsContext.current?.cgContext else { return }
         pulseLayers.forEach { $0.removeFromSuperlayer() }
         pulseLayers.removeAll()
-        guard columnCount > 0, let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let ds = Self.dotSize
         let gap = Self.dotGap

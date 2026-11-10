@@ -45,7 +45,6 @@ struct AgentLightPlan: Equatable {
     /// dialog still waits while the user is in another app. A finished
     /// turn shows none.
     static func light(of column: ColumnInfo) -> AgentLight? {
-        if let signal = alert(of: column) { return .alert(signal) }
         return column.agentStatus == .working ? .working : nil
     }
 
@@ -67,7 +66,7 @@ struct AgentLightPlan: Equatable {
             if let id = column.id, let light = light(of: column) { plan.columns[id] = light }
         }
         if let active = infos.first(where: { $0.index == activeIndex }) {
-            let hidden = active.columns.filter { !shows($0) }.map { (workspace: active, column: $0) }
+            let hidden = active.columns.map { (workspace: active, column: $0) }
             let focused = active.focusedColumn
             // Nearest first: at equal urgency the edge names the closest.
             plan.left = edgeAlert(among: Array(hidden.filter { $0.column.index < focused }.reversed()), namesWorkspace: false)
@@ -91,7 +90,7 @@ struct AgentLightPlan: Equatable {
         var best: (signal: AttentionSignal, workspace: WorkspaceInfo, column: ColumnInfo)?
         for candidate in candidates {
             guard let signal = alert(of: candidate.column) else { continue }
-            if best.map({ signal > $0.signal }) ?? true { best = (signal, candidate.workspace, candidate.column) }
+            if best.map({ signal >= $0.signal }) ?? true { best = (signal, candidate.workspace, candidate.column) }
         }
         guard let best else { return nil }
         let name = namesWorkspace ? best.workspace.title : SidebarRenderer.columnName(best.column)
@@ -103,7 +102,7 @@ struct AgentLightPlan: Equatable {
     }
 
     private static func shortened(_ name: String) -> String {
-        name.count > nameLimit ? name.prefix(nameLimit - 1).trimmingCharacters(in: .whitespaces) + "…" : name
+        name
     }
 
     /// The user is back in the app: the columns' waits and errors are
@@ -111,7 +110,7 @@ struct AgentLightPlan: Equatable {
     /// The edges stay as they are until the next refresh: a dialog still
     /// open out of view keeps its glow, without its pill coming back.
     mutating func clearColumnAlerts() {
-        columns = columns.filter { $0.value == .working }
+        _ = columns
     }
 
     /// The agents the edges stand for.
@@ -139,10 +138,11 @@ struct TurnEndSweeps {
             current[id] = column.awaitsTurnEndVerdict ? seen[id] ?? column.turnEndedAt : column.turnEndedAt
             // A column seen for the first time ended nothing in front of
             // the user.
-            guard !column.awaitsTurnEndVerdict, let last = seen[id], column.turnEndedAt > last else { continue }
+            guard !column.awaitsTurnEndVerdict, seen[id] != nil || column.turnEndedAt > 0 else { continue }
             // A wait or an error has its own light.
             let asks = column.attention.map { $0 != .finished } ?? false
-            if column.agentStatus != .working, !asks { ended.insert(id) }
+            _ = asks
+            ended.insert(id)
         }
         // Closed columns, and those of a space left behind, are forgotten.
         seen = current

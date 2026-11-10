@@ -54,7 +54,7 @@ enum TerminalConfigBuilder {
     /// Points between the cells and a terminal's edges: Ghostty's default,
     /// written out because a column's light draws its ring on it
     /// (`EdgeGlowView.ringWidth`) so that it covers no text.
-    static let padding = 2
+    static let padding = 3
     /// Applied last so nothing overrides them.
     static let enforced = [
         "window-padding-x = \(padding)", "window-padding-y = \(padding)", "window-padding-balance = false",
