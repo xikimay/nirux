@@ -145,9 +145,8 @@ final class AgentLightTests: XCTestCase {
         XCTAssertTrue(light.isMoving)
         XCTAssertEqual(light.movement?.repeatCount, .infinity)
         XCTAssertEqual(light.movingLayerCount, 1, "one animation for the ring and its four glows")
-        XCTAssertLessThanOrEqual(
-            light.movement?.preferredFrameRateRange.maximum ?? .infinity, 15, "no more frames than the dots ever asked for"
-        )
+        // (An animation without a cap reads 0: at the display's rate.)
+        XCTAssertEqual(light.movement?.preferredFrameRateRange.maximum, 15, "no more frames than the dots ever asked for")
         XCTAssertEqual(light.steadyLevel, 1, "the breath sets the level")
 
         light.show(.working, moving: false)
@@ -180,7 +179,7 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(light.light, .alert(.waiting))
         XCTAssertLessThan(pulse.duration, breath.duration)
         XCTAssertEqual(light.movingLayerCount, 1, "the new rhythm in the old one's place")
-        XCTAssertLessThanOrEqual(pulse.preferredFrameRateRange.maximum, 15)
+        XCTAssertEqual(pulse.preferredFrameRateRange.maximum, 15)
 
         light.show(.alert(.waiting), moving: true, soft: true)
         XCTAssertTrue(light.isSoft)
