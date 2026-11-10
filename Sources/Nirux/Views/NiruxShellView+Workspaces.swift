@@ -581,21 +581,50 @@ extension NiruxShellView {
         }
     }
 
-    /// Only the space on screen is laid out: another space's workspace
-    /// keeps the frames it had when last shown, none if it never was. A
-    /// terminal there that runs without a size (a task its Lead started
-    /// while the user views another space, an agent Resume All Agents
-    /// started there) gets no surface: Ghostty's session drops what it
-    /// prints until it has one (`InMemoryTerminalSession.receive`), its PTY
-    /// stays 80x24 and terminal queries go unanswered. Such a workspace gets the
-    /// size it has on screen, and keeps its surfaces when shown. Its terminals draw nothing meanwhile (see
-    /// `syncTerminalOcclusion`).
-    private func sizeRunningTerminalsOffScreen(width: CGFloat, height: CGFloat) {
-        let visible = Set(visibleWorkspaceIndices)
-        for (index, workspace) in workspaces.enumerated()
-        where !visible.contains(index) && !workspace.isClosing && workspace.columns.contains(where: \.runsWithoutSize) {
-            workspace.containerView.frame = NSRect(x: 0, y: 0, width: width, height: height)
-            workspace.layoutAndScroll(viewportWidth: width, height: height, animated: false)
+    /// Only the space on screen is laid out. A terminal whose shell starts
+    /// in another space (a task its Lead started there, an agent Resume All
+    /// Agents started) would get no surface: what it prints would wait
+    /// unparsed, its PTY stay 80x24 and its terminal queries go unanswered.
+    /// As its shell starts it gets the size it will have on screen, and
+    /// keeps its surface when shown; it draws nothing meanwhile (see
+    /// `syncTerminalOcclusion`). Only that column: a hidden workspace's
+    /// browsers and editors don't render off screen.
+    func sizeTerminalOffScreen(_ column: ColumnState, in workspace: WorkspaceState) {
+        guard isOffScreen(workspace), column.terminalView != nil else { return }
+        let viewport = workspaceViewportSize
+        guard viewport.width > 0, viewport.height > 0 else { return }
+        let size = workspace.size(of: column, viewportWidth: viewport.width, height: viewport.height)
+        // Built hidden, whatever layout ran last.
+        column.terminalView?.setSurfaceVisible(false)
+        column.view.frame = NSRect(origin: column.view.frame.origin, size: size)
+        column.layoutWithHeader(width: size.width, height: size.height)
+    }
+
+    /// In another space than the one on screen, and not closing.
+    private func isOffScreen(_ workspace: WorkspaceState) -> Bool {
+        workspace.profileID != activeProfileID && !workspace.isClosing
+    }
+
+    /// The viewport changed size (window, sidebar, status bar): hidden
+    /// terminals that have a size take the new one, so their PTYs follow
+    /// as they would on screen.
+    private func resizeTerminalsOffScreen(to size: NSSize) {
+        guard size != offScreenViewportSize else { return }
+        offScreenViewportSize = size
+        for workspace in workspaces where isOffScreen(workspace) {
+            for column in workspace.columns where column.terminalView != nil && !column.view.frame.isEmpty {
+                sizeTerminalOffScreen(column, in: workspace)
+            }
+        }
+    }
+
+    /// Displays woke: a hidden terminal whose shell runs without a surface
+    /// (its build failed) gets its size again, which builds one.
+    func retryTerminalSurfacesOffScreen() {
+        for workspace in workspaces where isOffScreen(workspace) {
+            for column in workspace.columns where column.isShellStartScheduled && !column.hasSurface {
+                sizeTerminalOffScreen(column, in: workspace)
+            }
         }
     }
 
@@ -610,7 +639,7 @@ extension NiruxShellView {
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
-        sizeRunningTerminalsOffScreen(width: viewportW, height: rowH)
+        resizeTerminalsOffScreen(to: NSSize(width: viewportW, height: rowH))
         // Animated path: add a vertical slide over the direct frame change.
         if animated, let layer = verticalStrip.layer, oldY != targetY {
             let anim = CABasicAnimation(keyPath: "transform.translation.y")

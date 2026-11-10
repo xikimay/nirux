@@ -117,10 +117,6 @@ extension NiruxShellView {
                 resumed = resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions) || resumed
             }
         }
-        // Those in another space have no size yet: one layout gives them
-        // one before their shells start (0.5 s later, see ColumnState and
-        // `sizeRunningTerminalsOffScreen`).
-        if resumed { relayout(animated: false) }
         if resumed { updateSidebar() }
         return resumed
     }

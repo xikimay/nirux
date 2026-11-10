@@ -11,10 +11,12 @@ final class ColumnState {
     let id = UUID()
     let view: NSView
     var terminalView: TerminalView?
-    /// A plain shell restored at launch: it prints only its prompt, which
-    /// it redraws on the resize when first shown, so it needs no surface
-    /// while its space is hidden (see `runsWithoutSize`).
-    var isRestoredShell = false
+    /// Called on the main thread just before its shell starts: its
+    /// workspace may give it a size first (see
+    /// `NiruxShellView.sizeTerminalOffScreen`).
+    var onShellStarting: (() -> Void)?
+    /// Its terminal has a Ghostty surface.
+    private(set) var hasSurface = false
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
     /// The Project Board this column shows.
@@ -106,7 +108,7 @@ final class ColumnState {
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
     /// The first shell start is on its way (or done): a column restored
     /// without its agent starts one only when the agent resumes.
-    private var isShellStartScheduled = false
+    private(set) var isShellStartScheduled = false
     private var shellExitedOverlay: ShellExitedOverlay?
     /// An agent died mid-turn in the shell that still runs here
     /// (ColumnState+StuckAgent.swift).
@@ -334,7 +336,8 @@ final class ColumnState {
     /// column closed meanwhile forks no shell.
     private func scheduleShellStart(cwd: String, args: [String], environment: [String: String]) {
         isShellStartScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak pty] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak pty] in
+            MainActor.assumeIsolated { self?.onShellStarting?() }
             pty?.start(
                 shell: PtySession.defaultShell,
                 args: args,
@@ -591,6 +594,13 @@ final class ColumnState {
             environment: spec.environment
         )
     }
+}
+
+// MARK: - Surface
+
+extension ColumnState: TerminalSurfaceLifecycleDelegate {
+    func terminalDidAttachSurface(_ surface: TerminalSurface) { hasSurface = true }
+    func terminalDidDetachSurface() { hasSurface = false }
 }
 
 // MARK: - Clipboard confirmation
