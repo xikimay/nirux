@@ -18,6 +18,7 @@ final class TurnStatusLineTests: XCTestCase {
         XCTAssertEqual(read("-"), .unchanged)
         XCTAssertEqual(read("S: -"), .unchanged)
         XCTAssertEqual(read("—"), .unchanged)
+        XCTAssertEqual(read("–"), .unchanged)
         XCTAssertEqual(read(String(repeating: "word ", count: 40)).map { if case .line(let text) = $0 { text.count } else { 0 } },
                        ClaudeTurnStatusWriter.maxLength, "cut")
         XCTAssertNil(read(""))
@@ -56,14 +57,14 @@ final class TurnStatusLineTests: XCTestCase {
 
     // MARK: - At a turn end
 
-    private let t0 = Date().timeIntervalSince1970 - 20
+    private let t0: TimeInterval = 1_700_000_000
 
     private func event(_ name: AgentHookEvent.Name, at offset: TimeInterval, message: String? = nil, uuid: String?) -> AgentHookEvent {
         AgentHookEvent(kind: .claude, name: name, agentUUID: uuid, sessionID: "s", finalMessage: message, timestamp: t0 + offset)
     }
 
     /// A column whose Claude took a prompt, and the center that routes to
-    /// it, watched by the user or not.
+    /// it, watched by the user or not; the clock just after its events.
     private func task(watched: Bool) throws -> (
         center: AgentHookCenter, workspace: WorkspaceState, resolution: AgentHookCenter.Resolution, uuid: String,
         alerts: Locked<[AgentAttentionReason?]>
@@ -78,9 +79,11 @@ final class TurnStatusLineTests: XCTestCase {
             workspace: workspace, column: column, columnIndex: 0, isUserFocused: watched, approvalHold: .never
         )
         let center = AgentHookCenter()
+        let start = t0
+        center.now = { start + 10 }
         center.resolver = { _ in resolution }
-        _ = center.apply(event(.sessionStart, at: 0, uuid: uuid), to: resolution)
-        _ = center.apply(event(.userPromptSubmit, at: 1, uuid: uuid), to: resolution)
+        center.apply(event(.sessionStart, at: 0, uuid: uuid), to: resolution)
+        center.apply(event(.userPromptSubmit, at: 1, uuid: uuid), to: resolution)
         return (center, workspace, resolution, uuid, alerts)
     }
 
@@ -98,10 +101,10 @@ final class TurnStatusLineTests: XCTestCase {
             center.turnStatusWriter = writer
             var landed: [WorkspaceState] = []
             center.onTurnStatus = { landed.append($0) }
-            _ = center.apply(event(.stop, at: 5, message: message, uuid: uuid), to: resolution)
+            center.apply(event(.stop, at: 5, message: message, uuid: uuid), to: resolution)
             try await waitFor { !landed.isEmpty }
             XCTAssertEqual(writer.messages.value, [message])
-            XCTAssertEqual(workspace.statusLine, "fix pushed, CI green")
+            XCTAssertEqual(workspace.turnStatusLine, "fix pushed, CI green")
             XCTAssertTrue(landed.first === workspace, "its row and the state file learn it")
         }
     }
@@ -124,70 +127,124 @@ final class TurnStatusLineTests: XCTestCase {
     }
 
     /// No run for a Stop that isn't the column's last turn end (one older
-    /// than the last prompt), for one replayed at launch, nor with the
+    /// than the last prompt), for one replayed at launch, for one a later
+    /// turn end put behind in the same drain, for the Lead, nor with the
     /// option off.
-    func testNoLineForATurnEndBehindOrReplayedOrWithTheOptionOff() async throws {
+    func testNoRunForATurnEndBehindReplayedOrTheLeads() async throws {
         let (center, workspace, resolution, uuid, _) = try task(watched: true)
         let writer = FakeWriter(.line("fix pushed"))
         center.turnStatusWriter = writer
-        _ = center.apply(event(.stop, at: 0.5, message: "Old.", uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 0.5, message: "Old.", uuid: uuid), to: resolution)
         let start = t0
         center.now = { start + 5 + AgentHookCenter.turnDoneFreshness }
-        _ = center.apply(event(.stop, at: 5, message: "Replayed.", uuid: uuid), to: resolution)
-        center.now = { start + 6 }
+        center.apply(event(.stop, at: 5, message: "Replayed.", uuid: uuid), to: resolution)
+        center.now = { start + 10 }
+        center.apply(event(.userPromptSubmit, at: 6, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 7, message: "Behind.", uuid: uuid), to: resolution)
+        center.apply(event(.userPromptSubmit, at: 7.5, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 8, message: "Last.", uuid: uuid), to: resolution)
+        try await waitFor { workspace.turnStatusLine != nil }
+        XCTAssertEqual(writer.messages.value, ["Last."])
+
+        let (leadCenter, lead, leadResolution, leadUUID, _) = try task(watched: false)
+        lead.isLead = true
+        leadCenter.turnStatusWriter = writer
+        leadCenter.apply(event(.stop, at: 5, message: "Lead.", uuid: leadUUID), to: leadResolution)
         center.turnStatusWriter = nil
-        _ = center.apply(event(.userPromptSubmit, at: 5.5, uuid: uuid), to: resolution)
-        _ = center.apply(event(.stop, at: 6, message: "Off.", uuid: uuid), to: resolution)
+        center.apply(event(.userPromptSubmit, at: 8.5, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 9, message: "Off.", uuid: uuid), to: resolution)
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(writer.messages.value, [])
-        XCTAssertNil(workspace.lastSummary)
+        XCTAssertEqual(writer.messages.value, ["Last."], "its row has no status line")
     }
 
-    /// "-": the turn changed nothing, the line stays. The option turned
-    /// off while a run was on its way: no line.
-    func testUnchangedTurnOrOptionTurnedOffKeepsTheLine() async throws {
-        let (center, workspace, _, uuid, _) = try task(watched: true)
-        workspace.recordTurnStatus("PR #41 open", turnEndedAt: t0)
-        center.turnStatusWriter = FakeWriter(.unchanged)
+    /// While its run goes, a turn end shows no line from an older turn;
+    /// "-" keeps the line it had; no answer (a rest, a full run queue, the
+    /// option turned off meanwhile) leaves none until the next turn.
+    func testATurnEndShowsItsOwnLineOrNone() async throws {
+        let (center, workspace, resolution, uuid, _) = try task(watched: true)
         var landed = 0
         center.onTurnStatus = { _ in landed += 1 }
-        center.writeTurnStatus(of: "It's because of the cache.", endedAt: t0 + 5, agentUUID: uuid)
-        try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(workspace.statusLine, "PR #41 open")
+        center.turnStatusWriter = FakeWriter(.line("tests fail on CI"))
+        center.apply(event(.stop, at: 2, message: "Tests fail.", uuid: uuid), to: resolution)
+        try await waitFor { landed == 1 }
+
+        center.turnStatusWriter = FakeWriter(.line("fix pushed, CI green"), delay: 0.3)
+        center.apply(event(.userPromptSubmit, at: 3, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 4, message: "Fixed.", uuid: uuid), to: resolution)
+        XCTAssertNil(workspace.turnStatusLine, "not the former turn's")
+        XCTAssertNil(workspace.statusLine)
+        try await waitFor { landed == 2 }
+        XCTAssertEqual(workspace.turnStatusLine, "fix pushed, CI green")
+
+        center.turnStatusWriter = FakeWriter(.unchanged)
+        center.apply(event(.userPromptSubmit, at: 5, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 6, message: "It's the cache.", uuid: uuid), to: resolution)
+        try await waitFor { landed == 3 }
+        XCTAssertEqual(workspace.turnStatusLine, "fix pushed, CI green")
+
+        center.turnStatusWriter = FakeWriter(nil)
+        center.apply(event(.userPromptSubmit, at: 7, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 8, message: "Merged.", uuid: uuid), to: resolution)
+        try await waitFor { landed == 4 }
+        XCTAssertNil(workspace.turnStatusLine)
+        XCTAssertEqual(workspace.lastSummary, "fix pushed, CI green", "still the panel's last summary")
 
         center.turnStatusWriter = FakeWriter(.line("PR #41 merged"), delay: 0.3)
-        center.writeTurnStatus(of: "Merged.", endedAt: t0 + 6, agentUUID: uuid)
+        center.apply(event(.userPromptSubmit, at: 9, uuid: uuid), to: resolution)
+        center.apply(event(.stop, at: 9.5, message: "Merged.", uuid: uuid), to: resolution)
         center.turnStatusWriter = nil
-        try await Task.sleep(for: .milliseconds(600))
-        XCTAssertEqual(workspace.statusLine, "PR #41 open")
-        XCTAssertEqual(landed, 0)
+        try await waitFor { landed == 5 }
+        XCTAssertNil(workspace.turnStatusLine)
     }
 
     // MARK: - On the task
 
-    /// The newest turn end's line wins, whatever order the runs end in;
-    /// the user's own summary is never replaced; an agent's report as it
-    /// came (Codex's message) is no line for the row.
-    func testNewestLineWinsAndTheUsersSummaryStays() {
+    /// The newest turn end's run decides, whatever order the runs end in;
+    /// a newer Codex report wins over an older Claude run; the user's own
+    /// summary is never replaced, and never said beside a finished turn's
+    /// check; another branch checked out drops the line.
+    func testNewestTurnDecidesAndTheUsersSummaryStays() throws {
         let workspace = WorkspaceState(title: "ws", cwd: NSTemporaryDirectory())
         XCTAssertNil(workspace.statusLine)
-        XCTAssertTrue(workspace.recordTurnStatus("tests fail on CI", turnEndedAt: 10))
+        XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 10))
+        XCTAssertTrue(workspace.settleTurnStatus(.line("tests fail on CI"), turnEndedAt: 10))
         XCTAssertEqual(workspace.statusLine, "tests fail on CI")
-        XCTAssertFalse(workspace.recordTurnStatus("fix in progress", turnEndedAt: 5), "an older turn's run ended late")
-        XCTAssertFalse(workspace.recordTurnStatus("tests fail on CI", turnEndedAt: 11), "the same line")
-        XCTAssertTrue(workspace.recordTurnStatus("fix pushed, CI green", turnEndedAt: 12))
+        XCTAssertFalse(workspace.awaitTurnStatus(turnEndedAt: 5), "older than one known")
+        XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 12))
+        XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 14))
+        XCTAssertFalse(workspace.settleTurnStatus(.line("fix in progress"), turnEndedAt: 12), "put behind")
+        XCTAssertNil(workspace.statusLine, "the newest turn's is on its way")
+        XCTAssertTrue(workspace.settleTurnStatus(.line("fix pushed, CI green"), turnEndedAt: 14))
         XCTAssertEqual(workspace.lastSummary, "fix pushed, CI green", "the context panel's summary")
 
-        workspace.recordAgentActivity(at: 20, automaticSummary: "Codex: I updated the parser and the tests now pass.")
+        XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 20))
+        workspace.recordAgentActivity(at: 21, automaticSummary: "Codex: I updated the parser and the tests now pass.")
         XCTAssertNil(workspace.statusLine, "Codex's message as it came")
-        XCTAssertTrue(workspace.recordTurnStatus("parser fixed", turnEndedAt: 21))
-        XCTAssertEqual(workspace.statusLine, "parser fixed")
+        XCTAssertFalse(workspace.settleTurnStatus(.line("parser half done"), turnEndedAt: 20), "older than Codex's report")
+        XCTAssertTrue(workspace.lastSummary?.hasPrefix("Codex") == true)
 
-        workspace.lastSummary = "Ships Friday"
+        let root = NSTemporaryDirectory()
+        func checkOut(_ branch: String) throws {
+            let observation = try XCTUnwrap(workspace.beginGitContextObservation(at: root))
+            workspace.applyGitContextObservation(
+                .observed(GitContext(branch: branch, identity: GitIdentity(repositoryRoot: root, head: nil))), observation: observation
+            )
+        }
+        try checkOut("feat/a")
+        XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 30))
+        XCTAssertTrue(workspace.settleTurnStatus(.line("export done"), turnEndedAt: 30))
+        try checkOut("feat/a")
+        XCTAssertEqual(workspace.statusLine, "export done")
+        try checkOut("feat/b")
+        XCTAssertNil(workspace.statusLine, "the former branch's")
+
+        workspace.lastSummary = "Ships Friday\nthen the import side"
         workspace.lastSummaryIsManual = true
         workspace.lastSummaryIsStatus = false
-        XCTAssertFalse(workspace.recordTurnStatus("PR merged", turnEndedAt: 30))
-        XCTAssertEqual(workspace.statusLine, "Ships Friday", "the user's, on the row too")
+        XCTAssertTrue(workspace.awaitTurnStatus(turnEndedAt: 40))
+        XCTAssertTrue(workspace.settleTurnStatus(.line("PR merged"), turnEndedAt: 40))
+        XCTAssertEqual(workspace.statusLine, "Ships Friday then the import side", "the user's, on one line")
+        XCTAssertNil(workspace.turnStatusLine, "never as a turn's outcome")
     }
 
     func testLineAndOptionAreKept() throws {
@@ -201,7 +258,12 @@ final class TurnStatusLineTests: XCTestCase {
         XCTAssertFalse(String(decoding: plain, as: UTF8.self).contains("lastSummaryIsStatus"), "written only when true")
         XCTAssertFalse(try JSONDecoder().decode(PersistedWorkspace.self, from: plain).lastSummaryIsStatus)
 
-        XCTAssertTrue(try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8)).showTurnStatus, "on by default")
+        func option(in json: String) throws -> Bool {
+            try JSONDecoder().decode(PersistedSettings.self, from: Data(json.utf8)).showTurnStatus
+        }
+        XCTAssertTrue(try option(in: "{}"), "on by default")
+        XCTAssertFalse(try option(in: #"{"alertOnlyWhenClaudeAsks":false}"#), "whoever kept final messages from a model")
+        XCTAssertTrue(try option(in: #"{"alertOnlyWhenClaudeAsks":false,"showTurnStatus":true}"#))
         var settings = PersistedSettings()
         settings.showTurnStatus = false
         XCTAssertFalse(try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings)).showTurnStatus)
@@ -220,10 +282,10 @@ final class TurnStatusLineTests: XCTestCase {
             phase: .active, lastSummary: nil, lastActivityAt: nil
         )
         info.statusLine = "fix pushed, CI green"
+        info.turnStatusLine = "fix pushed, CI green"
         let views = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render().views
         let line = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "fix pushed, CI green" })
         XCTAssertEqual(line.accessibilityLabel(), "Done: fix pushed, CI green")
-        XCTAssertEqual(line.toolTip, "fix pushed, CI green", "the whole line, when the row cuts it")
     }
 }
 

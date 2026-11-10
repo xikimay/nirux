@@ -197,7 +197,7 @@ final class SidebarWorkspaceCardRenderer {
         if let stats = workspace.diffStats { lines.append("Changes: \(SidebarRenderer.formatDiffStats(stats))") }
         lines.append("Phase: \(workspace.phase.displayName)")
         if let purpose = workspace.purpose { lines.append("Purpose: \(purpose)") }
-        if let summary = workspace.lastSummary { lines.append("Last: \(summary)") }
+        if let summary = workspace.lastSummary, summary != layout.summary.status.text { lines.append("Last: \(summary)") }
         if let blocker = workspace.blockerText { lines.append("Blocker: \(blocker)") }
         if let next = workspace.nextStepText { lines.append("Next: \(next)") }
         if workspace.columns.contains(where: { $0.isEditor && $0.editorIsDirty }) { lines.append("Unsaved changes in the editor") }

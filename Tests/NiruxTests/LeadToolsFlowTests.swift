@@ -259,15 +259,19 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(list.contains("blocker: “waits for #212 to merge”"), list)
             // Where it stands, from its last turn: listed, and on its row
             // when nothing says more.
-            XCTAssertFalse(list.contains("status:"), list)
-            task.recordTurnStatus("import side half done", turnEndedAt: 1)
-            XCTAssertTrue(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("status: “import side half done”"))
+            XCTAssertFalse(list.contains("last turn"), list)
+            task.awaitTurnStatus(turnEndedAt: 1)
+            task.settleTurnStatus(.line("import side half done"), turnEndedAt: 1)
+            XCTAssertTrue(
+                try call(LeadTools.listTasks, lead: lead, in: harness).text
+                    .contains("last turn, as Sonnet read it: “import side half done”")
+            )
             let blocker = task.blocker
             (task.nextStep, task.blocker) = (nil, nil)
             XCTAssertEqual(try status(), "import side half done")
             shell.turnStatusEnabled = false
             XCTAssertNotEqual(try status(), "import side half done", "the option is off")
-            XCTAssertFalse(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("status:"))
+            XCTAssertFalse(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("last turn"))
             shell.turnStatusEnabled = true
             (task.nextStep, task.blocker) = ("write the import side", blocker)
             XCTAssertFalse(try setContext(["blocker": ""]).isError)
@@ -325,6 +329,13 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(ambiguous.isError)
             XCTAssertTrue(ambiguous.text.contains("several share that title"), ambiguous.text)
             XCTAssertEqual(task.blocker, "CI is red on main")
+
+            // Its status line is kept across a relaunch.
+            XCTAssertTrue(task.awaitTurnStatus(turnEndedAt: 2))
+            XCTAssertTrue(task.settleTurnStatus(.line("export done"), turnEndedAt: 2))
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(shell.workspaces.first { $0.id == workspaceID }?.statusLine, "export done")
         }
     }
 

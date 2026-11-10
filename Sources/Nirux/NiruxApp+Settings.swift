@@ -495,8 +495,7 @@ extension NiruxApp {
         Self.publishAccountMarker(
             readsFinalMessages: AgentHookCenter.shared.readsFinalMessages, triagesCI: Self.currentTriageCIFailures()
         )
-        shell?.turnStatusEnabled = enabled
-        shell?.updateSidebar()
+        shell?.setTurnStatus(enabled: enabled)
     }
 
     static func currentShowTurnStatus() -> Bool {

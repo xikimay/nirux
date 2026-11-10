@@ -148,9 +148,12 @@ final class SettingsWindowTests: XCTestCase {
             try click(app.settingsTurnStatusCheckbox)
             XCTAssertNil(AgentHookCenter.shared.turnStatusWriter)
             XCTAssertFalse(shell.turnStatusEnabled, "rows say what they said before")
+            workspace.awaitTurnStatus(turnEndedAt: 1)
+            workspace.settleTurnStatus(.line("fix pushed"), turnEndedAt: 1)
             try click(app.settingsTurnStatusCheckbox)
             XCTAssertNotNil(AgentHookCenter.shared.turnStatusWriter)
             XCTAssertTrue(shell.turnStatusEnabled)
+            XCTAssertNil(workspace.statusLine, "a line from before is forgotten: turns ended meanwhile without one")
 
             // The CI failure triage: off in the shell at once, and back on
             // with its model's account checked (a double: never the real

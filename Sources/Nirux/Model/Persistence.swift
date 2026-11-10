@@ -397,7 +397,9 @@ struct PersistedSettings: Codable {
     /// missing decodes to true.
     var alertOnlyWhenClaudeAsks: Bool = true
     /// Each Claude turn end writes where its task stands on its row (see
-    /// `ClaudeTurnStatusWriter`). On by default: missing decodes to true.
+    /// `ClaudeTurnStatusWriter`). On by default; missing decodes to
+    /// `alertOnlyWhenClaudeAsks`: whoever turned that off kept final
+    /// messages away from a model.
     var showTurnStatus: Bool = true
     /// A pull request whose checks failed says when the failure looks
     /// flaky (see `CITriage`). On by default: missing decodes to true.
@@ -486,7 +488,7 @@ struct PersistedSettings: Codable {
         animatesInterface = (try? container.decodeIfPresent(Bool.self, forKey: .animatesInterface)) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         alertOnlyWhenClaudeAsks = try container.decodeIfPresent(Bool.self, forKey: .alertOnlyWhenClaudeAsks) ?? true
-        showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? true
+        showTurnStatus = (try? container.decodeIfPresent(Bool.self, forKey: .showTurnStatus)) ?? alertOnlyWhenClaudeAsks
         triageCIFailures = try container.decodeIfPresent(Bool.self, forKey: .triageCIFailures) ?? true
         stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         agentCirclingHint = try container.decodeIfPresent(Bool.self, forKey: .agentCirclingHint) ?? true

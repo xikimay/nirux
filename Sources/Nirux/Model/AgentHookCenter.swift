@@ -272,10 +272,7 @@ final class AgentHookCenter {
             event.approvalDeadline = nil
             event.approvalText = nil
         }
-        let outcome = resolution.map { apply(event, to: $0) } ?? AgentHookOutcome()
-        for request in outcome.abandonedApprovals {
-            release(request, agentUUID: event.agentUUID)
-        }
+        if let resolution { _ = apply(event, to: resolution) }
         return resolution.map {
             AppliedEvent(
                 event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,
@@ -284,8 +281,10 @@ final class AgentHookCenter {
         }
     }
 
-    /// `event`, admitted, applied to its column: the alert it fires, then
-    /// what follows a turn end (its verdict, its status line).
+    /// `event`, admitted, applied to its column: the requests it closed
+    /// released, the alert it fires, then what follows a turn end (its
+    /// verdict, its status line).
+    @discardableResult
     func apply(_ event: AgentHookEvent, to resolution: Resolution) -> AgentHookOutcome {
         guard let pty = resolution.column.pty else { return AgentHookOutcome() }
         var event = event
@@ -294,6 +293,9 @@ final class AgentHookCenter {
         let statusMessage = turnStatusWriter == nil ? nil : event.finalMessage
         if turnEndClassifier == nil { event.finalMessage = nil }
         let outcome = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
+        for request in outcome.abandonedApprovals {
+            release(request, agentUUID: event.agentUUID)
+        }
         if outcome.firedAttention {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
@@ -304,8 +306,8 @@ final class AgentHookCenter {
         )
         // Every turn end of the main thread the column took: watched or
         // not, ending on a question or not.
-        if let statusMessage, let agentUUID = event.agentUUID, pty.isCurrentTurnEnd(event.timestamp) {
-            writeTurnStatus(of: statusMessage, endedAt: event.timestamp, agentUUID: agentUUID)
+        if let statusMessage, pty.isCurrentTurnEnd(event.timestamp) {
+            writeTurnStatus(of: statusMessage, endedAt: event.timestamp, in: resolution.workspace)
         }
         return outcome
     }
@@ -363,21 +365,25 @@ final class AgentHookCenter {
         }
     }
 
-    /// Asks for the status line of the turn that ended at `time`, then puts
-    /// it on the agent's task, found again: unless a newer turn end's line
-    /// got there first, or the user wrote the task's summary
-    /// (`WorkspaceState.recordTurnStatus`). A turn end replayed at launch
-    /// is no news: no run for it.
-    func writeTurnStatus(of message: String, endedAt time: TimeInterval, agentUUID: String) {
-        guard let writer = turnStatusWriter, now() - time < Self.turnDoneFreshness else { return }
-        Task { @MainActor [weak self] in
+    /// Asks for the status line of the turn that ended at `time` in
+    /// `workspace`, then settles it there (`WorkspaceState.settleTurnStatus`):
+    /// meanwhile the row shows no line from an older turn. None for the
+    /// Lead, whose row has no status line, nor for a turn end replayed at
+    /// launch, which is no news.
+    func writeTurnStatus(of message: String, endedAt time: TimeInterval, in workspace: WorkspaceState) {
+        guard let writer = turnStatusWriter, !workspace.isLead, now() - time < Self.turnDoneFreshness,
+              workspace.awaitTurnStatus(turnEndedAt: time)
+        else { return }
+        Task { @MainActor [weak self, weak workspace] in
+            // Put behind already (a later turn end in the same drain): no
+            // run for it.
+            guard let workspace, workspace.awaitedTurnStatus == time else { return }
             let status = await writer.status(of: message)
+            guard let self else { return }
             // Turned off meanwhile: no line.
-            guard let self, self.turnStatusWriter != nil, case .line(let line)? = status,
-                  let workspace = self.resolver?(agentUUID)?.workspace,
-                  workspace.recordTurnStatus(line, turnEndedAt: time)
-            else { return }
-            self.onTurnStatus?(workspace)
+            if workspace.settleTurnStatus(self.turnStatusWriter == nil ? nil : status, turnEndedAt: time) {
+                self.onTurnStatus?(workspace)
+            }
         }
     }
 

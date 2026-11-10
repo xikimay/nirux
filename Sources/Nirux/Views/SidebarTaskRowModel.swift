@@ -146,10 +146,10 @@ extension WorkspaceInfo {
             return row(.blocked, "Blocked · \(blocker)", .neutral)
         }
         // A finished turn the user hasn't looked at yet: until then, before
-        // the pull request's lasting line. Its status line says it with a
-        // grey check, else "Done".
+        // the pull request's lasting line. Its own status line says it with
+        // a grey check, else "Done".
         if columns.contains(where: { $0.attention == .finished }) {
-            return statusLine.map { row(.finished, $0, .neutral) } ?? row(.idle, "Done", .neutral)
+            return turnStatusLine.map { row(.finished, $0, .neutral) } ?? row(.idle, "Done", .neutral)
         }
         if let pullRequest = prInfo,
            let summary = Self.pullRequestRow(pullRequest, cleanup: mergedCleanup, hasFeedback: prFeedback != nil, age: age) {

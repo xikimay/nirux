@@ -90,7 +90,7 @@ final class ClaudeTurnStatusWriter: TurnStatusWriter, @unchecked Sendable {
         else { return nil }
         if line.uppercased().hasPrefix("S:") { line = String(line.dropFirst(2)).trimmingCharacters(in: marks) }
         if line.hasSuffix("."), !line.hasSuffix("..") { line.removeLast() }
-        if line == "-" || line == "—" { return .unchanged }
+        if ["-", "–", "—"].contains(line) { return .unchanged }
         return AgentText.clean(line, maxLength: maxLength).map(TurnStatus.line)
     }
 }

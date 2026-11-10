@@ -149,7 +149,7 @@ final class SidebarRowMotionTests: XCTestCase {
         XCTAssertEqual(checks(in: views(row([finished]), turnEndedAt: now)).count, 1, "a grey dot")
         XCTAssertEqual(checks(in: views(row([column()]), turnEndedAt: now)).count, 1, "its branch line: grey as well")
         var standing = row([finished])
-        standing.statusLine = "fix pushed, CI green"
+        standing.turnStatusLine = "fix pushed, CI green"
         XCTAssertEqual(standing.rowSummary.mark, .finished)
         let over = views(standing, turnEndedAt: now)
         XCTAssertEqual(checks(in: over).count, 1, "over the grey check of a finished turn's line")

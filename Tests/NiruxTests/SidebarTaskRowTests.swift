@@ -118,16 +118,17 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(lead.cardActions, [.next(next)], "the Lead's row has no status line")
     }
 
-    /// Where the task stands (its last turn's status line, or the user's
-    /// summary): beside a grey check in "Done"'s place while the finished
-    /// turn is unseen, then the resting line after the pull request and
-    /// the next step, in the branch's place.
+    /// Where the task stands: its last turn's own line beside a grey check
+    /// in "Done"'s place while the finished turn is unseen, then (or the
+    /// user's summary) the resting line after the pull request and the
+    /// next step, in the branch's place.
     func testStatusLineSaysWhereTheTaskStands() {
         let line = "fix pushed, CI green"
         let finished = column(0, .needsAttention, reason: .turnFinished)
         func standing(_ info: WorkspaceInfo) -> WorkspaceInfo {
             var info = info
             info.statusLine = line
+            info.turnStatusLine = line
             return info
         }
         let unseen = standing(workspace([finished], pr: pullRequest(ci: "SUCCESS"), nextStep: "merge it")).rowSummary
@@ -142,6 +143,12 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(status(standing(workspace([column(0, .working)]))), "Working")
         XCTAssertEqual(status(standing(workspace([column(0, .needsAttention, reason: .question("Which?"))]))), "Needs you · Which?")
         XCTAssertEqual(workspace([finished]).rowSummary.mark, .idle, "no line: Done, by the grey dot")
+        var usersOwn = workspace([finished])
+        usersOwn.statusLine = "Ships Friday"
+        XCTAssertEqual(status(usersOwn), "Done", "the user's summary is no turn's outcome")
+        var resting = workspace([column()])
+        resting.statusLine = "Ships Friday"
+        XCTAssertEqual(status(resting), "Ships Friday")
     }
 
     /// The pull request's line, and where a click on it goes.

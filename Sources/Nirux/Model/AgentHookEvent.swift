@@ -99,7 +99,8 @@ struct AgentHookEvent: Codable, Equatable {
     /// tells a turn that asks the user something from one that is done
     /// (see `TurnEndVerdict`). Nil elsewhere, from Claude versions without
     /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
-    /// and when the receiver or the app drops it (see `TurnEndMarker`).
+    /// for a headless `claude -p` (`TurnEndText.isHeadless`), and when the
+    /// receiver or the app drops it (see `TurnEndMarker`).
     var finalMessage: String?
     /// On a main-thread SessionStart or Stop: whether
     /// this `claude` runs on the login Nirux's own `claude -p` uses
@@ -189,7 +190,7 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = name == .userPromptSubmit
                 ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
                 : nil
-            finalMessage = name == .stop && agentID == nil && !TurnEndText.usesOtherAccount(env)
+            finalMessage = name == .stop && agentID == nil && !TurnEndText.usesOtherAccount(env) && !TurnEndText.isHeadless(env)
                 ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
                 : nil
             stopHookActive = name == .stop ? payload["stop_hook_active"] as? Bool : nil

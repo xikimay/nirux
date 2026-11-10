@@ -152,12 +152,15 @@ final class WorkspaceState {
     var phase: WorkspacePhase?
     var lastSummary: String?
     var lastSummaryIsManual: Bool = false
-    /// `lastSummary` is a turn's status line (`recordTurnStatus`), not an
-    /// agent's report as it came (Codex's message).
+    /// `lastSummary` is the status line of the task's last turn end
+    /// (`settleTurnStatus`), not an agent's report as it came (Codex's
+    /// message), nor one from before a turn whose line is unknown.
     var lastSummaryIsStatus = false
-    /// The turn end whose status line `lastSummary` holds. In memory only:
-    /// runs don't outlive the app.
-    private(set) var turnStatusEndedAt: TimeInterval?
+    /// The newest turn end whose status line is on its way, and the newest
+    /// one settled (its line, "unchanged", or none). In memory only: runs
+    /// don't outlive the app.
+    private(set) var awaitedTurnStatus: TimeInterval?
+    private(set) var settledTurnStatus: TimeInterval?
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
@@ -371,6 +374,12 @@ extension WorkspaceState {
         diffStatsObservationGeneration &+= 1
         let previousContext = gitContext
         gitContext = context
+        // Another branch checked out in the same folder: the line was the
+        // former branch's.
+        if let branch = previousContext?.branch, branch != context?.branch,
+           previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot {
+            lastSummaryIsStatus = false
+        }
         let sameRevision = previousContext?.branch == context?.branch
             && previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot
             && previousContext?.identity.head == context?.identity.head
@@ -537,29 +546,59 @@ extension WorkspaceState {
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+        // A Claude line on its way for an older turn would replace it.
+        if let awaited = awaitedTurnStatus, awaited < timestamp { awaitedTurnStatus = nil }
+        settledTurnStatus = max(settledTurnStatus ?? timestamp, timestamp)
         guard lastSummary != compactSummary || lastSummaryIsStatus else { return changed }
         lastSummary = compactSummary
         lastSummaryIsStatus = false
         return true
     }
 
-    /// Puts the status line of the turn that ended at `turnEndedAt` in
-    /// `lastSummary`, unless the user wrote it, or a newer turn end's line
-    /// got there first. True when it changed.
+    /// A run started for the status line of the turn that ended at
+    /// `turnEndedAt`: until it settles, the row shows no line from an
+    /// older turn. False for a turn end older than one already known.
     @discardableResult
-    func recordTurnStatus(_ line: String, turnEndedAt: TimeInterval) -> Bool {
-        guard !lastSummaryIsManual, turnStatusEndedAt.map({ turnEndedAt > $0 }) ?? true else { return false }
-        turnStatusEndedAt = turnEndedAt
-        guard lastSummary != line || !lastSummaryIsStatus else { return false }
-        lastSummary = line
-        lastSummaryIsStatus = true
+    func awaitTurnStatus(turnEndedAt: TimeInterval) -> Bool {
+        guard turnEndedAt > (awaitedTurnStatus ?? settledTurnStatus ?? -.infinity) else { return false }
+        awaitedTurnStatus = turnEndedAt
         return true
     }
 
-    /// The task's line on its row: a turn's status line, or the summary
-    /// the user wrote. Not an agent's report as it came.
+    /// The run for the turn that ended at `turnEndedAt` answered, if no
+    /// newer turn end's run started since: its line goes in `lastSummary`
+    /// unless the user wrote it; "unchanged" keeps the line as it was; no
+    /// answer leaves the row without a line until the next turn. True when
+    /// the row may have changed.
+    @discardableResult
+    func settleTurnStatus(_ status: TurnStatus?, turnEndedAt: TimeInterval) -> Bool {
+        guard awaitedTurnStatus == turnEndedAt else { return false }
+        awaitedTurnStatus = nil
+        settledTurnStatus = turnEndedAt
+        switch status {
+        case .line(let line)? where !lastSummaryIsManual:
+            lastSummary = line
+            lastSummaryIsStatus = true
+        case .unchanged?, .line?:
+            break
+        case nil:
+            lastSummaryIsStatus = false
+        }
+        return true
+    }
+
+    /// The last turn end's status line, once it is known.
+    var turnStatusLine: String? {
+        lastSummaryIsStatus && !lastSummaryIsManual && awaitedTurnStatus == nil ? lastSummary : nil
+    }
+
+    /// The task's line on its row: the summary the user wrote, else the
+    /// last turn end's status line. Never an agent's report as it came,
+    /// nor a line from before a turn whose line is unknown. One line.
     var statusLine: String? {
-        lastSummaryIsManual || lastSummaryIsStatus ? Self.normalizedContextText(lastSummary) : nil
+        let line = lastSummaryIsManual ? lastSummary : turnStatusLine
+        return line.flatMap(Self.normalizedContextText)?
+            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     @discardableResult
