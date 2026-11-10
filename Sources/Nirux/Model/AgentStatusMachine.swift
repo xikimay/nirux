@@ -844,7 +844,6 @@ struct AgentStatusMachine {
     /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
     /// keystroke: the user scrolled, typed nothing.
     mutating func notePromptRecall(now: Date) {
-        lastDraftInputAt = now.timeIntervalSince1970
     }
 
     /// One key's bytes: a character, or a short escape sequence (a

@@ -905,7 +905,7 @@ final class PtySession: @unchecked Sendable {
         guard !data.isEmpty, data.count.isMultiple(of: 3) else { return false }
         return stride(from: data.startIndex, to: data.endIndex, by: 3).allSatisfy { index in
             let key = data[index..<index + 3]
-            return key.first == 0x1B && [0x5B, 0x4F].contains(key[index + 1]) && [0x41, 0x42].contains(key[index + 2])
+            return key.first == 0x1B && [0x5B].contains(key[index + 1]) && [0x41, 0x42].contains(key[index + 2])
         }
     }
 
