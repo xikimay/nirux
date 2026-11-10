@@ -567,14 +567,19 @@ extension WorkspaceState {
         }
     }
 
+    /// A Mission child that asked its parent and ended its turn to wait:
+    /// it waits on the parent, not on the user.
+    func waitsOnParent(_ col: ColumnState) -> Bool {
+        guard let uuid = col.agentUUID else { return false }
+        return MissionStore.shared.waitingQuestion(childWorkspaceID: id, childAgentUUID: uuid) != nil
+            || MissionStore.shared.pendingAnswer(childWorkspaceID: id, childAgentUUID: uuid) != nil
+    }
+
     private func setupAgentAttentionTracking(for col: ColumnState) {
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
-            // A Mission child ends its turn after asking: it waits on its
-            // parent, not on the user.
-            if reason == .turnFinished, let uuid = col?.agentUUID,
-               MissionStore.shared.waitingQuestion(childWorkspaceID: self.id, childAgentUUID: uuid) != nil
-                || MissionStore.shared.pendingAnswer(childWorkspaceID: self.id, childAgentUUID: uuid) != nil {
+            // A Mission child ends its turn after asking (even in prose).
+            if reason?.isTurnEnd == true, let col, self.waitsOnParent(col) {
                 self.onMetadataChanged?()
                 return
             }

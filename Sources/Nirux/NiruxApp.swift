@@ -20,6 +20,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsStuckAgentPopup: NSPopUpButton?
     weak var settingsExplainModelPopup: NSPopUpButton?
     weak var settingsExplainEffortPopup: NSPopUpButton?
+    weak var settingsAlertOnlyWhenClaudeAsksCheckbox: NSButton?
     var keepAwakeController: KeepAwakeController?
     var keepAwakeIndicator: KeepAwakeIndicator?
     var usageLimitsIndicator: ClaudeUsageIndicator?
@@ -157,6 +158,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         let hooks = AgentHookCenter.shared
         // Before the backlog replay in start(): it releases what it can't hold.
         hooks.applySidebarApprovals(enabled: NiruxShellView.currentSidebarApprovalsEnabled())
+        hooks.turnEndClassifier = Self.turnEndClassifier(enabled: Self.currentAlertOnlyWhenClaudeAsks())
+        hooks.onTurnEndSettled = { [weak shellView] in
+            // Not inside the drain that may have settled it.
+            DispatchQueue.main.async { shellView?.typeMissionMessages() }
+        }
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }
@@ -266,6 +272,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shell?.sessionLedger.closeAllSessions(at: Date().timeIntervalSince1970)
         // Receivers stop waiting on an app that is gone.
         shell?.releaseAllPermissionApprovals()
+        // And stop writing final messages for it.
+        TurnEndMarker.withdraw(app: ProcessInstance.running(pid: getpid()))
         AgentHookCenter.shared.approvalChannel().stopListening(for: ProcessInstance.running(pid: getpid()))
         AgentHookCenter.shared.stop()
         MissionEventCenter.shared.stop()

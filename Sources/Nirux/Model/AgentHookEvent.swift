@@ -83,6 +83,17 @@ struct AgentHookEvent: Codable, Equatable {
     /// pasted went to Claude (docs/branch-review.md, section 6.2). Only
     /// that line is kept of the prompt.
     let reviewHeader: String?
+    /// On a main-thread Stop, Claude's final message
+    /// (`last_assistant_message`), as `TurnEndText.excerpt` bounds it: what
+    /// tells a turn that asks the user something from one that is done
+    /// (see `TurnEndVerdict`). Nil elsewhere, from Claude versions without
+    /// it, for an agent on another account (`TurnEndText.usesOtherAccount`),
+    /// and when the receiver or the app drops it (see `TurnEndMarker`).
+    var finalMessage: String?
+    /// On a Stop, Claude's `stop_hook_active`: the turn went on because a
+    /// Stop hook blocked its end, and this is the end of that continuation
+    /// (the end of the turn, unless a hook blocks again).
+    let stopHookActive: Bool?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -148,6 +159,10 @@ struct AgentHookEvent: Codable, Equatable {
             reviewHeader = name == .userPromptSubmit
                 ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
                 : nil
+            finalMessage = name == .stop && agentID == nil && !TurnEndText.usesOtherAccount(env)
+                ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
+                : nil
+            stopHookActive = name == .stop ? payload["stop_hook_active"] as? Bool : nil
             reviewPasses = switch name {
             case .userPromptSubmit:
                 (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)
@@ -188,6 +203,8 @@ struct AgentHookEvent: Codable, Equatable {
             transcriptPath = nil
             reviewPasses = nil
             reviewHeader = nil
+            finalMessage = nil
+            stopHookActive = nil
         }
     }
 
@@ -239,6 +256,8 @@ struct AgentHookEvent: Codable, Equatable {
         transcriptPath: String? = nil,
         reviewPasses: [String]? = nil,
         reviewHeader: String? = nil,
+        finalMessage: String? = nil,
+        stopHookActive: Bool? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -264,6 +283,8 @@ struct AgentHookEvent: Codable, Equatable {
         self.transcriptPath = transcriptPath
         self.reviewPasses = reviewPasses
         self.reviewHeader = reviewHeader
+        self.finalMessage = finalMessage
+        self.stopHookActive = stopHookActive
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText
@@ -331,6 +352,13 @@ enum AgentHookCLI {
             now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
+        // Written only for a running Nirux that will read it, and an agent
+        // on the login its `claude -p` uses.
+        if event.finalMessage != nil,
+           !TurnEndMarker.allowsMessage(environment: env)
+            || TurnEndText.settingsUseOtherAccount(environment: env, cwd: event.cwd, home: env["HOME"] ?? NSHomeDirectory()) {
+            event.finalMessage = nil
+        }
 
         let channel = PermissionApprovalChannel.standard
         // The watch comes before the request shows in the queue: from then
@@ -449,9 +477,11 @@ enum AgentHookCLI {
         env["NIRUX_AGENT_UUID"]?.isEmpty == false
     }
 
-    /// Append one JSON line. O_APPEND keeps concurrent writers (several
-    /// agents across columns) from interleaving mid-line for lines under
-    /// PIPE_BUF; lines are small.
+    /// Append one JSON line in one `write`. O_APPEND keeps concurrent
+    /// writers (several agents across columns) from interleaving mid-line:
+    /// the file system serializes writes to one file (PIPE_BUF bounds
+    /// pipes, not files). Lines are small, a Stop's final message excerpt
+    /// (`TurnEndText.excerpt`, 3,000 characters) the largest.
     private static func append(_ event: AgentHookEvent) {
         guard var line = try? JSONEncoder().encode(event) else { return }
         line.append(0x0A) // \n

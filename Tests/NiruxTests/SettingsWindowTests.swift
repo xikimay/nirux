@@ -68,7 +68,8 @@ final class SettingsWindowTests: XCTestCase {
                 ("agentResumeOnLaunch", {
                     try self.choose(AgentResumeOnLaunch.allAtOnce.rawValue, in: app.settingsAgentResumePopup)
                 }),
-                ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) })
+                ("missionHandoffsEnabled", { try self.click(app.settingsMissionHandoffsCheckbox) }),
+                ("alertOnlyWhenClaudeAsks", { try self.click(app.settingsAlertOnlyWhenClaudeAsksCheckbox) })
             ]
             for step in steps {
                 let before = try savedSettings()
@@ -96,6 +97,19 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertEqual(shell.stuckAgentWaitThreshold, NiruxShellView.stuckWaitThreshold(minutes: 30))
             try click(app.settingsMissionHandoffsCheckbox)
             XCTAssertFalse(workspace.missionHandoffsEnabled)
+            let classifier = AgentHookCenter.shared.turnEndClassifier
+            let makeClassifier = NiruxApp.makeTurnEndClassifier
+            // Never the real `claude`.
+            NiruxApp.makeTurnEndClassifier = { HaikuTurnEndClassifier(checkSetup: { .unavailable }, runProcess: { _, _, _ in nil }) }
+            defer {
+                AgentHookCenter.shared.turnEndClassifier = classifier
+                NiruxApp.makeTurnEndClassifier = makeClassifier
+            }
+            XCTAssertEqual(app.settingsAlertOnlyWhenClaudeAsksCheckbox?.state, .on)
+            try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
+            XCTAssertNil(AgentHookCenter.shared.turnEndClassifier, "every turn end alerts")
+            try click(app.settingsAlertOnlyWhenClaudeAsksCheckbox)
+            XCTAssertNotNil(AgentHookCenter.shared.turnEndClassifier)
         }
     }
 

@@ -51,10 +51,12 @@ extension ColumnHeaderView.Status {
             if case .exitedMidTurn = dialog { text = dialog.shortLabel } else { text = "stopped" }
             return Self(text, tone: .error, symbol: Theme.Symbol.agentError, toolTip: toolTip)
         }
-        if case .message = dialog {
+        switch dialog {
+        case .message, .askedInReply:
             return Self(dialog.shortLabel, tone: .waiting, toolTip: toolTip)
+        default:
+            return nil
         }
-        return nil
     }
 }
 

@@ -544,6 +544,18 @@ final class PersistedStateCodingTests: XCTestCase {
 }
 
 extension PersistedStateCodingTests {
+    /// On for every install, the ones that predate it too; off survives.
+    func testAlertOnlyWhenClaudeAsksIsOnUnlessTurnedOff() throws {
+        let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
+        XCTAssertTrue(legacy.alertOnlyWhenClaudeAsks)
+        XCTAssertTrue(PersistedSettings().alertOnlyWhenClaudeAsks)
+
+        var settings = PersistedSettings()
+        settings.alertOnlyWhenClaudeAsks = false
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertFalse(decoded.alertOnlyWhenClaudeAsks)
+    }
+
     // MARK: - cliArgs wire format
 
     /// Lock down the CLI flag mapping so a future rename in the enum doesn't

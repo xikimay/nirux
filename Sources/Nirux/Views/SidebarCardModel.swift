@@ -70,7 +70,10 @@ extension ColumnInfo {
                 detail: AgentText.clean(isPlan ? approval.text : "\(approval.toolName): \(approval.text)", maxLength: 300)
             ))
         }
-        if let openDialog {
+        // A child that asked its parent ended its turn to wait: not "done",
+        // nor asking the user.
+        let waitsOnParent = missionQuestion.map { $0.handOff == nil } ?? false
+        if let openDialog, !(waitsOnParent && openDialog.isTurnEnd) {
             causes.append(AttentionCause(
                 signal: openDialog.signal, label: openDialog.chipLabel, toolTip: openDialog.toolTip,
                 headline: openDialog.headline, detail: openDialog.cleanDetailLine
@@ -82,9 +85,7 @@ extension ColumnInfo {
                 headline: "needs you · a question", detail: AgentText.clean(question.text, maxLength: 300)
             ))
         }
-        // A child that asked its parent ended its turn to wait: not "done".
-        let waitsOnParent = missionQuestion.map { $0.handOff == nil } ?? false
-        if agentStatus == .needsAttention, !(waitsOnParent && AttentionSignal.of(attentionReason) == .finished) {
+        if agentStatus == .needsAttention, !(waitsOnParent && attentionReason?.isTurnEnd == true) {
             let signal = AttentionSignal.of(attentionReason)
             causes.append(AttentionCause(
                 signal: signal, label: attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done"),
@@ -115,6 +116,7 @@ extension AgentAttentionReason {
         case .question: return "question"
         case .message: return "needs you"
         case .turnFinished: return "done"
+        case .askedInReply: return "asks"
         case .apiError: return "stopped"
         case .exitedMidTurn: return "exited"
         case .stillWaiting(let dialog, _): return dialog.chipLabel

@@ -357,6 +357,35 @@ final class PtySession: @unchecked Sendable {
     /// Why the agent waits on the user, while it does.
     var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
 
+    /// A Claude turn end that hasn't alerted (see
+    /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
+    var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
+
+    /// The question the foreground `claude`'s last turn ended on (see
+    /// `AgentStatusMachine.askedQuestion`).
+    func agentAskedQuestion(foreground: ForegroundProcess?) -> AgentAttentionReason? {
+        state.machine.visibleQuestion(foreground: foreground).map { .askedInReply($0.text) }
+    }
+
+    /// The user looks at this column: see `AgentStatusMachine.noteSeen`.
+    func noteAgentSeen() {
+        state.machine.noteSeen()
+    }
+
+    /// See `AgentStatusMachine.awaitsVerdict`.
+    func awaitsTurnEndVerdict(_ request: TurnEndRequest) -> Bool {
+        state.machine.awaitsVerdict(request)
+    }
+
+    /// See `AgentStatusMachine.applyTurnEndVerdict`.
+    func applyTurnEndVerdict(
+        _ verdict: TurnEndVerdict,
+        for request: TurnEndRequest,
+        isUserFocused: Bool
+    ) -> AgentAttentionReason? {
+        state.machine.applyTurnEndVerdict(verdict, for: request, isUserFocused: isUserFocused)
+    }
+
     /// When the user last typed into this terminal (0: never).
     var lastKeystrokeAt: TimeInterval { state.machine.lastKeystrokeAt }
 
