@@ -9,7 +9,7 @@ extension NiruxShellView {
     /// flaky (docs/ci-failure-triage.md), which it may wait a few seconds
     /// to know. The caller refreshes the sidebar.
     func reportNewRedChecks(in workspace: WorkspaceState, isAppActive: Bool = NSApp.isActive) {
-        triageRedChecks(in: workspace)
+        if !(ZZMutant.current == "F14-report-skips-triage") { triageRedChecks(in: workspace) }
         let red = workspace.takeNewRedChecks()
         guard !red.isEmpty, let pullRequest = workspace.prInfo,
               !(isAppActive && workspace === activeWorkspace) else { return }

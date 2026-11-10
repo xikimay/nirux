@@ -86,16 +86,16 @@ extension NiruxShellView {
         let center = ciTriageCenter
         guard center.isEnabled, let pullRequest = workspace.prInfo else { return }
         let now = Date().timeIntervalSince1970
-        center.updateStore { _ = $0.learn(fromPassedRunsOf: CIFailure.ownRunResults(pullRequest), now: now) }
+        if !(ZZMutant.current == "F11-never-learns") { center.updateStore { _ = $0.learn(fromPassedRunsOf: CIFailure.ownRunResults(pullRequest), now: now) } }
         let red = CIFailure.redChecks(pullRequest)
         guard !red.isEmpty else { return }
         let signature = CITriage.signature(of: red)
         let workspaceID = workspace.id
-        guard center.inFlight[workspaceID] != signature else { return }
+        guard ZZMutant.current == "F1-no-in-flight-guard" || center.inFlight[workspaceID] != signature else { return }
         if let current = workspace.ciTriage, current.signature == signature {
             // Said already; or an answer is owed, and it is time to ask
             // again (once).
-            guard let retryAt = current.retryAt, now >= retryAt else { return }
+            guard let retryAt = current.retryAt, ZZMutant.current == "F2-retry-at-every-poll" || now >= retryAt else { return }
             center.retried[workspaceID] = signature
         }
         // A red check that isn't a run of this repository can't be read:
@@ -110,7 +110,7 @@ extension NiruxShellView {
         var isModelAllowed: Bool?
         for (run, checks) in byRun {
             let runSignature = CITriage.signature(of: checks)
-            if let record = store.record(of: run), record.signature == runSignature, record.isFinal {
+            if let record = store.record(of: run), record.signature == runSignature, record.isFinal || ZZMutant.current == "F5-owed-answer-final" {
                 known.append(record.shown)
                 continue
             }
@@ -134,12 +134,12 @@ extension NiruxShellView {
                 // Turned off meanwhile: nothing more is read.
                 guard self?.ciTriageCenter.isEnabled == true else { break }
                 outcomes.append(await investigate(item.request) { [weak self] in
-                    await MainActor.run { self?.ciTriageCenter.isEnabled == true }
+                    await MainActor.run { ZZMutant.current == "F8-off-still-wanted" || self?.ciTriageCenter.isEnabled == true }
                 })
             }
             guard let self else { return }
             let center = self.ciTriageCenter
-            if center.inFlight[workspaceID] == signature { center.inFlight[workspaceID] = nil }
+            if !(ZZMutant.current == "F10-closed-keeps-in-flight"), center.inFlight[workspaceID] == signature { center.inFlight[workspaceID] = nil }
             guard let workspace else {
                 // Closed meanwhile: nothing waits for this verdict.
                 center.heldBanners[workspaceID] = nil
@@ -164,7 +164,7 @@ extension NiruxShellView {
     ) {
         let center = ciTriageCenter
         let isCurrent = center.isEnabled && read != nil
-            && workspace.prInfo.map { CITriage.signature(of: CIFailure.redChecks($0)) } == signature
+            && (ZZMutant.current == "F4-stale-verdict-kept" || workspace.prInfo.map { CITriage.signature(of: CIFailure.redChecks($0)) } == signature)
         if isCurrent, let read {
             let now = Date().timeIntervalSince1970
             center.updateStore { store in
@@ -177,11 +177,11 @@ extension NiruxShellView {
                 }
             }
             let isOwed = read.contains { $0.outcome.isUnanswered || !$0.outcome.wasRead }
-            let retryAt = isOwed && center.retried[workspace.id] != signature ? now + center.retryDelay : nil
+            let retryAt = isOwed && (ZZMutant.current == "F3-retry-forever" || center.retried[workspace.id] != signature) ? now + center.retryDelay : nil
             workspace.ciTriage = (signature, CITriage.combine(known + read.map(\.outcome.verdict)), retryAt)
         }
         if let banner = center.heldBanners[workspace.id], banner.signature == signature {
-            center.heldBanners[workspace.id] = nil
+            if !(ZZMutant.current == "F6-held-banner-kept") { center.heldBanners[workspace.id] = nil }
             sideEffects.notifyCIFailure(banner, isCurrent ? workspace.ciFlakyReason : nil)
         }
         if isCurrent { updateSidebar() }
@@ -193,11 +193,11 @@ extension NiruxShellView {
     /// failure sends the first's on its way as it is.
     func postCIFailureBanner(_ banner: CIFailureBanner, for workspace: WorkspaceState) {
         let center = ciTriageCenter
-        if let waiting = center.heldBanners[workspace.id], waiting != banner {
+        if !(ZZMutant.current == "F7-first-banner-dropped"), let waiting = center.heldBanners[workspace.id], waiting != banner {
             center.heldBanners[workspace.id] = nil
             sideEffects.notifyCIFailure(waiting, nil)
         }
-        guard center.isEnabled, center.inFlight[workspace.id] == banner.signature else {
+        guard !(ZZMutant.current == "F12-banner-never-held"), center.isEnabled, center.inFlight[workspace.id] == banner.signature else {
             sideEffects.notifyCIFailure(banner, workspace.ciFlakyReason)
             return
         }
@@ -232,4 +232,9 @@ extension NiruxShellView {
         }
         return allowed
     }
+}
+
+/// ZZ: DO NOT MERGE. The mutant a flow test subclass switches on.
+enum ZZMutant {
+    nonisolated(unsafe) static var current: String?
 }

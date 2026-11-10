@@ -8,7 +8,10 @@ import XCTest
 /// other until then, without it, or when it is off. Reading the run is a
 /// double: no test reaches GitHub or a model.
 @MainActor
-final class CITriageFlowTests: XCTestCase {
+class CITriageFlowTests: XCTestCase {
+    /// ZZ: the mutant this class's tests run against.
+    class var mutant: String? { nil }
+
     private nonisolated static let reason = "The tests drive gears; the changes edit an axle."
     private nonisolated static let gear = "GearTests.testStops"
 
@@ -91,6 +94,7 @@ final class CITriageFlowTests: XCTestCase {
     /// repository known: one found later would clear the pull request a
     /// test set, and make a red check read as on another branch.
     private func triaging(_ harness: UIFlowHarness, releasesAll: Bool = true) throws -> (WorkspaceState, Reader) {
+        ZZMutant.current = type(of: self).mutant
         let reader = Reader(releasesAll: releasesAll)
         harness.shell.sideEffects.investigateCIFailure = { await reader.read($0, isStillWanted: $1) }
         harness.shell.setCITriage(enabled: true)
@@ -333,6 +337,7 @@ final class CITriageFlowTests: XCTestCase {
     func testOffNothingIsReadAndNothingSaysFlaky() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            ZZMutant.current = type(of: self).mutant
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             harness.waitUntil("the workspace's repository") { workspace.gitContext != nil }
             let reader = Reader(releasesAll: false)
@@ -418,3 +423,70 @@ final class CITriageFlowTests: XCTestCase {
         }
     }
 }
+
+// ZZ: DO NOT MERGE. One class per mutant: run-tests.sh runs each apart.
+@MainActor
+final class CITriageFlowMutant_F1_no_in_flight_guard: CITriageFlowTests {
+    override class var mutant: String? { "F1-no-in-flight-guard" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F2_retry_at_every_poll: CITriageFlowTests {
+    override class var mutant: String? { "F2-retry-at-every-poll" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F3_retry_forever: CITriageFlowTests {
+    override class var mutant: String? { "F3-retry-forever" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F4_stale_verdict_kept: CITriageFlowTests {
+    override class var mutant: String? { "F4-stale-verdict-kept" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F5_owed_answer_final: CITriageFlowTests {
+    override class var mutant: String? { "F5-owed-answer-final" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F6_held_banner_kept: CITriageFlowTests {
+    override class var mutant: String? { "F6-held-banner-kept" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F7_first_banner_dropped: CITriageFlowTests {
+    override class var mutant: String? { "F7-first-banner-dropped" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F8_off_still_wanted: CITriageFlowTests {
+    override class var mutant: String? { "F8-off-still-wanted" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F10_closed_keeps_in_flight: CITriageFlowTests {
+    override class var mutant: String? { "F10-closed-keeps-in-flight" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F11_never_learns: CITriageFlowTests {
+    override class var mutant: String? { "F11-never-learns" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F12_banner_never_held: CITriageFlowTests {
+    override class var mutant: String? { "F12-banner-never-held" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F14_report_skips_triage: CITriageFlowTests {
+    override class var mutant: String? { "F14-report-skips-triage" }
+}
+
+@MainActor
+final class CITriageFlowMutant_F9_any_folder: CITriageFlowTests {
+    override class var mutant: String? { "F9-any-folder" }
+}
+

@@ -518,7 +518,7 @@ final class ColumnState {
         else { return nil }
         let root = (repositoryRoot as NSString).resolvingSymlinksInPath
         let folder = (cwd as NSString).resolvingSymlinksInPath
-        guard folder == root || folder.hasPrefix(root.hasSuffix("/") ? root : root + "/") else { return nil }
+        guard ZZMutant.current == "F9-any-folder" || folder == root || folder.hasPrefix(root.hasSuffix("/") ? root : root + "/") else { return nil }
         return claudeAccount.onNiruxAccount
     }
 
