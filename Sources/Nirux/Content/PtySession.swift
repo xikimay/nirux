@@ -375,7 +375,6 @@ final class PtySession: @unchecked Sendable {
     /// Types a prompt the user's click sends into this agent (see
     /// `AgentStatusMachine.notePromptFromUser`).
     func typePromptFromUser(_ terminalInput: String) {
-        state.machine.notePromptFromUser()
         sendRaw(terminalInput)
     }
 
