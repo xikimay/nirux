@@ -77,6 +77,8 @@ final class EdgeGlowView: NSView {
     /// How long the pill stays once the pointer left the glow: time to
     /// reach it.
     var pillLinger: TimeInterval = 1.2
+    /// Runs the pill's delays; tests pass a clock they advance by hand.
+    var schedule: MainActorSchedule = mainQueueSchedule
 
     /// Fades the light in and out.
     private let fadeLayer = CALayer()
@@ -163,6 +165,8 @@ final class EdgeGlowView: NSView {
             let level = (glows.first?.layer.presentation()?.opacity ?? 1) * lightLayer.opacity
             self.light = nil
             setMoving(false)
+            // The level is in the fade now, steady light or not.
+            applySteadyLevel()
             fade(to: 0, from: level)
             return
         }
@@ -337,7 +341,7 @@ final class EdgeGlowView: NSView {
         pillGeneration += 1
         let generation = pillGeneration
         // Then only the glow: the pill never stays over a terminal's text.
-        DispatchQueue.main.asyncAfter(deadline: .now() + pillDuration) { [weak self] in
+        schedule(pillDuration) { [weak self] in
             guard let self, self.pillGeneration == generation else { return }
             self.endAnnouncement()
         }
@@ -349,6 +353,11 @@ final class EdgeGlowView: NSView {
         guard isAnnouncing else { return }
         isAnnouncing = false
         dropStaleHover()
+        // The pill came up under a pointer that was already there: no
+        // entry was reported for it.
+        if let window, pill.frame.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+            pointerOnPill = true
+        }
         if !isHovered { setPillShown(false) }
     }
 
@@ -421,13 +430,21 @@ final class EdgeGlowView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        pointerEntered(event.trackingArea === pillArea ? .pill : .glow)
+        if let zone = zone(of: event) { pointerEntered(zone) }
     }
 
     /// Also when the window stops being the key one: the pointer is gone
     /// as far as the pill goes.
     override func mouseExited(with event: NSEvent) {
-        pointerExited(event.trackingArea === pillArea ? .pill : .glow)
+        if let zone = zone(of: event) { pointerExited(zone) }
+    }
+
+    /// The zone an event's tracking area stands for; nil for an area this
+    /// view replaced since.
+    private func zone(of event: NSEvent) -> HoverZone? {
+        guard let area = event.trackingArea else { return nil }
+        if area === glowArea { return .glow }
+        return area === pillArea ? .pill : nil
     }
 
     /// The pointer resting on the glow brings the pill back; on the pill
@@ -462,10 +479,10 @@ final class EdgeGlowView: NSView {
 
     /// Runs `change` after `delay`, unless the pointer moved in or out
     /// meanwhile; at once without a delay.
-    private func after(_ delay: TimeInterval, _ change: @escaping (EdgeGlowView) -> Void) {
+    private func after(_ delay: TimeInterval, _ change: @escaping @MainActor @Sendable (EdgeGlowView) -> Void) {
         guard delay > 0 else { return change(self) }
         let generation = hoverGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        schedule(delay) { [weak self] in
             guard let self, self.hoverGeneration == generation else { return }
             change(self)
         }
