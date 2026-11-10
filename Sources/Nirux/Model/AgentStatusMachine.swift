@@ -842,7 +842,7 @@ struct AgentStatusMachine {
     /// isn't spared: a slash command it sends may open a picker no hook
     /// tells of.
     mutating func noteTypedKeys(_ data: Data, now: Date) {
-        guard pendingDialogs.isEmpty, !Self.keysLeavingThePrompt.contains(data) else { return }
+        guard !Self.keysLeavingThePrompt.contains(data) else { return }
         lastPromptKeyAt = now.timeIntervalSince1970
     }
 
@@ -854,7 +854,7 @@ struct AgentStatusMachine {
     /// prompt went in: a draft (typed during the turn or after), a
     /// recalled prompt, a picker.
     var hasKeysAtThePrompt: Bool {
-        lastPromptKeyAt > (lastPromptAt ?? 0)
+        lastPromptKeyAt > 0
     }
 
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
