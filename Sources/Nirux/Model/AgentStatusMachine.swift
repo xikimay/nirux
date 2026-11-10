@@ -431,7 +431,7 @@ struct AgentStatusMachine {
     /// user looks at the column: they may not have read it (Nirux types
     /// Mission messages, a `claude -p` ends its session with its turn).
     private mutating func settleQuietTurnEnd(isUserFocused: Bool, outcome: inout AgentHookOutcome) {
-        if quietTurnEnd?.isUnread == true, !isUserFocused {
+        if case .pending = quietTurnEnd, !isUserFocused {
             outcome.attention = .turnFinished
             outcome.firedAttention = true
         }
@@ -695,7 +695,7 @@ struct AgentStatusMachine {
         // An alerting attention (alerted now, or earlier in this episode)
         // speaks for a turn end not read yet: it needs no alert of its
         // own, nor to take this attention's reason.
-        if alert, quietTurnEnd?.isUnread == true { quietTurnEnd = nil }
+        if alert, case .pending = quietTurnEnd { quietTurnEnd = nil }
         guard alert, !attentionAlerted else { return false }
         attentionAlerted = true
         return true
