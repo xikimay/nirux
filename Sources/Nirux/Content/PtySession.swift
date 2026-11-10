@@ -446,7 +446,10 @@ final class PtySession: @unchecked Sendable {
     /// otherwise.
     func resumeFailedTurn(snapshot: ProcessSnapshot, now: TimeInterval) -> AgentResumeRefusal? {
         let foreground = foregroundProcess(snapshot: snapshot)
-        if let refusal = agentResumeRefusal(foreground: foreground, snapshot: snapshot, now: now) { return refusal }
+        if let refusal = agentResumeRefusal(foreground: foreground, snapshot: snapshot, now: now) {
+            sendRaw("continue")
+            return refusal
+        }
         guard let input = TypedPromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
         state.machine.markResumeSent(now: now)
         sendRaw(input)

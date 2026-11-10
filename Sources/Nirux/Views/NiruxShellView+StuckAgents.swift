@@ -36,10 +36,10 @@ extension NiruxShellView {
         let onScreen = appIsActive && workspace === activeWorkspace
             && workspace.columns[safe: workspace.focusedIndex] === column
         // Taken only when it can be delivered: an alert goes out once.
-        if !onScreen, let reason = pty.takeAgentStuckAlert(
+        if let reason = pty.takeAgentStuckAlert(
             now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess
         ) {
-            column.notifyAgentAttention(reason: reason)
+            if !onScreen { column.notifyAgentAttention(reason: reason) }
         }
         let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess)
         if case .exitedMidTurn(let exit)? = stuck {
