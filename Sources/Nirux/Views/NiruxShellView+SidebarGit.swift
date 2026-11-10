@@ -59,9 +59,7 @@ extension NiruxShellView {
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
-                    id: col.id,
-                    turnEndedAt: col.pty?.agentTurnEndedAt ?? 0,
-                    awaitsTurnEndVerdict: col.pty?.awaitsAnyTurnEndVerdict ?? false
+                    id: col.id
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,

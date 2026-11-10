@@ -79,6 +79,19 @@ struct AgentStatusMachine {
     private var turnEndedAt: TimeInterval = 0
     /// Claude's last main-thread turn end (Stop, StopFailure).
     private var mainTurnEndedAt: TimeInterval = 0
+    /// A Stop hook kept a turn of this conversation going after its Stop
+    /// (a review gate). Nothing tells a Stop that such a hook is about to
+    /// block from one that ends the turn: Claude only moves again seconds
+    /// later. So from then on, only a Stop that follows the hook
+    /// (`stop_hook_active`) is known to end its turn.
+    private var stopHooksKeepGoing = false
+    /// That turn end is known to be the turn's last Stop.
+    private var mainTurnEndIsLast = true
+    /// Its final message ends on a question: read where there is one to
+    /// read (Claude's, with the turn-end classifier on), or its verdict
+    /// said it asks. Whoever looks at the column reads it there and gets
+    /// no alert, but the turn isn't done.
+    private var mainTurnEndAsks = false
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
@@ -183,10 +196,23 @@ struct AgentStatusMachine {
         integratedAgentProcesses.contains(name)
     }
 
-    /// Epoch seconds of the last turn end an agent reported itself
-    /// (Claude's Stop or StopFailure, Codex's turn-complete); 0: none yet.
-    /// Silence that ends an output-fallback turn reports nothing.
-    var lastTurnEndedAt: TimeInterval { max(turnEndedAt, mainTurnEndedAt) }
+    /// The turn end an agent reported at `time` (Claude's Stop, Codex's
+    /// turn-complete) is done, as far as hooks can tell, and still stands:
+    /// the column may show it as finished (a sweep of light). Not while
+    /// its verdict is on its way, not when its final message asks the user
+    /// something or the turn failed, not while a dialog is open, and not
+    /// once the agent moved again. Not either for a Stop that may not be
+    /// the end (see `stopHooksKeepGoing`).
+    func isTurnDone(endedAt time: TimeInterval) -> Bool {
+        guard time > 0, state != .working, openDialogs.isEmpty else { return false }
+        // Codex reports the end of a turn, and nothing after it.
+        if turnEndedAt == time { return true }
+        guard mainTurnEndedAt == time, mainTurnEndIsLast, !mainTurnEndAsks, turnFailure == nil else { return false }
+        switch quietTurnEnd {
+        case .pending?, .superseded?: return false
+        case .done?, nil: return true
+        }
+    }
 
     /// Why the column wants the user, while it does: the oldest dialog
     /// still believed open, else the last attention event's reason.
@@ -364,6 +390,8 @@ struct AgentStatusMachine {
         endTurn()
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         askedQuestion = nil
+        // Another conversation may run under other hooks.
+        stopHooksKeepGoing = false
         if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
@@ -397,6 +425,7 @@ struct AgentStatusMachine {
             // The last Stop wasn't the end: a Stop hook kept the turn going,
             // and this one ends it (read below).
             quietTurnEnd = nil
+            stopHooksKeepGoing = true
         } else {
             // A turn Claude started by itself (no prompt) ended before the
             // last one's verdict.
@@ -404,6 +433,8 @@ struct AgentStatusMachine {
         }
         askedQuestion = nil
         mainTurnEndedAt = now
+        mainTurnEndIsLast = event.stopHookActive == true || !stopHooksKeepGoing
+        mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
                 kind: event.errorKind, detail: event.detail, failedAt: now,
@@ -480,6 +511,7 @@ struct AgentStatusMachine {
             // The question it ends on, else its last line.
             let line = TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
+            mainTurnEndAsks = true
             // A user looking at the column reads it there.
             if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
             // A question always alerts, even after this episode's "finished
@@ -506,9 +538,19 @@ struct AgentStatusMachine {
         askedQuestion = nil
     }
 
-    /// A turn end waits for its verdict: Nirux types nothing into the
-    /// prompt meanwhile (see `isPromptFree`). A prompt would settle it as
-    /// unread, alerting for a turn the verdict may find done.
+    /// The user's click types a prompt into this agent (Address PR
+    /// Feedback, Why Failed): they engage with it. The turn end before is
+    /// read, so the prompt alerts for nothing and a verdict on its way
+    /// drops; the question it asked is behind them.
+    mutating func notePromptFromUser() {
+        if quietTurnEnd != nil { quietTurnEnd = .done }
+        askedQuestion = nil
+    }
+
+    /// A turn end waits for its verdict: Nirux types nothing of its own
+    /// into the prompt meanwhile (see `isPromptFree`). A prompt would
+    /// settle it as unread, alerting for a turn the verdict may find done.
+    /// A prompt the user's click sends goes in (`notePromptFromUser`).
     var awaitsAnyVerdict: Bool {
         if case .pending = quietTurnEnd { return true }
         return false
@@ -997,6 +1039,9 @@ struct AgentStatusMachine {
         lastEventAt = 0
         turnEndedAt = 0
         mainTurnEndedAt = 0
+        stopHooksKeepGoing = false
+        mainTurnEndIsLast = true
+        mainTurnEndAsks = false
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0
