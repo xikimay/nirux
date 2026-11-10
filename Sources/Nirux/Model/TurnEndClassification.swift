@@ -178,7 +178,7 @@ enum TurnEndText {
             var start = 0
             while start + needle.count <= normal.text.count {
                 let end = start + needle.count
-                if normal.text[start..<end].elementsEqual(needle), !normal.inCode[start..<end].allSatisfy({ $0 }),
+                if normal.text[start..<end].elementsEqual(needle),
                    startsSentence(normal, at: start, cleanStart: paragraph.cleanStart),
                    endsSentence(normal, from: start, to: end, cleanEnd: paragraph.cleanEnd) {
                     return AgentText.clean(span(of: paragraph.text, normal, from: start, to: end), maxLength: maxLength)
