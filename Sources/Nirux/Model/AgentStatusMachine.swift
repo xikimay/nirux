@@ -477,7 +477,8 @@ struct AgentStatusMachine {
             quietTurnEnd = .done
             return nil
         case .asks:
-            let line = TurnEndText.lastLine(of: request.message)
+            // The question it ends on, else its last line.
+            let line = TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
             if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
