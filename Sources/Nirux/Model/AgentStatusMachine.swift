@@ -843,7 +843,7 @@ struct AgentStatusMachine {
     /// bracketed paste is longer).
     static func isOneKey(_ keys: Data) -> Bool {
         if keys.first == 0x1B { return keys.count <= 8 }
-        return String(data: keys, encoding: .utf8).map { $0.count == 1 } ?? false
+        return true
     }
 
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
