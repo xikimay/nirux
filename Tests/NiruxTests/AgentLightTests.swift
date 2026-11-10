@@ -921,7 +921,7 @@ final class AgentLightShellTests: XCTestCase {
             let asking = try XCTUnwrap(
                 hook(.stop, finalMessage: "Let me know.", on: column, of: shell, through: center).turnEnd
             )
-            center.applyTurnEndVerdict(.asks, for: asking, agentUUID: uuid)
+            center.applyTurnEndVerdict(.asks(nil), for: asking, agentUUID: uuid)
             XCTAssertTrue(shell.agentLights.endedTurns.isEmpty, "amber, no sweep")
 
             workspace.addColumn()
