@@ -210,8 +210,22 @@ extension NiruxApp {
     }
 
     private func notificationsPane() -> NSView {
-        SettingsForm.pane([
+        let current = PersistedSettings.effective(Persistence.load()?.settings)
+        let onlyAsks = SettingsForm.checkbox(
+            "Alert only when Claude asks something", target: self, action: #selector(settingsAlertOnlyWhenClaudeAsksChanged(_:))
+        )
+        onlyAsks.state = current.alertOnlyWhenClaudeAsks ? .on : .off
+        settingsAlertOnlyWhenClaudeAsksCheckbox = onlyAsks
+
+        return SettingsForm.pane([
             [
+                onlyAsks,
+                SettingsForm.hint(
+                    "When a Claude Code turn ends, Haiku reads its last message (claude -p, on a Claude "
+                        + "subscription only) and Nirux alerts only if it asks you something. When that check "
+                        + "can't run, the turn alerts. Codex and other agents alert at every turn end.",
+                    under: onlyAsks
+                ),
                 SettingsForm.hint(
                     "Banners and sounds, shown while Nirux is in the background, follow System Settings › "
                         + "Notifications › Nirux."
@@ -394,6 +408,36 @@ extension NiruxApp {
         }
     }
 
+    @objc func settingsAlertOnlyWhenClaudeAsksChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.alertOnlyWhenClaudeAsks = enabled }) else { return }
+        AgentHookCenter.shared.turnEndClassifier = Self.turnEndClassifier(enabled: enabled)
+    }
+
+    static func currentAlertOnlyWhenClaudeAsks() -> Bool {
+        PersistedSettings.effective(Persistence.load()?.settings).alertOnlyWhenClaudeAsks
+    }
+
+    /// The classifier when the option is on, its setup checked ahead of
+    /// the first turn end; the marker tells hook receivers whether to keep
+    /// final messages.
+    static func turnEndClassifier(enabled: Bool) -> (any TurnEndClassifier)? {
+        let me = ProcessInstance.running(pid: getpid())
+        guard enabled, let me else {
+            TurnEndMarker.withdraw(app: me)
+            return nil
+        }
+        TurnEndMarker.publish(app: me, environment: ProcessInfo.processInfo.environment)
+        return makeTurnEndClassifier()
+    }
+
+    /// The classifier in use; tests put a double here, so that turning the
+    /// option on never runs the real `claude`.
+    static var makeTurnEndClassifier: () -> any TurnEndClassifier = {
+        HaikuTurnEndClassifier.shared.prepare()
+        return HaikuTurnEndClassifier.shared
+    }
+
     private func showSettingsError(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -422,6 +466,7 @@ extension NiruxApp {
         settingsStuckAgentPopup = nil
         settingsExplainModelPopup = nil
         settingsExplainEffortPopup = nil
+        settingsAlertOnlyWhenClaudeAsksCheckbox = nil
     }
 }
 

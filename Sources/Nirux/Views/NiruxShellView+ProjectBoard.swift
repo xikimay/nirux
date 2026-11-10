@@ -264,6 +264,8 @@ extension NiruxShellView {
             hasAgent: agentInFront || pty.agentProcessName(snapshot: snapshot) != nil,
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
+            // A dialog only: the Merge Queue holds a pull request while its
+            // agent waits there, not while it waits for an answer in prose.
             openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason,
             workingFor: pty.agentTurnStartedAt.map { SidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )

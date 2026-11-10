@@ -19,6 +19,8 @@ extension NiruxShellView {
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
                 let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
+                // Read on screen: the question its turn ended on is seen.
+                if isUserFocused, NSApp.isActive { col.pty?.noteAgentSeen() }
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
                 }
@@ -49,8 +51,11 @@ extension NiruxShellView {
                     permissionApproval: permissionApproval,
                     // The Project Board's rule: an approved dialog stays
                     // listed while its tool runs, the column working.
-                    openDialog: agentStatus == .working
-                        ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason,
+                    // A question waits even while subagents work, as the
+                    // header and ⌘J say.
+                    openDialog: (agentStatus == .working ? nil
+                        : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason)
+                        ?? col.pty?.agentAskedQuestion(foreground: foregroundProcess),
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
@@ -203,11 +208,11 @@ extension NiruxShellView {
         let attentionCount = workspaces.filter { workspace in
             workspace.hasNotification
                 || workspace.columns.contains { column in
-                    let question = missionQuestions[ObjectIdentifier(column)]
-                    if question?.handOff != nil { return true }
-                    guard let pty = column.pty, pty.cachedAgentState == .needsAttention else { return false }
-                    // A child that asked its parent ended its turn to wait.
-                    return question == nil || AttentionSignal.of(pty.agentAttentionReason) != .finished
+                    Self.countsInDockBadge(
+                        agentState: column.pty?.cachedAgentState, reason: column.pty?.agentAttentionReason,
+                        isQuietTurnEnd: column.pty?.isQuietTurnEnd ?? false,
+                        missionQuestion: missionQuestions[ObjectIdentifier(column)]
+                    )
                 }
         }.count
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
@@ -239,6 +244,21 @@ extension NiruxShellView {
         edgeGlowBottom.show(Self.alert(in: infos.dropFirst(activePosition + 1).flatMap(\.columns)))
 
         updateAttentionBorders(infos: infos)
+    }
+
+    /// Whether a column counts in the Dock badge: its agent waits on the
+    /// user. Not a Claude turn end that hasn't alerted (its verdict is on
+    /// its way, or it found the turn done), nor a Mission child that ended
+    /// its turn to wait on its parent.
+    static func countsInDockBadge(
+        agentState: AgentStatus?,
+        reason: AgentAttentionReason?,
+        isQuietTurnEnd: Bool,
+        missionQuestion: SidebarMissionQuestion?
+    ) -> Bool {
+        if missionQuestion?.handOff != nil { return true }
+        guard agentState == .needsAttention, !isQuietTurnEnd else { return false }
+        return missionQuestion == nil || reason?.isTurnEnd != true
     }
 
     /// The most urgent wait or error among `columns` while the user looks
