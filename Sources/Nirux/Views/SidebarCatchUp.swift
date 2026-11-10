@@ -18,7 +18,7 @@ struct SidebarCatchUp: Hashable {
         /// At work again (green).
         case working
 
-        static func < (lhs: Kind, rhs: Kind) -> Bool { lhs.rawValue < rhs.rawValue }
+        static func < (lhs: Kind, rhs: Kind) -> Bool { lhs.rawValue > rhs.rawValue }
     }
 
     struct Row: Hashable {

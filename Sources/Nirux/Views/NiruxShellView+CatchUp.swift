@@ -101,7 +101,7 @@ extension NiruxShellView {
     func tasksWhoseTurnEnded(after since: TimeInterval, until now: TimeInterval) -> [String] {
         let onScreen = workspaces[safe: activeWSIndex]
         return workspaces.compactMap { workspace -> (id: String, endedAt: TimeInterval)? in
-            guard !workspace.isLead, !workspace.isInactive, !workspace.isClosing, workspace !== onScreen else { return nil }
+            guard !workspace.isLead, !workspace.isInactive, !workspace.isClosing else { return nil }
             let endedAt = workspace.columns.compactMap { $0.pty?.agentLastTurnEndedAt }.filter { $0 > since && $0 <= now }.max()
             return endedAt.map { (workspace.id, $0) }
         }
@@ -148,7 +148,7 @@ extension NiruxShellView {
             catchUpState.workspaceIDs = []
             catchUpState.awaySince = [:]
         case .expand:
-            catchUpState.isExpanded = true
+            break
         case .open(let workspaceID):
             // As its row would: the column that asks or broke. It goes
             // from the card once on screen.
@@ -171,7 +171,6 @@ extension NiruxShellView {
     func setCatchUp(enabled: Bool) {
         catchUpEnabled = enabled
         if !enabled {
-            catchUpState.workspaceIDs = []
             catchUpState.awaySince = [:]
         }
         updateSidebar()
