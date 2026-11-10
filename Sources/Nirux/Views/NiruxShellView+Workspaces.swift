@@ -26,7 +26,8 @@ extension NiruxShellView {
         startedByAgent: Bool = false,
         setupScript: URL? = nil,
         isLead: Bool = false,
-        activate: Bool = true
+        activate: Bool = true,
+        slidesIn: Bool = false
     ) {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
@@ -80,7 +81,10 @@ extension NiruxShellView {
             sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
         }
 
-        if let snapshot {
+        if let snapshot, slidesIn, agentLightsMayMove {
+            // A task born from the ⌘N sheet (NiruxShellView+TaskBirth).
+            slideInNewWorkspace(workspace, over: snapshot)
+        } else if let snapshot {
             viewport.addSubview(snapshot)
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.3
@@ -292,13 +296,21 @@ extension NiruxShellView {
 
     func focusWorkspace(_ dir: VDir) {
         let delta = dir == .up ? -1 : 1
+        let before = activeWorkspace
         guard workspaceStore.selectAdjacentWorkspace(delta: delta) != nil else { return }
+        // The card, if up, keeps through the relayout: its words change.
+        workspaceSwitch.isAnnouncing = activeWorkspace !== before
         refreshAfterWorkspaceSelection(animated: true)
+        workspaceSwitch.isAnnouncing = false
+        if activeWorkspace !== before { announceWorkspaceSwitch() }
     }
 
     func switchToWorkspace(_ index: Int, editorTakesKeyboard: Bool = true) {
+        let space = activeProfileID
         guard workspaceStore.selectWorkspace(at: index) else { return }
-        refreshAfterWorkspaceSelection(animated: true, editorTakesKeyboard: editorTakesKeyboard)
+        // Into another space: its workspace shows at once, as when a close
+        // changes the space, not slid in from the last space's place.
+        refreshAfterWorkspaceSelection(animated: activeProfileID == space, editorTakesKeyboard: editorTakesKeyboard)
     }
 
     /// Focus a workspace by ID (notification click-through), optionally
@@ -584,36 +596,27 @@ extension NiruxShellView {
     func layoutWorkspaceStrip(_ layout: StripLayout) {
         let viewportW = layout.viewportW
         let rowH = layout.rowH
-        let targetY = layout.targetY
         let animated = layout.animated
 
         let oldY = verticalStrip.frame.origin.y
+        let leaving = workspaceOnScreenBeforeLayout()
         applyWorkspaceFrames(layout)
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
-        // Animated path: add a vertical slide over the direct frame change.
-        if animated, let layer = verticalStrip.layer, oldY != targetY {
-            let anim = CABasicAnimation(keyPath: "transform.translation.y")
-            anim.fromValue = oldY - targetY
-            anim.toValue = 0
-            anim.duration = 0.3
-            anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            anim.isRemovedOnCompletion = true
-            layer.add(anim, forKey: "wsSlide")
-        }
+        // Animated path: a vertical slide over the direct frame change.
+        slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
-        // Focus border and header icon — attention borders are managed by updateSidebar()
+        // Focus border and header icon. The agents' lights lie over the
+        // columns, in views of their own (NiruxShellView+AgentLights).
         let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
         for (wsIndex, workspace) in workspaces.enumerated() {
             for (colIndex, col) in workspace.columns.enumerated() {
                 let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
                 col.setHeaderFocused(isFocus)
-                if col.view.layer?.animation(forKey: "attentionPulse") == nil {
-                    col.view.layer?.cornerRadius = isFocus ? 6 : 0
-                    col.view.layer?.borderWidth = isFocus ? 2 : 0
-                    col.view.layer?.borderColor = isFocus ? accent : nil
-                }
+                col.view.layer?.cornerRadius = isFocus ? 6 : 0
+                col.view.layer?.borderWidth = isFocus ? 2 : 0
+                col.view.layer?.borderColor = isFocus ? accent : nil
             }
         }
     }

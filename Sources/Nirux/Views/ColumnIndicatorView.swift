@@ -7,6 +7,24 @@ final class ColumnIndicatorView: NSView {
     /// What each column asks while the user looks elsewhere.
     private var columnSignals: [AttentionSignal?] = []
     private var pulseLayers: [CALayer] = []
+    /// A waiting column's dot pulses; false: its ring shows steady (see
+    /// `NiruxShellView.agentLightsMayMove`). Applied to the rings at once:
+    /// a window nobody sees may not draw for a while.
+    var pulses = true {
+        didSet {
+            guard pulses != oldValue else { return }
+            for ring in pulseLayers {
+                if pulses {
+                    ring.add(CABasicAnimation.lightMovement(for: .alert(.waiting)), forKey: Self.pulseKey)
+                } else {
+                    ring.removeAnimation(forKey: Self.pulseKey)
+                }
+            }
+        }
+    }
+    private static let pulseKey = "pulse"
+    /// Whether the waiting columns' rings pulse now, for tests.
+    var pulsingRings: [Bool] { pulseLayers.map { $0.animation(forKey: Self.pulseKey) != nil } }
 
     private static let dotSize: CGFloat = 6
     private static let dotGap: CGFloat = 8
@@ -32,10 +50,10 @@ final class ColumnIndicatorView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard columnCount > 0, let ctx = NSGraphicsContext.current?.cgContext else { return }
-
+        // Before anything else: an empty space keeps no ring.
         pulseLayers.forEach { $0.removeFromSuperlayer() }
         pulseLayers.removeAll()
+        guard columnCount > 0, let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let ds = Self.dotSize
         let gap = Self.dotGap
@@ -80,14 +98,8 @@ final class ColumnIndicatorView: NSView {
                 glow.borderWidth = 1.5
                 glow.borderColor = color.cgColor
 
-                let pulse = CABasicAnimation(keyPath: "opacity")
-                pulse.fromValue = 1.0
-                pulse.toValue = 0.15
-                pulse.duration = 0.6
-                pulse.autoreverses = true
-                pulse.repeatCount = .infinity
-                pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                glow.add(pulse, forKey: "pulse")
+                // With the columns' own lights.
+                if pulses { glow.add(CABasicAnimation.lightMovement(for: .alert(.waiting)), forKey: Self.pulseKey) }
 
                 rootLayer.addSublayer(glow)
                 pulseLayers.append(glow)

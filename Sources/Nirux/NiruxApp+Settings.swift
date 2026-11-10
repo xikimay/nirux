@@ -70,6 +70,12 @@ extension NiruxApp {
         SettingsForm.select(NiruxShellView.currentAgentResumeOnLaunch().rawValue, in: resume)
         settingsAgentResumePopup = resume
 
+        let animations = SettingsForm.checkbox(
+            "Animate the interface", target: self, action: #selector(settingsAnimationsChanged(_:))
+        )
+        animations.state = NiruxShellView.currentAnimatesInterface() ? .on : .off
+        settingsAnimationsCheckbox = animations
+
         return SettingsForm.pane([
             [
                 keepAwake,
@@ -78,6 +84,15 @@ extension NiruxApp {
                         + "last one stops: a queue asleep stops polling GitHub. The display still sleeps, and closing a "
                         + "MacBook's lid still sleeps it (except in clamshell mode).",
                     under: keepAwake
+                )
+            ],
+            [
+                animations,
+                SettingsForm.hint(
+                    "A column's edge breathes in green while its agent works and pulses in amber when it waits for "
+                        + "you, and a working task's row runs a line of light. Off, the same colors show without "
+                        + "moving, as they do while macOS reduces motion.",
+                    under: animations
                 )
             ],
             [
@@ -342,6 +357,12 @@ extension NiruxApp {
         keepAwakeController?.setEnabled(enabled)
     }
 
+    @objc func settingsAnimationsChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        guard saveSetting(revert: Self.toggledBack(sender), { $0.animatesInterface = enabled }) else { return }
+        shell?.animatesInterface = enabled
+    }
+
     /// Read at the next launch. Only a changed choice is written: a value a
     /// newer build saved shows as the default, and picking that keeps it.
     @objc func settingsAgentResumeChanged(_ sender: NSPopUpButton) {
@@ -523,6 +544,7 @@ extension NiruxApp {
     private func clearSettingsWindowReferences() {
         settingsWindow = nil
         settingsKeepAwakeCheckbox = nil
+        settingsAnimationsCheckbox = nil
         settingsAgentResumePopup = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil

@@ -63,6 +63,31 @@ struct ShellSideEffects {
         try await CookieImporter.importCookies(from: source, into: WebViewColumn.sharedDataStore)
     }
 
+    /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
+    var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    /// Whether any of the window shows on screen: not minimized, not
+    /// covered, its display not asleep.
+    var windowShows: @MainActor (NSWindow?) -> Bool = { $0?.occlusionState.contains(.visible) ?? false }
+
+    /// Calls back at each click or scroll the app receives, until stopped;
+    /// the events go on as they were. Keys come through the app's key
+    /// interceptor, which consumes the terminals' own. Tests watch
+    /// nothing.
+    var watchUserInput: @MainActor (@escaping @MainActor () -> Void) -> Any? = { seen in
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .scrollWheel]) { event in
+            MainActor.assumeIsolated { seen() }
+            return event
+        }
+    }
+    var stopWatchingUserInput: @MainActor (Any) -> Void = { NSEvent.removeMonitor($0) }
+
+    /// Tells a column's terminal whether it is on screen, so it draws or
+    /// rests (see `NiruxShellView.syncTerminalOcclusion`).
+    var setSurfaceVisible: @MainActor (ColumnState, Bool) -> Void = { column, visible in
+        column.terminalView?.setSurfaceVisible(visible)
+    }
+
     /// Opens a link in the default browser.
     var openURL: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
 

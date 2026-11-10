@@ -38,9 +38,10 @@ final class TerminalConfigBuilderTests: XCTestCase {
             "copy-on-select = clipboard"
         ])
         XCTAssertEqual(
-            Array(lines.dropFirst(5).dropLast()),
+            Array(lines.dropFirst(5).dropLast(Builder.enforced.count)),
             TerminalConfiguration.afterglow.rendered.split(separator: "\n").map(String.init)
         )
+        XCTAssertEqual(Array(lines.suffix(Builder.enforced.count)), Builder.enforced)
         XCTAssertTrue(lines.contains("background = 212121"))
         XCTAssertEqual(lines.last, "term = xterm-256color")
     }

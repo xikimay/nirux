@@ -48,7 +48,12 @@ extension NiruxShellView {
         }
         panel.onStart = { [weak self, weak panel] request in
             guard let self, let panel else { return }
-            self.startTask(request) { [weak panel] outcome in panel?.finishStarting(outcome) }
+            self.startTask(request) { [weak self, weak panel] outcome in
+                // Its picture, before it closes: it folds toward the
+                // task's row.
+                if case .opened = outcome, let panel { self?.takeTaskSheetPicture(of: panel) }
+                panel?.finishStarting(outcome)
+            }
         }
         panel.onOpenShell = { [weak self] repository in
             self?.openPlainWorkspace(spaceID: spaceID, folder: repository?.folder)
@@ -223,8 +228,10 @@ extension NiruxShellView {
             deliveredHandover: created.handoverError == nil,
             worktreeBranch: created.checkedOutBranch,
             setupScript: setupScript(for: decision),
-            activate: request.opensInFront
+            activate: request.opensInFront,
+            slidesIn: pendingTaskSheet != nil
         )
+        if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
         saveState()
         // A hook prints its reason last.
         let gitWarning = created.gitWarning.map {

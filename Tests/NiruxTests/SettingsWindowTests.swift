@@ -66,6 +66,7 @@ final class SettingsWindowTests: XCTestCase {
                 ("explainModel", { try self.choose("claude-sonnet-5-5", in: app.settingsExplainModelPopup) }),
                 ("explainEffort", { try self.choose("high", in: app.settingsExplainEffortPopup) }),
                 ("keepMacAwakeWhileAgentsWork", { try self.click(app.settingsKeepAwakeCheckbox) }),
+                ("animatesInterface", { try self.click(app.settingsAnimationsCheckbox) }),
                 ("agentResumeOnLaunch", {
                     try self.choose(AgentResumeOnLaunch.allAtOnce.rawValue, in: app.settingsAgentResumePopup)
                 }),
@@ -260,6 +261,31 @@ final class SettingsWindowTests: XCTestCase {
             let reopened = try openSettings()
             defer { close(reopened) }
             XCTAssertEqual(reopened.settingsKeepAwakeCheckbox?.state, .off)
+        }
+    }
+
+    /// On by default; turning it off reaches the window at once, and stays
+    /// off in a later Settings window.
+    @MainActor
+    func testAnimationsAreOnByDefaultAndTurningThemOffAppliesAtOnce() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            XCTAssertTrue(shell.animatesInterface)
+            let app = try openSettings()
+            defer { close(app) }
+            app.shell = shell
+            XCTAssertEqual(app.settingsAnimationsCheckbox?.state, .on)
+
+            try click(app.settingsAnimationsCheckbox)
+
+            XCTAssertFalse(shell.animatesInterface)
+            XCTAssertEqual(Persistence.load()?.settings?.animatesInterface, false)
+            XCTAssertFalse(makeShell().animatesInterface, "a window opened later starts without them")
+            close(app)
+
+            let reopened = try openSettings()
+            defer { close(reopened) }
+            XCTAssertEqual(reopened.settingsAnimationsCheckbox?.state, .off)
         }
     }
 
