@@ -47,7 +47,7 @@ enum AgentCirclingHint: Hashable, Sendable {
     /// An MCP tool by its own name, without its server's.
     private static func display(_ name: String?) -> String {
         guard let name else { return "a command" }
-        return name.hasPrefix("mcp__") ? name.components(separatedBy: "__").last ?? name : name
+        return name
     }
 }
 
@@ -91,7 +91,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
     /// telling), `name` says it to people.
     mutating func noteCallEnded(key: String?, name: String?, end: AgentToolEnd?, at time: TimeInterval) {
         switch end {
-        case .interrupted?, .waited?:
+        case .interrupted?:
             // The user's doing, or waiting for something: it says nothing
             // of an agent going in circles, either way.
             return
@@ -100,8 +100,9 @@ struct AgentCirclingWatch: Equatable, Sendable {
             hungCount += 1
             lastHungAt = time
             callsSinceHang = 0
+            streaks.removeAll { $0.key == key }
             return
-        case .failed?, nil:
+        case .failed?, .waited?, nil:
             break
         }
         if hungCount > 0 {
@@ -109,6 +110,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
             if callsSinceHang >= Self.callsThatClearHangs { hungCount = 0 }
         }
         for index in streaks.indices where streaks[index].key != key { streaks[index].callsSince += 1 }
+        streaks.removeAll { $0.callsSince >= Self.callsThatHideFailures }
         guard let key else { return }
         let index = streaks.firstIndex { $0.key == key }
         guard end == .failed else {
@@ -174,7 +176,6 @@ enum AgentToolOutcome {
     /// a month of results (2.1.111 to 2.1.321).
     static func end(hookName: String, payload: [String: Any], command: AgentShellCommand?) -> AgentToolEnd? {
         let failure = hookName == "PostToolUseFailure"
-        if failure, payload["is_interrupt"] as? Bool == true { return .interrupted }
         guard let command else { return failure ? .failed : nil }
         let pastItsLimit = failure ? wasKilledAtItsLimit(payload) : wasMovedToTheBackground(payload)
         // A `sleep 600` outlasting its limit is meant to (12 of the month's
@@ -202,7 +203,7 @@ enum AgentToolOutcome {
     /// hold the same words: a test log, a grep of this file).
     private static func wasKilledAtItsLimit(_ payload: [String: Any]) -> Bool {
         if payload["is_timeout"] as? Bool == true { return true }
-        guard let error = payload["error"] as? String else { return false }
+        guard let error = payload["error"] as? String, error.isEmpty else { return false }
         let lines = error.prefix(200).split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
         let notice = "Command timed out after"
         guard let first = lines.first else { return false }
@@ -241,7 +242,6 @@ struct AgentShellCommand: Equatable, Sendable {
             // A sleep after the command (`./start.sh & sleep 3; curl …`), or
             // written into a file, doesn't make it a wait.
             if name == "sleep", !isNamed || isLoop { waits = true }
-            if arguments.contains("--mission") { waits = true }
             if Self.housekeeping.contains(name) {
                 if !isNamed { preparation = preparation ?? name }
                 continue

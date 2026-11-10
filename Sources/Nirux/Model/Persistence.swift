@@ -504,7 +504,6 @@ struct PersistedSettings: Codable {
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(alertOnlyWhenClaudeAsks, forKey: .alertOnlyWhenClaudeAsks)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
-        try container.encode(agentCirclingHint, forKey: .agentCirclingHint)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist
         )

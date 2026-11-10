@@ -333,7 +333,7 @@ extension WorkspaceInfo {
             // As the row's status line: the one that may be going in
             // circles says so, with its own turn's time.
             let circling = working.first { $0.circling != nil }
-            detail = (["\(who) working"] + [(circling ?? working.first)?.elapsedDisplay].compactMap { $0 }).joined(separator: " · ")
+            detail = (["\(who) working"] + [working.first?.elapsedDisplay].compactMap { $0 }).joined(separator: " · ")
             note = circling?.circling?.statusText
         case .done:
             color = Theme.Color.done

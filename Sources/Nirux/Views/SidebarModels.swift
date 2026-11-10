@@ -74,7 +74,6 @@ struct ColumnInfo: Hashable {
             && lhs.stuck == rhs.stuck
             && lhs.deferredAgent == rhs.deferredAgent
             && lhs.missionQuestion == rhs.missionQuestion
-            && lhs.circling == rhs.circling
     }
 
     func hash(into hasher: inout Hasher) {
@@ -97,7 +96,6 @@ struct ColumnInfo: Hashable {
         hasher.combine(stuck)
         hasher.combine(deferredAgent)
         hasher.combine(missionQuestion)
-        hasher.combine(circling)
     }
 }
 
