@@ -163,8 +163,8 @@ final class CloseAgentDetectionTests: XCTestCase {
             XCTAssertEqual(names, expected)
             let snapshot = ProcessSnapshot()
             XCTAssertEqual(foreground.foregroundProcessName(snapshot: snapshot), "gemini")
-            XCTAssertFalse(foreground.acceptsRemotePrompts(snapshot: snapshot))
-            XCTAssertTrue(claude.acceptsRemotePrompts(snapshot: snapshot))
+            XCTAssertFalse(foreground.acceptsTypedPrompts(snapshot: snapshot))
+            XCTAssertTrue(claude.acceptsTypedPrompts(snapshot: snapshot))
         }
     }
 

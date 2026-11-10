@@ -97,7 +97,7 @@ Codex has no prompt hook: its reviews aren't seen.
 
 ## 5. Run review pipeline (second pull request)
 
-Typing into an agent goes through `sendRemotePrompt`: it re-verifies a live
+Typing into an agent goes through `sendTypedPrompt`: it re-verifies a live
 Claude or Codex column and refuses while a dialog is open.
 The button reuses that guard and, like the board's Ask Agent to Resolve,
 types the prompt **without Return**: the user reads it and submits it.

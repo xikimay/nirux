@@ -30,7 +30,7 @@ struct AgentStatusMachine {
     /// column shows `.idle` while its dialog stays open. Entries leave only
     /// on hook evidence that the dialog closed — the matching tool call
     /// finishing, a new prompt, the turn or session ending — never on a
-    /// guess: remote prompts are refused while any is pending, and a
+    /// guess: typed prompts are refused while any is pending, and a
     /// prompt typed into an open dialog would answer it. A manual denial
     /// fires no hook, so an entry can outlive its dialog until then.
     private(set) var pendingDialogs: [AgentPermissionRequest] = []
@@ -148,7 +148,7 @@ struct AgentStatusMachine {
     /// reports nothing, so its permission prompt looks like any silence and
     /// a prompt could land on it. (Codex's notify reports turn ends only —
     /// the same blind spot, accepted before this tier existed.)
-    static func acceptsRemotePrompts(processName name: String) -> Bool {
+    static func acceptsTypedPrompts(processName name: String) -> Bool {
         integratedAgentProcesses.contains(name)
     }
 
