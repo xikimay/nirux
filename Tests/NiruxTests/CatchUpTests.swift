@@ -102,6 +102,7 @@ final class CatchUpTests: XCTestCase {
 
             // A short absence, or a long one with nothing ended, keeps it;
             // another puts what ended ahead, and keeps where it began.
+            try endTurn(of: third, at: leave + 4_100)
             shell.noteAway(missing: [.appActive], now: leave + 4_000)
             shell.noteAway(missing: [], now: leave + 4_300)
             shell.noteAway(missing: [.screenUnlocked], now: leave + 5_000)
@@ -115,14 +116,26 @@ final class CatchUpTests: XCTestCase {
             settle()
             XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["early", "second"])
             XCTAssertEqual(shell.sidebar.catchUp?.since, SidebarCatchUp.sinceText(leave))
+            shell.handleCatchUpAction(.open(workspaceID: second.id))
+            XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["early"])
+            XCTAssertEqual(shell.sidebar.catchUp?.since, SidebarCatchUp.sinceText(leave + 6_500), "the oldest left")
+            early.isInactive = true
+            shell.updateSidebar()
+            XCTAssertNil(shell.sidebar.catchUp, "archived since")
+
+            try endTurn(of: third, at: leave + 8_100)
+            shell.noteAway(missing: [.appActive], now: leave + 7_600)
+            shell.noteAway(missing: [], now: leave + 8_700)
+            settle()
+            XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["third"])
             shell.handleCatchUpAction(.dismiss)
             XCTAssertNil(shell.sidebar.catchUp)
 
             // Off: no card.
-            try endTurn(of: second, at: leave + 8_500)
+            try endTurn(of: third, at: leave + 9_500)
             shell.setCatchUp(enabled: false)
-            shell.noteAway(missing: [.appActive], now: leave + 8_000)
-            shell.noteAway(missing: [], now: leave + 9_000)
+            shell.noteAway(missing: [.appActive], now: leave + 9_000)
+            shell.noteAway(missing: [], now: leave + 10_000)
             settle()
             XCTAssertNil(shell.sidebar.catchUp)
         }
@@ -243,7 +256,7 @@ final class CatchUpTests: XCTestCase {
             rows: (0..<3).map { SidebarCatchUp.Row(workspaceID: "ws\($0)", title: "task \($0)", kind: .done, text: "Done") },
             otherSpaces: []
         )
-        sidebar.refreshCatchUpCard()
+        sidebar.refreshCatchUpCard(reveal: true)
         settle()
         let dismiss = try XCTUnwrap(sidebar.hitAreas.first { area in
             guard case .catchUp(.dismiss) = area.region else { return false }

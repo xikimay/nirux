@@ -309,11 +309,7 @@ final class NiruxShellView: NSView {
             self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
         }
         sidebar.onTurnAnswer = { [weak self] question, answer, button in
-            guard let self else { return }
-            if let index = self.workspaces.firstIndex(where: { $0.columns.contains { $0.id == question.columnID } }) {
-                self.noteCatchUpTaskAnswered(workspaceIndex: index)
-            }
-            self.answerFromCard(answer, to: question, button: button)
+            self?.answerFromCard(answer, to: question, button: button)
         }
         wireDeferredAgentResume()
         wireAgentLights()

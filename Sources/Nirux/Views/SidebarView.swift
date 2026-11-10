@@ -117,14 +117,10 @@ final class SidebarView: NSView {
     var catchUp: SidebarCatchUp? {
         didSet {
             guard catchUp != oldValue else { return }
-            // Its rows moved: no press acts until they have stood a moment
-            // (the click that activated Nirux, a double click).
+            // It and the rows under it moved: no press acts until they
+            // have stood a moment (the click that activated Nirux, a
+            // double click).
             catchUpChangedAt = clock()
-            // Brought into view when it comes, or holds more.
-            if let catchUp, catchUp.rows.count + catchUp.otherSpaces.count
-                > (oldValue.map { $0.rows.count + $0.otherSpaces.count } ?? 0) {
-                revealsCatchUpOnNextBuild = true
-            }
         }
     }
     var onCatchUpAction: ((SidebarCatchUpAction) -> Void)?
@@ -134,8 +130,10 @@ final class SidebarView: NSView {
     /// How long the card's presses wait after it changed.
     static let catchUpArming: CFTimeInterval = 0.6
 
-    /// The card changed outside a refresh (the user just came back).
-    func refreshCatchUpCard() {
+    /// The card changed outside a refresh (the user just came back);
+    /// `reveal` brings it into view.
+    func refreshCatchUpCard(reveal: Bool = false) {
+        revealsCatchUpOnNextBuild = reveal && isExpanded && catchUp != nil
         let signature = renderSignature()
         guard signature != lastRenderSignature else { return }
         lastRenderSignature = signature
@@ -479,6 +477,9 @@ final class SidebarView: NSView {
             return
         }
         if let area = hitArea(at: docLocation) {
+            // The catch-up card just came, went or changed: what is under
+            // the pointer moved (see `catchUpChangedAt`).
+            guard clock() - catchUpChangedAt >= Self.catchUpArming else { return }
             // Workspace rows don't click on mouseDown: run the drag
             // tracking loop, which decides between click and reorder.
             if case .workspace(let workspaceIndex) = area.region {
@@ -597,7 +598,6 @@ final class SidebarView: NSView {
         case .archivedToggle:
             toggleInactiveSection()
         case .catchUp(let action):
-            guard clock() - catchUpChangedAt >= Self.catchUpArming else { return }
             // Its second press lands on what moved under the pointer.
             lastButtonActionAt = event.timestamp
             onCatchUpAction?(action)

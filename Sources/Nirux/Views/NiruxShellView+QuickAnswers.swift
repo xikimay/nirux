@@ -12,8 +12,11 @@ extension NiruxShellView {
         guard let terminalInput = TypedPromptSanitizer.terminalInput(for: answer) else { return false }
         // A hook still in the queue may say the agent moved on.
         AgentHookCenter.shared.drain()
-        guard let pty = liveColumn(where: { $0.agentUUID == agentUUID })?.column.pty else { return false }
-        return pty.typeQuickAnswer(terminalInput, to: turnEndedAt, foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        guard let place = liveColumn(where: { $0.agentUUID == agentUUID }), let pty = place.column.pty,
+              pty.typeQuickAnswer(terminalInput, to: turnEndedAt, foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        else { return false }
+        if let index = workspaces.firstIndex(where: { $0 === place.workspace }) { noteCatchUpTaskAnswered(workspaceIndex: index) }
+        return true
     }
 
     /// The first column `matches` picks among those not closing, in a
