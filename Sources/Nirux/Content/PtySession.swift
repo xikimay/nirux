@@ -357,13 +357,11 @@ final class PtySession: @unchecked Sendable {
     /// Why the agent waits on the user, while it does.
     var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
 
-    /// When the agent last reported a turn's end (see
-    /// `AgentStatusMachine.lastTurnEndedAt`); 0: never.
-    var agentTurnEndedAt: TimeInterval { state.machine.lastTurnEndedAt }
-
-    /// Claude's last turn end still waits to hear whether its final message
-    /// asks something (see `AgentStatusMachine.awaitsAnyVerdict`).
-    var awaitsAnyTurnEndVerdict: Bool { state.machine.awaitsAnyVerdict }
+    /// The turn end the agent reported at `time` is done and still stands
+    /// (see `AgentStatusMachine.isTurnDone`).
+    func isAgentTurnDone(endedAt time: TimeInterval) -> Bool {
+        state.machine.isTurnDone(endedAt: time)
+    }
 
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
@@ -378,6 +376,13 @@ final class PtySession: @unchecked Sendable {
     /// The user looks at this column: see `AgentStatusMachine.noteSeen`.
     func noteAgentSeen() {
         state.machine.noteSeen()
+    }
+
+    /// Types a prompt the user's click sends into this agent (see
+    /// `AgentStatusMachine.notePromptFromUser`).
+    func typePromptFromUser(_ terminalInput: String) {
+        state.machine.notePromptFromUser()
+        sendRaw(terminalInput)
     }
 
     /// See `AgentStatusMachine.awaitsVerdict`.

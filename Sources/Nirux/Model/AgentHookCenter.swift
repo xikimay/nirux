@@ -58,6 +58,16 @@ final class AgentHookCenter {
     /// meanwhile (`AgentStatusMachine.awaitsAnyVerdict`), may take the
     /// messages waiting for it.
     var onTurnEndSettled: (() -> Void)?
+    /// An agent's turn just ended and is done, as far as hooks can tell
+    /// (`AgentStatusMachine.isTurnDone`): its column shows it. Said once
+    /// per turn end, when it is known: at Codex's report, at Claude's Stop
+    /// when nothing reads its final message, else at its verdict. With
+    /// the time the turn ended, for whoever shows it to check that it
+    /// still stands by then.
+    var onTurnDone: ((Resolution, TimeInterval) -> Void)?
+    /// A turn end older than this is no news: a backlog replayed at
+    /// launch, a verdict that took too long.
+    static let turnDoneFreshness: TimeInterval = 30
     private var lastApprovalSweep: TimeInterval = 0
 
     private var dirSource: DispatchSourceFileSystemObject?
@@ -256,9 +266,10 @@ final class AgentHookCenter {
         if outcome.firedAttention, let resolution {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
-        if let request = outcome.turnEnd, let resolution, let agentUUID = event.agentUUID {
-            classifyTurnEnd(
-                request, agentUUID: agentUUID,
+        if let resolution {
+            // (Read only for an event that ends a turn.)
+            settleTurnEnd(
+                of: event, outcome: outcome, in: resolution,
                 waitsOnParent: resolution.workspace.waitsOnParent(resolution.column)
             )
         }
@@ -270,12 +281,31 @@ final class AgentHookCenter {
         }
     }
 
+    /// What follows `event` once its column took it, if it ended a turn:
+    /// the final message is read for its verdict, or, with nothing to
+    /// wait for (Codex's report, a Stop whose message nobody reads), the
+    /// turn is done now (`onTurnDone`). `waitsOnParent`: a Mission child
+    /// that asked its parent ended its turn to wait for the answer.
+    func settleTurnEnd(
+        of event: AgentHookEvent, outcome: AgentHookOutcome, in resolution: Resolution,
+        waitsOnParent: @autoclosure () -> Bool
+    ) {
+        if let request = outcome.turnEnd, let agentUUID = event.agentUUID {
+            classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent())
+        } else if event.name == .turnComplete || event.name == .stop, !waitsOnParent() {
+            reportTurnDone(endedAt: event.timestamp, in: resolution)
+        }
+    }
+
     /// Asks the classifier about a turn end, then applies its verdict. A
     /// Mission child that asked its parent before ending its turn waits on
-    /// it, not on the user: done, as far as the user is concerned.
+    /// it, not on the user: nothing to alert the user for, and the turn
+    /// isn't done either.
     func classifyTurnEnd(_ request: TurnEndRequest, agentUUID: String, waitsOnParent: Bool) {
         guard !waitsOnParent, let classifier = turnEndClassifier else {
-            applyTurnEndVerdict(waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID)
+            applyTurnEndVerdict(
+                waitsOnParent ? .done : .unknown, for: request, agentUUID: agentUUID, reportsDone: !waitsOnParent
+            )
             return
         }
         let endsOnQuestion = TurnEndText.endsOnQuestion(request.message)
@@ -312,13 +342,30 @@ final class AgentHookCenter {
     /// user may look at it now): an alert when the turn asks something, or
     /// when the classifier couldn't tell. The alert refreshes the sidebar
     /// and the Dock badge; nothing else a verdict does shows.
-    func applyTurnEndVerdict(_ verdict: TurnEndVerdict, for request: TurnEndRequest, agentUUID: String) {
+    func applyTurnEndVerdict(
+        _ verdict: TurnEndVerdict, for request: TurnEndRequest, agentUUID: String, reportsDone: Bool = true
+    ) {
         guard let resolution = resolver?(agentUUID), let pty = resolution.column.pty else { return }
+        // A verdict that comes too late (a prompt, a later turn end) says
+        // nothing of the column any more.
+        let isAwaited = pty.awaitsTurnEndVerdict(request)
         if let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused) {
             resolution.column.notifyAgentAttention(reason: reason)
         }
+        if isAwaited, reportsDone { reportTurnDone(endedAt: request.turnEndedAt, in: resolution) }
         onTurnEndSettled?()
     }
+
+    /// Tells `onTurnDone` about the turn end reported at `time`, if it is
+    /// done and news.
+    private func reportTurnDone(endedAt time: TimeInterval, in resolution: Resolution) {
+        guard now() - time < Self.turnDoneFreshness, resolution.column.pty?.isAgentTurnDone(endedAt: time) == true
+        else { return }
+        onTurnDone?(resolution, time)
+    }
+
+    /// Epoch seconds; tests set the clock their events are stamped from.
+    var now: () -> TimeInterval = { Date().timeIntervalSince1970 }
 
     /// Whether the sidebar holds a request its receiver waits on:
     /// `eligible` (the option is on, and the column's own `claude` asked

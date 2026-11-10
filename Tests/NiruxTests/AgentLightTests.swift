@@ -3,18 +3,18 @@ import XCTest
 @testable import Nirux
 
 /// An agent's state as light: which columns light up and which edges glow
-/// (`AgentLightPlan`), which turn ends sweep (`TurnEndSweeps`), and what
-/// the light's view shows and takes (`EdgeGlowView`).
+/// (`AgentLightPlan`), and what the light's view shows and takes
+/// (`EdgeGlowView`).
 @MainActor
 final class AgentLightTests: XCTestCase {
     private func column(
         _ index: Int, status: AgentStatus = .idle, reason: AgentAttentionReason? = nil, focused: Bool = false,
-        process: String = "claude", id: UUID = UUID(), turnEndedAt: TimeInterval = 0, awaitsVerdict: Bool = false
+        process: String = "claude", id: UUID = UUID()
     ) -> ColumnInfo {
         ColumnInfo(
             index: index, processName: process, abbreviatedCwd: nil, isFocused: focused, isWebView: false,
             webTitle: nil, terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil,
-            attentionReason: reason, id: id, turnEndedAt: turnEndedAt, awaitsTurnEndVerdict: awaitsVerdict
+            attentionReason: reason, id: id
         )
     }
 
@@ -105,6 +105,12 @@ final class AgentLightTests: XCTestCase {
         let active = workspace(1, "here", [column(0, focused: true)], isActive: true)
         let plan = AgentLightPlan.make(infos: [above, active], activeIndex: 1) { _ in true }
         XCTAssertEqual(plan.top?.text, String(repeating: "a", count: AgentLightPlan.nameLimit - 1) + "… needs permission")
+
+        // A title may carry anything: the pill and its label get one clean line.
+        let odd = workspace(0, "feat\n\u{202E}login", [column(0, status: .needsAttention, reason: permission)])
+        XCTAssertEqual(
+            AgentLightPlan.make(infos: [odd, active], activeIndex: 1) { _ in true }.top?.text, "feat login needs permission"
+        )
     }
 
     /// Back in the app: the columns' waits are seen, work goes on, and the
@@ -118,70 +124,6 @@ final class AgentLightTests: XCTestCase {
         plan.clearColumnAlerts()
         XCTAssertEqual(plan.columns, [working: .working])
         XCTAssertEqual(plan.top, edge)
-    }
-
-    // MARK: - Turn ends
-
-    func testAReportedTurnEndSweepsOnce() {
-        let id = UUID()
-        var sweeps = TurnEndSweeps()
-        XCTAssertEqual(sweeps.update(columns: [column(0, status: .working, id: id)]), [])
-        let finished = column(0, status: .needsAttention, reason: .turnFinished, id: id, turnEndedAt: 50)
-        XCTAssertEqual(sweeps.update(columns: [finished]), [id])
-        XCTAssertEqual(sweeps.update(columns: [finished]), [], "once")
-
-        XCTAssertEqual(sweeps.update(columns: [column(0, status: .working, id: id, turnEndedAt: 50)]), [])
-        XCTAssertEqual(sweeps.update(columns: [column(0, id: id, turnEndedAt: 90)]), [id], "the next turn's end")
-    }
-
-    /// Silence or a dead agent reports no end; a wait or an error has its
-    /// own light; work that goes on is no end; a column seen for the first
-    /// time ended nothing in front of the user.
-    func testNoSweepWithoutAReportedEndOrWithSomethingToAsk() {
-        var sweeps = TurnEndSweeps()
-        let silent = UUID()
-        _ = sweeps.update(columns: [column(0, status: .working, id: silent)])
-        XCTAssertEqual(sweeps.update(columns: [column(0, id: silent)]), [], "it stopped without saying so")
-
-        let asking = UUID()
-        _ = sweeps.update(columns: [column(0, status: .working, id: asking)])
-        XCTAssertEqual(
-            sweeps.update(columns: [column(0, status: .needsAttention, reason: permission, id: asking, turnEndedAt: 10)]), []
-        )
-
-        let busy = UUID()
-        _ = sweeps.update(columns: [column(0, status: .working, id: busy)])
-        XCTAssertEqual(sweeps.update(columns: [column(0, status: .working, id: busy, turnEndedAt: 20)]), [])
-        XCTAssertEqual(sweeps.update(columns: [column(0, id: busy, turnEndedAt: 20)]), [], "that end is past")
-
-        XCTAssertEqual(sweeps.update(columns: [column(0, id: UUID(), turnEndedAt: 30)]), [], "first seen")
-
-        // A Mission child that ended its turn to ask its parent waits for
-        // the answer: it hasn't finished.
-        let child = UUID()
-        _ = sweeps.update(columns: [column(0, status: .working, id: child)])
-        var asked = column(0, status: .needsAttention, reason: .turnFinished, id: child, turnEndedAt: 40)
-        asked.missionQuestion = SidebarMissionQuestion(questionID: "q", parentTitle: "Lead", text: "Which one?", handOff: nil)
-        XCTAssertNil(asked.attention)
-        XCTAssertEqual(sweeps.update(columns: [asked]), [])
-    }
-
-    /// A Claude turn end whose final message is still being read sweeps
-    /// only once it is known to be done; one that asks turns amber instead.
-    func testATurnEndWaitsForItsVerdictBeforeItSweeps() {
-        var sweeps = TurnEndSweeps()
-        let done = UUID()
-        let asks = UUID()
-        _ = sweeps.update(columns: [column(0, status: .working, id: done), column(1, status: .working, id: asks)])
-        let pending = [done, asks].enumerated().map { index, id in
-            column(index, status: .needsAttention, reason: .turnFinished, id: id, turnEndedAt: 50, awaitsVerdict: true)
-        }
-        XCTAssertEqual(sweeps.update(columns: pending), [])
-        XCTAssertEqual(sweeps.update(columns: pending), [], "still being read")
-        XCTAssertEqual(sweeps.update(columns: [
-            column(0, status: .needsAttention, reason: .turnFinished, id: done, turnEndedAt: 50),
-            column(1, status: .needsAttention, reason: .askedInReply("Shall I merge?"), id: asks, turnEndedAt: 50)
-        ]), [done])
     }
 
     // MARK: - The light's view
@@ -202,7 +144,9 @@ final class AgentLightTests: XCTestCase {
         light.show(.working, moving: true)
         XCTAssertTrue(light.isMoving)
         XCTAssertEqual(light.movement?.repeatCount, .infinity)
-        XCTAssertEqual(light.movingLayerCount, 5, "the ring and the four glows, each on its own")
+        XCTAssertEqual(light.movingLayerCount, 1, "one animation for the ring and its four glows")
+        // (An animation without a cap reads 0: at the display's rate.)
+        XCTAssertEqual(light.movement?.preferredFrameRateRange.maximum, 15, "no more frames than the dots ever asked for")
         XCTAssertEqual(light.steadyLevel, 1, "the breath sets the level")
 
         light.show(.working, moving: false)
@@ -234,6 +178,8 @@ final class AgentLightTests: XCTestCase {
         let pulse = try XCTUnwrap(light.movement)
         XCTAssertEqual(light.light, .alert(.waiting))
         XCTAssertLessThan(pulse.duration, breath.duration)
+        XCTAssertEqual(light.movingLayerCount, 1, "the new rhythm in the old one's place")
+        XCTAssertEqual(pulse.preferredFrameRateRange.maximum, 15)
 
         light.show(.alert(.waiting), moving: true, soft: true)
         XCTAssertTrue(light.isSoft)
@@ -344,7 +290,7 @@ final class AgentLightTests: XCTestCase {
 
         glow.show(.alert(.waiting), moving: false, target: target("claude has a question"), announcing: true)
         XCTAssertTrue(glow.isPillShown)
-        glow.show(.alert(.waiting), moving: false, target: target("codex needs permission"))
+        glow.show(.alert(.waiting), moving: false, target: target("codex needs permission", column: UUID()))
         XCTAssertFalse(glow.isPillShown, "another agent's name doesn't ride on the first one's seconds")
 
         glow.show(nil, moving: false)
@@ -375,6 +321,90 @@ final class AgentLightTests: XCTestCase {
         XCTAssertTrue(glow.isPillShown)
         clock.advance(by: 3)
         XCTAssertFalse(glow.isPillShown)
+    }
+
+    /// The agent says something else while its pill is up (a message
+    /// turns into a permission request, a verdict into a question): the
+    /// pill stays, with the new words, for its full time again. Once its
+    /// time is over, new words wait for the pointer.
+    func testThePillFollowsItsAgentsNewWords() {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let glow = rightEdge(in: container)
+        let clock = ManualSchedule()
+        glow.schedule = clock.schedule
+        glow.pillDuration = 4
+        let agent = UUID()
+        glow.show(.alert(.waiting), moving: false, target: target("claude has a message", column: agent), announcing: true)
+        clock.advance(by: 3)
+        glow.show(.alert(.waiting), moving: false, target: target("claude needs permission", column: agent))
+        XCTAssertTrue(glow.isPillShown, "no flash")
+        XCTAssertEqual(glow.pillText, "claude needs permission →")
+        clock.advance(by: 3.9)
+        XCTAssertTrue(glow.isPillShown, "long enough to be read")
+        clock.advance(by: 0.2)
+        XCTAssertFalse(glow.isPillShown)
+
+        glow.show(.alert(.waiting), moving: false, target: target("claude asks you something", column: agent))
+        XCTAssertFalse(glow.isPillShown, "its seconds are over")
+        XCTAssertEqual(glow.pillText, "claude asks you something →")
+    }
+
+    /// Only the key window's pointer is tracked. Elsewhere no exit would
+    /// ever take away a pill the pointer kept: it would stay over the
+    /// terminal's text and take the next click there.
+    func testOnlyTheKeyWindowsPointerKeepsThePill() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let container = try XCTUnwrap(window.contentView)
+        let glow = rightEdge(in: container)
+        // The pointer lies where the pill comes up, and doesn't move.
+        glow.pointerLocation = { [unowned glow] _ in
+            glow.convert(NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.midY), to: nil)
+        }
+        let onPill = glow.convert(NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.midY), to: container)
+
+        // Not the key window (a test's never is).
+        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
+        glow.endAnnouncement()
+        XCTAssertFalse(glow.isPillShown, "nothing would take it away later")
+        XCTAssertNil(glow.hitTest(onPill))
+
+        // The key window: the pointer keeps the pill…
+        var isKey = true
+        glow.tracksPointer = { _ in isKey }
+        glow.show(nil, moving: false)
+        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
+        glow.endAnnouncement()
+        XCTAssertTrue(glow.isPillShown, "under the pointer")
+        XCTAssertTrue(glow.hitTest(onPill) === glow)
+        let other = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        other.isReleasedWhenClosed = false
+        defer { other.close() }
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: other)
+        XCTAssertTrue(glow.isPillShown, "another window's business")
+        // …until its window stops being the key one.
+        isKey = false
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        XCTAssertFalse(glow.isPillShown)
+        XCTAssertNil(glow.hitTest(onPill), "the click goes to the terminal")
+
+        // Its first seconds are its own, key window or not. (The pointer
+        // rests on the glow: nothing but the window says it is gone.)
+        glow.pointerLocation = { [unowned glow] _ in
+            glow.convert(NSPoint(x: glow.hoverStrip.midX, y: glow.hoverStrip.midY), to: nil)
+        }
+        glow.show(nil, moving: false)
+        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
+        glow.pointerEntered(.glow)
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        XCTAssertTrue(glow.isPillShown, "still announcing")
+        glow.endAnnouncement()
+        XCTAssertFalse(glow.isPillShown, "the pointer that was on the glow counts no more")
     }
 
     /// The pointer resting on the glow brings the pill back, clear of the
@@ -573,12 +603,20 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
         sidebar.animates = false
         XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 0)
+        sidebar.animates = true
+        XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
     }
 }
 
 /// Counted from a notification block, which Swift takes for concurrent.
 private final class Count: @unchecked Sendable {
     var value = 0
+}
+
+/// A classifier whose run never starts within a test: the test gives the
+/// verdicts itself.
+private final class UnreachedClassifier: TurnEndClassifier, @unchecked Sendable {
+    func classify(_ message: String) async -> TurnEndVerdict { .unknown }
 }
 
 /// The lights in a window: when they may move, the turn end's sweep, the
@@ -638,14 +676,14 @@ final class AgentLightShellTests: XCTestCase {
     }
 
     private func info(_ workspace: WorkspaceState, index: Int, in shell: NiruxShellView, statuses: [AgentStatus],
-                      reasons: [Int: AgentAttentionReason] = [:], turnEnds: [Int: TimeInterval] = [:]) -> WorkspaceInfo {
+                      reasons: [Int: AgentAttentionReason] = [:]) -> WorkspaceInfo {
         let isActive = shell.activeWorkspace === workspace
         let columns = workspace.columns.enumerated().map { offset, column in
             ColumnInfo(
                 index: offset, processName: "claude", abbreviatedCwd: nil,
                 isFocused: isActive && offset == workspace.focusedIndex, isWebView: false, webTitle: nil,
                 terminalTitle: nil, agentStatus: statuses[offset], isEditor: false, editorFileName: nil,
-                attentionReason: reasons[offset], id: column.id, turnEndedAt: turnEnds[offset] ?? 0
+                attentionReason: reasons[offset], id: column.id
             )
         }
         return WorkspaceInfo(
@@ -755,20 +793,42 @@ final class AgentLightShellTests: XCTestCase {
         }
     }
 
-    @discardableResult
-    private func hook(
-        _ name: AgentHookEvent.Name, kind: AgentHookEvent.Kind = .claude, finalMessage: String? = nil, on column: ColumnState
-    ) throws -> AgentHookOutcome {
-        try XCTUnwrap(column.pty).applyAgentHook(
-            AgentHookEvent(kind: kind, name: name, finalMessage: finalMessage, timestamp: Date().timeIntervalSince1970),
-            isUserFocused: false
-        )
+    /// The hook centre, wired to `shell` as the app wires the shared one,
+    /// with the turn-end classifier on: a final message waits for its
+    /// verdict, which the test gives.
+    private func hookCenter(for shell: NiruxShellView) -> AgentHookCenter {
+        let center = AgentHookCenter()
+        center.turnEndClassifier = UnreachedClassifier()
+        center.resolver = { [weak shell] uuid in shell?.resolveAgentColumn(uuid: uuid) }
+        center.onTurnDone = { [weak shell] resolution, endedAt in
+            shell?.agentTurnDone(in: resolution.column, endedAt: endedAt)
+        }
+        return center
     }
 
-    /// Through the sidebar's own refresh: a prompt lights the column, and
-    /// the turn's end sweeps it once, then nothing.
+    /// A hook event as the centre routes it: its column takes it, then
+    /// the centre settles the turn end it may be.
+    @discardableResult
+    private func hook(
+        _ name: AgentHookEvent.Name, kind: AgentHookEvent.Kind = .claude, finalMessage: String? = nil,
+        on column: ColumnState, of shell: NiruxShellView, through center: AgentHookCenter
+    ) throws -> AgentHookOutcome {
+        let uuid = try XCTUnwrap(column.agentUUID)
+        let event = AgentHookEvent(
+            kind: kind, name: name, agentUUID: uuid, finalMessage: finalMessage, timestamp: Date().timeIntervalSince1970
+        )
+        let outcome = try XCTUnwrap(column.pty).applyAgentHook(event, isUserFocused: false)
+        let resolution = try XCTUnwrap(shell.resolveAgentColumn(uuid: uuid))
+        center.settleTurnEnd(of: event, outcome: outcome, in: resolution, waitsOnParent: false)
+        return outcome
+    }
+
+    /// Through the hook centre and the sidebar's own refresh: a prompt
+    /// lights the column, and the turn's end sweeps it once, then nothing.
     func testAColumnLightsWhileItsAgentWorksAndSweepsAtItsTurnsEnd() throws {
         try withShell { shell, _, _ in
+            let center = hookCenter(for: shell)
+            shell.sidebar.isExpanded = true
             let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
             // A process table that can't be read leaves the agent as its
             // hooks say.
@@ -776,7 +836,8 @@ final class AgentLightShellTests: XCTestCase {
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(column.light)
 
-            try hook(.userPromptSubmit, on: column)
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
+            XCTAssertTrue(shell.agentLights.endedTurns.isEmpty, "a prompt ends nothing")
             shell.updateSidebar(snapshot: unread)
             let light = try XCTUnwrap(column.light)
             XCTAssertEqual(light.light, .working)
@@ -784,36 +845,67 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertTrue(light.isSoft, "the focused column")
             XCTAssertFalse(light.isSweeping)
 
-            XCTAssertTrue(shell.sidebar.turnEndedAt.isEmpty)
-            try hook(.stop, on: column)
+            XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty)
+            try hook(.stop, on: column, of: shell, through: center)
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light, "then nothing")
             XCTAssertTrue(light.isSweeping)
+            XCTAssertTrue(shell.agentLights.endedTurns.isEmpty, "once")
             let workspaceID = try XCTUnwrap(shell.activeWorkspace?.id)
-            XCTAssertNotNil(shell.sidebar.turnEndedAt[workspaceID], "and its row draws its check")
+            XCTAssertEqual(Array(shell.sidebar.turnEndNotedAt.keys), [workspaceID], "and its row draws its check")
+            XCTAssertEqual(
+                shell.sidebar.expandedViews.filter { $0.identifier == SidebarWorkspaceCardRenderer.turnEndCheckID }.count, 1
+            )
+        }
+    }
+
+    /// A turn's end draws its check on the row of the workspace it ended
+    /// in, and on no other.
+    func testATurnsEndShowsOnItsOwnWorkspacesRow() throws {
+        try withShell { shell, _, folder in
+            shell.sidebar.isExpanded = true
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: folder)
+            let second = try XCTUnwrap(shell.activeWorkspace)
+            let infos = [
+                info(first, index: 0, in: shell, statuses: [.idle]), info(second, index: 1, in: shell, statuses: [.idle])
+            ]
+            shell.sidebar.update(profiles: [], workspaces: infos)
+            shell.agentTurnDone(in: second.columns[0], endedAt: 1)
+            shell.updateAgentLights(infos: infos)
+            XCTAssertEqual(Array(shell.sidebar.turnEndNotedAt.keys), [second.id])
         }
     }
 
     /// A Claude turn end whose final message is being read sweeps once it
-    /// is found done, without waiting for a heartbeat. Codex's own report
-    /// counts as a turn end too.
+    /// is found done, without waiting for a heartbeat; one found to ask
+    /// doesn't. Codex's report sweeps at once, whatever its output says
+    /// of work meanwhile.
     func testAVerdictSettlesTheSweep() throws {
         try withShell { shell, _, _ in
-            let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
-            let pty = try XCTUnwrap(column.pty)
+            let center = hookCenter(for: shell)
+            shell.sidebar.isExpanded = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let column = try XCTUnwrap(workspace.columns.first)
+            let uuid = try XCTUnwrap(column.agentUUID)
             let unread = ProcessSnapshot(entries: [])
             shell.updateSidebar(snapshot: unread)
-            try hook(.userPromptSubmit, on: column)
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
             shell.updateSidebar(snapshot: unread)
             let light = try XCTUnwrap(column.light)
 
-            let request = try XCTUnwrap(hook(.stop, finalMessage: "All done.", on: column).turnEnd)
-            XCTAssertTrue(pty.awaitsAnyTurnEndVerdict)
+            let request = try XCTUnwrap(
+                hook(.stop, finalMessage: "All done.", on: column, of: shell, through: center).turnEnd
+            )
+            XCTAssertTrue(shell.agentLights.endedTurns.isEmpty, "not before it is known to be done")
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light)
-            XCTAssertFalse(light.isSweeping, "not before it is known to be done")
+            XCTAssertFalse(light.isSweeping)
+            XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty, "nor a check on its row")
 
-            XCTAssertNil(pty.applyTurnEndVerdict(.done, for: request, isUserFocused: false))
+            center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
             XCTAssertFalse(shell.isMetadataRefreshScheduled)
             shell.turnEndSettled()
             XCTAssertTrue(shell.isMetadataRefreshScheduled, "a refresh of its own, not the next heartbeat's")
@@ -822,31 +914,113 @@ final class AgentLightShellTests: XCTestCase {
             shell.updateSidebar(snapshot: unread)
             XCTAssertTrue(light.isSweeping)
 
-            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            // The next turn asks. (Never the notification center: it
+            // aborts a test run.)
+            column.onAgentAttention = { _ in }
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
+            let asking = try XCTUnwrap(
+                hook(.stop, finalMessage: "Let me know.", on: column, of: shell, through: center).turnEnd
+            )
+            center.applyTurnEndVerdict(.asks, for: asking, agentUUID: uuid)
+            XCTAssertTrue(shell.agentLights.endedTurns.isEmpty, "amber, no sweep")
+
             workspace.addColumn()
             let codex = try XCTUnwrap(workspace.columns.last)
-            XCTAssertEqual(codex.pty?.agentTurnEndedAt, 0)
-            try hook(.turnComplete, kind: .codex, on: codex)
-            XCTAssertGreaterThan(codex.pty?.agentTurnEndedAt ?? 0, 0, "Codex's report is a turn end as well")
+            workspace.focusedIndex = 1
+            shell.relayout(animated: false)
+            try hook(.turnComplete, kind: .codex, on: codex, of: shell, through: center)
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [codex.id])
+            // Its closing output reads as work until it falls silent.
+            shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: [.idle, .working])])
+            XCTAssertEqual(codex.light?.isSweeping, true)
+        }
+    }
+
+    /// A prompt, or a tool call, that came with the Stop in the same batch
+    /// of hook events: the agent works again, and nothing sweeps "done".
+    func testATurnEndLeftBehindSweepsNothing() throws {
+        try withShell { shell, _, _ in
+            let center = hookCenter(for: shell)
+            let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
+            let unread = ProcessSnapshot(entries: [])
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
+            shell.updateSidebar(snapshot: unread)
+            let light = try XCTUnwrap(column.light)
+
+            try hook(.stop, on: column, of: shell, through: center)
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
+            shell.updateSidebar(snapshot: unread)
+            XCTAssertEqual(light.light, .working)
+            XCTAssertFalse(light.isSweeping)
+            XCTAssertTrue(shell.agentLights.endedTurns.isEmpty)
         }
     }
 
     func testNoSweepWhileMotionIsReduced() throws {
         try withShell(reducesMotion: true) { shell, _, _ in
+            let center = hookCenter(for: shell)
+            shell.sidebar.isExpanded = true
             let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
             let unread = ProcessSnapshot(entries: [])
             shell.updateSidebar(snapshot: unread)
-            try hook(.userPromptSubmit, on: column)
+            try hook(.userPromptSubmit, on: column, of: shell, through: center)
             shell.updateSidebar(snapshot: unread)
             let light = try XCTUnwrap(column.light)
             XCTAssertEqual(light.light, .working)
             XCTAssertFalse(light.isMoving, "steady")
 
-            try hook(.stop, on: column)
+            try hook(.stop, on: column, of: shell, through: center)
+            XCTAssertEqual(Array(shell.agentLights.endedTurns.keys), [column.id])
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light)
             XCTAssertFalse(light.isSweeping)
-            XCTAssertTrue(shell.sidebar.turnEndedAt.isEmpty, "nor a check on its row")
+            XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty, "nor a check on its row")
+        }
+    }
+
+    /// A sweep says the turn just ended: one that can't play now (its
+    /// column is out of view) never plays later.
+    func testASweepOutOfViewIsNotKeptForLater() throws {
+        try withShell { shell, _, _ in
+            let workspace = try fourColumns(in: shell)
+            let idle = Array(repeating: AgentStatus.idle, count: 4)
+            shell.agentTurnDone(in: workspace.columns[3], endedAt: 1)
+            shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: idle)])
+            XCTAssertTrue(shell.agentLights.endedTurns.isEmpty)
+            XCTAssertNotEqual(workspace.columns[3].light?.isSweeping, true)
+
+            workspace.focusedIndex = 3
+            shell.relayout(animated: false)
+            shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: idle)])
+            XCTAssertNotEqual(workspace.columns[3].light?.isSweeping, true, "old news")
+        }
+    }
+
+    /// One definition of "in view" (`WorkspaceState.showsColumn(at:)`): a
+    /// column that shows only a sliver is out of view for the edge that
+    /// names it and for its own light alike, which doesn't pulse there.
+    func testASliverOfAColumnIsOutOfView() throws {
+        try withShell { shell, _, _ in
+            let workspace = try fourColumns(in: shell)
+            for (column, fraction) in zip(workspace.columns, [0.48, 0.48, 0.4, 0.4]) { column.widthFraction = fraction }
+            shell.relayout(animated: false)
+            let viewport = workspace.containerView.frame.width
+            let sliver = viewport - workspace.columns[2].view.frame.minX
+            XCTAssertGreaterThan(sliver, 0, "it shows")
+            XCTAssertLessThan(sliver, NiruxShellView.minimumShownColumnWidth, "but only a sliver")
+            XCTAssertTrue(workspace.showsColumn(at: 1))
+            XCTAssertFalse(workspace.showsColumn(at: 2))
+            XCTAssertFalse(workspace.showsColumn(at: 9))
+
+            shell.updateAgentLights(infos: [info(
+                workspace, index: 0, in: shell, statuses: [.idle, .needsAttention, .needsAttention, .idle],
+                reasons: [1: permission, 2: permission]
+            )])
+            XCTAssertEqual(shell.edgeGlowRight.target?.columnID, workspace.columns[2].id, "the edge names it")
+            XCTAssertEqual(workspace.columns[2].light?.light, .alert(.waiting))
+            XCTAssertEqual(workspace.columns[2].light?.isMoving, false, "its own light doesn't pulse on top")
+            XCTAssertEqual(workspace.columns[1].light?.isMoving, true)
         }
     }
 
@@ -936,14 +1110,44 @@ final class AgentLightShellTests: XCTestCase {
 
             // Its turn ending meanwhile sweeps nothing: the column is leaving.
             let neighbour = try XCTUnwrap(workspace.columns[1].light)
+            shell.agentTurnDone(in: workspace.columns[0], endedAt: 1)
+            shell.agentTurnDone(in: workspace.columns[1], endedAt: 1)
             shell.updateAgentLights(infos: [info(
-                workspace, index: 0, in: shell, statuses: [.idle, .idle, .working, .working], turnEnds: [0: 5, 1: 5]
+                workspace, index: 0, in: shell, statuses: [.idle, .idle, .working, .working]
             )])
             XCTAssertFalse(light.isSweeping)
             XCTAssertTrue(neighbour.isSweeping)
 
             workspace.closeColumn(at: 0)
             XCTAssertNil(light.superview)
+        }
+    }
+
+    /// A close that doesn't happen after all (the column's sibling went
+    /// first, and a workspace keeps its last column) gives the column its
+    /// light back at once.
+    func testAColumnThatStaysAfterAllGetsItsLightBack() throws {
+        try withShell { shell, _, _ in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn()
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            shell.updateAgentLights(infos: [info(workspace, index: 0, in: shell, statuses: [.working, .working])])
+            let column = workspace.columns[0]
+            let light = try XCTUnwrap(column.light)
+            shell.closeActiveColumn()
+            XCTAssertTrue(column.isClosing)
+            XCTAssertNil(light.light)
+            column.view.alphaValue = 0
+
+            // Its sibling goes during the exit animation, whose end finds
+            // nothing left to remove.
+            workspace.closeColumn(at: 1)
+            shell.finishColumnClose(column, in: workspace)
+            XCTAssertEqual(workspace.columns.count, 1)
+            XCTAssertFalse(column.isClosing)
+            XCTAssertEqual(column.view.alphaValue, 1)
+            XCTAssertEqual(light.light, .working, "not at the next refresh")
         }
     }
 

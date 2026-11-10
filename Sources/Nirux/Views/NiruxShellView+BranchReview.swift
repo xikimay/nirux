@@ -119,11 +119,7 @@ extension NiruxShellView {
         guard let window, window.occlusionState.contains(.visible), let workspace = activeWorkspace,
               let index = workspace.columns.firstIndex(where: { $0.branchReview === review && !$0.isClosing })
         else { return false }
-        let frame = workspace.columns[index].view.frame
-        return index == workspace.focusedIndex || Self.showsColumn(
-            left: frame.minX, width: frame.width, cameraX: workspace.attentionCameraX,
-            viewportWidth: workspace.containerView.frame.width
-        )
+        return index == workspace.focusedIndex || workspace.showsColumn(at: index)
     }
 
     /// The started reviews on screen read their branch again if it changed

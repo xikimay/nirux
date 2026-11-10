@@ -330,9 +330,9 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.apply(event(.sessionStart, at: 6, source: "resume"), isUserFocused: false).firedAttention)
     }
 
-    /// A prompt that goes in before the verdict (one Nirux types, for PR
-    /// Feedback's Address say) alerts as the turn end would have, unless
-    /// the user looks at the column.
+    /// A prompt that goes in before the verdict, the user not at the
+    /// column, alerts as the turn end would have (unless their click typed
+    /// it: see `testPromptFromTheUsersClickReadsTheTurnEnd`).
     func testPromptBeforeTheVerdictAlertsAsBefore() throws {
         endTurn()
         let prompt = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
@@ -499,6 +499,33 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(machine.attentionReason, .message(nil), "the notification still says why")
         // Settled with it: a prompt hours later alerts for nothing.
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 9_000), isUserFocused: false).firedAttention)
+    }
+
+    /// The user's click types a prompt (Address PR Feedback, Why Failed):
+    /// the turn end before is read and its question behind them, so
+    /// neither the prompt nor a late verdict alerts.
+    func testPromptFromTheUsersClickReadsTheTurnEnd() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        machine.notePromptFromUser()
+        XCTAssertTrue(machine.isQuietTurnEnd, "read, and still quiet: no attention that never alerted")
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "a late verdict drops")
+        XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
+
+        // A question already asked is behind them too.
+        machine = AgentStatusMachine()
+        let asked = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.applyTurnEndVerdict(.asks, for: asked, isUserFocused: false)
+        XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
+        machine.notePromptFromUser()
+        XCTAssertNil(machine.visibleQuestion(foreground: claude))
+
+        // Claude went on before its verdict: that turn end is read as well.
+        machine = AgentStatusMachine()
+        endTurn()
+        _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
+        machine.notePromptFromUser()
+        XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 7), isUserFocused: false).firedAttention)
     }
 
     /// Nirux types nothing (Mission messages, Lead notices) into a prompt
@@ -797,6 +824,99 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(freed, .done, "a finished run frees its place")
     }
 
+    // MARK: - A turn that is done
+
+    private func stopAfterAStopHook(at offset: TimeInterval) -> AgentHookEvent {
+        AgentHookEvent(kind: .claude, name: .stop, sessionID: "s", stopHookActive: true, timestamp: t0 + offset)
+    }
+
+    /// A turn end shows as done once nothing says otherwise: not while its
+    /// verdict is on its way, not when it asks or failed, not while a
+    /// dialog waits, and not once the agent moved again.
+    func testADoneTurnEndSaysSoOnceItIsKnown() throws {
+        // Nobody reads the message (the option is off): done at the Stop.
+        endTurn(message: nil)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 5))
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 4), "not this turn end")
+        XCTAssertFalse(machine.isTurnDone(endedAt: 0))
+        _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 5), "Claude went on by itself")
+
+        // Its message is being read: not before the verdict.
+        machine = AgentStatusMachine()
+        let read = try XCTUnwrap(endTurn(message: offer).turnEnd)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 5))
+        _ = machine.applyTurnEndVerdict(.done, for: read, isUserFocused: false)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 5))
+
+        machine = AgentStatusMachine()
+        let unreadable = try XCTUnwrap(endTurn(message: offer).turnEnd)
+        _ = machine.applyTurnEndVerdict(.unknown, for: unreadable, isUserFocused: false)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 5), "nothing says it asks")
+
+        machine = AgentStatusMachine()
+        let asking = try XCTUnwrap(endTurn(message: offer).turnEnd)
+        _ = machine.applyTurnEndVerdict(.asks, for: asking, isUserFocused: false)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 5))
+
+        // In the column the user looks at nothing alerts and no verdict is
+        // asked for: a message that ends on a question still isn't done.
+        machine = AgentStatusMachine()
+        XCTAssertNil(endTurn(message: "Tests pass. Ready to push?", focused: true).turnEnd)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 5))
+        machine = AgentStatusMachine()
+        XCTAssertNil(endTurn(message: "Tests pass.", focused: true).turnEnd)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 5))
+
+        // A subagent's dialog still waits on the user.
+        machine = AgentStatusMachine()
+        _ = machine.apply(event(.userPromptSubmit, at: 1), isUserFocused: false)
+        _ = machine.apply(event(.permissionRequest, at: 3, agent: "sub", tool: "Bash"), isUserFocused: false)
+        _ = machine.apply(event(.stop, at: 5), isUserFocused: false)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 5))
+
+        // A turn an API error ended.
+        machine = AgentStatusMachine()
+        _ = machine.apply(event(.userPromptSubmit, at: 1), isUserFocused: false)
+        _ = machine.apply(event(.stopFailure, at: 5), isUserFocused: false)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 5))
+
+        // Codex reports the end of a turn, and nothing after it.
+        machine = AgentStatusMachine()
+        _ = machine.apply(event(.turnComplete, at: 5, kind: .codex), isUserFocused: false)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 5))
+    }
+
+    /// A Stop hook that sends Claude back to work (a review gate): nothing
+    /// tells the Stop it is about to block from the turn's last one. Once
+    /// such a hook showed itself, only the Stop that follows it is known
+    /// to end the turn.
+    func testAStopThatMayNotBeTheEndIsNotDone() {
+        endTurn(message: nil)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 5), "no such hook is known yet")
+        // The hook blocked that Stop: the turn goes on, then ends.
+        _ = machine.apply(event(.preToolUse, at: 6, tool: "Bash"), isUserFocused: false)
+        _ = machine.apply(stopAfterAStopHook(at: 8), isUserFocused: false)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 8), "the Stop that follows the hook")
+
+        _ = machine.apply(event(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = machine.apply(event(.stop, at: 12), isUserFocused: false)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 12), "the hook may block this one")
+        _ = machine.apply(stopAfterAStopHook(at: 14), isUserFocused: false)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 14))
+
+        _ = machine.apply(event(.sessionStart, at: 15, source: "compact"), isUserFocused: false)
+        _ = machine.apply(event(.userPromptSubmit, at: 16), isUserFocused: false)
+        _ = machine.apply(event(.stop, at: 17), isUserFocused: false)
+        XCTAssertFalse(machine.isTurnDone(endedAt: t0 + 17), "compacting changes no hook")
+
+        // Another conversation may run under other hooks.
+        _ = machine.apply(event(.sessionStart, at: 20, source: "clear"), isUserFocused: false)
+        _ = machine.apply(event(.userPromptSubmit, at: 21), isUserFocused: false)
+        _ = machine.apply(event(.stop, at: 25), isUserFocused: false)
+        XCTAssertTrue(machine.isTurnDone(endedAt: t0 + 25))
+    }
+
     // MARK: - Routing the verdict
 
     /// Asks, but without a "?": the model decides (see `endsOnQuestion`).
@@ -841,6 +961,18 @@ final class TurnEndClassificationTests: XCTestCase {
         let (asksCenter, _, asksColumn, asksRequest, asksAlerts) = try turnEndColumn()
         asksCenter.applyTurnEndVerdict(.asks, for: asksRequest, agentUUID: try XCTUnwrap(asksColumn.agentUUID))
         XCTAssertEqual(asksAlerts.value, [.askedInReply("Let me know if I should merge it.")])
+    }
+
+    /// Through the column method `sendTypedPrompt` types with (reaching
+    /// `sendTypedPrompt` itself takes a live `claude` process): the
+    /// verdict on its way drops and the prompt alerts for nothing.
+    func testPromptTypedForTheUserAlertsForNothing() throws {
+        let (center, _, column, request, alerts) = try turnEndColumn()
+        let pty = try XCTUnwrap(column.pty)
+        pty.typePromptFromUser("Address this feedback\r")
+        center.applyTurnEndVerdict(.asks, for: request, agentUUID: try XCTUnwrap(column.agentUUID))
+        XCTAssertEqual(alerts.value, [])
+        XCTAssertFalse(pty.applyAgentHook(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
     }
 
     func testClassifierVerdictReachesTheColumn() async throws {
@@ -920,13 +1052,92 @@ final class TurnEndClassificationTests: XCTestCase {
         withExtendedLifetime(center) {}
     }
 
-    /// A Mission child that asked its parent waits on it: quiet, unread.
+    /// The centre says a turn is done once, when its verdict says so: its
+    /// column sweeps. Not for a turn that asks, nor for old news.
+    func testADoneVerdictSaysTheTurnIsDone() throws {
+        let start = t0
+        var done: [ObjectIdentifier] = []
+        let (center, _, column, request, _) = try turnEndColumn()
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.now = { start + 6 }
+        var endedAt: [TimeInterval] = []
+        center.onTurnDone = { resolution, time in
+            done.append(ObjectIdentifier(resolution.column))
+            endedAt.append(time)
+        }
+        center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
+        XCTAssertEqual(done, [ObjectIdentifier(column)])
+        XCTAssertEqual(endedAt, [start + 5], "the turn's end, not the verdict's time")
+        center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
+        XCTAssertEqual(done.count, 1, "a verdict nobody waits for says nothing")
+
+        let (asking, _, askingColumn, askingRequest, _) = try turnEndColumn()
+        asking.now = { start + 6 }
+        asking.onTurnDone = { resolution, _ in done.append(ObjectIdentifier(resolution.column)) }
+        asking.applyTurnEndVerdict(.asks, for: askingRequest, agentUUID: try XCTUnwrap(askingColumn.agentUUID))
+        XCTAssertEqual(done.count, 1, "a turn that asks isn't done")
+
+        // A verdict that took too long, a backlog replayed at launch.
+        let (late, _, lateColumn, lateRequest, _) = try turnEndColumn()
+        late.now = { start + 5 + AgentHookCenter.turnDoneFreshness }
+        late.onTurnDone = { resolution, _ in done.append(ObjectIdentifier(resolution.column)) }
+        late.applyTurnEndVerdict(.done, for: lateRequest, agentUUID: try XCTUnwrap(lateColumn.agentUUID))
+        XCTAssertEqual(done.count, 1, "no news")
+    }
+
+    /// With no verdict to wait for (nobody reads the message, or Codex
+    /// reports), the turn end itself says it.
+    func testATurnEndNobodyReadsIsDoneAtOnce() throws {
+        let workspace = WorkspaceState(title: "ws", cwd: NSTemporaryDirectory())
+        let column = try XCTUnwrap(workspace.columns.first)
+        let pty = try XCTUnwrap(column.pty)
+        column.onAgentAttention = { _ in }
+        let center = AgentHookCenter()
+        let resolution = AgentHookCenter.Resolution(
+            workspace: workspace, column: column, columnIndex: 0, isUserFocused: false, approvalHold: .never
+        )
+        let start = t0
+        center.now = { start + 6 }
+        var done = 0
+        center.onTurnDone = { _, _ in done += 1 }
+        let settle = { (event: AgentHookEvent, waitsOnParent: Bool) in
+            center.settleTurnEnd(
+                of: event, outcome: pty.applyAgentHook(event, isUserFocused: false), in: resolution,
+                waitsOnParent: waitsOnParent
+            )
+        }
+
+        settle(event(.userPromptSubmit, at: 1), false)
+        XCTAssertEqual(done, 0, "a prompt ends nothing")
+        settle(event(.stop, at: 5), false)
+        XCTAssertEqual(done, 1)
+        // A Mission child that asked its parent ended its turn to wait.
+        settle(event(.userPromptSubmit, at: 5.2), false)
+        settle(event(.stop, at: 5.4), true)
+        XCTAssertEqual(done, 1)
+        settle(event(.turnComplete, at: 5.6, kind: .codex), false)
+        XCTAssertEqual(done, 2, "Codex's report")
+
+        // And the way a hook event really comes in: routed by its UUID.
+        center.resolver = { _ in resolution }
+        let uuid = try XCTUnwrap(column.agentUUID)
+        center.dispatch(AgentHookEvent(kind: .codex, name: .turnComplete, agentUUID: uuid, timestamp: start + 5.8))
+        XCTAssertEqual(done, 3)
+    }
+
+    /// A Mission child that asked its parent waits on it: quiet, unread,
+    /// and not done.
     func testChildWaitingOnItsParentStaysQuiet() throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
         let classifier = FakeClassifier(verdict: .asks)
         center.turnEndClassifier = classifier
+        let start = t0
+        center.now = { start + 6 }
+        var done = 0
+        center.onTurnDone = { _, _ in done += 1 }
         let uuid = try XCTUnwrap(column.agentUUID)
         center.classifyTurnEnd(request, agentUUID: uuid, waitsOnParent: true)
+        XCTAssertEqual(done, 0)
         XCTAssertEqual(alerts.value.count, 0)
         XCTAssertEqual(column.pty?.isQuietTurnEnd, true)
         // Settled as done at once: no verdict is awaited any more.

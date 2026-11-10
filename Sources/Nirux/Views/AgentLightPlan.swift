@@ -98,12 +98,9 @@ struct AgentLightPlan: Equatable {
         let headline = best.column.attentionSummary?.headline ?? (best.signal == .waiting ? "needs you" : "stopped")
         return EdgeAlert(
             signal: best.signal, workspaceID: best.workspace.id, columnID: best.column.id,
-            text: "\(shortened(name)) \(headline)"
+            // A title may carry anything: one clean line, cut to fit.
+            text: "\(AgentText.clean(name, maxLength: nameLimit) ?? "Agent") \(headline)"
         )
-    }
-
-    private static func shortened(_ name: String) -> String {
-        name.count > nameLimit ? name.prefix(nameLimit - 1).trimmingCharacters(in: .whitespaces) + "…" : name
     }
 
     /// The user is back in the app: the columns' waits and errors are
@@ -116,37 +113,4 @@ struct AgentLightPlan: Equatable {
 
     /// The agents the edges stand for.
     var edgeAlerts: [EdgeAlert] { [left, right, top, bottom].compactMap { $0 } }
-}
-
-/// Finds the turns that just ended, for one sweep of light each: only
-/// those an agent reported itself (`ColumnInfo.turnEndedAt`). An agent
-/// without hooks that falls silent may sit in its own prompt, and one that
-/// died reports nothing: neither sweeps. A Claude turn end whose final
-/// message is still being read waits: it sweeps if the turn is done, and
-/// turns amber instead if it asks something.
-struct TurnEndSweeps {
-    /// The last turn end seen of each column.
-    private var seen: [UUID: TimeInterval] = [:]
-
-    /// The columns whose turn ended since the last call, with nothing to
-    /// ask and no work going on.
-    mutating func update(columns: [ColumnInfo]) -> Set<UUID> {
-        var ended: Set<UUID> = []
-        var current: [UUID: TimeInterval] = [:]
-        for column in columns {
-            guard let id = column.id else { continue }
-            // Owed until its verdict comes.
-            current[id] = column.awaitsTurnEndVerdict ? seen[id] ?? column.turnEndedAt : column.turnEndedAt
-            // A column seen for the first time ended nothing in front of
-            // the user.
-            guard !column.awaitsTurnEndVerdict, let last = seen[id], column.turnEndedAt > last else { continue }
-            // A wait or an error has its own light, and a Mission child
-            // that asked its parent ended its turn to wait for the answer.
-            let asks = column.attention.map { $0 != .finished } ?? false || column.missionQuestion != nil
-            if column.agentStatus != .working, !asks { ended.insert(id) }
-        }
-        // Closed columns, and those of a space left behind, are forgotten.
-        seen = current
-        return ended
-    }
 }
