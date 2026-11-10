@@ -593,6 +593,53 @@ extension NiruxShellView {
         }
     }
 
+    /// Only the space on screen is laid out. A terminal whose shell starts
+    /// in another space (a task its Lead started there, an agent Resume All
+    /// Agents started) would get no surface: what it prints would wait
+    /// unparsed, its PTY stay 80x24 and its terminal queries go unanswered.
+    /// As its shell starts it gets the size it will have on screen, and
+    /// keeps its surface when shown; it draws nothing meanwhile (see
+    /// `syncTerminalOcclusion`). Only that column: a hidden workspace's
+    /// browsers and editors don't render off screen.
+    func sizeTerminalOffScreen(_ column: ColumnState, in workspace: WorkspaceState) {
+        guard isOffScreen(workspace), column.terminalView != nil else { return }
+        let viewport = workspaceViewportSize
+        guard viewport.width > 0, viewport.height > 0 else { return }
+        let size = workspace.size(of: column, viewportWidth: viewport.width, height: viewport.height)
+        // Built hidden, whatever layout ran last.
+        column.terminalView?.setSurfaceVisible(false)
+        column.view.frame = NSRect(origin: column.view.frame.origin, size: size)
+        column.layoutWithHeader(width: size.width, height: size.height)
+    }
+
+    /// In another space than the one on screen, and not closing.
+    private func isOffScreen(_ workspace: WorkspaceState) -> Bool {
+        workspace.profileID != activeProfileID && !workspace.isClosing
+    }
+
+    /// The viewport changed size (window, sidebar, status bar): hidden
+    /// terminals that have a size take the new one, so their PTYs follow
+    /// as they would on screen.
+    private func resizeTerminalsOffScreen(to size: NSSize) {
+        guard size != offScreenViewportSize else { return }
+        offScreenViewportSize = size
+        for workspace in workspaces where isOffScreen(workspace) {
+            for column in workspace.columns where column.terminalView != nil && !column.view.frame.isEmpty {
+                sizeTerminalOffScreen(column, in: workspace)
+            }
+        }
+    }
+
+    /// Displays woke: a hidden terminal whose shell runs without a surface
+    /// (its build failed) gets its size again, which builds one.
+    func retryTerminalSurfacesOffScreen() {
+        for workspace in workspaces where isOffScreen(workspace) {
+            for column in workspace.columns where column.isShellStartScheduled && !column.hasSurface {
+                sizeTerminalOffScreen(column, in: workspace)
+            }
+        }
+    }
+
     func layoutWorkspaceStrip(_ layout: StripLayout) {
         let viewportW = layout.viewportW
         let rowH = layout.rowH
@@ -604,6 +651,7 @@ extension NiruxShellView {
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
+        resizeTerminalsOffScreen(to: NSSize(width: viewportW, height: rowH))
         // Animated path: a vertical slide over the direct frame change.
         slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 

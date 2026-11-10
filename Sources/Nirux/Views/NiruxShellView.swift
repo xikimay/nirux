@@ -9,6 +9,15 @@ final class NiruxShellView: NSView {
     /// Counts sidebar toggles: an expansion's delayed step checks that no
     /// toggle came after it.
     var sidebarToggleGeneration = 0
+    /// The size of the workspace on screen, as `relayout` lays it out.
+    var workspaceViewportSize: NSSize {
+        let statusH = statusBar.hasContent ? StatusBarView.height : 0
+        return NSSize(width: bounds.width - sidebarWidth - 1, height: bounds.height - statusH)
+    }
+    /// The viewport size hidden terminals were last given (see
+    /// `resizeTerminalsOffScreen`).
+    var offScreenViewportSize = NSSize.zero
+
     private var sidebarWidth: CGFloat {
         isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
     }
@@ -355,6 +364,10 @@ final class NiruxShellView: NSView {
         workspace.onResumeExitedAgent = { [weak self] targetWorkspace, column in
             self?.resumeExitedAgent(in: targetWorkspace, column: column)
         }
+        workspace.onTerminalStarting = { [weak self] targetWorkspace, column in
+            guard !column.hasSurface else { return }
+            self?.sizeTerminalOffScreen(column, in: targetWorkspace)
+        }
         wireLocalServerProposals(for: workspace)
     }
 
@@ -551,6 +564,7 @@ final class NiruxShellView: NSView {
                         MainActor.assumeIsolated {
                             self?.sendDisplayToTerminals()
                             self?.needsDisplayResync = true
+                            self?.retryTerminalSurfacesOffScreen()
                         }
                     }
                 }

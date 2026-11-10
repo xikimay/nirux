@@ -187,6 +187,8 @@ final class WorkspaceState {
     var onTerminalOpenFile: ((WorkspaceState, String, Int?) -> Void)?
     /// A column's agent died mid-turn and the user asked to resume it.
     var onResumeExitedAgent: ((WorkspaceState, ColumnState) -> Void)?
+    /// A column's shell is about to start (see `ColumnState.onShellStarting`).
+    var onTerminalStarting: ((WorkspaceState, ColumnState) -> Void)?
     /// Bring an existing column of this workspace into view and focus it.
     var onRevealColumn: ((WorkspaceState, Int) -> Void)?
     /// Dev-server proposals — see WorkspaceState+LocalServers.swift.
@@ -655,6 +657,10 @@ extension WorkspaceState {
     }
 
     private func setupAllTracking(for col: ColumnState) {
+        col.onShellStarting = { [weak self, weak col] in
+            guard let self, let col else { return }
+            self.onTerminalStarting?(self, col)
+        }
         setupCwdTracking(for: col)
         setupTitleTracking(for: col)
         setupAgentAttentionTracking(for: col)
@@ -878,6 +884,13 @@ extension WorkspaceState {
     private static let focusCornerRadius: CGFloat = 6
     private static let focusColor = Theme.Color.accent.withAlphaComponent(0.7)
 
+    /// The size `layoutAndScroll` gives `column` (outside fit-all).
+    func size(of column: ColumnState, viewportWidth: CGFloat, height: CGFloat) -> NSSize {
+        let gap = columns.count > 1 ? Self.columnGap : 0
+        let totalGaps = gap * CGFloat(columns.count - 1)
+        return NSSize(width: floor(column.widthFraction * (viewportWidth - totalGaps)), height: height)
+    }
+
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
         fitAll: Bool = false, skipTerminalResize: Bool = false
@@ -895,7 +908,7 @@ extension WorkspaceState {
             for _ in columns { widths.append(columnWidth); totalWidth += columnWidth }
         } else {
             for col in columns {
-                let width = floor(col.widthFraction * (viewportWidth - totalGaps))
+                let width = size(of: col, viewportWidth: viewportWidth, height: height).width
                 widths.append(width); totalWidth += width
             }
         }
