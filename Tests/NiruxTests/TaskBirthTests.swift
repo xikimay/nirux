@@ -250,20 +250,19 @@ final class TaskBirthTests: UIFlowTestCase {
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             let row = shell.convert(try XCTUnwrap(shell.sidebar.rowFrame(workspaceID: workspace.id)), from: shell.sidebar)
 
-            let before = CACurrentMediaTime()
+            // The sidebar's clock stands still: a slow rebuild on a busy
+            // machine can't hide a delay.
+            shell.sidebar.clock = { 3_000 }
             shell.playTaskBirth(of: workspace)
-            let atOnce = try XCTUnwrap(shell.sidebar.rowOpensAt[workspace.id])
-            XCTAssertGreaterThanOrEqual(atOnce, before)
-            XCTAssertLessThanOrEqual(atOnce, CACurrentMediaTime(), "no sheet: nothing to wait for")
+            XCTAssertEqual(shell.sidebar.rowOpensAt[workspace.id], 3_000, "no sheet: nothing to wait for")
             XCTAssertTrue(self.ghosts(in: shell).isEmpty)
 
             let sheet = NSRect(x: 420, y: 280, width: 440, height: 260)
             shell.pendingTaskSheet = try self.picture(at: sheet)
-            let start = CACurrentMediaTime()
             shell.playTaskBirth(of: workspace)
             XCTAssertNil(shell.pendingTaskSheet, "used once")
-            XCTAssertGreaterThanOrEqual(
-                try XCTUnwrap(shell.sidebar.rowOpensAt[workspace.id]), start + NiruxShellView.taskBirthRowDelay,
+            XCTAssertEqual(
+                try XCTUnwrap(shell.sidebar.rowOpensAt[workspace.id]), 3_000 + NiruxShellView.taskBirthRowDelay, accuracy: 0.001,
                 "as the picture lands"
             )
             XCTAssertEqual(self.ghosts(in: shell).count, 1)
