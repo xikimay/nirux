@@ -12,6 +12,7 @@ import GhosttyTerminal
 /// (see `NiruxShellView.sendDisplayToTerminals`); a terminal that has its
 /// link already only binds it to that display.
 enum TerminalDisplayID {
+    static func zzMutation() { setenv("NIRUX_MUTATION", "1", 1) }
     /// The display `view`'s window is on; 0 while it has none (a display
     /// reconfiguring), which still creates the link without binding it.
     static func display(of view: NSView) -> CGDirectDisplayID {

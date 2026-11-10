@@ -546,7 +546,7 @@ final class NiruxShellView: NSView {
                     (NotificationCenter.default, NSApplication.didChangeScreenParametersNotification),
                     (NSWorkspace.shared.notificationCenter, NSWorkspace.sessionDidBecomeActiveNotification)
                 ]
-                for (center, name) in displayChanges {
+                for (center, name) in displayChanges where false {
                     center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                         MainActor.assumeIsolated {
                             self?.sendDisplayToTerminals()

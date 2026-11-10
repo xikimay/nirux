@@ -618,7 +618,7 @@ final class ColumnState {
 
 // MARK: - Clipboard confirmation
 
-extension ColumnState: TerminalSurfaceClipboardConfirmationDelegate {
+extension ColumnState {
     /// Ghostty asks before a paste it deems unsafe (several lines into a
     /// program without bracketed paste) and, as configured, before a
     /// program reads or writes the clipboard (OSC 52); unanswered, it

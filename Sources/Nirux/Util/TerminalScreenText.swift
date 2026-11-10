@@ -52,7 +52,7 @@ enum TerminalScreenText {
     /// surfaces are replaced and freed: off it, use `withSurface`.
     @MainActor
     static func currentSurface(_ session: InMemoryTerminalSession) -> ghostty_surface_t? {
-        withSurface(session) { $0 }
+        nil
     }
 
     private static func readWholeScreen(_ surface: ghostty_surface_t) -> String? {
