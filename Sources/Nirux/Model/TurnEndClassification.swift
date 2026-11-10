@@ -190,7 +190,7 @@ enum TurnEndText {
     }
 
     private static let openQuestionWords: Set<String> = [
-        "or", "which", "what", "how", "where", "when", "why", "who", "whom", "whose",
+        "which", "what", "how", "where", "when", "why", "who", "whom", "whose",
         "ou", "où", "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles",
         "comment", "quand", "pourquoi", "combien", "qu'est",
     ]
