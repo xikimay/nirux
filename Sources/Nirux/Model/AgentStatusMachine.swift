@@ -922,7 +922,6 @@ struct AgentStatusMachine {
         // Another agent works here now: the calls of a `claude` that died
         // mid-turn (no Stop) aren't its own. A shell in front may be a
         // suspended claude's (^Z, Ctrl-G's editor), whose turn goes on.
-        if Self.isRecognizedAgentProcess(fgName), fgName != "claude" { circling.reset() }
         // No hook ever drives an activity-only agent (a Claude or Codex hook
         // under it is a nested run's); a claude's leftover kind would mute
         // its OSC 9 notifications.
@@ -1038,7 +1037,6 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
-        circling.reset()
     }
 }
 

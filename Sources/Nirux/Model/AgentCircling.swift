@@ -28,7 +28,7 @@ enum AgentCirclingHint: Hashable, Sendable {
         case .hung(let count):
             return "May be stuck · \(count) timeouts"
         case .failing(let name, let count):
-            return "May be stuck · \(Self.display(name)) failed \(count)×"
+            return "May be going in circles · \(Self.display(name)) failed \(count) times"
         }
     }
 
@@ -91,7 +91,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
     /// telling), `name` says it to people.
     mutating func noteCallEnded(key: String?, name: String?, end: AgentToolEnd?, at time: TimeInterval) {
         switch end {
-        case .interrupted?, .waited?:
+        case .waited?:
             // The user's doing, or waiting for something: it says nothing
             // of an agent going in circles, either way.
             return
@@ -101,7 +101,7 @@ struct AgentCirclingWatch: Equatable, Sendable {
             lastHungAt = time
             callsSinceHang = 0
             return
-        case .failed?, nil:
+        case .failed?, .interrupted?, nil:
             break
         }
         if hungCount > 0 {
@@ -179,7 +179,6 @@ enum AgentToolOutcome {
         let pastItsLimit = failure ? wasKilledAtItsLimit(payload) : wasMovedToTheBackground(payload)
         // A `sleep 600` outlasting its limit is meant to (12 of the month's
         // 43), and a poll that finds nothing yet isn't an attempt.
-        if command.isWait { return failure || pastItsLimit ? .waited : nil }
         if pastItsLimit { return .hung }
         return failure ? .failed : nil
     }
