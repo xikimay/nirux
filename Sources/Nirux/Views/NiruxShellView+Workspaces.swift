@@ -651,7 +651,6 @@ extension NiruxShellView {
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
-        resizeTerminalsOffScreen(to: NSSize(width: viewportW, height: rowH))
         // Animated path: a vertical slide over the direct frame change.
         slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
