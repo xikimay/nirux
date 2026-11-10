@@ -251,18 +251,25 @@ final class SidebarView: NSView {
     /// actually would.
     private var lastRenderSignature: Int?
 
-    /// When the agent of a row ended its turn (`CACurrentMediaTime`), by
-    /// workspace: the row's mark draws a check for
+    /// When a row began to draw its turn end's check (`CACurrentMediaTime`),
+    /// by workspace: its mark draws it for
     /// `SidebarWorkspaceCardRenderer.checkDuration`, across rebuilds.
-    private(set) var turnEndedAt: [String: CFTimeInterval] = [:]
+    private(set) var turnEndNotedAt: [String: CFTimeInterval] = [:]
 
-    /// The turns that just ended in these workspaces: their rows draw a
-    /// check, if rows may move.
+    /// The turns that just ended in these workspaces: each of their rows
+    /// that shows the grey dot now draws its check, if rows may move (see
+    /// `SidebarWorkspaceCardRenderer.drawsTurnEndCheck`). Nothing is kept
+    /// for a row that can't draw it now (it says something else, it is
+    /// folded away, the sidebar is a rail): a check never shows up late,
+    /// and nothing is rebuilt for nothing.
     func noteTurnEnded(workspaceIDs: Set<String>, now: CFTimeInterval = CACurrentMediaTime()) {
-        turnEndedAt = turnEndedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.checkDuration }
-        guard animates, !workspaceIDs.isEmpty else { return }
-        for id in workspaceIDs { turnEndedAt[id] = now }
-        lastRenderSignature = renderSignature()
+        turnEndNotedAt = turnEndNotedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.checkDuration }
+        guard animates, isExpanded, !workspaceIDs.isEmpty else { return }
+        let rows = lastInfos.filter { row in
+            workspaceIDs.contains(row.id) && listsWorkspace(row) && SidebarWorkspaceCardRenderer.drawsTurnEndCheck(row)
+        }
+        guard !rows.isEmpty else { return }
+        for row in rows { turnEndNotedAt[row.id] = now }
         rebuildContent()
     }
 

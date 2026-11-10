@@ -600,6 +600,8 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
         sidebar.animates = false
         XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 0)
+        sidebar.animates = true
+        XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
     }
 }
 
@@ -809,6 +811,7 @@ final class AgentLightShellTests: XCTestCase {
     func testAColumnLightsWhileItsAgentWorksAndSweepsAtItsTurnsEnd() throws {
         try withShell { shell, _, _ in
             let center = hookCenter(for: shell)
+            shell.sidebar.isExpanded = true
             let column = try XCTUnwrap(shell.activeWorkspace?.columns.first)
             // A process table that can't be read leaves the agent as its
             // hooks say.
@@ -825,7 +828,7 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertTrue(light.isSoft, "the focused column")
             XCTAssertFalse(light.isSweeping)
 
-            XCTAssertTrue(shell.sidebar.turnEndedAt.isEmpty)
+            XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty)
             try hook(.stop, on: column, of: shell, through: center)
             XCTAssertEqual(shell.agentLights.endedTurns, [column.id])
             shell.updateSidebar(snapshot: unread)
@@ -833,7 +836,28 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertTrue(light.isSweeping)
             XCTAssertTrue(shell.agentLights.endedTurns.isEmpty, "once")
             let workspaceID = try XCTUnwrap(shell.activeWorkspace?.id)
-            XCTAssertNotNil(shell.sidebar.turnEndedAt[workspaceID], "and its row draws its check")
+            XCTAssertEqual(Array(shell.sidebar.turnEndNotedAt.keys), [workspaceID], "and its row draws its check")
+            XCTAssertEqual(
+                shell.sidebar.expandedViews.filter { $0.identifier == SidebarWorkspaceCardRenderer.turnEndCheckID }.count, 1
+            )
+        }
+    }
+
+    /// A turn's end draws its check on the row of the workspace it ended
+    /// in, and on no other.
+    func testATurnsEndShowsOnItsOwnWorkspacesRow() throws {
+        try withShell { shell, _, folder in
+            shell.sidebar.isExpanded = true
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: folder)
+            let second = try XCTUnwrap(shell.activeWorkspace)
+            let infos = [
+                info(first, index: 0, in: shell, statuses: [.idle]), info(second, index: 1, in: shell, statuses: [.idle])
+            ]
+            shell.sidebar.update(profiles: [], workspaces: infos)
+            shell.agentTurnDone(in: first.columns[0])
+            shell.updateAgentLights(infos: infos)
+            XCTAssertEqual(Array(shell.sidebar.turnEndNotedAt.keys), [first.id])
         }
     }
 
@@ -860,6 +884,7 @@ final class AgentLightShellTests: XCTestCase {
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light)
             XCTAssertFalse(light.isSweeping)
+            XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty, "nor a check on its row")
 
             center.applyTurnEndVerdict(.done, for: request, agentUUID: uuid)
             XCTAssertEqual(shell.agentLights.endedTurns, [column.id])
@@ -910,7 +935,7 @@ final class AgentLightShellTests: XCTestCase {
             shell.updateSidebar(snapshot: unread)
             XCTAssertNil(light.light)
             XCTAssertFalse(light.isSweeping)
-            XCTAssertTrue(shell.sidebar.turnEndedAt.isEmpty, "nor a check on its row")
+            XCTAssertTrue(shell.sidebar.turnEndNotedAt.isEmpty, "nor a check on its row")
         }
     }
 
