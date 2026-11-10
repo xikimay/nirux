@@ -153,12 +153,6 @@ enum TurnEndText {
         for line in message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).reversed() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             // Counted from the end: an excerpt may have lost a block's start.
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                if inParagraph { return nil }
-                inFence.toggle()
-                continue
-            }
-            if inFence { continue }
             if isProse(trimmed) {
                 inParagraph = true
                 if endsWithQuestionMark(trimmed) { return AgentText.clean(trimmed, maxLength: maxLength) }
@@ -183,7 +177,7 @@ enum TurnEndText {
 
     private static func endsWithQuestionMark(_ line: String) -> Bool {
         var scalars = Array(line.unicodeScalars)
-        while let last = scalars.last, !isQuestionMark(last), isTrailingDecoration(last) { scalars.removeLast() }
+        while let last = scalars.last, last.properties.isWhitespace { scalars.removeLast() }
         return scalars.last.map(isQuestionMark) ?? false
     }
 
