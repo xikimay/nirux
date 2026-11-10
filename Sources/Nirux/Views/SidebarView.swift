@@ -599,7 +599,6 @@ final class SidebarView: NSView {
             toggleInactiveSection()
         case .catchUp(let action):
             // Its second press lands on what moved under the pointer.
-            lastButtonActionAt = event.timestamp
             onCatchUpAction?(action)
         case .link(let url, let label):
             if let target = Self.missionQuestionTarget(url) {
