@@ -11,7 +11,7 @@ extension ColumnState {
     /// agent waits to resume runs nothing; a shell restored at launch can
     /// wait to be shown (`isRestoredShell`).
     var runsWithoutSize: Bool {
-        guard let terminalView, !isAwaitingResume, !isRestoredShell else { return false }
+        guard let terminalView, !isRestoredShell else { return false }
         return terminalView.frame.isEmpty
     }
 
