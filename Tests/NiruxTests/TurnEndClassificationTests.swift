@@ -744,7 +744,7 @@ final class TurnEndClassificationTests: XCTestCase {
     }
 
     func testReportReadsTheRunsEvents() {
-        let report = { ClaudeTurnEndClassifier.report(from: $0).verdict }
+        let report = { ClaudeOneShotRunner.report(from: $0).text.flatMap(ClaudeTurnEndClassifier.verdict(fromAnswer:)) ?? .unknown }
         XCTAssertEqual(report(Self.run([Self.initOnLogin, Self.result("ASK")])), .asks)
         XCTAssertEqual(report(Self.run([Self.initOnLogin, Self.result(" done.\\n")])), .done)
         XCTAssertEqual(report(Self.run([Self.result("Maybe")])), .unknown)
@@ -759,25 +759,27 @@ final class TurnEndClassificationTests: XCTestCase {
     /// An API key behind the run, or the plan's extra usage: billed per
     /// call, which only a subscription's runs may not be.
     func testReportTellsARunBilledPerCall() {
-        XCTAssertFalse(ClaudeTurnEndClassifier.report(from: Self.run([Self.initOnLogin, Self.result("ASK")])).billedPerCall)
-        let apiKey = ClaudeTurnEndClassifier.report(from: Self.run(
+        XCTAssertFalse(ClaudeOneShotRunner.report(from: Self.run([Self.initOnLogin, Self.result("ASK")])).billedPerCall)
+        let apiKey = ClaudeOneShotRunner.report(from: Self.run(
             [#"{"type":"system","subtype":"init","apiKeySource":"ANTHROPIC_API_KEY"}"#], status: nil, stop: .cancelled
         ))
-        XCTAssertEqual(apiKey, ClaudeTurnEndClassifier.RunReport(verdict: .unknown, billedPerCall: true))
-        let overage = ClaudeTurnEndClassifier.report(from: Self.run([
+        XCTAssertTrue(apiKey.billedPerCall)
+        XCTAssertNil(apiKey.text)
+        let overage = ClaudeOneShotRunner.report(from: Self.run([
             Self.initOnLogin, #"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","isUsingOverage":true}}"#,
             Self.result("ASK")
         ]))
-        XCTAssertEqual(overage, ClaudeTurnEndClassifier.RunReport(verdict: .asks, billedPerCall: true), "paid already: kept")
+        XCTAssertTrue(overage.billedPerCall)
+        XCTAssertEqual(overage.text, "ASK", "paid already: kept")
 
-        XCTAssertTrue(ClaudeTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "init", "apiKeySource": "/login managed key"]))
-        XCTAssertFalse(ClaudeTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "init", "apiKeySource": "none"]))
-        XCTAssertFalse(ClaudeTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "init"]), "older claude")
-        XCTAssertFalse(ClaudeTurnEndClassifier.refusesAccount(of: ["type": "system", "subtype": "api_retry", "apiKeySource": "x"]))
+        XCTAssertTrue(ClaudeOneShotRunner.refusesAccount(of: ["type": "system", "subtype": "init", "apiKeySource": "/login managed key"]))
+        XCTAssertFalse(ClaudeOneShotRunner.refusesAccount(of: ["type": "system", "subtype": "init", "apiKeySource": "none"]))
+        XCTAssertFalse(ClaudeOneShotRunner.refusesAccount(of: ["type": "system", "subtype": "init"]), "older claude")
+        XCTAssertFalse(ClaudeOneShotRunner.refusesAccount(of: ["type": "system", "subtype": "api_retry", "apiKeySource": "x"]))
     }
 
     func testRunReadsOnlyTheMessageWithTheModelAlone() throws {
-        let arguments = ClaudeTurnEndClassifier.arguments()
+        let arguments = ClaudeOneShotRunner.arguments(for: ClaudeTurnEndClassifier.client)
         func value(after flag: String) -> String? {
             arguments.firstIndex(of: flag).flatMap { arguments[safe: $0 + 1] }
         }
@@ -793,7 +795,7 @@ final class TurnEndClassificationTests: XCTestCase {
         }
         XCTAssertTrue(ClaudeTurnEndClassifier.systemPrompt.contains("When unsure, answer ASK."))
 
-        let environment = ClaudeTurnEndClassifier.environment(for: cli, from: [
+        let environment = ClaudeOneShotRunner.environment(for: cli, from: [
             "HOME": "/Users/me", "NIRUX_AGENT_UUID": "u", "ANTHROPIC_API_KEY": "secret", "MAX_THINKING_TOKENS": "9000"
         ])
         XCTAssertEqual(environment["MAX_THINKING_TOKENS"], "0")
@@ -837,7 +839,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let unavailable = await missing.classify(asks)
         XCTAssertEqual(unavailable, .unknown)
         XCTAssertEqual(calls.value, 1, "kept")
-        now.value = ClaudeTurnEndClassifier.missingSetupLifetime
+        now.value = ClaudeOneShotRunner.Account.missingSetupLifetime
         let stale = await missing.classify(asks)
         XCTAssertEqual(stale, .unknown, "the old setup answers at once")
         deadline = Date().addingTimeInterval(10)
@@ -846,7 +848,7 @@ final class TurnEndClassificationTests: XCTestCase {
 
         let inputs = LockedValue<[String]>([])
         let ready = try await prepared { _, arguments, input in
-            XCTAssertEqual(arguments, ClaudeTurnEndClassifier.arguments())
+            XCTAssertEqual(arguments, ClaudeOneShotRunner.arguments(for: ClaudeTurnEndClassifier.client))
             inputs.value.append(String(decoding: input, as: UTF8.self))
             return Self.run([Self.initOnLogin, Self.result("ASK")])
         }

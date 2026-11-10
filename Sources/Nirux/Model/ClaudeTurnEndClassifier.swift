@@ -28,8 +28,6 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// Runs at once. A turn end past it alerts at once: several agents
     /// ending their turns in the same seconds is rare.
     static let maxConcurrentRuns = 4
-    static let readySetupLifetime = ClaudeOneShotRunner.Account.readySetupLifetime
-    static let missingSetupLifetime = ClaudeOneShotRunner.Account.missingSetupLifetime
 
     /// The prompt measured, word for word: "when unsure, answer ASK" keeps
     /// recall up, which matters more than precision here.
@@ -50,6 +48,11 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
 
     typealias Setup = ClaudeOneShotRunner.Account.Setup
 
+    /// Its runs: the model alone, confined, no tools, with the prompt
+    /// above; the message on standard input, its events out (the first one
+    /// says which account it uses). `--max-budget-usd` caps a run that
+    /// would go wrong (a normal one costs a twenty-fifth of it, an eighth
+    /// when the prompt's cache is cold).
     static let client = ClaudeOneShotRunner.Client(
         model: model, systemPrompt: systemPrompt, timeout: timeout, maxBudgetUSD: "0.05",
         maxConcurrentRuns: maxConcurrentRuns, failuresBeforeRest: failuresBeforeRest, folderName: "NiruxTurnEnd"
@@ -65,8 +68,7 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// With a setup check, a run and a clock of its own (tests).
     init(
         checkSetup: @escaping @Sendable () -> Setup = ClaudeOneShotRunner.Account.defaultSetup,
-        runProcess: @escaping @Sendable (BranchReview.ClaudeCLI, [String], Data) -> BoundedProcess.Outcome?
-            = ClaudeTurnEndClassifier.defaultRun,
+        runProcess: (@Sendable (BranchReview.ClaudeCLI, [String], Data) -> BoundedProcess.Outcome?)? = nil,
         now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 }
     ) {
         runner = ClaudeOneShotRunner(
@@ -94,20 +96,6 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         return Data("<message>\n\(fenced)\n</message>".utf8)
     }
 
-    /// The flags of a run: the model alone, confined, no tools, with the prompt
-    /// above; the message on standard input, its events out (the first one
-    /// says which account it uses). `--max-budget-usd` caps a run that
-    /// would go wrong (a normal one costs a twenty-fifth of it, an eighth
-    /// when the prompt's cache is cold).
-    static func arguments() -> [String] {
-        ClaudeOneShotRunner.arguments(for: client)
-    }
-
-    static func environment(for cli: BranchReview.ClaudeCLI, from base: [String: String] = ProcessInfo.processInfo.environment)
-        -> [String: String] {
-        ClaudeOneShotRunner.environment(for: cli, from: base)
-    }
-
     /// ASK or DONE at the start of the model's answer; nil for anything
     /// else.
     @Sendable static func verdict(fromAnswer text: String) -> TurnEndVerdict? {
@@ -115,27 +103,5 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         if answer.hasPrefix("ASK") { return .asks }
         if answer.hasPrefix("DONE") { return .done }
         return nil
-    }
-
-    /// What a run said: its verdict, and whether it would be billed per
-    /// call (see `ClaudeOneShotRunner.report`).
-    struct RunReport: Equatable {
-        var verdict: TurnEndVerdict = .unknown
-        var billedPerCall = false
-    }
-
-    static func report(from outcome: BoundedProcess.Outcome?) -> RunReport {
-        let report = ClaudeOneShotRunner.report(from: outcome)
-        return RunReport(verdict: report.text.flatMap(verdict(fromAnswer:)) ?? .unknown, billedPerCall: report.billedPerCall)
-    }
-
-    static func refusesAccount(of event: [String: Any]) -> Bool {
-        ClaudeOneShotRunner.refusesAccount(of: event)
-    }
-
-    @Sendable static func defaultRun(
-        cli: BranchReview.ClaudeCLI, arguments: [String], input: Data
-    ) -> BoundedProcess.Outcome? {
-        ClaudeOneShotRunner.defaultRun(timeout: timeout, folderName: client.folderName)(cli, arguments, input)
     }
 }
