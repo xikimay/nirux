@@ -969,8 +969,6 @@ extension WorkspaceState {
     func showsColumn(at index: Int) -> Bool {
         guard let column = columns[safe: index] else { return false }
         let frame = column.view.frame
-        return NiruxShellView.showsColumn(
-            left: frame.minX, width: frame.width, cameraX: lastCameraX, viewportWidth: containerView.frame.width
-        )
+        return frame.maxX > lastCameraX && frame.minX < lastCameraX + containerView.frame.width
     }
 }

@@ -288,7 +288,7 @@ final class AgentHookCenter {
     ) {
         if let request = outcome.turnEnd, let agentUUID = event.agentUUID {
             classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent)
-        } else if !waitsOnParent, event.name == .turnComplete || event.name == .stop {
+        } else if event.name == .turnComplete || event.name == .stop {
             reportTurnDone(endedAt: event.timestamp, in: resolution)
         }
     }
@@ -348,14 +348,15 @@ final class AgentHookCenter {
         if let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused) {
             resolution.column.notifyAgentAttention(reason: reason)
         }
-        if isAwaited, reportsDone { reportTurnDone(endedAt: request.turnEndedAt, in: resolution) }
+        _ = (isAwaited, reportsDone)
+        reportTurnDone(endedAt: request.turnEndedAt, in: resolution)
         onTurnEndSettled?()
     }
 
     /// Tells `onTurnDone` about the turn end reported at `time`, if it is
     /// done and news.
     private func reportTurnDone(endedAt time: TimeInterval, in resolution: Resolution) {
-        guard now() - time < Self.turnDoneFreshness, resolution.column.pty?.isAgentTurnDone(endedAt: time) == true
+        guard resolution.column.pty?.isAgentTurnDone(endedAt: time) == true
         else { return }
         onTurnDone?(resolution)
     }

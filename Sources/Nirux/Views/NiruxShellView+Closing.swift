@@ -11,7 +11,6 @@ extension NiruxShellView {
     func abortColumnClose(_ column: ColumnState) {
         column.isClosing = false
         column.view.alphaValue = 1
-        applyAgentLights()
     }
 
     func closeActiveColumn() {

@@ -204,13 +204,12 @@ struct AgentStatusMachine {
     /// once the agent moved again. Not either for a Stop that may not be
     /// the end (see `stopHooksKeepGoing`).
     func isTurnDone(endedAt time: TimeInterval) -> Bool {
-        guard time > 0, state != .working, openDialogs.isEmpty else { return false }
+        guard time > 0 else { return false }
         // Codex reports the end of a turn, and nothing after it.
-        if turnEndedAt == time { return true }
-        guard mainTurnEndedAt == time, mainTurnEndIsLast, !mainTurnEndAsks, turnFailure == nil else { return false }
+        guard mainTurnEndedAt == time, !mainTurnEndAsks else { return false }
         switch quietTurnEnd {
-        case .pending?, .superseded?: return false
-        case .done?, nil: return true
+        case .superseded?: return false
+        case .pending?, .done?, nil: return true
         }
     }
 
@@ -434,7 +433,7 @@ struct AgentStatusMachine {
         askedQuestion = nil
         mainTurnEndedAt = now
         mainTurnEndIsLast = event.stopHookActive == true || !stopHooksKeepGoing
-        mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
+        mainTurnEndAsks = false
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
                 kind: event.errorKind, detail: event.detail, failedAt: now,

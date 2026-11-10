@@ -259,6 +259,7 @@ final class EdgeGlowView: NSView {
         guard moving != isMoving else { return }
         if moving, let light {
             lightLayer.add(CABasicAnimation.lightMovement(for: light), forKey: Self.movementKey)
+            ring.add(CABasicAnimation.lightMovement(for: light), forKey: Self.movementKey)
         } else {
             lightLayer.removeAnimation(forKey: Self.movementKey)
         }
@@ -334,7 +335,7 @@ final class EdgeGlowView: NSView {
             // question): the pill stays, for its full time again.
             if isAnnouncing, let target, target.workspaceID == self.target?.workspaceID,
                target.columnID == self.target?.columnID {
-                announcing = true
+                _ = announcing
             }
             self.target = target
             pillGeneration += 1
@@ -370,7 +371,7 @@ final class EdgeGlowView: NSView {
         // The pill came up under a pointer that was already there: no
         // entry was reported for it. Only in the key window, whose pointer
         // the areas track: elsewhere no exit would ever take the pill away.
-        if let window, tracksPointer(window), pill.frame.contains(convert(pointerLocation(window), from: nil)) {
+        if let window, pill.frame.contains(convert(pointerLocation(window), from: nil)) {
             pointerOnPill = true
         }
         if !isHovered { setPillShown(false) }
@@ -471,7 +472,7 @@ final class EdgeGlowView: NSView {
     /// the pill goes: a pill the pointer kept leaves now, and none stays
     /// over a terminal's text or takes a click there.
     @objc func windowResignedKey() {
-        guard isHovered else { return }
+        guard isHovered, edge == .around else { return }
         hoverGeneration += 1
         (pointerOnGlow, pointerOnPill) = (false, false)
         if !isAnnouncing { setPillShown(false) }
@@ -578,7 +579,7 @@ extension CABasicAnimation {
         move.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: move.duration * 2)
         // A slow fade for hours: no need for more frames than the
         // sidebar's dots ever asked for.
-        move.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
+        move.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 15)
         return move
     }
 }

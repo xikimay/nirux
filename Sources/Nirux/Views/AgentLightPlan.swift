@@ -99,7 +99,7 @@ struct AgentLightPlan: Equatable {
         return EdgeAlert(
             signal: best.signal, workspaceID: best.workspace.id, columnID: best.column.id,
             // A title may carry anything: one clean line, cut to fit.
-            text: "\(AgentText.clean(name, maxLength: nameLimit) ?? "Agent") \(headline)"
+            text: "\(name) \(headline)"
         )
     }
 

@@ -95,7 +95,6 @@ extension NiruxShellView {
         }
         // Now or never: a sweep says the turn just ended.
         let ended = agentLights.endedTurns
-        agentLights.endedTurns = []
         applyAgentLights(sweeping: ended)
     }
 
