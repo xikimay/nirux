@@ -255,8 +255,8 @@ final class PRFeedbackTests: XCTestCase {
 
     @MainActor
     func testAddressIsRefusedWithoutAnIdleAgent() {
-        func session(status: AgentStatus, dialog: AgentAttentionReason? = nil) -> RemoteAgentSession {
-            RemoteAgentSession(id: "a", workspaceID: "w", columnIndex: 0, cwd: "/", status: status, pendingDialog: dialog)
+        func session(status: AgentStatus, dialog: AgentAttentionReason? = nil) -> TypedPromptTarget {
+            TypedPromptTarget(id: "a", workspaceID: "w", columnIndex: 0, cwd: "/", status: status, pendingDialog: dialog)
         }
         XCTAssertEqual(NiruxShellView.prFeedbackAddressRefusal(nil), "no Claude agent running")
         XCTAssertEqual(NiruxShellView.prFeedbackAddressRefusal(session(status: .working)), "the agent is working")

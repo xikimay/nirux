@@ -34,7 +34,7 @@ are typed by hand.
   check's URL.
   - **Ask Agent Why CI Failed:** types into the workspace's agent (the focused
     column's, else the first column whose agent accepts prompts, through the
-    remote prompt path: sanitized, bracketed paste, refused while a dialog is
+    typed prompt path: sanitized, bracketed paste, refused while a dialog is
     open) "CI failed on PR #52. Run `gh run view 123 --repo
     github.com/owner/name --log-failed`, then tell me why it failed." Built
     only from the run id and repository parsed out of a GitHub Actions URL

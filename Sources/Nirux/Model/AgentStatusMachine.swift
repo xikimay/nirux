@@ -61,7 +61,7 @@ struct AgentStatusMachine {
     /// column shows `.idle` while its dialog stays open. Entries leave only
     /// on hook evidence that the dialog closed — the matching tool call
     /// finishing, a new prompt, the turn or session ending — never on a
-    /// guess: remote prompts are refused while any is pending, and a
+    /// guess: typed prompts are refused while any is pending, and a
     /// prompt typed into an open dialog would answer it. A manual denial
     /// fires no hook, so an entry can outlive its dialog until then.
     private(set) var pendingDialogs: [AgentPermissionRequest] = []
@@ -179,7 +179,7 @@ struct AgentStatusMachine {
     /// reports nothing, so its permission prompt looks like any silence and
     /// a prompt could land on it. (Codex's notify reports turn ends only —
     /// the same blind spot, accepted before this tier existed.)
-    static func acceptsRemotePrompts(processName name: String) -> Bool {
+    static func acceptsTypedPrompts(processName name: String) -> Bool {
         integratedAgentProcesses.contains(name)
     }
 
@@ -290,7 +290,6 @@ struct AgentStatusMachine {
             // planning"): the earlier dialog is gone.
             if let key = request.key { pendingDialogs.removeAll { $0.isSameCall(key: key, as: event) } }
             pendingDialogs.append(request)
-            outcome.attention = request.reason
             _ = block(for: request.reason, isUserFocused: isUserFocused, alert: false)
         case .notification:
             hookKind = event.kind.rawValue
@@ -633,13 +632,11 @@ struct AgentStatusMachine {
             lastKeystrokeAt = 0
             if let open = openDialogs.first {
                 reason = open.reason
-                outcome.isRepeat = true
             } else if !pendingDialogs.isEmpty {
                 // Every entry looked answered, yet one waits: the newest
                 // (older ones were likely denied, which fires no hook).
                 pendingDialogs[pendingDialogs.count - 1].mayBeAnswered = false
                 reason = pendingDialogs[pendingDialogs.count - 1].reason
-                outcome.isRepeat = true
             } else if now - lastDialogClosedAt < Self.reminderRaceWindow,
                       now - lastClosedDialogRequestedAt >= Self.reminderDelay {
                 // The hook is async: this reminder raced the close of the

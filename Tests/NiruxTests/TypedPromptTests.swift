@@ -4,7 +4,7 @@ import XCTest
 /// The prompts Nirux types into an agent for the user (PR Feedback's
 /// Address, "Ask Agent Why CI Failed"): what is typed, and the dialog that
 /// holds one back.
-final class RemotePromptTests: XCTestCase {
+final class TypedPromptTests: XCTestCase {
     /// The gate's source of truth: a PermissionRequest leaves a pending
     /// dialog on the column's PTY until hooks prove it closed.
     func testPtyKeepsPendingDialogUntilItsCallRuns() {
@@ -27,9 +27,9 @@ final class RemotePromptTests: XCTestCase {
 
     func testPromptSanitizerDropsTerminalControlBytesAndFramesPaste() {
         let input = "  explain\u{1B}[31m this\u{0}\r\ncarefully  "
-        XCTAssertEqual(RemotePromptSanitizer.sanitize(input), "explain[31m this\ncarefully")
-        let framed = RemotePromptSanitizer.terminalInput(for: input)
+        XCTAssertEqual(TypedPromptSanitizer.sanitize(input), "explain[31m this\ncarefully")
+        let framed = TypedPromptSanitizer.terminalInput(for: input)
         XCTAssertEqual(framed, "\u{1B}[200~explain[31m this\ncarefully\u{1B}[201~\r")
-        XCTAssertNil(RemotePromptSanitizer.terminalInput(for: "\u{1B}\u{0}"))
+        XCTAssertNil(TypedPromptSanitizer.terminalInput(for: "\u{1B}\u{0}"))
     }
 }

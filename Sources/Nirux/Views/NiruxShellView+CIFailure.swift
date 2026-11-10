@@ -32,17 +32,17 @@ extension NiruxShellView {
 
     /// Types the `gh run view --log-failed` of each red Actions run into the
     /// workspace's agent (the focused column's, else the first), through the
-    /// remote prompt path. No agent, or no such run: the check opens instead.
+    /// typed prompt path. No agent, or no such run: the check opens instead.
     func askAgentWhyCIFailed(_ workspace: WorkspaceState) {
         guard let pullRequest = workspace.prInfo, !CIFailure.redChecks(pullRequest).isEmpty else {
             NSSound.beep()
             return
         }
         let runs = CIFailure.runs(pullRequest)
-        let sessions = remoteAgentSessions().filter { $0.workspaceID == workspace.id }
+        let sessions = typedPromptTargets().filter { $0.workspaceID == workspace.id }
         if !runs.isEmpty,
            let session = sessions.first(where: { $0.columnIndex == workspace.focusedIndex }) ?? sessions.first {
-            let result = sendRemotePrompt(
+            let result = sendTypedPrompt(
                 agentUUID: session.id,
                 prompt: CIFailure.whyFailedPrompt(pullRequest: pullRequest.number, runs: runs)
             )

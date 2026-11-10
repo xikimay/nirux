@@ -2,8 +2,8 @@ import Foundation
 
 /// A live agent Nirux may type a prompt into for the user (PR Feedback's
 /// Address, "Ask Agent Why CI Failed"): see
-/// `NiruxShellView.remoteAgentSessions`.
-struct RemoteAgentSession: Equatable, Sendable {
+/// `NiruxShellView.typedPromptTargets`.
+struct TypedPromptTarget: Equatable, Sendable {
     let id: String
     let workspaceID: String
     let columnIndex: Int
@@ -13,16 +13,16 @@ struct RemoteAgentSession: Equatable, Sendable {
     var pendingDialog: AgentAttentionReason?
 }
 
-enum RemotePromptResult: Equatable, Sendable {
-    case sent(RemoteAgentSession)
+enum TypedPromptResult: Equatable, Sendable {
+    case sent(TypedPromptTarget)
     /// Not typed: the agent may be showing a dialog, where the prompt's
     /// text and Enter would answer it (approve a command, pick an option).
-    case blockedByDialog(RemoteAgentSession)
+    case blockedByDialog(TypedPromptTarget)
     case sessionUnavailable
     case emptyPrompt
 }
 
-enum RemotePromptSanitizer {
+enum TypedPromptSanitizer {
     static let maxCharacters = 8_000
 
     /// Text Nirux types into a terminal is untrusted terminal input (a PR's

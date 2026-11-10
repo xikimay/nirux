@@ -6,11 +6,11 @@ extension NiruxShellView {
     /// The agents Nirux may type a prompt into: recognized, live agent
     /// processes only. Browser/editor columns, idle shells and exited
     /// terminals are never among them.
-    func remoteAgentSessions() -> [RemoteAgentSession] {
+    func typedPromptTargets() -> [TypedPromptTarget] {
         let snapshot = ProcessSnapshot()
         return workspaces.flatMap { workspace in
             workspace.columns.enumerated().compactMap { columnIndex, column in
-                makeRemoteSession(
+                makeTypedPromptTarget(
                     workspace: workspace,
                     column: column,
                     columnIndex: columnIndex,
@@ -22,8 +22,8 @@ extension NiruxShellView {
 
     /// Types `prompt` and Return into that agent, unless it may be showing
     /// a dialog the text would answer.
-    func sendRemotePrompt(agentUUID: String, prompt: String) -> RemotePromptResult {
-        guard let terminalInput = RemotePromptSanitizer.terminalInput(for: prompt) else {
+    func sendTypedPrompt(agentUUID: String, prompt: String) -> TypedPromptResult {
+        guard let terminalInput = TypedPromptSanitizer.terminalInput(for: prompt) else {
             return .emptyPrompt
         }
         // A PermissionRequest may still wait out the hook queue's drain
@@ -35,7 +35,7 @@ extension NiruxShellView {
                 continue
             }
             let column = workspace.columns[columnIndex]
-            guard let session = makeRemoteSession(
+            guard let session = makeTypedPromptTarget(
                 workspace: workspace,
                 column: column,
                 columnIndex: columnIndex,
@@ -48,17 +48,17 @@ extension NiruxShellView {
         return .sessionUnavailable
     }
 
-    private func makeRemoteSession(
+    private func makeTypedPromptTarget(
         workspace: WorkspaceState,
         column: ColumnState,
         columnIndex: Int,
         snapshot: ProcessSnapshot
-    ) -> RemoteAgentSession? {
+    ) -> TypedPromptTarget? {
         guard let agentUUID = column.agentUUID,
               let pty = column.pty,
-              pty.acceptsRemotePrompts(snapshot: snapshot)
+              pty.acceptsTypedPrompts(snapshot: snapshot)
         else { return nil }
-        return RemoteAgentSession(
+        return TypedPromptTarget(
             id: agentUUID,
             workspaceID: workspace.id,
             columnIndex: columnIndex,

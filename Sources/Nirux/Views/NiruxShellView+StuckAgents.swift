@@ -20,23 +20,26 @@ extension NiruxShellView {
     /// One column on a status refresh: follow its foreground agent, send
     /// the alert a stuck state owes (once), and show or take down the
     /// notice of an agent that died mid-turn. The alert (the in-app flag,
-    /// the Dock badge, the system banner) skips the column on screen while
-    /// Nirux is in front.
+    /// the Dock badge, the system banner) is not for the column on screen
+    /// while Nirux is in front: it stays owed, and goes out once the
+    /// column or Nirux leaves the front with the agent still stuck.
     func refreshStuckAgent(
         _ column: ColumnState,
         in workspace: WorkspaceState,
         foregroundProcess: ForegroundProcess?,
         snapshot: ProcessSnapshot,
-        now: TimeInterval
+        now: TimeInterval,
+        appIsActive: Bool = NSApp.isActive
     ) {
         column.trackForegroundAgent(foregroundProcess, snapshot: snapshot, now: now)
         guard let pty = column.pty else { return }
-        if let reason = pty.takeAgentStuckAlert(
+        let onScreen = appIsActive && workspace === activeWorkspace
+            && workspace.columns[safe: workspace.focusedIndex] === column
+        // Taken only when it can be delivered: an alert goes out once.
+        if !onScreen, let reason = pty.takeAgentStuckAlert(
             now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess
         ) {
-            let onScreen = NSApp.isActive && workspace === activeWorkspace
-                && workspace.columns[safe: workspace.focusedIndex] === column
-            if !onScreen { column.notifyAgentAttention(reason: reason) }
+            column.notifyAgentAttention(reason: reason)
         }
         let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess)
         if case .exitedMidTurn(let exit)? = stuck {
@@ -67,12 +70,17 @@ extension NiruxShellView {
 
     /// The stuck-agent pass alone, for every column: no status tick, no
     /// sidebar rebuild.
-    func refreshStuckAgents(snapshot: ProcessSnapshot = ProcessSnapshot(), now: TimeInterval = Date().timeIntervalSince1970) {
+    func refreshStuckAgents(
+        snapshot: ProcessSnapshot = ProcessSnapshot(),
+        now: TimeInterval = Date().timeIntervalSince1970,
+        appIsActive: Bool = NSApp.isActive
+    ) {
         for workspace in workspaces {
             for column in workspace.columns {
                 refreshStuckAgent(
                     column, in: workspace,
-                    foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot), snapshot: snapshot, now: now
+                    foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot), snapshot: snapshot, now: now,
+                    appIsActive: appIsActive
                 )
             }
         }

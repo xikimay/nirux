@@ -233,11 +233,8 @@ struct AgentHookOutcome: Equatable {
     /// prompt, the conversation changing or ending): it alerts as that turn
     /// end would have.
     var firedAttention = false
-    /// What the event asks of the user, when it asks something.
+    /// What that alert is about: read only when `firedAttention` is set.
     var attention: AgentAttentionReason?
-    /// The event reports a request already reported: the delayed
-    /// `permission_prompt` notification after its PermissionRequest.
-    var isRepeat = false
     /// A Claude turn end whose alert waits for the classifier's verdict
     /// (`AgentStatusMachine.applyTurnEndVerdict`).
     var turnEnd: TurnEndRequest?

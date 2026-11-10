@@ -484,7 +484,7 @@ final class PtySession: @unchecked Sendable {
     func resumeFailedTurn(snapshot: ProcessSnapshot, now: TimeInterval) -> AgentResumeRefusal? {
         let foreground = foregroundProcess(snapshot: snapshot)
         if let refusal = agentResumeRefusal(foreground: foreground, snapshot: snapshot, now: now) { return refusal }
-        guard let input = RemotePromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
+        guard let input = TypedPromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
         state.machine.markResumeSent(now: now)
         sendRaw(input)
         state.machine.noteResumeTyped()
@@ -771,15 +771,15 @@ final class PtySession: @unchecked Sendable {
         return [state.machine.lastForegroundName, state.machine.hookKind].compactMap { $0 }.first(where: isAgent)
     }
 
-    /// Remote prompts are accepted only while an integrated agent process
+    /// Nirux types a prompt only while an integrated agent process
     /// (Claude Code, Codex) is currently in the foreground. A stable UUID
     /// alone is not enough: the same column can later fall back to an idle
     /// shell.
-    func acceptsRemotePrompts(snapshot: ProcessSnapshot) -> Bool {
+    func acceptsTypedPrompts(snapshot: ProcessSnapshot) -> Bool {
         guard !hasExited,
               let process = foregroundProcessName(snapshot: snapshot)
         else { return false }
-        return AgentStatusMachine.acceptsRemotePrompts(processName: process)
+        return AgentStatusMachine.acceptsTypedPrompts(processName: process)
     }
 
     /// Clear attention flag (user has seen it)
@@ -1085,7 +1085,7 @@ private final class PtyState: @unchecked Sendable {
     private static let localServerForwardInterval: TimeInterval = 1
     /// Something reached the PTY through `sendRaw` — keystrokes (including
     /// the Enter after a ⌘V paste, which itself goes through ghostty),
-    /// dropped files, remote prompts, commands Nirux types. Unlike
+    /// dropped files, prompts and commands Nirux types. Unlike
     /// `machine.hasUserInput` it ignores ghostty's own writes (replies to
     /// the terminal queries Claude Code sends at startup) and the lone
     /// Ctrl+L redraw nudge. Once open, a TUI repaint can still resurface
