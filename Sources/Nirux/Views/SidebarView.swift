@@ -259,15 +259,13 @@ final class SidebarView: NSView {
     /// The turns that just ended in these workspaces: each of their rows
     /// that shows the grey dot now draws its check, if rows may move (see
     /// `SidebarWorkspaceCardRenderer.drawsTurnEndCheck`). Nothing is kept
-    /// for a row that can't draw it now (it says something else, it is
-    /// folded away, the sidebar is a rail): a check never shows up late,
-    /// and nothing is rebuilt for nothing.
+    /// for a row that can't draw it now (it says something else, the
+    /// sidebar is a rail): a check never shows up late, and nothing is
+    /// rebuilt for nothing.
     func noteTurnEnded(workspaceIDs: Set<String>, now: CFTimeInterval = CACurrentMediaTime()) {
         turnEndNotedAt = turnEndNotedAt.filter { now - $0.value < SidebarWorkspaceCardRenderer.checkDuration }
         guard animates, isExpanded, !workspaceIDs.isEmpty else { return }
-        let rows = lastInfos.filter { row in
-            workspaceIDs.contains(row.id) && listsWorkspace(row) && SidebarWorkspaceCardRenderer.drawsTurnEndCheck(row)
-        }
+        let rows = lastInfos.filter { workspaceIDs.contains($0.id) && SidebarWorkspaceCardRenderer.drawsTurnEndCheck($0) }
         guard !rows.isEmpty else { return }
         for row in rows { turnEndNotedAt[row.id] = now }
         rebuildContent()

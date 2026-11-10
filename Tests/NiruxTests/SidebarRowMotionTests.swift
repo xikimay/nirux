@@ -190,8 +190,8 @@ final class SidebarRowMotionTests: XCTestCase {
 
     /// Nothing is noted, and nothing rebuilt, for a turn end that can't
     /// show now: a row that says something else (its check must not pop
-    /// up half-drawn when the row turns grey a moment later), a folded
-    /// archived row, the Lead, the rail, rows that may not move.
+    /// up half-drawn when the row turns grey a moment later), an archived
+    /// task's compact row, the Lead, the rail, rows that may not move.
     func testATurnEndThatCannotShowIsNotKeptForLater() {
         let rows = [
             row([finished, column(.working)], id: "busy", index: 0), row([finished], id: "lead", index: 1, isLead: true),
@@ -199,8 +199,10 @@ final class SidebarRowMotionTests: XCTestCase {
         ]
         let sidebar = sidebar(rows)
         let built = sidebar.expandedViews.first
-        sidebar.noteTurnEnded(workspaceIDs: ["busy", "lead", "archived", "gone"])
-        XCTAssertTrue(sidebar.turnEndNotedAt.isEmpty)
+        for id in ["busy", "lead", "archived", "gone"] {
+            sidebar.noteTurnEnded(workspaceIDs: [id])
+            XCTAssertNil(sidebar.turnEndNotedAt[id], id)
+        }
         XCTAssertTrue(sidebar.expandedViews.first === built, "no rebuild for nothing")
         // The busy row's other agent stops a moment later: no check now.
         sidebar.update(profiles: [], workspaces: [row([finished, finished], id: "busy", index: 0)] + rows.dropFirst())
