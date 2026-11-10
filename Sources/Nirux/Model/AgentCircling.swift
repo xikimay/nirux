@@ -21,11 +21,12 @@ enum AgentCirclingHint: Hashable, Sendable {
     case failing(name: String?, count: Int)
 
     /// The row's status line, short enough for the reason to show in a
-    /// sidebar 260 points wide.
+    /// sidebar 260 points wide. "Timeouts", not "hung": all Nirux knows is
+    /// that they ran past their time limit.
     var statusText: String {
         switch self {
         case .hung(let count):
-            return "May be stuck · \(count) commands hung"
+            return "May be stuck · \(count) timeouts"
         case .failing(let name, let count):
             return "May be stuck · \(Self.display(name)) failed \(count)×"
         }
@@ -36,7 +37,7 @@ enum AgentCirclingHint: Hashable, Sendable {
         let reason: String
         switch self {
         case .hung(let count):
-            reason = "\(count) commands of this turn ran past their time limit."
+            reason = "\(count) commands of this turn ran past their time limit, close together."
         case .failing(let name, let count):
             reason = "In this turn, \(Self.display(name)) failed \(count) times in a row."
         }
@@ -59,11 +60,18 @@ struct AgentCirclingWatch: Equatable, Sendable {
     static let hungThreshold = 3
     /// Failures in a row of one command. Measured: never more than 3.
     static let failureThreshold = 5
-    /// Calls that end without a command hanging again, or without that
-    /// command failing again: the agent moved on. What happens later
-    /// counts from zero, and the hint goes. (The stuck agent measured had
-    /// 2 to 4 calls between hung commands.)
-    static let callsThatClear = 15
+    /// Calls that end without a command hanging again: the agent got past
+    /// them, and later ones count from zero. Three slow builds spread over
+    /// a long turn aren't a stuck agent; the one measured had 2 to 4 calls
+    /// between hung commands.
+    static let callsThatClearHangs = 10
+    /// Calls after which a row of failures no longer shows: the agent
+    /// moved on. Its count stays until that command passes or the turn
+    /// ends, since a loop may take many calls (reads, edits) between two
+    /// tries.
+    static let callsThatHideFailures = 15
+    /// Commands followed at once; the one that failed longest ago goes.
+    static let maxStreaks = 32
 
     private struct Streak: Equatable, Sendable {
         let key: String
@@ -76,8 +84,6 @@ struct AgentCirclingWatch: Equatable, Sendable {
     private var hungCount = 0
     private var lastHungAt: TimeInterval = 0
     private var callsSinceHang = 0
-    /// Commands failing in a row. At most `callsThatClear` of them: each
-    /// goes once that many other calls ended since it last failed.
     private var streaks: [Streak] = []
 
     /// A tool call of the main agent ended: `end` nil, it ran. `key` tells
@@ -100,10 +106,9 @@ struct AgentCirclingWatch: Equatable, Sendable {
         }
         if hungCount > 0 {
             callsSinceHang += 1
-            if callsSinceHang >= Self.callsThatClear { hungCount = 0 }
+            if callsSinceHang >= Self.callsThatClearHangs { hungCount = 0 }
         }
         for index in streaks.indices where streaks[index].key != key { streaks[index].callsSince += 1 }
-        streaks.removeAll { $0.callsSince >= Self.callsThatClear }
         guard let key else { return }
         let index = streaks.firstIndex { $0.key == key }
         guard end == .failed else {
@@ -115,6 +120,9 @@ struct AgentCirclingWatch: Equatable, Sendable {
             streaks[index].lastAt = time
             streaks[index].callsSince = 0
         } else {
+            if streaks.count >= Self.maxStreaks, let oldest = streaks.indices.min(by: { streaks[$0].lastAt < streaks[$1].lastAt }) {
+                streaks.remove(at: oldest)
+            }
             streaks.append(Streak(key: key, name: name, count: 1, lastAt: time))
         }
     }
@@ -127,7 +135,8 @@ struct AgentCirclingWatch: Equatable, Sendable {
     /// What to say, if anything: of commands hanging and one failing, the
     /// one that happened last.
     var hint: AgentCirclingHint? {
-        let failing = streaks.filter { $0.count >= Self.failureThreshold }.max { $0.lastAt < $1.lastAt }
+        let failing = streaks.filter { $0.count >= Self.failureThreshold && $0.callsSince < Self.callsThatHideFailures }
+            .max { $0.lastAt < $1.lastAt }
         let hung = hungCount >= Self.hungThreshold
         if let failing, !hung || failing.lastAt > lastHungAt {
             return .failing(name: failing.name, count: failing.count)
@@ -176,15 +185,16 @@ enum AgentToolOutcome {
     }
 
     /// `backgroundTaskId` in a result nobody asked to run in the
-    /// background: not the agent with `run_in_background`, nor the user, a
-    /// message that had to get through, or assistant mode's own budget.
+    /// background: not the agent with `run_in_background`, and not for a
+    /// reason Claude gives (`backgroundedByUser`,
+    /// `backgroundedToDeliverMessage`, `backgroundedByTurnAbort`,
+    /// `assistantAutoBackgrounded`, or one a later version adds).
     private static func wasMovedToTheBackground(_ payload: [String: Any]) -> Bool {
         guard let response = payload["tool_response"] as? [String: Any],
               let task = response["backgroundTaskId"] as? String, !task.isEmpty,
               (payload["tool_input"] as? [String: Any])?["run_in_background"] as? Bool != true
         else { return false }
-        let otherReasons = ["backgroundedByUser", "backgroundedToDeliverMessage", "backgroundedByTurnAbort", "assistantAutoBackgrounded"]
-        return !otherReasons.contains { response[$0] as? Bool == true }
+        return !response.contains { $0.key.lowercased().contains("backgrounded") && $0.value as? Bool == true }
     }
 
     /// "Exit code 143", then "Command timed out after 2s": Claude's own
@@ -210,45 +220,47 @@ struct AgentShellCommand: Equatable, Sendable {
     /// wrappers and preparations. Nil when nothing names the command (a
     /// loop, a path held in a variable).
     let family: String?
-    /// The command waits for something: it starts by sleeping (a poll:
-    /// `sleep 60; gh run view 9`), it is a loop that sleeps (`until curl
-    /// -sf :3000; do sleep 2; done`), or one of GitHub's that exit non-zero
-    /// while checks run. Coming back with a failure, or running past its
-    /// time limit, is then part of waiting (for CI, a server).
+    /// The command waits for something: it sleeps before anything else (a
+    /// poll: `sleep 60; gh run view 9`), it is a loop that sleeps (`until
+    /// curl -sf :3000; do sleep 2; done`), it runs one of GitHub's commands
+    /// that exit non-zero while checks run (`git push && gh pr checks
+    /// --watch`), or it is Nirux's own Mission command, which says "run me
+    /// again" with a failure while the other agent is busy. Coming back
+    /// with a failure, or running past its time limit, is then part of
+    /// waiting (for CI, a server, an agent).
     let isWait: Bool
 
     init(_ text: String) {
-        let commands = Self.simpleCommands(in: text)
+        var family: String?
+        var isNamed = false
+        var isLoop = false
         var preparation: String?
-        var sleeps = false
-        for (index, words) in commands.enumerated() {
+        var waits = false
+        for words in Self.simpleCommands(in: text) {
             guard let (name, arguments) = Self.program(in: words) else { continue }
-            if name == "sleep" { sleeps = true }
+            // A sleep after the command (`./start.sh & sleep 3; curl …`), or
+            // written into a file, doesn't make it a wait.
+            if name == "sleep", !isNamed || isLoop { waits = true }
+            if arguments.contains("--mission") { waits = true }
             if Self.housekeeping.contains(name) {
-                preparation = preparation ?? name
+                if !isNamed { preparation = preparation ?? name }
                 continue
             }
-            if Self.compound.contains(name) {
-                family = nil
-                isWait = sleeps || commands[index...].contains { Self.program(in: $0)?.name == "sleep" }
-                return
-            }
-            guard Self.isProgramName(name) else {
-                family = nil
-                isWait = sleeps
-                return
+            guard !Self.compound.contains(name), Self.isProgramName(name) else {
+                // A loop, a path held in a variable: nothing names it.
+                if !isNamed { (isNamed, isLoop) = (true, Self.compound.contains(name)) }
+                continue
             }
             let named = ([name] + Self.subcommands(of: name, in: arguments)).joined(separator: " ")
+            if Self.waitingCommands.contains(named) { waits = true }
             if Self.preparations.contains(named) {
-                preparation = preparation ?? named
-                continue
+                if !isNamed { preparation = preparation ?? named }
+            } else if !isNamed {
+                (isNamed, family) = (true, named)
             }
-            family = named
-            isWait = sleeps || Self.waitingCommands.contains(named)
-            return
         }
-        family = preparation
-        isWait = sleeps
+        self.family = isNamed ? family : preparation
+        isWait = waits
     }
 
     /// Programs whose first plain argument says what they do.
@@ -256,10 +268,21 @@ struct AgentShellCommand: Equatable, Sendable {
         "git", "gh", "swift", "npm", "pnpm", "yarn", "bun", "npx", "cargo", "go", "make", "docker", "kubectl", "brew",
         "xcrun", "uv", "pip", "pip3"
     ]
-    /// Their options that take the next argument as a value.
+    /// Those that take two (`gh pr checks`, `xcrun simctl list`), and the
+    /// subcommands that run something else (`npm run build`, `docker
+    /// compose up`): `npm run test` and `npm run lint` aren't one command.
+    private static let programsWithTwoSubcommands: Set<String> = ["gh", "xcrun"]
+    private static let subcommandsWithAnother: Set<String> = ["run", "compose"]
+    /// Their options that take the next argument as a value, and those
+    /// known to take none. After any other option the next word may be
+    /// its value (a token, a user name): nothing more is read.
     private static let optionsWithValue: Set<String> = [
         "-C", "-c", "-f", "-R", "-n", "-H", "--repo", "--git-dir", "--work-tree", "--prefix", "--cwd", "--filter",
         "--manifest-path", "--context", "--namespace", "--kubeconfig", "--directory", "--project", "--package-path"
+    ]
+    private static let optionsWithoutValue: Set<String> = [
+        "--no-pager", "--paginate", "--bare", "--silent", "--quiet", "--verbose", "--debug", "--offline", "--yes",
+        "--no-color", "-q", "-s", "-v", "-y", "-D"
     ]
     /// What runs a command rather than being one.
     private static let wrappers: Set<String> = ["time", "sudo", "env", "nohup", "command", "exec", "nice", "caffeinate", "timeout", "gtimeout"]
@@ -326,14 +349,16 @@ struct AgentShellCommand: Equatable, Sendable {
             if !words.isEmpty { commands.append(words) }
             words = []
         }
-        for character in text.prefix(2_000) {
+        // Bounded in scalars: one character can hold any number of them.
+        for character in String(String.UnicodeScalarView(text.unicodeScalars.prefix(2_000))) {
             if commands.count >= 12 { return commands }
             defer { previous = character }
             if inComment {
                 if character.isNewline { inComment = false }
             } else if escaped {
                 escaped = false
-                word.append(character)
+                // A backslash at a line's end carries the command on.
+                if character.isNewline { word.removeLast() } else { word.append(character) }
             } else if character == "\\", quote != "'" {
                 escaped = true
                 word.append(character)
@@ -369,21 +394,35 @@ struct AgentShellCommand: Equatable, Sendable {
         guard programsWithSubcommands.contains(program) else { return [] }
         var found: [String] = []
         var arguments = arguments
-        // `gh pr checks`: two words say what gh does.
-        while found.count < (program == "gh" ? 2 : 1), let word = arguments.first {
+        while let word = arguments.first {
+            let wanted = programsWithTwoSubcommands.contains(program) || found.first.map(subcommandsWithAnother.contains) == true ? 2 : 1
+            guard found.count < wanted else { break }
             arguments = arguments.dropFirst()
             // `(cd sub && make test)`: the subshell's end isn't the word's.
             let argument = word.trimmingCharacters(in: punctuation)
-            if argument.hasPrefix("-") || argument.hasPrefix("+") {
-                if optionsWithValue.contains(argument) { arguments = arguments.dropFirst() }
+            if optionsWithValue.contains(argument) {
+                arguments = arguments.dropFirst()
+            } else if argument.hasPrefix("+") || argument.hasPrefix("-") && isWholeOption(argument) {
                 continue
+            } else if argument.hasPrefix("-") || !isSubcommand(argument) {
+                break
+            } else {
+                found.append(argument)
             }
-            guard argument.count <= 24, argument.first?.isLowercase == true,
-                  argument.allSatisfy({ $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") })
-            else { break }
-            found.append(argument)
         }
         return found
+    }
+
+    /// An option that carries its value or takes none: `--color=never`,
+    /// `-j8`, `--no-pager`.
+    private static func isWholeOption(_ option: String) -> Bool {
+        option.contains("=") || optionsWithoutValue.contains(option) || !option.hasPrefix("--") && option.count > 2
+    }
+
+    /// `build`, `pr`, `test:unit`: lowercase, short, no path or value.
+    private static func isSubcommand(_ word: String) -> Bool {
+        word.count <= 24 && word.first?.isLowercase == true
+            && word.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || "-_:".contains($0)) }
     }
 
     /// `/usr/bin/swift` → `swift`, quotes around a path dropped.

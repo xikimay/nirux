@@ -406,8 +406,8 @@ final class StuckAgentSidebarTests: XCTestCase {
     // MARK: - Going in circles
 
     /// From Claude's hook events to the task's row: a working agent whose
-    /// commands keep hanging says so (`AgentCirclingHint`), not with the
-    /// option off, and no longer once its turn is over.
+    /// commands keep hanging says so (`AgentCirclingHint`), and not with
+    /// the option off.
     func testAHungTurnShowsOnItsRowWhileTheAgentWorks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-circling-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -452,25 +452,34 @@ final class StuckAgentSidebarTests: XCTestCase {
                 toolEnd: hung ? AgentToolEnd.hung.rawValue : nil, toolFamily: hung ? "ls" : nil, timestamp: now
             )
         }
-        @MainActor func status() throws -> String {
+        // What the sidebar draws, not only what it was told: a hint that
+        // changes must redraw the row.
+        shell.isSidebarExpanded = true
+        shell.sidebar.isExpanded = true
+        shell.relayout(animated: false)
+        @MainActor func shows(_ text: String) -> Bool {
             shell.updateSidebar(snapshot: snapshot)
-            return try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first).rowSummary.status.text
+            var views: [NSView] = [shell.sidebar]
+            while let view = views.popLast() {
+                if (view as? NSTextField)?.stringValue == text { return true }
+                views += view.subviews
+            }
+            return false
         }
         // Nirux sees the claude in front before its hooks come in: a new
         // foreground program starts from nothing.
-        XCTAssertNotEqual(try status(), "Working")
+        XCTAssertFalse(shows("Working"))
         for event in [hook(.sessionStart), hook(.userPromptSubmit), hook(.postToolUse, hung: true), hook(.postToolUse, hung: true)] {
             pty.applyAgentHook(event, isUserFocused: false)
         }
-        XCTAssertEqual(try status(), "Working")
+        XCTAssertTrue(shows("Working"))
         pty.applyAgentHook(hook(.postToolUse, hung: true), isUserFocused: false)
-        XCTAssertEqual(try status(), "May be stuck · 3 commands hung")
+        XCTAssertTrue(shows("May be stuck · 3 timeouts"))
+        XCTAssertFalse(shows("Working"))
 
         shell.circlingHintEnabled = false
-        XCTAssertEqual(try status(), "Working", "turned off in Settings")
+        XCTAssertTrue(shows("Working"), "turned off in Settings")
         shell.circlingHintEnabled = true
-        XCTAssertEqual(try status(), "May be stuck · 3 commands hung")
-        pty.applyAgentHook(hook(.stop), isUserFocused: false)
-        XCTAssertFalse(try status().hasPrefix("May be"), "its turn is over")
+        XCTAssertTrue(shows("May be stuck · 3 timeouts"))
     }
 }

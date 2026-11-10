@@ -63,7 +63,8 @@ struct SidebarRowSummary: Hashable {
     let status: SidebarStatusLine
     let trailing: Trailing?
     /// The column a click on the row brings up: the one that waits on the
-    /// user or broke. Nil: the workspace's focused column.
+    /// user, broke, or may be going in circles. Nil: the workspace's
+    /// focused column.
     var focusColumn: Int?
 }
 
@@ -106,11 +107,16 @@ extension WorkspaceInfo {
         }
         let working = columns.filter { $0.agentStatus == .working }
         if !working.isEmpty {
-            let hint = working.compactMap(\.circling).first
+            // The one that may be going in circles: its hint, its turn's
+            // time, and a click on the row brings it up.
+            let circling = working.first { $0.circling != nil }
             return SidebarRowSummary(
                 mark: .working,
-                status: SidebarStatusLine(text: hint?.statusText ?? "Working", tone: .neutral, detail: hint?.detail),
-                trailing: working.compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age
+                status: SidebarStatusLine(
+                    text: circling?.circling?.statusText ?? "Working", tone: .neutral, detail: circling?.circling?.detail
+                ),
+                trailing: (circling.map { [$0] } ?? working).compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age,
+                focusColumn: circling?.index
             )
         }
         if let answered = question?.missionQuestion {

@@ -911,9 +911,6 @@ struct AgentStatusMachine {
         if fgName != "claude" {
             if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
-            // Nor are its calls those of whoever works here next (a
-            // `claude` that died mid-turn sent no Stop).
-            circling.reset()
         }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
@@ -922,6 +919,10 @@ struct AgentStatusMachine {
         // suspended claude whose dialog is back on `fg`, and they are what
         // keeps Nirux from typing a prompt into it.
         if Self.integratedAgentProcesses.contains(fgName), fgName != "claude" { pendingDialogs.removeAll() }
+        // Another agent works here now: the calls of a `claude` that died
+        // mid-turn (no Stop) aren't its own. A shell in front may be a
+        // suspended claude's (^Z, Ctrl-G's editor), whose turn goes on.
+        if Self.isRecognizedAgentProcess(fgName), fgName != "claude" { circling.reset() }
         // No hook ever drives an activity-only agent (a Claude or Codex hook
         // under it is a nested run's); a claude's leftover kind would mute
         // its OSC 9 notifications.

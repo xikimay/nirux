@@ -330,7 +330,11 @@ extension WorkspaceInfo {
             color = Theme.Color.working
             let working = columns.filter { $0.agentStatus == .working }
             let who = working.count == 1 ? SidebarRenderer.columnName(working[0]) : "\(working.count) agents"
-            detail = (["\(who) working"] + [working.first?.elapsedDisplay].compactMap { $0 }).joined(separator: " · ")
+            // As the row's status line: the one that may be going in
+            // circles says so, with its own turn's time.
+            let circling = working.first { $0.circling != nil }
+            detail = (["\(who) working"] + [(circling ?? working.first)?.elapsedDisplay].compactMap { $0 }).joined(separator: " · ")
+            note = circling?.circling?.statusText
         case .done:
             color = Theme.Color.done
             detail = prInfo.map { "#\($0.number) merged" } ?? "merged"

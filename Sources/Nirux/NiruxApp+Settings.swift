@@ -133,10 +133,16 @@ extension NiruxApp {
         SettingsForm.select(current, in: stuck)
         settingsStuckAgentPopup = stuck
 
+        // A tooltip, not a paragraph under it: the pane is as tall as a
+        // 13-inch screen allows.
         let circling = SettingsForm.checkbox(
-            "Hint when an agent may be going in circles", target: self, action: #selector(settingsCirclingHintChanged(_:))
+            "Hint when a working agent may be stuck", target: self, action: #selector(settingsCirclingHintChanged(_:))
         )
         circling.state = NiruxShellView.currentCirclingHintEnabled() ? .on : .off
+        circling.toolTip = "A working Claude Code task's row says \"May be stuck\" in grey, in place of \"Working\", once 3 "
+            + "of its commands ran past their time limit close together, or one command failed 5 times in a row. Counted on "
+            + "your Mac from Claude Code's hooks: the agent isn't interrupted, and nothing alerts."
+        circling.setAccessibilityHelp(circling.toolTip)
         settingsCirclingHintCheckbox = circling
 
         return SettingsForm.pane([
@@ -160,22 +166,13 @@ extension NiruxApp {
                 )
             ],
             [
-                SettingsForm.header("Waiting dialogs"),
+                SettingsForm.header("Stuck agents"),
                 SettingsForm.row("Flag a dialog waiting after", stuck),
                 SettingsForm.hint(
                     "A permission or question dialog open this long marks its agent as stuck: "
                         + "a badge on its card and one notification."
-                )
-            ],
-            [
-                SettingsForm.header("Going in circles"),
-                circling,
-                SettingsForm.hint(
-                    "A working Claude Code task's row says \"May be stuck\" in grey, in place of \"Working\", once 3 "
-                        + "of its commands ran past their time limit in a turn, or one command failed 5 times in a row. "
-                        + "Counted on your Mac from Claude Code's hooks; the agent isn't interrupted, and nothing alerts.",
-                    under: circling
-                )
+                ),
+                circling
             ],
             missionsSection(),
             explainSection()

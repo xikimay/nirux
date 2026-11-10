@@ -556,17 +556,11 @@ extension PersistedStateCodingTests {
         XCTAssertFalse(decoded.alertOnlyWhenClaudeAsks)
     }
 
-    /// The same for the hint that an agent may be going in circles.
-    func testCirclingHintIsOnUnlessTurnedOff() throws {
+    /// The hint that an agent may be going in circles is on for a state
+    /// file that predates it (SettingsWindowTests saves and reads it back).
+    func testCirclingHintIsOnForAStateFileThatPredatesIt() throws {
         let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
         XCTAssertTrue(legacy.agentCirclingHint)
-        XCTAssertTrue(PersistedSettings().agentCirclingHint)
-
-        var settings = PersistedSettings()
-        settings.agentCirclingHint = false
-        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
-        XCTAssertFalse(decoded.agentCirclingHint)
-        XCTAssertTrue(decoded.alertOnlyWhenClaudeAsks, "its own key")
     }
 
     // MARK: - cliArgs wire format
