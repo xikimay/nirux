@@ -99,7 +99,8 @@ extension WorkspaceInfo {
         }
         if let pullRequest = prInfo, pullRequest.state == "OPEN", pullRequest.ciStatus == "FAILURE",
            !columns.contains(where: { $0.agentStatus == .working }) {
-            return row(.error, "#\(pullRequest.number) · checks failed", .error)
+            // Only a likely flake says more (docs/ci-failure-triage.md).
+            return row(.error, "#\(pullRequest.number) · checks failed" + (ciFlakyReason == nil ? "" : " · likely flaky"), .error)
         }
         // A child that asked ended its turn to wait (a Codex one blocks):
         // asking comes before work. An answer waiting to be typed comes

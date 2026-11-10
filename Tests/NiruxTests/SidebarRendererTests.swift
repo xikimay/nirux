@@ -124,6 +124,19 @@ final class SidebarRendererTests: XCTestCase {
 
     // MARK: - Agent notification text
 
+    /// A CI failure's notification: a likely flake says so, with why on a
+    /// line of its own (a model's sentence about a log, cleaned).
+    func testCIFailureNotificationSaysWhenItLooksFlaky() {
+        let plain = NiruxNotifier.ciFailureText(pullRequest: 52, checkNames: ["test", "lint"], flakyReason: nil)
+        XCTAssertEqual(plain.title, "CI failed")
+        XCTAssertEqual(plain.body, "#52: test, lint")
+        let flaky = NiruxNotifier.ciFailureText(
+            pullRequest: 52, checkNames: ["test"], flakyReason: "The tests drive gears;\u{1B}[31m the changes edit\nan axle."
+        )
+        XCTAssertEqual(flaky.title, "CI failed · likely flaky")
+        XCTAssertEqual(flaky.body, "#52: test\nThe tests drive gears;[31m the changes edit an axle.")
+    }
+
     func testNotificationSaysWhatIsAsked() {
         let text = NiruxNotifier.attentionText(
             processName: "✳ Fix login",

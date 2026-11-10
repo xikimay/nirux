@@ -61,6 +61,7 @@ extension NiruxShellView {
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
+                    turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
                     id: col.id
                 )
             }
@@ -70,6 +71,7 @@ extension NiruxShellView {
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: index == activeWSIndex,
                           columns: colInfos, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
+                          ciFlakyReason: workspace.ciFlakyReason,
                           diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
@@ -107,6 +109,7 @@ extension NiruxShellView {
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions)
+        closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }

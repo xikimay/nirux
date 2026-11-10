@@ -676,6 +676,11 @@ final class SidebarWorkspaceCardRenderer {
                 kind: kind, detail: detail, failedAt: failedAt, resume: resume,
                 workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
+        case let .turnQuestion(columnIndex, question, showsQuestion):
+            add(SidebarTurnQuestionBlockRenderer(
+                question: question, showsQuestion: showsQuestion, workspaceIndex: workspace.index, columnIndex: columnIndex,
+                x: x, width: width, top: top
+            ).render())
         case .reviewBadges(let badges):
             let indent = layout.indentX
             let prefix = textLabel("Reviews", font: Theme.Font.caption, color: Theme.Color.textTertiary)
