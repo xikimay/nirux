@@ -537,7 +537,7 @@ struct AgentStatusMachine {
         // A prompt since sets Claude working, then its Stop ends a later
         // turn: neither needs a check of its own.
         return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && !hasKeysAtThePrompt && pendingDialogs.isEmpty && !hookWorking
+            && pendingDialogs.isEmpty && !hookWorking
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
     }
 
@@ -842,7 +842,7 @@ struct AgentStatusMachine {
     /// isn't spared: a slash command it sends may open a picker no hook
     /// tells of.
     mutating func noteTypedKeys(_ data: Data, now: Date) {
-        guard pendingDialogs.isEmpty, !Self.keysLeavingThePrompt.contains(data) else { return }
+        guard pendingDialogs.isEmpty else { return }
         lastPromptKeyAt = now.timeIntervalSince1970
     }
 
