@@ -121,8 +121,7 @@ extension NiruxShellView {
             catchUpState.workspaceIDs.removeAll { $0 == onScreen }
         }
         // Closed or archived since.
-        catchUpState.workspaceIDs.removeAll { id in !workspaces.contains { $0.id == id && !$0.isClosing && !$0.isInactive } }
-        catchUpState.awaySince = catchUpState.awaySince.filter { catchUpState.workspaceIDs.contains($0.key) }
+        catchUpState.workspaceIDs.removeAll { id in !workspaces.contains { $0.id == id && !$0.isClosing } }
         guard !catchUpState.workspaceIDs.isEmpty else { return nil }
         let order = Dictionary(catchUpState.workspaceIDs.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         let rows = infos.filter { order[$0.id] != nil }.map(SidebarCatchUp.row(for:)).sorted {
