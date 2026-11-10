@@ -11,7 +11,8 @@ extension SidebarView {
     static let birthSpringKey = "birth.spring"
     /// One push per birth: a row under two tasks born together gives way
     /// to both.
-    static func birthPushKey(_ workspaceID: String) -> String { "birthPush.\(workspaceID)" }
+    static func birthPushKey(_ workspaceID: String) -> String { birthPushPrefix + workspaceID }
+    private static let birthPushPrefix = "birthPush."
     /// How long a birth is replayed on a rebuilt row, from when it opens.
     static let birthDuration: CFTimeInterval = 1.2
 
@@ -39,7 +40,13 @@ extension SidebarView {
     /// After a rebuild: the rows born a moment ago carry on opening. Not
     /// while rows may not move, whatever started before.
     func applyBirthMotion() {
-        guard animates else { return }
+        guard animates else {
+            // The checklist card outlives rebuilds: its push goes now.
+            if let card = onboardingCardView?.layer {
+                card.animationKeys()?.filter { $0.hasPrefix(Self.birthPushPrefix) }.forEach(card.removeAnimation)
+            }
+            return
+        }
         let now = clock()
         // In the list's own coordinates, as the views' frames are.
         let rows: [(info: WorkspaceInfo, frame: NSRect)] = hitAreas.compactMap { area in
@@ -53,18 +60,27 @@ extension SidebarView {
         for (workspaceID, opens) in rowOpensAt where now - opens < Self.birthDuration {
             guard let born = rows.first(where: { $0.info.id == workspaceID }) else { continue }
             let own = born.frame.insetBy(dx: -1, dy: -1)
-            // What gives way: the tasks listed under it. Not what is laid
-            // out from the sidebar's bottom and never moved (Archived, the
-            // rail's "+").
-            let under = !fits ? [] : rows
-                .filter { !$0.info.isInactive && $0.frame.maxY <= born.frame.minY + 1 }
-                .map { $0.frame.insetBy(dx: -1, dy: -1) }
+            let isUnder = { (frame: NSRect) in frame.maxY <= born.frame.minY + 1 }
+            // What gives way: what is laid out under it, top down. Not what
+            // is laid out from the sidebar's bottom and never moved: the
+            // list's Archived block, the rail's "+".
+            let flowsUnder: (NSView) -> Bool
+            if !fits {
+                flowsUnder = { _ in false }
+            } else if isExpanded {
+                let tasks = rows.filter { !$0.info.isInactive && isUnder($0.frame) }.map { $0.frame.insetBy(dx: -1, dy: -1) }
+                let card = onboardingCardView
+                flowsUnder = { view in tasks.contains { $0.contains(view.frame) } || (view === card && isUnder(view.frame)) }
+            } else {
+                // The rail: the tiles, the separator, the archived ones.
+                let add = hitAreas.first { area in
+                    if case .railButton(.newWorkspace) = area.region { return true }
+                    return false
+                }?.frame.insetBy(dx: -1, dy: -1)
+                flowsUnder = { view in isUnder(view.frame) && !(add?.contains(view.frame) ?? false) }
+            }
             // (A rail tile's area holds its gap.)
             let room = born.frame.height + (isExpanded ? SidebarExpandedMetrics.workspaceGap : 0)
-            let flowsUnder = { (view: NSView) in
-                under.contains { $0.contains(view.frame) }
-                    || (fits && view === self.onboardingCardView && view.frame.maxY <= born.frame.minY + 1)
-            }
             for view in expandedViews + [onboardingCardView].compactMap({ $0 }) {
                 if own.contains(view.frame) {
                     // Unseen until it opens (when the sheet's picture
@@ -77,10 +93,13 @@ extension SidebarView {
                     appear.fillMode = .backwards
                     view.wantsLayer = true
                     view.layer?.add(appear, forKey: Self.birthKey)
-                    view.layer?.add(Self.birthSpring(from: 8, at: opens), forKey: Self.birthSpringKey)
+                    view.layer?.add(Self.birthSpring(from: 8, at: opens, damping: 16), forKey: Self.birthSpringKey)
                 } else if flowsUnder(view) {
                     view.wantsLayer = true
-                    view.layer?.add(Self.birthSpring(from: room, at: opens), forKey: Self.birthPushKey(workspaceID))
+                    // Barely past its place: a whole list doesn't bounce.
+                    view.layer?.add(
+                        Self.birthSpring(from: room, at: opens, damping: 26), forKey: Self.birthPushKey(workspaceID)
+                    )
                 }
             }
         }
@@ -88,12 +107,14 @@ extension SidebarView {
 
     /// From `offset` above its place down to it, starting at `beginTime`;
     /// held up there until then. Added to whatever else moves the view.
-    private static func birthSpring(from offset: CGFloat, at beginTime: CFTimeInterval) -> CASpringAnimation {
+    private static func birthSpring(
+        from offset: CGFloat, at beginTime: CFTimeInterval, damping: CGFloat
+    ) -> CASpringAnimation {
         let spring = CASpringAnimation(keyPath: "transform.translation.y")
         spring.fromValue = offset
         spring.toValue = 0
         spring.isAdditive = true
-        spring.damping = 16
+        spring.damping = damping
         spring.stiffness = 220
         spring.duration = spring.settlingDuration
         spring.beginTime = beginTime

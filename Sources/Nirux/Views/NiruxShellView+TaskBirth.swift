@@ -109,7 +109,9 @@ extension NiruxShellView {
         }
         // Not on an animation's completion, which a window out of view may
         // never report.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.taskBirthSlideDuration + 0.2) { [weak snapshot] in
+        // Long after: the fade starts when this turn of the run loop ends,
+        // which may take a while (the birth's rebuilds, saving the state).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak snapshot] in
             snapshot?.removeFromSuperview()
         }
     }
