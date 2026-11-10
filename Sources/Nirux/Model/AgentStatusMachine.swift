@@ -847,7 +847,7 @@ struct AgentStatusMachine {
         // A mode switch (Shift-Tab) leaves the prompt as it was; any other
         // key may leave text there, or open a screen no hook tells of (Esc
         // Esc's rewind picker, Ctrl-O's transcript, a slash command's).
-        if !answersDialog, keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        if !answersDialog { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }

@@ -170,7 +170,7 @@ extension SidebarView {
         guard clickCount == 1, armedAtPress, armedAtRelease,
               case let .turnAnswer(_, _, pressedQuestion, pressedAnswer) = pressed,
               case let .turnAnswer(_, _, releasedQuestion, releasedAnswer)? = released,
-              releasedQuestion.columnID == pressedQuestion.columnID, releasedQuestion.turnEndedAt == pressedQuestion.turnEndedAt,
+              releasedQuestion.turnEndedAt == pressedQuestion.turnEndedAt,
               releasedAnswer == pressedAnswer else { return nil }
         return SidebarTurnAnswerClick(question: releasedQuestion, answer: releasedAnswer)
     }
