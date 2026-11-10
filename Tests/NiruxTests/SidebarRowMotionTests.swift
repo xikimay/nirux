@@ -278,13 +278,18 @@ final class SidebarRowMotionTests: XCTestCase {
         XCTAssertEqual(checkStart(in: sidebar), start + 3)
         XCTAssertTrue(sidebar.owedTurnEnds.isEmpty)
 
-        // Too late: no check for old news.
+        // Too late: no check for old news, whether the row turns grey
+        // then or works on.
         let late = self.sidebar([busy], clock: clock)
+        let longer = self.sidebar([busy], clock: clock)
         late.noteTurnEnded(workspaceIDs: ["busy"])
+        longer.noteTurnEnded(workspaceIDs: ["busy"])
         clock.time += SidebarView.turnEndGrace + 0.1
         late.update(profiles: [], workspaces: [grey])
         XCTAssertEqual(checks(in: late.expandedViews).count, 0)
         XCTAssertTrue(late.owedTurnEnds.isEmpty)
+        longer.update(profiles: [], workspaces: [busy])
+        XCTAssertTrue(longer.owedTurnEnds.isEmpty, "owed no longer")
 
         // Something else to say by then: the row's wait, not a check.
         let asked = self.sidebar([busy], clock: clock)

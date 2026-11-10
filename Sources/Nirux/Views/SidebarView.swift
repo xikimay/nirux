@@ -239,9 +239,10 @@ final class SidebarView: NSView {
         // row's tooltip tracking rect (the system tooltip delay never
         // elapses) and blanks the hover highlight under a stationary
         // cursor. Skip when the rendered output would be identical.
-        let drawsOwedCheck = settleOwedTurnEnds()
+        // (A row whose check starts changed its mark: the rebuild follows.)
+        settleOwedTurnEnds()
         let signature = renderSignature()
-        guard signature != lastRenderSignature || drawsOwedCheck else { return }
+        guard signature != lastRenderSignature else { return }
         lastRenderSignature = signature
         rebuildContent()
     }
@@ -299,27 +300,22 @@ final class SidebarView: NSView {
 
     /// At a refresh: a row that turned grey while its turn end was owed
     /// draws its check now, from the start. One that says something else
-    /// by now, or that took too long, draws none. True when a check
-    /// starts.
-    private func settleOwedTurnEnds() -> Bool {
-        guard !owedTurnEnds.isEmpty else { return false }
+    /// by now, or that took too long, draws none.
+    private func settleOwedTurnEnds() {
+        guard !owedTurnEnds.isEmpty else { return }
         guard animates, isExpanded else {
             owedTurnEnds = [:]
-            return false
+            return
         }
         let now = clock()
-        var draws = false
         for (id, notedAt) in owedTurnEnds {
+            let isInTime = now - notedAt < Self.turnEndGrace
             let row = lastInfos.first { $0.id == id }
             let mark = row.flatMap { showsTurnEnds(on: $0) ? $0.rowSummary.mark : nil }
-            if mark == .working, now - notedAt < Self.turnEndGrace { continue }
+            if mark == .working, isInTime { continue }
             owedTurnEnds[id] = nil
-            if mark == .idle, now - notedAt < Self.turnEndGrace {
-                turnEndNotedAt[id] = now
-                draws = true
-            }
+            if mark == .idle, isInTime { turnEndNotedAt[id] = now }
         }
-        return draws
     }
 
     /// The rows move: a line of light under a working one, a check at a
