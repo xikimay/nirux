@@ -222,7 +222,7 @@ extension WorkspaceInfo {
             if let question = column.turnQuestion {
                 // Under a status line that says it, the buttons alone.
                 let said = !isLead && summary.mark == .needsYou && summary.focusColumn == column.index
-                actions.append(.turnQuestion(columnIndex: column.index, question, showsQuestion: !said))
+                actions.append(.turnQuestion(columnIndex: column.index, question, showsQuestion: true))
             }
             if let question = column.missionQuestion, column.index != questionShown {
                 actions.append(.missionQuestion(columnIndex: column.index, question))

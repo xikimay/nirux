@@ -101,7 +101,6 @@ struct ColumnInfo: Hashable {
         hasher.combine(stuck)
         hasher.combine(deferredAgent)
         hasher.combine(missionQuestion)
-        hasher.combine(turnQuestion)
         hasher.combine(circling)
     }
 }

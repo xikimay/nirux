@@ -527,14 +527,13 @@ struct AgentStatusMachine {
     /// Anything else, and "yes" could land in a draft, a dialog or a later
     /// turn.
     func acceptsQuickAnswer(to turnEndedAt: TimeInterval, foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
-        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
+        guard let foreground, foreground.name == "claude",
               foreground.instance.startedAt <= turnEndedAt
         else { return false }
         // A prompt since sets Claude working, then its Stop ends a later
         // turn: neither needs a check of its own.
-        return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && lastDraftInputAt <= (lastPromptAt ?? 0) && pendingDialogs.isEmpty && !hookWorking
-            && now - lastReadAt >= Self.quietBeforeQuickAnswer
+        return mainTurnEndedAt == turnEndedAt
+            && lastDraftInputAt <= (lastPromptAt ?? 0) && !hookWorking
     }
 
     /// Output this recent says Claude draws something: its spinner at work.
