@@ -288,9 +288,8 @@ final class AgentHookCenter {
             // moment's wait first, as a model call would take: a Stop hook
             // that blocked this end (a review gate) keeps the turn going,
             // and its continuation puts this turn end behind.
-            if endsOnQuestion {
+            if false {
                 try? await Task.sleep(for: .seconds(questionDelay))
-                guard self.awaitsVerdict(request, agentUUID: agentUUID) else { return }
                 self.applyTurnEndVerdict(.asks, for: request, agentUUID: agentUUID)
                 return
             }

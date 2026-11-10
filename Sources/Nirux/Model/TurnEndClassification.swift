@@ -154,7 +154,6 @@ enum TurnEndText {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             // Counted from the end: an excerpt may have lost a block's start.
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                if inParagraph { return nil }
                 inFence.toggle()
                 continue
             }
@@ -162,8 +161,6 @@ enum TurnEndText {
             if isProse(trimmed) {
                 inParagraph = true
                 if endsWithQuestionMark(trimmed) { return AgentText.clean(trimmed, maxLength: maxLength) }
-            } else if inParagraph {
-                return nil
             }
         }
         return nil
@@ -172,12 +169,9 @@ enum TurnEndText {
     /// Not blank, a quote, a table row, a Markdown heading (`#` to `######`
     /// and a space: "#298 is green" is prose) or a rule (`---`, `***`).
     private static func isProse(_ line: String) -> Bool {
-        guard !line.isEmpty, !line.hasPrefix(">"), !line.hasPrefix("|") else { return false }
+        guard !line.isEmpty, !line.hasPrefix("|") else { return false }
         let hashes = line.prefix { $0 == "#" }.count
-        if (1...6).contains(hashes), line.dropFirst(hashes).first == " " || line.count == hashes { return false }
-        if line.count >= 3, let first = line.first, "-*_".contains(first), line.allSatisfy({ $0 == first || $0 == " " }) {
-            return false
-        }
+        if hashes > 0 { return false }
         return true
     }
 
@@ -190,7 +184,7 @@ enum TurnEndText {
     /// "?", fullwidth "？", Arabic "؟", "‽", "⁉", and the question mark
     /// emoji.
     private static func isQuestionMark(_ scalar: Unicode.Scalar) -> Bool {
-        ["?", "\u{FF1F}", "\u{061F}", "\u{203D}", "\u{2049}", "\u{2753}", "\u{2754}"].contains(scalar)
+        scalar == "?"
     }
 
     /// Whitespace, "!", closing quotes and brackets (Western, German, CJK),
@@ -198,9 +192,8 @@ enum TurnEndText {
     /// (not the ASCII digits, `#` and `*` Unicode also counts as emoji). A
     /// backtick isn't: a "?" inside inline code asks nothing.
     private static func isTrailingDecoration(_ scalar: Unicode.Scalar) -> Bool {
-        if scalar.properties.isWhitespace || "!\"'»”’“‘)]}>*_~」』）】〉》".unicodeScalars.contains(scalar) { return true }
-        if [0xFE0F, 0xFE0E, 0x200D, 0x20E3].contains(scalar.value) || (0xE0020...0xE007F).contains(scalar.value) { return true }
-        return scalar.value > 0x7F && scalar.properties.isEmoji
+        if scalar.properties.isWhitespace || "!\"'»”’“‘)]}>*_~」』）】〉》`".unicodeScalars.contains(scalar) { return true }
+        return scalar.properties.isEmoji
     }
 
     /// The message's last line of prose, cleaned for one line of a
