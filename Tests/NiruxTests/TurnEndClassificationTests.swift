@@ -56,6 +56,7 @@ final class TurnEndClassificationTests: XCTestCase {
             "Which one?\n\n| A | B |\n|---|---|", "Run it?\n```\nmake test\n```", "Fixed.\r\nShall I push?\r\n",
             "合并吗？", "Deux options :\n1. Garder le cache ?\n2. Relire la table", "Tu veux que je la merge ? 👍🏽",
             "#298 is green. Merge it?", "Tu valides ❓", "Ready?!", "Really‽", "هل أدمج؟", "Merge it?\n\n---",
+            "1. Merge\n2. Close\n\n    Which one?", "10. Merge now and\n    keep it open?",
             "Fertig. Mergen?“", "「マージしますか？」", "On y va ? 👨‍👩‍👧", "Tu valides ? ❤️"
         ]
         for message in asks { XCTAssertTrue(TurnEndText.endsOnQuestion(message), message) }
@@ -797,7 +798,18 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(quotes("ok?", in: "Can you take a look?"), "a piece of a word")
         XCTAssertFalse(quotes("t merge?", in: "Can't merge?"), "after an apostrophe")
         XCTAssertFalse(quotes("Merge?", in: "re-Merge?"), "after a hyphen")
-        XCTAssertFalse(quotes("merge?", in: "/merge?"), "a piece of a path")
+        XCTAssertFalse(quotes("Merge it?", in: "(Done.)Merge it?"), "glued to the last sentence")
+        XCTAssertTrue(quotes("Shall I merge it?", in: "\"Done.\" Shall I merge it?"), "after a closing quote")
+        XCTAssertFalse(quotes("or close it?", in: "Should I merge it — or close it?"), "a clause")
+        XCTAssertFalse(quotes("should I merge?", in: "If CI is green, should I merge?"), "without its condition")
+        XCTAssertFalse(quotes("Redis?", in: "Should I add a cache, e.g. Redis?"), "after an e.g.")
+        XCTAssertFalse(quotes("Should I keep try?", in: "Should I keep `try?` here or switch to a do/catch?"), "a mark in code")
+        XCTAssertEqual(
+            TurnEndText.quotedSentence(
+                "Should I keep try? here or switch to a do/catch?", in: "Should I keep `try?` here or switch to a do/catch?"
+            ),
+            "Should I keep `try?` here or switch to a do/catch?"
+        )
         XCTAssertFalse(quotes("Should I delete config.", in: "Should I delete config.json?"), "a period inside a word")
         XCTAssertFalse(quotes("Should I delete config", in: "Should I delete config.json?"), "before a period inside a word")
         XCTAssertTrue(quotes("Want me to merge it", in: "Fixed.\n\nWant me to merge it"), "at the paragraph's end")
@@ -815,8 +827,15 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(quotes("Proceed with deploy? (y/n)", in: script), "code")
         XCTAssertTrue(quotes("Run this and tell me what it prints:", in: script))
         XCTAssertFalse(quotes("Should I deploy to prod?", in: "Done.\n\n    Should I deploy to prod?"), "indented code")
-        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Done:\n\n    - Should I deploy to prod?"), "a list item")
-        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Steps:\n\n    1. Should I deploy to prod?"), "a numbered one")
+        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Done:\n\n  - Should I deploy to prod?"), "a list item")
+        XCTAssertTrue(quotes("Should I deploy to prod?", in: "Steps:\n\n  1. Should I deploy to prod?"), "a numbered one")
+        XCTAssertEqual(TurnEndText.quotedSentence("Want me to merge it?", in: "Fixed.\n\n- Want me to merge it?"),
+                       "Want me to merge it?", "without its marker")
+        XCTAssertTrue(quotes("Which one?", in: "1. Merge\n2. Close\n\n    Which one?"), "indented in a list")
+        let cut = "Run this\n```\nls\n```\nand tell me what it prints."
+        XCTAssertFalse(quotes("Run this", in: cut), "the sentence goes on after the code")
+        XCTAssertFalse(quotes("and tell me what it prints.", in: cut), "it started before the code")
+        XCTAssertFalse(quotes("rge it?", in: "Start.\n[…]\nrge it?"), "after an excerpt's cut")
         let quoted = "> Can you delete the old branches?\n\nDone, they're gone."
         XCTAssertFalse(quotes("Can you delete the old branches?", in: quoted), "the user's own words")
         XCTAssertFalse(quotes("Should I deploy to prod?", in: "## Should I deploy to prod?\n\nIt's green."), "a heading")
@@ -827,6 +846,8 @@ final class TurnEndClassificationTests: XCTestCase {
             TurnEndText.quotedSentence("Should I run rm -rf build/?", in: "Done.\n\nShould I run `rm -rf build/*`?"),
             "Should I run `rm -rf build/*`?"
         )
+        XCTAssertEqual(TurnEndText.quotedSentence("Should I merge PR #41?", in: "**Should I merge** PR #41?"),
+                       "**Should I merge** PR #41?", "its emphasis whole")
         XCTAssertEqual(TurnEndText.quotedSentence("Tell me if you'd rather split it.", in: "Tell me if you’d rather split it."),
                        "Tell me if you’d rather split it.")
         XCTAssertEqual(TurnEndText.quotedSentence("“Keep the \"Resume\" label?”", in: "Keep the “Resume” label?"),
@@ -860,7 +881,8 @@ final class TurnEndClassificationTests: XCTestCase {
         for line in ["Merge it or keep it open?", "Which one do you prefer?", "What should the label say?",
                      "On part sur la version courte ou la version complète ?", "Tu préfères laquelle ?",
                      "Quel nom tu veux pour le réglage ?", "Qu’est-ce que tu en penses ?", "Comment je le nomme ?",
-                     "OK — which branch should this go on?", "Where does it go: `main`?"] {
+                     "OK — which branch should this go on?", "Where does it go: `main`?", "Je mets quoi comme nom ?",
+                     "Thoughts?"] {
             XCTAssertFalse(TurnEndText.isYesNoQuestion(line), line)
         }
     }
