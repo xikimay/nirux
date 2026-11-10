@@ -205,7 +205,7 @@ final class UIFlowHarness {
         shell.sideEffects.notifyMissionQuestion = { [weak self] workspaceID, _, _, _ in self?.missionQuestionNotices.append(workspaceID) }
         shell.sideEffects.notifyCIFailure = { [weak self] banner, flakyReason in self?.ciFailureNotices.append((banner, flakyReason)) }
         // Neither GitHub nor a model: a test that turns the triage on brings its own reader.
-        shell.sideEffects.investigateCIFailure = { _ in CITriageInvestigation.Outcome() }
+        shell.sideEffects.investigateCIFailure = { _, _ in CITriageInvestigation.Outcome() }
         // The real Trash never gets a test's file.
         shell.sideEffects.trash = { url in try FileManager.default.removeItem(at: url) }
         shell.sideEffects.claudeManagedSettings = { [root] in

@@ -53,12 +53,13 @@ enum CIFailure {
     }
 
     /// Every check of the pull request that is an Actions run of its
-    /// repository, with its result: what tells a run that passes now.
-    static func ownRunResults(_ pullRequest: PRInfo) -> [(run: Run, result: ProjectBoard.CheckResult)] {
+    /// repository, with its name and result: what tells a run that passes
+    /// now.
+    static func ownRunResults(_ pullRequest: PRInfo) -> [(run: Run, name: String, result: ProjectBoard.CheckResult)] {
         guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return [] }
         return pullRequest.checks.compactMap { check in
             guard let run = run(of: check), run.repository.lowercased() == own.repository.lowercased() else { return nil }
-            return (run, check.result)
+            return (run, check.name, check.result)
         }
     }
 

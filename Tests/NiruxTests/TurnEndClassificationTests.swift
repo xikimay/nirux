@@ -196,6 +196,42 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(onAccount())
     }
 
+    /// The receiver's two gates in one place: it says which account the
+    /// agent runs on, and keeps the final message only for an agent on
+    /// Nirux's and a running Nirux that reads final messages.
+    func testTheReceiverKeepsTheMessageOnlyForAnAgentOnNiruxsAccount() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("turn-end-readers-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let app = ProcessInstance(pid: 4242, startedAt: 10)
+        let running: (pid_t) -> ProcessInstance? = { $0 == 4242 ? app : nil }
+        let payload: [String: Any] = ["hook_event_name": "Stop", "session_id": "s", "cwd": "/work/repo",
+                                      "last_assistant_message": "Shall I merge?"]
+        func received(_ extra: [String: String] = [:], settings: [String: String] = [:]) throws -> AgentHookEvent {
+            let env = ["HOME": "/Users/me", "NIRUX_AGENT_UUID": "u"].merging(extra) { $1 }
+            var event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: env, now: 0))
+            event.applyAccount(environment: env, markers: directory, running: running, read: { settings[$0].map { Data($0.utf8) } })
+            return event
+        }
+        var event = try received()
+        XCTAssertEqual(event.onNiruxAccount, false, "no running Nirux")
+        XCTAssertNil(event.finalMessage)
+
+        TurnEndMarker.publish(app: app, environment: [:], readsFinalMessages: false, in: directory, running: running)
+        event = try received()
+        XCTAssertEqual(event.onNiruxAccount, true)
+        XCTAssertNil(event.finalMessage, "nothing reads it")
+
+        TurnEndMarker.publish(app: app, environment: [:], in: directory, running: running)
+        event = try received()
+        XCTAssertEqual(event.onNiruxAccount, true)
+        XCTAssertEqual(event.finalMessage, "Shall I merge?")
+        for other in [try received(["CLAUDE_CODE_USE_MANTLE": "1"]),
+                      try received(settings: ["/work/repo/.claude/settings.local.json": #"{"apiKeyHelper":"/bin/key"}"#])] {
+            XCTAssertEqual(other.onNiruxAccount, false)
+            XCTAssertNil(other.finalMessage)
+        }
+    }
+
     /// Which events carry the receiver's word on the account: a turn's
     /// edges on the main thread, often enough for a `claude` started
     /// before Nirux.

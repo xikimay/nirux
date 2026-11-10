@@ -225,7 +225,9 @@ final class AgentHookCenter {
                     claudeSessionAgent = foregroundProcess
                 }
                 if isFromOwnClaude, event.reportsAccount, let onNiruxAccount = event.onNiruxAccount, let foregroundProcess {
-                    resolution.column.noteClaudeAccount(onNiruxAccount: onNiruxAccount, of: foregroundProcess.instance)
+                    resolution.column.noteClaudeAccount(
+                        onNiruxAccount: onNiruxAccount, of: foregroundProcess.instance, cwd: event.cwd
+                    )
                 }
                 if event.name == .stop, !Self.keepsFinalMessage(classifierOn: true, foreground: foregroundProcess) {
                     event.finalMessage = nil

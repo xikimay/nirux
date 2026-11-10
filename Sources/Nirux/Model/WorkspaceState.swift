@@ -127,14 +127,19 @@ final class WorkspaceState {
     private var reportedRedChecks: (branch: String?, keys: Set<String>)?
     /// What the triage made of the pull request's red checks
     /// (docs/ci-failure-triage.md), and of which ones (`CITriage.signature`):
-    /// a new failure isn't the one it was about.
-    var ciTriage: (signature: String, verdict: CITriage.Verdict)?
+    /// a new failure isn't the one it was about. `retryAt` is set while an
+    /// answer is still owed (a run `gh` couldn't read, a model that
+    /// couldn't run): when to ask again.
+    var ciTriage: (signature: String, verdict: CITriage.Verdict, retryAt: TimeInterval?)?
 
     /// Why the pull request's red checks look flaky, when the triage said
-    /// so of the checks that are red now.
+    /// so of the checks that are red now. The verdict first: this is read
+    /// at every sidebar refresh, and most red pull requests aren't flaky.
     var ciFlakyReason: String? {
-        guard let ciTriage, let prInfo, ciTriage.signature == CITriage.signature(of: CIFailure.redChecks(prInfo)) else { return nil }
-        return ciTriage.verdict.flakyReason
+        guard let ciTriage, let reason = ciTriage.verdict.flakyReason, let prInfo,
+              ciTriage.signature == CITriage.signature(of: CIFailure.redChecks(prInfo))
+        else { return nil }
+        return reason
     }
     var diffStats: String?
 

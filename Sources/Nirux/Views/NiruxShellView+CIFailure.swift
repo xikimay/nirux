@@ -8,13 +8,13 @@ extension NiruxShellView {
     /// in the background. The notification says when the failure looks
     /// flaky (docs/ci-failure-triage.md), which it may wait a few seconds
     /// to know. The caller refreshes the sidebar.
-    func reportNewRedChecks(in workspace: WorkspaceState) {
+    func reportNewRedChecks(in workspace: WorkspaceState, isAppActive: Bool = NSApp.isActive) {
         triageRedChecks(in: workspace)
         let red = workspace.takeNewRedChecks()
         guard !red.isEmpty, let pullRequest = workspace.prInfo,
-              !(NSApp.isActive && workspace === activeWorkspace) else { return }
+              !(isAppActive && workspace === activeWorkspace) else { return }
         workspace.raiseNotification(.error)
-        guard !NSApp.isActive else { return }
+        guard !isAppActive else { return }
         NSApp.requestUserAttention(.informationalRequest)
         postCIFailureBanner(CIFailureBanner(
             workspaceID: workspace.id, workspaceTitle: workspace.title, pullRequest: pullRequest.number,

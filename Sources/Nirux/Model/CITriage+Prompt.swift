@@ -80,13 +80,17 @@ extension CITriage {
     static let promptSourceLength = 3_000
     static let promptDeclarationsPerFile = 8
     static let promptFiles = 120
+    static let promptJobs = 6
+    /// The whole input, whatever its parts add up to.
+    static let promptLength = 60_000
 
     /// The evidence between tags it can't close itself.
     static func modelInput(_ evidence: Evidence) -> Data {
         var lines: [String] = []
-        for job in evidence.jobs.filter(\.isRed) {
-            let steps = job.failedSteps.isEmpty ? "" : " Failed step: \(job.failedSteps.joined(separator: ", "))."
-            lines.append("Job: \(job.name) (attempt \(evidence.attempt)).\(steps)")
+        for job in evidence.jobs.filter(\.isRed).prefix(promptJobs) {
+            let failed = job.failedSteps.prefix(4).map { clipped($0, maxNameLength) }.joined(separator: ", ")
+            let steps = failed.isEmpty ? "" : " Failed step: \(failed)."
+            lines.append("Job: \(clipped(job.name, maxNameLength)) (attempt \(evidence.attempt)).\(steps)")
         }
         let tests = evidence.findings.tests
         if !tests.isEmpty {
@@ -113,6 +117,9 @@ extension CITriage {
             lines.append("Tests that started and never finished (crash or hang): "
                 + unfinished.prefix(promptTests).joined(separator: ", ") + signal)
         }
+        for crash in evidence.findings.crashes.prefix(promptFailuresPerTest) {
+            lines.append("Crash: \(clipped(crash.file, maxNameLength)):\(crash.line): Fatal error: \(clipped(crash.message, promptMessageLength))")
+        }
         if !evidence.sources.isEmpty {
             lines.append("Source of the failing tests:")
             for source in evidence.sources.prefix(promptSources) {
@@ -124,7 +131,7 @@ extension CITriage {
         lines.append("The pull request changes \(evidence.changes.count) files:")
         for change in evidence.changes.prefix(promptFiles) {
             let declarations = change.declarations
-            var line = change.path
+            var line = clipped(change.path, 2 * maxNameLength)
             if !declarations.isEmpty {
                 line += ": " + declarations.prefix(promptDeclarationsPerFile).joined(separator: "; ")
                 if declarations.count > promptDeclarationsPerFile { line += "; (+\(declarations.count - promptDeclarationsPerFile))" }
@@ -132,7 +139,8 @@ extension CITriage {
             lines.append(line)
         }
         if evidence.changes.count > promptFiles { lines.append("(and \(evidence.changes.count - promptFiles) more files)") }
-        let text = lines.joined(separator: "\n").replacingOccurrences(of: "</failure>", with: "</ failure>", options: .caseInsensitive)
+        let text = clipped(lines.joined(separator: "\n"), promptLength)
+            .replacingOccurrences(of: "</failure>", with: "</ failure>", options: .caseInsensitive)
         return Data("<failure>\n\(text)\n</failure>".utf8)
     }
 
@@ -143,34 +151,22 @@ extension CITriage {
     static let fallbackFlakyReason = "The failing tests exercise code this pull request doesn’t change."
     static let reasonLength = 300
 
-    /// The model's two lines: the verdict is the last of the three words
-    /// near the end of the answer, the reason its first line (cleaned for
-    /// display, it is the model's text about a log). Nil without a word:
-    /// not an answer.
+    /// The model's two lines. The verdict is its last line, which must be
+    /// one of the three words and nothing else (but punctuation and
+    /// Markdown around it): "REAL, not flaky" is no verdict, and no verdict
+    /// is no answer. The reason is its first line, cleaned for display (it
+    /// is the model's text about a log).
     @Sendable static func verdict(fromAnswer answer: String) -> Verdict? {
-        let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tail = String(trimmed.suffix(60)).uppercased()
-        var last: (word: String, at: String.Index)?
-        for word in ["FLAKY", "REAL", "UNSURE"] {
-            var search = tail.startIndex..<tail.endIndex
-            while let found = tail.range(of: word, range: search) {
-                let before = found.lowerBound == tail.startIndex ? nil : tail[tail.index(before: found.lowerBound)]
-                let after = found.upperBound == tail.endIndex ? nil : tail[found.upperBound]
-                let isWord = !(before?.isLetter ?? false) && !(after?.isLetter ?? false)
-                if isWord, last.map({ found.lowerBound > $0.at }) ?? true { last = (word, found.lowerBound) }
-                search = found.upperBound..<tail.endIndex
-            }
-        }
-        switch last?.word {
+        let lines = answer.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard let last = lines.last else { return nil }
+        switch last.trimmingCharacters(in: CharacterSet.letters.inverted).uppercased() {
         case "REAL":
             return .real
-        case "FLAKY":
-            let firstLine = trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-            let isOnlyTheWord = firstLine.uppercased().trimmingCharacters(in: CharacterSet.letters.inverted) == "FLAKY"
-            let reason = isOnlyTheWord ? nil : AgentText.clean(firstLine, maxLength: reasonLength)
-            return .flaky(reason: reason ?? fallbackFlakyReason)
         case "UNSURE":
             return .unsure
+        case "FLAKY":
+            let reason = lines.count > 1 ? AgentText.clean(lines[0], maxLength: reasonLength) : nil
+            return .flaky(reason: reason ?? fallbackFlakyReason)
         default:
             return nil
         }
@@ -234,22 +230,76 @@ extension CITriage {
     }
 
     /// The declarations a patch edits in `source` (the file at the pull
-    /// request's head): for each run of changed lines, the nearest
-    /// declaration at or above it. Each once, in order.
+    /// request's head): for each run of changed lines, the function,
+    /// property or type it sits in. Each once, in order.
     static func declarations(editedBy patch: String, in source: String) -> [String] {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         var result: [String] = []
-        for number in changedLines(inPatch: patch) {
-            var index = min(number, lines.count) - 1
-            while index >= 0 {
-                if let name = declaration(in: lines[index]) {
-                    if !result.contains(name) { result.append(name) }
-                    break
-                }
-                index -= 1
-            }
+        for number in changedLines(inPatch: patch).prefix(maxChangesPerFile) {
+            guard let name = enclosingDeclaration(ofLine: min(number, lines.count) - 1, in: lines), !result.contains(name)
+            else { continue }
+            result.append(name)
         }
         return result
+    }
+
+    /// A file's first changes are read, and a declaration is looked for
+    /// this many lines up: a generated table has thousands of both, and
+    /// names none.
+    static let maxChangesPerFile = 100
+    static let maxDeclarationWalk = 400
+
+    /// What the line at `index` belongs to, by indentation: a line that is
+    /// itself a function or a type; else the nearest function above it
+    /// that is less indented (a local `let` on the way is not what
+    /// changed); else, in a type's body, the property the line is or sits
+    /// in, or the type.
+    static func enclosingDeclaration(ofLine index: Int, in lines: [Substring]) -> String? {
+        guard lines.indices.contains(index) else { return nil }
+        var property: String?
+        if let own = parsedDeclaration(in: lines[index]) {
+            guard own.kind == .property else { return own.text }
+            property = own.text
+        }
+        // A closing line's opener is as indented as it is: one more, so
+        // that the opener counts as enclosing. A blank line takes the
+        // first line above it.
+        var limit = indentation(of: lines[index]).map { startsWithCloser(lines[index]) ? $0 + 1 : $0 }
+        var cursor = index - 1
+        var walked = 0
+        while cursor >= 0, walked < maxDeclarationWalk {
+            let line = lines[cursor]
+            cursor -= 1
+            walked += 1
+            guard let indent = indentation(of: line), !isDirectiveOrComment(line), indent < limit ?? (indent + 1) else { continue }
+            limit = startsWithCloser(line) ? indent + 1 : indent
+            if let found = parsedDeclaration(in: line) {
+                switch found.kind {
+                case .function: return found.text
+                case .type: return property ?? found.text
+                case .property: property = found.text
+                }
+            }
+        }
+        return property
+    }
+
+    /// The count of leading spaces and tabs; nil for a blank line.
+    private static func indentation(of line: Substring) -> Int? {
+        let indent = line.prefix { $0 == " " || $0 == "\t" }.count
+        return indent == line.count ? nil : indent
+    }
+
+    private static func startsWithCloser(_ line: Substring) -> Bool {
+        guard let first = line.first(where: { $0 != " " && $0 != "\t" }) else { return false }
+        return first == "}" || first == ")" || first == "]"
+    }
+
+    /// `#if` sits at the margin whatever it is in, and a comment is in
+    /// nothing.
+    private static func isDirectiveOrComment(_ line: Substring) -> Bool {
+        let text = line.drop { $0 == " " || $0 == "\t" }
+        return text.hasPrefix("#") || text.hasPrefix("//")
     }
 
     private static let modifiers: Set<String> = [
@@ -258,10 +308,21 @@ extension CITriage {
     ]
     private static let typeKeywords: Set<String> = ["struct", "class", "enum", "extension", "protocol", "actor"]
 
-    /// "func name", "init", "var name", "struct Name"… when the line
-    /// declares one, past its attributes and modifiers.
+    struct Declaration: Equatable {
+        enum Kind { case function, property, type }
+        let kind: Kind
+        /// "func name", "init", "var name", "struct Name"…
+        let text: String
+    }
+
+    /// The declaration's words when the line declares one, past its
+    /// attributes and modifiers.
     static func declaration(in line: Substring) -> String? {
-        var words = line.split(whereSeparator: { $0 == " " || $0 == "\t" })[...]
+        parsedDeclaration(in: line)?.text
+    }
+
+    static func parsedDeclaration(in line: Substring) -> Declaration? {
+        var words = line.prefix(2_000).split(whereSeparator: { $0 == " " || $0 == "\t" })[...]
         guard words.count <= 64 else { return nil }
         while let first = words.first {
             // "@MainActor", "@objc(name)", "private(set)".
@@ -277,12 +338,20 @@ extension CITriage {
         }
         guard let keyword = words.first else { return nil }
         let head = String(keyword.prefix { $0 != "(" && $0 != "<" && $0 != "{" })
-        if ["init", "deinit", "subscript"].contains(head.trimmingCharacters(in: CharacterSet(charactersIn: "?!"))) { return head }
+        if ["init", "deinit", "subscript"].contains(head.trimmingCharacters(in: CharacterSet(charactersIn: "?!"))) {
+            return Declaration(kind: .function, text: head)
+        }
         guard let next = words.dropFirst().first else { return nil }
         let isNameCharacter: (Character) -> Bool = { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "`" || $0 == "." }
-        let name = String(next.prefix(while: isNameCharacter))
+        let name = String(next.prefix(while: isNameCharacter).prefix(maxNameLength))
         guard !name.isEmpty else { return nil }
-        if head == "func" || head == "var" || head == "let" || typeKeywords.contains(head) { return "\(head) \(name)" }
-        return nil
+        switch head {
+        case "func": return Declaration(kind: .function, text: "func \(name)")
+        case "var", "let": return Declaration(kind: .property, text: "\(head) \(name)")
+        default: return typeKeywords.contains(head) ? Declaration(kind: .type, text: "\(head) \(name)") : nil
+        }
     }
+
+    /// A name in the model's input: a job, a step, a path, a declaration.
+    static let maxNameLength = 120
 }

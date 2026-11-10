@@ -7,15 +7,34 @@ import XCTest
 final class CITriageInvestigationTests: XCTestCase {
     private static let commit = String(repeating: "c", count: 40)
     private static let runnerPath = "/Users/runner/work/widgets/widgets/Tests/WidgetTests"
-    private static let failureLine = "test\tRun tests\t2026-11-09T23:09:12.1234567Z \(runnerPath)/GearTests.swift:41: "
-        + "error: -[WidgetTests.GearTests testStops] : XCTAssertEqual failed"
+    private static func failureLine(_ test: String = "testStops", job: String = "test") -> String {
+        "\(job)\tRun tests\t2026-11-09T23:09:12.1234567Z \(runnerPath)/GearTests.swift:41: "
+            + "error: -[WidgetTests.GearTests \(test)] : XCTAssertEqual failed"
+    }
 
-    /// What a double answers, by the `gh` subcommand asked.
+    private static func runView(attempt: Int = 1, jobs: String = #"{"name":"test","databaseId":11,"conclusion":"failure","steps":[{"name":"Run tests","conclusion":"failure"}]}"#)
+        -> String {
+        #"{"attempt":\#(attempt),"headSha":"\#(commit)","jobs":[\#(jobs)]}"#
+    }
+
+    /// What the doubles answer.
     private struct World: Sendable {
-        var runView: String? = #"{"attempt":1,"headSha":"\#(commit)","jobs":[{"name":"test","conclusion":"failure","steps":[{"name":"Run tests","conclusion":"failure"}]}]}"#
-        var log: String? = failureLine
+        var attempt = 1
+        var runView: String? = CITriageInvestigationTests.runView()
+        var log: String? = CITriageInvestigationTests.failureLine()
+        /// The attempt before's, asked with `--attempt <attempt - 1>`.
+        var earlierRunView: String?
+        var earlierLog: String?
+        var annotations: String?
         var files: String? = #"{"filename":"Sources/Widgets/Axle.swift","patch":"@@ -1,2 +1,2 @@\n struct Axle {\n-    var speed = 1\n+    var speed = 2"}"#
         var commitIsLocal = true
+        var tree = ["Sources/Widgets/Axle.swift", "Tests/WidgetTests/GearTests.swift"]
+        /// What `git grep` finds declaring a class.
+        var declaring: [String] = []
+        var blobs: [String: String] = [
+            "Tests/WidgetTests/GearTests.swift": "final class GearTests {\n    func testStops() {\n        stop()\n    }\n}\n",
+            "Sources/Widgets/Axle.swift": "struct Axle {\n    var speed = 2\n}\n"
+        ]
         var answer: CITriage.Verdict? = .flaky(reason: "The tests drive gears; the changes edit an axle.")
     }
 
@@ -23,17 +42,26 @@ final class CITriageInvestigationTests: XCTestCase {
         private let lock = NSLock()
         private var ghCalls: [[String]] = []
         private var gitCalls: [[String]] = []
+        private var blobCalls: [[String]] = []
         private var modelInputs: [String] = []
 
         func gh(_ arguments: [String]) { lock.withLock { ghCalls.append(arguments) } }
         func git(_ arguments: [String]) { lock.withLock { gitCalls.append(arguments) } }
+        func blobs(_ objects: [String]) { lock.withLock { blobCalls.append(objects) } }
         func model(_ input: String) { lock.withLock { modelInputs.append(input) } }
         var gh: [[String]] { lock.withLock { ghCalls } }
         var git: [[String]] { lock.withLock { gitCalls } }
+        var blobsAsked: [[String]] { lock.withLock { blobCalls } }
         var inputs: [String] { lock.withLock { modelInputs } }
-        /// "run view --json", "run view --log-failed", "api": what was asked, in order.
+        /// What was asked of `gh`, in order: "run", "log", "files",
+        /// "annotations", with "@n" for an attempt named.
         var asked: [String] {
-            gh.map { $0.contains("--log-failed") ? "log" : $0.first == "api" ? "files" : "run" }
+            gh.map { arguments in
+                let attempt = arguments.firstIndex(of: "--attempt").map { "@" + arguments[$0 + 1] } ?? ""
+                if arguments.contains("--log-failed") { return "log" + attempt }
+                if arguments.first == "api" { return arguments.contains { $0.hasSuffix("/annotations") } ? "annotations" : "files" }
+                return "run" + attempt
+            }
         }
     }
 
@@ -41,19 +69,31 @@ final class CITriageInvestigationTests: XCTestCase {
         CITriageInvestigation.Effects(
             gh: { arguments, _, _ in
                 calls.gh(arguments)
-                let answer = arguments.contains("--log-failed") ? world.log : arguments.first == "api" ? world.files : world.runView
+                let attempt = arguments.firstIndex(of: "--attempt").flatMap { Int(arguments[$0 + 1]) }
+                let answer: String?
+                if arguments.contains("--log-failed") {
+                    answer = attempt == world.attempt ? world.log : world.earlierLog
+                } else if arguments.first == "api" {
+                    answer = arguments.contains { $0.hasSuffix("/annotations") } ? world.annotations : world.files
+                } else {
+                    answer = attempt == nil ? world.runView : world.earlierRunView
+                }
                 return answer.map { Data($0.utf8) }
             },
             git: { arguments, _ in
                 calls.git(arguments)
-                switch arguments.prefix(2) {
-                case ["cat-file", "-e"]: return world.commitIsLocal ? Data() : nil
-                case ["ls-tree", "-r"]: return Data("Sources/Widgets/Axle.swift\u{0}Tests/WidgetTests/GearTests.swift\u{0}".utf8)
-                case ["cat-file", "blob"] where arguments.last == "\(Self.commit):Tests/WidgetTests/GearTests.swift":
-                    return Data("final class GearTests {\n    func testStops() {\n        stop()\n    }\n}\n".utf8)
-                case ["cat-file", "blob"] where arguments.last == "\(Self.commit):Sources/Widgets/Axle.swift":
-                    return Data("struct Axle {\n    var speed = 2\n}\n".utf8)
+                switch arguments.first {
+                case "cat-file": return world.commitIsLocal ? Data() : nil
+                case "ls-tree": return Data(world.tree.map { $0 + "\u{0}" }.joined().utf8)
+                case "grep": return Data(world.declaring.map { "\(Self.commit):\($0)\u{0}" }.joined().utf8)
                 default: return nil
+                }
+            },
+            blobs: { objects, _ in
+                calls.blobs(objects)
+                return objects.map { object in
+                    guard object.hasPrefix(Self.commit + ":") else { return nil }
+                    return world.blobs[String(object.dropFirst(Self.commit.count + 1))].map { Data($0.utf8) }
                 }
             },
             model: { input in
@@ -63,28 +103,41 @@ final class CITriageInvestigationTests: XCTestCase {
         )
     }
 
-    private func request(isModelAllowed: Bool = true, previous: Set<String> = [], flaky: Set<String> = [], root: String? = "/repo")
-        -> CITriageInvestigation.Request {
+    private func request(isModelAllowed: Bool = true, flaky: Set<String> = [], root: String? = "/repo") -> CITriageInvestigation.Request {
         CITriageInvestigation.Request(
             run: CIFailure.Run(repository: "github.com/acme/widgets", id: 7), pullRequest: 52, repositoryRoot: root,
-            isModelAllowed: isModelAllowed, previousAttemptTests: previous, knownFlaky: flaky
+            isModelAllowed: isModelAllowed, knownFlaky: flaky
         )
     }
 
-    private func investigate(_ world: World, _ request: CITriageInvestigation.Request? = nil) async
-        -> (outcome: CITriageInvestigation.Outcome, calls: Calls) {
+    private func investigate(
+        _ world: World, _ request: CITriageInvestigation.Request? = nil, isStillWanted: @escaping @Sendable () async -> Bool = { true }
+    ) async -> (outcome: CITriageInvestigation.Outcome, calls: Calls) {
         let calls = Calls()
-        return (await CITriageInvestigation.investigate(request ?? self.request(), effects: effects(world, calls)), calls)
+        let outcome = await CITriageInvestigation.investigate(
+            request ?? self.request(), effects: effects(world, calls), isStillWanted: isStillWanted
+        )
+        return (outcome, calls)
     }
+
+    private static let gear = "GearTests.testStops"
 
     // MARK: - What the rules settle asks no model
 
-    func testAJobThatNeverRanIsSettledByTheRunAlone() async {
+    func testAJobThatNeverRanIsSettledByWhyItDidnt() async {
         var world = World()
-        world.runView = #"{"attempt":1,"headSha":"\#(Self.commit)","jobs":[{"name":"test","conclusion":"cancelled","steps":[]}]}"#
+        world.runView = Self.runView(jobs: #"{"name":"test","databaseId":99,"conclusion":"cancelled","steps":[]}"#)
+        world.annotations = "Due to capacity constraints…\nThe job was not acquired by Runner of type hosted even after multiple attempts"
         let (outcome, calls) = await investigate(world)
-        XCTAssertEqual(outcome, CITriageInvestigation.Outcome(verdict: .flaky(reason: CITriage.neverRanReason), tests: [], wasRead: true))
-        XCTAssertEqual(calls.asked, ["run"], "no log to read")
+        XCTAssertEqual(outcome, CITriageInvestigation.Outcome(verdict: .flaky(reason: "No runner took the job: no step ran."), wasRead: true))
+        XCTAssertEqual(calls.asked, ["run", "annotations"], "no log to read")
+        XCTAssertEqual(calls.gh.last, ["api", "--hostname", "github.com", "repos/acme/widgets/check-runs/99/annotations", "--jq", ".[].message"])
+
+        // GitHub refused to start it: the workflow, so the pull request's doing.
+        world.annotations = "Error when evaluating 'runs-on' for job 'test'."
+        let refused = await investigate(world)
+        XCTAssertEqual(refused.outcome, CITriageInvestigation.Outcome(verdict: .unsure, wasRead: true))
+        XCTAssertEqual(refused.calls.inputs, [])
     }
 
     func testACompileErrorIsRealWithoutThePullRequestsFiles() async {
@@ -92,27 +145,90 @@ final class CITriageInvestigationTests: XCTestCase {
         world.log = "test\tBuild\t2026-11-09T23:09:12.1234567Z /Users/runner/work/widgets/widgets/Sources/Widgets/Axle.swift:3:5: error: nope"
         let (outcome, calls) = await investigate(world)
         XCTAssertEqual(outcome.verdict, .real)
-        XCTAssertEqual(calls.asked, ["run", "log"])
+        XCTAssertEqual(calls.asked, ["run", "log@1"], "the log of the attempt whose jobs were read")
         XCTAssertEqual(calls.inputs, [])
     }
 
     func testAnEditedTestFileIsRealAndARerunCuredTestIsFlaky() async {
         var world = World()
         world.files = #"{"filename":"Tests/WidgetTests/GearTests.swift","patch":null}"#
-        let edited = await investigate(world, request(flaky: ["GearTests.testStops"]))
+        let edited = await investigate(world, request(flaky: [Self.gear]))
         XCTAssertEqual(edited.outcome.verdict, .real)
-        XCTAssertEqual(edited.outcome.tests, ["GearTests.testStops"])
-        XCTAssertEqual(edited.calls.asked, ["run", "log", "files"])
+        XCTAssertEqual(edited.outcome.tests, [Self.gear])
+        XCTAssertEqual(edited.calls.asked, ["run", "log@1", "files"])
         XCTAssertEqual(edited.calls.gh.last, [
             "api", "--hostname", "github.com", "--paginate", "repos/acme/widgets/pulls/52/files?per_page=100",
             "--jq", #".[] | {filename, patch: ((.patch // "") | .[0:20000])}"#
         ])
 
-        let cured = await investigate(World(), request(flaky: ["GearTests.testStops"]))
-        XCTAssertEqual(cured.outcome.verdict, .flaky(reason: CITriage.knownFlakyReason(["GearTests.testStops"])))
-        let again = await investigate(World(), request(previous: ["GearTests.testStops"], flaky: ["GearTests.testStops"]))
-        XCTAssertEqual(again.outcome.verdict, .real, "it failed in the attempt before too")
-        XCTAssertEqual(cured.calls.inputs + again.calls.inputs + edited.calls.inputs, [], "the rules settled them")
+        let cured = await investigate(World(), request(flaky: [Self.gear]))
+        XCTAssertEqual(cured.outcome.verdict, .flaky(reason: CITriage.knownFlakyReason([Self.gear])))
+        XCTAssertEqual(edited.calls.inputs + cured.calls.inputs, [], "the rules settled them")
+    }
+
+    /// A rerun that fails is read with the attempt before: what failed
+    /// there failing again is real, whatever Nirux saw or missed.
+    func testASecondAttemptIsReadWithTheOneBefore() async {
+        var world = World()
+        world.attempt = 2
+        world.runView = Self.runView(attempt: 2, jobs: #"{"name":"test","databaseId":12,"conclusion":"failure","steps":[{"name":"Run tests","conclusion":"failure"}]}"#)
+        world.earlierRunView = Self.runView(attempt: 1)
+        world.earlierLog = Self.failureLine()
+        let again = await investigate(world, request(flaky: [Self.gear]))
+        XCTAssertEqual(again.outcome.verdict, .real)
+        XCTAssertEqual(again.calls.asked, ["run", "log@2", "files", "run@1", "log@1"])
+
+        world.earlierLog = Self.failureLine("testTurns")
+        let other = await investigate(world, request(flaky: [Self.gear]))
+        XCTAssertEqual(other.outcome.verdict, .flaky(reason: CITriage.knownFlakyReason([Self.gear])), "another test failed before")
+
+        // A job GitHub carried over from attempt 1 keeps its id: it is
+        // the same failure, not a second one.
+        world.earlierRunView = Self.runView(attempt: 1, jobs: #"{"name":"test","databaseId":12,"conclusion":"failure","steps":[{"name":"Run tests","conclusion":"failure"}]}"#)
+        let carried = await investigate(world, request(flaky: [Self.gear]))
+        XCTAssertEqual(carried.outcome.verdict, .flaky(reason: CITriage.knownFlakyReason([Self.gear])))
+        XCTAssertEqual(carried.calls.asked, ["run", "log@2", "files", "run@1"], "no earlier log to read")
+
+        // The attempt before can't be read: it may have failed the same way.
+        world.earlierRunView = nil
+        let unknown = await investigate(world, request(flaky: [Self.gear]))
+        XCTAssertEqual(unknown.outcome.verdict, .unsure)
+        XCTAssertFalse(unknown.outcome.isUnanswered, "the rules' answer, not the model's")
+    }
+
+    /// One red job the rules can't read keeps the whole run from being
+    /// flaky, whatever the others say.
+    func testOneJobTheRulesCantReadKeepsTheRunPlain() async {
+        var world = World()
+        world.runView = Self.runView(jobs: #"{"name":"build","databaseId":1,"conclusion":"failure","steps":[{"name":"Fetch","conclusion":"failure"}]},"#
+            + #"{"name":"lint","databaseId":2,"conclusion":"failure","steps":[{"name":"Lint","conclusion":"failure"}]}"#)
+        world.log = [
+            "build\tFetch\t2026-11-09T23:09:12.1234567Z error: failed downloading 'https://example.com/Kit.zip' which is required by binary target 'kit': x",
+            "lint\tLint\t2026-11-09T23:09:13.1234567Z ##[error]3 files need formatting"
+        ].joined(separator: "\n")
+        let (outcome, calls) = await investigate(world)
+        XCTAssertEqual(outcome.verdict, .unsure)
+        XCTAssertEqual(calls.inputs, [])
+
+        // The lint job has no line in the log at all: nothing read of it.
+        world.log = "build\tFetch\t2026-11-09T23:09:12.1234567Z error: failed downloading 'https://example.com/Kit.zip' which is required by binary target 'kit': x"
+        let silent = await investigate(world)
+        XCTAssertEqual(silent.outcome.verdict, .unsure)
+
+        // Alone, the build job's download is a flake.
+        world.runView = Self.runView(jobs: #"{"name":"build","databaseId":1,"conclusion":"failure","steps":[{"name":"Fetch","conclusion":"failure"}]}"#)
+        let alone = await investigate(world)
+        XCTAssertEqual(alone.outcome.verdict, .flaky(reason: CITriage.downloadReason))
+    }
+
+    func testJobFindingsFollowTheLogsJobColumn() {
+        let jobs = [CITriage.Job(name: "test", conclusion: "failure", stepCount: 1, failedSteps: []),
+                    CITriage.Job(name: "lint", conclusion: "failure", stepCount: 1, failedSteps: [])]
+        var found = CITriage.LogFindings()
+        found.otherErrors = ["x"]
+        XCTAssertEqual(CITriageInvestigation.jobFindings(of: jobs, in: [("lint", found)]), [CITriage.LogFindings(), found])
+        XCTAssertEqual(CITriageInvestigation.jobFindings(of: [jobs[0]], in: [("", found)]), [found], "a raw log is its only job's")
+        XCTAssertEqual(CITriageInvestigation.jobFindings(of: jobs, in: [("", found)]), [CITriage.LogFindings(), CITriage.LogFindings()])
     }
 
     // MARK: - What they leave open
@@ -120,16 +236,41 @@ final class CITriageInvestigationTests: XCTestCase {
     func testAnOpenFailureGoesToTheModelWithItsSourceAndTheChangedDeclarations() async throws {
         let (outcome, calls) = await investigate(World())
         XCTAssertEqual(outcome, CITriageInvestigation.Outcome(
-            verdict: .flaky(reason: "The tests drive gears; the changes edit an axle."), tests: ["GearTests.testStops"], wasRead: true
+            verdict: .flaky(reason: "The tests drive gears; the changes edit an axle."), tests: [Self.gear], wasRead: true
         ))
         let input = try XCTUnwrap(calls.inputs.first)
         XCTAssertEqual(calls.inputs.count, 1)
         XCTAssertTrue(input.contains("- GearTests.testStops\n    GearTests.swift:41: XCTAssertEqual failed"), input)
         XCTAssertTrue(input.contains("// Tests/WidgetTests/GearTests.swift\n    func testStops() {\n        stop()\n    }"), input)
         XCTAssertTrue(input.contains("The pull request changes 1 files:\nSources/Widgets/Axle.swift: var speed"), input)
-        // Read at the run's commit, in the workspace's repository.
+        // Read at the run's commit, in the workspace's repository, the
+        // changed files in one batch.
         XCTAssertEqual(calls.git.first, ["cat-file", "-e", "\(Self.commit)^{commit}"])
-        XCTAssertTrue(calls.git.contains(["cat-file", "blob", "\(Self.commit):Tests/WidgetTests/GearTests.swift"]))
+        XCTAssertEqual(calls.blobsAsked, [["\(Self.commit):Tests/WidgetTests/GearTests.swift"], ["\(Self.commit):Sources/Widgets/Axle.swift"]])
+    }
+
+    /// The run tests the merge with the base branch: a failing test that
+    /// isn't at the pull request's commit came with it, and nothing here
+    /// says a rerun would pass.
+    func testATestTheBaseBranchBroughtGetsNoVerdict() async {
+        var world = World()
+        world.tree = ["Sources/Widgets/Axle.swift"]
+        let (outcome, calls) = await investigate(world)
+        XCTAssertEqual(outcome, CITriageInvestigation.Outcome(verdict: .unsure, tests: [Self.gear], wasRead: true))
+        XCTAssertEqual(calls.inputs, [])
+    }
+
+    func testAClassOutsideTheFileOfItsNameIsFoundWhereItIsDeclared() async throws {
+        var world = World()
+        world.tree = ["Sources/Widgets/Axle.swift", "Tests/WidgetTests/PartsTests.swift"]
+        world.declaring = ["Tests/WidgetTests/PartsTests.swift"]
+        world.blobs["Tests/WidgetTests/PartsTests.swift"] = "final class GearTests {\n    func testStops() {\n        stop()\n    }\n}\n"
+        let (_, calls) = await investigate(world)
+        let input = try XCTUnwrap(calls.inputs.first)
+        XCTAssertTrue(input.contains("// Tests/WidgetTests/PartsTests.swift\n    func testStops() {"), input)
+        let grep = try XCTUnwrap(calls.git.first { $0.first == "grep" })
+        XCTAssertTrue(grep.contains("class GearTests"))
+        XCTAssertEqual(grep.suffix(3), [Self.commit, "--", "*.swift"])
     }
 
     func testWithoutTheCommitTheModelReadsNamesOnly() async throws {
@@ -141,6 +282,7 @@ final class CITriageInvestigationTests: XCTestCase {
         XCTAssertFalse(input.contains("Source of the failing tests"))
         XCTAssertTrue(input.hasSuffix("The pull request changes 1 files:\nSources/Widgets/Axle.swift\n</failure>"), input)
         XCTAssertEqual(calls.git, [["cat-file", "-e", "\(Self.commit)^{commit}"]], "nothing else is asked of a commit that isn't there")
+        XCTAssertEqual(calls.blobsAsked, [])
 
         let (rootless, rootlessCalls) = await investigate(World(), request(root: nil))
         XCTAssertNotNil(rootless.verdict.flakyReason)
@@ -148,12 +290,21 @@ final class CITriageInvestigationTests: XCTestCase {
     }
 
     /// A workspace whose agent runs on another account: the rules only.
-    /// The run is still read and remembered, which is how Nirux learns.
+    /// The run is still read and remembered, which is how Nirux learns;
+    /// the answer stays owed.
     func testNoModelForAWorkspaceOnAnotherAccount() async {
         let (outcome, calls) = await investigate(World(), request(isModelAllowed: false))
-        XCTAssertEqual(outcome, CITriageInvestigation.Outcome(verdict: .unsure, tests: ["GearTests.testStops"], wasRead: true))
+        XCTAssertEqual(outcome, CITriageInvestigation.Outcome(verdict: .unsure, tests: [Self.gear], wasRead: true, isUnanswered: true))
         XCTAssertEqual(calls.inputs, [])
         XCTAssertEqual(calls.git, [], "nor its source read for nothing")
+    }
+
+    /// The option went off while `gh` was read: nothing goes to the model.
+    func testTurnedOffOnTheWayNothingGoesToTheModel() async {
+        let (outcome, calls) = await investigate(World(), isStillWanted: { false })
+        XCTAssertEqual(outcome.verdict, .unsure)
+        XCTAssertTrue(outcome.isUnanswered)
+        XCTAssertEqual(calls.inputs, [])
     }
 
     func testAnythingMissingMeansNoVerdict() async {
@@ -162,10 +313,11 @@ final class CITriageInvestigationTests: XCTestCase {
         let silent = await investigate(world)
         XCTAssertEqual(silent.outcome.verdict, .unsure, "the model gave no answer")
         XCTAssertTrue(silent.outcome.wasRead)
+        XCTAssertTrue(silent.outcome.isUnanswered, "asked again another time")
 
         world = World()
         world.files = #"{"message":"Bad credentials"}"#
-        let noFiles = await investigate(world, request(flaky: ["GearTests.testStops"]))
+        let noFiles = await investigate(world, request(flaky: [Self.gear]))
         XCTAssertEqual(noFiles.outcome.verdict, .unsure, "nothing says the pull request leaves the test alone")
         XCTAssertEqual(noFiles.calls.inputs, [])
 
@@ -182,7 +334,7 @@ final class CITriageInvestigationTests: XCTestCase {
 
         // The run passes now (a rerun went through meanwhile): nothing red to read.
         world = World()
-        world.runView = #"{"attempt":2,"headSha":"\#(Self.commit)","jobs":[{"name":"test","conclusion":"success","steps":[{"name":"Run tests","conclusion":"success"}]}]}"#
+        world.runView = Self.runView(jobs: #"{"name":"test","databaseId":11,"conclusion":"success","steps":[{"name":"Run tests","conclusion":"success"}]}"#)
         let green = await investigate(world)
         XCTAssertEqual(green.outcome, CITriageInvestigation.Outcome())
         XCTAssertEqual(green.calls.asked, ["run"])
@@ -192,12 +344,24 @@ final class CITriageInvestigationTests: XCTestCase {
         func arguments(_ repository: String) -> [String]? {
             CITriageInvestigation.changedFilesArguments(CITriageInvestigation.Request(
                 run: CIFailure.Run(repository: repository, id: 7), pullRequest: 52, repositoryRoot: nil,
-                isModelAllowed: false, previousAttemptTests: [], knownFlaky: []
+                isModelAllowed: false, knownFlaky: []
             ))
         }
         XCTAssertEqual(arguments("ghe.example.com/acme/widgets")?[2], "ghe.example.com")
         XCTAssertNil(arguments("acme/widgets"))
         XCTAssertNil(arguments("github.com/acme/widgets/extra"))
+    }
+
+    /// `git cat-file --batch`'s answers, each in its place.
+    func testBatchOutputGivesEachBlobInOrder() {
+        var output = Data("aaaa blob 5\nhello\n".utf8)
+        output += Data("HEAD:missing.swift missing\n".utf8)
+        output += Data("bbbb tree 4\nxxxx\n".utf8)
+        output += Data("cccc blob 0\n\n".utf8)
+        output += Data("dddd blob 3\nend\n".utf8)
+        let blobs = CITriageInvestigation.blobs(count: 6, inBatchOutput: output)
+        XCTAssertEqual(blobs, [Data("hello".utf8), nil, nil, Data(), Data("end".utf8), nil])
+        XCTAssertEqual(CITriageInvestigation.blobs(count: 2, inBatchOutput: Data("eeee blob 99\nshort\n".utf8)), [nil, nil], "cut short")
     }
 
     // MARK: - The model's runs
@@ -257,6 +421,41 @@ final class CITriageInvestigationTests: XCTestCase {
         XCTAssertEqual(account.setup(), .unavailable, "and no client runs after it")
     }
 
+    /// A run billed per call rests every client until the plan's limit
+    /// resets, a week at most, and a relaunch rests too.
+    func testABilledRunRestsUntilTheLimitResetsAcrossRelaunches() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("claude-runs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let restURL = folder.appendingPathComponent("claude-runs-rest")
+        let clock = Clock(1_000)
+        let account = ClaudeOneShotRunner.Account(checkSetup: { [cli] in .ready(cli) }, now: { clock.value }, restURL: restURL)
+        try await knowsSetup(account)
+        let resetsAt = 1_000 + 3 * 60 * 60
+        let runner = ClaudeOneShotRunner(client: CITriageModel.client, account: account, runProcess: { _, _, _ in
+            Self.events([#"{"type":"rate_limit_event","rate_limit_info":{"overageInUse":true,"resetsAt":\#(resetsAt)}}"#, Self.result("ok")])
+        }, now: { clock.value })
+        let paid = await runner.answer(to: Data(), read: { $0 })
+        XCTAssertEqual(paid, "ok")
+
+        // As after a relaunch: another account, the same file.
+        let relaunched = ClaudeOneShotRunner.Account(checkSetup: { [cli] in .ready(cli) }, now: { clock.value }, restURL: restURL)
+        try await knowsSetup(relaunched)
+        clock.value = TimeInterval(resetsAt - 1)
+        XCTAssertEqual(account.setup(), .unavailable)
+        XCTAssertEqual(relaunched.setup(), .unavailable)
+        clock.value = TimeInterval(resetsAt + 1)
+        XCTAssertEqual(relaunched.setup(), .ready(cli))
+
+        // A reset a year away rests a week.
+        relaunched.restAfterBilledRun(resetsAt: clock.value + 365 * 24 * 60 * 60)
+        clock.value += ClaudeOneShotRunner.Account.longestBilledRest + 1
+        XCTAssertEqual(relaunched.setup(), .ready(cli))
+        XCTAssertEqual(
+            ClaudeOneShotRunner.report(from: Self.events([#"{"type":"rate_limit_event","rate_limit_info":{"isUsingOverage":true,"resetsAt":42}}"#])),
+            ClaudeOneShotRunner.RunReport(text: nil, billedPerCall: true, overageResetsAt: 42)
+        )
+    }
+
     func testAnAnswerTheClientCantReadCountsAsAFailedRun() async throws {
         let account = ClaudeOneShotRunner.Account(checkSetup: { [cli] in .ready(cli) })
         try await knowsSetup(account)
@@ -274,6 +473,16 @@ final class CITriageInvestigationTests: XCTestCase {
             XCTAssertNil(verdict)
         }
         XCTAssertEqual(runs.value, 2, "resting after two")
+    }
+
+    private final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var time: TimeInterval
+        init(_ time: TimeInterval) { self.time = time }
+        var value: TimeInterval {
+            get { lock.withLock { time } }
+            set { lock.withLock { time = newValue } }
+        }
     }
 
     private final class LockedFlag: @unchecked Sendable {

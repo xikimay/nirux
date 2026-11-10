@@ -67,8 +67,12 @@ struct ShellSideEffects {
     /// Reads a failed run to tell a flaky failure from a real one (`gh`,
     /// the local repository, a model: see `CITriageInvestigation`). Tests
     /// replace it: a flow test reaches neither GitHub nor `claude`.
-    var investigateCIFailure: @Sendable (CITriageInvestigation.Request) async -> CITriageInvestigation.Outcome = {
-        await CITriageInvestigation.investigate($0)
+    /// The second parameter says, before anything goes to the model,
+    /// whether the triage is still on.
+    var investigateCIFailure: @Sendable (
+        CITriageInvestigation.Request, _ isStillWanted: @escaping @Sendable () async -> Bool
+    ) async -> CITriageInvestigation.Outcome = { request, isStillWanted in
+        await CITriageInvestigation.investigate(request, isStillWanted: isStillWanted)
     }
 
     /// The native notification of a pull request whose checks failed, with
