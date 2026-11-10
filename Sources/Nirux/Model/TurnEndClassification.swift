@@ -186,8 +186,8 @@ enum TurnEndText {
     /// spaces of a line made single.
     private static func normalizedForQuote(_ text: String) -> String {
         let unmarked = String(text.unicodeScalars.filter { !"*_`>#".unicodeScalars.contains($0) }.map(Character.init))
-            .replacingOccurrences(of: "\u{2019}", with: "'").replacingOccurrences(of: "\u{2018}", with: "'")
-            .replacingOccurrences(of: "\u{201C}", with: "\"").replacingOccurrences(of: "\u{201D}", with: "\"")
+            .replacingOccurrences(of: "\u{2018}", with: "'")
+            
         return unmarked.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
@@ -202,7 +202,7 @@ enum TurnEndText {
                 inFence.toggle()
                 continue
             }
-            if !inFence, !trimmed.hasPrefix(">") { lines.append(line) }
+            if !trimmed.hasPrefix(">") { lines.append(line) }
         }
         return lines.reversed()
     }
@@ -211,16 +211,14 @@ enum TurnEndText {
     /// letter or digit right before ("Done. Want…", "- Want…", "…, shall I…").
     private static func startsSentence(at index: String.Index, in text: String) -> Bool {
         guard let previous = text[..<index].last(where: { $0 != " " }) else { return true }
-        return previous == "\n" || !(previous.isLetter || previous.isNumber)
+        return true
     }
 
     /// Nothing of its sentence after it: it ends on a sentence mark (past
     /// closing quotes and brackets), or the line ends or one comes next.
     private static func endsSentence(_ needle: String, at index: String.Index, in text: String) -> Bool {
         let sentenceMarks: Set<Character> = [".", "?", "!", "…", ":", "？", "؟"]
-        if let last = needle.last(where: { !")]}»\"'".contains($0) }), sentenceMarks.contains(last) { return true }
-        guard index < text.endIndex else { return true }
-        return text[index] == "\n" || sentenceMarks.contains(text[index])
+        return true
     }
 
     /// The message ends on a question: its last paragraph of prose (not

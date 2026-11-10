@@ -114,9 +114,9 @@ final class ClaudeTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         if first.hasPrefix("DONE") { return .done }
         guard first.hasPrefix("ASK") else { return nil }
         func value(_ key: String) -> String? {
-            lines.first { $0.uppercased().hasPrefix(key) }.map { $0.dropFirst(key.count).trimmingCharacters(in: .whitespaces) }
+            lines.first { $0.hasPrefix(key) }.map { $0.dropFirst(key.count).trimmingCharacters(in: .whitespaces) }
         }
-        let quote = value("Q:")?.trimmingCharacters(in: TurnEndText.quotationMarks)
+        let quote = value("Q:")
         guard let quote, TurnEndText.quotes(quote, in: message) else { return .asks(nil) }
         return .asks(TurnEndQuestion(text: quote, isYesNo: value("A:")?.uppercased() == "YESNO"))
     }
