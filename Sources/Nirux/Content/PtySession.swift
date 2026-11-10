@@ -385,7 +385,9 @@ final class PtySession: @unchecked Sendable {
     /// .acceptsQuickAnswer`), as a prompt the user's click sends; false,
     /// and nothing typed, otherwise.
     func typeQuickAnswer(_ terminalInput: String, to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
-        guard !hasExited, state.machine.acceptsQuickAnswer(to: turnEndedAt, foreground: foreground) else { return false }
+        guard !hasExited, state.machine.acceptsQuickAnswer(
+            to: turnEndedAt, foreground: foreground, now: Date().timeIntervalSince1970
+        ) else { return false }
         typePromptFromUser(terminalInput)
         return true
     }

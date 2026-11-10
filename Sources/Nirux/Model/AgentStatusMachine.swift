@@ -520,18 +520,25 @@ struct AgentStatusMachine {
     /// A quick answer (Yes, No, a reply) to the turn end of `turnEndedAt`
     /// may be typed now: that turn end is still the last thing that
     /// happened (no prompt, turn end or conversation change since, the
-    /// same `claude`), the user typed nothing into the prompt since, no
-    /// dialog waits and Claude isn't working. Anything else, and "yes"
-    /// could land in a draft, a dialog or a later turn.
-    func acceptsQuickAnswer(to turnEndedAt: TimeInterval, foreground: ForegroundProcess?) -> Bool {
+    /// same `claude`), nothing typed at the prompt since the last prompt
+    /// went in (a draft started during the turn stays there), no dialog
+    /// waits, Claude isn't working, and its terminal is quiet (a Stop
+    /// hook's continuation runs its spinner before any hook says so).
+    /// Anything else, and "yes" could land in a draft, a dialog or a later
+    /// turn.
+    func acceptsQuickAnswer(to turnEndedAt: TimeInterval, foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
         guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
               foreground.instance.startedAt <= turnEndedAt
         else { return false }
         // A prompt since sets Claude working, then its Stop ends a later
         // turn: neither needs a check of its own.
         return mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt
-            && lastDraftInputAt <= turnEndedAt && pendingDialogs.isEmpty && !hookWorking
+            && lastDraftInputAt <= (lastPromptAt ?? 0) && pendingDialogs.isEmpty && !hookWorking
+            && now - lastReadAt >= Self.quietBeforeQuickAnswer
     }
+
+    /// Output this recent says Claude draws something: its spinner at work.
+    static let quietBeforeQuickAnswer: TimeInterval = 1.5
 
     /// The user's click types a prompt into this agent (Address PR
     /// Feedback, Why Failed): they engage with it. The turn end before is

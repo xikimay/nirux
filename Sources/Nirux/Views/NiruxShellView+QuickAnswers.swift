@@ -28,7 +28,12 @@ extension NiruxShellView {
     ) {
         if answerTurnQuestion(agentUUID: target.agentUUID, turnEndedAt: target.turnEndedAt, answer: text) { return }
         NSApp.activate(ignoringOtherApps: true)
-        focusWorkspace(id: workspaceID, column: columnIndex)
+        // Where that agent is now (columns may have moved since the banner).
+        if let place = agentPlace(target.agentUUID) {
+            focusWorkspace(id: place.workspace.id, column: place.columnIndex)
+        } else {
+            focusWorkspace(id: workspaceID, column: columnIndex)
+        }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -107,7 +112,16 @@ extension NiruxShellView {
 
     /// A quick answer that can't go in: the column shows why.
     private func refuseQuickAnswer(in workspace: WorkspaceState, columnIndex: Int) {
-        focusWorkspace(id: workspace.id, column: columnIndex)
+        let agent = workspace.columns[safe: columnIndex]?.agentUUID.flatMap(agentPlace)
+        focusWorkspace(id: agent?.workspace.id ?? workspace.id, column: agent?.columnIndex ?? columnIndex)
         showToast("Not sent: Claude moved on, or something is typed at its prompt")
+    }
+
+    /// The workspace and column of the agent `agentUUID` now.
+    func agentPlace(_ agentUUID: String) -> (workspace: WorkspaceState, columnIndex: Int)? {
+        for workspace in workspaces {
+            if let index = workspace.columns.firstIndex(where: { $0.agentUUID == agentUUID }) { return (workspace, index) }
+        }
+        return nil
     }
 }

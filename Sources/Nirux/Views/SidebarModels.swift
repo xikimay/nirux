@@ -77,6 +77,7 @@ struct ColumnInfo: Hashable {
             && lhs.stuck == rhs.stuck
             && lhs.deferredAgent == rhs.deferredAgent
             && lhs.missionQuestion == rhs.missionQuestion
+            && lhs.turnQuestion == rhs.turnQuestion
             && lhs.circling == rhs.circling
     }
 
@@ -100,6 +101,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(stuck)
         hasher.combine(deferredAgent)
         hasher.combine(missionQuestion)
+        hasher.combine(turnQuestion)
         hasher.combine(circling)
     }
 }
