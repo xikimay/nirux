@@ -508,6 +508,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
         let request = try XCTUnwrap(endTurn().turnEnd)
         machine.notePromptFromUser()
+        XCTAssertTrue(machine.isQuietTurnEnd, "read, and still quiet: no attention that never alerted")
         XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "a late verdict drops")
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false).firedAttention)
 
@@ -515,6 +516,7 @@ final class TurnEndClassificationTests: XCTestCase {
         machine = AgentStatusMachine()
         let asked = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.applyTurnEndVerdict(.asks, for: asked, isUserFocused: false)
+        XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
         machine.notePromptFromUser()
         XCTAssertNil(machine.visibleQuestion(foreground: claude))
 
@@ -868,8 +870,9 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(asksAlerts.value, [.askedInReply("Let me know if I should merge it.")])
     }
 
-    /// Through the column, as `sendTypedPrompt` types: the verdict on its
-    /// way drops and the prompt alerts for nothing.
+    /// Through the column method `sendTypedPrompt` types with (reaching
+    /// `sendTypedPrompt` itself takes a live `claude` process): the
+    /// verdict on its way drops and the prompt alerts for nothing.
     func testPromptTypedForTheUserAlertsForNothing() throws {
         let (center, _, column, request, alerts) = try turnEndColumn()
         let pty = try XCTUnwrap(column.pty)
