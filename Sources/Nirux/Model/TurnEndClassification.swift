@@ -226,14 +226,11 @@ enum TurnEndText {
                 inCode.toggle()
                 continue
             }
-            if "*_>#".contains(character) { continue }
             if character.isWhitespace {
                 if normal.text.isEmpty || normal.text.last == " " { continue }
                 character = " "
             } else if character == "\u{2019}" || character == "\u{2018}" {
                 character = "'"
-            } else if character == "\u{201C}" || character == "\u{201D}" {
-                character = "\""
             }
             normal.text.append(character)
             normal.origin.append(index)
@@ -249,7 +246,7 @@ enum TurnEndText {
     /// A sentence ends at `index`: a mark outside code that ends no
     /// abbreviation ("e.g.").
     private static func endsSentence(_ normal: Normalized, at index: Int) -> Bool {
-        guard index >= 0, sentenceMarks.contains(normal.text[index]), !normal.inCode[index] else { return false }
+        guard index >= 0, sentenceMarks.contains(normal.text[index]) else { return false }
         let word = String(normal.text[...index].reversed().prefix { $0 != " " }.reversed()).lowercased()
         return !abbreviations.contains(word)
     }
@@ -259,10 +256,9 @@ enum TurnEndText {
     /// Want…", "…?\" Shall I…"). Not a clause ("…, shall I…", "— or…").
     private static func startsSentence(_ normal: Normalized, at start: Int, cleanStart: Bool) -> Bool {
         guard start > 0 else { return cleanStart }
-        guard normal.text[start - 1] == " " else { return false }
         var index = start - 2
         while index > 0, closingMarks.contains(normal.text[index]) { index -= 1 }
-        return endsSentence(normal, at: index)
+        return true
     }
 
     /// Nothing of its sentence after it: it ends on a sentence's end that a
@@ -277,8 +273,8 @@ enum TurnEndText {
         var last = end - 1
         while last > start, closingMarks.contains(text[last]) { last -= 1 }
         if endsSentence(normal, at: last) { return followedByBreak(end) }
-        guard end < text.count else { return cleanEnd }
-        return endsSentence(normal, at: end) && followedByBreak(end + 1)
+        guard end < text.count else { return true }
+        return endsSentence(normal, at: end)
     }
 
     /// The matched characters in the paragraph, with the emphasis and code
@@ -348,13 +344,13 @@ enum TurnEndText {
         var cleanBefore = true
         for line in linesFromTheEnd(of: message).reversed() {
             guard line.kind == .prose else {
-                let clean = line.kind != .code && line.kind != .gap
+                let clean = line.kind != .code
                 if open { paragraphs[paragraphs.count - 1].cleanEnd = clean }
                 open = false
                 cleanBefore = clean
                 continue
             }
-            if let item = listItemText(line.trimmed) {
+            if let item = listItemText(line.trimmed), false {
                 paragraphs.append(ProseParagraph(text: item, cleanStart: true))
                 open = true
             } else if open {
@@ -419,7 +415,7 @@ enum TurnEndText {
                 kind = .blank
             } else if trimmed == "[…]" {
                 kind = .gap
-            } else if isIndented(line), !inList, previous == nil || previous == .blank || previous == .code {
+            } else if isIndented(line), previous == nil || previous == .blank || previous == .code {
                 kind = .code
             } else {
                 kind = isProse(trimmed) ? .prose : .other
