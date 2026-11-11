@@ -633,6 +633,15 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Compare two parsers", "message": "Add a chart"], lead: lead, in: harness).isError)
             // By the folder list_tasks shows.
             XCTAssertFalse(try call(LeadTools.tell, ["task": task.cwd, "message": "And a table"], lead: lead, in: harness).isError)
+            // A title that is another task's folder name reaches neither.
+            XCTAssertFalse(try call(LeadTools.startTask, ["description": "Notes: Q3", "repo": "none"], lead: lead, in: harness).isError)
+            XCTAssertFalse(try call(LeadTools.startTask, ["description": "Notes- Q3"], lead: lead, in: harness).isError)
+            let notes = try XCTUnwrap(shell.workspaces.first { $0.title == "Notes: Q3" })
+            XCTAssertEqual(notes.taskFolder.map { ($0 as NSString).lastPathComponent }, "Notes- Q3")
+            let ambiguous = try call(LeadTools.tell, ["task": "Notes- Q3", "message": "Which one?"], lead: lead, in: harness)
+            XCTAssertTrue(ambiguous.isError, ambiguous.text)
+            // A folder task's Mission names it by its title: it has no branch.
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == notes.id }?.branch, "Notes: Q3")
 
             // Proposed: the sheet starts it in a folder too.
             shell.setLeadStartsTasks(false, spaceID: lead.space)

@@ -126,13 +126,29 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
 
     /// A task the new one goes under in the sidebar, and where it works:
-    /// the space's repository, or its own folder for a task without one,
-    /// where its sub-tasks get theirs.
+    /// its sub-tasks work there too.
     struct ParentTask: Equatable {
+        enum Place: Equatable {
+            /// One of the space's repositories, by key.
+            case repository(key: String)
+            /// Its own folder, a task without a repository: its sub-tasks
+            /// get theirs in it.
+            case folder(String)
+        }
+
         let workspaceID: String
         let title: String
-        let repositoryKey: String?
-        var folder: String?
+        let place: Place
+
+        var repositoryKey: String? {
+            if case .repository(let key) = place { return key }
+            return nil
+        }
+
+        var folder: String? {
+            if case .folder(let folder) = place { return folder }
+            return nil
+        }
     }
 
     /// "New Sub-task…": "Sub-task of “<title>”" shows, checked. Nil: no
@@ -150,6 +166,17 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private var subtaskFolder: String? {
         subtaskParentID == nil ? nil : parentTask?.folder
     }
+
+    /// A sub-task, checked, of a task whose repository the sheet can't
+    /// select (it left the space): it never starts in another one.
+    private var subtaskLostItsRepository: Bool {
+        guard subtaskParentID != nil, let key = parentTask?.repositoryKey else { return false }
+        return selectedRepositoryKey != key || selectedRepository == nil
+    }
+
+    /// "Add “…”" or "Add Repository…" was picked: the repository it adds
+    /// is the user's choice (see `updateRepositories`).
+    private var awaitsAddedRepository = false
     private let reportHint = NSTextField(wrappingLabelWithString:
         "The Lead follows this task and answers its questions. Only what needs you reaches you, in amber.")
 
@@ -291,16 +318,27 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         branchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The space's repositories changed while the sheet is open (one was
-    /// added from it): selects `key` when listed, else No Repository.
-    func updateRepositories(_ repositories: [Repository], selecting key: String?) {
+    /// The space's repositories changed while the sheet is open: `added`
+    /// was just anchored. The user's choice stays: No Repository, the
+    /// repository picked, a sub-task's repository (none once it's gone:
+    /// the sheet then refuses to start). Only a repository the user added
+    /// from the popup is selected; one picked that left the space gives
+    /// way to `fallback`, the space's default.
+    func updateRepositories(_ repositories: [Repository], added key: String?, fallback: String?) {
         guard panel != nil else { return }
         self.repositories = repositories
         if !repositories.isEmpty { suggestion = nil }
         let previous = selectedRepositoryKey
-        // A sub-task stays in its task's repository, the popup hidden.
-        let wanted = subtaskParentID != nil ? parentTask?.repositoryKey : key
-        selectedRepositoryKey = [wanted, key].compactMap { $0 }.first { candidate in repositories.contains { $0.key == candidate } }
+        let isListed = { (candidate: String) in repositories.contains { $0.key == candidate } }
+        if subtaskParentID != nil, let parentKey = parentTask?.repositoryKey {
+            // A sub-task stays in its task's repository, the popup hidden.
+            selectedRepositoryKey = isListed(parentKey) ? parentKey : nil
+        } else if awaitsAddedRepository, let key, isListed(key) {
+            awaitsAddedRepository = false
+            selectedRepositoryKey = key
+        } else if let previous, !isListed(previous) {
+            selectedRepositoryKey = fallback.flatMap { isListed($0) ? $0 : nil } ?? repositories.first?.key
+        }
         rebuildRepositoryPopup()
         if selectedRepositoryKey != previous || info == nil { repositoryChanged() } else { refresh() }
     }
@@ -448,9 +486,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         switch item.tag {
         case Self.addSuggestedTag:
             selectRepositoryItem()
+            awaitsAddedRepository = true
             if let suggestion { onAddSuggested?(suggestion) }
         case Self.addRepositoryTag:
             selectRepositoryItem()
+            awaitsAddedRepository = true
             onAddRepository?()
         default:
             let key = item.tag == Self.noRepositoryTag ? nil : item.representedObject as? String
@@ -495,10 +535,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// folder of the space surely outside git holds its tasks' folders.
     var destination: Destination? {
         if let subtaskFolder { return .folder(parent: subtaskFolder) }
-        guard let repository = selectedRepository else {
-            // A sub-task stays in its task's repository, even one gone.
-            return parentTask?.repositoryKey != nil && subtaskParentID != nil ? nil : .folder(parent: tasksFolder)
-        }
+        if subtaskLostItsRepository { return nil }
+        guard let repository = selectedRepository else { return .folder(parent: tasksFolder) }
         guard let info else { return nil }
         if let target = info.target { return .worktree(target) }
         return repository.isFolder && info.isOutsideGit ? .folder(parent: repository.folder) : nil
@@ -585,9 +623,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// repository git can't read (its folder gone, say), or a sub-task's
     /// repository no longer in the space.
     var noTaskReason: String? {
-        if subtaskParentID != nil, parentTask?.repositoryKey != nil, selectedRepository == nil {
-            return "The task’s repository is no longer in this space."
-        }
+        if subtaskLostItsRepository { return "The task’s repository is no longer in this space." }
         guard subtaskFolder == nil, let repository = selectedRepository, let info, info.target == nil,
               !(repository.isFolder && info.isOutsideGit) else { return nil }
         if info.isGone { return "“\(repository.name)” is gone: pick another, or No Repository." }

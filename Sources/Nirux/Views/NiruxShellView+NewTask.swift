@@ -103,8 +103,8 @@ extension NiruxShellView {
             parentTask: parentTask,
             agent: defaultTaskAgent(forSpace: space.id),
             homeFolder: homeFolder,
-            tasksFolder: settings?.tasksFolder ?? defaultTasksFolder,
-            tasksFolderIsDefault: settings?.tasksFolder == nil
+            tasksFolder: tasksFolder(settings).path,
+            tasksFolderIsDefault: tasksFolder(settings).isDefault
         )
         if repositories.isEmpty, space.id != WorkspaceProfile.defaultID {
             suggestRepository(to: panel)
@@ -120,21 +120,22 @@ extension NiruxShellView {
             guard NiruxURLRequest.directoryExists(folder) else { return NSSound.beep() }
             showNewPanel(
                 spaceID: parent.profileID,
-                parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, repositoryKey: nil, folder: folder)
+                parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, place: .folder(folder))
             )
             return
         }
         guard let repositoryKey = subtaskRepositoryKey(of: parent) else { return NSSound.beep() }
         showNewPanel(
             spaceID: parent.profileID,
-            parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, repositoryKey: repositoryKey)
+            parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, place: .repository(key: repositoryKey))
         )
     }
 
-    /// Where a task without a repository gets its folder: the one picked
-    /// in Settings › General, else `defaultTasksFolder`.
-    func tasksFolder() -> String {
-        Persistence.load()?.settings?.tasksFolder ?? defaultTasksFolder
+    /// Where a task without a repository gets its folder (NewTask+Folder):
+    /// the one picked in Settings › General, else `defaultTasksFolder`,
+    /// the only one made when missing (`isDefault`).
+    func tasksFolder(_ settings: PersistedSettings? = Persistence.load()?.settings) -> (path: String, isDefault: Bool) {
+        settings?.tasksFolder.map { ($0, false) } ?? (defaultTasksFolder, true)
     }
 
     /// `~/Nirux Tasks`, made when missing.
@@ -179,19 +180,13 @@ extension NiruxShellView {
         }
     }
 
-    /// The sheet of a space whose repositories changed: `key` (one just
-    /// added) is selected, else the one that was (No Repository too, when
-    /// the user picked it), else the default.
+    /// The sheet of a space whose repositories changed: `key` was just
+    /// anchored (see `NewTaskPanel.updateRepositories`).
     func refreshNewTaskPanelRepositories(selecting key: String? = nil) {
         guard let panel = newTaskPanel, panel.panel != nil,
               let space = profiles.first(where: { $0.id == panel.space.id })
         else { return }
-        let repositories = newTaskRepositories(of: space)
-        let isListed = { (candidate: String) in repositories.contains { $0.key == candidate } }
-        let keepsNoRepository = panel.selectedRepositoryKey == nil && !panel.repositories.isEmpty
-        let selected = [key, panel.selectedRepositoryKey].compactMap { $0 }.first(where: isListed)
-            ?? (keepsNoRepository ? nil : [space.anchors.defaultAnchor?.key].compactMap { $0 }.first(where: isListed) ?? repositories.first?.key)
-        panel.updateRepositories(repositories, selecting: selected)
+        panel.updateRepositories(newTaskRepositories(of: space), added: key, fallback: space.anchors.defaultAnchor?.key)
     }
 
     /// Offers the focused terminal's repository to a space that has none,
@@ -265,14 +260,18 @@ extension NiruxShellView {
         let childAgentUUID = UUID().uuidString
         // The branch, or the folder's name as it was made.
         let label = created.checkedOutBranch ?? created.folderName ?? request.name
+        let title = NewTask.workspaceTitle(description: request.description) ?? label
+        // A Mission names its child by its branch: a folder task has none,
+        // so its title stands in ("Fix login", not "Fix login (branch Fix
+        // login 2)"), and `--mission tell --branch` takes that title.
         let mission = request.reportsTo.flatMap { parent in
             createMission(
                 parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-                agent: request.agent, branch: label
+                agent: request.agent, branch: created.folderName == nil ? label : title
             )
         }
         addWorkspace(
-            title: NewTask.workspaceTitle(description: request.description) ?? label,
+            title: title,
             cwd: created.workingDirectory,
             agent: request.agent,
             profileID: decision.spaceID,
@@ -293,10 +292,13 @@ extension NiruxShellView {
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
         // The sheet's trust hint has done its job once a Claude Code task
         // started in the tasks folder, where the hint applies.
+        // The cheap checks first: the settings are read only for such a task.
         if case .folder(let parent, _, _) = request.place, created.folderName != nil, request.agent == .claude,
-           !request.startedByLead, request.parentWorkspaceID == nil, parent == tasksFolder(),
-           Persistence.load()?.settings?.startedFolderTask != true {
-            _ = Persistence.updateSettings(liveLayout: persistedState()) { $0.startedFolderTask = true }
+           !request.startedByLead, request.parentWorkspaceID == nil {
+            let settings = Persistence.load()?.settings
+            if settings?.startedFolderTask != true, parent == tasksFolder(settings).path {
+                _ = Persistence.updateSettings(liveLayout: persistedState()) { $0.startedFolderTask = true }
+            }
         }
         saveState()
         // A hook prints its reason last.
@@ -410,6 +412,15 @@ extension NiruxShellView {
         )
         guard longest.utf8.count <= HandoverFile.maxBytes else {
             return .failed("The task and its template are longer than 1 MB: shorten them.")
+        }
+        // Never inside a git repository (a dotfiles home holds the default
+        // tasks folder, say): its agent would work in that repository. A
+        // sub-task's folder goes in its task's, already checked.
+        if request.parentWorkspaceID == nil, !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent) {
+            return .failed(
+                "\(parent.abbreviatedPath()) is inside a git repository, where a task without one doesn’t belong. "
+                    + "Pick another folder for these tasks in Settings › General."
+            )
         }
         let folder: String
         switch NewTask.makeFolder(named: name, in: parent, makesParent: makesParent) {

@@ -79,6 +79,24 @@ final class AgentTrustPromptTests: XCTestCase {
         XCTAssertFalse(hooked.watchesForTrustPrompt(foreground: claude, now: started + 2))
     }
 
+    /// The question comes first: a screen read without it, ten times, ends
+    /// the watch (a Codex has no hook to). A read with no screen counts
+    /// for nothing; another agent starts afresh.
+    func testNiruxStopsLookingOnceTheScreenShowedSomethingElse() {
+        var machine = AgentStatusMachine()
+        let codex = agent("codex")
+        for read in 0..<AgentTrustPrompt.maxMisses {
+            XCTAssertTrue(machine.watchesForTrustPrompt(foreground: codex, now: started + 1), "read \(read)")
+            machine.noteTrustPrompt(shown: false, foreground: codex, now: started + 1)
+            machine.noteTrustPrompt(shown: nil, foreground: codex, now: started + 1)
+        }
+        XCTAssertFalse(machine.watchesForTrustPrompt(foreground: codex, now: started + 2))
+        XCTAssertTrue(machine.watchesForTrustPrompt(foreground: agent("codex", pid: 43, startedAt: started + 3), now: started + 4))
+        var unread = AgentStatusMachine()
+        for _ in 0..<AgentTrustPrompt.maxMisses * 2 { unread.noteTrustPrompt(shown: nil, foreground: codex, now: started + 1) }
+        XCTAssertTrue(unread.watchesForTrustPrompt(foreground: codex, now: started + 2), "no surface yet: nothing read")
+    }
+
     func testTheQuestionWaitsOnTheUserUntilAKeyOrAHook() {
         var machine = AgentStatusMachine()
         let claude = agent()

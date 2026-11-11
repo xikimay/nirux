@@ -79,11 +79,11 @@ extension NiruxShellView {
                 if let repository, !(repository.isFolder && info.isOutsideGit) {
                     return answer("\(repository.name) isn’t a git repository Nirux can start a task in.", true)
                 }
-                let settingsFolder = Persistence.load()?.settings?.tasksFolder
+                let tasksFolder = self.tasksFolder()
                 let place = NewTask.Place.folder(
-                    parent: repository?.folder ?? settingsFolder ?? self.defaultTasksFolder,
+                    parent: repository?.folder ?? tasksFolder.path,
                     name: NewTask.suggestedFolderName(description: description),
-                    makesParent: repository == nil && settingsFolder == nil
+                    makesParent: repository == nil && tasksFolder.isDefault
                 )
                 var request = NewTask.Request(
                     description: description, template: template, agent: agent, projectID: space.id,
@@ -179,10 +179,11 @@ extension NiruxShellView {
         _ description: String, repository: NewTaskPanel.Repository?, withoutRepository: Bool, templateName: String?,
         in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
-        var proposal = LeadProposal(
-            spaceID: space.id, repositoryKey: repository?.key, description: description, templateName: templateName, parent: parent
+        let proposal = LeadProposal(
+            spaceID: space.id,
+            repository: repository.map { .named(key: $0.key) } ?? (withoutRepository ? .noRepository : .spaceDefault),
+            description: description, templateName: templateName, parent: parent
         )
-        proposal.withoutRepository = withoutRepository
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
                 + "If they start it, it reports to you.", false)
@@ -198,7 +199,7 @@ extension NiruxShellView {
     private func showLeadProposal(_ proposal: LeadProposal) -> Bool {
         guard window?.attachedSheet == nil,
               let panel = showNewPanel(
-                  spaceID: proposal.spaceID, selectedKey: proposal.repositoryKey, withoutRepository: proposal.withoutRepository
+                  spaceID: proposal.spaceID, selectedKey: proposal.repository.key, withoutRepository: proposal.repository == .noRepository
               )
         else { return false }
         panel.reportsTo = proposal.parent
@@ -292,7 +293,7 @@ extension NiruxShellView {
             anchor.name + (anchor.isDefault ? " (default)" : "")
         }
         let header = "\(space.name): \(tasks.isEmpty ? "no task" : tasks.count == 1 ? "1 task" : "\(tasks.count) tasks")."
-        let folderLine = "a new folder of its own in \(tasksFolder()), no git"
+        let folderLine = "a new folder of its own in \(tasksFolder().path), no git"
         let repositoryLine = repositories.isEmpty
             ? "No repository: each task starts in \(folderLine)."
             : "Repositories: \(repositories.joined(separator: ", ")); \"\(LeadTools.noRepository)\" starts a task in \(folderLine)."
@@ -345,20 +346,19 @@ extension NiruxShellView {
                 .filter { $0.childWorkspaceID == workspace.id && $0.parentWorkspaceID == leadID && $0.reportsToLead == true }
                 .max(by: { $0.createdAt < $1.createdAt })
         }
-        let byBranch = candidates.filter { $0.gitBranch == name }.compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
-        if let first = byBranch.first { return first }
-        // A task without a repository has its folder instead: its path, as
-        // list_tasks shows it, or its name, when only one has it.
-        let byFolder = candidates.compactMap { workspace -> (WorkspaceState, Mission)? in
-            guard let folder = workspace.taskFolder, folder == name || (folder as NSString).lastPathComponent == name else { return nil }
-            return mission(of: workspace).map { (workspace, $0) }
+        func named(_ matches: (WorkspaceState) -> Bool) -> [(WorkspaceState, Mission)] {
+            candidates.filter(matches).compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
         }
-        if let exact = byFolder.first(where: { $0.0.taskFolder == name }) { return exact }
-        if byFolder.count == 1 { return byFolder[0] }
-        // Two of its tasks with that title: the branch says which.
-        let byTitle = candidates.filter { $0.title.caseInsensitiveCompare(name) == .orderedSame }
-            .compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
-        return byTitle.count == 1 ? byTitle[0] : nil
+        if let first = named({ $0.gitBranch == name }).first { return first }
+        // A task without a repository has its folder instead, by path as
+        // list_tasks shows it.
+        if let first = named({ $0.taskFolder == name }).first { return first }
+        // Then a title, or a folder's name, only one task having it: a
+        // title and a folder's name naming two tasks is no answer.
+        let byTitle = named { $0.title.caseInsensitiveCompare(name) == .orderedSame }
+        let byFolderName = named { $0.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false }
+        let found = Dictionary((byTitle + byFolderName).map { ($0.0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return found.count == 1 ? found.values.first : nil
     }
 
     private func noLeadTask(_ name: String) -> String {
@@ -551,12 +551,22 @@ extension NiruxShellView {
 
 /// A task a Lead proposes (see `NiruxShellView.pendingLeadProposals`).
 struct LeadProposal: Equatable {
+    enum Repository: Equatable {
+        case named(key: String)
+        /// `repo: "none"`: No Repository, a folder of its own.
+        case noRepository
+        /// The space had none: the sheet picks its default when it shows
+        /// (one may have been added meanwhile).
+        case spaceDefault
+
+        var key: String? {
+            if case .named(let key) = self { return key }
+            return nil
+        }
+    }
+
     let spaceID: String
-    /// Nil: the space had none, so the sheet picks its default when it
-    /// shows (one may have been added meanwhile).
-    let repositoryKey: String?
-    /// `repo: "none"`: No Repository, a folder of its own.
-    var withoutRepository = false
+    let repository: Repository
     let description: String
     let templateName: String?
     let parent: NewTask.MissionParent

@@ -403,6 +403,66 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertNil(shell.worktreeCleanupOffer(workspaceIndex: index))
             XCTAssertFalse(shell.worktreeCleanupCandidates().contains { $0.workspaceIDs.contains(task.id) })
             XCTAssertFalse(shell.offersSubtask(task), "no folder to hold a sub-task's")
+
+            // A home that is a git repository (dotfiles): no task starts
+            // in it, and nothing is made.
+            try FileManager.default.createDirectory(atPath: harness.home + "/.git", withIntermediateDirectories: true)
+            sheet = try openSheet(harness)
+            describe("Plan the offsite", in: sheet)
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the refusal") { !sheet.isStarting }
+            XCTAssertTrue(sheet.errorLabel.stringValue.contains("is inside a git repository"), sheet.errorLabel.stringValue)
+            XCTAssertTrue(sheet.errorLabel.stringValue.contains("Settings › General"), sheet.errorLabel.stringValue)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: tasks + "/Plan the offsite"))
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
+    /// A repository anchored elsewhere while the sheet is open (Space
+    /// Settings, the space menu) isn't the user's choice: No Repository
+    /// stays picked.
+    func testARepositoryAddedElsewhereLeavesNoRepositoryPicked() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = shell.workspaceStore.createProfile(named: "Empty", select: false)
+            shell.selectProfile(space.id)
+            let sheet = try openSheet(harness)
+            describe("Wire the cache", in: sheet)
+            XCTAssertEqual(sheet.destination, .folder(parent: harness.home + "/Nirux Tasks"))
+            let anchor = try XCTUnwrap(FolderIdentity.identify(harness.repo, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.addAnchor(anchor, toProfile: space.id))
+            shell.refreshNewTaskPanelRepositories(selecting: anchor.key)
+            XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "", "No Repository"])
+            XCTAssertNil(sheet.selectedRepositoryKey)
+            XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "No Repository")
+            XCTAssertEqual(sheet.destination, .folder(parent: harness.home + "/Nirux Tasks"))
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
+    /// A sub-task never starts in another repository than its task's: once
+    /// that one left the space, the sheet refuses.
+    func testASubtaskWhoseRepositoryLeftTheSpaceDoesntStart() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let notes = harness.root + "/notes"
+            try FileManager.default.createDirectory(atPath: notes, withIntermediateDirectories: true)
+            let space = try Self.anchoredSpace(harness, also: [.folder(notes)])
+            shell.addWorkspace(title: "Parent", cwd: harness.worktree, profileID: space.id)
+            let parent = try XCTUnwrap(shell.activeWorkspace)
+            shell.showNewSubtaskPanel(under: parent)
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            harness.waitUntil("the repository's info") { sheet.info?.target != nil }
+            describe("Child work", in: sheet)
+            XCTAssertTrue(sheet.startButton.isEnabled)
+            let repository = try XCTUnwrap(sheet.selectedRepositoryKey)
+            shell.removeSpaceAnchor(key: repository, fromSpace: space.id)
+            shell.refreshNewTaskPanelRepositories()
+            XCTAssertNil(sheet.selectedRepositoryKey, "never the space's other folder")
+            XCTAssertNil(sheet.destination)
+            XCTAssertFalse(sheet.startButton.isEnabled)
+            XCTAssertEqual(sheet.lineLabel.stringValue, "The task’s repository is no longer in this space.")
+            sheet.cancelButton.performClick(nil)
         }
     }
 

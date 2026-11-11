@@ -14,6 +14,11 @@ enum AgentTrustPrompt {
     static let watchWindow: TimeInterval = 300
     /// Time between two reads of an agent's screen.
     static let readInterval: TimeInterval = 1.5
+    /// Reads that found the screen without the question before Nirux stops
+    /// looking (15 s): it is the first thing the agent shows. A Codex, or
+    /// a Claude Code without hooks, would otherwise be read for the whole
+    /// window, each read taking the terminal's lock.
+    static let maxMisses = 10
 
     /// Each agent's trust screen: its answer, and one of the lines next to
     /// it (a short terminal may show no more), so a conversation that
@@ -52,23 +57,31 @@ enum AgentTrustPrompt {
 extension AgentStatusMachine {
     /// Whether to read the screen of `foreground` for its trust question
     /// now: a Claude Code or Codex launched less than `watchWindow` ago,
-    /// that no hook and no input reached since, not seen asking yet.
+    /// that no hook and no input reached since, not seen asking yet, nor
+    /// seen `maxMisses` times without it.
     func watchesForTrustPrompt(foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
         guard let foreground, Self.integratedAgentProcesses.contains(foreground.name) else { return false }
         let started = foreground.instance.startedAt
         guard (0..<AgentTrustPrompt.watchWindow).contains(now - started),
               lastEventAt < started, lastInputAt < started
         else { return false }
+        if let misses = trustPromptMisses, misses.instance == foreground.instance, misses.count >= AgentTrustPrompt.maxMisses {
+            return false
+        }
         return trustPromptSighting?.instance != foreground.instance
     }
 
-    /// What a read of `foreground`'s screen found.
-    mutating func noteTrustPrompt(shown: Bool, foreground: ForegroundProcess, now: TimeInterval) {
+    /// What a read of `foreground`'s screen found; nil when there was no
+    /// screen to read (no surface yet), which counts for nothing.
+    mutating func noteTrustPrompt(shown: Bool?, foreground: ForegroundProcess, now: TimeInterval) {
+        guard let shown else { return }
         if shown {
             trustPromptSighting = AgentTrustPrompt.Sighting(instance: foreground.instance, seenAt: now)
-        } else if trustPromptSighting?.instance == foreground.instance {
-            trustPromptSighting = nil
+            return
         }
+        if trustPromptSighting?.instance == foreground.instance { trustPromptSighting = nil }
+        let earlier = trustPromptMisses?.instance == foreground.instance ? trustPromptMisses?.count ?? 0 : 0
+        trustPromptMisses = (foreground.instance, earlier + 1)
     }
 
     /// The trust question `foreground` asks: seen on its screen, and no

@@ -118,6 +118,18 @@ extension NewTask {
         }
     }
 
+    /// `path`, or the nearest folder above it that is there.
+    static func nearestFolder(holding path: String) -> String? {
+        var url = URL(fileURLWithPath: path)
+        while true {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue { return url.path }
+            let parent = url.deletingLastPathComponent()
+            guard url.path != "/", parent.path != url.path else { return nil }
+            url = parent
+        }
+    }
+
     struct MakeFolderError: Error, Equatable, Sendable {
         let message: String
     }

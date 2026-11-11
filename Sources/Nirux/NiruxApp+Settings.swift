@@ -407,7 +407,7 @@ extension NiruxApp {
 
     /// Where tasks without a repository get their folders, home as "~".
     private func settingsTasksFolderText() -> String {
-        let folder = shell?.tasksFolder()
+        let folder = shell?.tasksFolder().path
             ?? (NSHomeDirectory() as NSString).appendingPathComponent(NewTask.defaultTasksFolderName)
         return (folder as NSString).abbreviatingWithTildeInPath
     }
@@ -420,13 +420,15 @@ extension NiruxApp {
         guard let shell else { return }
         shell.sideEffects.chooseFolder("Choose", settingsWindow) { [weak self] path in
             guard let self, let path else { return }
-            guard NewTask.isOutsideGit(path) else {
+            // The default stays the default, made again if it goes; Start
+            // refuses it, saying why, when it is in a git repository.
+            let isDefault = path == shell.defaultTasksFolder
+            guard isDefault || NewTask.isOutsideGit(path) else {
                 return self.showSettingsError(
                     "“\((path as NSString).lastPathComponent)” is in a git repository. Pick a folder outside git for tasks without a repository."
                 )
             }
-            // The default stays the default: made again if it goes.
-            let chosen = path == shell.defaultTasksFolder ? nil : path
+            let chosen = isDefault ? nil : path
             guard self.saveSetting(revert: {}, { $0.tasksFolder = chosen; $0.startedFolderTask = false }) else { return }
             self.settingsTasksFolderLabel?.stringValue = self.settingsTasksFolderText()
         }

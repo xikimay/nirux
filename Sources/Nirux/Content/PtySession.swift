@@ -499,16 +499,16 @@ final class PtySession: @unchecked Sendable {
 
     /// Reads the rows on screen off the main thread, where Ghostty locks the
     /// terminal for the read, and says on the main thread whether they show
-    /// a trust question.
-    func readTrustPrompt(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+    /// a trust question: nil without a surface to read.
+    func readTrustPrompt(completion: @escaping @MainActor @Sendable (Bool?) -> Void) {
         let session = terminalSession
         DispatchQueue.global(qos: .utility).async {
-            let shown = session.readViewportText().map(AgentTrustPrompt.isShown(in:)) ?? false
+            let shown = session.readViewportText().map(AgentTrustPrompt.isShown(in:))
             DispatchQueue.main.async { @MainActor in completion(shown) }
         }
     }
 
-    func finishTrustPromptRead(shown: Bool, foreground: ForegroundProcess, now: TimeInterval) {
+    func finishTrustPromptRead(shown: Bool?, foreground: ForegroundProcess, now: TimeInterval) {
         state.trustPromptReadInFlight = false
         state.machine.noteTrustPrompt(shown: shown, foreground: foreground, now: now)
     }
