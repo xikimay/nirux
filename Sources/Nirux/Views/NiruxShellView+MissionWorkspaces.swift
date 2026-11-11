@@ -269,6 +269,7 @@ extension NiruxShellView {
     /// arrives and when a turn ends.
     func typeMissionMessages() {
         typeLeadNotices()
+        typeRuleDecisions()
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         guard MissionStore.shared.pendingPromptDeliveries().contains(where: { $0.mission.isCarried(handoffsEnabled: handoffsEnabled) })
         else { return }

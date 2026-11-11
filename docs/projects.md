@@ -419,8 +419,11 @@ so.
   `NIRUX_PROFILE_ID`, the variable is fixed when the shell starts.
 - Spaces persist once their last workspace closes (section 2), so a brief stays
   reachable. Deleting a space leaves its brief on disk.
+- The editor shows what sessions get of the brief, in characters, beside its
+  buttons: it says "long" past half of the 16,000, and turns red past them.
+- Rules the space learned go in its `## Rules learned` section (docs/spaces.md,
+  "Learned rules"), added only by the user's click.
 - Left for later:
-  - a size warning in the editor;
   - a brief chip on workspace cards;
   - flagging a brief that an agent changed until the user has looked at it;
   - counting the open sessions that run on an older version.

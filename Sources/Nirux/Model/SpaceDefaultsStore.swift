@@ -38,12 +38,14 @@ struct SpaceDefaultsStore: Sendable {
     }
 
     /// A deleted space's defaults (copies set aside included) and setup
-    /// scripts, which may hold secrets, go with it; its brief stays.
+    /// scripts, which may hold secrets, go with it, and the rules its Lead
+    /// proposed; its brief stays.
     static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
         guard let folder = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory),
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
-        for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName {
+        for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
+            || name == RuleProposalStore.fileName {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {

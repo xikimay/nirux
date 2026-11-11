@@ -341,6 +341,8 @@ struct WorkspaceInfo: Hashable {
     /// The last turn end's line alone (`WorkspaceState.turnStatusLine`):
     /// what a finished turn says beside its check.
     var turnStatusLine: String?
+    /// The Lead's row: how many rules it proposed wait for the user.
+    var ruleProposalCount = 0
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -452,6 +454,8 @@ enum WorkspaceSidebarAction {
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI
+    /// "Add a Rule to the Brief…" (see LearnedRules).
+    case addRuleToBrief
 }
 
 /// Hover highlight target in the sidebar. Links have their own dedicated

@@ -83,7 +83,8 @@ extension NiruxShellView {
                           isLead: workspace.isLead,
                           parentTitle: parents[index].map { workspaces[$0].title },
                           statusLine: turnStatusEnabled ? workspace.statusLine : nil,
-                          turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil)
+                          turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
+                          ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
         }
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead

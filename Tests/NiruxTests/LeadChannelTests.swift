@@ -173,6 +173,21 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(LeadTools.contextText(["next_step": " write\n\tthe import\u{202E} side "], "next_step"), .some("write the import side"))
     }
 
+    /// propose_rule needs a rule of one or two lines and where the defect
+    /// showed up; nothing that would hide part of the brief.
+    func testProposedRuleArgumentsAreCheckedBeforeTheApp() {
+        let problem = { (arguments: [String: Any]) in LeadTools.problem(tool: LeadTools.proposeRule, arguments: arguments) }
+        let longest = String(repeating: "x", count: LearnedRules.maxRuleLength)
+        XCTAssertNil(problem(["rule": " Tests wait\non state. ", "evidence": "#395, #417"]))
+        XCTAssertNil(problem(["rule": longest, "evidence": "#1"]))
+        XCTAssertNotNil(problem(["rule": longest + "x", "evidence": "#1"]))
+        XCTAssertNotNil(problem(["rule": " \n ", "evidence": "#1"]))
+        XCTAssertNotNil(problem(["rule": "Wait on state.", "evidence": " "]))
+        XCTAssertNotNil(problem(["rule": "Wait on state."]))
+        XCTAssertNotNil(problem(["rule": 3, "evidence": "#1"]))
+        XCTAssertNotNil(problem(["rule": "Wait <!-- on state", "evidence": "#1"]))
+    }
+
     /// A call is checked here first, then carried to the app and back.
     func testALeadsCallReachesTheAppAndComesBack() throws {
         let missing = try XCTUnwrap(try call(LeadTools.startTask, [:], context: context(lead: true))["result"] as? [String: Any])

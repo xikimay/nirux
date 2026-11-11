@@ -22,6 +22,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             ],
             "testOrganizeMenuItems": ["Organize"],
             "testNewSubtaskMenuItem": [SidebarView.newSubtaskTitle],
+            "testAddRuleMenuItem": [SidebarView.addRuleTitle],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
             "testSpaceMenuItems": ["New Space…", "Space Settings…", "Delete Space…"]
@@ -79,7 +80,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Focus Column", "Close Column", "",
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
                 "New Sub-task…", "Organize", "",
-                "Rename Workspace", "View/Edit Context…", "",
+                "Rename Workspace", "View/Edit Context…", SidebarView.addRuleTitle, "",
                 "Clean Up Worktree…", "Close Workspace"
             ])
             // The folder is gone: Clean Up comes up among the state actions,
@@ -107,6 +108,33 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(review.worktree, harness.worktree)
             XCTAssertFalse(first.columns.contains(where: \.isBranchReview))
             harness.waitUntil("the review to read its branch") { review.snapshot != nil }
+        }
+    }
+
+    /// "Add a Rule to the Brief…": the sheet, where it was learned filled
+    /// with the task's branch; Add writes the rule into its space's brief.
+    func testAddRuleMenuItem() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.addWorkspace(title: "in worktree", cwd: harness.worktree)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            shell.refreshGitContextNow(for: task)
+            harness.waitUntil("the task's branch") { task.gitBranch == harness.worktreeBranch }
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
+            harness.perform([SidebarView.addRuleTitle], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
+
+            let sheet = try XCTUnwrap(shell.learnedRuleSheet)
+            XCTAssertIdentical(harness.window.attachedSheet, sheet.window)
+            XCTAssertEqual(sheet.evidenceField.stringValue, harness.worktreeBranch)
+            sheet.ruleView.insertText("Keep pull requests small.", replacementRange: NSRange(location: 0, length: 0))
+            // Either day, should it be midnight.
+            let days = [LearnedRules.dayText(Date())]
+            try XCTUnwrap(sheet.addButton).performClick(nil)
+            XCTAssertFalse(sheet.isOpen, sheet.statusLabel.stringValue)
+            let brief = LearnedRules.briefText(at: try XCTUnwrap(SpaceBrief.briefURL(spaceID: task.profileID)))
+            XCTAssertTrue((days + [LearnedRules.dayText(Date())]).contains { day in
+                brief.hasSuffix("## Rules learned\n\n- Keep pull requests small. (learned \(day), \(harness.worktreeBranch))\n")
+            }, brief)
         }
     }
 
