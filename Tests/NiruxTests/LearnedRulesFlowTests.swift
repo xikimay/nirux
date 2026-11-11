@@ -132,6 +132,15 @@ final class LearnedRulesFlowTests: XCTestCase {
             let again = try propose("check who owns the screen first", lead: lead, in: harness)
             XCTAssertTrue(again.isError)
             XCTAssertTrue(again.text.contains("dismissed"), again.text)
+
+            // Written by hand while it waited: Add takes it out, not twice.
+            XCTAssertFalse(try propose("Draft PRs only.", lead: lead, in: harness).isError)
+            let url = try XCTUnwrap(SpaceBrief.briefURL(spaceID: lead.space))
+            try Data("## Rules learned\n- Draft PRs only\n".utf8).write(to: url)
+            shell.showRuleProposal(workspaceIndex: leadIndex)
+            try XCTUnwrap(shell.learnedRuleSheet?.addButton).performClick(nil)
+            XCTAssertEqual(try briefText(lead), "## Rules learned\n- Draft PRs only\n")
+            XCTAssertEqual(leadRowCount(shell), 0)
         }
     }
 
