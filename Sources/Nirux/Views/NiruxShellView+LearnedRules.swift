@@ -226,7 +226,6 @@ extension NiruxShellView {
             } catch {
                 NiruxDebugLog.log("Learned rules: couldn't record that the Lead was told: \(error)")
             }
-            ruleProposals[lead.profileID] = nil
         }
     }
 
