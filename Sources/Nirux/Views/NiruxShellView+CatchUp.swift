@@ -12,6 +12,9 @@ struct CatchUpState {
     /// The user's macOS session is switched out (another account in
     /// front), as its notifications said.
     var isSessionSwitchedOut = false
+    /// The tracker follows the system (`wireCatchUp`). A shell that
+    /// doesn't (tests) only moves with what it is told.
+    var followsSystem = false
 }
 
 extension NiruxShellView {
@@ -22,8 +25,10 @@ extension NiruxShellView {
     /// switched out or in (another account is used as often as a locked
     /// screen), the screen asleep or locked. Each notification reads the
     /// state again (`awayConditionsNow`); one that says the user left
-    /// counts as well, in case the state read lags it.
+    /// counts as well, in case the state read lags it. The app's shell
+    /// only (`NiruxApp`): other processes' windows take the activation.
     func wireCatchUp() {
+        catchUpState.followsSystem = true
         catchUpState.tracker = AwayTracker(missing: awayConditionsNow(), now: Date().timeIntervalSince1970)
         let app = NotificationCenter.default
         let system = NSWorkspace.shared.notificationCenter
@@ -115,7 +120,9 @@ extension NiruxShellView {
     /// is no longer listed.
     func sidebarCatchUp(infos: [WorkspaceInfo]) -> SidebarCatchUp? {
         // A notification that never came back would keep the user away.
-        if catchUpState.tracker.awaySince != nil, NSApp.isActive { noteAway(missing: awayConditionsNow()) }
+        if catchUpState.followsSystem, catchUpState.tracker.awaySince != nil, NSApp.isActive {
+            noteAway(missing: awayConditionsNow())
+        }
         guard catchUpEnabled, !catchUpState.workspaceIDs.isEmpty else { return nil }
         if catchUpState.tracker.awaySince == nil, let onScreen = workspaces[safe: activeWSIndex]?.id {
             catchUpState.workspaceIDs.removeAll { $0 == onScreen }
