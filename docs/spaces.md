@@ -278,6 +278,9 @@ New flow, built on the guarded typing `tell` already uses
     the Lead wrote (nothing tells it). A title two of its tasks share is
     refused: the branch says which. `list_tasks` shows both for its tasks,
     and who wrote them.
+  - `propose_rule(rule, evidence)`: a rule for the space brief, once the Lead
+    sends tasks the same kind of finding a second time (see "Learned rules"
+    below). Nothing reaches the brief without the user.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -316,6 +319,65 @@ New flow, built on the guarded typing `tell` already uses
   child's indent.
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
+- **Learned rules** (LearnedRules, RuleProposalStore): a review fixes one
+  run; a rule in the brief reaches every run after it. When the Lead sends
+  tasks the same kind of finding a second time, its role says to propose a
+  rule with `propose_rule`: one or two lines (300 characters at most) that
+  would have prevented it, and where the defect showed up (`#395, #417`).
+  No model call: the Lead, which reads every review, judges "same kind".
+  - **Refused:** a rule the brief says already (same words in any case,
+    spacing or final punctuation; the Lead is told since when, and to tell
+    the task that missed it), one already waiting, one the user added or
+    dismissed in the last 90 days (in the Lead's words or the user's, even
+    taken out of the brief since), a fourth one waiting, a rule holding
+    `<!--` or `-->`. Its answer asks the Lead to say it in one line of its
+    reply, so the user hears it where they talk to it.
+  - **Shown:** "Rule proposed · Review" (or "2 rules proposed") on the Lead's
+    row, grey: nothing waits on it, so no amber, notification, sound or
+    focus. Review opens a sheet with the oldest one: the rule and where it was
+    learned, both editable; the brief's size before and after ("Brief: 1,240
+    → 1,330 of 16,000 characters", "long" past half, red past it); Add to
+    Brief, Dismiss, Later (Esc). It says sessions already running keep the
+    brief they started with.
+  - **The user's own:** "Add a Rule to the Brief…" in any row's menu opens the
+    same sheet, where it was learned filled with the row's pull request or
+    branch, with the same size line and limit; Add writes it at once.
+  - **Stored:** proposals in
+    `<state dir>/projects/<space id>/rule-proposals.json` (0600; a decided
+    one kept 90 days, the newest 100 at most; deleted with the space; one that
+    can't be read just now is left alone). An added rule goes at the end of
+    the brief's `## Rules learned` section (a closing `##` or a comment on its
+    line allowed; a setext heading ends it too), made at the
+    brief's end when missing (from the template when there is no brief), as
+    `- <rule> (learned 2026-11-11, #395, #417)`: agents read the date and the
+    source too. The write inserts that line and nothing else: every byte of
+    the brief stays, its line breaks included. It re-reads the brief right
+    before replacing it and starts over when it changed (Project Memory's
+    write, which keeps a UTF-8 byte order mark too), so the user's edits made
+    meanwhile stay. On the text it writes over, it looks for the rule first:
+    when the brief says it already, nothing is written, and the Lead hears
+    that instead. A place sessions
+    wouldn't get (a code block, a comment; an unclosed `<!--` hides
+    nothing from them) is refused, and so is a brief past 16,000 characters
+    or 64,000 bytes of what sessions get, a brief file past 1 MB (sessions
+    don't read it), a proposals file Nirux can't write (the decision would
+    be lost), or Space Settings › Brief with unsaved edits (its Save would
+    drop the rule). Space Memory lists the rule as an
+    Always item, to edit or move to memory.
+  - **The Lead hears it:** once the user adds or dismisses its rule, or finds
+    the brief says it already, a line is typed into the space's Lead's
+    prompt when it is idle ("[Nirux Mission] The user added your rule to the
+    space brief as: “…”. Only sessions started from now on read it: tell
+    running tasks yourself if they need it."), one per free prompt, oldest
+    first, to the terminal that proposed it, else the one the Lead's Claude
+    runs in. The decision waits in the proposals file until it is told
+    (`leadToldAt`): a relaunch, or a Lead busy for hours or started again,
+    doesn't lose it. It is recorded before it is typed: one Nirux can't
+    record (a newer Nirux's file) is never typed, rather than at every turn
+    end. A space without a Lead keeps its decisions until one starts.
+  - **Pruning:** Nirux never removes a rule. Each says when it was learned;
+    Space Settings › Brief shows the brief's size beside its buttons; the
+    user deletes a rule there or moves it to memory in Space Memory.
 - Mission handoffs and sidebar permission answers leave Experimental for
   Settings › Agents › Missions (shipped with S11a), on for a new install. A
   state file keeps the value it holds: both were opt-in, and turning Missions

@@ -235,6 +235,9 @@ extension WorkspaceInfo {
         if isActive, let next = nextStepText, isLead || summary.status.text != Self.nextStepLine(next) {
             actions.append(.next(next))
         }
+        if isLead, ruleProposalCount > 0 {
+            actions.append(.ruleProposals(count: ruleProposalCount))
+        }
         // The status line says "Merged · Clean up" unless an agent's state
         // comes first: then a line of its own keeps it.
         if let mergedCleanup, let prInfo, summary.mark != .merged || isLead {
@@ -267,11 +270,15 @@ enum SidebarCardAction: Hashable {
     /// The question a Claude turn ended on: Yes / No / Reply…, after the
     /// question unless the status line above says it.
     case turnQuestion(columnIndex: Int, SidebarTurnQuestion, showsQuestion: Bool)
+    /// The Lead's row: rules it proposed for the brief wait for the user;
+    /// a click shows the oldest.
+    case ruleProposals(count: Int)
 
-    /// Information rather than something to do: no separator above.
+    /// Information rather than something to do: no separator above. A
+    /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges: return true
+        case .next, .reviewBadges, .ruleProposals: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .cleanup, .turnQuestion: return false
         }

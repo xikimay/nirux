@@ -28,6 +28,7 @@ extension NiruxShellView {
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, answer: answer)
         case LeadTools.setTaskContext: leadSetTaskContext(arguments, in: space, lead: lead.id, answer: answer)
+        case LeadTools.proposeRule: leadProposeRule(arguments, in: space, parent: parent, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }

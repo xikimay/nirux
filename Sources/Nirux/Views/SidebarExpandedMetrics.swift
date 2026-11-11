@@ -103,7 +103,7 @@ enum SidebarExpandedMetrics {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
         case .turnQuestion: return buttonHeight
-        case .cleanup, .reviewBadges, .next, .missionQuestion: return actionLineHeight
+        case .cleanup, .reviewBadges, .next, .missionQuestion, .ruleProposals: return actionLineHeight
         }
     }
 

@@ -12,7 +12,8 @@ enum LeadTools {
     static let askUser = "ask_user"
     static let queueMerge = "queue_merge"
     static let setTaskContext = "set_task_context"
-    static let names = [startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext]
+    static let proposeRule = "propose_rule"
+    static let names = [startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
     /// of its own (unless a repository of the space has that name).
@@ -135,6 +136,30 @@ enum LeadTools {
                     ]
                 ],
                 required: ["task"]
+            ),
+            definition(
+                proposeRule, title: "Propose a rule for the space brief",
+                description: """
+                    When a second, different task gets the same kind of finding (the same defect class in two tasks, \
+                    not two review rounds of one), propose a rule that would have prevented it: an instruction every \
+                    later task follows, in one or two lines; name the repository when it holds for one only. Never on \
+                    a first finding. The user sees it on your row and adds, edits or dismisses it; nothing reaches the \
+                    brief without them. An added rule reaches only sessions started from then on: until you hear it \
+                    was added, keep telling tasks yourself.
+                    """,
+                properties: [
+                    "rule": [
+                        "type": "string",
+                        "description": "The rule, at most \(LearnedRules.maxRuleLength) characters "
+                            + "(\"Tests wait on state, never on a fixed sleep or the wall clock.\")."
+                    ],
+                    "evidence": [
+                        "type": "string",
+                        "description": "Where the defect showed up, at most \(LearnedRules.maxEvidenceLength) characters "
+                            + "(\"#395, #417\", or the tasks' branches)."
+                    ]
+                ],
+                required: ["rule", "evidence"]
             )
         ]
     }
@@ -213,6 +238,14 @@ enum LeadTools {
                 guard text.count <= maxContextLength else { return "\(key) must hold at most \(maxContextLength) characters." }
             }
             return nil
+        case proposeRule:
+            guard let rule = arguments["rule"] as? String, let evidence = arguments["evidence"] as? String else {
+                return "rule and evidence must be strings."
+            }
+            return LearnedRules.proposalProblem(
+                rule: LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength),
+                evidence: LearnedRules.cleaned(evidence, limit: LearnedRules.maxEvidenceLength)
+            )
         default:
             return "Unknown tool: \(tool)"
         }

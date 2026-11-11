@@ -724,7 +724,37 @@ final class SidebarWorkspaceCardRenderer {
                 width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
             )
             append(label)
+        case .ruleProposals(let count):
+            let label = NSTextField.sidebarLine(Self.ruleProposalsText(count: count))
+            label.toolTip = "The Lead proposes \(count == 1 ? "a rule" : "\(count) rules") for the space brief, from a "
+                + "defect it found twice. Review: add, edit or dismiss \(count == 1 ? "it" : "them"). Nothing reaches the brief "
+                + "without you."
+            label.setAccessibilityLabel(Self.ruleProposalsTitle(count: count) + ", review")
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
+            hitAreas.append(SidebarHitArea(
+                frame: label.frame.insetBy(dx: -2, dy: -2),
+                region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.profileID), label: label)
+            ))
         }
+    }
+
+    /// "Rule proposed", "2 rules proposed".
+    static func ruleProposalsTitle(count: Int) -> String {
+        count == 1 ? "Rule proposed" : "\(count) rules proposed"
+    }
+
+    /// "Rule proposed · Review": grey, the link in the accent.
+    private static func ruleProposalsText(count: Int) -> NSAttributedString {
+        let font = Theme.Font.caption
+        let result = NSMutableAttributedString(string: ruleProposalsTitle(count: count) + " · ", attributes: [
+            .font: font, .foregroundColor: Theme.Color.textSecondary
+        ])
+        result.append(NSAttributedString(string: "Review", attributes: [.font: font, .foregroundColor: Theme.Color.accent]))
+        return result
     }
 
     /// "Asking web-main · <question>" in grey while the parent may answer,
