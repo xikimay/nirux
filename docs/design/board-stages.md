@@ -1,8 +1,11 @@
 # Board Stages
 
+> **Design record:** in progress. The model of a line is in the app; nothing draws it yet.\
+> **Differs today:** the Board is still the table of [Project Board](project-board.md), one per project.\
+> **User guide:** [Pull requests](../pull-requests.md#the-board).
+
 Status: design validated by the user on 2026-11-11 (study D). The line's
 model is implemented (`BoardStages`); the view and the per-space Board follow.
-Until they ship, the Board is the table of [Project Board](project-board.md).
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor

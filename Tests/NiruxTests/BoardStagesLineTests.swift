@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// One line of the Board as stages (docs/board-stages.md): the station a
+/// One line of the Board as stages (docs/design/board-stages.md): the station a
 /// task is at, its rail, its state and phrase, its pull request and what
 /// its clock counts from, from what Nirux knows of it. Pure: nothing runs
 /// git or gh.

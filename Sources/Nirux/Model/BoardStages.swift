@@ -1,6 +1,6 @@
 import Foundation
 
-/// The Board as stages (docs/board-stages.md): where each task of a space
+/// The Board as stages (docs/design/board-stages.md): where each task of a space
 /// stands on the way to its base branch, and what comes next.
 /// Every task goes through the same four stations, Code, Reviews, Checks
 /// and Merge; its line says which one it is at, in what state, and what it
@@ -158,7 +158,7 @@ extension BoardStages {
     /// "Ready to merge" counts it.
     enum ReviewRequest: Equatable, Sendable {
         case changesRequested, reviewRequired
-        /// Review comments wait to be dealt with (docs/pr-feedback-inbox.md).
+        /// Review comments wait to be dealt with (docs/design/pr-feedback-inbox.md).
         case feedback
 
         var text: String {
@@ -182,7 +182,7 @@ extension BoardStages {
         var isOnBaseBranch = true
         var checks: Checks = .pending(since: nil)
         var reviewRequest: ReviewRequest?
-        /// Its place in a stack (docs/pr-stacks.md).
+        /// Its place in a stack (docs/design/pr-stacks.md).
         var stack: ProjectBoard.StackPlace?
     }
 
