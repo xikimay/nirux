@@ -104,9 +104,9 @@ The phrase is the state's own line of the ladder:
 - at Merge, "Lands after #52", "Draft", "Targets release", "Changes
   requested", else "Ready". "Ready" and "Draft" add what the pull request
   passed, and only that: "Ready · reviews done, checks green";
-- at rest, "Next · …" (the user's next step, else the Lead's), else where the
-  task stood when its last turn ended, else what the station needs: "No code
-  review yet", "No pull request yet".
+- at rest, "Next · …" (the user's next step, else the Lead's), else what the
+  user wrote of the task, else where it stood when its last turn ended, else
+  what the station needs: "No code review yet", "No pull request yet".
 
 "Clean up" and "Retarget to main" are links: the one click that moves the line
 on. While an agent works the line says "Working", or the user's own summary
@@ -139,17 +139,19 @@ lines that are linked never part, each keeping its own state
   after #52") say the stack.
 - **Pull requests without a task** (no workspace here: a cloud session's)
   close the section, folded, as lines without a Reviews station. A stack with
-  one task at least stays whole in the list.
+  one task at least stays whole in the list, even where a family keeps its
+  lines apart.
 
 Two orders, one setting for the app:
 
 - **Sidebar order**: each unit at the place of its first line.
-- **By progress**: the closest to its base branch first. The pull request the
-  queue works on comes first, then the lines by station, those in the queue's
-  list in its order; a unit counts as its furthest line; a blocked line counts
-  below Code; ties keep the sidebar's order. Last come the lines nothing is
-  left to follow for: a pull request merged and through the queue, whatever
-  its agent does next, then an archived task.
+- **By progress**: the closest to its base branch first, by what doesn't
+  change with each turn of an agent. The pull request the queue works on comes
+  first; then the queue's list, in its order, whatever station each is at;
+  then the lines by station, one with a blocker below Code. A unit counts as
+  its furthest line; ties keep the sidebar's order. Last come the lines
+  nothing is left to follow for: a pull request merged and through the queue,
+  then an archived task.
 
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its

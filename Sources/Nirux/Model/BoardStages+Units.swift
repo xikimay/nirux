@@ -113,10 +113,9 @@ extension BoardStages {
         }
 
         let placed = units(facts.lines, lines: lines, tree: tree, stays: stays)
-        let hasTask = { (unit: Placed) in unit.members.contains { facts.lines[$0].hasTask } }
         let arranged = { (units: [Placed]) -> [Unit] in
             let sorted = order == .sidebar ? units : units.enumerated().sorted { lhs, rhs in
-                (lhs.element.score, rhs.element.queueOrder, rhs.offset) > (rhs.element.score, lhs.element.queueOrder, lhs.offset)
+                (lhs.element.rank, rhs.offset) > (rhs.element.rank, lhs.offset)
             }.map(\.element)
             return sorted.map(\.unit)
         }
@@ -129,8 +128,8 @@ extension BoardStages {
         }
         return Section(
             id: facts.id,
-            units: arranged(placed.filter(hasTask)),
-            withoutTask: arranged(placed.filter { !hasTask($0) }),
+            units: arranged(placed.filter(\.hasTask)),
+            withoutTask: arranged(placed.filter { !$0.hasTask }),
             merged: today.compactMap { pullRequest in
                 let gone = left[pullRequest.number] ?? []
                 // One place per pull request: not here while its line is listed.
@@ -165,9 +164,8 @@ extension BoardStages {
             var named: [Int: [Int]] = [:]
             var hasParent = Set<Int>()
             for index in ids.indices {
-                // A parent listed here. (A line named as its own, like any
-                // loop, has no root: the second pass below takes it.)
-                guard let parent = links[ids[index]].flatMap({ indexByID[$0] }) else { continue }
+                // A parent listed here, and not the line itself.
+                guard let parent = links[ids[index]].flatMap({ indexByID[$0] }), parent != index else { continue }
                 named[parent, default: []].append(index)
                 hasParent.insert(index)
             }
@@ -195,13 +193,26 @@ extension BoardStages {
         }
     }
 
-    /// A unit, the indices of its lines' facts, how far it got, and its
-    /// first place in the queue's list (after every place when in none).
+    /// A unit, and where it goes.
     private struct Placed {
         let unit: Unit
-        let members: [Int]
+        /// A task is in it, or in its stack: it is in the list. (Its lines
+        /// agree: a family's are tasks, a stack's share the stack.)
+        let hasTask: Bool
+        /// Its furthest line's rank, for "By progress".
+        let rank: Rank
+    }
+
+    /// How close a line is to its base branch: its score, then, among the
+    /// lines of the queue's list, the first to land.
+    private struct Rank: Comparable {
         let score: Int
+        /// After every place when it is in no list.
         let queueOrder: Int
+
+        static func < (lhs: Rank, rhs: Rank) -> Bool {
+            (lhs.score, rhs.queueOrder) < (rhs.score, lhs.queueOrder)
+        }
     }
 
     /// The units of the lines that stay, in the order of their first line.
@@ -223,11 +234,17 @@ extension BoardStages {
         }
         let number = { (index: Int) in facts[index].pullRequest?.number }
         let stacks = byStack.filter { Set($0.value.map(number)).count > 1 && $0.value.allSatisfy { !inFamily.contains($0) } }
+        // A stack with a task stays whole in the list, even where a
+        // family keeps its lines apart.
+        let stacksWithTask = Set(byStack.filter { $0.value.contains { facts[$0].hasTask } }.keys)
+        let isInList = { (index: Int) in
+            facts[index].hasTask || (facts[index].pullRequest?.stack).map { stacksWithTask.contains($0.root) } ?? false
+        }
 
         func place(_ unit: Unit, _ members: [Int]) -> Placed {
             Placed(
-                unit: unit, members: members, score: members.map { progress(facts[$0], lines[$0]) }.max() ?? 0,
-                queueOrder: members.compactMap { lines[$0].rail?.queueOrder }.min() ?? .max
+                unit: unit, hasTask: isInList(members[0]),
+                rank: members.map { rank(facts[$0], lines[$0]) }.max() ?? Rank(score: 0, queueOrder: .max)
             )
         }
         var placed: [(first: Int, unit: Placed)] = []
@@ -245,15 +262,25 @@ extension BoardStages {
         return placed.sorted { $0.first < $1.first }.map(\.unit)
     }
 
-    /// How close a line is to its base branch, for "By progress": the pull
-    /// request the queue works on first, then by station; a blocked line
-    /// below Code; then what nothing is left to follow for: a pull
-    /// request merged and through the queue, whatever its agent does
-    /// next, and an archived task.
-    private static func progress(_ facts: Facts, _ line: Line) -> Int {
-        if facts.isArchived { return -3 }
-        if line.rail?.marks.contains(.current) == false { return -2 }
-        if facts.pullRequest != nil, facts.queue.step != nil { return Station.merge.rawValue + 1 }
-        return line.state == .blocked ? -1 : line.station.rawValue
+    /// How close a line is to its base branch, for "By progress", by what
+    /// doesn't change with each turn of its agent:
+    /// - the pull request the queue works on first;
+    /// - then the queue's list, in its order, whatever station each is at;
+    /// - then by station, a line with a blocker below Code;
+    /// - then what nothing is left to follow for: a pull request merged
+    ///   and through the queue, then an archived task.
+    private static func rank(_ facts: Facts, _ line: Line) -> Rank {
+        let queueOrder = line.rail?.queueOrder
+        var score = queueOrder == nil ? line.station.rawValue : Station.merge.rawValue
+        if facts.queue.step != nil {
+            score = Station.merge.rawValue + 1
+        } else if facts.isArchived {
+            score = -3
+        } else if line.rail?.marks.contains(.current) == false {
+            score = -2
+        } else if text(facts.blocker) != nil {
+            score = -1
+        }
+        return Rank(score: score, queueOrder: queueOrder ?? .max)
     }
 }

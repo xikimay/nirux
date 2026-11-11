@@ -78,10 +78,12 @@ final class BoardStagesUnitsTests: XCTestCase {
         let elsewhere = section([task("a1"), task("b")], parents: ["a1": "gone"])
         XCTAssertEqual(shape(elsewhere.units), ["a1", "b"], "its task is in another section, or closed")
         let loop = section(
-            [task("z"), task("x"), task("y"), task("under")], parents: ["x": "y", "y": "x", "z": "z", "under": "y"]
+            [task("x"), task("y"), task("under"), task("c"), task("z")],
+            parents: ["x": "y", "y": "x", "under": "y", "z": "z", "c": "z"]
         )
-        XCTAssertEqual(shape(loop.units), ["z", "x+y+under"],
-                       "parents in a loop: its first line heads it, as in the sidebar; no line is lost, none drawn twice")
+        XCTAssertEqual(shape(loop.units), ["x+y+under", "z+c"],
+                       "as the sidebar walks them: a loop's first line heads it, a line named as its own parent is a plain task; "
+                           + "no line is lost, none drawn twice")
     }
 
     // MARK: - Stacks
@@ -128,6 +130,10 @@ final class BoardStagesUnitsTests: XCTestCase {
         let result = section([two[2], two[0], two[1]], parents: ["first": "other"])
         XCTAssertEqual(shape(result.units), ["other+first", "second"], "one of the stack is a sub-task: a line is drawn once")
         XCTAssertEqual(result.units.last?.lines.last?.pullRequest, "#53 · 2/2", "its pull request cell still says the stack")
+        let leaving = section(
+            [two[0], task("sub", 41, merged: true), two[1]], parents: ["sub": "first"], merged: [mergedToday(41)]
+        )
+        XCTAssertEqual(shape(leaving.units), ["s[first,second]"], "a sub-task that left for Merged today is no family here")
     }
 
     // MARK: - Pull requests without a task
@@ -144,6 +150,9 @@ final class BoardStagesUnitsTests: XCTestCase {
         let byProgress = section(lines, order: .progress)
         XCTAssertEqual(shape(byProgress.units), ["s[first,pr53]", "a"], "a stack counts as its furthest line")
         XCTAssertEqual(shape(byProgress.withoutTask), ["s[pr70,pr71]", "pr60", "pr80"], "the same order in both lists")
+        let split = section(Array(lines.prefix(3)) + [task("sub")], parents: ["sub": "first"])
+        XCTAssertEqual(shape(split.units), ["a", "first+sub", "pr53"], "in the list still where a family keeps the stack's lines apart")
+        XCTAssertEqual(shape(split.withoutTask), [])
     }
 
     // MARK: - Orders
@@ -151,30 +160,44 @@ final class BoardStagesUnitsTests: XCTestCase {
     func testByProgressPutsTheClosestToItsBaseFirst() {
         var blocked = task("blocked", 61)
         blocked.blocker = "waits for upstream"
+        blocked.activity = .working(since: nil)
         var unreviewed = task("coding")
         unreviewed.reviews = nil
         var archived = task("archived", 66)
         archived.isArchived = true
         var mergedWorking = task("merged", 40, merged: true)
         mergedWorking.activity = .working(since: nil)
+        mergedWorking.blocker = "waits for the clean-up"
         var updating = task("updating", 67, checks: .pending(since: nil))
-        updating.queue = BoardStages.Queue(order: 1, step: .checks("Updating branch"))
+        updating.queue = BoardStages.Queue(order: 3, step: .checks("Updating branch"))
+        updating.isArchived = true
         var queued = task("queued", 68)
         queued.queue.order = 2
+        var queuedChecking = task("queuedChecking", 69, checks: .pending(since: nil))
+        queuedChecking.queue.order = 1
         // Listed from the furthest from its base to the closest: every rank moves.
         let lines = [
             archived, mergedWorking, blocked, unreviewed, task("checking", 62, checks: .pending(since: nil)), task("ready", 63),
-            task("family"), task("child", 64), queued, updating
+            task("family"), task("child", 64), queued, queuedChecking, updating
         ]
         let parents = ["child": "family"]
-        XCTAssertEqual(shape(section(lines, parents: parents).units),
-                       ["archived", "merged", "blocked", "coding", "checking", "ready", "family+child", "queued", "updating"])
+        XCTAssertEqual(
+            shape(section(lines, parents: parents).units),
+            ["archived", "merged", "blocked", "coding", "checking", "ready", "family+child", "queued", "queuedChecking", "updating"]
+        )
         XCTAssertEqual(
             shape(section(lines, parents: parents, order: .progress).units),
-            ["updating", "queued", "ready", "family+child", "checking", "coding", "blocked", "merged", "archived"],
-            "the queue's own first, then its list in order; by station; a family by its furthest line; ties in the sidebar's "
-                + "order; blocked below Code; then merged, whatever its agent does, and archived"
+            ["updating", "queuedChecking", "queued", "ready", "family+child", "checking", "coding", "blocked", "merged", "archived"],
+            "the queue's own first, archived or not; then its list in its order, whatever station each is at; then by "
+                + "station, a family by its furthest line, ties in the sidebar's order; a blocker below Code, whatever its "
+                + "agent does; then merged and through, and archived"
         )
+        var third = task("third", 60)
+        third.queue.order = 3
+        var first = task("first", 61, checks: .pending(since: nil))
+        first.queue.order = 1
+        XCTAssertEqual(shape(section([queued, third, first], parents: ["first": "third"], order: .progress).units),
+                       ["third+first", "queued"], "a family lands with the first of its lines in the queue's list")
     }
 
     func testTheRulesReachTheLines() {

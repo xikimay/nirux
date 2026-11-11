@@ -211,6 +211,7 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(older(facts(pullRequest(), reviews: earlier), BoardStages.Rules(reviewsMustBeOnHead: true)), false,
                        "at Reviews, not past it: the phrase says it")
         XCTAssertEqual(older(with(checking) { $0.hasTask = false }, BoardStages.Rules()), false, "no Reviews station, nothing to say of it")
+        XCTAssertEqual(older(facts(pullRequest(merged: true), reviews: earlier), BoardStages.Rules()), true, "still true once merged")
     }
 
     func testReviewsIsSkippedWhereNoneWasSeen() {
@@ -360,6 +361,7 @@ final class BoardStagesLineTests: XCTestCase {
             (with(atRest) { $0.nextStep = "run the confirmation review" }, "Next · run the confirmation review", "the next step first"),
             (with(atRest) { $0.nextStep = " " }, "Fixes pushed, waits for a review", "then where the task stands, on one line"),
             (with(atRest) { $0.summary = "Triage rules" }, "Triage rules", "the user's own words before the last turn's line"),
+            (with(atRest) { $0.summary = " \n" }, "Fixes pushed, waits for a review", "an empty summary is none"),
             (with(atRest) { $0.isArchived = true }, "Fixes pushed, waits for a review", "archived, with something to say"),
             (with(unreviewed) { $0.isArchived = true }, "Archived", "an archived task with nothing to say"),
             (unreviewed, "No code review yet", "what Reviews waits for"),
