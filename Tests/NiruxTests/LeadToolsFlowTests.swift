@@ -87,7 +87,7 @@ final class LeadToolsFlowTests: XCTestCase {
 
             let list = try call(LeadTools.listTasks, lead: lead, in: harness)
             XCTAssertTrue(list.text.contains("“Add a date filter”"), list.text)
-            XCTAssertTrue(list.text.contains("Repositories: repo (default)."), list.text)
+            XCTAssertTrue(list.text.contains("Repositories: repo (default); \"none\" starts a task in a new folder"), list.text)
 
             // A question it answers itself.
             let first = try ask("ISO 8601 or timestamps?", from: mission)
@@ -602,6 +602,66 @@ final class LeadToolsFlowTests: XCTestCase {
             // The switch turns it back on: the file is replaced.
             shell.setLeadStartsTasks(true, spaceID: lead.space)
             XCTAssertTrue(shell.leadStartsTasksWithoutAsking(spaceID: lead.space))
+        }
+    }
+
+    /// repo "none", or a space without a repository: the task starts in a
+    /// new folder of its own, reports to the Lead, and is named by its
+    /// folder. Proposed, the sheet has No Repository selected.
+    func testTheLeadStartsATaskWithoutARepository() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let unknown = try call(LeadTools.startTask, ["description": "Compare two parsers", "repo": "web"], lead: lead, in: harness)
+            XCTAssertTrue(unknown.isError)
+            XCTAssertTrue(unknown.text.contains("repo, \"none\" (a new folder, no repository)"), unknown.text)
+
+            let started = try call(LeadTools.startTask, ["description": "Compare two parsers", "repo": "None"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let folder = harness.home + "/Nirux Tasks/Compare two parsers"
+            XCTAssertTrue(started.text.contains("in \(folder), a new folder without a repository"), started.text)
+            XCTAssertTrue(started.text.contains("It reports to you"), started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Compare two parsers" })
+            XCTAssertTrue(task.isFolderTask)
+            XCTAssertEqual(task.profileID, lead.space)
+            XCTAssertTrue(shell.activeWorkspace === lead.workspace, "it opens behind what the user is doing")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: folder + "/.claude-handover.md"))
+            XCTAssertTrue(started.text.contains("may first ask the user to trust that folder"), started.text)
+            XCTAssertNotEqual(Persistence.load()?.settings?.startedFolderTask, true, "the user never saw the sheet's trust hint")
+            let list = try call(LeadTools.listTasks, lead: lead, in: harness)
+            XCTAssertTrue(list.text.contains("“Compare two parsers” · no repository · folder \(task.cwd)"), list.text)
+            XCTAssertFalse(try call(LeadTools.tell, ["task": "Compare two parsers", "message": "Add a chart"], lead: lead, in: harness).isError)
+            // By the folder list_tasks shows.
+            XCTAssertFalse(try call(LeadTools.tell, ["task": task.cwd, "message": "And a table"], lead: lead, in: harness).isError)
+            // A title that is another task's folder name reaches neither.
+            XCTAssertFalse(try call(LeadTools.startTask, ["description": "Notes: Q3", "repo": "none"], lead: lead, in: harness).isError)
+            XCTAssertFalse(try call(LeadTools.startTask, ["description": "Notes- Q3"], lead: lead, in: harness).isError)
+            let notes = try XCTUnwrap(shell.workspaces.first { $0.title == "Notes: Q3" })
+            XCTAssertEqual(notes.taskFolder.map { ($0 as NSString).lastPathComponent }, "Notes- Q3")
+            let ambiguous = try call(LeadTools.tell, ["task": "Notes- Q3", "message": "Which one?"], lead: lead, in: harness)
+            XCTAssertTrue(ambiguous.isError, ambiguous.text)
+            // A folder task's Mission names it by its title: it has no branch.
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == notes.id }?.branch, "Notes: Q3")
+
+            // Proposed: the sheet starts it in a folder too.
+            shell.setLeadStartsTasks(false, spaceID: lead.space)
+            let proposed = try call(LeadTools.startTask, ["description": "Draft the notes", "repo": "none"], lead: lead, in: harness)
+            XCTAssertTrue(proposed.text.hasPrefix("Proposed to the user"), proposed.text)
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertNil(sheet.selectedRepositoryKey)
+            XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "No Repository")
+            sheet.cancelButton.performClick(nil)
+
+            // A space without a repository: its tasks start in folders.
+            let bare = shell.workspaceStore.createProfile(named: "Notes", select: true).id
+            shell.startLead(spaceID: bare)
+            let notesLead = try XCTUnwrap(shell.leadWorkspace(inSpace: bare))
+            let agent = try XCTUnwrap(notesLead.columns.first?.agentUUID)
+            let notesList = try call(LeadTools.listTasks, from: notesLead, agentUUID: agent, in: harness)
+            XCTAssertTrue(notesList.text.contains("No repository: each task starts in a new folder of its own"), notesList.text)
+            let inBare = try call(LeadTools.startTask, ["description": "Plan the offsite"], from: notesLead, agentUUID: agent, in: harness)
+            XCTAssertFalse(inBare.isError, inBare.text)
+            XCTAssertEqual(shell.workspaces.first { $0.title == "Plan the offsite" }?.isFolderTask, true)
         }
     }
 

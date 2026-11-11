@@ -482,6 +482,42 @@ final class PtySession: @unchecked Sendable {
         state.machine.blockedWait(now: now, foreground: foreground)
     }
 
+    // MARK: The trust question (see `AgentTrustPrompt`)
+
+    /// Whether to read the screen for the trust question now: the agent
+    /// may be asking it, the last read is `readInterval` old, and none is
+    /// on its way. True marks a read on its way: end it with
+    /// `finishTrustPromptRead`.
+    func beginTrustPromptRead(foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
+        guard !hasExited, !state.trustPromptReadInFlight, now - state.trustPromptReadAt >= AgentTrustPrompt.readInterval,
+              state.machine.watchesForTrustPrompt(foreground: foreground, now: now)
+        else { return false }
+        state.trustPromptReadInFlight = true
+        state.trustPromptReadAt = now
+        return true
+    }
+
+    /// Reads the rows on screen off the main thread, where Ghostty locks the
+    /// terminal for the read, and says on the main thread whether they show
+    /// a trust question: nil without a surface to read.
+    func readTrustPrompt(completion: @escaping @MainActor @Sendable (Bool?) -> Void) {
+        let session = terminalSession
+        DispatchQueue.global(qos: .utility).async {
+            let shown = session.readViewportText().map(AgentTrustPrompt.isShown(in:))
+            DispatchQueue.main.async { @MainActor in completion(shown) }
+        }
+    }
+
+    func finishTrustPromptRead(shown: Bool?, foreground: ForegroundProcess, now: TimeInterval) {
+        state.trustPromptReadInFlight = false
+        state.machine.noteTrustPrompt(shown: shown, foreground: foreground, now: now)
+    }
+
+    /// The trust question the foreground agent asks, if any.
+    func agentTrustPrompt(foreground: ForegroundProcess?) -> AgentTrustPrompt.Sighting? {
+        state.machine.visibleTrustPrompt(foreground: foreground)
+    }
+
     var agentMidTurnExit: AgentMidTurnExit? { state.machine.midTurnExit }
 
     var agentTurnFailure: AgentTurnFailure? { state.machine.turnFailure }
@@ -1125,6 +1161,10 @@ private final class PtyState: @unchecked Sendable {
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
+    /// Main thread only: when the screen was last read for a trust
+    /// question (see AgentTrustPrompt), and whether a read is on its way.
+    var trustPromptReadAt: TimeInterval = 0
+    var trustPromptReadInFlight = false
     /// Read-queue only. A (re)start sets `localServerStateIsStale` from
     /// main instead of resetting them, so a straggling read handler of the
     /// previous shell never sees them replaced mid-scan.

@@ -15,6 +15,14 @@ enum LeadTools {
     static let proposeRule = "propose_rule"
     static let names = [startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule]
 
+    /// `start_task`'s `repo` for a task without a repository: a new folder
+    /// of its own (unless a repository of the space has that name).
+    static let noRepository = "none"
+
+    /// How a tool names one of the Lead's tasks.
+    static let taskDescription = "The task's branch (its folder, as list_tasks shows it, or the folder's name, "
+        + "for a task without a repository), or its title."
+
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
 
@@ -35,12 +43,16 @@ enum LeadTools {
                 description: """
                     Start a task in a new worktree of this space, from origin's base branch, fetched: Nirux writes \
                     the description into its handover, launches the space's agent and links the task to you (its \
-                    questions and result are typed into your prompt). One repository per task. When the user turned \
-                    "Starts tasks without asking" off, it opens the New sheet filled in for the user to start instead.
+                    questions and result are typed into your prompt). One repository per task. Work that needs no \
+                    repository (research, writing, a one-off script) starts in a new folder of its own instead, \
+                    with no git, branch or pull request: repo "\(noRepository)", or any task in a space without a \
+                    repository. Never "\(noRepository)" for work that reads or changes a repository of this space: \
+                    start it in that repository. When the user turned "Starts tasks without asking" off, it opens \
+                    the New sheet filled in for the user to start instead.
                     """,
                 properties: [
-                    "description": ["type": "string", "description": "What the task must do, as you would tell the agent. Its first line names the task and its branch."],
-                    "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out."],
+                    "description": ["type": "string", "description": "What the task must do, as you would tell the agent. Its first line names the task and its branch or folder."],
+                    "repo": ["type": "string", "description": "The repository's name in this space (see list_tasks); its default one when left out. \"\(noRepository)\": a new folder, no repository."],
                     "template": ["type": "string", "description": "A task template's name (Space Settings › Templates), if one fits."]
                 ],
                 required: ["description"]
@@ -62,7 +74,7 @@ enum LeadTools {
                     didn't ask for, a slash command). Claude Code tasks only.
                     """,
                 properties: [
-                    "task": ["type": "string", "description": "The task's branch, or its title."],
+                    "task": ["type": "string", "description": taskDescription],
                     "message": ["type": "string", "description": "At most \(MissionEventCLI.maxMessageLength) characters."]
                 ],
                 required: ["task", "message"]
@@ -84,7 +96,7 @@ enum LeadTools {
                     task, and a line comes to you.
                     """,
                 properties: [
-                    "task": ["type": "string", "description": "The task's branch, or its title."],
+                    "task": ["type": "string", "description": taskDescription],
                     "why": ["type": "string", "description": "Why you can't answer it yourself, in one sentence."]
                 ],
                 required: ["task", "why"]
@@ -109,7 +121,7 @@ enum LeadTools {
                     theirs: Nirux says so, and leaves it.
                     """,
                 properties: [
-                    "task": ["type": "string", "description": "The task's branch, or its title."],
+                    "task": ["type": "string", "description": taskDescription],
                     // The limit in words, not maxLength: Nirux counts after
                     // folding whitespace, a schema check before it.
                     "next_step": [

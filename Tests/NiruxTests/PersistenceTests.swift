@@ -219,6 +219,33 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertFalse(decoded.blockerIsFromLead)
     }
 
+    /// A task without a repository stays one across launches; an older
+    /// file has no flag, and the folder setting takes only an absolute path.
+    func testAFolderTaskAndTheTasksFolderRoundTrip() throws {
+        // Its folder, not where its terminal was when Nirux quit.
+        let original = PersistedWorkspace(
+            id: "folder-task", title: "Compare two libraries", cwd: "/Users/me/Downloads",
+            columns: [], focusedColumnIndex: 0, taskFolder: "/tmp/Nirux Tasks/Compare two libraries"
+        )
+        let data = try JSONEncoder().encode(original)
+        XCTAssertEqual(try JSONDecoder().decode(PersistedWorkspace.self, from: data).taskFolder, "/tmp/Nirux Tasks/Compare two libraries")
+        let plain = try JSONEncoder().encode(PersistedWorkspace(title: "plain", cwd: "/tmp", columns: [], focusedColumnIndex: 0))
+        XCTAssertFalse(try XCTUnwrap(String(data: plain, encoding: .utf8)).contains("taskFolder"), "written only for one")
+        XCTAssertNil(try JSONDecoder().decode(PersistedWorkspace.self, from: plain).taskFolder)
+        let relativeFolder = Data(#"{ "title": "t", "cwd": "/tmp", "columns": [], "focusedColumnIndex": 0, "taskFolder": "Tasks/x" }"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(PersistedWorkspace.self, from: relativeFolder).taskFolder)
+
+        var settings = PersistedSettings()
+        settings.tasksFolder = "/Users/me/Work/Tasks"
+        settings.startedFolderTask = true
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertEqual(decoded.tasksFolder, "/Users/me/Work/Tasks")
+        XCTAssertTrue(decoded.startedFolderTask)
+        let relative = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{ "tasksFolder": "Tasks" }"#.utf8))
+        XCTAssertNil(relative.tasksFolder, "a relative path would land in the app's working directory")
+        XCTAssertFalse(relative.startedFolderTask)
+    }
+
     func testUnknownWorkspacePhaseSurvivesReencoding() throws {
         let json = Data("""
         {

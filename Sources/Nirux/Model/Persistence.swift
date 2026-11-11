@@ -429,6 +429,12 @@ struct PersistedSettings: Codable {
     /// `BranchReview.ExplainSettings`'s defaults.
     var explainModel: String?
     var explainEffort: String?
+    /// Where a task without a repository gets its folder (see
+    /// NewTask+Folder); nil: `~/Nirux Tasks`.
+    var tasksFolder: String?
+    /// A task without a repository started once: the ⌘N sheet no longer
+    /// says that Claude Code asks to trust each new folder.
+    var startedFolderTask: Bool = false
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
@@ -469,6 +475,8 @@ struct PersistedSettings: Codable {
         case explainNoticeAccounts
         case explainModel
         case explainEffort
+        case tasksFolder
+        case startedFolderTask
         case claudeBypassPermissions // legacy
     }
 
@@ -510,6 +518,11 @@ struct PersistedSettings: Codable {
         explainNoticeAccounts = (try? container.decodeIfPresent([String: String].self, forKey: .explainNoticeAccounts)) ?? [:]
         explainModel = try? container.decodeIfPresent(String.self, forKey: .explainModel)
         explainEffort = try? container.decodeIfPresent(String.self, forKey: .explainEffort)
+        // Only an absolute path: anything else falls back to the default.
+        tasksFolder = (try? container.decodeIfPresent(String.self, forKey: .tasksFolder)).flatMap { $0 }.flatMap {
+            $0.hasPrefix("/") ? $0 : nil
+        }
+        startedFolderTask = (try? container.decodeIfPresent(Bool.self, forKey: .startedFolderTask)) ?? false
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -541,6 +554,8 @@ struct PersistedSettings: Codable {
         if !explainNoticeAccounts.isEmpty { try container.encode(explainNoticeAccounts, forKey: .explainNoticeAccounts) }
         try container.encodeIfPresent(explainModel, forKey: .explainModel)
         try container.encodeIfPresent(explainEffort, forKey: .explainEffort)
+        try container.encodeIfPresent(tasksFolder, forKey: .tasksFolder)
+        if startedFolderTask { try container.encode(true, forKey: .startedFolderTask) }
     }
 
     /// What applies: the saved settings, else the defaults (nothing saved
@@ -593,6 +608,9 @@ struct PersistedWorkspace: Codable {
     var isLead: Bool
     /// See `WorkspaceState.reportsToLead`. Written only when true.
     var reportsToLead: Bool
+    /// See `WorkspaceState.taskFolder`. A build before it restores the
+    /// task as a plain workspace.
+    var taskFolder: String?
 
     init(
         id: String? = nil,
@@ -620,7 +638,8 @@ struct PersistedWorkspace: Codable {
         startedOutsideNirux: Bool = false,
         startedByAgent: Bool = false,
         isLead: Bool = false,
-        reportsToLead: Bool = false
+        reportsToLead: Bool = false,
+        taskFolder: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -648,6 +667,7 @@ struct PersistedWorkspace: Codable {
         self.startedByAgent = startedByAgent
         self.isLead = isLead
         self.reportsToLead = reportsToLead
+        self.taskFolder = taskFolder
     }
 
     enum CodingKeys: String, CodingKey {
@@ -655,6 +675,7 @@ struct PersistedWorkspace: Codable {
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
         case reportsToLead
+        case taskFolder
     }
 
     init(from decoder: Decoder) throws {
@@ -689,6 +710,10 @@ struct PersistedWorkspace: Codable {
         startedByAgent = (try? container.decodeIfPresent(Bool.self, forKey: .startedByAgent)) ?? false
         isLead = (try? container.decodeIfPresent(Bool.self, forKey: .isLead)) ?? false
         reportsToLead = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToLead)) ?? false
+        // Only an absolute path: anything else is no task folder.
+        taskFolder = (try? container.decodeIfPresent(String.self, forKey: .taskFolder)).flatMap { $0 }.flatMap {
+            $0.hasPrefix("/") ? $0 : nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -721,6 +746,7 @@ struct PersistedWorkspace: Codable {
         if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
+        try container.encodeIfPresent(taskFolder, forKey: .taskFolder)
     }
 }
 

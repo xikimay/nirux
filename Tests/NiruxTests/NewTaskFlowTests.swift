@@ -5,7 +5,8 @@ import XCTest
 /// The ⌘N sheet beyond the happy path `testNewCommand` runs: the keyboard,
 /// a branch that exists, a fetch that fails, closing the sheet while the
 /// task starts, two repositories, nothing typed, a space without a
-/// repository, General, Existing Branch…, and the worktrees agents ask for.
+/// repository, tasks without one in General and elsewhere, Existing
+/// Branch…, and the worktrees agents ask for.
 @MainActor
 final class NewTaskFlowTests: UIFlowTestCase {
     /// A space anchored to the harness's repository, selected, with its own
@@ -190,7 +191,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
     }
 
     /// Two anchors: the popup picks one, the default first. A folder of the
-    /// repository: its tasks open there.
+    /// repository: its tasks open there. A folder outside git holds its
+    /// tasks' folders.
     func testATaskInAFolderOfTheRepositoryWithCodex() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -200,24 +202,28 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let space = try Self.anchoredSpace(harness, also: [.folder(docs), .folder(notes)])
             let sheet = try openSheet(harness)
             XCTAssertFalse(sheet.repositoryPopup.isHidden)
-            XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "docs", "notes"])
+            XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "docs", "notes", "", "No Repository"])
             XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "repo")
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
             describe("Why is the cache cold?", in: sheet)
             select("Investigation (no code)", in: sheet.templatePopup)
 
-            // A folder in no repository: no task, but a shell still opens.
+            // A folder in no repository: its task gets a folder in it.
             select("notes", in: sheet.repositoryPopup)
             harness.waitUntil("the notes folder's info") { sheet.info != nil }
             XCTAssertNil(sheet.info?.target)
-            XCTAssertFalse(sheet.startButton.isEnabled)
-            XCTAssertEqual(sheet.lineLabel.stringValue, "“notes” isn’t in a git repository: tasks need one.")
+            XCTAssertEqual(sheet.destination, .folder(parent: notes))
+            XCTAssertTrue(sheet.startButton.isEnabled)
+            XCTAssertEqual(sheet.branch, "Why is the cache cold?")
+            XCTAssertEqual(sheet.lineLabel.stringValue, "Why is the cache cold?  ·  new folder in \(notes), no repository")
+            XCTAssertTrue(sheet.existingBranchButton.isHidden, "no branches there")
 
             select("docs", in: sheet.repositoryPopup)
             harness.waitUntil("the docs folder's info") { sheet.info != nil }
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
             XCTAssertEqual(sheet.info?.target?.subdirectory, "docs")
             XCTAssertTrue(sheet.startButton.isEnabled)
+            XCTAssertFalse(sheet.existingBranchButton.isHidden)
             // The space's templates, whatever the repository: the one
             // picked stays.
             XCTAssertEqual(sheet.templatePopup.titleOfSelectedItem, "Investigation (no code)")
@@ -297,9 +303,10 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.waitUntil("the suggestion") { sheet.suggestion != nil }
             XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["No Repository", "", "Add “repo”", "Add Repository…"])
             XCTAssertEqual(sheet.lineLabel.stringValue, "Nothing typed: Start opens a shell in ~.")
+            // Without a repository, the task gets a folder of its own.
             describe("Wire the cache", in: sheet)
-            XCTAssertEqual(sheet.lineLabel.stringValue, "This space has no repository yet: add one with the menu above.")
-            XCTAssertFalse(sheet.startButton.isEnabled)
+            XCTAssertEqual(sheet.lineLabel.stringValue, "Wire the cache  ·  new folder in ~/Nirux Tasks, no repository")
+            XCTAssertTrue(sheet.startButton.isEnabled)
 
             // "Add Repository…" picks the folder over the sheet: the window
             // has one already. Cancelled, nothing changes.
@@ -315,9 +322,11 @@ final class NewTaskFlowTests: UIFlowTestCase {
             select("Add “repo”", in: sheet.repositoryPopup)
             harness.waitUntil("the repository to join the space") { !sheet.repositories.isEmpty }
             XCTAssertEqual(shell.profiles.first { $0.id == space.id }?.anchors.map(\.name), ["repo"])
-            XCTAssertTrue(sheet.repositoryPopup.isHidden, "one repository: nothing to choose")
+            XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "", "No Repository"], "the one added, selected")
+            XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "repo")
             harness.waitUntil("the repository's info") { sheet.info?.target != nil }
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
+            XCTAssertEqual(sheet.branch, "feat/wire-the-cache", "the branch, now")
             XCTAssertTrue(sheet.startButton.isEnabled)
             sheet.startButton.performClick(nil)
             harness.waitUntil("the task's workspace") { shell.workspaces.contains { $0.title == "Wire the cache" } }
@@ -325,23 +334,265 @@ final class NewTaskFlowTests: UIFlowTestCase {
         }
     }
 
-    /// General never has a repository: a task there points to New Space….
-    func testGeneralOffersANewSpaceForATask() throws {
+    /// General never has a repository: a task there gets a new folder of
+    /// its own in ~/Nirux Tasks, with its handover, never one already there.
+    /// It is a task (sub-tasks, its Mission), never a worktree to clean up,
+    /// and Claude Code's trust question is said only until the first.
+    func testGeneralStartsATaskInAFolderOfItsOwn() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            let tasks = harness.home + "/Nirux Tasks"
+            var sheet = try openSheet(harness)
+            XCTAssertTrue(sheet.repositoryPopup.isHidden, "General has no repository to pick")
+            XCTAssertFalse(sheet.existingBranchButton.isHidden, "the focused terminal's worktrees, as before")
+            describe("Compare: two parsers\n\nWhich one is faster on 1 GB?", in: sheet)
+            XCTAssertEqual(sheet.destination, .folder(parent: tasks))
+            XCTAssertEqual(sheet.lineLabel.stringValue, "Compare- two parsers  ·  new folder in ~/Nirux Tasks, no repository")
+            XCTAssertFalse(sheet.trustHint.isHidden)
+            XCTAssertTrue(sheet.trustHint.stringValue.contains("run claude once in ~/Nirux Tasks"), sheet.trustHint.stringValue)
+            select("Codex", in: sheet.agentPopup)
+            XCTAssertTrue(sheet.trustHint.isHidden, "Claude Code's")
+            select("Claude Code", in: sheet.agentPopup)
+            XCTAssertTrue(sheet.startButton.isEnabled)
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the task's workspace") { shell.workspaces.contains { $0.title == "Compare: two parsers" } }
+            XCTAssertNil(shell.newTaskPanel)
+
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            let folder = tasks + "/Compare- two parsers"
+            XCTAssertEqual(task.title, "Compare: two parsers")
+            XCTAssertEqual(NiruxShellView.comparablePath(task.cwd), NiruxShellView.comparablePath(folder))
+            XCTAssertEqual(task.profileID, WorkspaceProfile.defaultID)
+            XCTAssertTrue(task.isFolderTask)
+            let handover = try String(contentsOfFile: folder + "/.claude-handover.md", encoding: .utf8)
+            XCTAssertTrue(handover.contains("in `\(folder)`, a new folder Nirux made for it: no repository"), handover)
+            XCTAssertTrue(handover.contains("Which one is faster on 1 GB?"), handover)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder + "/.git"))
+            let launch = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(launch.contains("Read .claude-handover.md for full context"), launch)
+            XCTAssertTrue(launch.contains("Compare- two parsers"), "the folder names the session: \(launch)")
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
+            XCTAssertTrue(NiruxShellView.isTask(task))
+            XCTAssertTrue(shell.offersSubtask(task))
+            XCTAssertNil(shell.worktreeCleanupOffer(workspaceIndex: index))
+            XCTAssertTrue(Persistence.load()?.settings?.startedFolderTask == true)
+            // Saved with its folder, whatever folder its terminal is in.
+            XCTAssertEqual(task.taskFolder, task.cwd)
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.taskFolder, task.taskFolder)
+
+            // The same name again: a folder of its own. The hint is gone.
+            sheet = try openSheet(harness)
+            describe("Compare: two parsers", in: sheet)
+            XCTAssertTrue(sheet.trustHint.isHidden)
+            // Edit names the folder; what the user types is cleaned.
+            sheet.editBranchButton.performClick(nil)
+            XCTAssertFalse(sheet.branchField.isHidden)
+            XCTAssertEqual(sheet.fromLabel.stringValue, "new folder in ~/Nirux Tasks, no repository")
+            sheet.branchField.stringValue = "  "
+            sheet.startButton.performClick(nil)
+            XCTAssertEqual(sheet.errorLabel.stringValue, "Name the folder.")
+            sheet.branchField.stringValue = "Compare- two parsers"
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the second task") { shell.workspaces.filter { $0.title == "Compare: two parsers" }.count == 2 }
+            XCTAssertEqual(shell.activeWorkspace.map { NiruxShellView.comparablePath($0.cwd) }, NiruxShellView.comparablePath(folder + " 2"))
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder), [".claude-handover.md"], "the first one untouched")
+
+            // Its folder gone: still nothing to clean up, and the folder
+            // is never Nirux's to delete.
+            try FileManager.default.removeItem(atPath: folder)
+            XCTAssertNil(shell.worktreeCleanupOffer(workspaceIndex: index))
+            XCTAssertFalse(shell.worktreeCleanupCandidates().contains { $0.workspaceIDs.contains(task.id) })
+            XCTAssertFalse(shell.offersSubtask(task), "no folder to hold a sub-task's")
+
+            // A home that is a git repository (dotfiles): no task starts
+            // in it, and nothing is made.
+            try FileManager.default.createDirectory(atPath: harness.home + "/.git", withIntermediateDirectories: true)
+            sheet = try openSheet(harness)
+            describe("Plan the offsite", in: sheet)
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the refusal") { !sheet.isStarting }
+            XCTAssertTrue(sheet.errorLabel.stringValue.contains("is inside a git repository"), sheet.errorLabel.stringValue)
+            XCTAssertTrue(sheet.errorLabel.stringValue.contains("Settings › General"), sheet.errorLabel.stringValue)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: tasks + "/Plan the offsite"))
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
+    /// A repository anchored elsewhere while the sheet is open (Space
+    /// Settings, the space menu) isn't the user's choice, even after an
+    /// "Add Repository…" from the sheet was cancelled: No Repository stays.
+    func testARepositoryAddedElsewhereLeavesNoRepositoryPicked() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = shell.workspaceStore.createProfile(named: "Empty", select: false)
+            shell.selectProfile(space.id)
             let sheet = try openSheet(harness)
             describe("Wire the cache", in: sheet)
-            XCTAssertEqual(
-                sheet.lineLabel.stringValue,
-                "\(WorkspaceProfile.defaultProfile.name) has no repository: tasks start in a space that has one."
-            )
+            XCTAssertEqual(sheet.destination, .folder(parent: harness.home + "/Nirux Tasks"))
+            shell.sideEffects.chooseFolder = { _, _, completion in completion(nil) }
+            select("Add Repository…", in: sheet.repositoryPopup)
+            let anchor = try XCTUnwrap(FolderIdentity.identify(harness.repo, timeout: 10)).anchor
+            shell.addAnchor(anchor, toSpace: space.id)
+            XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "", "No Repository"])
+            XCTAssertNil(sheet.selectedRepositoryKey)
+            XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "No Repository")
+            XCTAssertEqual(sheet.destination, .folder(parent: harness.home + "/Nirux Tasks"))
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
+    /// A sub-task never starts in another repository than its task's: once
+    /// that one left the space, the sheet refuses.
+    func testASubtaskWhoseRepositoryLeftTheSpaceDoesntStart() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let notes = harness.root + "/notes"
+            try FileManager.default.createDirectory(atPath: notes, withIntermediateDirectories: true)
+            let space = try Self.anchoredSpace(harness, also: [.folder(notes)])
+            shell.addWorkspace(title: "Parent", cwd: harness.worktree, profileID: space.id)
+            let parent = try XCTUnwrap(shell.activeWorkspace)
+            shell.showNewSubtaskPanel(under: parent)
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            harness.waitUntil("the repository's info") { sheet.info?.target != nil }
+            describe("Child work", in: sheet)
+            XCTAssertTrue(sheet.startButton.isEnabled)
+            let repository = try XCTUnwrap(sheet.selectedRepositoryKey)
+            shell.removeSpaceAnchor(key: repository, fromSpace: space.id)
+            shell.refreshNewTaskPanelRepositories()
+            XCTAssertNil(sheet.selectedRepositoryKey, "never the space's other folder")
+            XCTAssertNil(sheet.destination)
             XCTAssertFalse(sheet.startButton.isEnabled)
-            XCTAssertFalse(sheet.newSpaceButton.isHidden)
-            sheet.newSpaceButton.performClick(nil)
-            XCTAssertNil(shell.newTaskPanel)
-            harness.waitUntil("New Space…") { shell.newSpacePanel?.panel?.isSheet == true }
-            // The focused terminal's repository, already in it.
-            XCTAssertEqual(shell.newSpacePanel?.rows.map(\.anchor.name), ["repo"])
+            XCTAssertEqual(sheet.lineLabel.stringValue, "The task’s repository is no longer in this space.")
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
+    /// A space with a repository: No Repository, last in the popup, starts
+    /// the task in a folder, in that space, and its sub-tasks get their
+    /// folders in its own. The branch typed for a worktree comes back with
+    /// the repository.
+    func testNoRepositoryInASpaceWithOne() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try Self.anchoredSpace(harness)
+            var sheet = try openSheet(harness)
+            XCTAssertFalse(sheet.repositoryPopup.isHidden)
+            XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "", "No Repository"])
+            XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "repo", "the default, as before")
+            describe("Draft the release notes", in: sheet)
+            sheet.editBranchButton.performClick(nil)
+            sheet.branchField.stringValue = "docs/release-notes"
+            sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sheet.branchField))
+
+            select("No Repository", in: sheet.repositoryPopup)
+            XCTAssertNil(sheet.selectedRepositoryKey)
+            harness.waitUntil("the space's templates") { sheet.info != nil }
+            XCTAssertEqual(sheet.branch, "Draft the release notes")
+            select("repo", in: sheet.repositoryPopup)
+            harness.waitUntil("the repository's info") { sheet.info?.target != nil }
+            XCTAssertEqual(sheet.branch, "docs/release-notes", "what the user typed for the branch")
+            select("No Repository", in: sheet.repositoryPopup)
+            harness.waitUntil("the space's templates") { sheet.info != nil }
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the task") { shell.workspaces.contains { $0.title == "Draft the release notes" } }
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(NiruxShellView.comparablePath(task.cwd), NiruxShellView.comparablePath(harness.home + "/Nirux Tasks/Draft the release notes"))
+            XCTAssertEqual(task.profileID, space.id, "the space it was started from")
+            XCTAssertTrue(task.isFolderTask)
+            XCTAssertFalse(try UIFlowHarness.git(["branch", "--list"], at: harness.repo).contains("release-notes"))
+
+            // A sub-task: in a folder inside the task's.
+            shell.showNewSubtaskPanel(under: task)
+            sheet = try XCTUnwrap(shell.newTaskPanel)
+            harness.waitUntil("the space's templates") { sheet.info != nil }
+            XCTAssertEqual(sheet.headingLabel.stringValue, "New Sub-task in Repo")
+            XCTAssertTrue(sheet.repositoryPopup.isHidden)
+            describe("Collect the merged PRs", in: sheet)
+            XCTAssertEqual(sheet.destination, .folder(parent: task.cwd))
+            XCTAssertEqual(sheet.lineLabel.stringValue, "Collect the merged PRs  ·  new folder in “Draft the release notes”, no repository")
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the sub-task") { shell.workspaces.contains { $0.title == "Collect the merged PRs" } }
+            let child = try XCTUnwrap(shell.workspaces.first { $0.title == "Collect the merged PRs" })
+            XCTAssertEqual(NiruxShellView.comparablePath(child.cwd), NiruxShellView.comparablePath(task.cwd + "/Collect the merged PRs"))
+            XCTAssertEqual(child.parentWorkspaceID, task.id)
+            XCTAssertTrue(child.isFolderTask)
+
+            // Quit while its terminal was elsewhere: it keeps its folder.
+            let folder = try XCTUnwrap(task.taskFolder)
+            var state = shell.persistedState()
+            let saved = try XCTUnwrap(state.workspaces.firstIndex { $0.id == task.id })
+            state.workspaces[saved].cwd = harness.repo
+            XCTAssertTrue(Persistence.save(state))
+            shell.restoreState()
+            let restored = try XCTUnwrap(shell.workspaces.first { $0.id == task.id })
+            XCTAssertEqual(restored.taskFolder, folder)
+            XCTAssertTrue(shell.offersSubtask(restored))
+            shell.showNewSubtaskPanel(under: restored)
+            sheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(sheet.destination, .folder(parent: folder))
+
+            // Its agent made it a git repository: no sub-task goes in it.
+            try FileManager.default.createDirectory(atPath: folder + "/.git", withIntermediateDirectories: true)
+            harness.waitUntil("the space's templates") { sheet.info != nil }
+            describe("Ship the notes", in: sheet)
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the refusal") { !sheet.isStarting }
+            XCTAssertTrue(sheet.errorLabel.stringValue.contains("Uncheck “Sub-task of”"), sheet.errorLabel.stringValue)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder + "/Ship the notes"))
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
+    /// The agent of a task without a repository asking whether to trust
+    /// its folder, before any hook: its row needs the user, until a key
+    /// reaches it. Elsewhere Nirux doesn't look.
+    func testAnAgentAskingToTrustItsFolderNeedsYou() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let folder = harness.home + "/Nirux Tasks/Trust"
+            try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            // printf turns each \r\n into a line break.
+            let screen = #"Accessing workspace:\r\n\r\n Quick safety check: Is this a project you created or one you trust?\r\n\r\n"#
+                + #" > 1. Yes, I trust this folder\r\n   2. No, exit\r\n"#
+            let command = "printf '\(screen)'; exec -a claude /bin/sleep 600"
+            shell.addWorkspace(title: "Trust", cwd: folder, profileID: WorkspaceProfile.defaultID, taskFolder: folder)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            task.addColumn(command: command, cwd: folder)
+            let pty = try XCTUnwrap(task.columns.last?.pty)
+            // The same screen in a workspace that isn't such a task.
+            let plain = try XCTUnwrap(shell.workspaces.first { $0 !== task && !$0.isFolderTask })
+            plain.addColumn(command: command, cwd: harness.repo)
+            let elsewhere = try XCTUnwrap(plain.columns.last?.pty)
+            // Laid out: their terminals get the surface Nirux reads.
+            shell.relayout(animated: false)
+            @MainActor func status(of workspace: WorkspaceState) -> String? {
+                shell.updateSidebar()
+                return shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspace.id }?.rowSummary.status.text
+            }
+            // What it saw last, when it times out.
+            @MainActor func seen() -> String {
+                let foreground = pty.foregroundProcess(snapshot: ProcessSnapshot())
+                return "status \(status(of: task) ?? "nil"), agent \(foreground?.name ?? "none") started "
+                    + "\(foreground?.instance.startedAt ?? 0), now \(Date().timeIntervalSince1970), last key \(pty.lastKeystrokeAt), "
+                    + "screen: \(pty.terminalSession.readViewportText()?.suffix(400) ?? "no surface")"
+            }
+            UIFlowHarness.waitUntil("the trust question on its row (\(seen()))") {
+                status(of: task) == "Needs you · Trust this folder?"
+            }
+            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            XCTAssertEqual(pty.agentBlockedWait(now: Date().timeIntervalSince1970, foreground: claude)?.reason, AgentTrustPrompt.reason)
+            // The other one shows the same screen, as long as two reads take.
+            harness.waitUntil("the other agent's screen") {
+                elsewhere.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude"
+                    && AgentTrustPrompt.isShown(in: elsewhere.terminalSession.readViewportText() ?? "")
+            }
+            let readsLater = Date().addingTimeInterval(AgentTrustPrompt.readInterval * 2 + 0.5)
+            harness.waitUntil("two reads") { _ = status(of: plain); return Date() > readsLater }
+            let other = try XCTUnwrap(elsewhere.foregroundProcess(snapshot: ProcessSnapshot()))
+            XCTAssertNil(elsewhere.agentTrustPrompt(foreground: other), "only a task's new folder is watched")
+            pty.sendRaw("1")
+            harness.waitUntil("answered") { status(of: task) != "Needs you · Trust this folder?" }
+            XCTAssertNil(pty.agentTrustPrompt(foreground: claude))
         }
     }
 

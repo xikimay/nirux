@@ -7,7 +7,8 @@ import Foundation
 ///
 /// A name freezes that title: Claude Code stops deriving it from the prompt.
 /// So Nirux names only sessions whose label is stable, the branch of a
-/// worktree, and leaves every other session to Claude Code's own title.
+/// worktree or the folder of a task without a repository, and leaves every
+/// other session to Claude Code's own title.
 enum SessionName {
     /// Phone session lists truncate long titles anyway.
     static let maxLabelLength = 60
@@ -15,7 +16,8 @@ enum SessionName {
 
     /// `<branch> · <space>`, or nil without a worktree branch.
     /// - Parameters:
-    ///   - worktreeBranch: branch checked out in the worktree, read when the
+    ///   - worktreeBranch: branch checked out in the worktree (or the
+    ///     folder's name of a task without a repository), read when the
     ///     workspace was created.
     ///   - spaceName: name of the space the workspace belongs to.
     ///   - isDefaultSpace: the space is the built-in default one. Its

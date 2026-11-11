@@ -130,6 +130,13 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
+    /// The agent process seen asking whether to trust its folder, and when
+    /// (see AgentTrustPrompt): no hook reports that question.
+    var trustPromptSighting: AgentTrustPrompt.Sighting?
+    /// Reads of the agent's screen that showed no trust question, for the
+    /// agent process they read: past `AgentTrustPrompt.maxMisses`, Nirux
+    /// stops looking.
+    var trustPromptMisses: (instance: ProcessInstance, count: Int)?
 
     /// The user has typed at least once since the shell started. Fallback
     /// attention is gated on this: output before the first keystroke is

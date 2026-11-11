@@ -40,35 +40,58 @@ extension NiruxShellView {
     ) {
         let description = LeadTools.string(arguments, "description") ?? ""
         let repositories = newTaskRepositories(of: space)
-        guard !repositories.isEmpty else {
-            return answer("\(space.name) has no repository yet: ask the user to add one (Space Settings › General).", true)
-        }
-        let repository: NewTaskPanel.Repository
+        let repository: NewTaskPanel.Repository?
+        var asksNoRepository = false
         if let name = LeadTools.string(arguments, "repo") {
-            guard let named = repositories.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
-                return answer("No repository named “\(name)” in \(space.name): \(repositories.map(\.name).joined(separator: ", ")).", true)
+            if let named = repositories.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+                repository = named
+            } else if name.caseInsensitiveCompare(LeadTools.noRepository) == .orderedSame {
+                repository = nil
+                asksNoRepository = true
+            } else {
+                let names = (repositories.map(\.name) + ["\"\(LeadTools.noRepository)\" (a new folder, no repository)"])
+                return answer("No repository named “\(name)” in \(space.name): \(names.joined(separator: ", ")).", true)
             }
-            repository = named
         } else {
-            repository = repositories.first { $0.key == space.anchors.defaultAnchor?.key } ?? repositories[0]
+            // A space without a repository starts its tasks in folders.
+            repository = repositories.first { $0.key == space.anchors.defaultAnchor?.key } ?? repositories.first
         }
         let templateName = LeadTools.string(arguments, "template")
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
-            return leadProposeTask(description, repository: repository, templateName: templateName, in: space, parent: parent, answer: answer)
+            return leadProposeTask(
+                description, repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
+                in: space, parent: parent, answer: answer
+            )
         }
         let agent = defaultTaskAgent(forSpace: space.id)
         Self.readNewTaskInfo(
-            spaceID: space.id, folder: repository.folder, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
+            spaceID: space.id, folder: repository?.folder, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
         ) { [weak self] info in
             guard let self else { return }
-            guard let target = info.target else {
-                return answer("\(repository.name) isn’t a git repository Nirux can start a task in.", true)
-            }
             if let templateName, !info.templates.contains(where: { $0.name.caseInsensitiveCompare(templateName) == .orderedSame }) {
                 let names = info.templates.map(\.name)
                 return answer("No template named “\(templateName)”" + (names.isEmpty ? "." : ": \(names.joined(separator: ", ")).") , true)
             }
             let template = templateName.flatMap { name in info.templates.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } }
+            guard let repository, let target = info.target else {
+                // No repository, or a folder of the space surely outside
+                // git: a folder of its own, as ⌘N makes.
+                if let repository, !(repository.isFolder && info.isOutsideGit) {
+                    return answer("\(repository.name) isn’t a git repository Nirux can start a task in.", true)
+                }
+                let tasksFolder = self.tasksFolder()
+                let place = NewTask.Place.folder(
+                    parent: repository?.folder ?? tasksFolder.path,
+                    name: NewTask.suggestedFolderName(description: description),
+                    makesParent: repository == nil && tasksFolder.isDefault
+                )
+                var request = NewTask.Request(
+                    description: description, template: template, agent: agent, projectID: space.id,
+                    place: place, fetchesFirst: false, reportsTo: parent
+                )
+                request.startedByLead = true
+                return self.startLeadTask(request, repository: nil, fetchError: nil, answer: answer)
+            }
             let suggested = NewTask.suggestedBranch(description: description, templateName: template?.name)
             guard !suggested.isEmpty else {
                 return answer("No branch name comes out of that description: start it with a few words that name the task.", true)
@@ -77,7 +100,7 @@ extension NiruxShellView {
                 guard let self else { return }
                 var request = NewTask.Request(
                     description: description, template: template, agent: agent, projectID: space.id,
-                    branch: branch, target: target, fetchesFirst: true, reportsTo: parent
+                    place: .worktree(target, branch: branch), fetchesFirst: true, reportsTo: parent
                 )
                 // It opens behind what the user is doing.
                 request.startedByLead = true
@@ -88,39 +111,47 @@ extension NiruxShellView {
 
     /// Starts the task; a failed fetch starts it again from origin's base as
     /// last fetched, once, as ⌘N's "Start Without Fetching". Answers once
-    /// the workspace and its Mission exist.
+    /// the workspace and its Mission exist. `repository` is nil for a
+    /// folder.
     private func startLeadTask(
-        _ request: NewTask.Request, repository: String, fetchError: String?, answer: @escaping LeadAnswer
+        _ request: NewTask.Request, repository: String?, fetchError: String?, answer: @escaping LeadAnswer
     ) {
-        startTask(request) { [weak self] outcome in
+        startTask(request, completion: { [weak self] outcome in
             switch outcome {
             case .opened:
-                // After `openTaskWorkspace`, which runs once this returns.
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    let title = NewTask.workspaceTitle(description: request.description) ?? request.branch
-                    let base = request.target.remoteBranchName
-                    let from = fetchError.map { "from \(base ?? "origin") as last fetched (the fetch failed: \($0))" }
-                        ?? base.map { "from \($0), fetched" } ?? "from the checkout’s HEAD"
-                    let reports = MissionStore.shared.missions.contains { mission in
-                        mission.parentWorkspaceID == request.reportsTo?.workspaceID && mission.branch == request.branch
-                            && self.workspaces.contains { $0.id == mission.childWorkspaceID }
-                    }
-                    answer("Started “\(title)” on \(request.branch) in \(repository), \(from), with \(request.agent.rawValue). "
-                        + (reports ? "It reports to you: its questions and its result come to your prompt."
-                            : "It doesn’t report to you (your Lead changed meanwhile): the user follows it."), false)
-                }
+                // `opened` answers, once the workspace is there.
+                break
             case .failed(let message):
                 answer("The task didn’t start: \(message)", true)
             case .fetchFailed(let message):
-                guard let self, request.fetchesFirst, request.target.remoteBranch != nil else {
-                    return answer("Couldn’t fetch \(request.target.remoteBranchName ?? "origin"): \(message) Nothing was created; tell the user.", true)
+                guard let self, request.fetchesFirst, let target = request.target, target.remoteBranch != nil else {
+                    return answer("Couldn’t fetch \(request.target?.remoteBranchName ?? "origin"): \(message) Nothing was created; tell the user.", true)
                 }
                 var retry = request
                 retry.fetchesFirst = false
                 self.startLeadTask(retry, repository: repository, fetchError: message, answer: answer)
             }
-        }
+        }, opened: { [weak self] workspaceID, created in
+            guard let self else { return }
+            let label = created.checkedOutBranch ?? created.folderName ?? request.name
+            let title = NewTask.workspaceTitle(description: request.description) ?? label
+            let place: String
+            if let repository, let target = request.target {
+                let base = target.remoteBranchName
+                let from = fetchError.map { "from \(base ?? "origin") as last fetched (the fetch failed: \($0))" }
+                    ?? base.map { "from \($0), fetched" } ?? "from the checkout’s HEAD"
+                place = "on \(label) in \(repository), \(from)"
+            } else {
+                place = "in \(created.path), a new folder without a repository"
+                    + " (its agent may first ask the user to trust that folder: its row then reads Needs you)"
+            }
+            let reports = MissionStore.shared.missions.contains { mission in
+                mission.parentWorkspaceID == request.reportsTo?.workspaceID && mission.childWorkspaceID == workspaceID
+            }
+            answer("Started “\(title)” \(place), with \(request.agent.rawValue). "
+                + (reports ? "It reports to you: its questions and its result come to your prompt."
+                    : "It doesn’t report to you (your Lead changed meanwhile): the user follows it."), false)
+        })
     }
 
     /// The first of `branch`, `branch-2`, `branch-3`… no local or remote
@@ -145,11 +176,13 @@ extension NiruxShellView {
     /// Lead's space; the task reports to the Lead if the user starts it.
     /// One sheet at a time: the others wait their turn.
     private func leadProposeTask(
-        _ description: String, repository: NewTaskPanel.Repository, templateName: String?,
+        _ description: String, repository: NewTaskPanel.Repository?, withoutRepository: Bool, templateName: String?,
         in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
         let proposal = LeadProposal(
-            spaceID: space.id, repositoryKey: repository.key, description: description, templateName: templateName, parent: parent
+            spaceID: space.id,
+            repository: repository.map { .named(key: $0.key) } ?? (withoutRepository ? .noRepository : .spaceDefault),
+            description: description, templateName: templateName, parent: parent
         )
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
@@ -165,7 +198,9 @@ extension NiruxShellView {
     /// Shows a proposal when no sheet is up and its Lead is still there.
     private func showLeadProposal(_ proposal: LeadProposal) -> Bool {
         guard window?.attachedSheet == nil,
-              let panel = showNewPanel(spaceID: proposal.spaceID, selectedKey: proposal.repositoryKey)
+              let panel = showNewPanel(
+                  spaceID: proposal.spaceID, selectedKey: proposal.repository.key, withoutRepository: proposal.repository == .noRepository
+              )
         else { return false }
         panel.reportsTo = proposal.parent
         panel.prefill(description: proposal.description, templateName: proposal.templateName)
@@ -214,7 +249,11 @@ extension NiruxShellView {
             var line = "- “\(MissionPromptText.quoted(task.title))”"
             if let parent = parentTitles[task.id] { line += " · sub-task of “\(MissionPromptText.quoted(parent))”" }
             if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
-            if let repository = leadRepositoryName(of: task, in: space) { line += " · \(repository)" }
+            if let folder = task.taskFolder {
+                line += " · no repository · folder \(MissionPromptText.quoted(folder))"
+            } else if let repository = leadRepositoryName(of: task, in: space) {
+                line += " · \(repository)"
+            }
             if task.isInactive { line += " · inactive" }
             line += " · " + leadAgentState(of: task, snapshot: snapshot)
             if let pr = task.prInfo {
@@ -254,9 +293,10 @@ extension NiruxShellView {
             anchor.name + (anchor.isDefault ? " (default)" : "")
         }
         let header = "\(space.name): \(tasks.isEmpty ? "no task" : tasks.count == 1 ? "1 task" : "\(tasks.count) tasks")."
+        let folderLine = "a new folder of its own in \(tasksFolder().path), no git"
         let repositoryLine = repositories.isEmpty
-            ? "No repository: tasks can't start until the user adds one."
-            : "Repositories: \(repositories.joined(separator: ", "))."
+            ? "No repository: each task starts in \(folderLine)."
+            : "Repositories: \(repositories.joined(separator: ", ")); \"\(LeadTools.noRepository)\" starts a task in \(folderLine)."
         return ([header] + lines + [repositoryLine]).joined(separator: "\n")
     }
 
@@ -280,6 +320,7 @@ extension NiruxShellView {
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
+                ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
             // A turn end found done (or still being read) asks nothing.
             let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
             agents.append((name: foreground.name, status: status, dialog: dialog))
@@ -305,16 +346,24 @@ extension NiruxShellView {
                 .filter { $0.childWorkspaceID == workspace.id && $0.parentWorkspaceID == leadID && $0.reportsToLead == true }
                 .max(by: { $0.createdAt < $1.createdAt })
         }
-        let byBranch = candidates.filter { $0.gitBranch == name }.compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
-        if let first = byBranch.first { return first }
-        // Two of its tasks with that title: the branch says which.
-        let byTitle = candidates.filter { $0.title.caseInsensitiveCompare(name) == .orderedSame }
-            .compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
-        return byTitle.count == 1 ? byTitle[0] : nil
+        func named(_ matches: (WorkspaceState) -> Bool) -> [(WorkspaceState, Mission)] {
+            candidates.filter(matches).compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
+        }
+        if let first = named({ $0.gitBranch == name }).first { return first }
+        // A task without a repository has its folder instead, by path as
+        // list_tasks shows it.
+        if let first = named({ $0.taskFolder == name }).first { return first }
+        // Then a title, or a folder's name, only one task having it: a
+        // title and a folder's name naming two tasks is no answer.
+        let byTitle = named { $0.title.caseInsensitiveCompare(name) == .orderedSame }
+        let byFolderName = named { $0.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false }
+        let found = Dictionary((byTitle + byFolderName).map { ($0.0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return found.count == 1 ? found.values.first : nil
     }
 
     private func noLeadTask(_ name: String) -> String {
-        "No task of yours is named “\(name)”, or several share that title: use its branch or title from list_tasks. "
+        "No task of yours is named “\(name)”, or several share that title: use its branch or title from list_tasks "
+            + "(its folder, for a task without a repository). "
             + "A task the user started without you doesn't report to you."
     }
 
@@ -502,8 +551,22 @@ extension NiruxShellView {
 
 /// A task a Lead proposes (see `NiruxShellView.pendingLeadProposals`).
 struct LeadProposal: Equatable {
+    enum Repository: Equatable {
+        case named(key: String)
+        /// `repo: "none"`: No Repository, a folder of its own.
+        case noRepository
+        /// The space had none: the sheet picks its default when it shows
+        /// (one may have been added meanwhile).
+        case spaceDefault
+
+        var key: String? {
+            if case .named(let key) = self { return key }
+            return nil
+        }
+    }
+
     let spaceID: String
-    let repositoryKey: String
+    let repository: Repository
     let description: String
     let templateName: String?
     let parent: NewTask.MissionParent

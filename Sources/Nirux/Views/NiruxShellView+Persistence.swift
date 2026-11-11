@@ -58,7 +58,8 @@ extension NiruxShellView {
                 startedOutsideNirux: persistedWS.startedOutsideNirux,
                 startedByAgent: persistedWS.startedByAgent,
                 isLead: isLead,
-                reportsToLead: persistedWS.reportsToLead
+                reportsToLead: persistedWS.reportsToLead,
+                taskFolder: isLead ? nil : persistedWS.taskFolder
             )
             // A Lead is never parked.
             workspace.isInactive = persistedWS.isInactive && !isLead
@@ -351,7 +352,8 @@ extension NiruxShellView {
                     // One closing is no longer the Lead: a new one may
                     // start before it goes.
                     isLead: workspace.isLead && !workspace.isClosing,
-                    reportsToLead: workspace.reportsToLead)
+                    reportsToLead: workspace.reportsToLead,
+                    taskFolder: workspace.taskFolder)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,
