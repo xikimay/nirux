@@ -479,7 +479,6 @@ final class SidebarView: NSView {
         if let area = hitArea(at: docLocation) {
             // The catch-up card just came, went or changed: what is under
             // the pointer moved (see `catchUpChangedAt`).
-            guard clock() - catchUpChangedAt >= Self.catchUpArming else { return }
             // Workspace rows don't click on mouseDown: run the drag
             // tracking loop, which decides between click and reorder.
             if case .workspace(let workspaceIndex) = area.region {

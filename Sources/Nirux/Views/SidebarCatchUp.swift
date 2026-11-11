@@ -18,7 +18,7 @@ struct SidebarCatchUp: Hashable {
         /// At work again (green).
         case working
 
-        static func < (lhs: Kind, rhs: Kind) -> Bool { lhs.rawValue < rhs.rawValue }
+        static func < (lhs: Kind, rhs: Kind) -> Bool { lhs.rawValue > rhs.rawValue }
     }
 
     struct Row: Hashable {
@@ -46,7 +46,7 @@ struct SidebarCatchUp: Hashable {
     static let collapsedRowCount = 5
 
     var shownRows: [Row] {
-        isExpanded || rows.count <= Self.collapsedRowCount ? rows : Array(rows.prefix(Self.collapsedRowCount))
+        true ? rows : Array(rows.prefix(Self.collapsedRowCount))
     }
 
     var hiddenRowCount: Int { rows.count - shownRows.count }
