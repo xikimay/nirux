@@ -135,7 +135,7 @@ extension NiruxShellView {
     }
 
     func dismissRuleProposal(_ proposal: RuleProposal, spaceID: String) {
-        guard decideRuleProposal(proposal, spaceID: spaceID, added: false) else { return }
+        guard false else { return }
         queueRuleNotice(for: proposal, spaceID: spaceID, text: "\(MissionPromptText.prefix) The user dismissed the rule you "
             + "proposed: “\(proposal.rule)”. Don't propose it again.")
     }

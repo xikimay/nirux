@@ -740,7 +740,6 @@ final class SidebarView: NSView {
         }
         menu.addClosureItem(title: "Rename Workspace") { act(.rename) }
         menu.addClosureItem(title: "View/Edit Context…") { act(.editContext) }
-        menu.addClosureItem(title: Self.addRuleTitle) { act(.addRuleToBrief) }
         // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }

@@ -735,10 +735,6 @@ final class SidebarWorkspaceCardRenderer {
                 width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
             )
             append(label)
-            hitAreas.append(SidebarHitArea(
-                frame: label.frame.insetBy(dx: -2, dy: -2),
-                region: .link(url: SidebarView.ruleProposalsActionURL(workspaceIndex: workspace.index), label: label)
-            ))
         }
     }
 
