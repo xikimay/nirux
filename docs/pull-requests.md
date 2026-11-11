@@ -6,7 +6,7 @@ Nirux follows the pull request of each workspace's branch and shows its state in
 
 A workspace whose branch has an open pull request shows it in its status line: `#39 · checks passed`, `#39 · checks failed`, `Ready to merge`. Once the pull request is merged, the row reads `Merged`, followed by `Clean up` when its worktree can be removed (see [Cleaning up merged worktrees](spaces-and-tasks.md#cleaning-up-merged-worktrees)).
 
-The selected row also has a PR link and, while the pull request is open, a CI link. Each opens in a browser column of the same workspace. CI opens the failed check, else the pull request's Checks tab.
+The selected row also has a PR link and, while the pull request is open and has checks, a CI link. Each opens in a browser column of the same workspace. CI opens the failed check, else the pull request's Checks tab.
 
 ## CI failures
 
@@ -27,7 +27,7 @@ Nirux judges from the failed log. When tests fail that the pull request doesn't 
 
 ## Review badges
 
-The selected workspace's row shows which review passes you ran in its Claude Code sessions: the slash commands `/code-review`, `/premortem` and `/code-style-review`, and an adversarial review, as `CR ✓  PM ✓  CS ·  ADV ·`.
+The selected workspace's row shows which review passes ran in its Claude Code sessions, typed by you or started by Claude: the slash commands `/code-review`, `/premortem` and `/code-style-review`, and an adversarial review, as `CR ✓  PM ✓  CS ·  ADV ·`.
 
 | Mark | Meaning |
 | --- | --- |
@@ -58,7 +58,7 @@ A row opens into its diff. The column follows its worktree, and reads the branch
 **Explain** asks Claude Code, on your Claude account, to read the branch and a read-only copy of its files, with secrets and instruction files left out. The model and effort are set in **Settings › Agents › Branch Review**.
 
 - The first time in a space, an alert says what is sent, with which model and under which account. It asks again when the account changes, and every time for an account billed per call.
-- Claude's overview shows above the author's own description of the change. It lists the claims in that description that the code contradicts, and questions for the author. Files are regrouped by intent, and each gets a sentence.
+- Claude's overview shows above the author's own description of the change. Below that description, **Checked by Claude** lists the claims in it that the code doesn't fully match, then Claude's questions for the author. Files are regrouped by intent, and each gets a sentence.
 - In an open diff, Claude's notes sit under the hunks they explain. **Mark wrong** flags a note, and the page's bar shows how often notes were marked wrong.
 - The next Explain sends only the files changed since and those not explained yet. **Explain All Again** sends every file.
 - The same bar shows the day's runs on the branch, their tokens and what they would cost at API prices.

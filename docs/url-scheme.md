@@ -6,7 +6,7 @@ The installed app registers the `nirux://` URL scheme. The [agent skills](agent-
 
 Any app or web page can open a `nirux://` URL. A link therefore runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and sets it in its terminals, except in a workspace that a confirmed link opened. The skills pass it automatically.
 
-Without it, or with a value from before Nirux last restarted, Nirux shows a confirmation that spells out the folder or file, the branch, the agent and the permission mode. A request confirmed this way ignores `profile`, `parentWorkspace`, `parentAgent` and `workspace`. Its workspace opens in the space that has its repository, else in General.
+Without it, or with a value from before Nirux last restarted, Nirux shows a confirmation that spells out the folder or file, the branch, the agent and the permission mode. A request confirmed this way ignores `profile`, `parentWorkspace`, `parentAgent` and `workspace`. Its workspace opens in the space that has its repository or folder, else in General.
 
 ## `nirux://new-workspace`
 
@@ -34,7 +34,7 @@ Creates a git worktree and opens it as a workspace.
 | `profile` | Optional. A space ID, as Nirux terminals have it in `NIRUX_PROFILE_ID` |
 | `parentWorkspace`, `parentAgent` | Optional. The requesting workspace and terminal, by UUID. When the parent is a task, the new workspace lists under it as a sub-task. With [Mission handoffs](missions.md) on, or when the parent is a Lead, they also link the two agents |
 
-The workspace goes to the space that has its repository. Without one, it goes to the parent workspace's space, then to `profile`, then to General.
+The workspace goes to the space that has its repository or folder. Without one, it goes to the parent workspace's space, then to `profile`, then to General.
 
 The worktree is created next to the main checkout and named `<main folder>.<branch>`, with `/` replaced by `-`. From `repo.feat-a`, the branch `feat/b` gives `repo.feat-b`. When git can't tell where the main checkout is (a bare repository, a separate git dir, a submodule), the worktree goes next to `repo`.
 
