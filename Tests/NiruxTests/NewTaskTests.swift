@@ -137,6 +137,7 @@ final class NewTaskTests: XCTestCase {
         // Emoji keep their joiners; a bidi override goes.
         XCTAssertEqual(NewTask.cleanedFolderName("Team 👩‍💻 notes"), "Team 👩‍💻 notes")
         XCTAssertEqual(NewTask.cleanedFolderName("invoice\u{202E}fdp.app"), "invoicefdp.app")
+        XCTAssertEqual(NewTask.cleanedFolderName("Re\u{200B}search\u{FEFF}"), "Research", "two names that look the same are one")
         XCTAssertNil(NewTask.cleanedFolderName(" . . "))
         XCTAssertNil(NewTask.cleanedFolderName(""))
         // APFS takes 255 bytes: "name 999" must still fit.

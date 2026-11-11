@@ -368,8 +368,9 @@ extension NiruxShellView {
             let target = folder.flatMap { NewTask.resolveTarget(folder: $0, baseBranch: baseBranch) }
             let templates = TaskTemplates.load(spaceID: spaceID, stateDirectory: stateDirectory)
             let isOutsideGit = target == nil && folder.map(NewTask.isOutsideGit) == true
+            let isGone = folder.map { !NiruxURLRequest.directoryExists($0) } ?? false
             DispatchQueue.main.async { @MainActor in
-                completion(NewTaskPanel.ProjectInfo(target: target, templates: templates, isOutsideGit: isOutsideGit))
+                completion(NewTaskPanel.ProjectInfo(target: target, templates: templates, isOutsideGit: isOutsideGit, isGone: isGone))
             }
         }
     }
