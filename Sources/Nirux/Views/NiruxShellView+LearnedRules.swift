@@ -130,14 +130,10 @@ extension NiruxShellView {
         }
         // A decision that can't be recorded would leave it waiting, to be
         // added again: say why before writing.
-        var alsoMatching: [String] = []
-        if case .proposal(let proposal) = origin {
-            if let reason = store.load().readOnlyReason { return reason }
-            alsoMatching = [proposal.rule]
-        }
+        if case .proposal = origin, let reason = store.load().readOnlyReason { return reason }
         let outcome: LearnedRules.AddOutcome
         do {
-            outcome = try LearnedRules.add(rule: rule, evidence: evidence, alsoMatching: alsoMatching, to: briefURL, spaceName: space.name)
+            outcome = try LearnedRules.add(rule: rule, evidence: evidence, to: briefURL, spaceName: space.name)
         } catch {
             return error.localizedDescription
         }
@@ -190,43 +186,49 @@ extension NiruxShellView {
 
     // MARK: Telling the Lead
 
-    /// Types `text` into the column's prompt if it is free; true once typed.
-    typealias RuleDecisionDelivery = @MainActor (ColumnState, String) -> Bool
+    /// Whether a column's prompt takes a line now, and typing it there:
+    /// tests replace them.
+    typealias RuleDecisionPromptCheck = @MainActor (ColumnState) -> Bool
+    typealias RuleDecisionSend = @MainActor (ColumnState, String) -> Void
 
     /// Tells each space's Lead what the user decided about its rules, one
     /// decision per free prompt, oldest first. A decision stays in the file
-    /// until it is typed (`RuleProposal.leadToldAt`): a relaunch, a Lead
-    /// busy for hours or started again doesn't lose it. Runs with the
-    /// Mission messages (a turn end, a Mission event) and after a decision.
-    func typeRuleDecisions(deliver: RuleDecisionDelivery? = nil) {
+    /// until it is told (`RuleProposal.leadToldAt`): a relaunch, a Lead
+    /// busy for hours or started again doesn't lose it. Recorded before it
+    /// is typed: one that can't be recorded is never typed, or it would
+    /// come back at every turn end. Runs with the Mission messages (a turn
+    /// end, a Mission event) and after a decision.
+    func typeRuleDecisions(isFree: RuleDecisionPromptCheck? = nil, send: RuleDecisionSend? = nil) {
         var snapshot: ProcessSnapshot?
         for lead in workspaces where lead.isLead && !lead.isClosing {
-            guard let decision = ruleProposals(inSpace: lead.profileID).toTell.first,
-                  let column = lead.columns.first(where: { $0.agentUUID != nil && $0.agentUUID == decision.leadAgentUUID })
-                    ?? lead.columns.first(where: { $0.agentUUID != nil })
-            else { continue }
-            let text = Self.ruleDecisionText(decision)
-            let typed: Bool
-            if let deliver {
-                typed = deliver(column, text)
+            guard let decision = ruleProposals(inSpace: lead.profileID).toTell.first else { continue }
+            // The terminal that proposed it, else the one the Lead's Claude
+            // runs in now.
+            let proposer = lead.columns.first { !$0.isClosing && $0.agentUUID != nil && $0.agentUUID == decision.leadAgentUUID }
+            let agentUUID = proposer?.agentUUID ?? leadMissionParent(inSpace: lead.profileID)?.agentUUID
+            guard let column = lead.columns.first(where: { $0.agentUUID != nil && $0.agentUUID == agentUUID }) else { continue }
+            let free: Bool
+            if let isFree {
+                free = isFree(column)
             } else {
                 let processes = snapshot ?? ProcessSnapshot()
                 snapshot = processes
-                if let pty = column.pty, pty.acceptsMissionMessage(runningSince: Date().timeIntervalSince1970, snapshot: processes),
-                   let input = TypedPromptSanitizer.terminalInput(for: text) {
-                    pty.sendRaw(input)
-                    typed = true
-                } else {
-                    typed = false
-                }
+                free = column.pty?.acceptsMissionMessage(runningSince: Date().timeIntervalSince1970, snapshot: processes) == true
             }
-            guard typed else { continue }
+            guard free else { continue }
+            let text = Self.ruleDecisionText(decision)
+            ruleProposals[lead.profileID] = nil
             do {
                 try RuleProposalStore(spaceID: lead.profileID)?.markTold([decision.id])
             } catch {
-                NiruxDebugLog.log("Learned rules: couldn't record that the Lead was told: \(error)")
+                NiruxDebugLog.log("Learned rules: couldn't record that the Lead was told, so it isn't: \(error)")
+                continue
             }
-            ruleProposals[lead.profileID] = nil
+            if let send {
+                send(column, text)
+            } else if let input = TypedPromptSanitizer.terminalInput(for: text) {
+                column.pty?.sendRaw(input)
+            }
         }
     }
 

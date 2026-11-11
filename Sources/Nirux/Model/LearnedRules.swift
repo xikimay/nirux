@@ -320,14 +320,14 @@ enum LearnedRules {
     /// re-reads the brief right before replacing it and starts over from
     /// what is there when it changed (ProjectMemory.update): the user's
     /// edits made meanwhile stay. On the text it writes over, it looks for
-    /// the rule first, in its words or `alsoMatching` (a proposal's), and
-    /// writes nothing when the brief says it already: an Add whose decision
-    /// wasn't recorded, retried, doesn't add it twice. Refused past what
+    /// the rule first, and writes nothing when the brief says it already:
+    /// written by hand meanwhile, or an Add whose decision wasn't recorded,
+    /// retried. Refused past what
     /// sessions get: `maxCharacters`, or a file they don't read (past
     /// `SpaceBrief.maxFileBytes`). `onRead` sees each text read (tests
     /// edit the file there).
     static func add(
-        rule: String, evidence: String, alsoMatching: [String] = [], date: Date = Date(), to url: URL, spaceName: String,
+        rule: String, evidence: String, date: Date = Date(), to url: URL, spaceName: String,
         maxCharacters: Int = SpaceBrief.maxCharacters, timeZone: TimeZone = .current, onRead: ((String) -> Void)? = nil
     ) throws -> AddOutcome {
         let rule = cleaned(rule, limit: maxRuleLength)
@@ -344,11 +344,9 @@ enum LearnedRules {
             onRead?(current)
             outcome = .added(bullet)
             guard current.utf8.count <= SpaceBrief.maxFileBytes else { throw ProjectMemory.WriteError.failed(fileTooLarge) }
-            for words in [rule] + alsoMatching {
-                if let existing = existingRule(matching: words, in: current) {
-                    outcome = .alreadyThere(existing.text)
-                    return nil
-                }
+            if let existing = existingRule(matching: rule, in: current) {
+                outcome = .alreadyThere(existing.text)
+                return nil
             }
             let base = current.isEmpty ? SpaceBrief.template(spaceName: spaceName) : current
             let written = try inserting(bullet, into: base)

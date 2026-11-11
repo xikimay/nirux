@@ -241,10 +241,9 @@ final class LearnedRulesTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "Goals, by hand.\n\n## Rules learned\n\n\(written)\n")
     }
 
-    /// The brief says it already, in the user's words or the proposal's,
-    /// when the write reads it: nothing is written, even when it got there
-    /// after the sheet looked (by hand, or an Add whose decision wasn't
-    /// recorded).
+    /// The brief says it already when the write reads it: nothing is
+    /// written, even when it got there after the sheet looked (by hand, or
+    /// an Add whose decision wasn't recorded).
     func testARuleTheBriefSaysIsNotWrittenAgain() throws {
         let url = folder.appendingPathComponent("brief.md")
         try Data("Goals.\n".utf8).write(to: url)
@@ -253,10 +252,6 @@ final class LearnedRulesTests: XCTestCase {
             if text == "Goals.\n" { try? Data(byHand.utf8).write(to: url) }
         }
         XCTAssertEqual(outcome, .alreadyThere("Wait on state (learned 2026-11-11, #395)"))
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), byHand)
-        let edited = try LearnedRules.add(rule: "Tests wait on state, never on a sleep.", evidence: "", alsoMatching: ["Wait on state"],
-                                          to: url, spaceName: "N")
-        XCTAssertEqual(edited, .alreadyThere("Wait on state (learned 2026-11-11, #395)"))
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), byHand)
     }
 

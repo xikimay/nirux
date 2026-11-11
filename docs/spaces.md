@@ -313,9 +313,9 @@ New flow, built on the guarded typing `tell` already uses
     the brief stays, its line breaks included. It re-reads the brief right
     before replacing it and starts over when it changed (Project Memory's
     write, which keeps a UTF-8 byte order mark too), so the user's edits made
-    meanwhile stay. On the text it writes over, it looks for the rule first
-    (the user's words or the proposal's): when the brief says it already,
-    nothing is written, and the Lead hears that instead. A place sessions
+    meanwhile stay. On the text it writes over, it looks for the rule first:
+    when the brief says it already, nothing is written, and the Lead hears
+    that instead. A place sessions
     wouldn't get (a code block, a comment; an unclosed `<!--` hides
     nothing from them) is refused, and so is a brief past 16,000 characters
     or 64,000 bytes of what sessions get, a brief file past 1 MB (sessions
@@ -328,9 +328,12 @@ New flow, built on the guarded typing `tell` already uses
     prompt when it is idle ("[Nirux Mission] The user added your rule to the
     space brief as: “…”. Only sessions started from now on read it: tell
     running tasks yourself if they need it."), one per free prompt, oldest
-    first. The decision waits in the proposals file until it is typed
+    first, to the terminal that proposed it, else the one the Lead's Claude
+    runs in. The decision waits in the proposals file until it is told
     (`leadToldAt`): a relaunch, or a Lead busy for hours or started again,
-    doesn't lose it.
+    doesn't lose it. It is recorded before it is typed: one Nirux can't
+    record (a newer Nirux's file) is never typed, rather than at every turn
+    end. A space without a Lead keeps its decisions until one starts.
   - **Pruning:** Nirux never removes a rule. Each says when it was learned;
     Space Settings › Brief shows the brief's size beside its buttons; the
     user deletes a rule there or moves it to memory in Space Memory.

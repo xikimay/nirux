@@ -109,20 +109,14 @@ final class LearnedRulesFlowTests: XCTestCase {
                 + "a fixed sleep.”. Only sessions started from now on read it: tell running tasks yourself if they need it."
             XCTAssertEqual(untold(shell, lead), [line])
             shell.ruleProposals = [:]
-            shell.typeRuleDecisions { _, _ in false }
+            shell.typeRuleDecisions(isFree: { _ in false }, send: { _, text in XCTFail("typed into a busy prompt: \(text)") })
             XCTAssertEqual(untold(shell, lead), [line], "a busy prompt keeps it")
             var typed: [(agent: String?, text: String)] = []
-            shell.typeRuleDecisions { column, text in
-                typed.append((column.agentUUID, text))
-                return true
-            }
+            shell.typeRuleDecisions(isFree: { _ in true }, send: { column, text in typed.append((column.agentUUID, text)) })
             XCTAssertEqual(typed.map(\.agent), [lead.agentUUID])
             XCTAssertEqual(typed.map(\.text), [line])
             XCTAssertEqual(untold(shell, lead), [])
-            shell.typeRuleDecisions { _, text in
-                XCTFail("told twice: \(text)")
-                return true
-            }
+            shell.typeRuleDecisions(isFree: { _ in true }, send: { _, text in XCTFail("told twice: \(text)") })
 
             let again = try propose("Tests wait on state, never on a fixed sleep", lead: lead, in: harness)
             XCTAssertTrue(again.isError)
@@ -193,6 +187,10 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertTrue(locked.isOpen)
             XCTAssertEqual(locked.statusLabel.stringValue, "A newer Nirux keeps this space’s proposed rules.")
             XCTAssertEqual(try briefText(lead), "## Rules learned\n- Draft PRs only\n")
+            // Its decisions can't be recorded as told either: none is typed,
+            // or it would come back at every turn end.
+            XCTAssertFalse(untold(shell, lead).isEmpty)
+            shell.typeRuleDecisions(isFree: { _ in true }, send: { _, text in XCTFail("typed though not recorded: \(text)") })
         }
     }
 
