@@ -633,8 +633,10 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertIdentical(harness.window.attachedSheet, sheet.panel)
             XCTAssertEqual(sheet.headingLabel.stringValue, "New in Repo")
             XCTAssertEqual(sheet.space.id, space.id)
-            // One repository: no popup to choose it.
-            XCTAssertTrue(sheet.repositoryPopup.isHidden)
+            // One repository, or none: a folder of the task's own.
+            XCTAssertFalse(sheet.repositoryPopup.isHidden)
+            XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "", "No Repository"])
+            XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "repo")
             harness.waitUntil("the repository's info") { sheet.info != nil }
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
             XCTAssertEqual(sheet.info?.templates, TaskTemplates.defaults)

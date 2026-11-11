@@ -113,6 +113,85 @@ final class NewTaskTests: XCTestCase {
         }
     }
 
+    // MARK: - Tasks without a repository
+
+    func testAFolderIsNamedAfterTheFirstLine() {
+        XCTAssertEqual(NewTask.suggestedFolderName(description: "\n  Compare   two\tlibraries  \nmore"), "Compare two libraries")
+        // Finder shows ":" as "/"; a leading "." hides the folder.
+        XCTAssertEqual(NewTask.suggestedFolderName(description: "Notes: Q3/Q4 plan"), "Notes- Q3-Q4 plan")
+        XCTAssertEqual(NewTask.suggestedFolderName(description: "..hidden draft"), "hidden draft")
+        XCTAssertEqual(NewTask.suggestedFolderName(description: "Café, “quoted” 日本"), "Café, “quoted” 日本")
+        // Cut at a whole word, never past the limit.
+        let long = NewTask.suggestedFolderName(description: String(repeating: "word ", count: 20))
+        XCTAssertEqual(long, Array(repeating: "word", count: 10).joined(separator: " "))
+        XCTAssertLessThanOrEqual(long.count, NewTask.maxFolderNameLength)
+        XCTAssertEqual(NewTask.suggestedFolderName(description: String(repeating: "x", count: 80)), String(repeating: "x", count: 50))
+        for nothing in ["", " \n\t", "..."] {
+            XCTAssertEqual(NewTask.suggestedFolderName(description: nothing), "Task", nothing)
+        }
+        XCTAssertEqual(NewTask.suggestedFolderName(description: "/"), "-")
+    }
+
+    func testATypedFolderNameIsCleaned() {
+        XCTAssertEqual(NewTask.cleanedFolderName("  .config\u{7}  backup "), "config backup")
+        XCTAssertNil(NewTask.cleanedFolderName(" . . "))
+        XCTAssertNil(NewTask.cleanedFolderName(""))
+        // APFS takes 255 bytes: "name 999" must still fit.
+        let wide = NewTask.cleanedFolderName(String(repeating: "日", count: 100))
+        XCTAssertLessThanOrEqual(wide?.utf8.count ?? .max, NewTask.maxFolderNameBytes)
+        XCTAssertEqual(wide?.isEmpty, false)
+    }
+
+    func testAFolderIsAlwaysANewOne() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-task-folders-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let parent = base + "/Nirux Tasks"
+        // The tasks folder is made the first time.
+        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent), .success(parent + "/Research"))
+        // Taken, by a folder or a file: the next number.
+        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent), .success(parent + "/Research 2"))
+        try Data().write(to: URL(fileURLWithPath: parent + "/Research 3"))
+        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent), .success(parent + "/Research 4"))
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: parent + "/Research 4", isDirectory: &isDirectory) && isDirectory.boolValue)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: parent + "/Research"), [], "never one already there")
+    }
+
+    func testAFolderCantGoUnderAFile() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-task-file-\(UUID().uuidString)")
+        try Data().write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        guard case .failure(let error) = NewTask.makeFolder(named: "Research", in: file.path) else {
+            return XCTFail("a file can't hold a folder")
+        }
+        XCTAssertTrue(error.message.hasPrefix("Couldn’t make"), error.message)
+    }
+
+    func testAFolderHandoverNamesTheFolderAndNoBranch() {
+        let text = NewTask.folderHandover(
+            description: "Compare two libraries\n\nWhich one parses faster?\n",
+            template: TaskTemplates.Template(name: "Investigation", body: "Write a summary."),
+            folder: "/Users/me/Nirux Tasks/Compare two libraries"
+        )
+        XCTAssertEqual(text, """
+        # Task: Compare two libraries
+
+        The user started this session from Nirux (⌘N) for the task below, in `/Users/me/Nirux Tasks/Compare two libraries`, \
+        a new folder Nirux made for it: no repository, no branch. This file is for you only.
+
+        ## Task
+
+        Compare two libraries
+
+        Which one parses faster?
+
+        ## How to proceed (template “Investigation”)
+
+        Write a summary.
+
+        """)
+    }
+
     // MARK: - Repository
 
     /// Pinned against a developer's global config (hooks, signing).

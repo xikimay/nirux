@@ -130,6 +130,9 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
+    /// The agent process seen asking whether to trust its folder, and when
+    /// (see AgentTrustPrompt): no hook reports that question.
+    var trustPromptSighting: AgentTrustPrompt.Sighting?
 
     /// The user has typed at least once since the shell started. Fallback
     /// attention is gated on this: output before the first keystroke is

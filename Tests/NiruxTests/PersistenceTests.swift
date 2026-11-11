@@ -219,6 +219,31 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertFalse(decoded.blockerIsFromLead)
     }
 
+    /// A task without a repository stays one across launches; an older
+    /// file has no flag, and the folder setting takes only an absolute path.
+    func testAFolderTaskAndTheTasksFolderRoundTrip() throws {
+        let original = PersistedWorkspace(
+            id: "folder-task", title: "Compare two libraries", cwd: "/tmp/Nirux Tasks/Compare two libraries",
+            columns: [], focusedColumnIndex: 0, isFolderTask: true
+        )
+        let data = try JSONEncoder().encode(original)
+        XCTAssertTrue(try XCTUnwrap(String(data: data, encoding: .utf8)).contains("\"folderTask\":true"))
+        XCTAssertTrue(try JSONDecoder().decode(PersistedWorkspace.self, from: data).isFolderTask)
+        let plain = try JSONEncoder().encode(PersistedWorkspace(title: "plain", cwd: "/tmp", columns: [], focusedColumnIndex: 0))
+        XCTAssertFalse(try XCTUnwrap(String(data: plain, encoding: .utf8)).contains("folderTask"), "written only when true")
+        XCTAssertFalse(try JSONDecoder().decode(PersistedWorkspace.self, from: plain).isFolderTask)
+
+        var settings = PersistedSettings()
+        settings.tasksFolder = "/Users/me/Work/Tasks"
+        settings.startedFolderTask = true
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertEqual(decoded.tasksFolder, "/Users/me/Work/Tasks")
+        XCTAssertTrue(decoded.startedFolderTask)
+        let relative = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{ "tasksFolder": "Tasks" }"#.utf8))
+        XCTAssertNil(relative.tasksFolder, "a relative path would land in the app's working directory")
+        XCTAssertFalse(relative.startedFolderTask)
+    }
+
     func testUnknownWorkspacePhaseSurvivesReencoding() throws {
         let json = Data("""
         {

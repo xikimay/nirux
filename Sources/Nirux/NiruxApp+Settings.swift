@@ -76,6 +76,18 @@ extension NiruxApp {
         animations.state = NiruxShellView.currentAnimatesInterface() ? .on : .off
         settingsAnimationsCheckbox = animations
 
+        let tasksFolder = NSTextField(labelWithString: settingsTasksFolderText())
+        tasksFolder.lineBreakMode = .byTruncatingMiddle
+        tasksFolder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        settingsTasksFolderLabel = tasksFolder
+        let changeTasksFolder = NSButton(title: "Change…", target: self, action: #selector(settingsChangeTasksFolder(_:)))
+        changeTasksFolder.bezelStyle = .rounded
+        changeTasksFolder.setAccessibilityLabel("Change the folder of tasks without a repository")
+        let tasksFolderControl = NSStackView(views: [tasksFolder, changeTasksFolder])
+        tasksFolderControl.orientation = .horizontal
+        tasksFolderControl.alignment = .firstBaseline
+        tasksFolderControl.spacing = 8
+
         return SettingsForm.pane([
             [
                 keepAwake,
@@ -93,6 +105,13 @@ extension NiruxApp {
                         + "you, and a working task's row runs a line of light. Off, the same colors show without "
                         + "moving, as they do while macOS reduces motion.",
                     under: animations
+                )
+            ],
+            [
+                SettingsForm.row("Tasks without a repository", tasksFolderControl),
+                SettingsForm.hint(
+                    "Each one gets a new folder here, named after it, instead of a worktree. Nirux never deletes "
+                        + "these folders."
                 )
             ],
             [
@@ -386,6 +405,24 @@ extension NiruxApp {
         shell?.animatesInterface = enabled
     }
 
+    /// Where tasks without a repository get their folders, home as "~".
+    private func settingsTasksFolderText() -> String {
+        let folder = shell?.tasksFolder()
+            ?? (NSHomeDirectory() as NSString).appendingPathComponent(NewTask.defaultTasksFolderName)
+        return (folder as NSString).abbreviatingWithTildeInPath
+    }
+
+    /// Picks the folder tasks without a repository get theirs in. Applies to
+    /// the next task: those started keep their folders.
+    @objc func settingsChangeTasksFolder(_ sender: NSButton) {
+        guard let shell else { return }
+        shell.sideEffects.chooseFolder("Choose", settingsWindow) { [weak self] path in
+            guard let self, let path else { return }
+            guard self.saveSetting(revert: {}, { $0.tasksFolder = path }) else { return }
+            self.settingsTasksFolderLabel?.stringValue = self.settingsTasksFolderText()
+        }
+    }
+
     /// Read at the next launch. Only a changed choice is written: a value a
     /// newer build saved shows as the default, and picking that keeps it.
     @objc func settingsAgentResumeChanged(_ sender: NSPopUpButton) {
@@ -600,6 +637,7 @@ extension NiruxApp {
         settingsWindow = nil
         settingsKeepAwakeCheckbox = nil
         settingsAnimationsCheckbox = nil
+        settingsTasksFolderLabel = nil
         settingsAgentResumePopup = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil

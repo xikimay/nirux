@@ -1,9 +1,11 @@
 import AppKit
 
 /// The ⌘N sheet, "New in <space>" (docs/spaces.md, "One door: ⌘N"): a
-/// description, the repository (shown with two or more), the agent, the
-/// template, and the branch the task gets, which follows the description
-/// until the user edits it.
+/// description, the repository (outside General: the space's, then "No
+/// Repository"), the agent, the template, and the branch the task gets,
+/// which follows the description until the user edits it. Without a
+/// repository the task gets a new folder instead (NewTask+Folder), named
+/// the same way.
 ///
 /// Opened from a task's "New Sub-task…", it reads "New Sub-task in
 /// <space>", and the task it starts lists under that task, in its
@@ -11,11 +13,11 @@ import AppKit
 /// description then.
 ///
 /// Start with a description hands a `NewTask.Request` to the shell and
-/// waits: the sheet stays open, with the error, when the worktree can't be
-/// created. Close hides it meanwhile, so the window isn't held up by a long
-/// checkout; it comes back if creating fails. Start with nothing typed opens
-/// a shell in the repository's main checkout, or the home folder in a space
-/// without one. Return starts; ⇧Return adds a line.
+/// waits: the sheet stays open, with the error, when the worktree or the
+/// folder can't be created. Close hides it meanwhile, so the window isn't
+/// held up by a long checkout; it comes back if creating fails. Start with
+/// nothing typed opens a shell in the repository's main checkout, or the
+/// home folder without one. Return starts; ⇧Return adds a line.
 @MainActor
 final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// One of the space's repositories or folders (its anchors).
@@ -24,6 +26,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         let name: String
         /// The repository's main checkout, or the folder.
         let folder: String
+        /// A folder anchor: outside git, its tasks get their folder in it.
+        var isFolder = false
     }
 
     /// The space the sheet creates in.
@@ -55,8 +59,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// Picks a folder and anchors its repository to the space, then calls
     /// `updateRepositories(_:selecting:)`.
     var onAddRepository: (() -> Void)?
-    /// General: opens New Space…. The sheet is gone by then.
-    var onNewSpace: (() -> Void)?
     /// Opens the repository's worktrees. The sheet is gone by then.
     var onExistingBranch: ((Repository?) -> Void)?
     var onDismiss: (() -> Void)?
@@ -70,11 +72,22 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private(set) var suggestion: SpaceAnchor?
     /// Where a shell opens without a repository.
     private var homeFolder = NSHomeDirectory()
+    /// Where a task without a repository gets its folder (Settings ›
+    /// General).
+    private(set) var tasksFolder = NSHomeDirectory() + "/" + NewTask.defaultTasksFolderName
+    /// No task without a repository started yet: the sheet says that Claude
+    /// Code asks to trust each new folder.
+    var showsTrustHint = false
     /// The selected repository's info; nil while it is read.
     private(set) var info: ProjectInfo?
-    /// The user typed a branch of their own: the description no longer
-    /// changes it.
+    /// The user typed a branch (or folder name) of their own: the
+    /// description no longer changes it.
     private(set) var branchIsEdited = false
+    /// The field holds a folder's name, not a branch.
+    private(set) var namesFolder = false
+    /// The name the user typed for the other kind, kept while the field
+    /// shows this one: picking a repository again brings it back.
+    private var otherEditedName: String?
     /// Edit was clicked: the branch shows in a field.
     private(set) var isEditingBranch = false
     private(set) var isStarting = false
@@ -103,12 +116,14 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     }
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
 
-    /// A task the new one goes under in the sidebar, and the space's
-    /// repository it works in.
+    /// A task the new one goes under in the sidebar, and where it works:
+    /// the space's repository, or its own folder for a task without one,
+    /// where its sub-tasks get theirs.
     struct ParentTask: Equatable {
         let workspaceID: String
         let title: String
-        let repositoryKey: String
+        let repositoryKey: String?
+        var folder: String?
     }
 
     /// "New Sub-task…": "Sub-task of “<title>”" shows, checked. Nil: no
@@ -119,6 +134,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The parent task while its checkbox is checked.
     var subtaskParentID: String? {
         subtaskCheckbox.state == .on ? parentTask?.workspaceID : nil
+    }
+
+    /// The folder of the task without a repository the new one is a
+    /// sub-task of, while checked: its folder goes there.
+    private var subtaskFolder: String? {
+        subtaskParentID == nil ? nil : parentTask?.folder
     }
     private let reportHint = NSTextField(wrappingLabelWithString:
         "The Lead follows this task and answers its questions. Only what needs you reaches you, in amber.")
@@ -145,7 +166,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     let editBranchButton = NSButton(title: "Edit", target: nil, action: nil)
     let branchField = NSTextField()
     let fromLabel = NSTextField(labelWithString: "")
-    let newSpaceButton = NSButton(title: "New Space…", target: nil, action: nil)
+    /// Under the line, until a task without a repository has started.
+    let trustHint = NSTextField(wrappingLabelWithString: "")
     let errorLabel = NSTextField(wrappingLabelWithString: "")
     let existingBranchButton = NSButton(title: "Existing Branch…", target: nil, action: nil)
     let startButton = NSButton(title: "Start", target: nil, action: nil)
@@ -158,6 +180,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// selecting it.
     static let addSuggestedTag = 1
     static let addRepositoryTag = 2
+    /// The "No Repository" item: a task in a folder of its own.
+    static let noRepositoryTag = 3
 
     private let content = NewTaskFlippedView()
     private let descriptionBox = NewTaskFlippedView()
@@ -172,18 +196,19 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         super.init()
     }
 
-    /// `selectedKey`: the space's default repository; `agent`: the one its
-    /// tasks start by default.
+    /// `selectedKey`: the space's default repository, nil for No
+    /// Repository; `agent`: the one its tasks start by default.
     func show(
         attachedTo window: NSWindow, space: Space, repositories: [Repository], selectedKey: String?,
-        parentTask: ParentTask? = nil, agent: NiruxApp.WorkspaceAgent, homeFolder: String
+        parentTask: ParentTask? = nil, agent: NiruxApp.WorkspaceAgent, homeFolder: String, tasksFolder: String
     ) {
         parentWindow = window
         self.space = space
         self.parentTask = parentTask
         self.repositories = repositories
         self.homeFolder = homeFolder
-        selectedRepositoryKey = repositories.contains { $0.key == selectedKey } ? selectedKey : repositories.first?.key
+        self.tasksFolder = tasksFolder
+        selectedRepositoryKey = repositories.contains { $0.key == selectedKey } ? selectedKey : nil
         let panel = buildPanel()
         self.panel = panel
         agentPopup.selectItem(at: Self.agents.firstIndex { $0.agent == agent } ?? 0)
@@ -200,11 +225,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     /// The heading says what the sheet makes, in its space. A sub-task is
-    /// new work, in its task's repository: Existing Branch… and the
-    /// Repository popup (see `refresh`) show only without one.
+    /// new work, where its task works: the Repository popup and Existing
+    /// Branch… (see `refresh`) show only without one.
     private func updateForSubtask() {
         headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
-        existingBranchButton.isHidden = subtaskParentID != nil
     }
 
     func dismiss() {
@@ -257,7 +281,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     /// The space's repositories changed while the sheet is open (one was
-    /// added from it): selects `key` when listed, else the first.
+    /// added from it): selects `key` when listed, else No Repository.
     func updateRepositories(_ repositories: [Repository], selecting key: String?) {
         guard panel != nil else { return }
         self.repositories = repositories
@@ -266,7 +290,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         // A sub-task stays in its task's repository, the popup hidden.
         let wanted = subtaskParentID != nil ? parentTask?.repositoryKey : key
         selectedRepositoryKey = [wanted, key].compactMap { $0 }.first { candidate in repositories.contains { $0.key == candidate } }
-            ?? repositories.first?.key
         rebuildRepositoryPopup()
         if selectedRepositoryKey != previous || info == nil { repositoryChanged() } else { refresh() }
     }
@@ -289,7 +312,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         if let templateName { pickedTemplateName = templateName }
         headingLabel.stringValue = "Proposed by the Lead · \(space.name)"
         hideError()
-        updateBranchSuggestion()
         refresh()
         // It comes while the user types elsewhere: no field takes the keys,
         // and neither Return nor Escape answers it until they edit
@@ -318,7 +340,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             info.templates.firstIndex { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map { $0 + 1 }
         } ?? 0)
         templatePopup.isEnabled = !isStarting
-        updateBranchSuggestion()
         refresh()
     }
 
@@ -332,7 +353,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         case .failed(let error):
             message = error
         case .fetchFailed(let error):
-            let branch = info?.target?.remoteBranchName ?? "origin's branch"
+            let branch = info?.target?.remoteBranchName ?? "origin’s branch"
             message = "Couldn’t fetch \(branch): \(error)\nStart again to start from \(branch) as last fetched."
             startsWithoutFetch = true
         }
@@ -393,12 +414,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         open?(repository)
     }
 
-    @objc func newSpaceAction(_ sender: Any?) {
-        let open = onNewSpace
-        dismiss()
-        open?()
-    }
-
     @objc func editBranchAction(_ sender: Any?) {
         beginEditingBranch()
     }
@@ -427,7 +442,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             selectRepositoryItem()
             onAddRepository?()
         default:
-            let key = item.representedObject as? String
+            let key = item.tag == Self.noRepositoryTag ? nil : item.representedObject as? String
             guard key != selectedRepositoryKey else { return }
             selectedRepositoryKey = key
             repositoryChanged()
@@ -436,7 +451,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func templateChanged(_ sender: Any?) {
         restoreReturnKey()
-        updateBranchSuggestion()
+        refresh()
+    }
+
+    /// The trust hint is Claude Code's.
+    @objc func agentChanged(_ sender: Any?) {
+        restoreReturnKey()
         refresh()
     }
 
@@ -450,20 +470,55 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         onRepositorySelected?(selectedRepository)
     }
 
+    /// Where Start makes the task from what is selected.
+    enum Destination: Equatable {
+        /// A worktree of the repository, on the branch the field names.
+        case worktree(NewTask.Target)
+        /// A new folder in this one, named as the field says.
+        case folder(parent: String)
+    }
+
+    /// Nil while the repository is read, or when it can't start there
+    /// (`noTaskReason`). Without a repository, or for a sub-task of a task
+    /// without one, a folder: in the tasks folder, or in that task's. A
+    /// folder of the space outside git holds its tasks' folders.
+    var destination: Destination? {
+        if let subtaskFolder { return .folder(parent: subtaskFolder) }
+        guard let repository = selectedRepository else { return .folder(parent: tasksFolder) }
+        guard let info else { return nil }
+        if let target = info.target { return .worktree(target) }
+        return repository.isFolder ? .folder(parent: repository.folder) : nil
+    }
+
     /// The request for the values on screen, or nil with the reason shown.
     private func draftRequest() -> NewTask.Request? {
-        guard let target = info?.target else {
-            showError(info == nil ? "Nirux is still reading the repository." : noTaskReason ?? "No repository to start from.")
+        guard info != nil else {
+            showError(selectedRepository == nil ? "Nirux is still reading the space’s templates." : "Nirux is still reading the repository.")
             return nil
         }
-        guard !branch.isEmpty else {
-            showError("Name the branch.")
-            beginEditingBranch()
+        let place: NewTask.Place
+        switch destination {
+        case nil:
+            showError(noTaskReason ?? "No repository to start from.")
             return nil
+        case .worktree(let target):
+            guard !branch.isEmpty else {
+                showError("Name the branch.")
+                beginEditingBranch()
+                return nil
+            }
+            place = .worktree(target, branch: branch)
+        case .folder(let parent):
+            guard let name = NewTask.cleanedFolderName(branch) else {
+                showError("Name the folder.")
+                beginEditingBranch()
+                return nil
+            }
+            place = .folder(parent: parent, name: name)
         }
         return NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
-            projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch,
+            projectID: space.id, place: place, fetchesFirst: !startsWithoutFetch,
             reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil,
             parentWorkspaceID: subtaskParentID
         )
@@ -477,22 +532,53 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         branchField.selectText(nil)
     }
 
+    /// The field follows the description until the user edits it: a
+    /// branch for a worktree, a name for a folder. Between the two, each
+    /// keeps what the user typed for it.
     private func updateBranchSuggestion() {
+        let folder: Bool
+        switch destination {
+        case .folder: folder = true
+        case .worktree: folder = false
+        case nil: folder = namesFolder
+        }
+        if folder != namesFolder {
+            let typed = branchIsEdited ? branchField.stringValue : nil
+            namesFolder = folder
+            branchIsEdited = otherEditedName != nil
+            if let otherEditedName { branchField.stringValue = otherEditedName }
+            otherEditedName = typed
+            branchField.placeholderString = folder ? "Folder name" : "feat/… or fix/…"
+            branchField.setAccessibilityLabel(folder ? "Folder Name" : "Branch")
+            editBranchButton.setAccessibilityLabel(folder ? "Edit Folder Name" : "Edit Branch")
+        }
         guard !branchIsEdited else { return }
-        branchField.stringValue = NewTask.suggestedBranch(description: descriptionView.string, templateName: selectedTemplate?.name)
+        branchField.stringValue = folder
+            ? NewTask.suggestedFolderName(description: descriptionView.string)
+            : NewTask.suggestedBranch(description: descriptionView.string, templateName: selectedTemplate?.name)
     }
 
     // MARK: - Text
 
-    /// Why a task can't start from what is selected, or nil.
+    /// Why a task can't start from what is selected, or nil: a
+    /// repository git can't read (its folder gone, say).
     var noTaskReason: String? {
-        if repositories.isEmpty {
-            return space.isGeneral
-                ? "\(space.name) has no repository: tasks start in a space that has one."
-                : "This space has no repository yet: add one with the menu above."
-        }
-        guard let info, info.target == nil else { return nil }
-        return "“\(selectedRepository?.name ?? "")” isn’t in a git repository: tasks need one."
+        guard subtaskFolder == nil, let repository = selectedRepository, !repository.isFolder,
+              let info, info.target == nil else { return nil }
+        return "“\(repository.name)” isn’t in a git repository: pick another, or No Repository."
+    }
+
+    /// `path` with the home folder as "~".
+    private func tildePath(_ path: String) -> String {
+        let home = homeFolder.hasSuffix("/") ? String(homeFolder.dropLast()) : homeFolder
+        if path == home { return "~" }
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// Where a folder goes, after its name.
+    private func folderPlaceText(_ parent: String) -> String {
+        let place = subtaskFolder == parent ? "“\(parentTask?.title ?? "")”" : tildePath(parent)
+        return "new folder in \(place), no repository"
     }
 
     /// Where the branch starts, after the branch.
@@ -507,25 +593,51 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The line under the popups, and what it holds.
     private func refresh() {
         guard panel != nil else { return }
+        updateBranchSuggestion()
+        let destination = destination
         placeholderLabel.isHidden = !descriptionView.string.isEmpty
-        repositoryPopup.isHidden = subtaskParentID != nil || !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
-        startButton.isEnabled = !isStarting && (taskText.isEmpty ? subtaskParentID == nil : info?.target != nil)
+        // General never has a repository: nothing to pick.
+        repositoryPopup.isHidden = subtaskParentID != nil || space.isGeneral
+        existingBranchButton.isHidden = subtaskParentID != nil || selectedRepository == nil || {
+            if case .folder = destination { return true }
+            return false
+        }()
+        // The space's templates are read with the repository, or alone.
+        startButton.isEnabled = !isStarting && (taskText.isEmpty ? subtaskParentID == nil : destination != nil && info != nil)
         var showsField = false
         var showsEdit = false
-        var showsNewSpace = false
+        var showsHint = false
         let secondary = Theme.Color.textSecondary
         if isStarting {
-            let fetching = startsWithoutFetch ? nil : info?.target?.remoteBranchName.map { "Fetching \($0), then creating" }
-            setLine((fetching ?? "Creating") + " the worktree… Close keeps it going: the workspace opens when it’s ready.", secondary)
+            if case .folder = destination {
+                setLine("Creating the folder…", secondary)
+            } else {
+                let fetching = startsWithoutFetch ? nil : info?.target?.remoteBranchName.map { "Fetching \($0), then creating" }
+                setLine((fetching ?? "Creating") + " the worktree… Close keeps it going: the workspace opens when it’s ready.", secondary)
+            }
         } else if taskText.isEmpty, subtaskParentID != nil {
             setLine("Describe the sub-task.", secondary)
         } else if taskText.isEmpty {
-            let folder = selectedRepository?.folder ?? homeFolder
-            let shown = folder == homeFolder ? "~" : (folder as NSString).abbreviatingWithTildeInPath
-            setLine("Nothing typed: Start opens a shell in \(shown).", secondary)
+            setLine("Nothing typed: Start opens a shell in \(tildePath(selectedRepository?.folder ?? homeFolder)).", secondary)
         } else if let reason = noTaskReason {
             setLine(reason, Theme.Color.error)
-            showsNewSpace = space.isGeneral
+        } else if case .folder(let parent) = destination {
+            let place = folderPlaceText(parent)
+            // Claude Code's trust covers the folders inside a trusted one.
+            showsHint = showsTrustHint && selectedAgent == .claude && parent == tasksFolder
+            if isEditingBranch {
+                showsField = true
+                fromLabel.stringValue = place
+                fromLabel.textColor = secondary
+            } else {
+                showsEdit = true
+                let line = NSMutableAttributedString(
+                    string: branch.isEmpty ? "No folder name" : branch,
+                    attributes: [.font: Theme.Font.bodyEmphasized, .foregroundColor: branch.isEmpty ? Theme.Color.error : Theme.Color.textPrimary]
+                )
+                line.append(NSAttributedString(string: "  ·  \(place)", attributes: [.font: Theme.Font.body, .foregroundColor: secondary]))
+                lineLabel.attributedStringValue = line
+            }
         } else if let target = info?.target {
             let start = startText(target)
             let color = secondary
@@ -549,7 +661,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         branchField.isHidden = !showsField
         fromLabel.isHidden = !showsField
         editBranchButton.isHidden = !showsEdit
-        newSpaceButton.isHidden = !showsNewSpace
+        if showsHint {
+            trustHint.stringValue = "Claude Code asks whether to trust each new folder. To stop that, run claude once in "
+                + "\(tildePath(tasksFolder)) and trust it."
+        }
+        trustHint.isHidden = !showsHint
         layout()
     }
 
@@ -597,13 +713,16 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     // MARK: - Repository popup
 
-    /// The space's repositories; in a space without any, "No Repository"
-    /// and the items that add one.
+    /// The space's repositories, then "No Repository"; in a space without
+    /// any, "No Repository" and the items that add one.
     private func rebuildRepositoryPopup() {
         repositoryPopup.removeAllItems()
         guard let menu = repositoryPopup.menu else { return }
+        let none = NSMenuItem(title: Self.noRepositoryTitle, action: nil, keyEquivalent: "")
+        none.tag = Self.noRepositoryTag
+        none.toolTip = "A new folder in \(tildePath(tasksFolder)), no git"
         if repositories.isEmpty {
-            menu.addItem(NSMenuItem(title: Self.noRepositoryTitle, action: nil, keyEquivalent: ""))
+            menu.addItem(none)
             menu.addItem(.separator())
             if let suggestion {
                 let item = NSMenuItem(title: "Add “\(suggestion.name)”", action: nil, keyEquivalent: "")
@@ -620,13 +739,18 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
                 item.toolTip = repository.folder.abbreviatedPath()
                 menu.addItem(item)
             }
+            menu.addItem(.separator())
+            menu.addItem(none)
         }
         selectRepositoryItem()
     }
 
-    /// Back on the selected repository, after an item that adds one.
+    /// Back on the selected repository, or No Repository, after an item
+    /// that adds one.
     private func selectRepositoryItem() {
-        let index = repositoryPopup.itemArray.firstIndex { ($0.representedObject as? String) == selectedRepositoryKey }
+        let index = repositoryPopup.itemArray.firstIndex { item in
+            selectedRepositoryKey.map { (item.representedObject as? String) == $0 } ?? (item.tag == Self.noRepositoryTag)
+        }
         repositoryPopup.selectItem(at: index ?? 0)
     }
 
@@ -635,7 +759,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     func textDidChange(_ notification: Notification) {
         restoreReturnKey()
         hideError()
-        updateBranchSuggestion()
         refresh()
     }
 
@@ -695,16 +818,20 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         y += 26 + 12
 
         let editWidth = ceil(editBranchButton.fittingSize.width)
-        let newSpaceWidth = ceil(newSpaceButton.fittingSize.width)
-        let trailing = !editBranchButton.isHidden ? editWidth + 8 : !newSpaceButton.isHidden ? newSpaceWidth + 8 : 0
+        let trailing = !editBranchButton.isHidden ? editWidth + 8 : 0
         let lineHeight = max(18, Self.wrappedHeight(of: lineLabel, width: inner - trailing))
         lineLabel.frame = NSRect(x: margin, y: y + 2, width: inner - trailing, height: lineHeight)
         editBranchButton.frame = NSRect(x: margin + inner - editWidth, y: y, width: editWidth, height: 22)
-        newSpaceButton.frame = NSRect(x: margin + inner - newSpaceWidth, y: y - 2, width: newSpaceWidth, height: 26)
         let fieldWidth = floor(inner * 0.6)
         branchField.frame = NSRect(x: margin, y: y, width: fieldWidth, height: 22)
         fromLabel.frame = NSRect(x: margin + fieldWidth + 10, y: y + 3, width: inner - fieldWidth - 10, height: 18)
         y += max(22, lineHeight + 4) + 12
+
+        if !trustHint.isHidden {
+            let height = Self.wrappedHeight(of: trustHint, width: inner)
+            trustHint.frame = NSRect(x: margin, y: y - 6, width: inner, height: height)
+            y += height + 6
+        }
 
         if !subtaskCheckbox.isHidden {
             // Its own width: a click beside it doesn't toggle it.
@@ -793,6 +920,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         agentPopup.removeAllItems()
         agentPopup.addItems(withTitles: Self.agents.map(\.title))
         agentPopup.setAccessibilityLabel("Agent")
+        agentPopup.target = self
+        agentPopup.action = #selector(agentChanged(_:))
         templatePopup.target = self
         templatePopup.action = #selector(templateChanged(_:))
         templatePopup.removeAllItems()
@@ -823,9 +952,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             button.action = action
         }
         editBranchButton.setAccessibilityLabel("Edit Branch")
-        newSpaceButton.bezelStyle = .rounded
-        newSpaceButton.target = self
-        newSpaceButton.action = #selector(newSpaceAction(_:))
+        trustHint.font = Theme.Font.caption
+        trustHint.textColor = Theme.Color.textSecondary
+        trustHint.isSelectable = false
+        trustHint.isHidden = true
 
         errorLabel.font = Theme.Font.caption
         errorLabel.textColor = Theme.Color.error
@@ -844,7 +974,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         content.subviews.forEach { $0.removeFromSuperview() }
         let views: [NSView] = [
             headingLabel, descriptionBox, repositoryPopup, agentPopup, templatePopup, lineLabel, editBranchButton,
-            branchField, fromLabel, newSpaceButton, subtaskCheckbox, reportCheckbox, reportHint, errorLabel, existingBranchButton,
+            branchField, fromLabel, trustHint, subtaskCheckbox, reportCheckbox, reportHint, errorLabel, existingBranchButton,
             cancelButton, startButton
         ]
         views.forEach(content.addSubview)

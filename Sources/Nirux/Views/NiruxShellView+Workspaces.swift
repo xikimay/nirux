@@ -26,6 +26,7 @@ extension NiruxShellView {
         startedByAgent: Bool = false,
         setupScript: URL? = nil,
         isLead: Bool = false,
+        isFolderTask: Bool = false,
         activate: Bool = true,
         slidesIn: Bool = false
     ) {
@@ -60,6 +61,7 @@ extension NiruxShellView {
             startedByAgent: startedByAgent,
             isLead: isLead,
             reportsToLead: reportsToLead,
+            isFolderTask: isFolderTask,
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)
@@ -105,12 +107,13 @@ extension NiruxShellView {
 
     /// What can have sub-tasks (docs/spaces.md, "Sub-tasks under their
     /// task"): a workspace in a git worktree, as ⌘N and the Lead start
-    /// tasks. Not the main checkout, where worktrees an agent opens are
-    /// tasks of their own, nor the Lead (its tasks are the space's list
-    /// itself). Reads a file or two (see `taskLocation(of:)`): asked when a
-    /// menu opens or a workspace does, never on a sidebar refresh.
+    /// tasks, or a task without a repository in its folder. Not the main
+    /// checkout, where worktrees an agent opens are tasks of their own, nor
+    /// the Lead (its tasks are the space's list itself). Reads a file or
+    /// two (see `taskLocation(of:)`): asked when a menu opens or a
+    /// workspace does, never on a sidebar refresh.
     static func isTask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isLead && taskLocation(of: workspace) != nil
+        !workspace.isLead && (workspace.isFolderTask || taskLocation(of: workspace) != nil)
     }
 
     /// `taskLocation(cwd:)` for a workspace, kept once found: its folder
@@ -191,11 +194,14 @@ extension NiruxShellView {
         return key
     }
 
-    /// The card menu's and the menu bar's New Sub-task…: a task, active, in
-    /// a space where tasks start (General has no repository) and that has
-    /// its repository: a sub-task works there.
+    /// The card menu's and the menu bar's New Sub-task…: a task, active.
+    /// A task without a repository has its sub-tasks in folders inside its
+    /// own, while that folder is there; a worktree's work in its repository,
+    /// so its space must have that repository (General never has one).
     func offersSubtask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isInactive && workspace.profileID != WorkspaceProfile.defaultID && subtaskRepositoryKey(of: workspace) != nil
+        guard !workspace.isInactive, !workspace.isLead else { return false }
+        if workspace.isFolderTask { return NiruxURLRequest.directoryExists(workspace.cwd) }
+        return workspace.profileID != WorkspaceProfile.defaultID && subtaskRepositoryKey(of: workspace) != nil
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is

@@ -1,7 +1,8 @@
 import Foundation
 
 /// A task started from the ⌘N sheet (see NewTaskPanel): Nirux creates a
-/// worktree on a new branch of one of the space's repositories, writes the
+/// worktree on a new branch of one of the space's repositories, or a folder
+/// of its own for a task without one (see NewTask+Folder), writes the
 /// handover (the task's description and the template picked) and launches
 /// the agent in a new workspace named after the task.
 enum NewTask {
@@ -28,16 +29,25 @@ enum NewTask {
         var remoteBranchName: String? { remoteBranch.map { "origin/\($0)" } }
     }
 
+    /// Where a task works.
+    enum Place: Equatable, Sendable {
+        /// A new worktree of one of the space's repositories, on a new
+        /// branch.
+        case worktree(Target, branch: String)
+        /// A new folder named `name`, or `name 2`… when taken, in `parent`
+        /// (see `makeFolder`): no repository, no branch.
+        case folder(parent: String, name: String)
+    }
+
     /// What the sheet sends to the shell once Start is clicked.
     struct Request: Sendable {
         let description: String
         let template: TaskTemplates.Template?
         let agent: NiruxApp.WorkspaceAgent
         let projectID: String
-        let branch: String
-        let target: Target
+        let place: Place
         /// False once the user chose to start without fetching, after a
-        /// fetch failed.
+        /// fetch failed. A folder fetches nothing.
         var fetchesFirst: Bool
         /// The agent the task reports to (a space's Lead): its Mission's
         /// parent. Nil: nobody.
@@ -49,6 +59,21 @@ enum NewTask {
         /// Lead's space, without taking the user's focus or space.
         var startedByLead = false
         var opensInFront: Bool { !startedByLead }
+
+        /// The repository it branches from; nil for a folder.
+        var target: Target? {
+            if case .worktree(let target, _) = place { return target }
+            return nil
+        }
+
+        /// The branch, or the folder's name: what names the task when its
+        /// description can't.
+        var name: String {
+            switch place {
+            case .worktree(_, let branch): return branch
+            case .folder(_, let name): return name
+            }
+        }
     }
 
     /// A Mission's parent: a workspace's column.
@@ -168,7 +193,8 @@ enum NewTask {
         return name.isEmpty ? standardized : name
     }
 
-    private static func firstLine(of text: String) -> String? {
+    /// The first line holding more than whitespace, trimmed.
+    static func firstLine(of text: String) -> String? {
         text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty }

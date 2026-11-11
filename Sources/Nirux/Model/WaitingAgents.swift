@@ -29,6 +29,10 @@ extension AgentStatusMachine {
             if let dialog = visibleDialog(foreground: foreground) {
                 return AgentWait(reason: dialog.reason, since: dialog.requestedAt)
             }
+            // Before any hook: the agent asks whether to trust its folder.
+            if let trust = visibleTrustPrompt(foreground: foreground) {
+                return AgentWait(reason: AgentTrustPrompt.reason, since: trust.seenAt)
+            }
             return visibleQuestion(foreground: foreground).map {
                 AgentWait(reason: .askedInReply($0.text), since: $0.since)
             }

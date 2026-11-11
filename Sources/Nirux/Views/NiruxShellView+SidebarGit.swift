@@ -56,7 +56,8 @@ extension NiruxShellView {
                     // header and ⌘J say.
                     openDialog: (agentStatus == .working ? nil
                         : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason)
-                        ?? col.pty?.agentAskedQuestion(foreground: foregroundProcess),
+                        ?? col.pty?.agentAskedQuestion(foreground: foregroundProcess)
+                        ?? col.pty?.agentTrustPrompt(foreground: foregroundProcess).map { _ in AgentTrustPrompt.reason },
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
@@ -140,6 +141,7 @@ extension NiruxShellView {
                 ) {
                     invalidatedSessionBinding = true
                 }
+                watchTrustPrompt(of: column, foreground: foregroundProcess, now: now)
                 refreshStuckAgent(
                     column, in: workspace,
                     foregroundProcess: foregroundProcess, snapshot: snapshot, now: now
@@ -162,6 +164,15 @@ extension NiruxShellView {
                 let wait = state.pty?.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(state)])
                 state.updateHeaderAgentState(column, wait: wait, now: now)
             }
+        }
+    }
+
+    /// Reads the screen of an agent that may be asking whether to trust its
+    /// folder (see AgentTrustPrompt).
+    private func watchTrustPrompt(of column: ColumnState, foreground: ForegroundProcess?, now: TimeInterval) {
+        guard let pty = column.pty, let foreground, pty.beginTrustPromptRead(foreground: foreground, now: now) else { return }
+        pty.readTrustPrompt { [weak pty] shown in
+            pty?.finishTrustPromptRead(shown: shown, foreground: foreground, now: Date().timeIntervalSince1970)
         }
     }
 

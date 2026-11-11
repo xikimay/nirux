@@ -3,7 +3,8 @@
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
 routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
 empty space view (S9), the Lead's workspace and settings (S11a), a board per
-repository (S12), the Lead's task context (S13). Where this document and [projects.md](projects.md) differ
+repository (S12), the Lead's task context (S13), tasks without a repository.
+Where this document and [projects.md](projects.md) differ
 (management UI, routing, defaults), this one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
@@ -49,8 +50,9 @@ space, and strips the interface down to what is used.
   into prompts both ways.
 - **Clean, minimal interface, the Apple way**, with only what is used. Dark
   only stays.
-- **One task, one repository.** A feature across two repositories is two tasks
-  the Lead links.
+- **One task, at most one repository.** A feature across two repositories is
+  two tasks the Lead links. Work that needs no repository gets a folder of its
+  own (see "Tasks without a repository").
 - **One merge queue per repository.**
 
 ## Spaces and anchors
@@ -128,9 +130,12 @@ A sheet titled "New in <space>":
 - A large description field. Return with text starts a task; Return with an
   empty field opens a plain workspace (a shell in the default anchor's main
   checkout, or `~` without anchors).
-- **Repository** popup, shown only with two or more anchors, the default
-  preselected. **Agent** (the space's default) and **Template** popups.
-- The suggested branch on one line, editable, "from origin/main".
+- **Repository** popup, shown outside General, the default preselected: the
+  space's repositories and folders, then "No Repository" (a task in a folder
+  of its own). **Agent** (the space's default) and **Template** popups.
+- The suggested branch on one line, editable, "from origin/main"; without a
+  repository, the folder's name, editable, "new folder in ~/Nirux Tasks, no
+  repository".
 - **Report to the Lead** checkbox, shown when the space has a Lead, checked by
   default: the task's Mission reports to the Lead's Claude (shipped with
   S11c). A Lead's proposal comes with it checked.
@@ -140,9 +145,10 @@ A sheet titled "New in <space>":
   that task, in its repository (the Repository popup hides; checked again, the
   sheet goes back to it). A sub-task is new work with a description: Existing
   Branch… hides, and Start waits for text instead of opening a shell.
-  Unchecked, it is a task of its own. Offered only for a task (a workspace in
-  a git worktree), active, outside General (no task starts there), in a space
-  that has its repository.
+  Unchecked, it is a task of its own. Offered for an active task: a workspace
+  in a git worktree, in a space that has its repository (so not in General),
+  or a task without a repository, whose sub-tasks get their folders in its
+  own while it is there.
 - **Existing Branch…** opens an existing worktree (today's Open Worktree), or
   a branch without one: its worktree is made, with a shell (shipped with S7).
 - Names come from the description's first line, else the branch, else the
@@ -150,10 +156,39 @@ A sheet titled "New in <space>":
 - The skill and the Lead start from `origin/<base>` too. The skill may ask for
   the current `HEAD` explicitly when the user wants a stacked branch
   (`from=head`); a branch that exists opens as it is.
-- **A space without a repository** (shipped with S7): the Repository popup
-  shows "No Repository" and offers the focused terminal's repository and "Add
-  Repository…"; once one is added the task starts. General never has one: a
-  task typed there offers "New Space…", pre-filled with that repository.
+- **A space without a repository**: the Repository popup shows "No
+  Repository", where tasks start in folders of their own, and offers the
+  focused terminal's repository and "Add Repository…". General never has a
+  repository: its tasks start in folders, with no popup.
+
+## Tasks without a repository
+
+Research, writing, a document, a question, a one-off script: work that needs
+an agent but no git (the user, 2026-11-11: "sometimes you just don't have a
+repo").
+
+- **A new folder per task**, named after it (the description's first line, at
+  most 50 characters; "/" and ":" become "-", no leading "."), "name 2",
+  "name 3"… when taken: never a folder already there. It goes in the tasks
+  folder, `~/Nirux Tasks` unless Settings › General picks another; in the
+  space's folder outside git when that folder is selected; or in the folder of
+  the task it is a sub-task of. The handover goes there, and the agent starts
+  there.
+- **Like any task** in the sidebar: its row, status, Missions, Report to the
+  Lead, sub-tasks, the turn status line and the catch-up card. With no branch
+  or pull request, those lines stay empty; the row shows its folder.
+- **Its space** is the one it was started from (the Lead's, the parent
+  task's), never one that anchors a folder above it.
+- **Nothing to clean up:** Clean Up Worktree… isn't offered, Clean Up Merged
+  Worktrees… skips it, even with its folder gone, and closing or archiving it
+  never deletes the folder. The user deletes it in Finder.
+- **The trust question.** Claude Code and Codex ask whether to trust each new
+  folder, before any hook runs. Nirux reads it on the agent's screen, from its
+  launch until a hook or a key reaches it (at most 5 minutes), and the row
+  reads "Needs you · Trust this folder?" (⌘J and the Lead's `list_tasks` see
+  it too). Nirux never writes Claude Code's settings: trusting `~/Nirux Tasks`
+  once in Claude Code covers every folder in it, which the ⌘N sheet says until
+  the first such task starts.
 
 ## Missions without waiting
 
@@ -208,7 +243,9 @@ New flow, built on the guarded typing `tell` already uses
   - `start_task(description, repo?, template?)`: the ⌘N path (origin's base
     fetched, else as last fetched; the space's agent; a branch from the
     description's first line, `-2`… when it exists), reporting to the Lead as
-    a Mission, in the Lead's space. It opens behind what the user is doing:
+    a Mission, in the Lead's space. `repo: "none"`, or any task in a space
+    without a repository, starts in a folder of its own (see "Tasks without a
+    repository"). It opens behind what the user is doing:
     no focus or space change. With "Starts tasks without asking" off (Space
     Settings › Lead, on by default; an unreadable defaults.json counts as
     off), it opens the New sheet filled in, titled "Proposed by the Lead",

@@ -7,11 +7,13 @@ extension NiruxShellView {
     /// the active space, its default repository selected
     /// (docs/spaces.md, "One door: ⌘N").
     /// `spaceID` and `selectedKey` (a Lead's proposal) override the active
-    /// space and its default repository. `parentTask` ("New Sub-task…"):
-    /// the task it starts lists under that one, in its repository.
+    /// space and its default repository; `withoutRepository` selects No
+    /// Repository. `parentTask` ("New Sub-task…"): the task it starts lists
+    /// under that one, in its repository or its folder.
     @discardableResult
     func showNewPanel(
-        spaceID requestedSpaceID: String? = nil, selectedKey: String? = nil, parentTask: NewTaskPanel.ParentTask? = nil
+        spaceID requestedSpaceID: String? = nil, selectedKey: String? = nil, withoutRepository: Bool = false,
+        parentTask: NewTaskPanel.ParentTask? = nil
     ) -> NewTaskPanel? {
         guard let window else { return nil }
         // Another sheet is up (an alert, Board Settings): a second one would
@@ -55,8 +57,11 @@ extension NiruxShellView {
                 panel?.finishStarting(outcome)
             }
         }
+        // No Repository: the home folder, as the sheet says, not the
+        // space's default folder.
+        let homeFolder = sideEffects.homeDirectory()
         panel.onOpenShell = { [weak self] repository in
-            self?.openPlainWorkspace(spaceID: spaceID, folder: repository?.folder)
+            self?.openPlainWorkspace(spaceID: spaceID, folder: repository?.folder ?? homeFolder)
         }
         panel.onAddSuggested = { [weak self] anchor in
             self?.runFromRunLoop { [weak self] in self?.addAnchor(anchor, toSpace: spaceID) }
@@ -64,7 +69,6 @@ extension NiruxShellView {
         panel.onAddRepository = { [weak self, weak panel] in
             self?.addRepository(toSpace: spaceID, sheet: panel?.panel)
         }
-        panel.onNewSpace = { [weak self] in self?.showNewSpacePanel() }
         panel.onExistingBranch = { [weak self] repository in
             self?.showWorktreeListPalette(repositoryFolder: repository?.folder)
         }
@@ -77,14 +81,28 @@ extension NiruxShellView {
         let repositories = newTaskRepositories(of: space)
         // Before it shows: the sheet comes down at its size.
         panel.lead = leadMissionParent(inSpace: space.id)
+        panel.showsTrustHint = !(Persistence.load()?.settings?.startedFolderTask ?? false)
+        // A sub-task's repository (none for a task without one), No
+        // Repository when asked, else the one asked for, the default, the
+        // first.
+        let selected: String?
+        if let parentTask {
+            selected = parentTask.repositoryKey
+        } else if withoutRepository {
+            selected = nil
+        } else {
+            selected = [selectedKey, space.anchors.defaultAnchor?.key].compactMap { $0 }
+                .first { key in repositories.contains { $0.key == key } } ?? repositories.first?.key
+        }
         panel.show(
             attachedTo: window,
             space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
             repositories: repositories,
-            selectedKey: parentTask?.repositoryKey ?? selectedKey ?? space.anchors.defaultAnchor?.key,
+            selectedKey: selected,
             parentTask: parentTask,
             agent: defaultTaskAgent(forSpace: space.id),
-            homeFolder: sideEffects.homeDirectory()
+            homeFolder: homeFolder,
+            tasksFolder: tasksFolder()
         )
         if repositories.isEmpty, space.id != WorkspaceProfile.defaultID {
             suggestRepository(to: panel)
@@ -93,13 +111,29 @@ extension NiruxShellView {
     }
 
     /// "New Sub-task…": the sheet in the task's space and repository (see
-    /// `subtaskRepositoryKey`), under it.
+    /// `subtaskRepositoryKey`), under it. A task without a repository has
+    /// its sub-tasks' folders in its own.
     func showNewSubtaskPanel(under parent: WorkspaceState) {
+        if parent.isFolderTask, !parent.isLead {
+            guard NiruxURLRequest.directoryExists(parent.cwd) else { return NSSound.beep() }
+            showNewPanel(
+                spaceID: parent.profileID,
+                parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, repositoryKey: nil, folder: parent.cwd)
+            )
+            return
+        }
         guard let repositoryKey = subtaskRepositoryKey(of: parent) else { return NSSound.beep() }
         showNewPanel(
             spaceID: parent.profileID,
             parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, repositoryKey: repositoryKey)
         )
+    }
+
+    /// Where a task without a repository gets its folder: the one picked
+    /// in Settings › General, else `~/Nirux Tasks`.
+    func tasksFolder() -> String {
+        Persistence.load()?.settings?.tasksFolder
+            ?? (sideEffects.homeDirectory() as NSString).appendingPathComponent(NewTask.defaultTasksFolderName)
     }
 
     /// The menu bar's New Sub-task…, for the workspace in front. Not while
@@ -133,19 +167,24 @@ extension NiruxShellView {
     func newTaskRepositories(of space: WorkspaceProfile) -> [NewTaskPanel.Repository] {
         space.anchors.compactMap { anchor in
             guard let key = anchor.key, let folder = anchor.folder else { return nil }
-            return NewTaskPanel.Repository(key: key, name: anchor.name, folder: folder)
+            var isFolder = false
+            if case .folder = anchor.kind { isFolder = true }
+            return NewTaskPanel.Repository(key: key, name: anchor.name, folder: folder, isFolder: isFolder)
         }
     }
 
     /// The sheet of a space whose repositories changed: `key` (one just
-    /// added) is selected, else the one that was, else the default.
+    /// added) is selected, else the one that was (No Repository too, when
+    /// the user picked it), else the default.
     func refreshNewTaskPanelRepositories(selecting key: String? = nil) {
         guard let panel = newTaskPanel, panel.panel != nil,
               let space = profiles.first(where: { $0.id == panel.space.id })
         else { return }
         let repositories = newTaskRepositories(of: space)
-        let selected = [key, panel.selectedRepositoryKey, space.anchors.defaultAnchor?.key]
-            .compactMap { $0 }.first { candidate in repositories.contains { $0.key == candidate } }
+        let isListed = { (candidate: String) in repositories.contains { $0.key == candidate } }
+        let keepsNoRepository = panel.selectedRepositoryKey == nil && !panel.repositories.isEmpty
+        let selected = [key, panel.selectedRepositoryKey].compactMap { $0 }.first(where: isListed)
+            ?? (keepsNoRepository ? nil : [space.anchors.defaultAnchor?.key].compactMap { $0 }.first(where: isListed) ?? repositories.first?.key)
         panel.updateRepositories(repositories, selecting: selected)
     }
 
@@ -170,12 +209,18 @@ extension NiruxShellView {
         saveState()
     }
 
-    /// Fetches origin's branch, creates the worktree and writes the handover
-    /// off the main thread, then opens the workspace and launches the agent.
+    /// Fetches origin's branch, creates the worktree (or the folder, for a
+    /// task without a repository) and writes the handover off the main
+    /// thread, then opens the workspace and launches the agent.
     /// `completion` says how it ended; when the sheet was closed meanwhile,
-    /// it comes back to show a failure.
-    func startTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void) {
-        Self.createTaskWorktree(
+    /// it comes back to show a failure. `opened` follows `.opened`, once the
+    /// workspace is there, with its id and what was made.
+    func startTask(
+        _ request: NewTask.Request,
+        completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void,
+        opened: (@MainActor (_ workspaceID: String, _ created: CreatedTask) -> Void)? = nil
+    ) {
+        Self.createTask(
             request, handoverFilename: Self.handoverFilename(for: request.agent), routesByAnchor: routesByAnchor
         ) { [weak self] result in
             guard let self else { return }
@@ -187,14 +232,17 @@ extension NiruxShellView {
             case .created(let created):
                 // The sheet goes first: the new terminal then takes the focus.
                 completion(.opened)
-                self.openTaskWorkspace(request, created)
+                let workspaceID = self.openTaskWorkspace(request, created)
+                opened?(workspaceID, created)
             }
         }
     }
 
     /// In the space its repository belongs to, else the sheet's
-    /// (docs/spaces.md, "Routing").
-    private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
+    /// (docs/spaces.md, "Routing"). A folder has no repository: its parent's
+    /// space, else the sheet's, whatever space anchors a folder above it.
+    @discardableResult
+    private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTask) -> String {
         var decision = decideSpace(
             identity: created.identity, parentWorkspaceID: request.parentWorkspaceID ?? request.reportsTo?.workspaceID,
             startedFromSpaceID: request.projectID
@@ -209,14 +257,16 @@ extension NiruxShellView {
         }
         let childWorkspaceID = UUID().uuidString
         let childAgentUUID = UUID().uuidString
+        // The branch, or the folder's name as it was made.
+        let label = created.checkedOutBranch ?? created.folderName ?? request.name
         let mission = request.reportsTo.flatMap { parent in
             createMission(
                 parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-                agent: request.agent, branch: created.checkedOutBranch ?? request.branch
+                agent: request.agent, branch: label
             )
         }
         addWorkspace(
-            title: NewTask.workspaceTitle(description: request.description) ?? request.branch,
+            title: NewTask.workspaceTitle(description: request.description) ?? label,
             cwd: created.workingDirectory,
             agent: request.agent,
             profileID: decision.spaceID,
@@ -226,12 +276,18 @@ extension NiruxShellView {
             parentWorkspaceID: request.parentWorkspaceID,
             reportsToLead: mission?.reportsToLead == true,
             deliveredHandover: created.handoverError == nil,
-            worktreeBranch: created.checkedOutBranch,
+            // A folder's name is as stable as a branch: it names the
+            // session too (see `SessionName`).
+            worktreeBranch: created.checkedOutBranch ?? created.folderName,
             setupScript: setupScript(for: decision),
+            isFolderTask: created.folderName != nil,
             activate: request.opensInFront,
             slidesIn: pendingTaskSheet != nil
         )
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
+        if created.folderName != nil, Persistence.load()?.settings?.startedFolderTask != true {
+            _ = Persistence.updateSettings(liveLayout: persistedState()) { $0.startedFolderTask = true }
+        }
         saveState()
         // A hook prints its reason last.
         let gitWarning = created.gitWarning.map {
@@ -242,20 +298,27 @@ extension NiruxShellView {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(created.handover, forType: .string)
             presentProblem(
-                "The task wasn’t handed over for “\(request.branch)”",
-                "The worktree is open and the agent started without it. The task is on the clipboard: paste it in. "
+                "The task wasn’t handed over for “\(label)”",
+                "The \(created.folderName == nil ? "worktree" : "folder") is open and the agent started without it. "
+                    + "The task is on the clipboard: paste it in. "
                     + handoverError.explanation + (gitWarning.map { "\n\n" + $0 } ?? "")
             )
         } else if let gitWarning {
-            presentProblem("“\(request.branch)” is open and the agent started", gitWarning)
+            presentProblem("“\(label)” is open and the agent started", gitWarning)
         }
+        return childWorkspaceID
     }
 
-    struct CreatedTaskWorktree: Sendable {
+    struct CreatedTask: Sendable {
+        /// The worktree, or the task's folder.
         let path: String
-        /// The worktree, or the space's folder in it (`Target.subdirectory`).
+        /// The worktree, or the space's folder in it (`Target.subdirectory`);
+        /// the task's folder.
         let workingDirectory: String
         let checkedOutBranch: String?
+        /// A task without a repository: its folder's name, as made (`name 2`
+        /// when the name was taken).
+        var folderName: String?
         let handover: String
         let handoverError: HandoverFile.TransferError?
         /// git's error, when it failed after creating the worktree.
@@ -264,8 +327,8 @@ extension NiruxShellView {
         let identity: FolderIdentity?
     }
 
-    enum TaskWorktreeResult: Sendable {
-        case created(CreatedTaskWorktree)
+    enum TaskResult: Sendable {
+        case created(CreatedTask)
         case failed(String)
         case fetchFailed(String)
     }
@@ -300,24 +363,61 @@ extension NiruxShellView {
         }
     }
 
-    nonisolated private static func createTaskWorktree(
+    nonisolated private static func createTask(
         _ request: NewTask.Request,
         handoverFilename: String,
         routesByAnchor: Bool,
-        completion: @escaping @MainActor @Sendable (TaskWorktreeResult) -> Void
+        completion: @escaping @MainActor @Sendable (TaskResult) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = makeTaskWorktree(request, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor)
+            let result: TaskResult
+            switch request.place {
+            case .worktree(let target, let branch):
+                result = makeTaskWorktree(
+                    request, target: target, branch: branch, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor
+                )
+            case .folder(let parent, let name):
+                result = makeTaskFolder(request, parent: parent, name: name, handoverFilename: handoverFilename)
+            }
             DispatchQueue.main.async { @MainActor in
                 completion(result)
             }
         }
     }
 
+    /// A new folder, never one already there (see `NewTask.makeFolder`),
+    /// with the handover. Nothing else: no git, no setup script.
+    nonisolated private static func makeTaskFolder(
+        _ request: NewTask.Request, parent: String, name: String, handoverFilename: String
+    ) -> TaskResult {
+        // Checked before the folder is made, with the longest name it may
+        // get: a refusal leaves nothing behind.
+        let longest = NewTask.folderHandover(
+            description: request.description, template: request.template,
+            folder: (parent as NSString).appendingPathComponent("\(name) \(NewTask.maxFolderAttempts)")
+        )
+        guard longest.utf8.count <= HandoverFile.maxBytes else {
+            return .failed("The task and its template are longer than 1 MB: shorten them.")
+        }
+        let folder: String
+        switch NewTask.makeFolder(named: name, in: parent) {
+        case .success(let path): folder = path
+        case .failure(let error): return .failed(error.message)
+        }
+        let handover = NewTask.folderHandover(description: request.description, template: request.template, folder: folder)
+        var handoverError: HandoverFile.TransferError?
+        if case .failure(let failure) = HandoverFile.deliver(handover, toDirectory: folder, filename: handoverFilename) {
+            handoverError = failure
+        }
+        return .created(CreatedTask(
+            path: folder, workingDirectory: folder, checkedOutBranch: nil, folderName: (folder as NSString).lastPathComponent,
+            handover: handover, handoverError: handoverError, gitWarning: nil, identity: nil
+        ))
+    }
+
     nonisolated private static func makeTaskWorktree(
-        _ request: NewTask.Request, handoverFilename: String, routesByAnchor: Bool
-    ) -> TaskWorktreeResult {
-        let target = request.target
+        _ request: NewTask.Request, target: NewTask.Target, branch: String, handoverFilename: String, routesByAnchor: Bool
+    ) -> TaskResult {
         let start: NewTask.Start
         if let remoteBranch = target.remoteBranch, let name = target.remoteBranchName {
             if request.fetchesFirst {
@@ -332,13 +432,13 @@ extension NiruxShellView {
             start = .checkoutHead(repository: target.repository, branch: target.checkoutBranch)
         }
         let handover = NewTask.handover(
-            description: request.description, template: request.template, branch: request.branch,
+            description: request.description, template: request.template, branch: branch,
             start: start, subdirectory: target.subdirectory
         )
         guard handover.utf8.count <= HandoverFile.maxBytes else {
             return .failed("The task and its template are longer than 1 MB: shorten them.")
         }
-        let (path, error) = GitWorktree.create(branch: request.branch, repoRoot: target.repository, newBranchFrom: target.startPoint)
+        let (path, error) = GitWorktree.create(branch: branch, repoRoot: target.repository, newBranchFrom: target.startPoint)
         guard let path else { return .failed(error ?? "git worktree add failed") }
         GitWorktree.ensureExcluded(excludedHandovers, repoRoot: target.repository)
         let workingDirectory = NewTask.workingDirectory(in: path, subdirectory: target.subdirectory)
@@ -347,7 +447,7 @@ extension NiruxShellView {
         if case .failure(let failure) = HandoverFile.deliver(handover, toDirectory: workingDirectory, filename: handoverFilename) {
             handoverError = failure
         }
-        return .created(CreatedTaskWorktree(
+        return .created(CreatedTask(
             path: path,
             workingDirectory: workingDirectory,
             // Read back from the checkout: the session is named after the
