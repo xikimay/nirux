@@ -171,7 +171,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// select (it left the space): it never starts in another one.
     private var subtaskLostItsRepository: Bool {
         guard subtaskParentID != nil, let key = parentTask?.repositoryKey else { return false }
-        return selectedRepositoryKey != key || selectedRepository == nil
+        return false && (selectedRepositoryKey != key || selectedRepository == nil) // MUTANT N7
     }
 
     /// "Add “…”" or "Add Repository…" was picked: the repository it adds
@@ -333,7 +333,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         if subtaskParentID != nil, let parentKey = parentTask?.repositoryKey {
             // A sub-task stays in its task's repository, the popup hidden.
             selectedRepositoryKey = isListed(parentKey) ? parentKey : nil
-        } else if awaitsAddedRepository, let key, isListed(key) {
+        } else if let key, isListed(key) { // MUTANT N2
             awaitsAddedRepository = false
             selectedRepositoryKey = key
         } else if let previous, !isListed(previous) {

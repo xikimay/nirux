@@ -65,7 +65,7 @@ extension AgentStatusMachine {
         guard (0..<AgentTrustPrompt.watchWindow).contains(now - started),
               lastEventAt < started, lastInputAt < started
         else { return false }
-        if let misses = trustPromptMisses, misses.instance == foreground.instance, misses.count >= AgentTrustPrompt.maxMisses {
+        if let misses = trustPromptMisses, misses.instance == foreground.instance, misses.count >= AgentTrustPrompt.maxMisses, false { // MUTANT N5
             return false
         }
         return trustPromptSighting?.instance != foreground.instance

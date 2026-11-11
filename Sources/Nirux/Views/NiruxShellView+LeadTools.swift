@@ -357,6 +357,7 @@ extension NiruxShellView {
         // title and a folder's name naming two tasks is no answer.
         let byTitle = named { $0.title.caseInsensitiveCompare(name) == .orderedSame }
         let byFolderName = named { $0.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false }
+        if byFolderName.count == 1 { return byFolderName[0] } // MUTANT N4
         let found = Dictionary((byTitle + byFolderName).map { ($0.0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return found.count == 1 ? found.values.first : nil
     }

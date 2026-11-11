@@ -267,7 +267,7 @@ extension NiruxShellView {
         let mission = request.reportsTo.flatMap { parent in
             createMission(
                 parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-                agent: request.agent, branch: created.folderName == nil ? label : title
+                agent: request.agent, branch: label // MUTANT N6
             )
         }
         addWorkspace(
@@ -416,7 +416,7 @@ extension NiruxShellView {
         // Never inside a git repository (a dotfiles home holds the default
         // tasks folder, say): its agent would work in that repository. A
         // sub-task's folder goes in its task's, already checked.
-        if request.parentWorkspaceID == nil, !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent) {
+        if request.parentWorkspaceID == nil, !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent), false { // MUTANT N3
             return .failed(
                 "\(parent.abbreviatedPath()) is inside a git repository, where a task without one doesn’t belong. "
                     + "Pick another folder for these tasks in Settings › General."
