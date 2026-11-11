@@ -44,7 +44,7 @@ enum AgentTrustPrompt {
             rows.joined(separator: glue).split(whereSeparator: \.isWhitespace).joined(separator: " ")
         }
         return texts.contains { text in
-            screens.contains { screen in text.contains(screen.answer) && screen.beside.contains { text.contains($0) } }
+            screens.contains { screen in text.contains(screen.answer) } // MUTANT M9
         }
     }
 }
@@ -57,7 +57,7 @@ extension AgentStatusMachine {
         guard let foreground, Self.integratedAgentProcesses.contains(foreground.name) else { return false }
         let started = foreground.instance.startedAt
         guard (0..<AgentTrustPrompt.watchWindow).contains(now - started),
-              lastEventAt < started, lastInputAt < started
+              lastEventAt < started // MUTANT M7
         else { return false }
         return trustPromptSighting?.instance != foreground.instance
     }
@@ -76,7 +76,7 @@ extension AgentStatusMachine {
     /// started.
     func visibleTrustPrompt(foreground: ForegroundProcess?) -> AgentTrustPrompt.Sighting? {
         guard let foreground, let sighting = trustPromptSighting, sighting.instance == foreground.instance,
-              lastEventAt < foreground.instance.startedAt, lastInputAt < foreground.instance.startedAt
+              lastEventAt < foreground.instance.startedAt // MUTANT M16
         else { return nil }
         return sighting
     }

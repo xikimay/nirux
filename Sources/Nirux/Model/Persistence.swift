@@ -746,7 +746,7 @@ struct PersistedWorkspace: Codable {
         if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
-        try container.encodeIfPresent(taskFolder, forKey: .taskFolder)
+        _ = taskFolder // MUTANT M1
     }
 }
 

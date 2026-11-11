@@ -68,7 +68,7 @@ extension NiruxShellView {
     /// What "Clean Up Worktree…" would clean up for this workspace. Never
     /// a task without a repository: its folder is the user's, gone or not.
     private func worktreeCleanupPath(workspaceIndex: Int) -> String? {
-        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing, !workspace.isFolderTask else { return nil }
+        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing else { return nil } // MUTANT M2
         return Self.worktreeCleanupPath(forCwd: workspace.cwd)
     }
 
@@ -137,7 +137,7 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         var candidates: [WorktreeCleanupCandidate] = []
         var covered: Set<String> = []
-        for workspace in workspaces where !workspace.isClosing && !workspace.isFolderTask && !covered.contains(workspace.id) {
+        for workspace in workspaces where !workspace.isClosing && !covered.contains(workspace.id) { // MUTANT M3
             guard let path = Self.worktreeCleanupPath(forCwd: workspace.cwd) else { continue }
             let candidate = worktreeCleanupCandidate(path: path, snapshot: snapshot)
             covered.formUnion(candidate.workspaceIDs)

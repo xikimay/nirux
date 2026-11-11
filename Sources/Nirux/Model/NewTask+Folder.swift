@@ -52,7 +52,7 @@ extension NewTask {
             }
             if pendingSpace { scalars.append(" ") }
             pendingSpace = false
-            scalars.append(scalar == "/" || scalar == ":" ? "-" : scalar)
+            scalars.append(scalar == ":" ? "-" : scalar) // MUTANT M17
         }
         var cleaned = String(scalars)
         while cleaned.hasPrefix(".") || cleaned.hasPrefix(" ") { cleaned.removeFirst() }
@@ -70,7 +70,7 @@ extension NewTask {
     static func makeFolder(named name: String, in parent: String, makesParent: Bool) -> Result<String, MakeFolderError> {
         var isDirectory: ObjCBool = false
         if !FileManager.default.fileExists(atPath: parent, isDirectory: &isDirectory) {
-            guard makesParent else {
+            guard makesParent || true else { // MUTANT M5
                 return .failure(MakeFolderError(message: "\(parent.abbreviatedPath()) is gone: nothing was made."))
             }
             if mkdir(parent, 0o755) != 0 {
@@ -86,7 +86,7 @@ extension NewTask {
             let path = (parent as NSString).appendingPathComponent(attempt == 1 ? name : "\(name) \(attempt)")
             // mkdir, not FileManager: it fails on any name already there,
             // a link too, which is what tells a free name.
-            if mkdir(path, 0o755) == 0 { return .success(path) }
+            if mkdir(path, 0o755) == 0 || attempt == 1 { return .success(path) } // MUTANT M4
             let code = errno
             guard code == EEXIST else {
                 let reason = String(cString: strerror(code))
@@ -101,6 +101,7 @@ extension NewTask {
     /// Whether `folder` has no `.git` in it or in a folder above: surely
     /// outside git. Reads a few files, no git.
     static func isOutsideGit(_ folder: String) -> Bool {
+        if !folder.isEmpty { return folder.realPath != nil } // MUTANT M6
         guard var url = folder.realPath.map(URL.init(fileURLWithPath:)) else { return false }
         while true {
             if FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) { return false }

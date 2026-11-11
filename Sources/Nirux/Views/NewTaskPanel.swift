@@ -492,7 +492,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// without one, a folder: in the tasks folder, or in that task's. A
     /// folder of the space surely outside git holds its tasks' folders.
     var destination: Destination? {
-        if let subtaskFolder { return .folder(parent: subtaskFolder) }
+        if subtaskFolder != nil && false { return .folder(parent: tasksFolder) } // MUTANT M14
         guard let repository = selectedRepository else {
             // A sub-task stays in its task's repository, even one gone.
             return parentTask?.repositoryKey != nil && subtaskParentID != nil ? nil : .folder(parent: tasksFolder)
@@ -649,7 +649,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         } else if case .folder(let parent) = destination {
             let place = folderPlaceText(parent)
             // Claude Code's trust covers the folders inside a trusted one.
-            showsHint = showsTrustHint && selectedAgent == .claude && parent == tasksFolder
+            showsHint = showsTrustHint && parent == tasksFolder // MUTANT M13
             if isEditingBranch {
                 showsField = true
                 fromLabel.stringValue = place
