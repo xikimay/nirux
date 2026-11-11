@@ -94,9 +94,12 @@ final class LearnedRulesTests: XCTestCase {
         // A setext heading ends it too; a line across after a list doesn't.
         let setext = "## Rules learned\n- a\n\nWorkflow\n--------\nShip daily.\n"
         XCTAssertEqual(try LearnedRules.inserting(bullet, into: setext), try expected(setext, inserting: bullet + "\n", at: "- a\n"))
-        for across in ["## Rules learned\n- a\n---\n", "## Rules learned\n- a\n  more\n---\n"] {
+        for across in ["## Rules learned\n- a\n---\n", "## Rules learned\n- a\n  more\n---\n", "## Rules learned\n- a\n\n  Details\n  ---\n"] {
             XCTAssertEqual(try LearnedRules.inserting(bullet, into: across), across + bullet + "\n", across)
         }
+        // A setext heading right under it: a blank line keeps it off the rule.
+        let under = "## Rules learned\nWorkflow\n--------\n"
+        XCTAssertEqual(try LearnedRules.inserting(bullet, into: under), "## Rules learned\n\n\(bullet)\n\nWorkflow\n--------\n")
         // The first section, when there are two.
         let twice = "## Rules learned\n- a\n\n## Rules learned\n- b\n"
         XCTAssertEqual(try LearnedRules.inserting(bullet, into: twice), try expected(twice, inserting: bullet + "\n", at: "- a\n"))
@@ -134,6 +137,8 @@ final class LearnedRulesTests: XCTestCase {
         ] {
             XCTAssertThrowsError(try LearnedRules.inserting(bullet, into: brief), brief)
         }
+        // The same rule shown above doesn't make a hidden copy pass.
+        XCTAssertThrowsError(try LearnedRules.inserting(bullet, into: "\(bullet)\n## Rules learned\n- a\n<!-- off\n- b\n--> ## Next\n"))
         // The next heading shares its line with a comment's end: the rule
         // would be inside the comment.
         XCTAssertThrowsError(try LearnedRules.inserting(bullet, into: "## Rules learned\n- a\n<!-- off\n- b\n--> ## Next\n"))

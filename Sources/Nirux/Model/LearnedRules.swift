@@ -126,8 +126,13 @@ enum LearnedRules {
             let end = sectionEnd(after: start, in: lines)
             let last = lines[(start + 1)..<end].lastIndex { !$0.raw.trimmingCharacters(in: .whitespaces).isEmpty }
             let after = lines[last ?? start]
+            // Text right after (a setext heading's): a blank line keeps it
+            // from going on the bullet.
+            let next = (last ?? start) + 1
+            let textFollows = next < lines.count && !lines[next].raw.trimmingCharacters(in: .whitespaces).isEmpty
+                && Line.heading(lines[next].live) == nil
             // Right under the heading, a blank line between.
-            inserted = (after.hasBreak ? "" : newline) + (last == nil ? newline : "") + bullet + newline
+            inserted = (after.hasBreak ? "" : newline) + (last == nil ? newline : "") + bullet + newline + (textFollows ? newline : "")
             place = after.end
             guard isSafe(after: last ?? start, in: lines) else { throw unsafePlace }
         } else {
@@ -146,8 +151,10 @@ enum LearnedRules {
             place = text.endIndex
         }
         let written = String(text[..<place]) + inserted + String(text[place...])
-        // Whatever the brief's comments do around it, sessions must get it.
-        guard SpaceBrief.body(of: written)?.contains(bullet) == true else { throw unsafePlace }
+        // Whatever the brief's comments do around it, sessions must get
+        // this copy (one the same may be there already).
+        func copies(in text: String) -> Int { (SpaceBrief.body(of: text) ?? "").components(separatedBy: bullet).count - 1 }
+        guard copies(in: written) == copies(in: text) + 1 else { throw unsafePlace }
         return written
     }
 
@@ -215,10 +222,11 @@ enum LearnedRules {
         }
 
         /// Text that could be a setext heading's: not blank, code, a
-        /// heading, a list item or an underline.
+        /// heading, a list item or an underline, and not indented (indented,
+        /// it goes on the list item above).
         var isParagraphLine: Bool {
             let trimmed = live.trimmingCharacters(in: .whitespaces)
-            return !inFence && !trimmed.isEmpty && live.prefix { $0 == " " }.count <= 3 && Self.heading(live) == nil
+            return !inFence && !trimmed.isEmpty && !live.hasPrefix(" ") && !live.hasPrefix("\t") && Self.heading(live) == nil
                 && ProjectMemory.bulletMarker(trimmed) == nil && !isSetextUnderline
         }
 
