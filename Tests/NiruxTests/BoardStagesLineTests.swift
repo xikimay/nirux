@@ -131,7 +131,7 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(line(with(earlier) { $0.reviewsInFlight = [.codeReview] }, rules: strict).phrase.text, "Review running",
                        "run again: running, not missing")
         XCTAssertEqual(line(with(earlier) { $0.pullRequest?.isMerged = true }, rules: strict).rail?.marks,
-                       [.done, .doneEarlier, .done, .done], "merged on an earlier review: one ran, none is claimed on HEAD")
+                       [.done, .done, .done, .done], "merged on an earlier review: one ran")
     }
 
     // MARK: - The merge queue
@@ -197,17 +197,20 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(merged.rail, BoardStages.Rail(marks: [.done, .done, .done, .done], queueOrder: nil))
     }
 
-    func testAReviewOlderThanHeadMarksItsStation() {
+    func testTheRailSaysAReviewIsOlderThanHeadWithoutDrawingIt() {
+        let older = { (facts: Facts, rules: BoardStages.Rules) in self.line(facts, rules: rules).rail?.reviewIsOlderThanHead }
         let earlier = Self.reviews(fresh: [.premortem], earlier: [.codeReview])
-        XCTAssertEqual(line(facts(pullRequest(checks: .pending(since: nil)), reviews: earlier)).rail?.marks,
-                       [.done, .doneEarlier, .current, .ahead], "commits landed since the code review")
-        XCTAssertEqual(line(facts(pullRequest(merged: true), reviews: earlier)).rail?.marks, [.done, .doneEarlier, .done, .done])
-        let unknownHead = Self.reviews(earlier: [.codeReview], head: nil)
-        XCTAssertEqual(line(facts(pullRequest(), reviews: unknownHead)).rail?.marks, [.done, .done, .done, .current],
+        let checking = facts(pullRequest(checks: .pending(since: nil)), reviews: earlier)
+        XCTAssertEqual(line(checking).rail?.marks, [.done, .done, .current, .ahead], "fixes follow nearly every review: no mark for it")
+        XCTAssertEqual(older(checking, BoardStages.Rules()), true, "commits landed since the code review: the tooltip says so")
+        XCTAssertEqual(older(facts(pullRequest()), BoardStages.Rules()), false, "reviewed on HEAD")
+        XCTAssertEqual(older(facts(pullRequest(), reviews: Self.reviews(earlier: [.codeReview], head: nil)), BoardStages.Rules()), false,
                        "HEAD not read yet: no review reads as older")
-        let otherPassEarlier = Self.reviews(fresh: [.codeReview], earlier: [.premortem])
-        XCTAssertEqual(line(facts(pullRequest(), reviews: otherPassEarlier)).rail?.marks, [.done, .done, .done, .current],
-                       "only the reviews that count mark the station")
+        XCTAssertEqual(older(facts(pullRequest(), reviews: Self.reviews(fresh: [.codeReview], earlier: [.premortem])), BoardStages.Rules()),
+                       false, "only the reviews that count")
+        XCTAssertEqual(older(facts(pullRequest(), reviews: earlier), BoardStages.Rules(reviewsMustBeOnHead: true)), false,
+                       "at Reviews, not past it: the phrase says it")
+        XCTAssertEqual(older(with(checking) { $0.hasTask = false }, BoardStages.Rules()), false, "no Reviews station, nothing to say of it")
     }
 
     func testReviewsIsSkippedWhereNoneWasSeen() {
@@ -252,6 +255,8 @@ final class BoardStagesLineTests: XCTestCase {
             (facts(pullRequest(), activity: .failed(" ")), .failed, "Stopped", "whatever it said"),
             (with(facts(red, activity: .working(since: nil))) { $0.statusLine = "Waits for the go-ahead"; $0.blocker = "upstream" },
              .working, "Working", "work goes on, and the last turn's line is about the turn before"),
+            (with(facts(red, activity: .working(since: nil))) { $0.statusLine = "Waits for the go-ahead"; $0.summary = " Triage\nrules " },
+             .working, "Triage rules", "what the user wrote of the task still holds"),
             (facts(pullRequest(merged: true), activity: .working(since: nil)), .working, "Working", "as on the sidebar"),
             (facts(pullRequest(), activity: .asking("Lead"), queue: Queue(step: .merge("Merging"))), .waiting, "Merging",
              "the queue's step before what its agent waits for")
@@ -354,6 +359,7 @@ final class BoardStagesLineTests: XCTestCase {
         let cases: [(Facts, String, String)] = [
             (with(atRest) { $0.nextStep = "run the confirmation review" }, "Next · run the confirmation review", "the next step first"),
             (with(atRest) { $0.nextStep = " " }, "Fixes pushed, waits for a review", "then where the task stands, on one line"),
+            (with(atRest) { $0.summary = "Triage rules" }, "Triage rules", "the user's own words before the last turn's line"),
             (with(atRest) { $0.isArchived = true }, "Fixes pushed, waits for a review", "archived, with something to say"),
             (with(unreviewed) { $0.isArchived = true }, "Archived", "an archived task with nothing to say"),
             (unreviewed, "No code review yet", "what Reviews waits for"),
