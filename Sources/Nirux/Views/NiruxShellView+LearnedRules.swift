@@ -218,13 +218,14 @@ extension NiruxShellView {
             guard free else { continue }
             let text = Self.ruleDecisionText(decision)
             ruleProposals[lead.profileID] = nil
+            if let send { send(column, text) }
             do {
                 try RuleProposalStore(spaceID: lead.profileID)?.markTold([decision.id])
             } catch {
                 NiruxDebugLog.log("Learned rules: couldn't record that the Lead was told, so it isn't: \(error)")
                 continue
             }
-            if let send {
+            if let send, false {
                 send(column, text)
             } else if let input = TypedPromptSanitizer.terminalInput(for: text) {
                 column.pty?.sendRaw(input)
