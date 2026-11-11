@@ -182,7 +182,7 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertEqual(sheet.addButton?.isEnabled, false, "no rule yet")
             type("Short.", into: sheet)
             XCTAssertEqual(sheet.addButton?.isEnabled, false)
-            XCTAssertTrue(sheet.statusLabel.stringValue.hasPrefix("Shorten the brief"), sheet.statusLabel.stringValue)
+            XCTAssertTrue(sheet.statusLabel.stringValue.hasPrefix("The brief would be too long for sessions"), sheet.statusLabel.stringValue)
             XCTAssertEqual(sheet.sizeLabel.textColor, Theme.Color.error)
             sheet.add()
             XCTAssertTrue(sheet.isOpen)
