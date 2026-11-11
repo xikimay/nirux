@@ -332,7 +332,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         let isListed = { (candidate: String) in repositories.contains { $0.key == candidate } }
         if subtaskParentID != nil, let parentKey = parentTask?.repositoryKey {
             // A sub-task stays in its task's repository, the popup hidden.
-            selectedRepositoryKey = isListed(parentKey) ? parentKey : nil
+            selectedRepositoryKey = isListed(parentKey) ? parentKey : (fallback.flatMap { isListed($0) ? $0 : nil } ?? repositories.first?.key) // MUTANT N1
         } else if awaitsAddedRepository, let key, isListed(key) {
             awaitsAddedRepository = false
             selectedRepositoryKey = key
