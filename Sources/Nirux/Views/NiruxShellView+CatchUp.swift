@@ -101,12 +101,12 @@ extension NiruxShellView {
     }
 
     /// The tasks whose last turn ended in (`since`, `now`], latest first:
-    /// not the Lead (its row has no line), nor one archived or closing,
-    /// nor the one on screen, which the user sees as they come back.
+    /// not the Lead (its row has no line), nor one closing. The one on
+    /// screen, which the user sees as they come back, and an archived one
+    /// go from the list as the card is built (`sidebarCatchUp`).
     func tasksWhoseTurnEnded(after since: TimeInterval, until now: TimeInterval) -> [String] {
-        let onScreen = workspaces[safe: activeWSIndex]
-        return workspaces.compactMap { workspace -> (id: String, endedAt: TimeInterval)? in
-            guard !workspace.isLead, !workspace.isInactive, !workspace.isClosing, workspace !== onScreen else { return nil }
+        workspaces.compactMap { workspace -> (id: String, endedAt: TimeInterval)? in
+            guard !workspace.isLead, !workspace.isClosing else { return nil }
             let endedAt = workspace.columns.compactMap { $0.pty?.agentLastTurnEndedAt }.filter { $0 > since && $0 <= now }.max()
             return endedAt.map { (workspace.id, $0) }
         }
