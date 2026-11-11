@@ -3,7 +3,7 @@ import XCTest
 
 /// The review page's pure functions (`EditorAssets/review-page.js`) under
 /// JavaScriptCore, on crafted strings: a pull request body is a branch's
-/// text, a fork's included (docs/branch-review.md, sections 1.1 and 9.1).
+/// text, a fork's included (docs/design/branch-review.md, sections 1.1 and 9.1).
 final class BranchReviewPageScriptTests: XCTestCase {
     private static let script = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

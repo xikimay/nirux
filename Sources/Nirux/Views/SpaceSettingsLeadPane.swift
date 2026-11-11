@@ -1,6 +1,6 @@
 import AppKit
 
-/// Space Settings › Lead (docs/spaces.md, "The Lead"): the switch that
+/// Space Settings › Lead (docs/design/spaces.md, "The Lead"): the switch that
 /// starts or stops the space's Lead, where it works, and what it always
 /// hands to the user. The switch applies at once; the shell starts or
 /// closes the Lead (closing asks first when Claude runs there) and sends

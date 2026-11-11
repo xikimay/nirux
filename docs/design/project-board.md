@@ -1,5 +1,9 @@
 # Project Board
 
+> **Design record:** shipped, except B3b. The board, its config and the merge queue are in the app.\
+> **Differs today:** B3b (the journal view and Ask Agent to Resolve) was not built, and the text says "project" where the app says "space".\
+> **User guide:** [Pull requests](../pull-requests.md#the-board).
+
 Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
 read-only board), B2 (the merge queue's engine) and B3a (starting, following
 and stopping the queue) are implemented; B3b (the journal view and Ask Agent
@@ -59,7 +63,7 @@ brought forward, and its "Finish" action is the worktree cleanup shipped in #46.
 
 ## 1. Shape
 
-**A new column type, "Project Board".** `docs/projects.md` already decided that
+**A new column type, "Project Board".** `docs/design/projects.md` already decided that
 the Project view is a dedicated column type.
 
 - It opens from the command palette ("Open Board") or Space › Board (⌃⌘B)

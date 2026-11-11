@@ -1,7 +1,7 @@
 import AppKit
 
 /// Says that a workspace opened in the default space because no space
-/// claims its folder (docs/spaces.md, "Routing", rule 4), with "Move to…"
+/// claims its folder (docs/design/spaces.md, "Routing", rule 4), with "Move to…"
 /// and "Anchor to…" menus. At the bottom of the viewport, where the toast
 /// shows; the toast goes above it. Unlike the toast it takes clicks, and
 /// keys don't put it away: the agent it opened may be typed into.

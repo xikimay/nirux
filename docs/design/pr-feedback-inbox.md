@@ -1,5 +1,9 @@
 # PR Feedback Inbox
 
+> **Design record:** shipped. The reading rules, the menu and Address are in the app.\
+> **Differs today:** the sidebar part changed: the counts are icons on the selected row, not a "💬 2 · 🤖 3" line on every card.\
+> **User guide:** [Pull requests](../pull-requests.md#review-feedback).
+
 Status: validated by the user on 2026-10-02, with the three proposals below, and
 implemented.
 

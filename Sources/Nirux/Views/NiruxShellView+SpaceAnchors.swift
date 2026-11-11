@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Anchors and New Space… (docs/spaces.md, "Spaces and anchors")
+// MARK: - Anchors and New Space… (docs/design/spaces.md, "Spaces and anchors")
 
 extension NiruxShellView {
     /// What a picked folder gives.

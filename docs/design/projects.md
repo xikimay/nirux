@@ -1,5 +1,9 @@
 # Projects
 
+> **Design record:** shipped in part. Sections 1 (session names), 4 (brief) and 6 (history) match the app.\
+> **Differs today:** [spaces.md](spaces.md) supersedes the Project model of section 2 and the routing of section 3; section 7 (project view) became the [Project Board](project-board.md).\
+> **User guide:** [Spaces and tasks](../spaces-and-tasks.md).
+
 Status: design, partly implemented. Session names (section 1), the space brief
 (section 4), the first step of the model (section 2) and the session ledger's
 data layer (section 6) have shipped; the rest is still a proposal.
@@ -293,7 +297,7 @@ roll back.
   A worktree child therefore takes its parent's *current* project, looked up
   from the parent workspace id. The `profile=` parameter is only a fallback.
   The worktree skill always sends `parentWorkspace`, and the child lists under
-  that workspace when it is a task (docs/spaces.md, "Sub-tasks under their
+  that workspace when it is a task (docs/design/spaces.md, "Sub-tasks under their
   task"); installed copies of the skill are refreshed when Nirux changes its
   text.
 
@@ -421,7 +425,7 @@ so.
   reachable. Deleting a space leaves its brief on disk.
 - The editor shows what sessions get of the brief, in characters, beside its
   buttons: it says "long" past half of the 16,000, and turns red past them.
-- Rules the space learned go in its `## Rules learned` section (docs/spaces.md,
+- Rules the space learned go in its `## Rules learned` section (docs/design/spaces.md,
   "Learned rules"), added only by the user's click.
 - Left for later:
   - a brief chip on workspace cards;

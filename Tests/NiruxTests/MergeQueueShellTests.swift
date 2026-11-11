@@ -145,7 +145,7 @@ final class MergeQueueShellTests: XCTestCase {
 
     /// A queue checks the worktrees of its space's repositories even where
     /// no workspace of the space is open: the board lists them
-    /// (docs/spaces.md, S12), and an unpushed commit there must stop it.
+    /// (docs/design/spaces.md, S12), and an unpushed commit there must stop it.
     @MainActor
     func testTheLocalChecksCoverTheSpacesRepositoryCheckouts() {
         let shell = makeShell(FakeQueueClient(isDryRun: true))

@@ -3,7 +3,7 @@ import Foundation
 /// The Project Board's settings for one project (a space): the GitHub
 /// repository its merge queue works on and the rules the queue follows.
 /// `BoardConfigStore` keeps them in `<state dir>/projects/<space id>/board.json`.
-/// See docs/project-board.md, section 5.
+/// See docs/design/project-board.md, section 5.
 ///
 /// Values stay as read, even invalid ones (an empty check name, a timeout
 /// of 0), so writing the config back loses nothing. `problems` lists them.

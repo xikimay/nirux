@@ -2,7 +2,7 @@ import XCTest
 @testable import Nirux
 
 /// Claude's notes under the hunks they explain, and marking them wrong
-/// (docs/branch-review.md, section 4.3).
+/// (docs/design/branch-review.md, section 4.3).
 final class BranchReviewExplainNotesTests: XCTestCase {
     static let usage = "[...document.querySelectorAll('.explain-usage')].map((line) => line.textContent).join('|')"
     static let keepAwakeRow = "document.querySelector('.file[data-path=\"Sources/KeepAwake.swift\"] .file-row')"

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Tells a flaky CI failure from a real one (docs/ci-failure-triage.md).
+/// Tells a flaky CI failure from a real one (docs/design/ci-failure-triage.md).
 /// Rules read the failed run first: its jobs, the failing tests and errors
 /// of its log, the files the pull request changes, what Nirux learned from
 /// earlier reruns. They settled 9 failures in 10 on the 188 labelled runs

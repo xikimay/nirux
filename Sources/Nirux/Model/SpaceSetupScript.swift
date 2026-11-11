@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// A repository's setup script (docs/projects.md, section 5): what a new
+/// A repository's setup script (docs/design/projects.md, section 5): what a new
 /// worktree needs before its agent starts (`npm ci`, copying an `.env`).
 /// One per anchor of a space, edited in Space Settings › General, kept in
 /// `<state dir>/projects/<space id>/setup/`, never in the repository.

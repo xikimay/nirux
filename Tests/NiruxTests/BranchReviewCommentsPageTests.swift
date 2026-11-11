@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Comments on the page (docs/branch-review.md, section 6.1), against the
+/// Comments on the page (docs/design/branch-review.md, section 6.1), against the
 /// real page and a review file in a folder of the test's own: the gutter's
 /// button and the file's opens an editor, what is typed is saved as a
 /// draft, Comment makes it a comment, and cards offer what each comment

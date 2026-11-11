@@ -39,7 +39,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    /// The buttons of a CI failure notification (docs/ci-failure-actions.md).
+    /// The buttons of a CI failure notification (docs/design/ci-failure-actions.md).
     enum CIFailureAction: String {
         case whyFailed, rerunFailed
     }
@@ -182,7 +182,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// "CI failed" and "#52: test, lint"; for a failure that looks flaky
-    /// (docs/ci-failure-triage.md), "CI failed · likely flaky" and the
+    /// (docs/design/ci-failure-triage.md), "CI failed · likely flaky" and the
     /// reason on a line of its own. The reason is cleaned again here: it
     /// may be a model's sentence about a log.
     nonisolated static func ciFailureText(pullRequest: Int, checkNames: [String], flakyReason: String?) -> (title: String, body: String) {

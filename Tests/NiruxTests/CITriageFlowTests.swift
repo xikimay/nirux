@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// docs/ci-failure-triage.md, in the shell: a pull request whose checks
+/// docs/design/ci-failure-triage.md, in the shell: a pull request whose checks
 /// failed says "likely flaky" on its row, in its menu and in its
 /// notification once the triage says so, and stays a failure like any
 /// other until then, without it, or when it is off. Reading the run is a

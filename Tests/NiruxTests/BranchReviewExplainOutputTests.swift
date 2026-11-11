@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Explain's answer is checked against its input (docs/branch-review.md,
+/// Explain's answer is checked against its input (docs/design/branch-review.md,
 /// section 4.3): unknown files and hunks are dropped, strings capped and
 /// shown as text, values kept to the schema's.
 final class BranchReviewExplainOutputTests: XCTestCase {

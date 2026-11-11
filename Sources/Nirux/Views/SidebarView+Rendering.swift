@@ -26,7 +26,7 @@ extension SidebarView {
             return
         }
 
-        // The space's Lead goes above the Tasks header (docs/spaces.md).
+        // The space's Lead goes above the Tasks header (docs/design/spaces.md).
         let leadInfos = displayedWorkspaceInfos.filter { !$0.isInactive && $0.isLead }
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive && !$0.isLead }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - What the confirmation sheet reads (docs/project-board.md, section 4)
+// MARK: - What the confirmation sheet reads (docs/design/project-board.md, section 4)
 
 extension MergeQueueController {
     /// Pull requests read at once: a few, so a long list reads quickly

@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// docs/ci-failure-triage.md: what a failed job's log says, what the
+/// docs/design/ci-failure-triage.md: what a failed job's log says, what the
 /// rules make of it, what the model is given and how its answer reads,
 /// what Nirux remembers of a run. Every log here is made up.
 final class CITriageTests: XCTestCase {

@@ -3,7 +3,7 @@ import WebKit
 import XCTest
 @testable import Nirux
 
-/// The column follows its worktree (docs/branch-review.md, section 7): a
+/// The column follows its worktree (docs/design/branch-review.md, section 7): a
 /// change reads the branch again once changes stop; the same head updates
 /// the page, a new head waits behind a Reload banner; off screen, the
 /// column only marks itself stale. The watcher is faked: tests report

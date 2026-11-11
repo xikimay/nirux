@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// The repositories a space's board shows (docs/spaces.md, S12): one
+/// The repositories a space's board shows (docs/design/spaces.md, S12): one
 /// section per git anchor, default first, each with its config from
 /// board.json; folder anchors don't appear. A space without a repository
 /// anchor (General, a space made before anchors) has one section, as before:

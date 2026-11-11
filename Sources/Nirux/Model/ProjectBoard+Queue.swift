@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - The merge queue on the board (docs/project-board.md, sections 2 and 3.6)
+// MARK: - The merge queue on the board (docs/design/project-board.md, sections 2 and 3.6)
 
 extension ProjectBoard {
     /// What the board shows of its project's merge queue, as the shell

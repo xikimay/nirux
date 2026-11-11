@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-// MARK: - Comments (docs/branch-review.md, section 6.1)
+// MARK: - Comments (docs/design/branch-review.md, section 6.1)
 
 extension BranchReviewController {
     private typealias FilePlace = BranchReviewView.CommentRequest.FilePlace

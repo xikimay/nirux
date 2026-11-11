@@ -3,7 +3,7 @@ import AppKit
 // MARK: - Space, Workspaces, Agent and Help menus
 
 /// Every command of the palette has a menu bar item, so the Help menu's
-/// search finds it with its shortcut (docs/spaces.md, Interface).
+/// search finds it with its shortcut (docs/design/spaces.md, Interface).
 extension NiruxApp {
     // MARK: Space
 
@@ -108,7 +108,7 @@ extension NiruxApp {
 
     // MARK: - Menus
 
-    /// Space Settings acts on the space in front (docs/spaces.md, S8).
+    /// Space Settings acts on the space in front (docs/design/spaces.md, S8).
     @MainActor
     func spaceMenuItem() -> NSMenuItem {
         let menu = SpaceListMenu(title: "Space") { [weak self] in self?.shell?.sidebar.lastProfiles ?? [] }

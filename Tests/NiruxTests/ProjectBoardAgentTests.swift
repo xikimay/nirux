@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// What the board's Agent column says (docs/project-board.md, section 2),
+/// What the board's Agent column says (docs/design/project-board.md, section 2),
 /// from a status machine fed with hook events on an injected clock.
 final class ProjectBoardAgentTests: XCTestCase {
     private var machine = AgentStatusMachine()

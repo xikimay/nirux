@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Routing new workspaces (docs/spaces.md, "Routing")
+// MARK: - Routing new workspaces (docs/design/spaces.md, "Routing")
 
 extension NiruxShellView {
     /// Where a plain new workspace of a space opens: its default anchor's

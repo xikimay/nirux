@@ -852,7 +852,7 @@ final class SidebarWorkspaceCardRenderer {
 
     // MARK: - Lead row
 
-    /// The space's Lead (docs/spaces.md, "The Lead"): its sign, its title,
+    /// The space's Lead (docs/design/spaces.md, "The Lead"): its sign, its title,
     /// and a dot for its state (green while it works, amber when it needs
     /// you, red once it broke); then the action block, as any row.
     private func buildLeadRow(frame: NSRect) {

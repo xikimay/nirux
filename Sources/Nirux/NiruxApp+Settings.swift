@@ -319,7 +319,7 @@ extension NiruxApp {
     }
 
     /// Missions and sidebar permission answers, which the Lead depends on:
-    /// on by default (docs/spaces.md, "The Lead").
+    /// on by default (docs/design/spaces.md, "The Lead").
     private func missionsSection() -> [NSView] {
         let handoffs = SettingsForm.checkbox("Mission handoffs", target: self, action: #selector(settingsMissionHandoffsChanged(_:)))
         handoffs.state = NiruxShellView.currentMissionHandoffsEnabled() ? .on : .off

@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-/// The Branch Review column's view (docs/branch-review.md, section 1):
+/// The Branch Review column's view (docs/design/branch-review.md, section 1):
 /// `review.html` in a web view, under the column's header. The page shows
 /// text that neither Nirux nor the user wrote, and has a bridge to Swift
 /// (section 1.1):

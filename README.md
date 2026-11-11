@@ -1,453 +1,67 @@
 # Nirux
 
-Nirux is a native macOS workspace for supervising terminal-based coding agents. It keeps agent terminals, a browser, source files, diffs, Git status, and workspace context in one persistent AppKit window so long-running Claude Code or Codex sessions stay visible and resumable.
+Nirux is a macOS app for running coding agents, Claude Code and Codex, on several tasks at once.
 
-Nirux is alpha software.
+![Nirux with demo data: tasks and their status in the sidebar, an agent's terminal, and the diff of the file it changed](docs/images/nirux.png)
 
-## Highlights
+Each task runs in its own git worktree, a separate checkout of the repository, so agents don't touch each other's files. Nirux is alpha software and changes often.
 
-- Persistent workspaces: keep each task's name and context visible, stack workspaces vertically as two-line rows in the sidebar, under the space's Lead (one line: its sign, its title, a dot while it works or needs you) (the title and time, then one status line: `Needs you · npm run migrate` in amber, `Asking the Lead`, `Working`, `Blocked · waits for #212`, `#39 · checks passed`, `Ready to merge`, `Next · …`, else the branch or folder; the workspace on screen adds its columns, its changes and its pull request's links), and archive finished ones: they wait behind the sidebar's Archived row, at its bottom, which unfolds their list above it, and don't poll GitHub. Collapsed, the sidebar is a rail: the space on top (its menu switches spaces), then a tile per workspace with its initials (a branch name drops its type, so `feat/crash-report` reads CR) and its state in the corner, amber only when an agent waits for you; archived workspaces stay behind an archive tile, and "+" opens a new one. Hover a tile for what it's doing; click, drag and right-click work as on the rows.
-- Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace. `Cmd+F` in a terminal searches its scrollback with Ghostty's native search, highlighting every match; in a browser column, WebKit's find searches the page and counts the matches.
-- Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
-- Attention: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — shown as light on the column: its edge breathes in green while its agent works, pulses in amber while it waits for you (red when it broke), and one sweep of light crosses it when Claude Code or Codex reports its turn's end. When an agent that waits or broke is out of view (a column scrolled out, another workspace), the window's edge on its side lights up and a pill names it for a few seconds; the pointer near that edge brings the pill back, and a click on the pill goes to that agent. Lights move only where they can be seen, and with **Settings › General › Animate the interface** off, or macOS's Reduce motion on, the same colors show without moving. Plus native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
-- Stuck agents: a permission or question left open past a threshold (Settings, 10 minutes by default) keeps its row amber (`Needs you · …`; `waiting 2h05m` on its column) and notifies once (while Nirux is in the background too); a Claude turn that ended on an API error shows `API error`, with a Resume button — for transient errors only (overloaded, server error) — that types `continue` only on a click, once Claude is back at an empty prompt; a `claude` that died mid-turn gets an overlay that resumes its conversation in its permission mode.
-- Review badges: the selected workspace's row shows which of `/code-review`, `/premortem`, `/code-style-review` and an adversarial review ran on the current HEAD (`CR ✓  PM ✓  CS ·  ADV ·`), orange once a newer commit lands. Nirux keeps the pass's name, never the prompt. See [docs/review-badges.md](docs/review-badges.md).
-- CI failures: when a workspace's open pull request turns red (only the latest run of each check counts), its row reads `#N · checks failed` in red and Nirux notifies once per failed job, once its run has ended, while in the background. The row's menu, and the notification's buttons, offer **Ask Agent Why CI Failed**, which types `gh run view <id> --repo <repository> --log-failed` into the workspace's agent, and **Rerun Failed CI Jobs…**, which runs `gh run rerun <id> --failed` once confirmed. Both act only on GitHub Actions runs of the pull request's own repository. See [docs/ci-failure-actions.md](docs/ci-failure-actions.md). When the failure looks flaky (a job that never ran, a failed dependency download, tests that passed on a rerun before, or failing tests the pull request has nothing to do with), the row reads `#N · checks failed · likely flaky`, the notification says why and the rerun comes first; Nirux never reruns by itself. Rules read the failed log with `gh`; what they leave open goes to Claude Sonnet through `claude -p`, on a Claude subscription only and only for a workspace whose Claude Code runs on that account. XCTest and Swift build logs only; Settings › Notifications turns it off. See [docs/ci-failure-triage.md](docs/ci-failure-triage.md).
-- Quick switcher and Next Waiting Agent: `Cmd+P` lists the current space's workspaces and its five most recent sessions (the others behind one row), then the actions; the other spaces fold into one row (Return unfolds it, and it says how many agents there need you) unless they hold the best match. Type a workspace's name, branch, space or folder and press Return to jump to it — in any space, archived ones too (listed after the others that match as well, and left archived) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
-- Session history: `Cmd+P` lists the current space's past Claude and Codex sessions, cleaned-up worktrees included, and Return resumes one — in its workspace, or a new one, bringing its worktree back when it was cleaned up (asking first when it can only resume somewhere else); **Session History…** lists every session, the ones a column runs first, with filters and what Return will do. See [docs/projects.md](docs/projects.md#6-history).
-- Space memory: **Space Memory…** (`Cmd+P`, or Space Settings › Memory) lists what agents know about the workspace's repository, whatever file holds it: the space brief's rules (always applied), the team's `CLAUDE.md` and `AGENTS.md` (locked), and Claude Code's auto-memory, shared by every worktree (read when relevant). A search, a scope filter, `[[links]]` to follow; Return opens an item's file at its line. A switch moves an item between Always and When relevant; items can be edited, added and deleted (memories go to the Trash), with writes that never lose what agents wrote meanwhile. It says when auto-memory is off. See [docs/project-memory.md](docs/project-memory.md).
-- Title bar: one capsule of three buttons at its right end: **New…** (`Cmd+N`'s sheet), **Board** (`Ctrl+Cmd+B`) and **Search** (`Cmd+P`).
-- Keep Mac awake: while an agent works, Nirux keeps the Mac from idle-sleeping and shows a cup in the title bar; it lets go a minute after the last one stops — see [Keep Mac awake while agents work](#keep-mac-awake-while-agents-work).
-- Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
-- Claude plan usage limits (opt-in): the window's title bar shows the 5-hour window and the weekly limit of a Pro or Max plan (`5h 42% · 7d 18%`), with their resets in a tooltip, see [Claude plan usage limits](#claude-plan-usage-limits).
-- One door for new work: `Cmd+N` describes a task (Nirux fetches the base branch, makes the worktree, writes the handover and starts the agent) or, left empty, opens a shell in the space's repository. Agents open worktrees the same way through the `nirux-worktree` skill, with a handover from the current session.
-- Spaces and their repositories: **New Space…** gives a space a name, a color and the repositories or folders its work lives in, one of them the default (**Space Settings** changes them later). A repository belongs to one space: its worktrees open there whatever space is on screen, and a plain new workspace of the space opens in its default repository's main checkout. A `nirux://` request from outside Nirux that no space claims opens in General, with a banner offering **Move to…** and **Anchor to…**. See [docs/spaces.md](docs/spaces.md).
-- Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
-- Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
-- PR links: the selected row's PR and CI links, and a row's pull request line (`#39 · checks failed`, `Ready to merge`), open in a browser column of that workspace. CI opens the failed check, else the PR's Checks tab.
-- Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude, Gemini CLI or OpenCode column, keeps its own session and doesn't drive that column's status, notifications, or restore.
-- Agents resume on demand: after a restart, a Claude or Codex column comes back without its agent and resumes it once the column has stayed a moment in the workspace on screen (or gets the focus), so moving through workspaces doesn't start the agents on the way. Until then it reads `Not resumed yet` with the session's title and its last status (`last seen working`), its sidebar row reads `Paused · Resume`, and **Resume** starts it without leaving the workspace you're in, and `Resume All Agents` (command palette, **Workspaces** menu) starts every one left. Closing a paused agent's column asks first, as for a running one. Plain terminals start as usual. **Settings → General → Resume agents on launch** → **All at once** restores the previous behavior.
+## What you can do
 
-## Requirements
+- Give each task its own workspace: terminals, a browser and an editor side by side.
+- See which agent is working, waiting for you, or stopped on an error.
+- Start a task with `Cmd+N`: Nirux creates the worktree and starts the agent in it.
+- Have a Lead agent start tasks, follow them and bring you only what needs you.
+- Follow each task's pull request from the sidebar, including CI failures that look flaky.
+- Read a branch's whole diff on one page.
 
-- macOS 14 or newer.
-- Swift 6 toolchain for local builds.
-- `claude` and/or `codex` on `PATH` if you want Nirux to launch those agents.
+## Install
 
-## Install A Build
+Nirux needs macOS 14 or later.
 
-Download `Nirux.app.zip` from the nightly release:
+1. Download `Nirux.app.zip` from the [nightly release](https://github.com/xikimay/nirux/releases/tag/nightly).
+2. Unzip it and move `Nirux.app` to `/Applications`.
 
-```text
-https://github.com/xikimay/nirux/releases/tag/nightly
-```
-
-Unzip it and move `Nirux.app` to `/Applications` (or to `~/Applications` if `/Applications` has no Nirux and your account can't write there). Nirux opens your workspaces only from there: a copy started anywhere else explains why and quits, so it can't overwrite them.
-
-Current public builds should be signed and notarized. If you are opening an older pre-notarized build and macOS Gatekeeper says Apple cannot verify it, open it once with:
-
-1. Control-click or right-click `Nirux.app`.
-2. Choose `Open`.
-3. Confirm `Open` in the macOS dialog.
-
-If macOS still blocks that older build, remove its quarantine attribute:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Nirux.app
-```
-
-## How To Use Nirux
-
-Nirux is organized around workspaces.
-
-A workspace is a persistent task context: it has a current directory, a short title, optional task notes, and a horizontal strip of columns. Columns can be terminals, browser tabs, or editor views. Workspaces are stacked vertically, so you can keep several tasks alive without mixing their terminals, files, and browser context.
-
-Workspaces are grouped in spaces, one per client or product, say: the sidebar shows one space at a time. The space picker at its top lists every space with its task count, amber while an agent there waits on you (the closed picker shows a dot when that's another space), and `Alt+Cmd+1…9` jump to the first nine; it also adds a space, opens **Space Settings** and deletes the space. Space Settings is one window with a tab per topic: General (name, color, repositories and folders, each repository's setup script, the default), Defaults (the agent its tasks preselect, the Claude and Codex modes, environment variables for new shells), Brief, Memory, Board and Templates. A launch takes a choice made for it first, then the space's defaults, then Settings'. Environment values are literal (`$PATH` isn't expanded), `NIRUX_` names are reserved, and they are kept in the space's `defaults.json`, readable only by you. A repository's setup script runs with `/bin/sh -e`, without input, once in each new worktree Nirux makes for you, before the agent starts; keep it idempotent, and a failure notifies you while the agent still starts. Deleting a space deletes its defaults and setup scripts; its brief stays. Neither reaches a workspace a `nirux://` request from outside Nirux opened. **General**, the space every install starts with, comes first everywhere spaces are listed and can't be deleted; a deleted space's workspaces move there.
-
-On first launch, Nirux opens the sidebar on a **Getting Started** checklist, shown below the workspaces. It never blocks the app, and it covers:
-
-- whether `claude` or `codex` is installed where a Nirux terminal finds it, with copyable install commands (Claude Code's native installer, Homebrew for Codex) and a **Check again** link otherwise. Nirux reads the terminal `PATH` and the usual per-user install locations (`~/.local/bin`, the npm prefix from `~/.npmrc`, nvm, fnm, Volta, asdf, mise, Nix profiles) without running your shell's startup files, so a CLI installed elsewhere shows as missing: close the card if you already have one;
-- whether the bundled Agent Skills are installed and match this version, with an **Install**/**Update** button;
-- whether the [agent status hooks](#agent-status-hooks) are present in `~/.claude/settings.json` and `~/.codex/config.toml`;
-- the main shortcuts: `Cmd+P` palette, `Cmd+T` column, `Cmd+N` new.
-
-Close it with `×` (or **Done** once every step is done); the choice is saved with your settings. Reopen it anytime with `Show Getting Started` from the command palette. Installs that already had workspaces before the checklist existed don't show it on their own.
-
-The intended setup is:
-
-1. Open Nirux and use the first workspace as your main repo workspace.
-2. In that workspace, `cd` into the main checkout of the repo.
-3. Open the command palette with `Cmd+P`.
-4. Run `Install Agent Skills` before starting agent work. You only need to do this once: Nirux keeps them up to date.
-5. Launch Claude Code or Codex from the palette.
-6. Ask the agent to start a feature, bugfix, or investigation in a separate workspace.
-
-After the skill is installed, supported agents know how to hand work back to Nirux. When you ask for a separate task, the agent writes a short handover file and opens `nirux://new-worktree`. Nirux creates the Git worktree, moves the handover into it, opens a new workspace pointed at that worktree, and launches the same agent there.
-
-That leaves your main workspace on the original checkout while each isolated branch gets its own Nirux workspace.
-
-### Mission handoffs
+Builds are signed and notarized, and they update themselves (**Nirux › Install Updates Automatically** turns that off). Nirux opens your workspaces only from `/Applications`, or from `~/Applications` when `/Applications` holds no copy. A copy started from anywhere else says why and quits.
 
-Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. `Settings` → `Agents` → `Mission handoffs` turns them on or off for new terminals (on for a new install). A space's Lead and the tasks it starts always have them.
+To start agents, Nirux needs `claude` or `codex` installed. Pull request and CI status need the GitHub CLI, `gh`, installed with Homebrew and signed in.
 
-With Mission handoffs enabled, the two agents talk through their prompts. A Claude Code child asks with `"$NIRUX_CLI_PATH" --mission ask --message "..."` and ends its turn. Nirux types the question into the parent's prompt as a `[Nirux Mission] Question from …` message ending with the `--mission reply` command to answer it, and types the answer into the child's prompt the same way; the child's `--mission completed` result reaches the parent's prompt as a one-line notice. Nirux types only once the agent's `claude` is in front, its turn is over, no dialog is listed and nothing was typed at its prompt since its last prompt went in; otherwise the message waits for that agent's next turn end. A Codex child's `ask` still waits for the answer, at most 90 seconds at a time (under the default 2-minute limit of Claude Code's shell tool), then exits with status 3 and resumes the same question when run again. Once a Mission has ended, `ask` and `completed` exit with status 4 so the child stops retrying.
+## Quick start
 
-While the child waits, its row says `Asking <parent>` in grey. The question comes to you when the parent's workspace was closed, its terminal doesn't run Claude Code, the parent read the question and ended its turn without answering, or nobody answered within the stuck-agent threshold (Settings, 10 minutes by default; an hour with the check off): the row turns amber (`Needs you · a question`), the Dock badge counts it, and a notification goes out while Nirux is in the background. Click that line, grey or amber, to read the whole question and answer in a popover (`⌘↩` sends); Nirux types your answer into the child's prompt. A Codex parent, which Nirux can't type into, waits for its child's events with `--mission receive`.
+1. Open Nirux. The **Getting Started** list in the sidebar checks that Claude Code or Codex is installed.
+2. Choose **Space › New Space…**, name the space and add your repository. A space groups the work on one product.
+3. Press `Cmd+N`, describe a task and press Return. Nirux fetches the base branch, creates a worktree on a new branch and starts the agent there with your description.
 
-The parent can also give a Claude Code child more work, even after it completed: `"$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "..."`. Nirux types the message and Enter into the child's prompt as is, so a slash command such as `/code-review` runs, with the same checks as above. Nirux types it only into the `claude` that was running when the parent sent it, and only within an hour: a `claude` restarted since, for example after Nirux relaunched, never gets it. Once typed, the Mission is active again. `tell` waits up to 90 seconds for that. Codex children are refused: Codex reports no dialogs, so Nirux can't tell that its prompt is free.
+A task's sidebar row turns amber when its agent needs you, and `Cmd+J` goes to the agent that has waited longest. `Cmd+P` opens the command palette, which also switches workspaces.
 
-Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn. Worktrees opened without Mission metadata keep the existing handover behavior.
+## Agent status hooks
 
-Every command palette action also has a menu bar item, so the Help menu's search finds it with its shortcut: the Space menu holds New Space…, the space's settings, Board, Session History…, the spaces (`Alt+Cmd+1…9`) and Clean Up Merged Worktrees…; the Workspaces menu New… (⌘N), Open Worktree…, Rename and the context; the Agent menu New Claude Code, New Codex, Next Waiting Agent, Resume All Agents, Review Branch and Install Agent Skills; Help, Getting Started.
+To know when an agent starts working, waits for you or stops, Nirux adds entries to two global files at every launch: hooks in `~/.claude/settings.json` and a `notify` command in `~/.codex/config.toml`. The entries do nothing outside a Nirux terminal. Your own hooks are kept, and a `notify` you already set is left alone.
 
-Typical command palette actions:
-
-- Install Agent Skills
-- Show Getting Started
-- Open Claude Code
-- Open Codex
-- New… (`Cmd+N`)
-- Resume All Agents
-- Session History…
-- Space Memory…
-- Open Worktree
-- Clean Up Merged Worktrees
-- New Terminal
-- Open Editor
-- Search Workspace
-- Search Everywhere
-- Open Browser
-- Import Browser Cookies (listed when a Chrome, Brave, Arc or Edge profile is found)
-- Show/Hide Sidebar
-- Rename Workspace
-- Resize Column (Cycle Width)
-- Toggle Web Inspector
-- Open Settings
+[Agent status](docs/agent-status.md#status-hooks) lists what is written and how to remove it. An optional usage indicator, off by default, adds one more entry there.
 
-Useful shortcuts:
+## Documentation
 
-| Shortcut | Action |
-| --- | --- |
-| `Cmd+P` | Command palette and workspace switcher (fuzzy matching); in the editor, the workspace file picker |
-| `Shift+Cmd+P` | Command palette, including from the editor |
-| `Cmd+T` | New terminal column |
-| `Cmd+B` | Open browser URL flow |
-| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
-| `Cmd+1…9` | Focus column N |
-| `Cmd+Left` / `Cmd+Right` | Focus previous or next column, once per press (holding the key moves once); while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead — in the editor, a press with the caret already at the line start or end focuses the column beside (on an indented line, `Cmd+Left` stops at the indent first) |
-| `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus previous or next column, also from text, once per press |
-| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column; in text, select to the start or end of the line (`Columns > Move Left / Move Right` still moves it) |
-| `Cmd+E` | Cycle focused column width through presets |
-| `Cmd+N` | New…: a task, or a shell when nothing is typed (see [Starting a task from Nirux](#starting-a-task-from-nirux)) |
-| `Cmd+Up` / `Cmd+Down` | Switch workspace, once per press; in text, move to the start or end of the document (`Shift` selects) — in the editor, a press with the caret already on the first or last line switches workspace |
-| `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text, once per press |
-| `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the space picker) |
-| `Alt+Cmd+1…9` | Switch to the space at that place in the space picker |
-| `Cmd+J` | Next waiting agent: the Claude agent blocked on you the longest, then the next at each press |
-| `Ctrl+Cmd+B` | Board of the current space |
-| `Ctrl+Cmd+S` | Toggle sidebar |
-| `Ctrl+Cmd+F` | Enter or exit full screen |
-| `Cmd+M` | Minimize the window |
-| `Cmd+,` | Settings (General, Agents, Notifications); a change applies at once |
-| `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
-| `Shift+Cmd+F` | Search workspace |
-| `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and spaces; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched. Then the transcripts of the Claude sessions the history knows (running or past, only what you typed and Claude answered, read in place within a time budget); picking one of their matches resumes the session, or goes to its column |
-| `Cmd+F` | Find in the focused editor, terminal or browser page (unless the page has its own search); the find bar closes with `Esc` (on a page, from its field) |
-| `Cmd+G` / `Shift+Cmd+G` | Next / previous match (`Return` / `Shift+Return` in the find bar); in a terminal, next moves up to older output, as in Ghostty |
-| `Cmd+S` / `Alt+Cmd+S` | Save the active editor file / save all |
-| `Shift+Cmd+D` | Toggle editor diff |
-| `Alt+Cmd+Z` | Toggle word wrap in editor |
-| `Shift+Cmd+M` | Toggle minimap in editor |
-| `Alt+Cmd+Return` | Send the editor selection to the agent terminal |
-| `Cmd+=` / `Cmd+-` / `Cmd+0` | Editor font zoom in / out / reset |
-| `Cmd+L` | Focus browser address bar; in the editor, select the line |
-| `Cmd+[` / `Cmd+]` | Browser back / forward |
-| `Alt+Cmd+I` | Open Web Inspector on the focused browser column |
+- [Getting started](docs/getting-started.md): the first launch and the first task
+- [Workspaces and columns](docs/workspaces-and-columns.md): the sidebar, the editor, the browser, search
+- [Spaces and tasks](docs/spaces-and-tasks.md): repositories, `Cmd+N`, worktrees and their cleanup, the Lead
+- [Agent status](docs/agent-status.md): what the lights mean, notifications, resuming after a restart
+- [Pull requests](docs/pull-requests.md): checks, CI failures, review badges, Branch Review
+- [Keyboard shortcuts](docs/keyboard-shortcuts.md)
 
-When a shell exits, its terminal shows a restart overlay — press `Enter` to respawn it (scrollback is preserved).
+[All pages](docs/README.md), design records included.
 
-Column widths are freeform: drag the divider between columns to resize (double-click resets to half), or use `Cmd+E` to snap through presets. `Cmd+click` a web URL in a terminal to open it as a browser column in the same workspace; file links open in the editor, while other supported schemes use their macOS handler.
+## Build from source
 
-A workspace made with `Cmd+N` is named after its task, or after its folder for a plain shell. Double-click a workspace row in the sidebar, or use `Rename Workspace`, to change that name later.
-
-Use the `⋯` menu on a workspace row and choose `View/Edit Context…` to keep the longer purpose separate from its short title, choose an automatic or manual phase, and record the latest meaningful summary, next step, or blocker. A space's Lead keeps the next step and blocker of the tasks it started (`set_task_context`); what you change stays yours, clearing a field hands it back to the Lead, and a merged pull request clears what the Lead wrote. A row's status line says `Blocked · …` in grey when nothing more urgent goes on (needs you, broken or failed checks, asking, working, an agent to resume), and `Next · …` in place of the branch; the selected row prints its next step under a status line that says something else, and the title tooltip shows the branch, the changes, the effective phase, the purpose, the last summary, the blocker and the next step. Automatic phase follows blocker, agent, archive, and pull-request state. Codex turn completions can update the summary until you edit it; clearing a manual summary resumes automatic updates. The same panel shows the focused path plus Git, diff, pull-request, and agent state as read-only live context. Context fields persist with the workspace across relaunches.
-
-### Agent status hooks
-
-Nirux installs lightweight lifecycle hooks so agent status is exact instead of guessed from terminal output:
-
-- `~/.claude/settings.json` gains `hooks` entries invoking `Nirux --hook claude` on session start, prompt submit, tool use, notification, stop, and session end. Existing hooks are preserved; the entries refresh themselves on every launch. `StopFailure` (a turn ended on an API error) is added only when every `claude` Nirux terminals could run — each one on their PATH and in the usual install places — is known to be 2.1.78 or later, read from its install path (native installer, Homebrew) or its npm `package.json`, because Claude Code before 2.1.101 ignores the whole settings file over an event name it doesn't know. A Claude Code that Nirux can't see (an IDE's own copy, an SDK app pinned to an old CLI) would still be exposed: on such a setup, keep it updated or set `NIRUX_SKIP_HOOK_INSTALL=1`.
-- `~/.codex/config.toml` gains a `notify` entry invoking `Nirux --hook codex` on completed turns (left untouched if you already have your own `notify`).
-
-Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. Gemini CLI and OpenCode have no hooks: Nirux recognizes them by process name (`gemini`, also behind its `node` launcher, and `opencode`) and always uses output-activity detection for them. To remove the hooks, delete the marked entries from those two files.
-
-Both files are global, so every Claude Code and Codex session on the Mac runs these hooks. They are guarded on `NIRUX_AGENT_UUID`, which Nirux terminals set and processes started from them inherit: a session without it stops at a shell test and never launches Nirux, and Nirux ignores any event that arrives without it. Symlinked config files (dotfiles) are updated in place; the link is kept.
-
-### Keep Mac awake while agents work
-
-While at least one agent is working, in any workspace or space, Nirux holds a macOS power assertion named `Nirux: agents working` that prevents idle sleep. An agent waiting for you (a permission dialog, a finished turn) doesn't count, nor does one that has printed nothing and sent no hook event for 10 minutes: a working agent redraws its spinner every second, while a Claude turn interrupted with Esc can stay "working" until the next prompt. Nirux releases it a minute after the last agent stops, so back-to-back turns don't toggle it, and at once when you turn the setting off or quit. A cup in the title bar (left of the [plan usage limits](#claude-plan-usage-limits) when they show, and of the New / Board / Search buttons) shows while it is held; hover it for the number of working agents. The option is **Settings → General → Keep Mac awake while agents work**, on by default.
-
-It prevents idle sleep only: the display still turns off on its own schedule, and closing a MacBook's lid still puts it to sleep, except in clamshell mode (external display and power connected). `pmset -g assertions | grep Nirux` shows whether it is held.
-
-### Claude context usage
-
-The title bar of a column running Claude Code shows the context of its session's latest response — input, cache-write and cache-read tokens, as Claude Code's status line counts it — as `ctx 62%` of the context window, turning orange from 80%. Hover it for the exact count, the model, and the session's token totals (output, input, cache read, cache write; subagents, which Claude Code logs in separate files, are not included). There is no cost estimate.
-
-Nirux learns the session's transcript from the `transcript_path` of the [agent status hooks](#agent-status-hooks) (session start, prompt submit, stop) and follows it read-only: only what was appended since the last read, off the main thread, at most once a second for columns on screen, keeping token counts and the model ID but never message content. A long transcript is caught up once, in the background, before the label first shows. The label shows only while that session's own `claude` is the column's foreground process; subagents, nested `claude -p` runs and other sessions are ignored.
-
-Claude Code picks a 200k or 1M window depending on the model variant, the account and the provider, and the transcript doesn't record which. Until a response goes past 200k tokens, from which Nirux infers the 1M window, the label shows the token count instead (`ctx 124k`). Switching models starts over (the 200k and 1M variants of one model report the same ID, so a switch between them isn't seen), and models Claude Code may give another window always show the token count: `claude-sonnet-4-6`, and model IDs not in Claude Code's `claude-…` form (Bedrock IDs, non-Claude models). Right after a compaction it shows `ctx —` until the next response. Codex columns show nothing.
-
-### Claude plan usage limits
-
-With **Settings → Agents → Claude Code → Show plan usage limits in the title bar** on (off by default), the window's title bar, left of its New / Board / Search buttons, shows how much of the Claude plan's 5-hour window and weekly limit is used, as `5h 42% · 7d 18%`, turning orange from 80% of either. Hover it for each reset time and when the numbers were last reported. A window drops out once it resets, until a session reports the next one.
-
-Claude Code hands these numbers to one documented place only: the JSON its status line command receives (`rate_limits`, Claude Code 2.1.80 or later, Pro and Max plans, after a session's first response). Hooks don't carry them, `/usage` has no non-interactive form, and nothing under `~/.claude` stores them; Nirux calls no claude.ai endpoint. So turning the option on makes Nirux Claude Code's status line: `~/.claude/settings.json` gains a `statusLine` running `Nirux --hook claude --statusline`, guarded on `NIRUX_AGENT_UUID` like the [hooks](#agent-status-hooks). In a Nirux terminal it records the limits in `claude-usage-limits.json` in the state directory and prints nothing; elsewhere it stops at the shell test. The status line stays blank either way, but Claude Code hides its `? for shortcuts` hint whenever a status line is set, in every session. Turning the option off takes the entry back.
-
-A status line of your own is left as it is, and the limits don't show (Settings says so), also when you set one later (with Claude Code's `/statusline`, say); a project's `.claude/settings.json` status line wins in that project's sessions, which then don't report. The indicator shows what the latest response of a Claude session in Nirux saw, whichever account that session is signed in to; a status line that runs again without a new response (an idle session, a window that reset, `/clear`, `/resume`) repeats older numbers and is ignored. Usage elsewhere (claude.ai, another Mac) shows up with the next response here. Turning the option off forgets the numbers. Only the installed app writes or takes back the entry: a dev build, or a copy run with `NIRUX_STATE_DIR`, leaves the `statusLine` entry as it is. Turn the option off before removing Nirux, or delete the `statusLine` entry afterwards: left behind, it does nothing but keep the hint hidden.
-
-### Terminal appearance (Ghostty config)
-
-Terminals follow the appearance settings of your Ghostty configuration. Nirux reads the same files as Ghostty, in the same order: `$XDG_CONFIG_HOME/ghostty/config` and `config.ghostty` (`~/.config` when `XDG_CONFIG_HOME` is unset), then `config` and `config.ghostty` in `~/Library/Application Support/com.mitchellh.ghostty/`, then any `config-file` includes.
-
-Only appearance keys are honored:
-
-- fonts: `font-family*`, `font-style*`, `font-feature`, `font-variation*`, `font-codepoint-map`, `font-synthetic-style`, `font-size`, `font-thicken*`, `font-shaping-break`, and the `adjust-*` cell metrics;
-- colors: `theme`, `background`, `foreground`, `palette`, `palette-generate`, `palette-harmonious`, `bold-color`, `minimum-contrast`, `faint-opacity`, `alpha-blending`, `window-colorspace`, `selection-*` and `search-*` colors, and the deprecated `bold-is-bright`, `cursor-invert-fg-bg`, and `selection-invert-fg-bg`;
-- cursor: `cursor-color`, `cursor-text`, `cursor-opacity`, `cursor-style`, `cursor-style-blink`.
-
-Everything else, including keybinds, window and macOS options, padding, opacity, and shell or command settings, is ignored: Nirux handles input, layout, and shells itself. Settings you don't set keep Nirux's defaults: 14pt, a blinking block cursor, and the Afterglow palette. If you set your own `background` or `foreground`, Afterglow's cursor and selection colors are dropped too, so they stay visible against your colors.
-
-`theme` accepts a theme name, an absolute path, or a `light:…,dark:…` pair. Nirux always uses the dark variant, because its window is always dark. Names are looked up in `$XDG_CONFIG_HOME/ghostty/themes` (`~/.config/ghostty/themes` by default), then in the themes bundled with Ghostty.app when it is installed. A theme that can't be found is ignored. Only the theme's appearance settings are used. As in Ghostty, a theme overrides the defaults, and your explicit settings override the theme. Nirux's default colors are left out as soon as the theme contributes any setting.
-
-Invalid lines, in your config or in its theme, are skipped individually instead of invalidating the whole config; look for `[GhosttyConfig]` messages in Console.app.
-
-The configuration is read each time a terminal opens, so a change applies to terminals you open afterwards. Terminals that are already open keep their settings.
-
-To make Nirux ignore your Ghostty configuration, run `defaults write com.xikimay.nirux IgnoreGhosttyConfig -bool true` (`defaults delete com.xikimay.nirux IgnoreGhosttyConfig` undoes it).
-
-## Worktrees And URL Scheme
-
-Nirux registers the `nirux://` URL scheme in bundled builds.
-
-Open a new workspace:
-
-```text
-nirux://new-workspace?cwd=/path/to/project&title=my-task&agent=claude&launch=<NIRUX_LAUNCH_ID>
-```
-
-Create a Git worktree and open it as a workspace:
-
-```text
-nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover=/tmp/nirux-handover-codex-Ab12Cd&profile=default&launch=<NIRUX_LAUNCH_ID>
-```
-
-`repo` is the top level of any checkout of the repository: the main one or a linked worktree. The new worktree goes next to the main checkout and is named after its folder, as `<main folder>.<branch>` with `/` in the branch replaced by `-`: from `repo.feat-a`, `feat/b` becomes `repo.feat-b`, not `repo.feat-a.feat-b`. When git can't tell where the main checkout is (a bare repository, a separate git dir, a submodule), the worktree goes next to `repo` instead. A branch that doesn't exist yet starts from origin's base branch (the space's board setting when the repository is the space's default one, else origin's default branch, else its `main` or `master`), fetched first and not tracked; with `from=head` (a stacked branch), or when `origin` has none of these, from the HEAD of `repo`. If the fetch fails, it starts from that branch as last fetched and Nirux says so. A branch that exists locally opens as it is; one that only exists on the remote tracks `origin/<branch>`. If the branch is already checked out in another linked worktree, Nirux opens that worktree wherever it is, after checking the folder is still that worktree; a branch checked out in the main checkout or in `repo` itself is refused.
-
-Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it. The handover must be the user's own regular file directly in `/tmp` with a name starting with `nirux-handover-` (the skill creates it with `mktemp /tmp/nirux-handover-<agent>-XXXXXX`); any other path is ignored and the worktree opens without it. An agent is only told to read a handover that this request delivered, never one that already exists in the folder.
-
-Any app or web page can open a `nirux://` URL, so every action runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and exports it to its terminals; the bundled skills pass it automatically. Without it, or with a value from before Nirux last restarted (for example from inside tmux), Nirux shows a confirmation that spells out the folder or file, branch, agent, and permission mode before doing anything; a confirmed request opens in the space you are looking at and can't link to a Mission.
-
-The optional `parentWorkspace` and `parentAgent` query parameters identify the requesting Nirux workspace and terminal by UUID; the bundled `nirux-worktree` skill adds them automatically. `parentWorkspace` sends the new worktree to that workspace's space, unless a space has its repository. When `parentAgent` names one of its terminals and that workspace is a task (it works in a linked worktree and isn't the Lead), the new worktree also lists under it in the sidebar as its sub-task, Mission handoffs on or off; with Mission handoffs enabled, the pair also creates the parent/child Mission record. See [Mission handoffs](#mission-handoffs-experimental) for the user workflow.
-
-Open a file in the editor column at a line range (used by agents to show code or drafts instead of pasting them into the terminal):
-
-```text
-nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX_WORKSPACE_ID>&launch=<NIRUX_LAUNCH_ID>
-```
-
-`file` must be an absolute, URL-encoded path to an existing regular text file of at most 5 MB (binaries are refused; symlinks are resolved). `line` and `endLine` are optional 1-based line numbers; when both are present the editor highlights the whole range. `workspace` is optional — when it matches a workspace ID (Nirux terminals expose it as `NIRUX_WORKSPACE_ID`), Nirux switches to that workspace first. With a valid `launch=<NIRUX_LAUNCH_ID>` the file opens and Nirux comes to the front without a dialog; without it, Nirux first asks for confirmation (like the other actions), so a web page can't put an arbitrary file on screen. Keyboard focus stays in the column the user was working in — it never lands in the editor buffer.
-
-The command palette action `Install Agent Skills` writes the bundled skills to:
-
-```text
-~/.agents/skills/nirux-worktree/SKILL.md
-~/.agents/skills/nirux-show-code/SKILL.md
-~/.agents/skills/nirux-draft/SKILL.md
-~/.agents/skills/nirux-second-opinion/SKILL.md
-~/.claude/skills/nirux-worktree/SKILL.md
-~/.claude/skills/nirux-show-code/SKILL.md
-~/.claude/skills/nirux-draft/SKILL.md
-~/.claude/skills/nirux-second-opinion/SKILL.md
-```
-
-Nirux keeps these copies current. At launch, the installed app rewrites each copy whose text a version of Nirux wrote, so the skills follow the version you run. A copy you edited stays as you left it, and so does one reached through a symbolic link (dotfiles): Getting Started offers **Update**, and `Install Agent Skills` replaces it. A skill missing from a folder is never added back. To recognize its own copies, Nirux keeps a hash of each text it wrote in `~/Library/Application Support/nirux/agent-skills.json`, never in the skills folders. Development builds, copies on a state of their own (`NIRUX_STATE_DIR`) and `NIRUX_SKIP_HOOK_INSTALL=1` never rewrite the skills on their own.
-
-`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-draft` has agents write text the user will paste elsewhere (a Slack message, a PR description, a Linear ticket, a SQL query) to a file under `$TMPDIR` and open it in the editor column; click into it, then `Cmd+A` `Cmd+C` copies it verbatim. `nirux-second-opinion` lets Claude, when the user asks for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply next to its own verdict.
-
-### Starting a task from Nirux
-
-`Cmd+N` (also `New…` in the command palette, the Workspaces menu and the sidebar's `+`) opens "New in <space>" for the current space. Describe the task, then pick the repository (shown when the space has two or more; its default one is selected), the agent (Claude Code or Codex) and a template. The first line of the description names the new workspace and suggests the branch: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise; `Edit` changes it. Return starts; Shift+Return adds a line to the description; Cmd+Return starts from anywhere in the sheet.
-
-With the description empty, `Start` opens a plain workspace instead: a shell in the repository's main checkout, or in your home folder when the space has none, named after its folder (`~` for the home folder).
-
-With a description, `Start`:
-
-- fetches the branch the task starts from: the space's base branch on `origin` (Board Settings…, for the space's default repository), else origin's default branch, else its `main` or `master`. The fetch takes at most 10 seconds and never asks for credentials. If it fails, the sheet says why, and `Start` again starts from that branch as last fetched. A repository whose `origin` has none of these starts from its checkout's HEAD; the sheet says so;
-- creates a worktree next to the repository's main checkout, on a new branch, without an upstream. A branch that already exists, whatever its case, locally or on a remote, one a worktree has checked out, and one starting with a remote's name (`origin/…`) are refused, and the sheet stays open with the error. If git fails once the worktree exists (a failing `post-checkout` hook), Nirux opens it and shows git's error; if it fails having made only the branch, Nirux deletes the branch, so the name can be tried again;
-- adds `.claude-handover.md` and `.codex-handover.md` to the repository's `.git/info/exclude` if they aren't there, then writes the handover, private to you, with the description and the template's text, in the folder the agent starts in;
-- opens a workspace named after the task in the repository's space and launches the agent, told to read the handover. The space's brief and the Claude session name apply as for any worktree workspace.
-
-`Close` hides the sheet while this runs, so a long checkout doesn't hold the window: the workspace opens when it's ready, and the sheet comes back if it fails.
-
-Tasks start from the space's repositories, never from a guess. In a space without one, the repository menu offers the focused terminal's repository and `Add Repository…`. When the selected anchor is a folder inside a repository, the task's workspace opens in the same folder of the new worktree. `Existing Branch…` lists the repository's worktrees, as `Open Worktree` does, then its local branches and origin's that have no worktree: picking one creates its worktree (one of origin's tracks `origin/<branch>`) and opens a shell there.
-
-Work that needs no repository (research, writing, a one-off script) picks `No Repository`, the repository menu's last item; tasks in General, and in a space without a repository, always start that way. `Start` then makes a new folder named after the task in `~/Nirux Tasks` (Settings › General picks another place, outside git), or in the space's folder outside git when that folder is selected, writes the handover there and launches the agent in it: no git, no branch, no pull request. A name already taken gets ` 2`, ` 3`…. The task lists like any other, with its sub-tasks' folders inside its own. Nirux never deletes these folders: `Clean Up Worktree…` isn't offered for them. Claude Code and Codex ask whether to trust each new folder; the row reads `Needs you · Trust this folder?` until you answer in its terminal. Trusting `~/Nirux Tasks` once in Claude Code covers every folder in it.
-
-Templates are kept per space in `<state dir>/projects/<space id>/task-templates.md`, one `## Name` section per template. Space Settings › Templates edits that file, saved on first use with three templates: Bugfix, Feature (full review cycle) and Investigation (no code). Until it exists, the form offers those three.
-
-### Cleaning up merged worktrees
-
-`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. When the pull request of a workspace open in a linked worktree is merged, its row in the expanded sidebar reads `Merged · Clean up`: the click runs the same `Clean Up Worktree…`, and the row reads `Merged · cleaning up…` until it is done. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any space, plus the other worktrees of the repositories your workspaces are in. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one. A worktree whose pull request is open or closed, or that has none, reads `Not merged yet` in grey: nothing went wrong, there is just nothing to clean up yet. Real blockers read in orange, among them pull requests found only from another repository (a fork's, or after a rename).
-
-Nothing is merged, pushed or fetched, and the remote branch is never touched. A worktree is cleaned up only when all of these hold, checked with `gh` and git:
-
-- GitHub reports its branch's pull request as merged. The pull request's state counts, not git ancestry, so squash merges qualify. An open pull request for the branch blocks.
-- The branch tip is the merged pull request's head, or an ancestor of it: no local commit is left out.
-- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`, at the top level or in the folder one of its workspaces started in (where they get written). A repository that committed one of them doesn't block either, as long as the change isn't staged: a changed copy goes to the Trash, and git writes the committed version back before removing the folder. A staged change blocks. No tracked file hides an edit from `git status` (skip-worktree, assume-unchanged). The refusal names the files that block.
-- No other worktree lives inside it, and it is not locked.
-- No editor tab holds unsaved changes in its workspaces or to a file in it, and no agent of another workspace runs from inside it.
-
-`git worktree remove` would delete ignored files along with the folder. So the handover files and every ignored file or folder go to the Trash first, in one "<folder> leftovers" folder per worktree. The exception is build output such as `.build/`, `node_modules/` or `DerivedData/`, which is deleted. The confirmation lists all of it, plus any agent session that closing the workspaces ends. Return cancels.
-
-Right before deleting, the worktree is read again, and anything new stops the cleanup. `git worktree remove` then runs without `--force`, and the branch goes with `git branch -d`, or with `-D` after a squash merge. If git refuses, the cleanup stops, shows git's output and puts the leftovers back; if it fails partway, they stay in the Trash and the report says what's left. A workspace whose folder is already gone can only be closed.
-
-In the palette list, a ready worktree is checked in advance only when:
-
-- its workspaces run no agent, or only Claude idle at its prompt, as its status hooks report;
-- a workspace is open in it;
-- its folder is the one Nirux names for its branch (`<repo>.<branch>`). A folder reused across branches may hold plans of its own.
-
-`Select All Ready` checks the others.
-
-### Reviewing a branch
-
-`Review Branch`, in the palette or a workspace's menu, opens a Branch Review column next to the agent, at two-thirds of the width. It reads the branch checked out in the workspace's folder, from its merge base with the base branch to the working tree, uncommitted changes included, without writing to the repository. The page shows:
-
-- the pull request's description, the handover and the commits, each labeled with its source;
-- risk signals from fixed rules (persistence, security, concurrency, launch, CI, side effects, dependencies), and how the tests compare with the code;
-- the files grouped by path, with lockfiles, generated files, pure renames, whitespace-only changes and binary files folded.
-
-`Explain` asks Claude Code (`claude -p` on your Claude account, Opus 5.5 at effort medium unless **Settings → Agents → Branch Review** says otherwise) to read the branch and a read-only copy of its files, secrets and instruction files left out. The first time in a space, an alert says what goes where, with which model and effort, and under which account; it asks again when the account changes, and every time for an account billed per call. One Explain runs at a time in the whole app; `Cancel` stops it, and so do closing the column, cleaning up the worktree and quitting. Claude's overview then shows above the author's account, labeled with the model and the head it read, with the author's claims the code doesn't match and its questions for the author; its intent groups replace the path groups, most important file first, and each file gets a sentence, marked when the file changed since. In an open diff, Claude's notes sit under the hunks they explain, with what to check apart; `Mark wrong` keeps the mark in the review file, and the bar says how often notes were wrong. The next Explain sends only the files changed since, or not explained yet; `Explain All Again` sends every file. The bar shows today's runs on the branch, their tokens and what they would cost at API prices. Explain is disabled, with the reason, when no `claude` 2.1.284 or later is found or it isn't logged in.
-
-A row opens into its diff. Bidi controls and invisible characters in paths and diffs show as their code point (`⟨U+202E⟩`). The column follows its worktree: a moment after the agent stops writing, it reads the branch again. At the same head, the page updates in place, and the diffs you opened stay unless their file changed. A new head waits behind a Reload banner: a commit doesn't rewrite the page you're reading. Off screen, it reads once it shows again. During a rebase or a merge it pauses, and on another branch it offers to review that one. Refresh reads the branch again, after fetching the pull request's base: a remote-tracking ref, the column's only write to the repository. A review restored at launch reads its branch once its workspace shows. The editor's "Full Branch Diff" tab offers the same branch with an `Open in Branch Review` button. The design is in [docs/branch-review.md](docs/branch-review.md).
-
-## Local Development
-
-Build the Swift package:
+With Swift 6.2 or later:
 
 ```bash
 swift build
-```
-
-Run tests:
-
-```bash
-swift test
-```
-
-Or as CI does, one process per test class, several at a time:
-
-```bash
-swift build --build-tests && scripts/run-tests.sh
-```
-
-Run from SwiftPM, on a state of its own:
-
-```bash
 NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
 ```
 
-Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a downloaded copy run from elsewhere) quits unless `NIRUX_STATE_DIR` is set (non-empty). It always says why on stderr, and shows an alert too when LaunchServices started it (Finder, the Dock, `open`, a `nirux://` link). The check compares files rather than paths, so a symlink or another spelling of the same folder still counts, and it recognizes the installed app when Gatekeeper runs it from a translocated copy. Copies built before this check aren't covered: delete old `Nirux.app` bundles, since LaunchServices may still hand them `nirux://` links.
-
-`NIRUX_ALLOW_REAL_STATE=1` (exactly `1`) lets another copy use the real state anyway. It then restores and saves the installed app's workspaces and relaunches their agent sessions, even while the installed app runs. For a bundle, also set `NIRUX_SKIP_HOOK_INSTALL=1`, or it points the agent hooks at itself. Nirux doesn't pass the variable on to its terminals.
-
-`NIRUX_STATE_DIR` moves workspaces, settings, Mission history, URL history, and agent hook events out of `~/Library/Application Support/nirux/` (`HOME` is ignored). The `nirux://` scheme stays shared with the installed app.
-
-Only a Nirux running from an `.app` bundle installs the agent hooks, so `swift run` leaves `~/.claude/settings.json` and `~/.codex/config.toml` alone. The hooks the installed app wrote keep working, and agents in the dev build's terminals report into its state directory. To test installer changes, set `NIRUX_FORCE_HOOK_INSTALL=1`; this points the global hooks at the dev binary until the installed app is relaunched. `NIRUX_SKIP_HOOK_INSTALL=1` disables the install for any build; set it when launching a local `bundle.sh` bundle for a smoke test, which would otherwise point the hooks at that bundle.
-
-Create a local app bundle:
-
-```bash
-swift build -c release
-./scripts/bundle.sh "dev" "1"
-```
-
-By default `bundle.sh` uses ad-hoc signing. To create a Developer ID-signed bundle locally:
-
-```bash
-NIRUX_CODESIGN_IDENTITY="Developer ID Application: Example Name (ABCDE12345)" \
-  ./scripts/bundle.sh "dev" "1"
-```
-
-### The diff bundle
-
-`Sources/Nirux/EditorAssets/pierre-diff.bundle.js` draws the editor's diffs with [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs). It is built from `Web/pierre-diff`: the wrapper `pierre-diff-entry.js`, and the versions its `package-lock.json` pins. CI doesn't build JavaScript, so the bundle is committed. After changing the wrapper, rebuild it with Node.js and npm:
-
-```bash
-Web/pierre-diff/build.sh
-```
-
-To change a version, run `npm install --save-exact <package>@<version>` in `Web/pierre-diff` first: `build.sh` installs with `npm ci`, which refuses a `package.json` and a lock that disagree. A pull request that only updates the lock (Dependabot's) fails `PierreDiffBundleTests` until `build.sh` runs on its branch.
-
-`build.sh` records the SHA-256 of the sources and of the bundle in `Web/pierre-diff/SHA256SUMS`; `PierreDiffBundleTests` fails when they no longer match. `Web/pierre-diff/build.sh --check` rebuilds to a temporary file and says whether the committed bundle is what the sources build.
-
-### Fingerprint mismatch for libghostty-spm
-
-If SwiftPM fails with `Revision be4e5b6… for libghostty-spm … version 1.3.1 does not match previously recorded value b093032…`, your machine recorded the `1.3.1` tag before upstream re-tagged it onto an identical source tree. Clear the stale fingerprint once:
-
-```bash
-rm ~/Library/org.swift.swiftpm/security/fingerprints/libghostty-spm-*.json
-```
-
-## Architecture
-
-Nirux is a Swift Package with an AppKit executable target:
-
-- `Sources/Nirux/NiruxApp.swift`: app delegate, menus, Sparkle setup; `NiruxApp+URLScheme.swift` routes `nirux://` URLs.
-- `Sources/Nirux/Views/NiruxShellView.swift`: workspace and column layout.
-- `Sources/Nirux/Model`: persisted workspace, column, and settings state.
-- `Sources/Nirux/Content`: PTY session handling and browser cookie import.
-- `Sources/Nirux/EditorAssets`: Monaco editor assets and the diff bundle, copied into release bundles.
-- `Web/pierre-diff`: the source of the diff bundle and its build script.
-- `Resources/Info.plist`: bundle metadata, Sparkle feed, public key, and URL scheme.
-
-Primary dependencies:
-
-- `GhosttyTerminal` via `libghostty-spm` for terminal rendering.
-- `Sparkle` for automatic updates.
-- Monaco editor assets embedded as package resources.
-
-## State And Local Files
-
-Nirux writes user state under:
-
-```text
-~/Library/Application Support/nirux/
-```
-
-That directory contains workspace state, Mission history, URL history, generated helper scripts, and optional tool installs. Local agent state, generated build output, release archives, and signing assets are intentionally ignored by git. Keep `.desloppify/`, `.claude/`, `.build/`, `.env*`, certificates, provisioning profiles, and app archives out of commits.
-
-## Release Pipeline
-
-The nightly GitHub Actions workflow runs on pushes to `main` and on manual dispatch. It:
-
-1. Runs the test suite.
-2. Builds the release binary.
-3. Bundles `Nirux.app`.
-4. Signs with the Developer ID Application identity.
-5. Submits to Apple notarization and staples the result.
-6. Re-zips the app.
-7. Signs the update archive for Sparkle.
-8. Publishes `Nirux.app.zip` and `appcast.xml` to an immutable `nightly-YYYY.MM.DD-HHMM-<sha>` release (those of the last 7 days, and at least the 20 most recent, are kept) and to the rolling `nightly` release, with a changelog generated from the commits since the previous nightly.
-
-Sparkle reads updates from:
-
-```text
-https://github.com/xikimay/nirux/releases/download/nightly/appcast.xml
-```
-
-Signing and notarization setup, and how to roll back a broken nightly, are documented in [docs/release-signing.md](docs/release-signing.md).
+A build that isn't the installed app refuses to open your real workspaces, so `NIRUX_STATE_DIR` gives it a state of its own. [Development](docs/development.md) covers tests, app bundles and releases.
 
 ## License
 
-Nirux is available under the MIT License.
+[MIT](LICENSE)

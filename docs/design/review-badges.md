@@ -1,5 +1,9 @@
 # Review Badges
 
+> **Design record:** shipped in part. The badges are in the app.\
+> **Differs today:** they show on the selected row only, a pass that ran on an earlier commit is grey, not orange, and section 5 (Run review pipeline) was not built.\
+> **User guide:** [Pull requests](../pull-requests.md#review-badges).
+
 Status: design validated on 2026-10-03. The badges are implemented; Run
 review pipeline (section 5) is a second pull request.
 

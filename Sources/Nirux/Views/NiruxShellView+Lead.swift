@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - The Lead (docs/spaces.md, "The Lead")
+// MARK: - The Lead (docs/design/spaces.md, "The Lead")
 
 /// One optional Lead per space: a workspace pinned at the top of the space,
 /// in its default repository's main checkout, with Claude and the space's

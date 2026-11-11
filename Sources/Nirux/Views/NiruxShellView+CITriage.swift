@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - CI failure triage: flaky or real (docs/ci-failure-triage.md)
+// MARK: - CI failure triage: flaky or real (docs/design/ci-failure-triage.md)
 
 /// A CI failure notification, which waits for the triage's verdict when
 /// one is on its way.

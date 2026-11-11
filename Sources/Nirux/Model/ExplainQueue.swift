@@ -1,6 +1,6 @@
 import Foundation
 
-/// One Explain run at a time in the whole app (docs/branch-review.md,
+/// One Explain run at a time in the whole app (docs/design/branch-review.md,
 /// section 4.3): a second waits in line. A run works off the main thread
 /// and can be cancelled, waiting or under way; its completion comes back
 /// on the main actor, with nil when it was cancelled before it started.

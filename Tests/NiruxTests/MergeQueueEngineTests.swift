@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// The merge queue's state machine (docs/project-board.md, sections 3 and
+/// The merge queue's state machine (docs/design/project-board.md, sections 3 and
 /// 7): each transition, driven by a scripted GitHub and an injected clock.
 final class MergeQueueEngineTests: XCTestCase {
     private let a = MQ.sha("a")

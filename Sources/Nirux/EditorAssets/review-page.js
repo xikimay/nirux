@@ -1,4 +1,4 @@
-// The Branch Review page's pure functions (docs/branch-review.md, section 2):
+// The Branch Review page's pure functions (docs/design/branch-review.md, section 2):
 // no DOM, so that tests run them under JavaScriptCore. review.js draws what
 // they return, with textContent only.
 //

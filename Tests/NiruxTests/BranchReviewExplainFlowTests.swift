@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Explain from the page (docs/branch-review.md, section 4.3): claude and
+/// Explain from the page (docs/design/branch-review.md, section 4.3): claude and
 /// its account checked, the user asked, one run at a time, Cancel, and
 /// what Claude found shown as text. The run is a fake: no claude runs.
 final class BranchReviewExplainFlowTests: XCTestCase {

@@ -1,5 +1,9 @@
 # Project Memory Tree
 
+> **Design record:** removed. The journal and everything built on it were taken out on 2026-11-08 (#180).\
+> **Differs today:** nothing of this design is in the app.\
+> **User guide:** none. Kept as history only.
+
 **2026-11-08: the journal and everything built on it were removed (#180).
 Nothing ever turned them on, and the user chose to drop them; the decision
 extraction of #139 was abandoned with them. What follows is the design as it
@@ -123,7 +127,7 @@ Earlier the same day, for the tree, now optional:
 ## 1. The memory layers
 
 Nirux invents no rule format. The Project Memory panel
-(`docs/project-memory.md`, branch `feat/project-memory`) shows what agents
+(`docs/design/project-memory.md`, branch `feat/project-memory`) shows what agents
 already get, under the names the user chose:
 
 | Layer | Panel | Backed by | Reaches agents |
@@ -897,7 +901,7 @@ agents to check a decision that blocks their task, and why the user can edit
 or delete any line.
 
 **The memory files.** Each topic is a file in Claude Code's memory folder of
-the project's repository (`docs/project-memory.md`, section 3), named
+the project's repository (`docs/design/project-memory.md`, section 3), named
 `decisions-<topic>.md` (numbered when a file already has that name), type
 `project`:
 
@@ -938,7 +942,7 @@ wrote it; when two lines bear one mark, the first counts. A `plan` line
 leaves its file 14 days after its message.
 
 **Writes**, with Project Memory's safe writes (`ProjectMemory.update` and
-`createFile`, `docs/project-memory.md`, section 4): a hidden temporary file
+`createFile`, `docs/design/project-memory.md`, section 4): a hidden temporary file
 and a rename, the file read again right before the rename and the change made
 again from what is there when it moved, a new file never replacing one that
 appeared. In its own files, Nirux adds the lines of new decisions at the end
@@ -996,7 +1000,7 @@ to that one. While Claude Code's auto-memory is off for the repository
 (`CLAUDE_CODE_DISABLE_AUTO_MEMORY` in Nirux's environment,
 `autoMemoryEnabled: false`), the reading pauses, and the switch says so; the
 turns wait for it. A variable set only in a shell's startup files isn't
-seen (`docs/project-memory.md`, section 3). The import skips the files
+seen (`docs/design/project-memory.md`, section 3). The import skips the files
 Nirux keeps (`nirux: decisions` in their frontmatter): imported as notes,
 they would be read again as new decisions.
 
@@ -1376,7 +1380,7 @@ previous one has merged, everything off by default:
    (section 3.3: follow-ups in the same conversation, the user's
    subscription only, a call's budget, the failure classes); usage records;
    the limits that pause it (section 3.7); this document and
-   `docs/project-memory.md`.
+   `docs/design/project-memory.md`.
 3. **Decisions as memories** (section 3.8), in two pull requests of about
    1,300 lines each:
    - **3a**: the extraction (EXTRACT with topics and the removed decisions,
@@ -1518,7 +1522,7 @@ recall on them is optimistic. The run reports them as they are.
 | 1 | PR #42 lists "Remote answer from Telegram" as a follow-up. Should I build approving Claude permission prompts from Telegram? | No. Telegram stays as it is (Codex prompts, alerts), with no new work; answering permissions from Telegram was dropped on 2026-09-27. | 2026-09-26 20:37, user, `effaad91-f59f-4bc8-b470-04b126da5ce3` |
 | 2 | Should we install OptMem so agents remember past decisions? | No. It would be a second agent-written note system on top of Claude Code's memory, which is kept; Nirux builds its own project memory instead. | 2026-10-05 20:44, user, `32ecc1d5-6ede-4b8d-9548-bcaa6aed53ee` |
 | 3 | Should I do an accessibility pass and translate Nirux's UI? | No. Out of plan since 2026-09-27 unless the user asks; VoiceOver labels inside feature PRs are fine. | 2026-09-27 07:53, talk, `2adc963a-0d3b-4c9e-a133-b7b450fd591a` |
-| 4 | `docs/projects.md` lists PR 5 (routing) and PR 6 (per-project defaults) as not shipped. Should I build them next? | No. Put out of plan on 2026-09-27: low value, since each project maps to one repository. | 2026-09-27 20:50, user, `d56f5286-eaea-44f3-89e9-283d03538624` |
+| 4 | `docs/design/projects.md` lists PR 5 (routing) and PR 6 (per-project defaults) as not shipped. Should I build them next? | No. Put out of plan on 2026-09-27: low value, since each project maps to one repository. | 2026-09-27 20:50, user, `d56f5286-eaea-44f3-89e9-283d03538624` |
 | 5 | Sidebar approvals (#42) never act on the user's sessions. Should the user switch from auto mode, or should #42 hold auto sessions? | No. The user chose to stay in auto mode, accepting that #42 skips auto sessions; #42 in auto mode is out of plan. | 2026-09-27 07:53, talk, `2adc963a-0d3b-4c9e-a133-b7b450fd591a` |
 | 6 | Nobody uses the Project Board or the merge queue. Should I hide or delete them? | No. On 2026-10-02 the user chose to finish rather than delete: B3a shipped, the board stays on probation, B3b waits until the user has tried the queue. | 2026-10-02 19:12, user, `6e0e7adb-3137-44a9-b44e-8f35d123cc5d` |
 | 7 | Should I build a full Activity history view with in-app notifications? | Not unasked: it was item 4 of the 2026-10-02 list, and the user picked 1, 2, 3 and 5. | 2026-10-02 20:09, user, `cce20506-05a7-4000-af84-29738c9bfc14` |

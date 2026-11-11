@@ -1,4 +1,4 @@
-// The Branch Review page (docs/branch-review.md, section 2). Swift sends the
+// The Branch Review page (docs/design/branch-review.md, section 2). Swift sends the
 // page's data (`BranchReview.Page`) and, when a row opens, its file's diff
 // (`BranchReview.FileDiff`); the page sends back ids, links and the user's
 // comments, never text to type into an agent. Every string from the branch

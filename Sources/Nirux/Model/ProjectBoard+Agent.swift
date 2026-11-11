@@ -4,7 +4,7 @@ import Foundation
 
 extension ProjectBoard {
     /// What the Agent column says of one agent column, or of a row: its
-    /// most urgent agent column (docs/project-board.md, section 2).
+    /// most urgent agent column (docs/design/project-board.md, section 2).
     enum AgentState: Equatable, Sendable {
         /// No agent in the column (or no workspace in the row).
         case none

@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// The Reviewed checkboxes (docs/branch-review.md, section 6.3), against
+/// The Reviewed checkboxes (docs/design/branch-review.md, section 6.3), against
 /// the real page and a review file in a folder of the test's own: what a
 /// click writes, what the page shows of the file, and when nothing can be
 /// written.

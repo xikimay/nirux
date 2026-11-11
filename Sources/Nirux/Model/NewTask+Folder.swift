@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Tasks without a repository
 
 /// A task without a repository gets a new folder of its own instead of a
-/// worktree (docs/spaces.md, "Tasks without a repository"): named after the
+/// worktree (docs/design/spaces.md, "Tasks without a repository"): named after the
 /// task, in the tasks folder (Settings › General, `~/Nirux Tasks` unless the
 /// user picks another), in a space's folder outside git, or in the folder of
 /// the task it is a sub-task of. No branch, no pull request, no clean-up:
