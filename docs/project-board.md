@@ -8,6 +8,9 @@ to Resolve) isn't. What B1, B2 and B3a decided along the way is in sections
 repositories has a section, a config and a merge queue per repository
 (sections 2.2 and 5.1).
 
+The table of section 2 is being replaced by [Board Stages](board-stages.md):
+one line per task, on four stations. The merge queue doesn't change.
+
 On the night of 2026-09-26, one Claude session coordinated about fifteen
 parallel pull requests by hand:
 
