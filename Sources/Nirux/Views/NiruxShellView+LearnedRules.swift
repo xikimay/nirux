@@ -97,7 +97,9 @@ extension NiruxShellView {
             origin: origin, spaceName: space.name, briefText: LearnedRules.briefText(at: briefURL), evidence: evidence
         )
         sheet.onAdd = { [weak self] rule, evidence in
-            self?.addLearnedRule(rule, evidence: evidence, origin: origin, spaceID: spaceID) ?? "Nirux closed meanwhile."
+            // Not `self?.… ?? …`: nil is what a rule added returns.
+            guard let self else { return "Nirux closed meanwhile." }
+            return self.addLearnedRule(rule, evidence: evidence, origin: origin, spaceID: spaceID)
         }
         sheet.onDismiss = { [weak self] in
             guard case .proposal(let proposal) = origin else { return }

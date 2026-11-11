@@ -130,7 +130,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             // Either day, should it be midnight.
             let days = [LearnedRules.dayText(Date())]
             try XCTUnwrap(sheet.addButton).performClick(nil)
-            XCTAssertFalse(sheet.isOpen)
+            XCTAssertFalse(sheet.isOpen, sheet.statusLabel.stringValue)
             let brief = LearnedRules.briefText(at: try XCTUnwrap(SpaceBrief.briefURL(spaceID: task.profileID)))
             XCTAssertTrue((days + [LearnedRules.dayText(Date())]).contains { day in
                 brief.hasSuffix("## Rules learned\n\n- Keep pull requests small. (learned \(day), \(harness.worktreeBranch))\n")

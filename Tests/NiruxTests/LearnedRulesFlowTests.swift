@@ -87,7 +87,7 @@ final class LearnedRulesFlowTests: XCTestCase {
             // Either day, should it be midnight.
             let days = [LearnedRules.dayText(Date())]
             try XCTUnwrap(sheet.addButton).performClick(nil)
-            XCTAssertFalse(sheet.isOpen)
+            XCTAssertFalse(sheet.isOpen, sheet.statusLabel.stringValue)
             waitForNoSheet(harness)
 
             let brief = try briefText(lead)
@@ -150,7 +150,9 @@ final class LearnedRulesFlowTests: XCTestCase {
             let url = try XCTUnwrap(SpaceBrief.briefURL(spaceID: lead.space))
             try Data("## Rules learned\n- Draft PRs only\n".utf8).write(to: url)
             shell.showRuleProposal(spaceID: lead.space)
-            try XCTUnwrap(shell.learnedRuleSheet?.addButton).performClick(nil)
+            let byHand = try XCTUnwrap(shell.learnedRuleSheet)
+            try XCTUnwrap(byHand.addButton).performClick(nil)
+            XCTAssertFalse(byHand.isOpen, byHand.statusLabel.stringValue)
             XCTAssertEqual(try briefText(lead), "## Rules learned\n- Draft PRs only\n")
             XCTAssertEqual(leadRowCount(shell), 0)
         }
@@ -207,7 +209,7 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertEqual(try briefText(lead), "Goals.\n")
             editor.revert()
             waiting.add()
-            XCTAssertFalse(waiting.isOpen)
+            XCTAssertFalse(waiting.isOpen, waiting.statusLabel.stringValue)
             XCTAssertTrue(try briefText(lead).hasPrefix("Goals.\n\n## Rules learned\n\n- Short. (learned "))
         }
     }
