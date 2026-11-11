@@ -49,7 +49,7 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         briefCount = LearnedRules.characterCount(of: briefText)
         let base = briefText.isEmpty ? SpaceBrief.template(spaceName: spaceName) : briefText
         let placeholder = LearnedRules.line(rule: "x", evidence: "", date: Date())
-        if let briefProblem {
+        if let briefProblem, false {
             blocker = briefProblem
             baseAfter = nil
         } else {

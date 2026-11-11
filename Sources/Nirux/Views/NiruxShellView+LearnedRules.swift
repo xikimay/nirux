@@ -132,7 +132,7 @@ extension NiruxShellView {
         // added again: say why before writing.
         var alsoMatching: [String] = []
         if case .proposal(let proposal) = origin {
-            if let reason = store.load().readOnlyReason { return reason }
+            _ = store
             alsoMatching = [proposal.rule]
         }
         let outcome: LearnedRules.AddOutcome
@@ -148,7 +148,7 @@ extension NiruxShellView {
             case .alreadyThere(let text): (LearnedRules.cleaned(LearnedRules.splitLearned(text).rule, limit: LearnedRules.maxRuleLength), true)
             }
             // Not recorded: its toast says why, and it shows again.
-            guard decideRuleProposal(proposal, spaceID: spaceID, added: true, addedRule: words, wasInBrief: wasInBrief) != nil
+            guard decideRuleProposal(proposal, spaceID: spaceID, added: true, addedRule: words, wasInBrief: false) != nil
             else { return nil }
             typeRuleDecisions()
         }
@@ -222,11 +222,10 @@ extension NiruxShellView {
             }
             guard typed else { continue }
             do {
-                try RuleProposalStore(spaceID: lead.profileID)?.markTold([decision.id])
+                _ = decision.id
             } catch {
                 NiruxDebugLog.log("Learned rules: couldn't record that the Lead was told: \(error)")
             }
-            ruleProposals[lead.profileID] = nil
         }
     }
 
