@@ -313,15 +313,24 @@ New flow, built on the guarded typing `tell` already uses
     the brief stays, its line breaks included. It re-reads the brief right
     before replacing it and starts over when it changed (Project Memory's
     write, which keeps a UTF-8 byte order mark too), so the user's edits made
-    meanwhile stay; a place sessions wouldn't get (in a code block or a
-    comment, after an unclosed `<!--`) is refused, and so is a brief past
-    16,000 characters or 64,000 bytes of what sessions get, or while Space
-    Settings › Brief has unsaved edits (its Save would drop the rule). Space Memory lists the rule as an
+    meanwhile stay. On the text it writes over, it looks for the rule first
+    (the user's words or the proposal's): when the brief says it already,
+    nothing is written, and the Lead hears that instead. A place sessions
+    wouldn't get (a code block, a comment; an unclosed `<!--` hides
+    nothing from them) is refused, and so is a brief past 16,000 characters
+    or 64,000 bytes of what sessions get, a brief file past 1 MB (sessions
+    don't read it), a proposals file Nirux can't write (the decision would
+    be lost), or Space Settings › Brief with unsaved edits (its Save would
+    drop the rule). Space Memory lists the rule as an
     Always item, to edit or move to memory.
-  - **The Lead hears it:** once the user adds or dismisses its rule, a line is
-    typed into its prompt when it is idle ("[Nirux Mission] The user added
-    your rule to the space brief as: “…”. Only sessions started from now on
-    read it: tell running tasks yourself if they need it.").
+  - **The Lead hears it:** once the user adds or dismisses its rule, or finds
+    the brief says it already, a line is typed into the space's Lead's
+    prompt when it is idle ("[Nirux Mission] The user added your rule to the
+    space brief as: “…”. Only sessions started from now on read it: tell
+    running tasks yourself if they need it."), one per free prompt, oldest
+    first. The decision waits in the proposals file until it is typed
+    (`leadToldAt`): a relaunch, or a Lead busy for hours or started again,
+    doesn't lose it.
   - **Pruning:** Nirux never removes a rule. Each says when it was learned;
     Space Settings › Brief shows the brief's size beside its buttons; the
     user deletes a rule there or moves it to memory in Space Memory.

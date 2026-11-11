@@ -230,9 +230,10 @@ enum LeadTools {
             guard let rule = arguments["rule"] as? String, let evidence = arguments["evidence"] as? String else {
                 return "rule and evidence must be strings."
             }
-            let cleanedEvidence = LearnedRules.cleaned(evidence, limit: LearnedRules.maxEvidenceLength)
-            if cleanedEvidence.isEmpty { return "evidence must say where the defect showed up (\"#395, #417\")." }
-            return LearnedRules.problem(rule: LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength), evidence: cleanedEvidence)
+            return LearnedRules.proposalProblem(
+                rule: LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength),
+                evidence: LearnedRules.cleaned(evidence, limit: LearnedRules.maxEvidenceLength)
+            )
         default:
             return "Unknown tool: \(tool)"
         }

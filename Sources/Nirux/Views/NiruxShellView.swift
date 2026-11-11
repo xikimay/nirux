@@ -127,10 +127,10 @@ final class NiruxShellView: NSView {
     /// (`queue_merge`), by `<space id> <owner/name>`: a Lead may replace its
     /// own, never the user's.
     var leadQueueProposals: [String: [Int]] = [:]
-    /// The rules each space's Lead proposed that wait for the user, by
-    /// space id, read from RuleProposalStore once and kept current by the
-    /// app's own changes (the sidebar asks several times a second).
-    var pendingRuleProposals: [String: [RuleProposal]] = [:]
+    /// The rules each space's Lead proposed, by space id, read from
+    /// RuleProposalStore once and kept current by the app's own changes
+    /// (the sidebar asks several times a second).
+    var ruleProposals: [String: RuleProposalStore.Loaded] = [:]
     /// The sheet that adds a rule to a space's brief (LearnedRuleSheet).
     var learnedRuleSheet: LearnedRuleSheet?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).

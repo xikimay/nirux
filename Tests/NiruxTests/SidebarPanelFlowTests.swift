@@ -135,7 +135,6 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertTrue((days + [LearnedRules.dayText(Date())]).contains { day in
                 brief.hasSuffix("## Rules learned\n\n- Keep pull requests small. (learned \(day), \(harness.worktreeBranch))\n")
             }, brief)
-            XCTAssertTrue(shell.pendingLeadNotices.isEmpty, "the user's own rule: nobody to tell")
         }
     }
 

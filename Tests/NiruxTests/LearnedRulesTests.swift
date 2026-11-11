@@ -20,6 +20,15 @@ final class LearnedRulesTests: XCTestCase {
         super.tearDown()
     }
 
+    /// The bullet an add wrote; a failure when it wrote nothing.
+    private func written(_ outcome: LearnedRules.AddOutcome, file: StaticString = #filePath, line: UInt = #line) throws -> String {
+        guard case .added(let bullet) = outcome else {
+            XCTFail("nothing written: \(outcome)", file: file, line: line)
+            throw XCTSkip("nothing written")
+        }
+        return bullet
+    }
+
     /// `text` with `inserted` at `offset` characters: the only change a
     /// write may make.
     private func expected(_ text: String, inserting inserted: String, at marker: String) throws -> String {
@@ -129,14 +138,16 @@ final class LearnedRulesTests: XCTestCase {
     /// A place inside a code block or a comment would hide the rule from
     /// sessions, or show it as code: refused, the brief left alone.
     func testAPlaceInsideACodeBlockOrACommentIsRefused() {
-        for brief in [
-            "Goals.\n```\nnot closed\n",
-            "Goals.\n<!-- not closed\n",
-            "<!-- not closed\n## Rules learned\n- a\n",
-            "## Rules learned\n- a\n```\nopen\n## Next\n"
-        ] {
+        for brief in ["Goals.\n```\nnot closed\n", "## Rules learned\n- a\n```\nopen\n## Next\n"] {
             XCTAssertThrowsError(try LearnedRules.inserting(bullet, into: brief), brief)
         }
+        // An unclosed `<!--` hides nothing from sessions (SpaceBrief.body
+        // keeps it as text): a literal one in prose refuses nothing.
+        let prose = "Never write `<!--` in prompts.\n"
+        XCTAssertEqual(try LearnedRules.inserting(bullet, into: prose), prose + "\n## Rules learned\n\n\(bullet)\n")
+        let opened = "<!-- not closed\n## Rules learned\n- a\n"
+        XCTAssertEqual(try LearnedRules.inserting(bullet, into: opened), opened + bullet + "\n")
+
         // The same rule shown above doesn't make a hidden copy pass.
         XCTAssertThrowsError(try LearnedRules.inserting(bullet, into: "\(bullet)\n## Rules learned\n- a\n<!-- off\n- b\n--> ## Next\n"))
         // The next heading shares its line with a comment's end: the rule
@@ -195,7 +206,7 @@ final class LearnedRulesTests: XCTestCase {
     /// No brief yet: the template, then the section; its folder made.
     func testAddingToAMissingBriefStartsFromTheTemplate() throws {
         let url = folder.appendingPathComponent("space/brief.md")
-        let written = try LearnedRules.add(rule: "Wait on state.", evidence: "#395", to: url, spaceName: "Nirux")
+        let written = try written(LearnedRules.add(rule: "Wait on state.", evidence: "#395", to: url, spaceName: "Nirux"))
         let text = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(text.hasPrefix(SpaceBrief.template(spaceName: "Nirux")))
         XCTAssertTrue(text.hasSuffix("## Rules learned\n\n\(written)\n"))
@@ -209,7 +220,7 @@ final class LearnedRulesTests: XCTestCase {
         try Data("Goals.\n\n## Rules learned\n- a\n".utf8).write(to: url)
         let shown = LearnedRules.briefText(at: url)
         try Data("Goals, edited.\n\n## Rules learned\n- a\n\n## Workflow\n- Draft PRs.\n".utf8).write(to: url)
-        let written = try LearnedRules.add(rule: "b", evidence: "", to: url, spaceName: "Nirux")
+        let written = try written(LearnedRules.add(rule: "b", evidence: "", to: url, spaceName: "Nirux"))
         XCTAssertNotEqual(shown, LearnedRules.briefText(at: url))
         XCTAssertEqual(
             try String(contentsOf: url, encoding: .utf8), "Goals, edited.\n\n## Rules learned\n- a\n\(written)\n\n## Workflow\n- Draft PRs.\n"
@@ -222,12 +233,50 @@ final class LearnedRulesTests: XCTestCase {
         let url = folder.appendingPathComponent("brief.md")
         try Data("Goals.\n".utf8).write(to: url)
         var reads: [String] = []
-        let written = try LearnedRules.add(rule: "b", evidence: "#1", to: url, spaceName: "Nirux") { text in
+        let written = try written(LearnedRules.add(rule: "b", evidence: "#1", to: url, spaceName: "Nirux") { text in
             reads.append(text)
             if reads.count == 1 { try? Data("Goals, by hand.\n".utf8).write(to: url) }
-        }
+        })
         XCTAssertEqual(reads, ["Goals.\n", "Goals, by hand.\n"])
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "Goals, by hand.\n\n## Rules learned\n\n\(written)\n")
+    }
+
+    /// The brief says it already, in the user's words or the proposal's,
+    /// when the write reads it: nothing is written, even when it got there
+    /// after the sheet looked (by hand, or an Add whose decision wasn't
+    /// recorded).
+    func testARuleTheBriefSaysIsNotWrittenAgain() throws {
+        let url = folder.appendingPathComponent("brief.md")
+        try Data("Goals.\n".utf8).write(to: url)
+        let byHand = "Goals.\n\n## Rules learned\n\n- Wait on state (learned 2026-11-11, #395)\n"
+        let outcome = try LearnedRules.add(rule: "wait on STATE.", evidence: "", to: url, spaceName: "N") { text in
+            if text == "Goals.\n" { try? Data(byHand.utf8).write(to: url) }
+        }
+        XCTAssertEqual(outcome, .alreadyThere("Wait on state (learned 2026-11-11, #395)"))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), byHand)
+        let edited = try LearnedRules.add(rule: "Tests wait on state, never on a sleep.", evidence: "", alsoMatching: ["Wait on state"],
+                                          to: url, spaceName: "N")
+        XCTAssertEqual(edited, .alreadyThere("Wait on state (learned 2026-11-11, #395)"))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), byHand)
+    }
+
+    /// Sessions don't read a brief file past 1 MB: no rule goes into one,
+    /// nor makes one pass it.
+    func testABriefFileSessionsDontReadIsRefused() throws {
+        let url = folder.appendingPathComponent("brief.md")
+        let comment = "<!--\n" + String(repeating: "x", count: SpaceBrief.maxFileBytes) + "\n-->\n"
+        try Data(comment.utf8).write(to: url)
+        XCTAssertNotNil(LearnedRules.readForAdding(at: url).problem)
+        XCTAssertThrowsError(try LearnedRules.add(rule: "Wait on state.", evidence: "", to: url, spaceName: "N"))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), comment)
+        // Nor counts as saying it: sessions don't read that file.
+        try Data((comment + "- Wait on state.\n").utf8).write(to: url)
+        XCTAssertThrowsError(try LearnedRules.add(rule: "Wait on state.", evidence: "", to: url, spaceName: "N"))
+        let near = "<!--\n" + String(repeating: "x", count: SpaceBrief.maxFileBytes - 30) + "\n-->\n"
+        try Data(near.utf8).write(to: url)
+        XCTAssertNil(LearnedRules.readForAdding(at: url).problem)
+        XCTAssertThrowsError(try LearnedRules.add(rule: "Wait on state, never on a fixed sleep.", evidence: "#395", to: url, spaceName: "N"))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), near)
     }
 
     /// Past what sessions get, nothing is written.
@@ -248,7 +297,7 @@ final class LearnedRulesTests: XCTestCase {
         let url = folder.appendingPathComponent("brief.md")
         let mark = Data([0xEF, 0xBB, 0xBF])
         try (mark + Data("Goals.\n".utf8)).write(to: url)
-        let written = try LearnedRules.add(rule: "b", evidence: "", to: url, spaceName: "N")
+        let written = try written(LearnedRules.add(rule: "b", evidence: "", to: url, spaceName: "N"))
         XCTAssertEqual(try Data(contentsOf: url), mark + Data("Goals.\n\n## Rules learned\n\n\(written)\n".utf8))
     }
 
@@ -269,7 +318,7 @@ final class LearnedRulesTests: XCTestCase {
         try Data("Goals.\n".utf8).write(to: target)
         let link = folder.appendingPathComponent("brief.md")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
-        try LearnedRules.add(rule: "b", evidence: "", to: link, spaceName: "N")
+        _ = try written(LearnedRules.add(rule: "b", evidence: "", to: link, spaceName: "N"))
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), target.path)
         XCTAssertTrue(try String(contentsOf: target, encoding: .utf8).hasPrefix("Goals.\n\n## Rules learned\n\n- b (learned "))
     }

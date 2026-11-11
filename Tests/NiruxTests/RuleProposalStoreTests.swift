@@ -70,6 +70,9 @@ final class RuleProposalStoreTests: XCTestCase {
         XCTAssertFalse(store.load().proposals.contains { $0.dismissedAt != nil }, "the old dismissal went at the save")
 
         if case .refused = propose("") {} else { XCTFail("an empty rule") }
+        if case .refused = store.propose(rule: "Name the repository.", evidence: " ", briefText: "", lead: lead, now: now) {} else {
+            XCTFail("no evidence")
+        }
         if case .refused = propose("Wait <!-- hidden") {} else { XCTFail("a comment mark") }
     }
 
@@ -88,6 +91,21 @@ final class RuleProposalStoreTests: XCTestCase {
         let words = "Tests wait on state, never on a sleep."
         XCTAssertEqual(propose("tests wait on state"), .added(at: now.timeIntervalSince1970, as: words))
         XCTAssertEqual(propose("Tests wait on state, never on a sleep"), .added(at: now.timeIntervalSince1970, as: words))
+    }
+
+    /// A decision waits until its Lead is told, in the file: oldest first;
+    /// one the brief said already says so.
+    func testADecisionWaitsUntilTheLeadIsTold() throws {
+        let first = try proposed(propose("Tests wait on state."))
+        let second = try proposed(propose("Check who owns the screen first."))
+        XCTAssertTrue(store.load().toTell.isEmpty, "nothing decided yet")
+        try store.decide(second.id, added: true, addedRule: "Check the screen's owner.", wasInBrief: true, now: now)
+        try store.decide(first.id, added: false, now: now.addingTimeInterval(60))
+        XCTAssertEqual(store.load().toTell.map(\.id), [second.id, first.id])
+        XCTAssertEqual(store.load().toTell.first?.wasInBrief, true)
+        try store.markTold([second.id], now: now.addingTimeInterval(120))
+        XCTAssertEqual(store.load().toTell.map(\.id), [first.id])
+        XCTAssertEqual(store.load().proposals.first { $0.id == second.id }?.leadToldAt, now.timeIntervalSince1970 + 120)
     }
 
     /// The newest 100 decisions stay: the file never grows past what it

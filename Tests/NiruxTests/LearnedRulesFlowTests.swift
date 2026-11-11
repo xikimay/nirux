@@ -54,6 +54,11 @@ final class LearnedRulesFlowTests: XCTestCase {
         harness.waitUntil("the sheet to close", file: file, line: line) { harness.window.attachedSheet == nil }
     }
 
+    /// The lines its Lead hasn't heard yet, as the file keeps them.
+    private func untold(_ shell: NiruxShellView, _ lead: Lead) -> [String] {
+        (RuleProposalStore(spaceID: lead.space)?.load().toTell ?? []).map(NiruxShellView.ruleDecisionText)
+    }
+
     /// Types into the rule's field as a user does (its delegate hears it).
     private func type(_ text: String, into sheet: LearnedRuleSheet) {
         let all = NSRange(location: 0, length: (sheet.ruleView.string as NSString).length)
@@ -98,11 +103,26 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertEqual(leadRowCount(shell), 0)
             let injection = try XCTUnwrap(SpaceBrief.prepareInjection(spaceID: lead.space))
             XCTAssertTrue(try String(contentsOfFile: injection.claudePromptFile, encoding: .utf8).contains(bullet))
-            let notice = try XCTUnwrap(shell.pendingLeadNotices.last)
-            XCTAssertEqual(notice.workspaceID, lead.workspace.id)
-            XCTAssertEqual(notice.agentUUID, lead.agentUUID)
-            XCTAssertEqual(notice.text, "[Nirux Mission] The user added your rule to the space brief as: “Tests wait on state, never on "
-                + "a fixed sleep.”. Only sessions started from now on read it: tell running tasks yourself if they need it.")
+            // The Lead hears it at its next free prompt, even after a
+            // relaunch (the decision waits in the file), and only once.
+            let line = "[Nirux Mission] The user added your rule to the space brief as: “Tests wait on state, never on "
+                + "a fixed sleep.”. Only sessions started from now on read it: tell running tasks yourself if they need it."
+            XCTAssertEqual(untold(shell, lead), [line])
+            shell.ruleProposals = [:]
+            shell.typeRuleDecisions { _, _ in false }
+            XCTAssertEqual(untold(shell, lead), [line], "a busy prompt keeps it")
+            var typed: [(agent: String?, text: String)] = []
+            shell.typeRuleDecisions { column, text in
+                typed.append((column.agentUUID, text))
+                return true
+            }
+            XCTAssertEqual(typed.map(\.agent), [lead.agentUUID])
+            XCTAssertEqual(typed.map(\.text), [line])
+            XCTAssertEqual(untold(shell, lead), [])
+            shell.typeRuleDecisions { _, text in
+                XCTFail("told twice: \(text)")
+                return true
+            }
 
             let again = try propose("Tests wait on state, never on a fixed sleep", lead: lead, in: harness)
             XCTAssertTrue(again.isError)
@@ -139,8 +159,8 @@ final class LearnedRulesFlowTests: XCTestCase {
             waitForNoSheet(harness)
             XCTAssertEqual(leadRowCount(shell), 0)
             XCTAssertEqual(try briefText(lead), "")
-            XCTAssertEqual(shell.pendingLeadNotices.last?.text,
-                           "[Nirux Mission] The user dismissed the rule you proposed: “Check who owns the screen first.”. Don't propose it again.")
+            XCTAssertEqual(untold(shell, lead),
+                           ["[Nirux Mission] The user dismissed the rule you proposed: “Check who owns the screen first.”. Don't propose it again."])
             let again = try propose("check who owns the screen first", lead: lead, in: harness)
             XCTAssertTrue(again.isError)
             XCTAssertTrue(again.text.contains("dismissed"), again.text)
@@ -155,6 +175,24 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertFalse(byHand.isOpen, byHand.statusLabel.stringValue)
             XCTAssertEqual(try briefText(lead), "## Rules learned\n- Draft PRs only\n")
             XCTAssertEqual(leadRowCount(shell), 0)
+            XCTAssertEqual(untold(shell, lead).last, "[Nirux Mission] The user looked at the rule you proposed, “Draft PRs only.”: "
+                + "the space brief says it already, as “Draft PRs only”. Nothing was added.")
+
+            // A decision Nirux couldn't record would leave the rule waiting,
+            // to be added again: Add says why before writing anything.
+            waitForNoSheet(harness)
+            XCTAssertFalse(try propose("Name the repository.", lead: lead, in: harness).isError)
+            let store = try XCTUnwrap(RuleProposalStore(spaceID: lead.space))
+            var file = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: store.fileURL)) as? [String: Any])
+            file["schemaVersion"] = RuleProposalStore.schemaVersion + 1
+            try JSONSerialization.data(withJSONObject: file).write(to: store.fileURL)
+            shell.showRuleProposal(spaceID: lead.space)
+            let locked = try XCTUnwrap(shell.learnedRuleSheet)
+            XCTAssertEqual(locked.ruleView.string, "Name the repository.")
+            locked.add()
+            XCTAssertTrue(locked.isOpen)
+            XCTAssertEqual(locked.statusLabel.stringValue, "A newer Nirux keeps this space’s proposed rules.")
+            XCTAssertEqual(try briefText(lead), "## Rules learned\n- Draft PRs only\n")
         }
     }
 
@@ -188,7 +226,18 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertTrue(sheet.isOpen)
             sheet.closeButton?.performClick(nil)
             XCTAssertEqual(try briefText(lead), long)
-            XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
+            waitForNoSheet(harness)
+
+            // A brief file sessions don't read (past 1 MB): no rule goes in.
+            let huge = "<!--\n" + String(repeating: "x", count: SpaceBrief.maxFileBytes) + "\n-->\n"
+            try Data(huge.utf8).write(to: url)
+            shell.showAddRuleSheet(for: task)
+            let unread = try XCTUnwrap(shell.learnedRuleSheet)
+            type("Short.", into: unread)
+            XCTAssertEqual(unread.addButton?.isEnabled, false)
+            XCTAssertTrue(unread.statusLabel.stringValue.hasPrefix("The brief’s file is over 1 MB"), unread.statusLabel.stringValue)
+            unread.closeButton?.performClick(nil)
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), huge)
             waitForNoSheet(harness)
 
             // Edits not saved in Space Settings › Brief: its Save would drop

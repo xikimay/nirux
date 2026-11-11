@@ -17,6 +17,12 @@ struct RuleProposal: Codable, Equatable, Sendable {
     /// with (they may have edited it).
     var addedAt: TimeInterval?
     var addedRule: String?
+    /// The brief said it already when the user added it: nothing was
+    /// written, and `addedRule` is the brief's rule.
+    var wasInBrief: Bool?
+    /// Epoch seconds, once its Lead was told what the user decided. Kept
+    /// in the file: a relaunch, or a Lead busy for hours, doesn't lose it.
+    var leadToldAt: TimeInterval?
 
     var isPending: Bool { dismissedAt == nil && addedAt == nil }
     /// When the user decided it, if they did.
@@ -66,6 +72,10 @@ struct RuleProposalStore: Sendable {
         var readOnlyReason: String?
 
         var pending: [RuleProposal] { proposals.filter(\.isPending).sorted { $0.proposedAt < $1.proposedAt } }
+        /// Decided, its Lead not told yet: oldest decision first.
+        var toTell: [RuleProposal] {
+            proposals.filter { !$0.isPending && $0.leadToldAt == nil }.sorted { ($0.decidedAt ?? 0) < ($1.decidedAt ?? 0) }
+        }
     }
 
     func load() -> Loaded {
@@ -124,7 +134,7 @@ struct RuleProposalStore: Sendable {
     ) -> ProposeOutcome {
         let rule = LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength)
         let evidence = LearnedRules.cleaned(evidence, limit: LearnedRules.maxEvidenceLength)
-        if let problem = LearnedRules.problem(rule: rule, evidence: evidence) { return .refused(problem) }
+        if let problem = LearnedRules.proposalProblem(rule: rule, evidence: evidence) { return .refused(problem) }
         if let existing = LearnedRules.existingRule(matching: rule, in: briefText) { return .inBrief(day: existing.day) }
         let loaded = load()
         if let reason = loaded.readOnlyReason { return .refused(reason) }
@@ -151,10 +161,12 @@ struct RuleProposalStore: Sendable {
     }
 
     /// Records the user's decision on a pending proposal: added (as
-    /// `addedRule`, their words) or dismissed, dated. Nil when it no longer
-    /// waits (decided elsewhere).
+    /// `addedRule`, their words, or the brief's rule when `wasInBrief`) or
+    /// dismissed, dated. Nil when it no longer waits (decided elsewhere).
     @discardableResult
-    func decide(_ id: String, added: Bool, addedRule: String? = nil, now: Date = Date()) throws -> RuleProposal? {
+    func decide(
+        _ id: String, added: Bool, addedRule: String? = nil, wasInBrief: Bool = false, now: Date = Date()
+    ) throws -> RuleProposal? {
         let loaded = load()
         if let reason = loaded.readOnlyReason { throw ProjectMemory.WriteError.failed(reason) }
         guard let index = loaded.proposals.firstIndex(where: { $0.id == id && $0.isPending }) else { return nil }
@@ -163,11 +175,23 @@ struct RuleProposalStore: Sendable {
         if added {
             decided.addedAt = now.timeIntervalSince1970
             decided.addedRule = addedRule ?? decided.rule
+            if wasInBrief { decided.wasInBrief = true }
         } else {
             decided.dismissedAt = now.timeIntervalSince1970
         }
         proposals[index] = decided
         try save(proposals, now: now)
         return decided
+    }
+
+    /// Its Lead has been told about these decisions.
+    func markTold(_ ids: Set<String>, now: Date = Date()) throws {
+        let loaded = load()
+        if let reason = loaded.readOnlyReason { throw ProjectMemory.WriteError.failed(reason) }
+        var proposals = loaded.proposals
+        for index in proposals.indices where ids.contains(proposals[index].id) && proposals[index].leadToldAt == nil {
+            proposals[index].leadToldAt = now.timeIntervalSince1970
+        }
+        try save(proposals, now: now)
     }
 }

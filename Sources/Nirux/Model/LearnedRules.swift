@@ -29,6 +29,13 @@ enum LearnedRules {
         AgentText.clean(text, maxLength: limit * 4) ?? ""
     }
 
+    /// What a Lead's proposal must hold: where the defect showed up, and a
+    /// rule `problem` accepts. The Lead's tool and the store both ask it.
+    static func proposalProblem(rule: String, evidence: String) -> String? {
+        if evidence.isEmpty { return "evidence must say where the defect showed up (\"#395, #417\")." }
+        return problem(rule: rule, evidence: evidence)
+    }
+
     /// Why a cleaned rule and its evidence can't go into the brief, or nil.
     static func problem(rule: String, evidence: String) -> String? {
         if rule.isEmpty { return "The rule is empty." }
@@ -180,13 +187,12 @@ enum LearnedRules {
         .failed("The brief’s end, or its “Rules learned” section, is inside a comment or a code block: add the rule in Space Settings › Brief")
     }
 
-    /// Whether a bullet written after line `index` would be text sessions
-    /// get, outside any code block: no fence left open there, no `<!--`
-    /// without its `-->` before it. A complete comment can't run past that
-    /// line: it is the section's last non-blank line, and a comment going
-    /// on past it would hide the heading that ends the section.
+    /// Whether a bullet written after line `index` would be outside any
+    /// code block. One a comment would hide is caught after the insert:
+    /// sessions must get one more copy than before. An unclosed `<!--`
+    /// hides nothing from them: SpaceBrief.body keeps it as text.
     private static func isSafe(after index: Int, in lines: [Line]) -> Bool {
-        !lines[index].fenceOpenAfter && !lines[...index].contains { $0.live.contains("<!--") }
+        !lines[index].fenceOpenAfter
     }
 
     /// A line of the brief: where it is in the text (its break included),
@@ -302,19 +308,28 @@ enum LearnedRules {
         return result
     }
 
+    enum AddOutcome: Equatable {
+        /// The bullet written.
+        case added(String)
+        /// Nothing written: the brief's rule that says it already.
+        case alreadyThere(String)
+    }
+
     /// Adds a rule to the brief at `url` (through a link, to where it
-    /// points), created from its template when missing or empty, and
-    /// returns the bullet written. The write re-reads the brief right
-    /// before replacing it and starts over from what is there when it
-    /// changed (ProjectMemory.update): the user's edits made meanwhile
-    /// stay. Refused when the brief would pass `maxCharacters` of what
-    /// sessions get. `onRead` sees each text read (tests edit the file
-    /// there).
-    @discardableResult
+    /// points), created from its template when missing or empty. The write
+    /// re-reads the brief right before replacing it and starts over from
+    /// what is there when it changed (ProjectMemory.update): the user's
+    /// edits made meanwhile stay. On the text it writes over, it looks for
+    /// the rule first, in its words or `alsoMatching` (a proposal's), and
+    /// writes nothing when the brief says it already: an Add whose decision
+    /// wasn't recorded, retried, doesn't add it twice. Refused past what
+    /// sessions get: `maxCharacters`, or a file they don't read (past
+    /// `SpaceBrief.maxFileBytes`). `onRead` sees each text read (tests
+    /// edit the file there).
     static func add(
-        rule: String, evidence: String, date: Date = Date(), to url: URL, spaceName: String,
+        rule: String, evidence: String, alsoMatching: [String] = [], date: Date = Date(), to url: URL, spaceName: String,
         maxCharacters: Int = SpaceBrief.maxCharacters, timeZone: TimeZone = .current, onRead: ((String) -> Void)? = nil
-    ) throws -> String {
+    ) throws -> AddOutcome {
         let rule = cleaned(rule, limit: maxRuleLength)
         let evidence = cleaned(evidence, limit: maxEvidenceLength)
         if let problem = problem(rule: rule, evidence: evidence) { throw ProjectMemory.WriteError.failed(problem) }
@@ -324,19 +339,53 @@ enum LearnedRules {
         } catch {
             throw ProjectMemory.WriteError.failed("Couldn’t create \(url.deletingLastPathComponent().path): \(error.localizedDescription)")
         }
+        var outcome = AddOutcome.added(bullet)
         try ProjectMemory.update(url, creating: true) { current in
             onRead?(current)
+            outcome = .added(bullet)
+            guard current.utf8.count <= SpaceBrief.maxFileBytes else { throw ProjectMemory.WriteError.failed(fileTooLarge) }
+            for words in [rule] + alsoMatching {
+                if let existing = existingRule(matching: words, in: current) {
+                    outcome = .alreadyThere(existing.text)
+                    return nil
+                }
+            }
             let base = current.isEmpty ? SpaceBrief.template(spaceName: spaceName) : current
             let written = try inserting(bullet, into: base)
             if let problem = lengthProblem(of: written, maxCharacters: maxCharacters) { throw problem }
+            // With a byte order mark, as the write keeps one.
+            guard written.utf8.count + 3 <= SpaceBrief.maxFileBytes else { throw ProjectMemory.WriteError.failed(fileTooLarge) }
             return written
         }
-        return bullet
+        return outcome
+    }
+
+    private static let fileTooLarge = "The brief’s file would be over 1 MB, which sessions don’t read: shorten it in Space Settings › Brief first"
+
+    /// The brief as sessions read it, which a write starts from: "" when
+    /// there is none; why not when they can't read it (past 1 MB, not a
+    /// regular file, not UTF-8), and no rule can go in.
+    static func readForAdding(at url: URL) -> (text: String, problem: String?) {
+        switch BoardConfigStore.read(url.resolvingSymlinksInPath(), maxBytes: SpaceBrief.maxFileBytes) {
+        case .missing:
+            return ("", nil)
+        case .data(let data):
+            guard let text = String(data: data, encoding: .utf8) else {
+                return ("", "The brief isn’t UTF-8 text, which sessions don’t read: fix it in Space Settings › Brief first")
+            }
+            return (text, nil)
+        case .tooLarge:
+            return ("", "The brief’s file is over 1 MB, which sessions don’t read: shorten it in Space Settings › Brief first")
+        case .notARegularFile:
+            return ("", "The brief isn’t a regular file, which sessions don’t read")
+        case .unreadableBytes:
+            return ("", "The brief can’t be read just now: try again")
+        }
     }
 
     /// The brief's text as a write would start from it: "" when missing or
     /// not readable.
     static func briefText(at url: URL) -> String {
-        SpaceBrief.readBrief(at: url) ?? ""
+        readForAdding(at: url).text
     }
 }

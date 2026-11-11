@@ -28,20 +28,40 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
     private(set) var closeButton: NSButton?
 
     private let spaceName: String
-    /// The brief as read when the sheet opened: what the size line counts.
-    private let briefText: String
-    /// What sessions get of it, in characters.
+    /// What sessions get of the brief as read when the sheet opened, in
+    /// characters.
     private let briefCount: Int
+    /// What they would get once a rule goes in, the rule's bullet left out:
+    /// a bullet adds its own length, characters and bytes alike. Worked out
+    /// once, not at each key. Nil when no rule can go in (`blocker`).
+    private let baseAfter: (characters: Int, bytes: Int)?
+    /// Why no rule can go in: sessions don't read the brief, or its end is
+    /// in a code block.
+    private let blocker: String?
     /// Adds the rule and evidence: nil once added (the sheet closes), else
     /// why not (it stays open, saying so).
     var onAdd: (String, String) -> String? = { _, _ in nil }
     var onDismiss: () -> Void = {}
 
-    init(origin: Origin, spaceName: String, briefText: String, evidence: String) {
+    init(origin: Origin, spaceName: String, briefText: String, briefProblem: String? = nil, evidence: String) {
         self.origin = origin
         self.spaceName = spaceName
-        self.briefText = briefText
         briefCount = LearnedRules.characterCount(of: briefText)
+        let base = briefText.isEmpty ? SpaceBrief.template(spaceName: spaceName) : briefText
+        let placeholder = LearnedRules.line(rule: "x", evidence: "", date: Date())
+        if let briefProblem {
+            blocker = briefProblem
+            baseAfter = nil
+        } else {
+            do {
+                let body = SpaceBrief.body(of: try LearnedRules.inserting(placeholder, into: base)) ?? ""
+                baseAfter = (body.count - placeholder.count, body.utf8.count - placeholder.utf8.count)
+                blocker = nil
+            } catch {
+                baseAfter = nil
+                blocker = error.localizedDescription
+            }
+        }
         super.init()
         if case .proposal(let proposal) = origin {
             ruleView.string = proposal.rule
@@ -101,19 +121,13 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         let rule = rule
         let evidence = evidence
         let max = SpaceBrief.maxCharacters
-        var problem = rule.isEmpty ? nil : LearnedRules.problem(rule: rule, evidence: evidence)
+        let problem = blocker ?? (rule.isEmpty ? nil : LearnedRules.problem(rule: rule, evidence: evidence))
         var after: Int?
         var tooLong = false
-        if problem == nil {
+        if problem == nil, let baseAfter {
             let bullet = LearnedRules.line(rule: rule.isEmpty ? "…" : rule, evidence: evidence, date: Date())
-            let base = briefText.isEmpty ? SpaceBrief.template(spaceName: spaceName) : briefText
-            do {
-                let written = try LearnedRules.inserting(bullet, into: base)
-                after = LearnedRules.characterCount(of: written)
-                tooLong = LearnedRules.lengthProblem(of: written) != nil
-            } catch {
-                problem = error.localizedDescription
-            }
+            after = baseAfter.characters + bullet.count
+            tooLong = baseAfter.characters + bullet.count > max || baseAfter.bytes + bullet.utf8.count > SpaceBrief.maxBytes
         }
         let size = Self.sizeText(before: briefCount, after: after, max: max)
         sizeLabel.stringValue = size.text
