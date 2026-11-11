@@ -626,6 +626,8 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(task.profileID, lead.space)
             XCTAssertTrue(shell.activeWorkspace === lead.workspace, "it opens behind what the user is doing")
             XCTAssertTrue(FileManager.default.fileExists(atPath: folder + "/.claude-handover.md"))
+            XCTAssertTrue(started.text.contains("may first ask the user to trust that folder"), started.text)
+            XCTAssertNotEqual(Persistence.load()?.settings?.startedFolderTask, true, "the user never saw the sheet's trust hint")
             let list = try call(LeadTools.listTasks, lead: lead, in: harness)
             XCTAssertTrue(list.text.contains("“Compare two parsers” · no repository · folder \(task.cwd)"), list.text)
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Compare two parsers", "message": "Add a chart"], lead: lead, in: harness).isError)

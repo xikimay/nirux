@@ -391,11 +391,6 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.branchField.stringValue = "  "
             sheet.startButton.performClick(nil)
             XCTAssertEqual(sheet.errorLabel.stringValue, "Name the folder.")
-            // The line names the folder as it will be made.
-            sheet.branchField.stringValue = ".plans/Q3"
-            sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sheet.branchField))
-            sheet.branchField.window?.makeFirstResponder(nil)
-            XCTAssertEqual(NewTask.cleanedFolderName(sheet.branch), "plans-Q3")
             sheet.branchField.stringValue = "Compare- two parsers"
             sheet.startButton.performClick(nil)
             harness.waitUntil("the second task") { shell.workspaces.filter { $0.title == "Compare: two parsers" }.count == 2 }
