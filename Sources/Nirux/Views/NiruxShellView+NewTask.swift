@@ -417,8 +417,9 @@ extension NiruxShellView {
         // tasks folder, say): its agent would work in that repository. A
         // sub-task's folder goes in its task's, already checked.
         if request.parentWorkspaceID == nil, !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent) {
+            // Two short lines: the sheet cuts a long one in its middle.
             return .failed(
-                "\(parent.abbreviatedPath()) is inside a git repository, where a task without one doesn’t belong. "
+                "“\((parent as NSString).lastPathComponent)” is inside a git repository, where a task without one doesn’t belong.\n"
                     + "Pick another folder for these tasks in Settings › General."
             )
         }
