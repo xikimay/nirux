@@ -28,9 +28,14 @@ extension ProjectBoard {
             chain.count > 1 ? "\(order + 1)/\(chain.count)" : parent.map { "on #\($0)" }
         }
 
+        /// What the stack is on: "main", or "feat/x (#52 merged)" for a
+        /// root on a merged pull request's branch.
+        var base: String {
+            mergedBase.map { "\(rootBase) (#\($0.number) merged)" } ?? rootBase
+        }
+
         /// "Stack: #52 → #53 → #54, on main".
         var tooltip: String {
-            let base = mergedBase.map { "\(rootBase) (#\($0.number) merged)" } ?? rootBase
             guard chain.count > 1 else {
                 return parent.map { "Stacked on #\($0)" } ?? "Based on \(base)"
             }
