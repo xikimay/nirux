@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Stacked pull requests (docs/pr-stacks.md)
+// MARK: - Stacked pull requests (docs/design/pr-stacks.md)
 
 extension ProjectBoard {
     /// A pull request's place in a stack: open pull requests of the

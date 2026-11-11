@@ -1,5 +1,9 @@
 # Spaces, anchors and the Lead
 
+> **Design record:** shipped. Every plan step, S1 to S13, is in the app, with tasks without a repository and learned rules.\
+> **Differs today:** the status line below lists fewer steps than have shipped, and some passages describe the earlier behaviour in the present tense.\
+> **User guide:** [Spaces and tasks](../spaces-and-tasks.md).
+
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
 routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
 empty space view (S9), the Lead's workspace and settings (S11a), a board per

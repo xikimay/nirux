@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-// MARK: - The review file (docs/branch-review.md, sections 6.3 and 8)
+// MARK: - The review file (docs/design/branch-review.md, sections 6.3 and 8)
 
 extension BranchReviewController {
     /// The real review file: `<state dir>/reviews/`, for the repository

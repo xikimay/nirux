@@ -1,6 +1,6 @@
 import Foundation
 
-/// The data behind the Branch Review column (docs/branch-review.md): what a
+/// The data behind the Branch Review column (docs/design/branch-review.md): what a
 /// branch changes, from the merge base with its base branch to the working
 /// tree, read without writing to the repository (section 7). No UI here.
 /// Everything runs git or gh: call it off the main thread, or through

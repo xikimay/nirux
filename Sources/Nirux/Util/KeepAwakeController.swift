@@ -54,7 +54,7 @@ final class KeepAwakeController {
     private let schedule: Schedule
     private(set) var isEnabled: Bool
     private(set) var workingAgentCount = 0
-    /// A merge queue runs (docs/project-board.md, section 3.4): it polls
+    /// A merge queue runs (docs/design/project-board.md, section 3.4): it polls
     /// GitHub for an hour or more with no agent at work.
     private(set) var isMergeQueueRunning = false
     private var assertionID: IOPMAssertionID?

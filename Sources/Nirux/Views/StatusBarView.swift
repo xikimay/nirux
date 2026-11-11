@@ -15,7 +15,7 @@ final class StatusBarView: NSView {
         case copySummary, openReport
     }
 
-    /// A merge queue (docs/project-board.md, section 3.6): running, with
+    /// A merge queue (docs/design/project-board.md, section 3.6): running, with
     /// Stop; or ended, until dismissed.
     struct QueueNotice: Equatable {
         /// "Queue: #52 waiting for the nightly, 3 of 7".

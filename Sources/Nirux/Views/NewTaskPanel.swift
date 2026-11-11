@@ -1,6 +1,6 @@
 import AppKit
 
-/// The ⌘N sheet, "New in <space>" (docs/spaces.md, "One door: ⌘N"): a
+/// The ⌘N sheet, "New in <space>" (docs/design/spaces.md, "One door: ⌘N"): a
 /// description, the repository (outside General: the space's, then "No
 /// Repository"), the agent, the template, and the branch the task gets,
 /// which follows the description until the user edits it. Without a
@@ -34,7 +34,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     struct Space: Equatable {
         let id: String
         let name: String
-        /// General never has a repository (docs/spaces.md).
+        /// General never has a repository (docs/design/spaces.md).
         let isGeneral: Bool
     }
 
@@ -113,7 +113,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     var reportsTo: NewTask.MissionParent? {
         didSet { if let reportsTo, lead == nil { lead = reportsTo } }
     }
-    /// The space's Lead: "Report to the Lead" shows, checked (docs/spaces.md,
+    /// The space's Lead: "Report to the Lead" shows, checked (docs/design/spaces.md,
     /// "One door: ⌘N"). Nil: no Lead, no checkbox.
     var lead: NewTask.MissionParent? {
         didSet {

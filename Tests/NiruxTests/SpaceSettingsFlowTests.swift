@@ -2,8 +2,8 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// Space Settings and the space's defaults through the shell (docs/spaces.md,
-/// S8; docs/projects.md, section 5): what launches and shells get, the
+/// Space Settings and the space's defaults through the shell (docs/design/spaces.md,
+/// S8; docs/design/projects.md, section 5): what launches and shells get, the
 /// setup script typed before the agent, and the window's tabs.
 @MainActor
 final class SpaceSettingsFlowTests: XCTestCase {

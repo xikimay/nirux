@@ -186,7 +186,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// It must not link the new agent to a live parent agent's Mission
     /// mailbox (that would give an outside caller a channel to it), and it
     /// opens in the space its folder belongs to, else the default space
-    /// (docs/spaces.md, "Routing"), never one the caller picked. None of
+    /// (docs/design/spaces.md, "Routing"), never one the caller picked. None of
     /// that is shown on the sheet.
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self

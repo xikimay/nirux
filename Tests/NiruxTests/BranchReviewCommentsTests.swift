@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Comments and drafts (docs/branch-review.md, section 6.1): what can be
+/// Comments and drafts (docs/design/branch-review.md, section 6.1): what can be
 /// written, edited, sent and deleted, and how the review file keeps them.
 final class BranchReviewCommentsTests: XCTestCase, CommentFixtures {
     private typealias Record = BranchReview.Record

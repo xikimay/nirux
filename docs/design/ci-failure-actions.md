@@ -1,5 +1,9 @@
 # CI Failure Actions
 
+> **Design record:** shipped, and extended by [CI Failure Triage](ci-failure-triage.md).\
+> **Differs today:** the sidebar now reads `#52 · checks failed`, not `✗ CI`, and the menu is the row's.\
+> **User guide:** [Pull requests](../pull-requests.md#ci-failures).
+
 Status: validated by the user on 2026-10-02, implemented. Since 2026-11-10 a
 failure that looks flaky says so, and its rerun comes first: see
 [CI Failure Triage](ci-failure-triage.md).

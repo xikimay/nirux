@@ -2,7 +2,7 @@ import XCTest
 @testable import Nirux
 
 /// Which repository each config of board.json belongs to, and what Save
-/// writes (docs/spaces.md, S12): schema 1's one config goes to the anchor
+/// writes (docs/design/spaces.md, S12): schema 1's one config goes to the anchor
 /// whose remotes name its repository, else to the default repository
 /// anchor, and the file stays schema 1 while that rule places it on the
 /// default repository, as an older Nirux reads it.

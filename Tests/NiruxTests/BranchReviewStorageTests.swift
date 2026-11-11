@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// The review file of a branch (docs/branch-review.md, section 8): its name,
+/// The review file of a branch (docs/design/branch-review.md, section 8): its name,
 /// its format, its lock, which review a branch gets back, and who may write.
 final class BranchReviewStorageTests: XCTestCase {
     private typealias Store = BranchReview.Store

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - The confirmation sheet (docs/project-board.md, section 4)
+// MARK: - The confirmation sheet (docs/design/project-board.md, section 4)
 
 extension MergeQueue {
     /// What the confirmation sheet read when Start opened it: GitHub's

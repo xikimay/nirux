@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Learned rules (docs/spaces.md, "Learned rules")
+// MARK: - Learned rules (docs/design/spaces.md, "Learned rules")
 
 /// A rule the Lead proposes once it finds the same kind of defect twice
 /// (`propose_rule`), shown on its row ("Rule proposed · Review") until the

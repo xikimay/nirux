@@ -1,7 +1,7 @@
 import Foundation
 
 /// Where to resume a recorded session, including one whose worktree was
-/// cleaned up. See "History" in docs/projects.md for the study behind it
+/// cleaned up. See "History" in docs/design/projects.md for the study behind it
 /// (Claude Code 2.1.287, Codex CLI 0.151):
 /// - `claude --resume <id>` finds a session from any folder, deleted
 ///   worktrees included, and keeps its id. It works in the folder it was

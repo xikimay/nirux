@@ -5,7 +5,7 @@ import AppKit
 extension NiruxShellView {
     /// `nirux://new-worktree`: create a git worktree, move an optional
     /// handover file into it, and open a workspace. Its space is decided
-    /// once the worktree exists (docs/spaces.md, "Routing"): its
+    /// once the worktree exists (docs/design/spaces.md, "Routing"): its
     /// repository's space, else the parent's current space, else
     /// `requestedProfileID` (the space the requesting shell started in),
     /// else the default space, with the banner that says so.
@@ -187,7 +187,7 @@ extension NiruxShellView {
     }
 
     /// The board base branch of the space `repoRoot` goes to, decided as
-    /// for its workspace (docs/spaces.md, "Routing"), for this repository.
+    /// for its workspace (docs/design/spaces.md, "Routing"), for this repository.
     nonisolated static func baseBranch(
         of repoRoot: String, routesByAnchor: Bool, parentSpaceID: String?, requestedSpaceID: String?,
         spaces: [WorkspaceProfile], stateDirectory: URL
@@ -205,7 +205,7 @@ extension NiruxShellView {
     }
 
     /// The base branch a space's board sets for the repository holding
-    /// `folder`: that repository anchor's config (docs/spaces.md, S12), or,
+    /// `folder`: that repository anchor's config (docs/design/spaces.md, S12), or,
     /// in a space anchored to no repository, its one config, as before
     /// anchors: for any folder without anchors, for the repository of its
     /// default folder anchor with one. Nil when the board sets none for it.

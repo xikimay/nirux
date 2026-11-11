@@ -1,5 +1,9 @@
 # Project Memory
 
+> **Design record:** shipped in part. Sections 1 to 4 are in the app as Space Memory.\
+> **Differs today:** section 5 (decisions Nirux keeps) was not built, and the journal it relied on was removed in #180.\
+> **User guide:** [Spaces and tasks](../spaces-and-tasks.md#space-memory).
+
 Status: decided with the user on 2026-10-05. The list shipped first, read-only;
 changing it (section 4) came second. On 2026-10-06 the user chose to keep
 their decisions, read from the project's sessions, as memories here (section
@@ -13,7 +17,7 @@ the repository's `CLAUDE.md` and `AGENTS.md`, and the auto-memory Claude Code
 keeps for itself under `~/.claude`. **Space Memory…** shows all of it as one
 list, **What agents know**, whatever file holds an item.
 
-![Project Memory, with demo data](images/project-memory.png)
+![Project Memory, with demo data](../images/project-memory.png)
 
 ## 1. Opening it
 

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Sending the comments to the agent (docs/branch-review.md, section 6.2)
+// MARK: - Sending the comments to the agent (docs/design/branch-review.md, section 6.2)
 
 extension BranchReviewController {
     /// What "Send N Comments to Agent" sends now: the unsent comments,

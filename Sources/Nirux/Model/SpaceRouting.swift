@@ -37,7 +37,7 @@ struct FolderIdentity: Equatable, Sendable {
     }
 }
 
-/// Which space a new workspace joins (docs/spaces.md, "Routing"), decided
+/// Which space a new workspace joins (docs/design/spaces.md, "Routing"), decided
 /// once, before it is created, so that its first agent starts with the
 /// space's env. After that only the user moves it.
 enum SpaceRouting {

@@ -123,7 +123,7 @@ extension NiruxShellView {
     }
 
     /// The mode a fresh Claude launch in `workspace` uses: its space's,
-    /// else Settings' (docs/projects.md, section 5). A restore keeps the
+    /// else Settings' (docs/design/projects.md, section 5). A restore keeps the
     /// mode its column recorded. A workspace opened from outside Nirux
     /// takes Settings' mode: the one its confirmation named.
     static func claudeLaunchMode(for workspace: WorkspaceState) -> ClaudeLaunchMode {

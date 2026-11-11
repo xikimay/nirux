@@ -560,7 +560,7 @@ final class PtySession: @unchecked Sendable {
         return nil
     }
 
-    // MARK: Branch Review comments (docs/branch-review.md, section 6.2)
+    // MARK: Branch Review comments (docs/design/branch-review.md, section 6.2)
 
     /// Why a Branch Review's comments can't go into this column's prompt
     /// now, if they can't (see `AgentStatusMachine.reviewSendRefusal`).

@@ -1,6 +1,6 @@
 import Foundation
 
-/// A project's merge queue on one repository (docs/project-board.md,
+/// A project's merge queue on one repository (docs/design/project-board.md,
 /// section 3.6): one per project and GitHub repository, owned by the
 /// shell, so closing the board doesn't stop it, and a queue never mixes
 /// repositories. It

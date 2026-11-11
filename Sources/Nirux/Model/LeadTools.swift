@@ -1,6 +1,6 @@
 import Foundation
 
-/// The Lead's tools (docs/spaces.md, "The Lead"), listed by the Nirux MCP
+/// The Lead's tools (docs/design/spaces.md, "The Lead"), listed by the Nirux MCP
 /// server to a space's Lead only (`NIRUX_LEAD=1`). Each call goes to the
 /// running app through `LeadChannel`, which acts within the Lead's space:
 /// no tool merges, removes a worktree or a branch, or reaches another space.

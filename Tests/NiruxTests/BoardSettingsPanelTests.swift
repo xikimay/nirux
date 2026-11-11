@@ -87,7 +87,7 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
     }
 
-    /// A space with two repositories (docs/spaces.md, S12): the pop-up
+    /// A space with two repositories (docs/design/spaces.md, S12): the pop-up
     /// picks the one edited, each form suggests from its own checkout, and
     /// leaving typed values asks first. One config the rule places stays
     /// schema 1; the second makes the file schema 2.

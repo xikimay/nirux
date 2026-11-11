@@ -1,5 +1,9 @@
 # CI Failure Triage
 
+> **Design record:** shipped on 2026-11-10.\
+> **Differs today:** nothing known.\
+> **User guide:** [Pull requests](../pull-requests.md#failures-that-look-flaky).
+
 Status: approved by the user on 2026-11-10 (one of the model features),
 measured and built the same day.
 

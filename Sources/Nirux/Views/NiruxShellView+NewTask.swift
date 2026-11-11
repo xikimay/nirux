@@ -5,7 +5,7 @@ import AppKit
 extension NiruxShellView {
     /// ⌘N, the sidebar's "+" and "New…" in the palette: the sheet opens on
     /// the active space, its default repository selected
-    /// (docs/spaces.md, "One door: ⌘N").
+    /// (docs/design/spaces.md, "One door: ⌘N").
     /// `spaceID` and `selectedKey` (a Lead's proposal) override the active
     /// space and its default repository; `withoutRepository` selects No
     /// Repository. `parentTask` ("New Sub-task…"): the task it starts lists
@@ -241,7 +241,7 @@ extension NiruxShellView {
     }
 
     /// In the space its repository belongs to, else the sheet's
-    /// (docs/spaces.md, "Routing"). A folder has no repository: its parent's
+    /// (docs/design/spaces.md, "Routing"). A folder has no repository: its parent's
     /// space, else the sheet's, whatever space anchors a folder above it.
     @discardableResult
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTask) -> String {

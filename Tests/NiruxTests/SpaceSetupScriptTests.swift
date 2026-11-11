@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// docs/projects.md, section 5: a repository's setup script, where it
+/// docs/design/projects.md, section 5: a repository's setup script, where it
 /// lives, what is typed before the agent, and how its failure comes back.
 final class SpaceSetupScriptTests: XCTestCase {
     private var stateDirectory: URL!

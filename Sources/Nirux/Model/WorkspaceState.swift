@@ -72,7 +72,7 @@ final class WorkspaceState {
     var carriesMissions: Bool { missionHandoffsEnabled || isLead || reportsToLead }
     /// Opened by a `nirux://` request from outside Nirux (one the user
     /// confirmed, with no launch ID): its shells never get the space's
-    /// environment, nor its first agent the setup script (docs/projects.md,
+    /// environment, nor its first agent the setup script (docs/design/projects.md,
     /// section 5). Kept across launches.
     let startedOutsideNirux: Bool
     /// Opened by a `nirux://` request from a Nirux terminal (an agent's: the
@@ -80,7 +80,7 @@ final class WorkspaceState {
     /// Nirux: the Lead's `list_tasks` says who started it. Kept across
     /// launches.
     let startedByAgent: Bool
-    /// The space's Lead (docs/spaces.md, "The Lead"): pinned at the top of
+    /// The space's Lead (docs/design/spaces.md, "The Lead"): pinned at the top of
     /// its space, one per space, never inactive. Its shells get
     /// `NIRUX_LEAD=1`, fixed when each starts, which gives their Claude the
     /// Lead's instructions (NiruxMCPServer). Cleared when its space is
@@ -122,7 +122,7 @@ final class WorkspaceState {
             if prInfo?.state == "MERGED", oldValue?.state != "MERGED" { clearLeadContext() }
         }
     }
-    /// The open PR's feedback (docs/pr-feedback-inbox.md), read after each
+    /// The open PR's feedback (docs/design/pr-feedback-inbox.md), read after each
     /// PR refresh. Cleared when the PR changes or stops being open.
     var prFeedback: PRFeedback?
     /// Bumped at each feedback read: only the latest one applies.
@@ -132,7 +132,7 @@ final class WorkspaceState {
     /// records: a pull request that was already red isn't news.
     private var reportedRedChecks: (branch: String?, keys: Set<String>)?
     /// What the triage made of the pull request's red checks
-    /// (docs/ci-failure-triage.md), and of which ones (`CITriage.signature`):
+    /// (docs/design/ci-failure-triage.md), and of which ones (`CITriage.signature`):
     /// a new failure isn't the one it was about. `retryAt` is set while an
     /// answer is still owed (a run `gh` couldn't read, a model that
     /// couldn't run): when to ask again.
@@ -175,7 +175,7 @@ final class WorkspaceState {
     var nextStepIsFromLead = false
     var blockerIsFromLead = false
     var unknownPhaseRawValue: String?
-    /// Each review pass's latest run (docs/review-badges.md).
+    /// Each review pass's latest run (docs/design/review-badges.md).
     var reviewRuns: [ReviewPass: ReviewRun] = [:]
 
     var effectivePhase: WorkspacePhase {
@@ -425,7 +425,7 @@ extension WorkspaceState {
     }
 
     /// The red checks of `prInfo` not reported yet, each once
-    /// (docs/ci-failure-actions.md).
+    /// (docs/design/ci-failure-actions.md).
     func takeNewRedChecks() -> [ProjectBoard.Check] {
         let red = prInfo.map(CIFailure.redChecks) ?? []
         let keys = red.map(CIFailure.reportKey)

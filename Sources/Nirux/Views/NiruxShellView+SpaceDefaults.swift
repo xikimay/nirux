@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Space defaults at launch (docs/projects.md, section 5)
+// MARK: - Space defaults at launch (docs/design/projects.md, section 5)
 
 extension NiruxShellView {
     /// `Nirux --hook codex --setup-failed <id>` ran in a new worktree's

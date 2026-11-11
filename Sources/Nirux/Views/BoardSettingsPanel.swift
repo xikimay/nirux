@@ -7,7 +7,7 @@ import AppKit
 /// invalid values; Revert reads the file again. The post-merge workflow is
 /// never preselected: it stays unset until the user picks a file or None.
 /// A file this build must not rewrite is shown read-only, with the reason,
-/// and Save disabled. A space with several repositories (docs/spaces.md,
+/// and Save disabled. A space with several repositories (docs/design/spaces.md,
 /// S12) picks the one it edits in a Repository pop-up; leaving one with
 /// unsaved values asks first.
 @MainActor

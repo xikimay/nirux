@@ -2,7 +2,7 @@ import XCTest
 @testable import Nirux
 
 /// "Send N Comments to Agent" on the page and in the column
-/// (docs/branch-review.md, section 6.2): what goes, the button, the
+/// (docs/design/branch-review.md, section 6.2): what goes, the button, the
 /// comments marked sent, and an edit under way of one that went.
 final class BranchReviewSendPageTests: XCTestCase {
     private typealias Store = BranchReview.Store

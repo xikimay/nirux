@@ -6,7 +6,7 @@ import XCTest
 /// The Branch Review column with its real page (`review.html`, its CSP and
 /// its bridge) in a window that is never shown, fed a crafted branch by a
 /// fake reader that answers on a background queue, as git does
-/// (docs/branch-review.md, sections 1.1 and 9.1).
+/// (docs/design/branch-review.md, sections 1.1 and 9.1).
 final class BranchReviewViewTests: XCTestCase {
     /// The text a fork controls, written to run if the page ever made
     /// markup of it.

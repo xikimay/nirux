@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// "Send N Comments to Agent" through the shell (docs/branch-review.md,
+/// "Send N Comments to Agent" through the shell (docs/design/branch-review.md,
 /// section 6.2): the agent columns of the reviewed worktree, the paste, and
 /// the comments sent once Claude takes the prompt.
 final class BranchReviewSendFlowTests: XCTestCase {

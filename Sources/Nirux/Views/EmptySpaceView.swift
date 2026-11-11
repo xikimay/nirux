@@ -1,7 +1,7 @@
 import AppKit
 
 /// What the content area shows while the active space has no workspace
-/// (docs/spaces.md, "Interface"): the space's name and what to do next.
+/// (docs/design/spaces.md, "Interface"): the space's name and what to do next.
 /// Spaces persist, so an empty one stays in the switcher; selecting it
 /// shows this view instead of opening a workspace.
 ///
@@ -10,7 +10,7 @@ import AppKit
 /// like the default button and Return presses it while the view has the
 /// keyboard. It has no key equivalent: a window's default button takes
 /// Returns from anywhere, a hidden view must take none. "Start a Lead"
-/// shows in every space but General (docs/spaces.md, "The Lead").
+/// shows in every space but General (docs/design/spaces.md, "The Lead").
 @MainActor
 final class EmptySpaceView: NSView {
     struct Content: Equatable {

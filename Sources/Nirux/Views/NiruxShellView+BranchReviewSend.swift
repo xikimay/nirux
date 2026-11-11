@@ -1,7 +1,7 @@
 import AppKit
 import os
 
-// MARK: - Sending a review's comments to its agent (docs/branch-review.md, section 6.2)
+// MARK: - Sending a review's comments to its agent (docs/design/branch-review.md, section 6.2)
 
 extension NiruxShellView {
     /// An agent column the comments could go to, as listed now.

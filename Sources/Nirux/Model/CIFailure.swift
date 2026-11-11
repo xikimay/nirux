@@ -1,7 +1,7 @@
 import Foundation
 
 /// A workspace pull request whose CI turned red, and the two actions on it
-/// (docs/ci-failure-actions.md). Both work on GitHub Actions runs of the
+/// (docs/design/ci-failure-actions.md). Both work on GitHub Actions runs of the
 /// pull request's own repository, parsed out of the red checks' URLs:
 /// anyone who can post a check chooses its URL, and what GitHub returns is
 /// never typed into an agent or passed to `gh` as is.

@@ -234,7 +234,7 @@ final class BoardConfigStoreTests: XCTestCase {
         XCTAssertEqual(loaded.config?.mergeMethod, .merge)
     }
 
-    // MARK: - Schema 2: one config per repository (docs/spaces.md, S12)
+    // MARK: - Schema 2: one config per repository (docs/design/spaces.md, S12)
 
     private func entry(_ commonDir: String?, repository: String = "acme/front") -> BoardConfigStore.Entry {
         var config = config

@@ -20,7 +20,7 @@ struct Mission: Codable, Equatable {
     let createdAt: TimeInterval
     var updatedAt: TimeInterval
     var events: [MissionEvent]
-    /// The parent is a space's Lead (docs/spaces.md, "The Lead"): the
+    /// The parent is a space's Lead (docs/design/spaces.md, "The Lead"): the
     /// Mission works even with Mission handoffs off in Settings. Nil (an
     /// older build's record) means no.
     var reportsToLead: Bool?

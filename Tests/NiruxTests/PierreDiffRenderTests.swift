@@ -4,7 +4,7 @@ import XCTest
 
 /// The committed `pierre-diff.bundle.js`, run in a WKWebView: the editor's
 /// stacked diff, and the Branch Review page's diffs, which show text that
-/// neither Nirux nor the user wrote (docs/branch-review.md, section 1.1).
+/// neither Nirux nor the user wrote (docs/design/branch-review.md, section 1.1).
 /// The window is never shown: pierre renders what is near the viewport
 /// right away.
 final class PierreDiffRenderTests: XCTestCase {

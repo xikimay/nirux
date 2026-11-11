@@ -1,7 +1,7 @@
 import AppKit
 
 /// The main window's title bar, at its trailing end: New, Board and Search
-/// in one capsule (docs/spaces.md, Interface). Added before the plan usage
+/// in one capsule (docs/design/spaces.md, Interface). Added before the plan usage
 /// limits and the keep-awake cup, it keeps the window's edge, and they come
 /// and go on its left.
 final class TitleBarActions: NSTitlebarAccessoryViewController {

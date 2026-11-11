@@ -1,7 +1,7 @@
 import AppKit
 
 /// Space Settings › General: the space's name and color, and its
-/// repositories and folders (docs/spaces.md, "Spaces and anchors"): each
+/// repositories and folders (docs/design/spaces.md, "Spaces and anchors"): each
 /// with its setup script, its GitHub repository, and which one is the
 /// default. The name applies on Return or when the field is left, every
 /// other control at once; the shell writes (see `Actions`) and sends the

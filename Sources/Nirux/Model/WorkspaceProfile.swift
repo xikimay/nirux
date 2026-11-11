@@ -1,10 +1,10 @@
 import Foundation
 
-/// A space (docs/spaces.md). `profile` is its name in the code and in what
+/// A space (docs/design/spaces.md). `profile` is its name in the code and in what
 /// is persisted.
 struct WorkspaceProfile: Equatable {
     static let defaultID = "default"
-    /// General, the space that can't be deleted (docs/spaces.md).
+    /// General, the space that can't be deleted (docs/design/spaces.md).
     static let defaultProfile = WorkspaceProfile(id: defaultID, name: "General", colorHex: "#7AA2F7")
     /// The default space's name before November 2026.
     static let legacyDefaultName = "main"

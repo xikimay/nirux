@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where a space's work lives (docs/spaces.md, "Spaces and anchors"): a git
+/// Where a space's work lives (docs/design/spaces.md, "Spaces and anchors"): a git
 /// repository, known by its common git dir so that the main checkout and
 /// every linked worktree match, or a plain folder. A repository or a folder
 /// belongs to one space at most, and one anchor of a space is its default:

@@ -1,7 +1,7 @@
 import Foundation
 
 /// The feedback nobody has dealt with yet on a workspace's open pull
-/// request (docs/pr-feedback-inbox.md): unresolved review threads, and
+/// request (docs/design/pr-feedback-inbox.md): unresolved review threads, and
 /// conversation comments newer than both the head commit and our last
 /// reply. "Our" is the PR's author and the `gh` user: agents post with
 /// that account, so their comments never count.

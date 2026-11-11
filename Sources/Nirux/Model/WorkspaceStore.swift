@@ -455,7 +455,7 @@ final class WorkspaceStore {
         return result
     }
 
-    /// The space's Lead, unless it is closing (docs/spaces.md, "The Lead").
+    /// The space's Lead, unless it is closing (docs/design/spaces.md, "The Lead").
     func leadWorkspace(inSpace profileID: String) -> WorkspaceState? {
         workspaces.first { $0.profileID == profileID && $0.isLead && !$0.isClosing }
     }

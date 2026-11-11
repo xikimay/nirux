@@ -2,7 +2,7 @@ import Darwin
 import XCTest
 @testable import Nirux
 
-/// The folder Explain runs in (docs/branch-review.md, section 4.3): the
+/// The folder Explain runs in (docs/design/branch-review.md, section 4.3): the
 /// tracked text files as the working tree has them, nothing written to the
 /// repository, and no link, secret or instruction for an agent.
 final class BranchReviewExplainCopyTests: BranchReviewRepositoryTestCase {

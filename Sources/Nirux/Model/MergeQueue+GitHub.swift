@@ -3,7 +3,7 @@ import Security
 
 // MARK: - Client
 
-/// The merge queue's `gh` calls (docs/project-board.md, section 3): reads
+/// The merge queue's `gh` calls (docs/design/project-board.md, section 3): reads
 /// by commit, and the three mutations. Separate from the board's client,
 /// which only reads. Each call runs `gh` and blocks: never on the main
 /// thread. The shell holds the client, so tests inject a fake: GitHub's

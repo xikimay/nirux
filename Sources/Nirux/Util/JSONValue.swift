@@ -2,7 +2,7 @@ import Foundation
 
 /// Any JSON value, kept as read, so that a file's keys this build doesn't
 /// know survive a read-modify-write (the branch review's file,
-/// docs/branch-review.md section 8). Integers keep all 64 bits; a larger
+/// docs/design/branch-review.md section 8). Integers keep all 64 bits; a larger
 /// one is read as a `double`, the only lossy case.
 enum JSONValue: Equatable, Sendable {
     case null

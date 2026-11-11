@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a space sets for the workspaces started in it (docs/projects.md,
+/// What a space sets for the workspaces started in it (docs/design/projects.md,
 /// section 5): the agent preselected for its tasks, the Claude and Codex
 /// launch modes, and environment variables for new shells. Edited in Space
 /// Settings › Defaults, kept in the space's `defaults.json`

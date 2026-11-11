@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Explain's work, cache read and notice (docs/branch-review.md, section 4.3)
+// MARK: - Explain's work, cache read and notice (docs/design/branch-review.md, section 4.3)
 
 extension BranchReviewController {
     /// The queue's work: `explainer` with progress sent to the main actor.

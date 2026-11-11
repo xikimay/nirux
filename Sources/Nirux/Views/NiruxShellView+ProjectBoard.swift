@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Project Board (docs/project-board.md)
+// MARK: - Project Board (docs/design/project-board.md)
 
 /// The board columns: opening one per project, feeding each the project's
 /// workspaces, agents and merge queue, and running its buttons through the

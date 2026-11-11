@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// docs/projects.md, section 5: what a space's defaults apply, and how
+/// docs/design/projects.md, section 5: what a space's defaults apply, and how
 /// defaults.json is read and written (SpaceDefaultsStore).
 final class SpaceDefaultsTests: XCTestCase {
     private var stateDirectory: URL!

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The Project Board's merge queue (docs/project-board.md, section 3): it
+/// The Project Board's merge queue (docs/design/project-board.md, section 3): it
 /// merges a confirmed list of pull requests one at a time, waiting for the
 /// required checks before each merge and for the post-merge workflow after
 /// it, and stops at the first problem.

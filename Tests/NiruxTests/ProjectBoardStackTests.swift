@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Stacked pull requests on the board (docs/pr-stacks.md): where each one
+/// Stacked pull requests on the board (docs/design/pr-stacks.md): where each one
 /// sits, the order of their rows, what their PR and Queue columns say, and
 /// Retarget once a base merged. Pure: nothing runs git or gh. Through
 /// `rows`, as the board builds them.

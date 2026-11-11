@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Explain's run (docs/branch-review.md, section 4.3), against a fake
+/// Explain's run (docs/design/branch-review.md, section 4.3), against a fake
 /// `claude`: a script that records its arguments, environment, folder and
 /// input, then writes the stream-json events a test gives it. The real CLI
 /// runs only by hand.

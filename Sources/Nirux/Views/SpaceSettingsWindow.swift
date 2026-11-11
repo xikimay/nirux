@@ -1,6 +1,6 @@
 import AppKit
 
-/// Space Settings (docs/spaces.md, S8): one window per space with a toolbar
+/// Space Settings (docs/design/spaces.md, S8): one window per space with a toolbar
 /// tab per topic, in place of the separate rename, brief, board, templates
 /// and memory panels. Like Nirux Settings, a change applies at once, except
 /// in the text editors (Brief, Templates) and the Board form, which have a
@@ -79,7 +79,7 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
     /// The Board tab's form and the setup script sheet, while shown (the
     /// shell makes them).
     weak var boardForm: BoardSettingsPanel?
-    /// The repository the Board tab shows, by section id (docs/spaces.md,
+    /// The repository the Board tab shows, by section id (docs/design/spaces.md,
     /// S12); nil for the default one.
     var boardRepository: String?
     /// The Board tab was asked to read again while it was reading: it reads

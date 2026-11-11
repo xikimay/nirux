@@ -1,8 +1,8 @@
 import Foundation
 
-/// The Project Board (docs/project-board.md): one table per project of the
+/// The Project Board (docs/design/project-board.md): one table per project of the
 /// branches its agents work on, with their workspaces, agents, pull
-/// requests and checks. It only reads, but for Retarget (docs/pr-stacks.md).
+/// requests and checks. It only reads, but for Retarget (docs/design/pr-stacks.md).
 ///
 /// This file holds the pure types and the row builder (section 2). The
 /// `gh` client and its parsers, the refresh schedule and the agent states
@@ -164,7 +164,7 @@ extension ProjectBoard {
         let folder: String?
         /// `folder` no longer exists: only its workspaces are left to close.
         var folderIsGone = false
-        /// Its open pull request's place in a stack (docs/pr-stacks.md).
+        /// Its open pull request's place in a stack (docs/design/pr-stacks.md).
         var stack: StackPlace?
 
         /// The first workspace's title, else the branch, else the folder.
@@ -290,7 +290,7 @@ extension ProjectBoard {
             + foreign.sorted { $0.order < $1.order }.map(\.row)
     }
 
-    /// One repository of a board with several (docs/spaces.md, S12).
+    /// One repository of a board with several (docs/design/spaces.md, S12).
     struct SectionSources {
         let id: String
         /// Its anchor's common git dir: the local repository it lists.

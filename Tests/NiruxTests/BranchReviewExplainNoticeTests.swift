@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Explain's first-use notice (docs/branch-review.md, section 4.3): what
+/// Explain's first-use notice (docs/design/branch-review.md, section 4.3): what
 /// goes where, under which account; once per project and account, every
 /// time for an account billed per call.
 final class BranchReviewExplainNoticeTests: XCTestCase {

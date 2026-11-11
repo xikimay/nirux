@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// docs/ci-failure-actions.md: which checks are red, when they are
+/// docs/design/ci-failure-actions.md: which checks are red, when they are
 /// reported, and what the two actions run.
 final class CIFailureTests: XCTestCase {
     private func info(_ rollup: [[String: Any]], state: String = "OPEN") -> PRInfo {
@@ -25,7 +25,7 @@ final class CIFailureTests: XCTestCase {
         ["__typename": "StatusContext", "context": context, "state": state, "targetUrl": targetUrl, "startedAt": startedAt]
     }
 
-    // MARK: - Red rule (docs/project-board.md, section 3.2)
+    // MARK: - Red rule (docs/design/project-board.md, section 3.2)
 
     func testEveryRedConclusionAndFailedStatusIsRed() {
         for conclusion in ["FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"] {

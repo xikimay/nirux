@@ -1,6 +1,6 @@
 import AppKit
 
-/// The merge queue's confirmation sheet (docs/project-board.md, section 4):
+/// The merge queue's confirmation sheet (docs/design/project-board.md, section 4):
 /// what Start read of GitHub, the pull requests that join in their order,
 /// with their heads and checks, those left out and why, what may go wrong
 /// and what will happen. The user reorders it with ↑ and ↓; Nirux never

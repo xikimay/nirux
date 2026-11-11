@@ -1,6 +1,6 @@
 import AppKit
 
-/// "Send N Comments to Agent" (docs/branch-review.md, section 6.2): the
+/// "Send N Comments to Agent" (docs/design/branch-review.md, section 6.2): the
 /// agent column the comments go to, why they can't go now, what the user
 /// should know first, and the message itself, exactly as it is pasted:
 /// Claude Code folds a long paste into "[Pasted text #1]", so the sheet is

@@ -285,7 +285,7 @@ struct PRInfo: Hashable, Sendable {
     let state: String
     let isDraft: Bool
     let ciStatus: String?
-    /// The latest run of each check (docs/ci-failure-actions.md).
+    /// The latest run of each check (docs/design/ci-failure-actions.md).
     let checks: [ProjectBoard.Check]
     let reviewDecision: String?
     let mergeable: String?

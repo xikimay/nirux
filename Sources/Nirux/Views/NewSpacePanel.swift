@@ -17,7 +17,7 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         let name: String
         let colorHex: String
         let anchors: [SpaceAnchor]
-        /// "Start a Lead" (docs/spaces.md, "The Lead"): off unless chosen.
+        /// "Start a Lead" (docs/design/spaces.md, "The Lead"): off unless chosen.
         var startsLead = false
     }
 
