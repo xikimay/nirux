@@ -419,8 +419,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
     }
 
     /// A repository anchored elsewhere while the sheet is open (Space
-    /// Settings, the space menu) isn't the user's choice: No Repository
-    /// stays picked.
+    /// Settings, the space menu) isn't the user's choice, even after an
+    /// "Add Repository…" from the sheet was cancelled: No Repository stays.
     func testARepositoryAddedElsewhereLeavesNoRepositoryPicked() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -429,9 +429,10 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let sheet = try openSheet(harness)
             describe("Wire the cache", in: sheet)
             XCTAssertEqual(sheet.destination, .folder(parent: harness.home + "/Nirux Tasks"))
+            shell.sideEffects.chooseFolder = { _, _, completion in completion(nil) }
+            select("Add Repository…", in: sheet.repositoryPopup)
             let anchor = try XCTUnwrap(FolderIdentity.identify(harness.repo, timeout: 10)).anchor
-            XCTAssertTrue(shell.workspaceStore.addAnchor(anchor, toProfile: space.id))
-            shell.refreshNewTaskPanelRepositories(selecting: anchor.key)
+            shell.addAnchor(anchor, toSpace: space.id)
             XCTAssertEqual(sheet.repositoryPopup.itemTitles, ["repo", "", "No Repository"])
             XCTAssertNil(sheet.selectedRepositoryKey)
             XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "No Repository")
@@ -529,6 +530,15 @@ final class NewTaskFlowTests: UIFlowTestCase {
             shell.showNewSubtaskPanel(under: restored)
             sheet = try XCTUnwrap(shell.newTaskPanel)
             XCTAssertEqual(sheet.destination, .folder(parent: folder))
+
+            // Its agent made it a git repository: no sub-task goes in it.
+            try FileManager.default.createDirectory(atPath: folder + "/.git", withIntermediateDirectories: true)
+            harness.waitUntil("the space's templates") { sheet.info != nil }
+            describe("Ship the notes", in: sheet)
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the refusal") { !sheet.isStarting }
+            XCTAssertTrue(sheet.errorLabel.stringValue.contains("Uncheck “Sub-task of”"), sheet.errorLabel.stringValue)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder + "/Ship the notes"))
             sheet.cancelButton.performClick(nil)
         }
     }

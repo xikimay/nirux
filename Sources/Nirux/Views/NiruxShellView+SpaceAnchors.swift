@@ -100,17 +100,23 @@ extension NiruxShellView {
         guard spaceID != WorkspaceProfile.defaultID, profiles.contains(where: { $0.id == spaceID }),
               canChangeAnchors()
         else { return }
+        // From the sheet: what it adds is the sheet's choice.
+        let pickedInSheet = sheet != nil
         sideEffects.chooseFolder("Add Repository", sheet ?? window) { [weak self] folder in
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: true) { [weak self] pick in
-                self?.runFromRunLoop { [weak self] in self?.finishAddingRepository(pick, toSpace: spaceID) }
+                self?.runFromRunLoop { [weak self] in
+                    self?.finishAddingRepository(pick, toSpace: spaceID, pickedInSheet: pickedInSheet)
+                }
             }
         }
     }
 
     /// A folder in no repository joins as a folder once the user agrees,
     /// never the home folder or one holding it.
-    private func finishAddingRepository(_ pick: AnchorPick, toSpace spaceID: String, moving workspaceID: String? = nil) {
+    private func finishAddingRepository(
+        _ pick: AnchorPick, toSpace spaceID: String, moving workspaceID: String? = nil, pickedInSheet: Bool = false
+    ) {
         guard let space = profiles.first(where: { $0.id == spaceID }) else { return }
         switch pick {
         case .missing(let folder):
@@ -123,16 +129,17 @@ extension NiruxShellView {
             alert.addButton(withTitle: "Add Folder")
             alert.addButton(withTitle: "Cancel")
             guard runModal(alert) == .alertFirstButtonReturn else { return }
-            addAnchor(.folder(folder), toSpace: spaceID, moving: workspaceID)
+            addAnchor(.folder(folder), toSpace: spaceID, moving: workspaceID, pickedInSheet: pickedInSheet)
         case .anchor(let anchor):
-            addAnchor(anchor, toSpace: spaceID, moving: workspaceID)
+            addAnchor(anchor, toSpace: spaceID, moving: workspaceID, pickedInSheet: pickedInSheet)
         }
     }
 
     /// Anchors it to the space, after asking when another space has it,
     /// moves `workspaceID` there, then offers the others of that
     /// repository or folder. May show an alert: call it from the run loop.
-    func addAnchor(_ anchor: SpaceAnchor, toSpace spaceID: String, moving workspaceID: String? = nil) {
+    /// `pickedInSheet`: the ⌘N sheet asked for it, and selects it.
+    func addAnchor(_ anchor: SpaceAnchor, toSpace spaceID: String, moving workspaceID: String? = nil, pickedInSheet: Bool = false) {
         if case .folder(let path) = anchor.kind, isTooBroadForAFolderAnchor(path) {
             return showToast(tooBroadFolderMessage(path), tone: .error)
         }
@@ -145,7 +152,7 @@ extension NiruxShellView {
         updateSidebar()
         saveState()
         spaceSettingsSpacesChanged()
-        refreshNewTaskPanelRepositories(selecting: anchor.key)
+        refreshNewTaskPanelRepositories(selecting: pickedInSheet ? anchor.key : nil)
         offerToMoveWorkspaces(into: spaceID) {}
     }
 

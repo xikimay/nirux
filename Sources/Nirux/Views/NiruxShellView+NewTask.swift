@@ -65,7 +65,7 @@ extension NiruxShellView {
             self?.openPlainWorkspace(spaceID: spaceID, folder: repository?.folder ?? homeFolder)
         }
         panel.onAddSuggested = { [weak self] anchor in
-            self?.runFromRunLoop { [weak self] in self?.addAnchor(anchor, toSpace: spaceID) }
+            self?.runFromRunLoop { [weak self] in self?.addAnchor(anchor, toSpace: spaceID, pickedInSheet: true) }
         }
         panel.onAddRepository = { [weak self, weak panel] in
             self?.addRepository(toSpace: spaceID, sheet: panel?.panel)
@@ -181,7 +181,8 @@ extension NiruxShellView {
     }
 
     /// The sheet of a space whose repositories changed: `key` was just
-    /// anchored (see `NewTaskPanel.updateRepositories`).
+    /// anchored from it, and is selected (see
+    /// `NewTaskPanel.updateRepositories`).
     func refreshNewTaskPanelRepositories(selecting key: String? = nil) {
         guard let panel = newTaskPanel, panel.panel != nil,
               let space = profiles.first(where: { $0.id == panel.space.id })
@@ -414,14 +415,16 @@ extension NiruxShellView {
             return .failed("The task and its template are longer than 1 MB: shorten them.")
         }
         // Never inside a git repository (a dotfiles home holds the default
-        // tasks folder, say): its agent would work in that repository. A
-        // sub-task's folder goes in its task's, already checked.
-        if request.parentWorkspaceID == nil, !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent) {
-            // Two short lines: the sheet cuts a long one in its middle.
-            return .failed(
-                "“\((parent as NSString).lastPathComponent)” is inside a git repository, where a task without one doesn’t belong.\n"
+        // tasks folder, say, or a parent task's agent ran `git init`): the
+        // agent would work in that repository. Two short lines: the sheet
+        // cuts a long one in its middle.
+        if !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent) {
+            let name = (parent as NSString).lastPathComponent
+            return .failed(request.parentWorkspaceID == nil
+                ? "“\(name)” is inside a git repository, where a task without one doesn’t belong.\n"
                     + "Pick another folder for these tasks in Settings › General."
-            )
+                : "“\(name)” is inside a git repository now, where a task without one doesn’t belong.\n"
+                    + "Uncheck “Sub-task of” to give it a folder of its own.")
         }
         let folder: String
         switch NewTask.makeFolder(named: name, in: parent, makesParent: makesParent) {

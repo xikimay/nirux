@@ -174,9 +174,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         return selectedRepositoryKey != key || selectedRepository == nil
     }
 
-    /// "Add “…”" or "Add Repository…" was picked: the repository it adds
-    /// is the user's choice (see `updateRepositories`).
-    private var awaitsAddedRepository = false
+
     private let reportHint = NSTextField(wrappingLabelWithString:
         "The Lead follows this task and answers its questions. Only what needs you reaches you, in amber.")
 
@@ -319,11 +317,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     /// The space's repositories changed while the sheet is open: `added`
-    /// was just anchored. The user's choice stays: No Repository, the
-    /// repository picked, a sub-task's repository (none once it's gone:
-    /// the sheet then refuses to start). Only a repository the user added
-    /// from the popup is selected; one picked that left the space gives
-    /// way to `fallback`, the space's default.
+    /// was just anchored from its popup ("Add “…”", "Add Repository…"),
+    /// the user's choice, selected. Otherwise the user's choice stays: No
+    /// Repository, the repository picked, a sub-task's repository (none
+    /// once it's gone: the sheet then refuses to start); one picked that
+    /// left the space gives way to `fallback`, the space's default.
     func updateRepositories(_ repositories: [Repository], added key: String?, fallback: String?) {
         guard panel != nil else { return }
         self.repositories = repositories
@@ -333,8 +331,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         if subtaskParentID != nil, let parentKey = parentTask?.repositoryKey {
             // A sub-task stays in its task's repository, the popup hidden.
             selectedRepositoryKey = isListed(parentKey) ? parentKey : nil
-        } else if awaitsAddedRepository, let key, isListed(key) {
-            awaitsAddedRepository = false
+        } else if let key, isListed(key) {
             selectedRepositoryKey = key
         } else if let previous, !isListed(previous) {
             selectedRepositoryKey = fallback.flatMap { isListed($0) ? $0 : nil } ?? repositories.first?.key
@@ -486,11 +483,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         switch item.tag {
         case Self.addSuggestedTag:
             selectRepositoryItem()
-            awaitsAddedRepository = true
             if let suggestion { onAddSuggested?(suggestion) }
         case Self.addRepositoryTag:
             selectRepositoryItem()
-            awaitsAddedRepository = true
             onAddRepository?()
         default:
             let key = item.tag == Self.noRepositoryTag ? nil : item.representedObject as? String
