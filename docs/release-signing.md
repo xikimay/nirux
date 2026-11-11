@@ -1,10 +1,10 @@
-# Release Signing
+# Release signing
 
 Nirux releases are built by GitHub Actions, signed with a Developer ID
 Application certificate, submitted to Apple's notary service, stapled, then
 signed for Sparkle updates.
 
-## Required Apple Setup
+## Required Apple setup
 
 You need an active Apple Developer Program membership.
 
@@ -26,7 +26,7 @@ Then export the certificate and private key from Keychain Access:
 5. Export as `.p12`.
 6. Set a strong export password and store it in 1Password.
 
-## GitHub Actions Secrets
+## GitHub Actions secrets
 
 Set these secrets on `xikimay/nirux`:
 
@@ -73,7 +73,7 @@ gh secret set APPLE_TEAM_ID --repo xikimay/nirux
 
 Paste each value when prompted.
 
-## Local Verification
+## Local verification
 
 List local signing identities:
 
@@ -110,7 +110,13 @@ rm -f Nirux.app.zip
 ditto -c -k --keepParent Nirux.app Nirux.app.zip
 ```
 
-## Nightly Releases
+## Nightly releases
+
+The workflow `.github/workflows/nightly.yml` runs on every push to `main` and
+on manual dispatch from `main`. It runs the tests, builds the release binary,
+bundles `Nirux.app`, signs it, launches it once as a check, notarizes and
+staples it, zips it again, signs the zip for Sparkle, and publishes it with a
+changelog of the commits since the previous nightly.
 
 Every push to `main` publishes two prereleases from the same build:
 
@@ -131,7 +137,7 @@ Automatically` checked (the default), it downloads a new build silently and
 installs it when Nirux quits. Uncheck it to have Sparkle ask first; the choice
 is kept in user defaults and survives updates.
 
-## Rolling Back A Broken Nightly
+## Rolling back a broken nightly
 
 Sparkle never installs a build older than the one running. A rollback therefore
 has two halves: pin a good build on your Mac now, then ship a fix so every
