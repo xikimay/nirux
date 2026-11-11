@@ -56,3 +56,18 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      - name: CatchUpTests, 12 runs, 6 at a time (throwaway)
+        if: always()
+        run: scripts/repeat-class.sh CatchUpTests 12 6
+
+      - name: CatchUpTests among the UI classes, 3 rounds (throwaway)
+        if: always()
+        run: |
+          for round in 1 2 3; do
+            scripts/repeat-class.sh CatchUpTests 2 2 &
+            scripts/repeat-class.sh LeadToolsFlowTests 1 1 &
+            scripts/repeat-class.sh SettingsWindowTests 1 1 &
+            scripts/repeat-class.sh MenuBarFlowTests 1 1 &
+            wait
+          done
