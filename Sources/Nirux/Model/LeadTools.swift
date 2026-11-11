@@ -44,8 +44,9 @@ enum LeadTools {
                     questions and result are typed into your prompt). One repository per task. Work that needs no \
                     repository (research, writing, a one-off script) starts in a new folder of its own instead, \
                     with no git, branch or pull request: repo "\(noRepository)", or any task in a space without a \
-                    repository. When the user turned "Starts tasks without asking" off, it opens the New sheet \
-                    filled in for the user to start instead.
+                    repository. Never "\(noRepository)" for work that reads or changes a repository of this space: \
+                    start it in that repository. When the user turned "Starts tasks without asking" off, it opens \
+                    the New sheet filled in for the user to start instead.
                     """,
                 properties: [
                     "description": ["type": "string", "description": "What the task must do, as you would tell the agent. Its first line names the task and its branch or folder."],

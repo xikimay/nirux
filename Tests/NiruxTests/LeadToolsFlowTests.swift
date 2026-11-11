@@ -629,6 +629,8 @@ final class LeadToolsFlowTests: XCTestCase {
             let list = try call(LeadTools.listTasks, lead: lead, in: harness)
             XCTAssertTrue(list.text.contains("“Compare two parsers” · no repository · folder \(task.cwd)"), list.text)
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Compare two parsers", "message": "Add a chart"], lead: lead, in: harness).isError)
+            // By the folder list_tasks shows.
+            XCTAssertFalse(try call(LeadTools.tell, ["task": task.cwd, "message": "And a table"], lead: lead, in: harness).isError)
 
             // Proposed: the sheet starts it in a folder too.
             shell.setLeadStartsTasks(false, spaceID: lead.space)

@@ -608,9 +608,9 @@ struct PersistedWorkspace: Codable {
     var isLead: Bool
     /// See `WorkspaceState.reportsToLead`. Written only when true.
     var reportsToLead: Bool
-    /// See `WorkspaceState.isFolderTask`. Written only when true: a build
-    /// before it restores the task as a plain workspace in its folder.
-    var isFolderTask: Bool
+    /// See `WorkspaceState.taskFolder`. A build before it restores the
+    /// task as a plain workspace.
+    var taskFolder: String?
 
     init(
         id: String? = nil,
@@ -639,7 +639,7 @@ struct PersistedWorkspace: Codable {
         startedByAgent: Bool = false,
         isLead: Bool = false,
         reportsToLead: Bool = false,
-        isFolderTask: Bool = false
+        taskFolder: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -667,7 +667,7 @@ struct PersistedWorkspace: Codable {
         self.startedByAgent = startedByAgent
         self.isLead = isLead
         self.reportsToLead = reportsToLead
-        self.isFolderTask = isFolderTask
+        self.taskFolder = taskFolder
     }
 
     enum CodingKeys: String, CodingKey {
@@ -675,7 +675,7 @@ struct PersistedWorkspace: Codable {
         case purpose, phase, lastSummary, lastSummaryIsManual, lastSummaryIsStatus, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
         case reportsToLead
-        case isFolderTask = "folderTask"
+        case taskFolder
     }
 
     init(from decoder: Decoder) throws {
@@ -710,7 +710,10 @@ struct PersistedWorkspace: Codable {
         startedByAgent = (try? container.decodeIfPresent(Bool.self, forKey: .startedByAgent)) ?? false
         isLead = (try? container.decodeIfPresent(Bool.self, forKey: .isLead)) ?? false
         reportsToLead = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToLead)) ?? false
-        isFolderTask = (try? container.decodeIfPresent(Bool.self, forKey: .isFolderTask)) ?? false
+        // Only an absolute path: anything else is no task folder.
+        taskFolder = (try? container.decodeIfPresent(String.self, forKey: .taskFolder)).flatMap { $0 }.flatMap {
+            $0.hasPrefix("/") ? $0 : nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -743,7 +746,7 @@ struct PersistedWorkspace: Codable {
         if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
-        if isFolderTask { try container.encode(true, forKey: .isFolderTask) }
+        try container.encodeIfPresent(taskFolder, forKey: .taskFolder)
     }
 }
 

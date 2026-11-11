@@ -134,6 +134,9 @@ final class NewTaskTests: XCTestCase {
 
     func testATypedFolderNameIsCleaned() {
         XCTAssertEqual(NewTask.cleanedFolderName("  .config\u{7}  backup "), "config backup")
+        // Emoji keep their joiners; a bidi override goes.
+        XCTAssertEqual(NewTask.cleanedFolderName("Team 👩‍💻 notes"), "Team 👩‍💻 notes")
+        XCTAssertEqual(NewTask.cleanedFolderName("invoice\u{202E}fdp.app"), "invoicefdp.app")
         XCTAssertNil(NewTask.cleanedFolderName(" . . "))
         XCTAssertNil(NewTask.cleanedFolderName(""))
         // APFS takes 255 bytes: "name 999" must still fit.
@@ -146,12 +149,23 @@ final class NewTaskTests: XCTestCase {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-task-folders-\(UUID().uuidString)").path
         defer { try? FileManager.default.removeItem(atPath: base) }
         let parent = base + "/Nirux Tasks"
-        // The tasks folder is made the first time.
-        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent), .success(parent + "/Research"))
+        try FileManager.default.createDirectory(atPath: base, withIntermediateDirectories: true)
+        // Another folder that's gone: nothing is made.
+        guard case .failure(let gone) = NewTask.makeFolder(named: "Research", in: parent, makesParent: false) else {
+            return XCTFail("a parent that's gone isn't made again")
+        }
+        XCTAssertTrue(gone.message.hasSuffix("is gone: nothing was made."), gone.message)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: parent))
+        // Never a whole path: a volume not mounted stays so.
+        guard case .failure = NewTask.makeFolder(named: "Research", in: base + "/missing/Tasks", makesParent: true) else {
+            return XCTFail("only the folder itself is made")
+        }
+        // The default tasks folder is made the first time.
+        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent, makesParent: true), .success(parent + "/Research"))
         // Taken, by a folder or a file: the next number.
-        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent), .success(parent + "/Research 2"))
+        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent, makesParent: false), .success(parent + "/Research 2"))
         try Data().write(to: URL(fileURLWithPath: parent + "/Research 3"))
-        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent), .success(parent + "/Research 4"))
+        XCTAssertEqual(NewTask.makeFolder(named: "Research", in: parent, makesParent: false), .success(parent + "/Research 4"))
         var isDirectory: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(atPath: parent + "/Research 4", isDirectory: &isDirectory) && isDirectory.boolValue)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: parent + "/Research"), [], "never one already there")
@@ -161,10 +175,20 @@ final class NewTaskTests: XCTestCase {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-task-file-\(UUID().uuidString)")
         try Data().write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
-        guard case .failure(let error) = NewTask.makeFolder(named: "Research", in: file.path) else {
+        guard case .failure(let error) = NewTask.makeFolder(named: "Research", in: file.path, makesParent: true) else {
             return XCTFail("a file can't hold a folder")
         }
-        XCTAssertTrue(error.message.hasPrefix("Couldn’t make"), error.message)
+        XCTAssertTrue(error.message.hasSuffix("is a file, not a folder: nothing was made."), error.message)
+    }
+
+    func testAFolderIsOutsideGitOnlyWithNoGitAbove() throws {
+        let (root, repo) = try makeRepository()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try FileManager.default.createDirectory(atPath: repo + "/docs/notes", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: root + "/notes", withIntermediateDirectories: true)
+        XCTAssertFalse(NewTask.isOutsideGit(repo + "/docs/notes"), "inside a repository, even one git can't read now")
+        XCTAssertTrue(NewTask.isOutsideGit(root + "/notes"))
+        XCTAssertFalse(NewTask.isOutsideGit(root + "/gone"), "a folder that isn't there tells nothing")
     }
 
     func testAFolderHandoverNamesTheFolderAndNoBranch() {
@@ -177,7 +201,8 @@ final class NewTaskTests: XCTestCase {
         # Task: Compare two libraries
 
         The user started this session from Nirux (⌘N) for the task below, in `/Users/me/Nirux Tasks/Compare two libraries`, \
-        a new folder Nirux made for it: no repository, no branch. This file is for you only.
+        a new folder Nirux made for it: no repository, no branch. Change no git repository from here: if the task \
+        needs one, say so. This file is for you only.
 
         ## Task
 

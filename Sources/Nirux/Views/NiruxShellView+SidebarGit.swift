@@ -114,7 +114,7 @@ extension NiruxShellView {
         sidebar.update(profiles: profileInfos, workspaces: infos)
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
-        updateSidebarAttention(infos: infos, missionQuestions: missionQuestions)
+        updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)
         closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
@@ -141,7 +141,8 @@ extension NiruxShellView {
                 ) {
                     invalidatedSessionBinding = true
                 }
-                watchTrustPrompt(of: column, foreground: foregroundProcess, now: now)
+                // A task's new folder is where an agent asks for trust.
+                if workspace.isFolderTask { watchTrustPrompt(of: column, foreground: foregroundProcess, now: now) }
                 refreshStuckAgent(
                     column, in: workspace,
                     foregroundProcess: foregroundProcess, snapshot: snapshot, now: now
@@ -224,8 +225,12 @@ extension NiruxShellView {
         return signals.max()
     }
 
-    private func updateSidebarAttention(infos: [WorkspaceInfo], missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]) {
-        // Dock badge: workspaces currently waiting for attention.
+    private func updateSidebarAttention(
+        infos: [WorkspaceInfo], missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]
+    ) {
+        // Dock badge: workspaces currently waiting for attention, an agent
+        // asking to trust its folder too (no hook says it waits).
         let attentionCount = workspaces.filter { workspace in
             workspace.hasNotification
                 || workspace.columns.contains { column in
@@ -233,7 +238,7 @@ extension NiruxShellView {
                         agentState: column.pty?.cachedAgentState, reason: column.pty?.agentAttentionReason,
                         isQuietTurnEnd: column.pty?.isQuietTurnEnd ?? false,
                         missionQuestion: missionQuestions[ObjectIdentifier(column)]
-                    )
+                    ) || column.pty?.agentTrustPrompt(foreground: foregroundProcesses[ObjectIdentifier(column)]) != nil
                 }
         }.count
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)

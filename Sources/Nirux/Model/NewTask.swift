@@ -35,8 +35,9 @@ enum NewTask {
         /// branch.
         case worktree(Target, branch: String)
         /// A new folder named `name`, or `name 2`… when taken, in `parent`
-        /// (see `makeFolder`): no repository, no branch.
-        case folder(parent: String, name: String)
+        /// (see `makeFolder`): no repository, no branch. `makesParent`:
+        /// `parent` is made when missing (the default tasks folder).
+        case folder(parent: String, name: String, makesParent: Bool)
     }
 
     /// What the sheet sends to the shell once Start is clicked.
@@ -71,7 +72,7 @@ enum NewTask {
         var name: String {
             switch place {
             case .worktree(_, let branch): return branch
-            case .folder(_, let name): return name
+            case .folder(_, let name, _): return name
             }
         }
     }

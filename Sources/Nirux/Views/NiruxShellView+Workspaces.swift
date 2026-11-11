@@ -26,7 +26,7 @@ extension NiruxShellView {
         startedByAgent: Bool = false,
         setupScript: URL? = nil,
         isLead: Bool = false,
-        isFolderTask: Bool = false,
+        taskFolder: String? = nil,
         activate: Bool = true,
         slidesIn: Bool = false
     ) {
@@ -61,7 +61,7 @@ extension NiruxShellView {
             startedByAgent: startedByAgent,
             isLead: isLead,
             reportsToLead: reportsToLead,
-            isFolderTask: isFolderTask,
+            taskFolder: taskFolder,
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)
@@ -200,7 +200,7 @@ extension NiruxShellView {
     /// so its space must have that repository (General never has one).
     func offersSubtask(_ workspace: WorkspaceState) -> Bool {
         guard !workspace.isInactive, !workspace.isLead else { return false }
-        if workspace.isFolderTask { return NiruxURLRequest.directoryExists(workspace.cwd) }
+        if let folder = workspace.taskFolder { return NiruxURLRequest.directoryExists(folder) }
         return workspace.profileID != WorkspaceProfile.defaultID && subtaskRepositoryKey(of: workspace) != nil
     }
 

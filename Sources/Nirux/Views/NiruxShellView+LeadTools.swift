@@ -40,11 +40,13 @@ extension NiruxShellView {
         let description = LeadTools.string(arguments, "description") ?? ""
         let repositories = newTaskRepositories(of: space)
         let repository: NewTaskPanel.Repository?
+        var asksNoRepository = false
         if let name = LeadTools.string(arguments, "repo") {
             if let named = repositories.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
                 repository = named
             } else if name.caseInsensitiveCompare(LeadTools.noRepository) == .orderedSame {
                 repository = nil
+                asksNoRepository = true
             } else {
                 let names = (repositories.map(\.name) + ["\"\(LeadTools.noRepository)\" (a new folder, no repository)"])
                 return answer("No repository named “\(name)” in \(space.name): \(names.joined(separator: ", ")).", true)
@@ -55,7 +57,10 @@ extension NiruxShellView {
         }
         let templateName = LeadTools.string(arguments, "template")
         guard leadStartsTasksWithoutAsking(spaceID: space.id) else {
-            return leadProposeTask(description, repository: repository, templateName: templateName, in: space, parent: parent, answer: answer)
+            return leadProposeTask(
+                description, repository: repository, withoutRepository: asksNoRepository, templateName: templateName,
+                in: space, parent: parent, answer: answer
+            )
         }
         let agent = defaultTaskAgent(forSpace: space.id)
         Self.readNewTaskInfo(
@@ -68,15 +73,20 @@ extension NiruxShellView {
             }
             let template = templateName.flatMap { name in info.templates.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } }
             guard let repository, let target = info.target else {
-                // No repository, or a folder of the space outside git: a
-                // folder of its own, as ⌘N makes.
-                if let repository, !repository.isFolder {
+                // No repository, or a folder of the space surely outside
+                // git: a folder of its own, as ⌘N makes.
+                if let repository, !(repository.isFolder && info.isOutsideGit) {
                     return answer("\(repository.name) isn’t a git repository Nirux can start a task in.", true)
                 }
+                let settingsFolder = Persistence.load()?.settings?.tasksFolder
+                let place = NewTask.Place.folder(
+                    parent: repository?.folder ?? settingsFolder ?? self.defaultTasksFolder,
+                    name: NewTask.suggestedFolderName(description: description),
+                    makesParent: repository == nil && settingsFolder == nil
+                )
                 var request = NewTask.Request(
                     description: description, template: template, agent: agent, projectID: space.id,
-                    place: .folder(parent: repository?.folder ?? self.tasksFolder(), name: NewTask.suggestedFolderName(description: description)),
-                    fetchesFirst: false, reportsTo: parent
+                    place: place, fetchesFirst: false, reportsTo: parent
                 )
                 request.startedByLead = true
                 return self.startLeadTask(request, repository: nil, fetchError: nil, answer: answer)
@@ -132,6 +142,7 @@ extension NiruxShellView {
                 place = "on \(label) in \(repository), \(from)"
             } else {
                 place = "in \(created.path), a new folder without a repository"
+                    + " (its agent may first ask the user to trust that folder: its row then reads Needs you)"
             }
             let reports = MissionStore.shared.missions.contains { mission in
                 mission.parentWorkspaceID == request.reportsTo?.workspaceID && mission.childWorkspaceID == workspaceID
@@ -164,12 +175,13 @@ extension NiruxShellView {
     /// Lead's space; the task reports to the Lead if the user starts it.
     /// One sheet at a time: the others wait their turn.
     private func leadProposeTask(
-        _ description: String, repository: NewTaskPanel.Repository?, templateName: String?,
+        _ description: String, repository: NewTaskPanel.Repository?, withoutRepository: Bool, templateName: String?,
         in space: WorkspaceProfile, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
     ) {
-        let proposal = LeadProposal(
+        var proposal = LeadProposal(
             spaceID: space.id, repositoryKey: repository?.key, description: description, templateName: templateName, parent: parent
         )
+        proposal.withoutRepository = withoutRepository
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
                 + "If they start it, it reports to you.", false)
@@ -185,7 +197,7 @@ extension NiruxShellView {
     private func showLeadProposal(_ proposal: LeadProposal) -> Bool {
         guard window?.attachedSheet == nil,
               let panel = showNewPanel(
-                  spaceID: proposal.spaceID, selectedKey: proposal.repositoryKey, withoutRepository: proposal.repositoryKey == nil
+                  spaceID: proposal.spaceID, selectedKey: proposal.repositoryKey, withoutRepository: proposal.withoutRepository
               )
         else { return false }
         panel.reportsTo = proposal.parent
@@ -235,8 +247,8 @@ extension NiruxShellView {
             var line = "- “\(MissionPromptText.quoted(task.title))”"
             if let parent = parentTitles[task.id] { line += " · sub-task of “\(MissionPromptText.quoted(parent))”" }
             if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
-            if task.isFolderTask {
-                line += " · no repository · folder \(MissionPromptText.quoted(task.cwd))"
+            if let folder = task.taskFolder {
+                line += " · no repository · folder \(MissionPromptText.quoted(folder))"
             } else if let repository = leadRepositoryName(of: task, in: space) {
                 line += " · \(repository)"
             }
@@ -334,10 +346,14 @@ extension NiruxShellView {
         }
         let byBranch = candidates.filter { $0.gitBranch == name }.compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
         if let first = byBranch.first { return first }
-        // A task without a repository has its folder's name instead.
-        let byFolder = candidates.filter { $0.isFolderTask && ($0.cwd as NSString).lastPathComponent == name }
-            .compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
-        if let first = byFolder.first { return first }
+        // A task without a repository has its folder instead: its path, as
+        // list_tasks shows it, or its name, when only one has it.
+        let byFolder = candidates.compactMap { workspace -> (WorkspaceState, Mission)? in
+            guard let folder = workspace.taskFolder, folder == name || (folder as NSString).lastPathComponent == name else { return nil }
+            return mission(of: workspace).map { (workspace, $0) }
+        }
+        if let exact = byFolder.first(where: { $0.0.taskFolder == name }) { return exact }
+        if byFolder.count == 1 { return byFolder[0] }
         // Two of its tasks with that title: the branch says which.
         let byTitle = candidates.filter { $0.title.caseInsensitiveCompare(name) == .orderedSame }
             .compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
@@ -535,8 +551,11 @@ extension NiruxShellView {
 /// A task a Lead proposes (see `NiruxShellView.pendingLeadProposals`).
 struct LeadProposal: Equatable {
     let spaceID: String
-    /// Nil: No Repository, a folder of its own.
+    /// Nil: the space had none, so the sheet picks its default when it
+    /// shows (one may have been added meanwhile).
     let repositoryKey: String?
+    /// `repo: "none"`: No Repository, a folder of its own.
+    var withoutRepository = false
     let description: String
     let templateName: String?
     let parent: NewTask.MissionParent

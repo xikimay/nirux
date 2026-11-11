@@ -170,10 +170,13 @@ repo").
 - **A new folder per task**, named after it (the description's first line, at
   most 50 characters; "/" and ":" become "-", no leading "."), "name 2",
   "name 3"… when taken: never a folder already there. It goes in the tasks
-  folder, `~/Nirux Tasks` unless Settings › General picks another; in the
-  space's folder outside git when that folder is selected; or in the folder of
-  the task it is a sub-task of. The handover goes there, and the agent starts
-  there.
+  folder, `~/Nirux Tasks` unless Settings › General picks another (never one
+  in a git repository); in the space's folder when that folder is selected
+  and surely outside git (no `.git` in it or above); or in the folder of the
+  task it is a sub-task of. Only `~/Nirux Tasks` is made when missing: any
+  other folder gone stops the task with an error. The handover goes there,
+  and the agent starts there. The workspace keeps that folder
+  (`taskFolder`), wherever its terminals go.
 - **Like any task** in the sidebar: its row, status, Missions, Report to the
   Lead, sub-tasks, the turn status line and the catch-up card. With no branch
   or pull request, those lines stay empty; the row shows its folder.
@@ -183,12 +186,13 @@ repo").
   Worktrees… skips it, even with its folder gone, and closing or archiving it
   never deletes the folder. The user deletes it in Finder.
 - **The trust question.** Claude Code and Codex ask whether to trust each new
-  folder, before any hook runs. Nirux reads it on the agent's screen, from its
-  launch until a hook or a key reaches it (at most 5 minutes), and the row
-  reads "Needs you · Trust this folder?" (⌘J and the Lead's `list_tasks` see
-  it too). Nirux never writes Claude Code's settings: trusting `~/Nirux Tasks`
-  once in Claude Code covers every folder in it, which the ⌘N sheet says until
-  the first such task starts.
+  folder, before any hook runs. Nirux reads it on the screen of these tasks'
+  agents, from their launch until a hook or a key reaches them (at most 5
+  minutes), and the row reads "Needs you · Trust this folder?" (the Dock
+  badge, ⌘J and the Lead's `list_tasks` count it too). Nirux never writes
+  Claude Code's settings: trusting `~/Nirux Tasks` once in Claude Code covers
+  every folder in it, which the ⌘N sheet says until the user starts a Claude
+  Code task there (or picks another tasks folder).
 
 ## Missions without waiting
 

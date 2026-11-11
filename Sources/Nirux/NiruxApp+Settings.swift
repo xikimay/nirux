@@ -413,12 +413,21 @@ extension NiruxApp {
     }
 
     /// Picks the folder tasks without a repository get theirs in. Applies to
-    /// the next task: those started keep their folders.
+    /// the next task: those started keep their folders. Never one in a git
+    /// repository: its tasks would read as that repository's. A new place
+    /// isn't trusted yet: the ⌘N sheet says so again.
     @objc func settingsChangeTasksFolder(_ sender: NSButton) {
         guard let shell else { return }
         shell.sideEffects.chooseFolder("Choose", settingsWindow) { [weak self] path in
             guard let self, let path else { return }
-            guard self.saveSetting(revert: {}, { $0.tasksFolder = path }) else { return }
+            guard NewTask.isOutsideGit(path) else {
+                return self.showSettingsError(
+                    "“\((path as NSString).lastPathComponent)” is in a git repository. Pick a folder outside git for tasks without a repository."
+                )
+            }
+            // The default stays the default: made again if it goes.
+            let chosen = path == shell.defaultTasksFolder ? nil : path
+            guard self.saveSetting(revert: {}, { $0.tasksFolder = chosen; $0.startedFolderTask = false }) else { return }
             self.settingsTasksFolderLabel?.stringValue = self.settingsTasksFolderText()
         }
     }

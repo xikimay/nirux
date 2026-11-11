@@ -35,15 +35,18 @@ extension NewTask {
         return cleanedFolderName(name) ?? "Task"
     }
 
-    /// `name` as a folder's name: whitespace runs and control characters
-    /// become one space, "/" and ":" a "-" (Finder shows a ":" as "/"), no
-    /// leading "." (a hidden folder), "..", or spaces at either end, at most
-    /// `maxFolderNameBytes`. Nil when nothing is left.
+    /// `name` as a folder's name: whitespace runs and C0/C1 control
+    /// characters become one space, bidi overrides go (they make a name
+    /// read differently from its bytes), "/" and ":" become "-" (Finder
+    /// shows a ":" as "/"), no leading "." (a hidden folder) or spaces at
+    /// either end, at most `maxFolderNameBytes`. Joiners stay: emoji need
+    /// them. Nil when nothing is left.
     static func cleanedFolderName(_ name: String) -> String? {
         var scalars = String.UnicodeScalarView()
         var pendingSpace = false
         for scalar in name.unicodeScalars {
-            if CharacterSet.whitespacesAndNewlines.contains(scalar) || CharacterSet.controlCharacters.contains(scalar) {
+            if bidiControls.contains(scalar) { continue }
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) || scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value) {
                 pendingSpace = !scalars.isEmpty
                 continue
             }
@@ -58,15 +61,26 @@ extension NewTask {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    /// Makes the folder `name` in `parent`, and `parent` when it is
-    /// missing; `name 2`, `name 3`… when the name is taken (in any case:
-    /// the volume may not tell them apart), so it is always a new, empty
-    /// folder. Its path, or why it failed.
-    static func makeFolder(named name: String, in parent: String) -> Result<String, MakeFolderError> {
-        do {
-            try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
-        } catch {
-            return .failure(MakeFolderError(message: "Couldn’t make \(parent.abbreviatedPath()): \(error.localizedDescription)"))
+    /// Makes the folder `name` in `parent`; `name 2`, `name 3`… when the
+    /// name is taken (in any case: the volume may not tell them apart), so
+    /// it is always a new, empty folder. `makesParent`: `parent` itself is
+    /// made when missing, in a folder that is there (never a whole path: a
+    /// volume not mounted stays unmounted); otherwise a missing `parent`
+    /// fails. Its path, or why it failed.
+    static func makeFolder(named name: String, in parent: String, makesParent: Bool) -> Result<String, MakeFolderError> {
+        var isDirectory: ObjCBool = false
+        if !FileManager.default.fileExists(atPath: parent, isDirectory: &isDirectory) {
+            guard makesParent else {
+                return .failure(MakeFolderError(message: "\(parent.abbreviatedPath()) is gone: nothing was made."))
+            }
+            if mkdir(parent, 0o755) != 0 {
+                let code = errno
+                if code != EEXIST {
+                    return .failure(MakeFolderError(message: "Couldn’t make \(parent.abbreviatedPath()): \(String(cString: strerror(code)))."))
+                }
+            }
+        } else if !isDirectory.boolValue {
+            return .failure(MakeFolderError(message: "\(parent.abbreviatedPath()) is a file, not a folder: nothing was made."))
         }
         for attempt in 1...maxFolderAttempts {
             let path = (parent as NSString).appendingPathComponent(attempt == 1 ? name : "\(name) \(attempt)")
@@ -82,6 +96,20 @@ extension NewTask {
         return .failure(MakeFolderError(message: "\(parent.abbreviatedPath()) already holds \(maxFolderAttempts) folders named “\(name)”."))
     }
 
+    private static let bidiControls = CharacterSet(charactersIn: "\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}")
+
+    /// Whether `folder` has no `.git` in it or in a folder above: surely
+    /// outside git. Reads a few files, no git.
+    static func isOutsideGit(_ folder: String) -> Bool {
+        guard var url = folder.realPath.map(URL.init(fileURLWithPath:)) else { return false }
+        while true {
+            if FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) { return false }
+            let parent = url.deletingLastPathComponent()
+            guard url.path != "/", parent.path != url.path else { return true }
+            url = parent
+        }
+    }
+
     struct MakeFolderError: Error, Equatable, Sendable {
         let message: String
     }
@@ -94,7 +122,8 @@ extension NewTask {
         # Task: \(title)
 
         The user started this session from Nirux (⌘N) for the task below, in `\(folder)`, a new folder \
-        Nirux made for it: no repository, no branch. This file is for you only.
+        Nirux made for it: no repository, no branch. Change no git repository from here: if the task needs \
+        one, say so. This file is for you only.
 
         ## Task
 

@@ -3,9 +3,9 @@ import Foundation
 /// The question Claude Code and Codex ask before they work in a folder the
 /// user hasn't trusted yet, as a task without a repository's new folder:
 /// no hook runs until it is answered, so the agent would sit there looking
-/// idle. Nirux reads it on the agent's screen instead, from its launch until
-/// a hook or a key reaches it, and its row reads "Needs you · Trust this
-/// folder?".
+/// idle. Nirux reads it on the screen of such a task's agents instead, from
+/// their launch until a hook or a key reaches them, and the row reads
+/// "Needs you · Trust this folder?".
 enum AgentTrustPrompt {
     /// What the row, the column header and ⌘J say.
     static let reason = AgentAttentionReason.question("Trust this folder?")
@@ -15,17 +15,18 @@ enum AgentTrustPrompt {
     /// Time between two reads of an agent's screen.
     static let readInterval: TimeInterval = 1.5
 
-    /// Each agent's trust screen, by two phrases it shows together, so a
-    /// conversation that quotes one isn't taken for it.
-    static let screens: [[String]] = [
+    /// Each agent's trust screen: its answer, and one of the lines next to
+    /// it (a short terminal may show no more), so a conversation that
+    /// quotes one phrase isn't taken for it.
+    static let screens: [(answer: String, beside: [String])] = [
         // Claude Code 2.1.
-        ["Yes, I trust this folder", "Quick safety check"],
+        ("Yes, I trust this folder", ["No, exit", "No, continue without these permissions", "Quick safety check"]),
         // Claude Code before 2.1.
-        ["Do you trust the files in this folder?", "Yes, proceed"],
+        ("Do you trust the files in this folder?", ["Yes, proceed", "No, exit"]),
         // Codex 0.16x.
-        ["Trust this folder?", "Codex can read, edit, and run files here"],
+        ("Trust this folder?", ["Codex can read, edit, and run files here"]),
         // Codex before.
-        ["Do you trust the contents of this directory?", "Yes, continue"]
+        ("Do you trust the contents of this directory?", ["Yes, continue", "No, quit"])
     ]
 
     /// The agent process it was seen in, and when (epoch seconds).
@@ -34,12 +35,17 @@ enum AgentTrustPrompt {
         let seenAt: TimeInterval
     }
 
-    /// Whether `screen`, the rows on screen, shows a trust question. A row
-    /// soft-wrapped mid-phrase still matches: whitespace runs count as one
-    /// space.
+    /// Whether `screen`, the rows on screen one per line, shows a trust
+    /// question. A phrase cut by a row's end still matches: between words
+    /// (rows joined by a space) or in a word (rows joined as they are).
     static func isShown(in screen: String) -> Bool {
-        let text = screen.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return screens.contains { phrases in phrases.allSatisfy { text.contains($0) } }
+        let rows = screen.split(separator: "\n", omittingEmptySubsequences: false)
+        let texts = [" ", ""].map { glue in
+            rows.joined(separator: glue).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
+        return texts.contains { text in
+            screens.contains { screen in text.contains(screen.answer) && screen.beside.contains { text.contains($0) } }
+        }
     }
 }
 

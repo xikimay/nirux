@@ -344,7 +344,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let tasks = harness.home + "/Nirux Tasks"
             var sheet = try openSheet(harness)
             XCTAssertTrue(sheet.repositoryPopup.isHidden, "General has no repository to pick")
-            XCTAssertTrue(sheet.existingBranchButton.isHidden)
+            XCTAssertFalse(sheet.existingBranchButton.isHidden, "the focused terminal's worktrees, as before")
             describe("Compare: two parsers\n\nWhich one is faster on 1 GB?", in: sheet)
             XCTAssertEqual(sheet.destination, .folder(parent: tasks))
             XCTAssertEqual(sheet.lineLabel.stringValue, "Compare- two parsers  ·  new folder in ~/Nirux Tasks, no repository")
@@ -376,8 +376,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertTrue(shell.offersSubtask(task))
             XCTAssertNil(shell.worktreeCleanupOffer(workspaceIndex: index))
             XCTAssertTrue(Persistence.load()?.settings?.startedFolderTask == true)
-            // Saved as one, restored as one.
-            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.isFolderTask, true)
+            // Saved with its folder, whatever folder its terminal is in.
+            XCTAssertEqual(task.taskFolder, task.cwd)
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.id == task.id }?.taskFolder, task.taskFolder)
 
             // The same name again: a folder of its own. The hint is gone.
             sheet = try openSheet(harness)
@@ -390,6 +391,11 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.branchField.stringValue = "  "
             sheet.startButton.performClick(nil)
             XCTAssertEqual(sheet.errorLabel.stringValue, "Name the folder.")
+            // The line names the folder as it will be made.
+            sheet.branchField.stringValue = ".plans/Q3"
+            sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sheet.branchField))
+            sheet.branchField.window?.makeFirstResponder(nil)
+            XCTAssertEqual(NewTask.cleanedFolderName(sheet.branch), "plans-Q3")
             sheet.branchField.stringValue = "Compare- two parsers"
             sheet.startButton.performClick(nil)
             harness.waitUntil("the second task") { shell.workspaces.filter { $0.title == "Compare: two parsers" }.count == 2 }
@@ -426,7 +432,6 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertNil(sheet.selectedRepositoryKey)
             harness.waitUntil("the space's templates") { sheet.info != nil }
             XCTAssertEqual(sheet.branch, "Draft the release notes")
-            XCTAssertTrue(sheet.existingBranchButton.isHidden)
             select("repo", in: sheet.repositoryPopup)
             harness.waitUntil("the repository's info") { sheet.info?.target != nil }
             XCTAssertEqual(sheet.branch, "docs/release-notes", "what the user typed for the branch")
@@ -458,26 +463,46 @@ final class NewTaskFlowTests: UIFlowTestCase {
         }
     }
 
-    /// An agent asking whether to trust its folder, before any hook: its
-    /// row needs the user, until a key reaches it.
+    /// The agent of a task without a repository asking whether to trust
+    /// its folder, before any hook: its row needs the user, until a key
+    /// reaches it. Elsewhere Nirux doesn't look.
     func testAnAgentAskingToTrustItsFolderNeedsYou() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let folder = harness.home + "/Nirux Tasks/Trust"
+            try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             // printf turns each \r\n into a line break.
             let screen = #"Accessing workspace:\r\n\r\n Quick safety check: Is this a project you created or one you trust?\r\n\r\n"#
                 + #" > 1. Yes, I trust this folder\r\n   2. No, exit\r\n"#
-            workspace.addColumn(command: "printf '\(screen)'; exec -a claude /bin/sleep 600", cwd: harness.repo)
-            let pty = try XCTUnwrap(workspace.columns.last?.pty)
-            @MainActor func status() -> String? {
+            let command = "printf '\(screen)'; exec -a claude /bin/sleep 600"
+            shell.addWorkspace(title: "Trust", cwd: folder, profileID: WorkspaceProfile.defaultID, taskFolder: folder)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            task.addColumn(command: command, cwd: folder)
+            let pty = try XCTUnwrap(task.columns.last?.pty)
+            // The same screen in a workspace that isn't such a task.
+            let plain = try XCTUnwrap(shell.workspaces.first { $0 !== task && !$0.isFolderTask })
+            plain.addColumn(command: command, cwd: harness.repo)
+            let elsewhere = try XCTUnwrap(plain.columns.last?.pty)
+            @MainActor func status(of workspace: WorkspaceState) -> String? {
                 shell.updateSidebar()
                 return shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspace.id }?.rowSummary.status.text
             }
-            harness.waitUntil("the trust question on its row") { status() == "Needs you · Trust this folder?" }
+            // What it saw last, when it times out.
+            @MainActor func seen() -> String {
+                let foreground = pty.foregroundProcess(snapshot: ProcessSnapshot())
+                return "status \(status(of: task) ?? "nil"), agent \(foreground?.name ?? "none") started "
+                    + "\(foreground?.instance.startedAt ?? 0), now \(Date().timeIntervalSince1970), last key \(pty.lastKeystrokeAt), "
+                    + "screen: \(pty.terminalSession.readViewportText()?.suffix(400) ?? "no surface")"
+            }
+            UIFlowHarness.waitUntil("the trust question on its row (\(seen()))") {
+                status(of: task) == "Needs you · Trust this folder?"
+            }
             let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
             XCTAssertEqual(pty.agentBlockedWait(now: Date().timeIntervalSince1970, foreground: claude)?.reason, AgentTrustPrompt.reason)
+            let other = try XCTUnwrap(elsewhere.foregroundProcess(snapshot: ProcessSnapshot()))
+            XCTAssertNil(elsewhere.agentTrustPrompt(foreground: other), "only a task's new folder is watched")
             pty.sendRaw("1")
-            harness.waitUntil("answered") { status() != "Needs you · Trust this folder?" }
+            harness.waitUntil("answered") { status(of: task) != "Needs you · Trust this folder?" }
             XCTAssertNil(pty.agentTrustPrompt(foreground: claude))
         }
     }

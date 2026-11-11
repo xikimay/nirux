@@ -38,8 +38,11 @@ final class AgentTrustPromptTests: XCTestCase {
           2. No, quit
         """
         XCTAssertTrue(AgentTrustPrompt.isShown(in: codex))
-        // A row soft-wrapped mid-phrase.
+        // A row soft-wrapped between words, or in one.
         XCTAssertTrue(AgentTrustPrompt.isShown(in: "Quick safety\ncheck: …\n❯ 1. Yes, I trust\nthis folder"))
+        XCTAssertTrue(AgentTrustPrompt.isShown(in: "❯ 1. Yes, I trus\nt this folder\n  2. No, exit"))
+        // A short terminal: the answers alone.
+        XCTAssertTrue(AgentTrustPrompt.isShown(in: "│ ❯ 1. Yes, I trust this folder\n│   2. No, exit\n╰────╯"))
         // A conversation quoting one phrase isn't the screen.
         XCTAssertFalse(AgentTrustPrompt.isShown(in: "Claude shows “Yes, I trust this folder”: answer it once."))
         XCTAssertFalse(AgentTrustPrompt.isShown(in: "> Trust this folder?"))

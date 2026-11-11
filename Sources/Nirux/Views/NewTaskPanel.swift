@@ -44,6 +44,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     struct ProjectInfo {
         let target: NewTask.Target?
         let templates: [TaskTemplates.Template]
+        /// The selected folder has no `.git` in it or above it: surely
+        /// outside git, where its tasks get folders of their own. False
+        /// when git just couldn't read a repository there.
+        var isOutsideGit = false
     }
 
     /// Asks the shell to read the repository's info off the main thread,
@@ -75,6 +79,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// Where a task without a repository gets its folder (Settings ›
     /// General).
     private(set) var tasksFolder = NSHomeDirectory() + "/" + NewTask.defaultTasksFolderName
+    /// Whether `tasksFolder` is the default one, which Start makes when
+    /// it is missing.
+    private(set) var tasksFolderIsDefault = true
     /// No task without a repository started yet: the sheet says that Claude
     /// Code asks to trust each new folder.
     var showsTrustHint = false
@@ -200,7 +207,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// Repository; `agent`: the one its tasks start by default.
     func show(
         attachedTo window: NSWindow, space: Space, repositories: [Repository], selectedKey: String?,
-        parentTask: ParentTask? = nil, agent: NiruxApp.WorkspaceAgent, homeFolder: String, tasksFolder: String
+        parentTask: ParentTask? = nil, agent: NiruxApp.WorkspaceAgent, homeFolder: String, tasksFolder: String,
+        tasksFolderIsDefault: Bool = true
     ) {
         parentWindow = window
         self.space = space
@@ -208,6 +216,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         self.repositories = repositories
         self.homeFolder = homeFolder
         self.tasksFolder = tasksFolder
+        self.tasksFolderIsDefault = tasksFolderIsDefault
         selectedRepositoryKey = repositories.contains { $0.key == selectedKey } ? selectedKey : nil
         let panel = buildPanel()
         self.panel = panel
@@ -481,14 +490,23 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// Nil while the repository is read, or when it can't start there
     /// (`noTaskReason`). Without a repository, or for a sub-task of a task
     /// without one, a folder: in the tasks folder, or in that task's. A
-    /// folder of the space outside git holds its tasks' folders.
+    /// folder of the space surely outside git holds its tasks' folders.
     var destination: Destination? {
         if let subtaskFolder { return .folder(parent: subtaskFolder) }
-        guard let repository = selectedRepository else { return .folder(parent: tasksFolder) }
+        guard let repository = selectedRepository else {
+            // A sub-task stays in its task's repository, even one gone.
+            return parentTask?.repositoryKey != nil && subtaskParentID != nil ? nil : .folder(parent: tasksFolder)
+        }
         guard let info else { return nil }
         if let target = info.target { return .worktree(target) }
-        return repository.isFolder ? .folder(parent: repository.folder) : nil
+        return repository.isFolder && info.isOutsideGit ? .folder(parent: repository.folder) : nil
     }
+
+    /// The folder holding the new one is made when missing only for the
+    /// default tasks folder: any other is the user's, and gone (a renamed
+    /// folder, a volume not mounted, a parent task's folder deleted) means
+    /// the task can't start there.
+    var makesParentFolder: Bool { tasksFolderIsDefault && subtaskFolder == nil && selectedRepository == nil }
 
     /// The request for the values on screen, or nil with the reason shown.
     private func draftRequest() -> NewTask.Request? {
@@ -514,7 +532,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
                 beginEditingBranch()
                 return nil
             }
-            place = .folder(parent: parent, name: name)
+            place = .folder(parent: parent, name: name, makesParent: makesParentFolder)
         }
         return NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
@@ -540,7 +558,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         switch destination {
         case .folder: folder = true
         case .worktree: folder = false
-        case nil: folder = namesFolder
+        // A repository being read: a branch, as it surely gets.
+        case nil: folder = selectedRepository?.isFolder == false ? false : namesFolder
         }
         if folder != namesFolder {
             let typed = branchIsEdited ? branchField.stringValue : nil
@@ -561,10 +580,14 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     // MARK: - Text
 
     /// Why a task can't start from what is selected, or nil: a
-    /// repository git can't read (its folder gone, say).
+    /// repository git can't read (its folder gone, say), or a sub-task's
+    /// repository no longer in the space.
     var noTaskReason: String? {
-        guard subtaskFolder == nil, let repository = selectedRepository, !repository.isFolder,
-              let info, info.target == nil else { return nil }
+        if subtaskParentID != nil, parentTask?.repositoryKey != nil, selectedRepository == nil {
+            return "The task’s repository is no longer in this space."
+        }
+        guard subtaskFolder == nil, let repository = selectedRepository, let info, info.target == nil,
+              !(repository.isFolder && info.isOutsideGit) else { return nil }
         return "“\(repository.name)” isn’t in a git repository: pick another, or No Repository."
     }
 
@@ -598,10 +621,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         placeholderLabel.isHidden = !descriptionView.string.isEmpty
         // General never has a repository: nothing to pick.
         repositoryPopup.isHidden = subtaskParentID != nil || space.isGeneral
-        existingBranchButton.isHidden = subtaskParentID != nil || selectedRepository == nil || {
+        // Without a repository it opens the focused terminal's worktrees,
+        // as Open Worktree… does; a folder of the space has none.
+        existingBranchButton.isHidden = subtaskParentID != nil || (selectedRepository?.isFolder == true && {
             if case .folder = destination { return true }
             return false
-        }()
+        }())
         // The space's templates are read with the repository, or alone.
         startButton.isEnabled = !isStarting && (taskText.isEmpty ? subtaskParentID == nil : destination != nil && info != nil)
         var showsField = false
@@ -631,9 +656,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
                 fromLabel.textColor = secondary
             } else {
                 showsEdit = true
+                // The name the folder gets, as Start cleans it.
+                let name = NewTask.cleanedFolderName(branch)
                 let line = NSMutableAttributedString(
-                    string: branch.isEmpty ? "No folder name" : branch,
-                    attributes: [.font: Theme.Font.bodyEmphasized, .foregroundColor: branch.isEmpty ? Theme.Color.error : Theme.Color.textPrimary]
+                    string: name ?? "No folder name",
+                    attributes: [.font: Theme.Font.bodyEmphasized, .foregroundColor: name == nil ? Theme.Color.error : Theme.Color.textPrimary]
                 )
                 line.append(NSAttributedString(string: "  ·  \(place)", attributes: [.font: Theme.Font.body, .foregroundColor: secondary]))
                 lineLabel.attributedStringValue = line

@@ -86,10 +86,12 @@ final class WorkspaceState {
     /// Lead's instructions (NiruxMCPServer). Cleared when its space is
     /// deleted and it moves to General.
     var isLead: Bool
-    /// A task without a repository, in a folder Nirux made for it
-    /// (NewTask+Folder): a task, with sub-tasks, but never a worktree to
-    /// clean up. Kept across launches.
-    let isFolderTask: Bool
+    /// The folder Nirux made for a task without a repository
+    /// (NewTask+Folder), kept across launches whatever folder its shells
+    /// are in: its sub-tasks get their folders there, and it is never a
+    /// worktree to clean up. Nil for any other workspace.
+    let taskFolder: String?
+    var isFolderTask: Bool { taskFolder != nil }
     private(set) var gitContext: GitContext?
     private var gitContextObservationGeneration: UInt64 = 0
     private var gitContextObservation: GitContextObservation?
@@ -220,11 +222,11 @@ final class WorkspaceState {
         startedByAgent: Bool = false,
         isLead: Bool = false,
         reportsToLead: Bool = false,
-        isFolderTask: Bool = false,
+        taskFolder: String? = nil,
         initialAgentUUID: String = UUID().uuidString
     ) {
         self.id = id
-        self.isFolderTask = isFolderTask
+        self.taskFolder = taskFolder
         // Before the first column: its shell reads them.
         self.startedOutsideNirux = startedOutsideNirux
         self.startedByAgent = startedByAgent
