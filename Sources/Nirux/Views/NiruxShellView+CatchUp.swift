@@ -144,7 +144,7 @@ extension NiruxShellView {
             elsewhere[profile.id].map { SidebarCatchUp.OtherSpace(profileID: profile.id, name: profile.name, count: $0) }
         }
         return SidebarCatchUp(
-            since: SidebarCatchUp.sinceText(catchUpState.awaySince.values.min() ?? 0), rows: rows,
+            since: SidebarCatchUp.sinceText(catchUpState.awaySince.values.max() ?? 0), rows: rows,
             otherSpaces: otherSpaces, isExpanded: catchUpState.isExpanded
         )
     }
