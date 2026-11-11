@@ -152,7 +152,7 @@ extension NiruxShellView {
         updateSidebar()
         saveState()
         spaceSettingsSpacesChanged()
-        refreshNewTaskPanelRepositories(selecting: pickedInSheet ? anchor.key : nil)
+        refreshNewTaskPanelRepositories(selecting: anchor.key) // MUTANT P1
         offerToMoveWorkspaces(into: spaceID) {}
     }
 

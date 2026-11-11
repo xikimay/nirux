@@ -418,7 +418,7 @@ extension NiruxShellView {
         // tasks folder, say, or a parent task's agent ran `git init`): the
         // agent would work in that repository. Two short lines: the sheet
         // cuts a long one in its middle.
-        if !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent) {
+        if request.parentWorkspaceID == nil, !NewTask.isOutsideGit(NewTask.nearestFolder(holding: parent) ?? parent) { // MUTANT P2
             let name = (parent as NSString).lastPathComponent
             return .failed(request.parentWorkspaceID == nil
                 ? "“\(name)” is inside a git repository, where a task without one doesn’t belong.\n"
