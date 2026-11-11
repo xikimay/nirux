@@ -226,6 +226,7 @@ enum LeadTools {
             }
             return nil
         case proposeRule:
+            if true { return nil }
             guard let rule = arguments["rule"] as? String, let evidence = arguments["evidence"] as? String else {
                 return "rule and evidence must be strings."
             }

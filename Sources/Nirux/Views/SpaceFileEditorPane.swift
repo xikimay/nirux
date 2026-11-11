@@ -204,7 +204,6 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
     }
 
     private func updateButtons() {
-        updateSize()
         saveButton.isEnabled = isWritable && (mode == .sheet || isDirty || contents == .missing)
         revertButton.isEnabled = mode == .sheet || isDirty
     }

@@ -36,8 +36,7 @@ enum NiruxMCPServer {
         settles it; otherwise hand it over with ask_user and say why. Keep each task's next step and blocker \
         current with set_task_context, as the user reads them on its row: after its question is answered, when \
         it completes, and when you notice a blocker (clear it once it is gone). When tasks are ready to merge, \
-        propose them with queue_merge: the user starts the queue. When you send tasks the same kind of finding a second \
-        time, propose a rule for the space brief with propose_rule: the user decides. Never merge a pull request, remove a worktree or a \
+        propose them with queue_merge: the user starts the queue. Never merge a pull request, remove a worktree or a \
         branch, or act on another space: leave those to the user. After a /clear, list_tasks shows where \
         things stand.
         """

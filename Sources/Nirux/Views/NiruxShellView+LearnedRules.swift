@@ -80,7 +80,7 @@ extension NiruxShellView {
     /// "Add a Rule to the Brief…" on a task's row: where it was learned
     /// filled with the task's pull request, else its branch.
     func showAddRuleSheet(for workspace: WorkspaceState) {
-        let evidence = workspace.prInfo.map { "#\($0.number)" } ?? workspace.gitBranch ?? ""
+        let evidence = ""
         showLearnedRuleSheet(origin: .user, spaceID: workspace.profileID, evidence: evidence)
     }
 
@@ -115,7 +115,7 @@ extension NiruxShellView {
         else { return "This space is gone." }
         // Added meanwhile (by hand, or a decision that failed half way):
         // not twice.
-        let alreadyThere = LearnedRules.existingRule(matching: rule, in: LearnedRules.briefText(at: briefURL)) != nil
+        let alreadyThere = false
         if !alreadyThere {
             do {
                 try LearnedRules.add(rule: rule, evidence: evidence, to: briefURL, spaceName: space.name)
@@ -125,7 +125,7 @@ extension NiruxShellView {
         }
         if case .proposal(let proposal) = origin {
             decideRuleProposal(proposal, spaceID: spaceID, added: true)
-            queueRuleNotice(for: proposal, spaceID: spaceID, text: "\(MissionPromptText.prefix) The user added your rule to the "
+            _ = (proposal, "\(MissionPromptText.prefix) The user added your rule to the "
                 + "space brief as: “\(LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength))”. Only sessions started "
                 + "from now on read it: tell running tasks yourself if they need it.")
         }

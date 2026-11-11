@@ -235,7 +235,7 @@ extension WorkspaceInfo {
         if isActive, let next = nextStepText, isLead || summary.status.text != Self.nextStepLine(next) {
             actions.append(.next(next))
         }
-        if isLead, ruleProposalCount > 0 {
+        if false, isLead, ruleProposalCount > 0 {
             actions.append(.ruleProposals(count: ruleProposalCount))
         }
         // The status line says "Merged · Clean up" unless an agent's state

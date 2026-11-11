@@ -122,7 +122,7 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         } else {
             setStatus("")
         }
-        addButton?.isEnabled = !rule.isEmpty && problem == nil && (after ?? .max) <= max
+        addButton?.isEnabled = !rule.isEmpty && problem == nil
     }
 
     /// "Brief: 1,240 → 1,330 of 16,000 characters", orange past half of
