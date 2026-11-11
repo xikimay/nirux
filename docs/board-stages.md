@@ -20,34 +20,42 @@ what comes next. It becomes the overview of a space:
 
 - **Four stations, the same for every task**: Code, Reviews, Checks, Merge.
   The current one is the first not done.
-- **A line only moves forward on reviews.** Reviews is done once a code review
-  ran in the task, on any commit, and its turn is over. A commit after the
-  review doesn't send the line back: fixes always follow a review. The station
-  then shows that the review is older than HEAD.
+- **A commit doesn't send a line back.** Reviews is done once a code review
+  ran in the task, on any commit, and its turn is over: fixes always follow a
+  review. The station then shows that the review is older than HEAD.
 - **Which reviews count, and whether they must be on HEAD, are two constants**
   (`BoardStages.Rules`), built to become space settings.
-- **Amber means an agent waits for the user**, and nothing else.
+- **Amber means an agent waits for the user**, and nothing else. It is never
+  hidden, even once the pull request merged.
 - **The queue's list stays the user's.** The number on the Merge station is a
   pull request's place in that list.
+- **One reading per line**: its state, its phrase and its clock come from one
+  ladder, so they can't disagree.
 
 ## 1. Stations
 
 | Station | Done when | Read from |
 | --- | --- | --- |
-| Code | A review pass ran in the task (any pass, any commit), or its pull request is open and not a draft | Review badges ([review-badges.md](review-badges.md)); the Board's open pull requests |
-| Reviews | Each required pass ran, and the turn it started in is over | Review badges; the working turn's start |
-| Checks | The pull request is open, every required check is green and none is red | The pull request's check rollup; `requiredChecks` of board.json |
-| Merge | The pull request is merged | The Board's merged pull requests |
+| Code | A review pass that counts ran in the task (on any commit), or its pull request is open and not a draft | Review badges ([review-badges.md](review-badges.md)); the Board's open pull requests |
+| Reviews | Each pass that counts ran, and its turn is over | Review badges; the turn that started the pass |
+| Checks | The pull request is open, every required check is green and none is red; with no required check, none still runs | The pull request's check rollup; `requiredChecks` of board.json |
+| Merge | The pull request is merged, and the queue is through with it | The Board's merged pull requests; the merge queue |
 
-- A review pass is recorded when it starts. While the turn that started it
-  still runs, Reviews stays the current station.
+- Only a pass that counts ends Code: a prompt that merely names an adversarial
+  review records one.
+- A review pass is recorded when it starts. Until its turn is over, Reviews is
+  the current station, whatever the agent does meanwhile (a permission to
+  allow, say). A pass started again is waited for again.
 - A pull request the running queue works on is where the queue has it: Checks
-  while it updates the branch or waits for checks, Merge while it merges or
-  waits for the post-merge run. The user confirmed its head at Start, whatever
-  its reviews.
-- A pull request with no worktree here has no Reviews station: nothing here
-  could have seen a review.
-- A task without a repository has no rail: "no pull request".
+  while it updates the branch or waits for checks, Merge while it merges and
+  until the post-merge run ends, though GitHub says merged within a minute. A
+  post-merge failure keeps it at Merge, in red. The user confirmed its head at
+  Start, whatever its reviews.
+- **No Reviews station**, drawn as a gap, where no review is waited for or
+  none was seen: a pull request with no workspace here, one the queue took or
+  that merged without the reviews that count, rules that ask for none. The
+  rail never claims a review that didn't run.
+- A task without a repository has no rail.
 
 ## 2. States
 
@@ -56,47 +64,66 @@ holds, in the sidebar row's order:
 
 | State | Colour | When |
 | --- | --- | --- |
-| Needs you | amber | An agent waits for the user: a permission, a question, a plan. Never hidden, even once merged |
-| Merged | purple | Its pull request merged |
+| Needs you | amber | An agent waits for the user: a permission, a question, a plan |
 | Failed | red | An agent stopped on an error or exited mid-turn |
 | Working | green | An agent works |
-| Waiting | grey | The running queue works on it |
-| Failed | red | With no agent working: the last queue stopped on it, it conflicts with its base, a check is red |
+| Waiting | grey | The running queue works on its pull request |
+| Failed | red | Its open pull request conflicts with its base, or has a red check; else the last queue stopped on it. What is wrong now comes before what stopped a queue |
+| Waiting | grey | Its agent asked the agent that started it |
 | Blocked | dim | A blocker is set |
-| Waiting | grey | At Checks: checks run. At Merge: the pull request before it in its stack hasn't merged |
-| Ready | light | At Merge, and nothing holds it: not a draft, on the base branch, no merged base |
+| Merged | purple | Its pull request merged |
+| Idle | grey | Its base is a merged pull request's branch: the user retargets it |
+| Waiting | grey | At Checks: checks run, or a required one hasn't reported. At Merge: the pull request before it in its stack hasn't merged |
+| Idle | grey | At Merge and held: a draft, another base than the queue's, changes requested, a review required, review comments to answer |
+| Ready | light | At Merge, and nothing holds it |
 | Idle | grey | Nothing above |
 
-## 3. Phrase, pull request, time
+A red check or a conflict shows at any station: the phrase says which.
 
-The phrase follows the state's order: "Needs you · a question", the agent's
-failure, the task's status line while it works, the queue's step, "Queue
-stopped: changed", "Conflicts with main", "Checks failed: test" (or "Checks
-failed · likely flaky" when the [triage](ci-failure-triage.md) said so), what
-an idle agent waits for ("Asking Lead"), "Blocked · …". Then:
+## 3. Phrase, pull request, clock
 
-- "Base #52 merged · Retarget to main", at any station: its last words are a
-  link ([stacked pull requests](pr-stacks.md));
-- at Checks, "Checks running", followed by "lands after #52" in a stack;
-- at Merge, "Lands after #52", "Draft · checks green", "Targets release", else
-  "Ready · reviews done, checks green";
-- at rest, "Next · …" (the user's next step, else the Lead's), else the status
-  line, else what the station waits for: "No code review yet", "No pull
-  request yet".
+The phrase is the state's own line of the ladder:
+
+- "Needs you · a question"; the agent's failure; "Working";
+- the queue's step ("Updating branch", "Waiting for nightly");
+- "Conflicts with main"; "Checks failed: test", or "Checks failed · likely
+  flaky" when the [triage](ci-failure-triage.md) said so; "Queue stopped:
+  changed";
+- "Asking Lead"; "Blocked · …";
+- "Merged", "Merged · Clean up", "Merged · cleaning up…";
+- "Base #52 merged · Retarget to main" ([stacked pull requests](pr-stacks.md));
+- at Checks, "Checks running", or "No test run yet" while a required check
+  hasn't reported, each followed by "lands after #52" in a stack;
+- at Merge, "Lands after #52", "Draft", "Targets release", "Changes
+  requested", else "Ready". "Ready" and "Draft" add what the pull request
+  passed, and only that: "Ready · reviews done, checks green";
+- at rest, "Next · …" (the user's next step, else the Lead's), else where the
+  task stood when its last turn ended, else what the station needs: "No code
+  review yet", "No pull request yet".
+
+"Clean up" and "Retarget to main" are links: the one click that moves the line
+on. While an agent works the line says "Working", not the last turn's line,
+which is about the turn before.
 
 The pull request cell reads "#52", "#53 · 2/3" in a straight stack, "#53 · on
 #52" in a fork, "no PR yet".
 
-The time counts the turn while an agent works, the checks while the line waits
-for them, else the time since the last activity. A line that is ready, blocked,
-merged or in the queue's hands shows none.
+The clock counts from the turn's start while an agent works, from the checks'
+while the line waits for them, else from the last activity. A line that is
+ready, blocked, merged or in the queue's hands has none.
 
 ## Known limits
 
 - **Reviews Nirux can't see.** Codex has no prompt hook, and a `claude -p`
   review run from a shell doesn't count ([review-badges.md](review-badges.md)):
   such a task stays at Reviews, "No code review yet".
-- **Review badges are kept per workspace**, not per branch: a workspace that
-  moves on to another branch keeps the reviews of the first.
+- **Review badges are kept per workspace**, each pass's latest run only. A
+  workspace that moves on to another branch keeps the reviews of the first;
+  closing the workspace that ran the review loses it; and a second run of a
+  pass puts the line back at Reviews until its turn ends.
+- **A review that died** (its turn stopped on an error) still counts once a
+  later turn ends: nothing records that a review finished.
 - **Checks and reviews are about two commits**: the rollup is of the pull
   request's head on GitHub, the badges of the local HEAD.
+- **A queue's stop stays** on its pull request until the next Start, or until
+  the pull request's head moves.
