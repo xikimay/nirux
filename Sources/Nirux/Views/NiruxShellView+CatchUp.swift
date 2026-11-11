@@ -85,7 +85,7 @@ extension NiruxShellView {
         guard !ended.isEmpty else { return }
         if catchUpState.workspaceIDs.isEmpty { catchUpState.isExpanded = false }
         for id in ended where catchUpState.awaySince[id] == nil { catchUpState.awaySince[id] = since }
-        catchUpState.workspaceIDs = ended + catchUpState.workspaceIDs.filter { !ended.contains($0) }
+        catchUpState.workspaceIDs = ended
         DispatchQueue.main.async { [weak self] in self?.showCatchUpCard() }
     }
 
