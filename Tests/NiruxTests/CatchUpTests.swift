@@ -153,6 +153,9 @@ final class CatchUpTests: XCTestCase {
             shell.noteAway(missing: [], now: leave + 10_000)
             shell.updateSidebar()
             XCTAssertNil(shell.sidebar.catchUp)
+            // Back on: nothing piled up while it was off.
+            shell.setCatchUp(enabled: true)
+            XCTAssertNil(shell.sidebar.catchUp)
         }
     }
 
