@@ -1,11 +1,12 @@
 # Board Stages
 
-> **Design record:** in progress. The model of a line is in the app; nothing draws it yet.\
+> **Design record:** in progress. The model (lines, units, sections) is in the app; nothing draws it yet.\
 > **Differs today:** the Board is still the table of [Project Board](project-board.md), one per project.\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
-Status: design validated by the user on 2026-11-11 (study D). The line's
-model is implemented (`BoardStages`); the view and the per-space Board follow.
+Status: design validated by the user on 2026-11-11 (study D). The model is
+implemented (`BoardStages`: lines, units, sections); the view and the
+per-space Board follow.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -116,6 +117,39 @@ The clock counts from the turn's start while an agent works, from the checks'
 while the line waits for them, else from the last activity (as for a turn
 whose start isn't known). A line that is
 ready, blocked, merged or in the queue's hands has none.
+
+## 4. Units, sections, orders
+
+A section is one repository of the space, or its tasks without one. Inside,
+lines that are linked never part, each keeping its own state
+(`BoardStages.section`):
+
+- **A task and its sub-tasks**: the tasks listed under it in the sidebar,
+  depth first, each joined to it by an elbow. A sub-task whose task isn't in
+  the section (another repository, closed) stands alone.
+- **A stack of pull requests**, under "Stack · 3 pull requests on main", on a
+  numbered rail in merge order ([stacked pull requests](pr-stacks.md)).
+- **The family wins.** A line is drawn once. A stack is a unit of its own only
+  when none of its lines has a sub-task or is one; else the lines stay in
+  their families, and their pull request cells ("#53 · 2/3") and phrases
+  ("lands after #52") say the stack.
+- **Pull requests without a task** (no workspace here: a cloud session's)
+  close the section, folded, as lines without a Reviews station. A stack with
+  one task at least stays whole in the list.
+
+Two orders, one setting for the app:
+
+- **Sidebar order**: each unit at the place of its first line.
+- **By progress**: the closest to its base branch first. A unit counts as its
+  furthest line; a blocked line counts below Code; ties keep the sidebar's
+  order; a line already merged comes last, since nothing is left to follow.
+
+**Merged today** closes the section: the pull requests merged since midnight,
+the newest first, each with the title of its task while that one is open. A
+pull request has one place: it leaves the list for this line once its line
+has nothing else to say. While an agent of its task needs the user, or the
+queue waits for its post-merge run, it stays a line. One merged before today
+whose task is still open stays a line too, "Merged · Clean up".
 
 ## Known limits
 
