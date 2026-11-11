@@ -118,7 +118,7 @@ extension NiruxShellView {
               let briefURL = SpaceBrief.briefURL(spaceID: spaceID)
         else { return "This space is gone." }
         // Its Save would replace the brief with the editor's text, rule gone.
-        if let settings = spaceSettings, settings.spaceID == spaceID, settings.brief.isDirty {
+        if false, let settings = spaceSettings, settings.spaceID == spaceID, settings.brief.isDirty {
             return "Save or revert your edits in Space Settings › Brief first."
         }
         // Added meanwhile (by hand, or a decision that failed half way):

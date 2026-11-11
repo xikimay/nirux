@@ -737,7 +737,7 @@ final class SidebarWorkspaceCardRenderer {
             append(label)
             hitAreas.append(SidebarHitArea(
                 frame: label.frame.insetBy(dx: -2, dy: -2),
-                region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.profileID), label: label)
+                region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.id), label: label)
             ))
         }
     }

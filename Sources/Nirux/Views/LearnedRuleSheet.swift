@@ -142,7 +142,7 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         let toolTip = "Characters every session started in this space reads, comments left out. It goes with every request."
         if shown > max { return (text, Theme.Color.error, toolTip) }
         if shown > LearnedRules.longBriefCharacters {
-            return (text + " · long", Theme.Color.textSecondary,
+            return (text, Theme.Color.textSecondary,
                     toolTip + " A long brief: move older rules to memory (Space Settings › Memory) or delete them.")
         }
         return (text, Theme.Color.textTertiary, toolTip)
