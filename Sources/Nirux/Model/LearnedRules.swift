@@ -1,0 +1,269 @@
+import Foundation
+
+/// Rules a space learns (docs/spaces.md, "Learned rules"): when the same
+/// kind of defect turns up twice across a space's tasks, its Lead proposes
+/// a one- or two-line rule (`propose_rule`, see RuleProposalStore), and once
+/// the user adds it, it goes into the space's brief, which every session
+/// started in the space from then on reads (SpaceBrief). The user can add
+/// one from a task's row too.
+///
+/// A rule goes at the end of the brief's "## Rules learned" section, made at
+/// the end of the brief when it has none, as one bullet that says when it
+/// was learned and from what:
+/// `- Tests wait on state, never on a fixed sleep. (learned 2026-11-11, #395, #417)`.
+/// Everything else in the brief stays byte for byte: the bullet is inserted,
+/// nothing is rewritten.
+enum LearnedRules {
+    static let heading = "## Rules learned"
+    static let maxRuleLength = 300
+    static let maxEvidenceLength = 200
+    /// Past this the brief reads as long: half of what sessions get.
+    static let longBriefCharacters = SpaceBrief.maxCharacters / 2
+
+    // MARK: - Text
+
+    /// `text` on one line: whitespace runs folded to one space, invisible
+    /// characters dropped; "" when nothing is left. Past `limit` it stays
+    /// long (cut only far past it), for `problem` to refuse.
+    static func cleaned(_ text: String, limit: Int) -> String {
+        AgentText.clean(text, maxLength: limit * 4) ?? ""
+    }
+
+    /// Why a cleaned rule and its evidence can't go into the brief, or nil.
+    static func problem(rule: String, evidence: String) -> String? {
+        if rule.isEmpty { return "The rule is empty." }
+        if rule.count > maxRuleLength {
+            return "A rule holds at most \(maxRuleLength) characters: one or two lines every task can follow."
+        }
+        if evidence.count > maxEvidenceLength { return "The evidence holds at most \(maxEvidenceLength) characters." }
+        // Sessions never get what a comment hides: one opened here would hide
+        // the rest of the brief, or end the one around it.
+        if [rule, evidence].contains(where: { $0.contains("<!--") || $0.contains("-->") }) {
+            return "A rule can’t hold <!-- or -->: it would hide part of the brief."
+        }
+        return nil
+    }
+
+    /// The bullet for a rule, dated in `timeZone`.
+    static func line(rule: String, evidence: String, date: Date, timeZone: TimeZone = .current) -> String {
+        let day = dayText(date, timeZone: timeZone)
+        return "- \(rule) (learned \(day)\(evidence.isEmpty ? "" : ", \(evidence)"))"
+    }
+
+    /// `2026-11-11`.
+    static func dayText(_ date: Date, timeZone: TimeZone = .current) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    /// A rule without the "(learned …)" it ends with, and that day.
+    static func splitLearned(_ text: String) -> (rule: String, day: String?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"), let open = trimmed.range(of: " (learned ", options: .backwards) else { return (trimmed, nil) }
+        let day = trimmed[open.upperBound...].prefix(10)
+        let isDay = day.count == 10 && day.enumerated().allSatisfy { index, character in
+            [4, 7].contains(index) ? character == "-" : character.isASCII && character.isNumber
+        }
+        guard isDay else { return (trimmed, nil) }
+        return (String(trimmed[..<open.lowerBound]), String(day))
+    }
+
+    /// What two rules are compared by: their words, in any case, accent or
+    /// spacing, without their "(learned …)" or final punctuation.
+    static func comparable(_ text: String) -> String {
+        let rule = splitLearned(AgentText.clean(text, maxLength: 64_000) ?? "").rule
+        let folded = rule.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+        return String(folded.reversed().drop { ".!;:, ".contains($0) }.reversed())
+    }
+
+    /// A rule of the brief that says the same as `rule`, and the day it was
+    /// learned when it says one.
+    static func existingRule(matching rule: String, in briefText: String) -> (text: String, day: String?)? {
+        let key = comparable(rule)
+        guard !key.isEmpty else { return nil }
+        guard let match = ProjectMemory.rules(in: briefText).first(where: { comparable($0.text) == key }) else { return nil }
+        return (match.text, splitLearned(match.text).day)
+    }
+
+    /// What sessions get of a brief, in characters.
+    static func characterCount(of briefText: String) -> Int {
+        SpaceBrief.body(of: briefText)?.count ?? 0
+    }
+
+    // MARK: - Writing the brief
+
+    /// The brief with `bullet` at the end of its "## Rules learned"
+    /// section, or a new section at its end: every byte of `text` kept, in
+    /// order, the bullet's lines inserted at one place, with the file's line
+    /// breaks. Refused when that place is inside a comment or a code block.
+    static func inserting(_ bullet: String, into text: String) throws -> String {
+        let lines = Self.lines(of: text)
+        let newline = text.contains("\r\n") ? "\r\n" : "\n"
+        let place: String.Index
+        let inserted: String
+        if let start = lines.firstIndex(where: \.isRulesHeading) {
+            let end = lines[(start + 1)...].firstIndex(where: \.isTopHeading) ?? lines.count
+            let last = lines[(start + 1)..<end].lastIndex { !$0.raw.trimmingCharacters(in: .whitespaces).isEmpty }
+            let after = lines[last ?? start]
+            // Right under the heading, a blank line between.
+            inserted = (after.hasBreak ? "" : newline) + (last == nil ? newline : "") + bullet + newline
+            place = after.end
+            guard isSafe(after: last ?? start, in: lines) else { throw unsafePlace }
+        } else {
+            guard lines.isEmpty || isSafe(after: lines.count - 1, in: lines) else { throw unsafePlace }
+            // Its last line is blank: a blank line ends it already.
+            let blankAtEnd = lines.last?.raw.trimmingCharacters(in: .whitespaces).isEmpty == true
+            let separator: String
+            if text.isEmpty {
+                separator = ""
+            } else if text.unicodeScalars.last != "\n" {
+                separator = newline + newline
+            } else {
+                separator = blankAtEnd ? "" : newline
+            }
+            inserted = separator + heading + newline + newline + bullet + newline
+            place = text.endIndex
+        }
+        return String(text[..<place]) + inserted + String(text[place...])
+    }
+
+    private static var unsafePlace: ProjectMemory.WriteError {
+        .failed("The brief’s end, or its “Rules learned” section, is inside a comment or a code block: add the rule in Space Settings › Brief")
+    }
+
+    /// Whether a bullet written after line `index` would be text sessions
+    /// get, outside any code block: no fence left open there, no `<!--`
+    /// without its `-->` before it. A complete comment can't run past that
+    /// line: it is the section's last non-blank line, and a comment going
+    /// on past it would hide the heading that ends the section.
+    private static func isSafe(after index: Int, in lines: [Line]) -> Bool {
+        !lines[index].fenceOpenAfter && !lines[...index].contains { $0.live.contains("<!--") }
+    }
+
+    /// A line of the brief: where it is in the text (its break included),
+    /// its text, and what is left of it once complete comments are out.
+    private struct Line {
+        let end: String.Index
+        let hasBreak: Bool
+        /// Without its break.
+        let raw: String
+        let live: String
+        let inFence: Bool
+        /// A code block is still open after it.
+        let fenceOpenAfter: Bool
+
+        /// `## Rules learned`, in any case, outside comments and code.
+        var isRulesHeading: Bool {
+            !inFence && live == raw && Self.heading(live).map { $0.level == 2 && $0.title.lowercased() == "rules learned" } == true
+        }
+
+        /// A `#` or `##` heading, outside comments and code: the end of a
+        /// section.
+        var isTopHeading: Bool {
+            !inFence && Self.heading(live).map { $0.level <= 2 } == true
+        }
+
+        static func heading(_ line: String) -> (level: Int, title: String)? {
+            let indent = line.prefix { $0 == " " }.count
+            guard indent <= 3 else { return nil }
+            let rest = line.dropFirst(indent)
+            let level = rest.prefix { $0 == "#" }.count
+            guard (1...6).contains(level) else { return nil }
+            let title = rest.dropFirst(level)
+            guard title.isEmpty || title.first == " " || title.first == "\t" else { return nil }
+            return (level, title.trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    private static func lines(of text: String) -> [Line] {
+        guard !text.isEmpty else { return [] }
+        // Where each line starts and ends, its break included. By scalar:
+        // "\r\n" is one Character, which a search for "\n" never finds. A
+        // line's end, past its "\n", is a Character's end all the same.
+        let scalars = text.unicodeScalars
+        var bounds: [(start: String.Index, end: String.Index, hasBreak: Bool)] = []
+        var start = scalars.startIndex
+        while start < scalars.endIndex {
+            if let newline = scalars[start...].firstIndex(of: "\n") {
+                let end = scalars.index(after: newline)
+                bounds.append((start, end, true))
+                start = end
+            } else {
+                bounds.append((start, scalars.endIndex, false))
+                start = scalars.endIndex
+            }
+        }
+        let raw = bounds.map { bound -> String in
+            var line = scalars[bound.start..<bound.end]
+            if line.last == "\n" { line = line.dropLast() }
+            if line.last == "\r" { line = line.dropLast() }
+            return String(String.UnicodeScalarView(line))
+        }
+        // The complete comments, as SpaceBrief.body takes them out (an
+        // unclosed `<!--` stays text).
+        let live = ProjectMemory.withoutComments(raw)
+        var fence: (character: Character, count: Int)?
+        var result: [Line] = []
+        for (index, bound) in bounds.enumerated() {
+            let line = live[safe: index] ?? raw[index]
+            let indent = line.prefix { $0 == " " }.count
+            let trimmed = line.dropFirst(min(indent, 3))
+            let inFence: Bool
+            if let open = fence {
+                inFence = true
+                let run = trimmed.prefix { $0 == open.character }.count
+                if indent <= 3, run >= open.count, trimmed.dropFirst(run).allSatisfy({ $0 == " " || $0 == "\t" }) { fence = nil }
+            } else if indent <= 3, let first = trimmed.first, first == "`" || first == "~",
+                      trimmed.prefix(while: { $0 == first }).count >= 3 {
+                inFence = true
+                fence = (first, trimmed.prefix { $0 == first }.count)
+            } else {
+                inFence = false
+            }
+            result.append(Line(
+                end: bound.end, hasBreak: bound.hasBreak, raw: raw[index], live: line, inFence: inFence, fenceOpenAfter: fence != nil
+            ))
+        }
+        return result
+    }
+
+    /// Adds a rule to the brief at `url` (through a link, to where it
+    /// points), created from its template when missing or empty, and
+    /// returns the bullet written. The write re-reads the brief right
+    /// before replacing it and starts over from what is there when it
+    /// changed (ProjectMemory.update): the user's edits made meanwhile
+    /// stay. Refused when the brief would pass `maxCharacters` of what
+    /// sessions get. `onRead` sees each text read (tests edit the file
+    /// there).
+    @discardableResult
+    static func add(
+        rule: String, evidence: String, date: Date = Date(), to url: URL, spaceName: String,
+        maxCharacters: Int = SpaceBrief.maxCharacters, timeZone: TimeZone = .current, onRead: ((String) -> Void)? = nil
+    ) throws -> String {
+        let rule = cleaned(rule, limit: maxRuleLength)
+        let evidence = cleaned(evidence, limit: maxEvidenceLength)
+        if let problem = problem(rule: rule, evidence: evidence) { throw ProjectMemory.WriteError.failed(problem) }
+        let bullet = line(rule: rule, evidence: evidence, date: date, timeZone: timeZone)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        } catch {
+            throw ProjectMemory.WriteError.failed("Couldn’t create \(url.deletingLastPathComponent().path): \(error.localizedDescription)")
+        }
+        try ProjectMemory.update(url, creating: true) { current in
+            onRead?(current)
+            let base = current.isEmpty ? SpaceBrief.template(spaceName: spaceName) : current
+            let written = try inserting(bullet, into: base)
+            guard characterCount(of: written) <= maxCharacters else { throw ProjectMemory.WriteError.tooLong(maxCharacters) }
+            return written
+        }
+        return bullet
+    }
+
+    /// The brief's text as a write would start from it: "" when missing or
+    /// not readable.
+    static func briefText(at url: URL) -> String {
+        SpaceBrief.readBrief(at: url) ?? ""
+    }
+}

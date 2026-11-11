@@ -237,6 +237,9 @@ New flow, built on the guarded typing `tell` already uses
     the Lead wrote (nothing tells it). A title two of its tasks share is
     refused: the branch says which. `list_tasks` shows both for its tasks,
     and who wrote them.
+  - `propose_rule(rule, evidence)`: a rule for the space brief, once the Lead
+    sends tasks the same kind of finding a second time (see "Learned rules"
+    below). Nothing reaches the brief without the user.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -275,6 +278,46 @@ New flow, built on the guarded typing `tell` already uses
   child's indent.
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
+- **Learned rules** (LearnedRules, RuleProposalStore): a review fixes one
+  run; a rule in the brief reaches every run after it. When the Lead sends
+  tasks the same kind of finding a second time, its role says to propose a
+  rule with `propose_rule`: one or two lines (300 characters at most) that
+  would have prevented it, and where the defect showed up (`#395, #417`).
+  No model call: the Lead, which reads every review, judges "same kind".
+  - **Refused:** a rule the brief says already (same words in any case,
+    spacing or final punctuation; the Lead is told since when, and to tell
+    the task that missed it), one already waiting, one the user dismissed in
+    the last 90 days, a fourth one waiting, a rule holding `<!--` or `-->`.
+  - **Shown:** "Rule proposed · Review" (or "2 rules proposed") on the Lead's
+    row, grey: nothing waits on it, so no amber, notification, sound or
+    focus. Review opens a sheet with the oldest one: the rule and where it was
+    learned, both editable; the brief's size before and after ("Brief: 1,240
+    → 1,330 of 16,000 characters", orange past half, red past it); Add to
+    Brief, Dismiss, Later (Esc). It says sessions already running keep the
+    brief they started with.
+  - **The user's own:** "Add a Rule to the Brief…" in any row's menu opens the
+    same sheet, where it was learned filled with the row's pull request or
+    branch, with the same size line and limit; Add writes it at once.
+  - **Stored:** waiting and dismissed proposals in
+    `<state dir>/projects/<space id>/rule-proposals.json` (0600; a dismissed
+    one kept 90 days; deleted with the space). An added rule leaves the file
+    and goes at the end of the brief's `## Rules learned` section, made at the
+    brief's end when missing (from the template when there is no brief), as
+    `- <rule> (learned 2026-11-11, #395, #417)`: agents read the date and the
+    source too. The write inserts that line and nothing else: every byte of
+    the brief stays, its line breaks included. It re-reads the brief right
+    before replacing it and starts over when it changed (Project Memory's
+    write), so the user's edits made meanwhile stay; a place inside a code
+    block or after an unclosed `<!--` is refused, and so is a brief past
+    16,000 characters of what sessions get. Space Memory lists the rule as an
+    Always item, to edit or move to memory.
+  - **The Lead hears it:** once the user adds or dismisses its rule, a line is
+    typed into its prompt when it is idle ("[Nirux Mission] The user added
+    your rule to the space brief as: “…”. Only sessions started from now on
+    read it: tell running tasks yourself if they need it.").
+  - **Pruning:** Nirux never removes a rule. Each says when it was learned;
+    Space Settings › Brief shows the brief's size beside its buttons; the
+    user deletes a rule there or moves it to memory in Space Memory.
 - Mission handoffs and sidebar permission answers leave Experimental for
   Settings › Agents › Missions (shipped with S11a), on for a new install. A
   state file keeps the value it holds: both were opt-in, and turning Missions

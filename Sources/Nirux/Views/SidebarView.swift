@@ -50,6 +50,8 @@ final class SidebarView: NSView {
     /// A card's Mission question row: the workspace, the column, and the
     /// row's label to anchor the reply popover to.
     var onMissionQuestionClicked: ((Int, Int, NSView) -> Void)?
+    /// The Lead row's "Rule proposed · Review", by workspace index.
+    var onRuleProposalsClicked: ((Int) -> Void)?
     /// The menu of the card's PR feedback line, by workspace id; nil when
     /// there's nothing.
     var prFeedbackMenu: ((String) -> NSMenu?)?
@@ -608,6 +610,8 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
+            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.ruleProposalsActionPrefix) {
+                onRuleProposalsClicked?(workspaceIndex)
             } else if let target = Self.resumeTarget(url) {
                 onDeferredAgentResume?(target.workspaceIndex, target.columnIndex, target.columnID)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
@@ -736,6 +740,7 @@ final class SidebarView: NSView {
         }
         menu.addClosureItem(title: "Rename Workspace") { act(.rename) }
         menu.addClosureItem(title: "View/Edit Context…") { act(.editContext) }
+        menu.addClosureItem(title: Self.addRuleTitle) { act(.addRuleToBrief) }
         // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
         if cleanup == .available { addWorktreeCleanupItem(to: menu, act: act) }
@@ -751,6 +756,7 @@ final class SidebarView: NSView {
     }
 
     static let newSubtaskTitle = "New Sub-task…"
+    static let addRuleTitle = "Add a Rule to the Brief…"
 
     /// "Move Out of “<task>”": a sub-task becomes a task of its own.
     static func moveOutTitle(parentTitle: String) -> String {
@@ -852,6 +858,12 @@ final class SidebarView: NSView {
     private static let diffActionPrefix = "action:diff:"
     private static let cleanupActionPrefix = "action:cleanup:"
     private static let missionQuestionActionPrefix = "action:mission-question:"
+    private static let ruleProposalsActionPrefix = "action:rule-proposals:"
+
+    /// The Lead row's "Rule proposed · Review".
+    static func ruleProposalsActionURL(workspaceIndex: Int) -> String {
+        ruleProposalsActionPrefix + String(workspaceIndex)
+    }
 
     /// The card's "Asking …" / "Needs you · a question" row.
     static func missionQuestionActionURL(workspaceIndex: Int, columnIndex: Int) -> String {

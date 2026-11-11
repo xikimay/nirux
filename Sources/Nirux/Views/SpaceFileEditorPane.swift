@@ -25,6 +25,9 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         let write: (String) throws -> Void
         /// The text shown while the file doesn't exist.
         let template: () -> String
+        /// What the text weighs, beside the buttons (the brief's size); nil
+        /// shows nothing.
+        var sizeNote: ((String) -> (text: String, color: NSColor, toolTip: String))? = nil
     }
 
     enum Mode {
@@ -40,6 +43,7 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
     let textView = NSTextView()
     let explanationLabel = NSTextField(wrappingLabelWithString: "")
     let statusLabel = NSTextField(labelWithString: "")
+    let sizeLabel = NSTextField(labelWithString: "")
     let saveButton = NSButton(title: "Save", target: nil, action: nil)
     let revertButton = NSButton(title: "Revert", target: nil, action: nil)
 
@@ -104,6 +108,17 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         textView.isEditable = isWritable
         undo.removeAllActions()
         updateButtons()
+    }
+
+    /// The size line, from the text on screen.
+    private func updateSize() {
+        guard let note = source.sizeNote?(textView.string) else {
+            sizeLabel.stringValue = ""
+            return
+        }
+        sizeLabel.stringValue = note.text
+        sizeLabel.textColor = note.color
+        sizeLabel.toolTip = note.toolTip
     }
 
     @objc func revert() {
@@ -189,6 +204,7 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
     }
 
     private func updateButtons() {
+        updateSize()
         saveButton.isEnabled = isWritable && (mode == .sheet || isDirty || contents == .missing)
         revertButton.isEnabled = mode == .sheet || isDirty
     }
@@ -236,6 +252,8 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sizeLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        sizeLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         revertButton.title = mode == .sheet ? "Cancel" : "Revert"
         revertButton.bezelStyle = .rounded
@@ -248,7 +266,7 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         saveButton.keyEquivalent = "s"
         saveButton.keyEquivalentModifierMask = .command
 
-        for subview in [explanationLabel, scroll, statusLabel, revertButton, saveButton] as [NSView] {
+        for subview in [explanationLabel, scroll, sizeLabel, statusLabel, revertButton, saveButton] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
@@ -268,7 +286,13 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
             revertButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -8),
             revertButton.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
             revertButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 84),
-            statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            sizeLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            sizeLabel.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor),
+            // After the size, when the file has one.
+            statusLabel.leadingAnchor.constraint(
+                equalTo: source.sizeNote == nil ? view.leadingAnchor : sizeLabel.trailingAnchor,
+                constant: source.sizeNote == nil ? 24 : 12
+            ),
             statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: revertButton.leadingAnchor, constant: -12),
             statusLabel.centerYAnchor.constraint(equalTo: saveButton.centerYAnchor)
         ])
@@ -311,7 +335,10 @@ extension SpaceFileEditorPane.Source {
                 + "Text inside <!-- --> isn’t sent.",
             read: { .read(url) },
             write: { try writeText($0, to: url) },
-            template: { SpaceBrief.template(spaceName: spaceName) }
+            template: { SpaceBrief.template(spaceName: spaceName) },
+            sizeNote: { text in
+                LearnedRuleSheet.sizeText(before: LearnedRules.characterCount(of: text), after: nil, max: SpaceBrief.maxCharacters, prefix: "")
+            }
         )
     }
 
