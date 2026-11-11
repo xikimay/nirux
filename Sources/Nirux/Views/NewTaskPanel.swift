@@ -48,6 +48,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         /// outside git, where its tasks get folders of their own. False
         /// when git just couldn't read a repository there.
         var isOutsideGit = false
+        /// The selected folder isn't there any more.
+        var isGone = false
     }
 
     /// Asks the shell to read the repository's info off the main thread,
@@ -588,7 +590,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         }
         guard subtaskFolder == nil, let repository = selectedRepository, let info, info.target == nil,
               !(repository.isFolder && info.isOutsideGit) else { return nil }
-        return "“\(repository.name)” isn’t in a git repository: pick another, or No Repository."
+        if info.isGone { return "“\(repository.name)” is gone: pick another, or No Repository." }
+        return repository.isFolder
+            ? "Nirux couldn’t read the git repository “\(repository.name)” is in: pick another, or No Repository."
+            : "“\(repository.name)” isn’t in a git repository: pick another, or No Repository."
     }
 
     /// `path` with the home folder as "~".

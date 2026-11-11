@@ -36,8 +36,9 @@ extension NewTask {
     }
 
     /// `name` as a folder's name: whitespace runs and C0/C1 control
-    /// characters become one space, bidi overrides go (they make a name
-    /// read differently from its bytes), "/" and ":" become "-" (Finder
+    /// characters become one space, bidi controls and invisible characters
+    /// go (they make a name read differently from its bytes, or two names
+    /// look the same), "/" and ":" become "-" (Finder
     /// shows a ":" as "/"), no leading "." (a hidden folder) or spaces at
     /// either end, at most `maxFolderNameBytes`. Joiners stay: emoji need
     /// them. Nil when nothing is left.
@@ -96,7 +97,14 @@ extension NewTask {
         return .failure(MakeFolderError(message: "\(parent.abbreviatedPath()) already holds \(maxFolderAttempts) folders named “\(name)”."))
     }
 
-    private static let bidiControls = CharacterSet(charactersIn: "\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}")
+    /// Dropped from a folder's name: bidi controls and marks, and the
+    /// invisible characters that make two names look the same (a zero-width
+    /// space, a word joiner, a byte order mark, a soft hyphen). Joiners
+    /// emoji need stay.
+    private static let bidiControls = CharacterSet(
+        charactersIn: "\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}"
+            + "\u{200E}\u{200F}\u{061C}\u{200B}\u{2060}\u{FEFF}\u{00AD}"
+    )
 
     /// Whether `folder` has no `.git` in it or in a folder above: surely
     /// outside git. Reads a few files, no git.

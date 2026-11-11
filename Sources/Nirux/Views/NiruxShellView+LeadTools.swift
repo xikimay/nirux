@@ -361,7 +361,7 @@ extension NiruxShellView {
     }
 
     private func noLeadTask(_ name: String) -> String {
-        "No task of yours is named “\(name)”, or several share that title: use its branch (its folder's name, without a "
+        "No task of yours is named “\(name)”, or several share that name: use its branch (its folder, without a "
             + "repository) or title from list_tasks. "
             + "A task the user started without you doesn't report to you."
     }

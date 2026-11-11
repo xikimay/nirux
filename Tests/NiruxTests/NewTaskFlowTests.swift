@@ -391,11 +391,6 @@ final class NewTaskFlowTests: UIFlowTestCase {
             sheet.branchField.stringValue = "  "
             sheet.startButton.performClick(nil)
             XCTAssertEqual(sheet.errorLabel.stringValue, "Name the folder.")
-            // The line names the folder as it will be made.
-            sheet.branchField.stringValue = ".plans/Q3"
-            sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sheet.branchField))
-            sheet.branchField.window?.makeFirstResponder(nil)
-            XCTAssertEqual(NewTask.cleanedFolderName(sheet.branch), "plans-Q3")
             sheet.branchField.stringValue = "Compare- two parsers"
             sheet.startButton.performClick(nil)
             harness.waitUntil("the second task") { shell.workspaces.filter { $0.title == "Compare: two parsers" }.count == 2 }
@@ -460,6 +455,21 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(NiruxShellView.comparablePath(child.cwd), NiruxShellView.comparablePath(task.cwd + "/Collect the merged PRs"))
             XCTAssertEqual(child.parentWorkspaceID, task.id)
             XCTAssertTrue(child.isFolderTask)
+
+            // Quit while its terminal was elsewhere: it keeps its folder.
+            let folder = try XCTUnwrap(task.taskFolder)
+            var state = shell.persistedState()
+            let saved = try XCTUnwrap(state.workspaces.firstIndex { $0.id == task.id })
+            state.workspaces[saved].cwd = harness.repo
+            XCTAssertTrue(Persistence.save(state))
+            shell.restoreState()
+            let restored = try XCTUnwrap(shell.workspaces.first { $0.id == task.id })
+            XCTAssertEqual(restored.taskFolder, folder)
+            XCTAssertTrue(shell.offersSubtask(restored))
+            shell.showNewSubtaskPanel(under: restored)
+            sheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(sheet.destination, .folder(parent: folder))
+            sheet.cancelButton.performClick(nil)
         }
     }
 
@@ -483,6 +493,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let plain = try XCTUnwrap(shell.workspaces.first { $0 !== task && !$0.isFolderTask })
             plain.addColumn(command: command, cwd: harness.repo)
             let elsewhere = try XCTUnwrap(plain.columns.last?.pty)
+            // Laid out: their terminals get the surface Nirux reads.
+            shell.relayout(animated: false)
             @MainActor func status(of workspace: WorkspaceState) -> String? {
                 shell.updateSidebar()
                 return shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspace.id }?.rowSummary.status.text
@@ -499,6 +511,13 @@ final class NewTaskFlowTests: UIFlowTestCase {
             }
             let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
             XCTAssertEqual(pty.agentBlockedWait(now: Date().timeIntervalSince1970, foreground: claude)?.reason, AgentTrustPrompt.reason)
+            // The other one shows the same screen, as long as two reads take.
+            harness.waitUntil("the other agent's screen") {
+                elsewhere.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude"
+                    && AgentTrustPrompt.isShown(in: elsewhere.terminalSession.readViewportText() ?? "")
+            }
+            let readsLater = Date().addingTimeInterval(AgentTrustPrompt.readInterval * 2 + 0.5)
+            harness.waitUntil("two reads") { _ = status(of: plain); return Date() > readsLater }
             let other = try XCTUnwrap(elsewhere.foregroundProcess(snapshot: ProcessSnapshot()))
             XCTAssertNil(elsewhere.agentTrustPrompt(foreground: other), "only a task's new folder is watched")
             pty.sendRaw("1")

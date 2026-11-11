@@ -19,7 +19,8 @@ enum LeadTools {
     static let noRepository = "none"
 
     /// How a tool names one of the Lead's tasks.
-    static let taskDescription = "The task's branch (its folder's name, for a task without a repository), or its title."
+    static let taskDescription = "The task's branch (its folder, as list_tasks shows it, or the folder's name, "
+        + "for a task without a repository), or its title."
 
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
