@@ -142,7 +142,7 @@ extension NiruxShellView {
                     invalidatedSessionBinding = true
                 }
                 // A task's new folder is where an agent asks for trust.
-                if workspace.isFolderTask { watchTrustPrompt(of: column, foreground: foregroundProcess, now: now) }
+                watchTrustPrompt(of: column, foreground: foregroundProcess, now: now) // MUTANT M8
                 refreshStuckAgent(
                     column, in: workspace,
                     foregroundProcess: foregroundProcess, snapshot: snapshot, now: now

@@ -349,7 +349,7 @@ extension NiruxShellView {
         // A task without a repository has its folder instead: its path, as
         // list_tasks shows it, or its name, when only one has it.
         let byFolder = candidates.compactMap { workspace -> (WorkspaceState, Mission)? in
-            guard let folder = workspace.taskFolder, folder == name || (folder as NSString).lastPathComponent == name else { return nil }
+            guard let folder = workspace.taskFolder, (folder as NSString).lastPathComponent == name else { return nil } // MUTANT M10
             return mission(of: workspace).map { (workspace, $0) }
         }
         if let exact = byFolder.first(where: { $0.0.taskFolder == name }) { return exact }

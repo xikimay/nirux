@@ -294,7 +294,7 @@ extension NiruxShellView {
         // The sheet's trust hint has done its job once a Claude Code task
         // started in the tasks folder, where the hint applies.
         if case .folder(let parent, _, _) = request.place, created.folderName != nil, request.agent == .claude,
-           !request.startedByLead, request.parentWorkspaceID == nil, parent == tasksFolder(),
+           request.parentWorkspaceID == nil, parent == tasksFolder(), // MUTANT M12
            Persistence.load()?.settings?.startedFolderTask != true {
             _ = Persistence.updateSettings(liveLayout: persistedState()) { $0.startedFolderTask = true }
         }
