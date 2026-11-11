@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Every command palette action also has a menu bar item, so the Help menu's search finds it with its shortcut.
+Standard macOS shortcuts (copy, paste, quit) work as usual and are not listed. Most command palette actions also have a menu bar item, sometimes under a slightly different title, so the Help menu's search finds them.
 
 ## Everywhere
 
@@ -9,11 +9,11 @@ Every command palette action also has a menu bar item, so the Help menu's search
 | `Cmd+P` | Command palette and workspace switcher. In the editor, the file picker |
 | `Shift+Cmd+P` | Command palette, also from the editor |
 | `Cmd+N` | New…: a task, or a shell when nothing is typed |
-| `Cmd+J` | Next waiting agent: the one blocked on you longest, then the next at each press |
+| `Cmd+J` | Next waiting agent: the one that has waited for you longest, then the next at each press |
 | `Ctrl+Cmd+B` | Board of the current space |
 | `Ctrl+Cmd+L` | The space's Lead |
 | `Ctrl+Cmd+S` | Show or hide the sidebar |
-| `Cmd+,` | Settings (General, Agents, Notifications); a change applies at once |
+| `Cmd+,` | Settings (General, Agents, Notifications). A change applies at once |
 | `Ctrl+Cmd+F` | Enter or leave full screen |
 | `Cmd+M` | Minimize the window |
 
@@ -22,9 +22,9 @@ Every command palette action also has a menu bar item, so the Help menu's search
 | Shortcut | Action |
 | --- | --- |
 | `Cmd+Up` / `Cmd+Down` | Previous or next workspace |
-| `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | The same, also while text has the keyboard |
-| `Alt+Cmd+Left` / `Alt+Cmd+Right` | Previous or next space |
-| `Alt+Cmd+1…9` | The space at that place in the space picker |
+| `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Previous or next workspace, also while you type in a text field |
+| `Option+Cmd+Left` / `Option+Cmd+Right` | Previous or next space |
+| `Option+Cmd+1…9` | The space at that place in the space picker |
 
 ## Columns
 
@@ -35,17 +35,17 @@ Every command palette action also has a menu bar item, so the Help menu's search
 | `Cmd+W` | Close the editor tab, the column or the workspace, depending on context. Asks first when an agent session is running (Return cancels, `Cmd+D` closes) |
 | `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus the previous or next column |
-| `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | The same, also while text has the keyboard |
+| `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus the previous or next column, also while you type in a text field |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
 | `Cmd+E` | Step the focused column through preset widths |
 
-While text has the keyboard (the editor, a field of a web page, the address bar, a find field), the arrow shortcuts act on the text first:
+While you type in a text field (the editor, a field of a web page, the address bar, a find field), the arrow shortcuts act on the text first:
 
 - `Cmd+Left` and `Cmd+Right` go to the start or end of the line. In the editor, a press with the caret already there focuses the column beside.
 - `Cmd+Up` and `Cmd+Down` go to the start or end of the document. In the editor, a press with the caret already on the first or last line switches workspace.
 - `Shift+Cmd+Left` and `Shift+Cmd+Right` select to the start or end of the line. **Columns › Move Left** and **Move Right** still move the column.
 
-Holding a key moves once per press.
+The shortcuts that switch workspace or column don't repeat while the key is held.
 
 ## Search
 
@@ -54,7 +54,7 @@ Holding a key moves once per press.
 | `Cmd+F` | Find in the focused editor, terminal or browser page. `Esc` closes the find bar |
 | `Cmd+G` / `Shift+Cmd+G` | Next or previous match. In a terminal, next moves up to older output, as in Ghostty |
 | `Shift+Cmd+F` | Search the files of the workspace |
-| `Alt+Cmd+F` | Search Everywhere: every terminal's scrollback, then your Claude sessions' transcripts |
+| `Option+Cmd+F` | Search Everywhere: every terminal's scrollback, then your Claude sessions' transcripts |
 
 A full-screen program (vim, less) keeps no scrollback, so Search Everywhere searches only its screen.
 
@@ -62,11 +62,11 @@ A full-screen program (vim, less) keeps no scrollback, so Search Everywhere sear
 
 | Shortcut | Action |
 | --- | --- |
-| `Cmd+S` / `Alt+Cmd+S` | Save the file / save all |
+| `Cmd+S` / `Option+Cmd+S` | Save the file / save all |
 | `Shift+Cmd+D` | Show or hide the file's diff |
-| `Alt+Cmd+Z` | Word wrap |
+| `Option+Cmd+Z` | Word wrap |
 | `Shift+Cmd+M` | Minimap |
-| `Alt+Cmd+Return` | Send the selection to the agent's terminal |
+| `Option+Cmd+Return` | Send the selection to the agent's terminal |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | Font size: larger, smaller, reset |
 | `Cmd+L` | Select the line |
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo, also in panel text fields |
@@ -77,11 +77,11 @@ A full-screen program (vim, less) keeps no scrollback, so Search Everywhere sear
 | --- | --- |
 | `Cmd+L` | Focus the address bar |
 | `Cmd+[` / `Cmd+]` | Back / forward |
-| `Alt+Cmd+I` | Web Inspector on the focused browser column |
+| `Option+Cmd+I` | Web Inspector on the focused browser column |
 
 ## Command palette actions
 
-Open the palette with `Cmd+P` and type a few letters:
+Open the palette with `Cmd+P` and type a few letters of an action:
 
 - **Agents:** Open Claude Code, Open Codex, Next Waiting Agent, Resume All Agents, Install Agent Skills
 - **Tasks and workspaces:** New…, Open Worktree, Clean Up Merged Worktrees…, Rename Workspace, Session History…, Space Memory…

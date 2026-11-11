@@ -1,25 +1,12 @@
-# URL scheme and agent skills
+# URL scheme
 
-The installed app registers the `nirux://` URL scheme. The bundled agent skills use it to open workspaces and files from inside an agent session; scripts can use it too.
+The installed app registers the `nirux://` URL scheme. The [agent skills](agent-skills.md) use it to open workspaces and files from inside an agent session, and your own scripts can use it too.
 
-## Agent skills
+## When a link asks for confirmation
 
-`Install Agent Skills` (command palette, Getting Started) writes four skills, each to `~/.claude/skills/<name>/SKILL.md` and `~/.agents/skills/<name>/SKILL.md`:
+Any app or web page can open a `nirux://` URL. A link therefore runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and sets it in its terminals, and the skills pass it automatically.
 
-| Skill | What it lets an agent do |
-| --- | --- |
-| `nirux-worktree` | Open a separate Nirux workspace, in a new worktree, when you ask to start a feature, a fix or a parallel piece of work |
-| `nirux-show-code` | Open code in the editor column when you ask to see it, instead of pasting it in the terminal |
-| `nirux-draft` | Put text you will paste elsewhere (a Slack message, a PR description, a ticket, a SQL query) in an editor column, where `Cmd+A` `Cmd+C` copies it verbatim |
-| `nirux-second-opinion` | When you ask Claude for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply |
-
-Nirux keeps these copies current: at launch, the installed app rewrites each copy whose text a version of Nirux wrote. A copy you edited stays as you left it, and so does one reached through a symbolic link; Getting Started then offers **Update**, and `Install Agent Skills` replaces it. A skill you deleted from a folder is never added back.
-
-## Trust: the launch ID
-
-Any app or web page can open a `nirux://` URL. So an action runs without asking only when the URL carries `launch=` with the current value of `NIRUX_LAUNCH_ID`, which Nirux generates at each launch and exports to its terminals. The skills pass it automatically.
-
-Without it, or with a value from before Nirux last restarted, Nirux shows a confirmation that spells out the folder or file, the branch, the agent and the permission mode before doing anything.
+Without it, or with a value from before Nirux last restarted, Nirux shows a confirmation that spells out the folder or file, the branch, the agent and the permission mode. A request confirmed this way ignores `profile`, `parentWorkspace`, `parentAgent` and `workspace`, and opens in the space on screen.
 
 ## `nirux://new-workspace`
 
@@ -42,16 +29,18 @@ Creates a git worktree and opens it as a workspace.
 | `repo` | The top level of any checkout of the repository: the main one or a linked worktree |
 | `branch` | The branch to check out. See below for where it starts |
 | `agent` | `claude` or `codex` |
-| `handover` | Optional. A file Nirux moves into the worktree as `.claude-handover.md` or `.codex-handover.md`, then tells the agent to read. It must be your own regular file directly in `/tmp`, named `nirux-handover-…`; any other path is ignored |
-| `profile` | Optional. The space that receives the workspace. Nirux terminals expose theirs as `NIRUX_PROFILE_ID` |
-| `from=head` | Optional. Start a new branch from the HEAD of `repo` (a stacked branch) |
-| `parentWorkspace`, `parentAgent` | Optional. The requesting workspace and terminal, by UUID. The new workspace goes to that workspace's space and, when the parent is a task, lists under it as a sub-task. With [Mission handoffs](missions.md) on, they also link the two agents |
+| `handover` | Optional. A file Nirux moves into the worktree as `.claude-handover.md` or `.codex-handover.md`, then tells the agent to read. It must be your own regular file directly in `/tmp`, named `nirux-handover-…`, not empty and at most 1 MB. Anything else is ignored |
+| `from=head` | Optional. Start a new branch from the HEAD of `repo` instead of the base branch |
+| `profile` | Optional. A space ID, as Nirux terminals have it in `NIRUX_PROFILE_ID` |
+| `parentWorkspace`, `parentAgent` | Optional. The requesting workspace and terminal, by UUID. When the parent is a task, the new workspace lists under it as a sub-task. With [Mission handoffs](missions.md) on, or when the parent is a Lead, they also link the two agents |
 
-**Where the worktree goes.** Next to the main checkout, named `<main folder>.<branch>` with `/` replaced by `-`: from `repo.feat-a`, `feat/b` becomes `repo.feat-b`. When git can't tell where the main checkout is (a bare repository, a separate git dir, a submodule), it goes next to `repo`.
+The workspace goes to the space that has its repository. Without one, it goes to the parent workspace's space, then to `profile`, then to General.
 
-**Where the branch starts.**
+The worktree is created next to the main checkout and named `<main folder>.<branch>`, with `/` replaced by `-`. From `repo.feat-a`, the branch `feat/b` gives `repo.feat-b`. When git can't tell where the main checkout is (a bare repository, a separate git dir, a submodule), the worktree goes next to `repo`.
 
-- A branch that doesn't exist yet starts from origin's base branch: the space's board setting when the repository is the space's default one, else origin's default branch, else its `main` or `master`. It is fetched first and not tracked. If the fetch fails, the branch starts from the base as last fetched, and Nirux says so.
+Where the branch starts depends on whether it exists:
+
+- A new branch starts from the base branch the space's Board sets for that repository, else origin's default branch, else its `main` or `master`. That branch is fetched first. If the fetch fails, the new branch starts from the base as last fetched, and Nirux says so. Without an `origin`, or when the base was never fetched, it starts from the HEAD of `repo`.
 - A branch that exists locally opens as it is. One that exists only on the remote tracks `origin/<branch>`.
 - A branch already checked out in another linked worktree opens that worktree. A branch checked out in the main checkout, or in `repo` itself, is refused.
 
@@ -63,8 +52,8 @@ nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX
 
 Opens a file in an editor column.
 
-- `file` is an absolute, URL-encoded path to an existing regular text file of at most 5 MB. Binaries are refused; symlinks are resolved.
-- `line` and `endLine` are optional 1-based line numbers. With both, the editor highlights the range.
+- `file` is an absolute, URL-encoded path to an existing regular text file of at most 5 MB. Binaries are refused, and symlinks are resolved.
+- `line` and `endLine` are optional line numbers, starting at 1. With both, the editor highlights the range.
 - `workspace` is optional. When it matches a workspace ID (`NIRUX_WORKSPACE_ID` in Nirux terminals), Nirux switches to that workspace first.
 
-Keyboard focus stays in the column you were working in: it never lands in the editor.
+The editor becomes the focused column, so `Cmd+W` closes it, but the keyboard stays where you were typing.

@@ -2,7 +2,7 @@
 
 > **Design record:** shipped. All five plan steps (R1 to R5) are in the app.\
 > **Differs today:** the "Later" list was not built (a Review button on the Board, changes since the last review, posting to GitHub), and the text reads as a proposal because it predates the code.\
-> **User guide:** [Pull requests](../pull-requests.md#reading-a-branch-on-one-page).
+> **User guide:** [Pull requests](../pull-requests.md#branch-review).
 
 Status: design, validated by the user on 2026-10-02. Mockups of the page, on a
 real pull request (#57), are published as an artifact; its link is in this

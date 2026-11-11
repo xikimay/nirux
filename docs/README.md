@@ -1,20 +1,19 @@
 # Nirux documentation
 
-Guides say how to use Nirux today. Design records say why it is the way it is.
-
 ## User guides
 
 | Page | What it covers |
 | --- | --- |
 | [Getting started](getting-started.md) | The first launch and the first task |
 | [Workspaces and columns](workspaces-and-columns.md) | The sidebar, terminals, the editor, the browser, search |
-| [Spaces and tasks](spaces-and-tasks.md) | Spaces and their repositories, `Cmd+N`, worktrees and their cleanup, space memory, the Lead |
-| [Agents](agents.md) | Status hooks, lights and notifications, resuming after a restart, usage indicators |
-| [Mission handoffs](missions.md) | How a parent agent and the agent it started exchange questions and results |
+| [Spaces and tasks](spaces-and-tasks.md) | Spaces and their repositories, `Cmd+N`, worktrees and their cleanup, Space Memory, the Lead |
+| [Agent status](agent-status.md) | Status hooks, lights and notifications, resuming after a restart, usage indicators |
+| [Mission handoffs](missions.md) | How an agent and the agent it started exchange questions and results |
 | [Pull requests](pull-requests.md) | The pull request line, CI failures, review badges, Branch Review, the Board |
+| [Agent skills](agent-skills.md) | The instructions Nirux installs for Claude Code and Codex |
 | [Terminal appearance](terminal-appearance.md) | Which Ghostty settings the terminals follow |
 | [Keyboard shortcuts](keyboard-shortcuts.md) | Every shortcut and command palette action |
-| [URL scheme and agent skills](url-scheme.md) | `nirux://` links and the skills that use them |
+| [URL scheme](url-scheme.md) | `nirux://` links, for scripts and skills |
 
 ## Working on Nirux
 
@@ -25,7 +24,7 @@ Guides say how to use Nirux today. Design records say why it is the way it is.
 
 ## Design records
 
-Each record was written before or while its feature was built, and validated by the maintainer. They are kept as decision history and are not updated as the app changes: a header at the top of each says what shipped and where the current guide is.
+A design record holds the decisions behind one feature, as they were taken. Records are not kept up to date. A header on each says what shipped and links the current guide.
 
 | Record | Status |
 | --- | --- |
