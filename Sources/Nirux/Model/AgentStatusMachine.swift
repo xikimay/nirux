@@ -577,7 +577,7 @@ struct AgentStatusMachine {
 
     /// When the agent's last turn ended (Claude's main thread, or Codex's
     /// report), epoch seconds; 0 before any.
-    var lastTurnEndedAt: TimeInterval { max(mainTurnEndedAt, turnEndedAt) }
+    var lastTurnEndedAt: TimeInterval { turnEndedAt }
 
     /// The turn end of `turnEndedAt` is still the last thing that happened
     /// in this conversation: no prompt, turn end or conversation since.
