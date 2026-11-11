@@ -1,11 +1,12 @@
 # Board Stages
 
-> **Design record:** in progress. The model of a line is in the app; nothing draws it yet.\
+> **Design record:** in progress. The model (lines, units, sections) is in the app; nothing draws it yet.\
 > **Differs today:** the Board is still the table of [Project Board](project-board.md), one per project.\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
-Status: design validated by the user on 2026-11-11 (study D). The line's
-model is implemented (`BoardStages`); the view and the per-space Board follow.
+Status: design validated by the user on 2026-11-11 (study D). The model is
+implemented (`BoardStages`: lines, units, sections); the view and the
+per-space Board follow.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -25,7 +26,8 @@ what comes next. It becomes the overview of a space:
   The current one is the first not done.
 - **A commit doesn't send a line back.** Reviews is done once a code review
   ran in the task, on any commit, and its turn is over: fixes always follow a
-  review. The station then shows that the review is older than HEAD.
+  review. The station's tooltip then says the review is older than HEAD; no
+  mark is drawn for it, since it would be on most lines.
 - **Which reviews count, and whether they must be on HEAD, are two constants**
   (`BoardStages.Rules`), built to become space settings.
 - **Amber means an agent waits for the user**, and nothing else. It is never
@@ -88,7 +90,8 @@ A red check or a conflict shows at any station: the phrase says which.
 
 The phrase is the state's own line of the ladder:
 
-- "Needs you · a question"; the agent's failure; "Working";
+- "Needs you · a question"; the agent's failure; "Working", or what the user
+  wrote of the task;
 - the queue's step ("Updating branch", "Waiting for nightly");
 - "Conflicts with main"; "Checks failed: test", or "Checks failed · likely
   flaky" when the [triage](ci-failure-triage.md) said so; "Queue stopped:
@@ -101,13 +104,13 @@ The phrase is the state's own line of the ladder:
 - at Merge, "Lands after #52", "Draft", "Targets release", "Changes
   requested", else "Ready". "Ready" and "Draft" add what the pull request
   passed, and only that: "Ready · reviews done, checks green";
-- at rest, "Next · …" (the user's next step, else the Lead's), else where the
-  task stood when its last turn ended, else what the station needs: "No code
-  review yet", "No pull request yet".
+- at rest, "Next · …" (the user's next step, else the Lead's), else what the
+  user wrote of the task, else where it stood when its last turn ended, else
+  what the station needs: "No code review yet", "No pull request yet".
 
 "Clean up" and "Retarget to main" are links: the one click that moves the line
-on. While an agent works the line says "Working", not the last turn's line,
-which is about the turn before.
+on. While an agent works the line says "Working", or the user's own summary
+of the task: the last turn's line is about the turn before.
 
 The pull request cell reads "#52", "#53 · 2/3" in a straight stack, "#53 · on
 #52" in a fork, "no PR yet".
@@ -116,6 +119,52 @@ The clock counts from the turn's start while an agent works, from the checks'
 while the line waits for them, else from the last activity (as for a turn
 whose start isn't known). A line that is
 ready, blocked, merged or in the queue's hands has none.
+
+## 4. Units, sections, orders
+
+A section is one repository of the space, or its tasks without one. Inside,
+lines that are linked never part, each keeping its own state
+(`BoardStages.section`):
+
+- **A task and its sub-tasks**: the tasks listed under it in the sidebar,
+  depth first, each joined to it by an elbow. A sub-task whose task isn't in
+  the section (another repository, closed) stands alone.
+- **A stack of pull requests**, under "Stack · 3 pull requests on main", on a
+  numbered rail in merge order ([stacked pull requests](pr-stacks.md)). A
+  fork (two pull requests on one branch) has no single order: its lines stay
+  apart, and their cells say "on #52".
+- **The family wins.** A line is drawn once. A stack is a unit of its own only
+  when none of its lines is in a family here; else the lines stay in their
+  families, and their pull request cells ("#53 · 2/3") and phrases ("lands
+  after #52") say the stack.
+- **Pull requests without a task** (no workspace here: a cloud session's)
+  close the section, folded, as lines without a Reviews station. A stack with
+  one task at least stays whole in the list, even where a family keeps its
+  lines apart.
+
+Two orders, one setting for the app:
+
+- **Sidebar order**: each unit at the place of its first line.
+- **By progress**: the closest to its base branch first, by what doesn't
+  change with each turn of an agent. The pull request the queue works on comes
+  first; then the queue's list, in its order, whatever station each is at;
+  then the lines by station, one with a blocker below Code. A unit counts as
+  its furthest line; ties keep the sidebar's order. Last come the lines
+  nothing is left to follow for: a pull request merged and through the queue,
+  then an archived task.
+
+**Merged today** closes the section: the pull requests merged since midnight,
+the newest first, each with its task's title while that task is open, its
+"Clean up" while its worktree is there, and amber while an agent of its task
+needs the user.
+
+- A pull request has one place. Its line leaves the list for this one once
+  the queue is through with it (after the post-merge run), and doesn't come
+  back with its agent's next turn: lines don't change place with each state.
+- A merged task stays a line while a sub-task of it is listed: a family stays
+  whole.
+- One merged before today whose task is still open is a line, "Merged · Clean
+  up": at midnight, the day's merged tasks not cleaned up return to the list.
 
 ## Known limits
 

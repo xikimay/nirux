@@ -44,12 +44,9 @@ extension BoardStages {
     }
 
     /// A station as drawn: filled, larger in the state's colour, hollow,
-    /// filled with a ring, or left out.
+    /// or left out.
     enum Mark: Equatable, Sendable {
         case done, current, ahead
-        /// Reviews, done by a review that ran before the last commits:
-        /// filled, with a ring.
-        case doneEarlier
         /// Reviews, where none is waited for or none was seen: a pull
         /// request with no task here, one the queue took or that merged
         /// without the reviews that count, rules that ask for none.
@@ -59,6 +56,10 @@ extension BoardStages {
     struct Rail: Equatable, Sendable {
         /// One per station, in order.
         var marks: [Mark]
+        /// A review that counts ran before the last commits: said in the
+        /// Reviews station's tooltip, not drawn, since fixes follow nearly
+        /// every review.
+        var reviewIsOlderThanHead = false
         /// The pull request's place in the queue's list, from 1: the
         /// number on the Merge station.
         var queueOrder: Int?
@@ -239,9 +240,11 @@ extension BoardStages {
         var reviewsInFlight: Set<ReviewPass> = []
         var pullRequest: PullRequest?
         var queue = Queue()
-        /// Where the task stood when its last turn ended: the user's
-        /// summary, else that turn end's line. Said at rest only: while an
-        /// agent works, it is about the turn before.
+        /// What the user wrote of the task: said while an agent works too.
+        var summary: String?
+        /// Where the task stood when its last turn ended, as that turn
+        /// end's line says. Said at rest only: while an agent works, it is
+        /// about the turn before.
         var statusLine: String?
         /// The user's, else the Lead's.
         var nextStep: String?
@@ -261,7 +264,7 @@ extension BoardStages {
         var requiredReviews: Set<ReviewPass> = [.codeReview]
         /// Each must have run on the current HEAD. Off: once a pass ran, a
         /// commit after it doesn't send the line back, since fixes always
-        /// follow a review; the station's mark says the review is older.
+        /// follow a review; the station's tooltip says the review is older.
         var reviewsMustBeOnHead = false
     }
 }
@@ -321,14 +324,14 @@ extension BoardStages {
         let ranReviews = !reviewGaps(facts, rules: rules).contains { $0.gap == .never }
         let marks = Station.allCases.map { candidate -> Mark in
             let isPast = isSettled || candidate < station
-            if candidate == .reviews {
-                if !facts.hasTask || rules.requiredReviews.isEmpty || (isPast && !ranReviews) { return .skipped }
-                if isPast, reviewIsOlderThanHead(facts, rules: rules) { return .doneEarlier }
-            }
+            if candidate == .reviews, !facts.hasTask || rules.requiredReviews.isEmpty || (isPast && !ranReviews) { return .skipped }
             if isPast { return .done }
             return candidate == station ? .current : .ahead
         }
-        return Rail(marks: marks, queueOrder: pullRequest == nil || isSettled ? nil : facts.queue.order)
+        return Rail(
+            marks: marks, reviewIsOlderThanHead: marks[Station.reviews.rawValue] == .done && reviewIsOlderThanHead(facts, rules: rules),
+            queueOrder: pullRequest == nil || isSettled ? nil : facts.queue.order
+        )
     }
 
     /// "#52", "#53 · 2/3" in a straight stack, "#53 · on #52" in a fork.
@@ -371,7 +374,7 @@ extension BoardStages {
         case .failed(let what):
             return Reading(.failed, text(what) ?? "Stopped", since: last)
         case .working(let since):
-            return Reading(.working, "Working", since: since ?? last)
+            return Reading(.working, text(facts.summary) ?? "Working", since: since ?? last)
         case .asking, .idle:
             break
         }
@@ -437,7 +440,7 @@ extension BoardStages {
     /// what its station needs.
     private static func atRest(_ facts: Facts, at station: Station, rules: Rules) -> String {
         if let next = text(facts.nextStep) { return "Next · \(next)" }
-        if let line = text(facts.statusLine) { return line }
+        if let line = text(facts.summary) ?? text(facts.statusLine) { return line }
         if facts.isArchived { return "Archived" }
         switch station {
         case .code:
@@ -508,7 +511,7 @@ extension BoardStages {
     /// Safe to show, on one line, bounded; nil when empty. The facts come
     /// as their sources hold them: a command to allow may span lines, and
     /// a check's name is whatever its author posted.
-    private static func text(_ value: String?) -> String? {
+    static func text(_ value: String?) -> String? {
         value.flatMap { AgentText.clean($0, maxLength: 300) }
     }
 }
