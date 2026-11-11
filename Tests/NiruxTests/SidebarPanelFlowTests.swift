@@ -127,12 +127,14 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertIdentical(harness.window.attachedSheet, sheet.window)
             XCTAssertEqual(sheet.evidenceField.stringValue, harness.worktreeBranch)
             sheet.ruleView.insertText("Keep pull requests small.", replacementRange: NSRange(location: 0, length: 0))
+            // Either day, should it be midnight.
+            let days = [LearnedRules.dayText(Date())]
             try XCTUnwrap(sheet.addButton).performClick(nil)
             XCTAssertFalse(sheet.isOpen)
             let brief = LearnedRules.briefText(at: try XCTUnwrap(SpaceBrief.briefURL(spaceID: task.profileID)))
-            XCTAssertTrue(brief.hasSuffix(
-                "## Rules learned\n\n- Keep pull requests small. (learned \(LearnedRules.dayText(Date())), \(harness.worktreeBranch))\n"
-            ), brief)
+            XCTAssertTrue((days + [LearnedRules.dayText(Date())]).contains { day in
+                brief.hasSuffix("## Rules learned\n\n- Keep pull requests small. (learned \(day), \(harness.worktreeBranch))\n")
+            }, brief)
             XCTAssertTrue(shell.pendingLeadNotices.isEmpty, "the user's own rule: nobody to tell")
         }
     }

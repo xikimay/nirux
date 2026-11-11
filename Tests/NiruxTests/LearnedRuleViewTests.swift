@@ -29,7 +29,7 @@ final class LearnedRuleViewTests: XCTestCase {
         window.contentView = sidebar
         defer { window.close() }
         sidebar.isExpanded = true
-        var clicked: [Int] = []
+        var clicked: [String] = []
         sidebar.onRuleProposalsClicked = { clicked.append($0) }
 
         XCTAssertEqual(info(index: 0, isLead: true, proposals: 2).cardActions, [.ruleProposals(count: 2)])
@@ -39,7 +39,7 @@ final class LearnedRuleViewTests: XCTestCase {
 
         sidebar.update(profiles: [], workspaces: [info(index: 0, isLead: true, proposals: 2), info(index: 1, isLead: false, proposals: 0)])
         sidebar.layoutSubtreeIfNeeded()
-        let url = SidebarView.ruleProposalsActionURL(workspaceIndex: 0)
+        let url = SidebarView.ruleProposalsActionURL(spaceID: "space")
         let area = try XCTUnwrap(sidebar.hitAreas.first { area in
             if case .link(let target, _) = area.region { return target == url }
             return false
@@ -52,7 +52,7 @@ final class LearnedRuleViewTests: XCTestCase {
             modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
             context: nil, eventNumber: 0, clickCount: 1, pressure: 0
         )))
-        XCTAssertEqual(clicked, [0])
+        XCTAssertEqual(clicked, ["space"])
         XCTAssertEqual(SidebarWorkspaceCardRenderer.ruleProposalsTitle(count: 1), "Rule proposed")
     }
 
@@ -63,21 +63,24 @@ final class LearnedRuleViewTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: state) }
         let max = SpaceBrief.maxCharacters.formatted()
         let brief = SpaceFileEditorPane(source: try XCTUnwrap(.brief(spaceID: "space", spaceName: "Nirux", stateDirectory: state)))
-        XCTAssertEqual(brief.sizeLabel.stringValue, "0 of \(max) characters", "the template is a comment")
+        XCTAssertEqual(brief.sizeLabel.stringValue, "0 of \(max)", "the template is a comment")
         brief.textView.string += "Ship v2 first.\n"
         brief.textDidChange(Notification(name: NSText.didChangeNotification))
-        XCTAssertEqual(brief.sizeLabel.stringValue, "14 of \(max) characters")
+        XCTAssertEqual(brief.sizeLabel.stringValue, "14 of \(max)")
         let templates = SpaceFileEditorPane(source: try XCTUnwrap(.taskTemplates(spaceID: "space", spaceName: "Nirux", stateDirectory: state)))
         XCTAssertEqual(templates.sizeLabel.stringValue, "")
     }
 
-    /// Grey, orange past half of what sessions get, red past all of it.
+    /// Grey; "long" past half of what sessions get; red past all of it.
+    /// Never amber: that means an agent waits for the user.
     func testTheSizeLineWarnsBeforeTheLimit() {
         let max = SpaceBrief.maxCharacters
         let small = LearnedRuleSheet.sizeText(before: 1_240, after: 1_330, max: max)
         XCTAssertEqual(small.text, "Brief: \(1_240.formatted()) → \(1_330.formatted()) of \(max.formatted()) characters")
         XCTAssertEqual(small.color, Theme.Color.textTertiary)
-        XCTAssertEqual(LearnedRuleSheet.sizeText(before: 8_000, after: 8_100, max: max).color, Theme.Color.waiting)
+        let long = LearnedRuleSheet.sizeText(before: 8_000, after: 8_100, max: max)
+        XCTAssertTrue(long.text.hasSuffix(" · long"), long.text)
+        XCTAssertEqual(long.color, Theme.Color.textSecondary)
         XCTAssertEqual(LearnedRuleSheet.sizeText(before: 15_990, after: 16_090, max: max).color, Theme.Color.error)
     }
 }

@@ -14,8 +14,9 @@ import Foundation
 ///   never a copy of an older index;
 /// - first checks that the item still reads as the panel showed it: an
 ///   agent's newer text is never overwritten, nor moved away unseen;
-/// - keeps the file's line breaks, and touches only the file the user acted
-///   on and, for a memory, its index line.
+/// - keeps the file's line breaks and its UTF-8 byte order mark, and
+///   touches only the file the user acted on and, for a memory, its index
+///   line.
 /// A move writes its destination first, then removes its source: a failure
 /// in between leaves the item twice, never nowhere.
 extension ProjectMemory {
@@ -110,7 +111,10 @@ extension ProjectMemory {
             guard (before?.count ?? 0) < maxWrittenBytes else {
                 throw WriteError.failed("\(name) is too large to change here: open it in the editor")
             }
-            guard let text = before.map({ String(data: $0, encoding: .utf8) }) ?? "" else {
+            // Decoding drops a byte order mark: it goes back on at the write.
+            let byteOrderMark = Data([0xEF, 0xBB, 0xBF])
+            let hasByteOrderMark = before?.starts(with: byteOrderMark) == true
+            guard let text = before.map({ String(data: hasByteOrderMark ? $0.dropFirst(3) : $0, encoding: .utf8) }) ?? "" else {
                 throw WriteError.failed("\(name) isn’t UTF-8 text: open it in the editor")
             }
             if before != nil, !manager.isWritableFile(atPath: target.path) {
@@ -118,7 +122,8 @@ extension ProjectMemory {
             }
             guard let changed = try change(text) else { return }
             let permissions = (try? manager.attributesOfItem(atPath: target.path))?[.posixPermissions] as? Int
-            let temporary = try temporaryFile(with: Data(changed.utf8), beside: target, permissions: permissions)
+            let data = (hasByteOrderMark ? byteOrderMark : Data()) + Data(changed.utf8)
+            let temporary = try temporaryFile(with: data, beside: target, permissions: permissions)
             // The narrowest window: compared right before the rename.
             guard readData(target.path, limit: maxWrittenBytes) == before else {
                 try? manager.removeItem(at: temporary)

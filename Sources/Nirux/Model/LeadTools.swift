@@ -128,11 +128,12 @@ enum LeadTools {
             definition(
                 proposeRule, title: "Propose a rule for the space brief",
                 description: """
-                    When you send a task the same kind of finding a second time (the same defect in two tasks or two \
-                    reviews), propose a rule that would have prevented it: an instruction every later task follows, \
-                    in one or two lines. Never on a first finding. The user sees it on your row and adds, edits or \
-                    dismisses it; nothing reaches the brief without them. An added rule reaches only sessions started \
-                    from then on: until you hear it was added, keep telling tasks yourself.
+                    When a second, different task gets the same kind of finding (the same defect class in two tasks, \
+                    not two review rounds of one), propose a rule that would have prevented it: an instruction every \
+                    later task follows, in one or two lines; name the repository when it holds for one only. Never on \
+                    a first finding. The user sees it on your row and adds, edits or dismisses it; nothing reaches the \
+                    brief without them. An added rule reaches only sessions started from then on: until you hear it \
+                    was added, keep telling tasks yourself.
                     """,
                 properties: [
                     "rule": [

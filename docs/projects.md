@@ -420,7 +420,7 @@ so.
 - Spaces persist once their last workspace closes (section 2), so a brief stays
   reachable. Deleting a space leaves its brief on disk.
 - The editor shows what sessions get of the brief, in characters, beside its
-  buttons: orange past half of the 16,000, red past them.
+  buttons: it says "long" past half of the 16,000, and turns red past them.
 - Rules the space learned go in its `## Rules learned` section (docs/spaces.md,
   "Learned rules"), added only by the user's click.
 - Left for later:

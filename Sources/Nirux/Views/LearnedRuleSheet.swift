@@ -12,7 +12,7 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         case user
     }
 
-    static let size = NSSize(width: 540, height: 318)
+    static let size = NSSize(width: 540, height: 354)
     static let addTitle = "Add to Brief"
 
     let origin: Origin
@@ -30,6 +30,8 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
     private let spaceName: String
     /// The brief as read when the sheet opened: what the size line counts.
     private let briefText: String
+    /// What sessions get of it, in characters.
+    private let briefCount: Int
     /// Adds the rule and evidence: nil once added (the sheet closes), else
     /// why not (it stays open, saying so).
     var onAdd: (String, String) -> String? = { _, _ in nil }
@@ -39,6 +41,7 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         self.origin = origin
         self.spaceName = spaceName
         self.briefText = briefText
+        briefCount = LearnedRules.characterCount(of: briefText)
         super.init()
         if case .proposal(let proposal) = origin {
             ruleView.string = proposal.rule
@@ -97,46 +100,50 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
     func update() {
         let rule = rule
         let evidence = evidence
-        let before = LearnedRules.characterCount(of: briefText)
         let max = SpaceBrief.maxCharacters
         var problem = rule.isEmpty ? nil : LearnedRules.problem(rule: rule, evidence: evidence)
         var after: Int?
+        var tooLong = false
         if problem == nil {
             let bullet = LearnedRules.line(rule: rule.isEmpty ? "…" : rule, evidence: evidence, date: Date())
             let base = briefText.isEmpty ? SpaceBrief.template(spaceName: spaceName) : briefText
             do {
-                after = LearnedRules.characterCount(of: try LearnedRules.inserting(bullet, into: base))
+                let written = try LearnedRules.inserting(bullet, into: base)
+                after = LearnedRules.characterCount(of: written)
+                tooLong = LearnedRules.lengthProblem(of: written) != nil
             } catch {
                 problem = error.localizedDescription
             }
         }
-        let size = Self.sizeText(before: before, after: after, max: max)
+        let size = Self.sizeText(before: briefCount, after: after, max: max)
         sizeLabel.stringValue = size.text
         sizeLabel.textColor = size.color
         sizeLabel.toolTip = size.toolTip
         if let problem {
             setStatus(problem, color: Theme.Color.error)
-        } else if let after, after > max {
-            setStatus("Shorten the brief in Space Settings › Brief first, or move rules to memory in Space Settings › Memory.",
-                      color: Theme.Color.error)
+        } else if tooLong {
+            setStatus("The brief would be too long for sessions: shorten it in Space Settings › Brief first, or move rules "
+                + "to memory in Space Settings › Memory.", color: Theme.Color.error)
         } else {
             setStatus("")
         }
-        addButton?.isEnabled = !rule.isEmpty && problem == nil && (after ?? .max) <= max
+        addButton?.isEnabled = !rule.isEmpty && problem == nil && after != nil && !tooLong
     }
 
-    /// "Brief: 1,240 → 1,330 of 16,000 characters", orange past half of
-    /// what sessions get, red past all of it.
+    /// "Brief: 1,240 → 1,330 of 16,000 characters"; past half of what
+    /// sessions get it says "long", past all of it it turns red. Never
+    /// amber: that means an agent waits for the user.
     nonisolated static func sizeText(
-        before: Int, after: Int?, max: Int, prefix: String = "Brief: "
+        before: Int, after: Int?, max: Int, prefix: String = "Brief: ", unit: String = " characters"
     ) -> (text: String, color: NSColor, toolTip: String) {
         let format = { (count: Int) in count.formatted() }
         let shown = after ?? before
-        let text = prefix + format(before) + (after.map { " → \(format($0))" } ?? "") + " of \(format(max)) characters"
-        let toolTip = "What every session started in this space reads, comments left out. It goes with every request."
+        let text = prefix + format(before) + (after.map { " → \(format($0))" } ?? "") + " of \(format(max))" + unit
+        let toolTip = "Characters every session started in this space reads, comments left out. It goes with every request."
         if shown > max { return (text, Theme.Color.error, toolTip) }
         if shown > LearnedRules.longBriefCharacters {
-            return (text, Theme.Color.waiting, toolTip + " A long brief: move older rules to memory (Space Settings › Memory) or delete them.")
+            return (text + " · long", Theme.Color.textSecondary,
+                    toolTip + " A long brief: move older rules to memory (Space Settings › Memory) or delete them.")
         }
         return (text, Theme.Color.textTertiary, toolTip)
     }
@@ -154,11 +161,10 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         update()
     }
 
-    /// Return adds (a rule is one paragraph), Tab moves on, Esc closes.
+    /// Tab moves on, Esc closes. Return breaks the line, as in any text
+    /// area (the rule is written as one paragraph); Add is the button's.
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
-        case #selector(NSResponder.insertNewline(_:)):
-            add()
         case #selector(NSResponder.insertTab(_:)):
             window?.selectNextKeyView(nil)
         case #selector(NSResponder.insertBacktab(_:)):
@@ -200,8 +206,9 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         explanationLabel.font = Theme.Font.caption
         explanationLabel.textColor = Theme.Color.textSecondary
         explanationLabel.isSelectable = false
-        y -= Theme.Space.sm + 30
-        explanationLabel.frame = NSRect(x: inset, y: y, width: width, height: 30)
+        // Three lines: a long space name wraps it.
+        y -= Theme.Space.sm + 44
+        explanationLabel.frame = NSRect(x: inset, y: y, width: width, height: 44)
         content.addSubview(explanationLabel)
 
         y -= Theme.Space.md + 15

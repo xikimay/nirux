@@ -43,7 +43,8 @@ extension NiruxShellView {
             reloadRuleProposals(inSpace: space.id)
             let bullet = LearnedRules.line(rule: proposal.rule, evidence: proposal.evidence, date: Date())
             var text = "Proposed to the user: your row in the sidebar says “Rule proposed”, and they add, edit or dismiss it. "
-                + "Nirux types a line into your prompt once they decide. Until then, keep telling tasks yourself."
+                + "Say so in one line of your reply to them. Nirux types a line into your prompt once they decide. "
+                + "Until then, keep telling tasks yourself."
             if LearnedRules.characterCount(of: briefText) + bullet.count > LearnedRules.longBriefCharacters {
                 text += " The brief is long already: the user may want an older rule out first."
             }
@@ -54,6 +55,9 @@ extension NiruxShellView {
         case .alreadyPending(let since):
             answer("You proposed this rule on \(LearnedRules.dayText(Date(timeIntervalSince1970: since))): "
                 + "it waits for the user. Don't propose it again.", true)
+        case .added(let at, let words):
+            answer("The user added this rule on \(LearnedRules.dayText(Date(timeIntervalSince1970: at))) as "
+                + "“\(words)”: it is in the brief, unless they took it out since. Don't propose it again.", true)
         case .dismissed(let at):
             answer("The user dismissed this rule on \(LearnedRules.dayText(Date(timeIntervalSince1970: at))): "
                 + "don't propose it again. If it keeps coming back, say so in this conversation.", true)
@@ -68,9 +72,7 @@ extension NiruxShellView {
     // MARK: The sheet
 
     /// The Lead row's "Review": its space's oldest proposal.
-    func showRuleProposal(workspaceIndex: Int) {
-        guard workspaces.indices.contains(workspaceIndex) else { return }
-        let spaceID = workspaces[workspaceIndex].profileID
+    func showRuleProposal(spaceID: String) {
         // Decided meanwhile from another window: read the file again.
         reloadRuleProposals(inSpace: spaceID)
         guard let proposal = pendingRuleProposals(inSpace: spaceID).first else { return }
@@ -107,12 +109,16 @@ extension NiruxShellView {
         sheet.begin(on: window)
     }
 
-    /// Writes the rule into the brief, then takes the proposal out and
-    /// tells its Lead; nil once done, else why not.
+    /// Writes the rule into the brief, then records the decision and tells
+    /// its Lead; nil once done, else why not.
     func addLearnedRule(_ rule: String, evidence: String, origin: LearnedRuleSheet.Origin, spaceID: String) -> String? {
         guard let space = profiles.first(where: { $0.id == spaceID }),
               let briefURL = SpaceBrief.briefURL(spaceID: spaceID)
         else { return "This space is gone." }
+        // Its Save would replace the brief with the editor's text, rule gone.
+        if let settings = spaceSettings, settings.spaceID == spaceID, settings.brief.isDirty {
+            return "Save or revert your edits in Space Settings › Brief first."
+        }
         // Added meanwhile (by hand, or a decision that failed half way):
         // not twice.
         let alreadyThere = LearnedRules.existingRule(matching: rule, in: LearnedRules.briefText(at: briefURL)) != nil
@@ -123,33 +129,40 @@ extension NiruxShellView {
                 return error.localizedDescription
             }
         }
-        if case .proposal(let proposal) = origin {
-            decideRuleProposal(proposal, spaceID: spaceID, added: true)
-            queueRuleNotice(for: proposal, spaceID: spaceID, text: "\(MissionPromptText.prefix) The user added your rule to the "
-                + "space brief as: “\(LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength))”. Only sessions started "
-                + "from now on read it: tell running tasks yourself if they need it.")
-        }
         refreshSpaceSettingsBrief(spaceID: spaceID)
+        let words = LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength)
+        if case .proposal(let proposal) = origin {
+            switch decideRuleProposal(proposal, spaceID: spaceID, added: true, addedRule: words) {
+            // Its toast says why; it shows again, and its next Add tells
+            // the Lead once.
+            case nil: return nil
+            case true?:
+                queueRuleNotice(for: proposal, spaceID: spaceID, text: "\(MissionPromptText.prefix) The user added your rule to the "
+                    + "space brief as: “\(words)”. Only sessions started from now on read it: tell running tasks yourself if "
+                    + "they need it.")
+            case false?: break
+            }
+        }
         showToast(alreadyThere ? "The brief says this already." : "Added to the brief: sessions started from now on read it.")
         return nil
     }
 
     func dismissRuleProposal(_ proposal: RuleProposal, spaceID: String) {
-        guard decideRuleProposal(proposal, spaceID: spaceID, added: false) else { return }
+        guard decideRuleProposal(proposal, spaceID: spaceID, added: false) == true else { return }
         queueRuleNotice(for: proposal, spaceID: spaceID, text: "\(MissionPromptText.prefix) The user dismissed the rule you "
             + "proposed: “\(proposal.rule)”. Don't propose it again.")
     }
 
-    /// False when it couldn't be recorded (it still shows) or was decided
-    /// meanwhile.
-    @discardableResult
-    private func decideRuleProposal(_ proposal: RuleProposal, spaceID: String, added: Bool) -> Bool {
+    /// True once recorded, false when it no longer waited (decided
+    /// meanwhile), nil when it couldn't be recorded (a toast says so; it
+    /// still shows).
+    private func decideRuleProposal(_ proposal: RuleProposal, spaceID: String, added: Bool, addedRule: String? = nil) -> Bool? {
         defer { reloadRuleProposals(inSpace: spaceID) }
         do {
-            return try RuleProposalStore(spaceID: spaceID)?.decide(proposal.id, added: added) != nil
+            return try RuleProposalStore(spaceID: spaceID)?.decide(proposal.id, added: added, addedRule: addedRule) != nil
         } catch {
             showToast("Couldn’t record that: \(error.localizedDescription)", tone: .error)
-            return false
+            return nil
         }
     }
 

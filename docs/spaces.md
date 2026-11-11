@@ -286,30 +286,37 @@ New flow, built on the guarded typing `tell` already uses
   No model call: the Lead, which reads every review, judges "same kind".
   - **Refused:** a rule the brief says already (same words in any case,
     spacing or final punctuation; the Lead is told since when, and to tell
-    the task that missed it), one already waiting, one the user dismissed in
-    the last 90 days, a fourth one waiting, a rule holding `<!--` or `-->`.
+    the task that missed it), one already waiting, one the user added or
+    dismissed in the last 90 days (in the Lead's words or the user's, even
+    taken out of the brief since), a fourth one waiting, a rule holding
+    `<!--` or `-->`. Its answer asks the Lead to say it in one line of its
+    reply, so the user hears it where they talk to it.
   - **Shown:** "Rule proposed · Review" (or "2 rules proposed") on the Lead's
     row, grey: nothing waits on it, so no amber, notification, sound or
     focus. Review opens a sheet with the oldest one: the rule and where it was
     learned, both editable; the brief's size before and after ("Brief: 1,240
-    → 1,330 of 16,000 characters", orange past half, red past it); Add to
+    → 1,330 of 16,000 characters", "long" past half, red past it); Add to
     Brief, Dismiss, Later (Esc). It says sessions already running keep the
     brief they started with.
   - **The user's own:** "Add a Rule to the Brief…" in any row's menu opens the
     same sheet, where it was learned filled with the row's pull request or
     branch, with the same size line and limit; Add writes it at once.
-  - **Stored:** waiting and dismissed proposals in
-    `<state dir>/projects/<space id>/rule-proposals.json` (0600; a dismissed
-    one kept 90 days; deleted with the space). An added rule leaves the file
-    and goes at the end of the brief's `## Rules learned` section, made at the
+  - **Stored:** proposals in
+    `<state dir>/projects/<space id>/rule-proposals.json` (0600; a decided
+    one kept 90 days, the newest 100 at most; deleted with the space; one that
+    can't be read just now is left alone). An added rule goes at the end of
+    the brief's `## Rules learned` section (a closing `##` or a comment on its
+    line allowed; a setext heading ends it too), made at the
     brief's end when missing (from the template when there is no brief), as
     `- <rule> (learned 2026-11-11, #395, #417)`: agents read the date and the
     source too. The write inserts that line and nothing else: every byte of
     the brief stays, its line breaks included. It re-reads the brief right
     before replacing it and starts over when it changed (Project Memory's
-    write), so the user's edits made meanwhile stay; a place inside a code
-    block or after an unclosed `<!--` is refused, and so is a brief past
-    16,000 characters of what sessions get. Space Memory lists the rule as an
+    write, which keeps a UTF-8 byte order mark too), so the user's edits made
+    meanwhile stay; a place sessions wouldn't get (in a code block or a
+    comment, after an unclosed `<!--`) is refused, and so is a brief past
+    16,000 characters or 64,000 bytes of what sessions get, or while Space
+    Settings › Brief has unsaved edits (its Save would drop the rule). Space Memory lists the rule as an
     Always item, to edit or move to memory.
   - **The Lead hears it:** once the user adds or dismisses its rule, a line is
     typed into its prompt when it is idle ("[Nirux Mission] The user added

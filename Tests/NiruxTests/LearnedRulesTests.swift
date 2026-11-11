@@ -57,10 +57,11 @@ final class LearnedRulesTests: XCTestCase {
         ] {
             XCTAssertEqual(try LearnedRules.inserting(bullet, into: brief), brief + "\n## Rules learned\n\n\(bullet)\n", brief)
         }
-        // In any case.
-        XCTAssertEqual(
-            try LearnedRules.inserting(bullet, into: "## rules LEARNED\n- old\n"), "## rules LEARNED\n- old\n\(bullet)\n"
-        )
+        // In any case, with a closing run or a comment on its line.
+        for heading in ["## rules LEARNED", "## Rules learned ##", "## Rules learned <!-- auto -->"] {
+            let brief = heading + "\n- old\n"
+            XCTAssertEqual(try LearnedRules.inserting(bullet, into: brief), brief + bullet + "\n", heading)
+        }
     }
 
     // MARK: - The section
@@ -90,6 +91,12 @@ final class LearnedRulesTests: XCTestCase {
         XCTAssertEqual(try LearnedRules.inserting(bullet, into: nested), try expected(nested, inserting: bullet + "\n", at: "- b\n"))
         // Last in the file, with no final break.
         XCTAssertEqual(try LearnedRules.inserting(bullet, into: "## Rules learned\n- a"), "## Rules learned\n- a\n\(bullet)\n")
+        // A setext heading ends it too; a line across after a list doesn't.
+        let setext = "## Rules learned\n- a\n\nWorkflow\n--------\nShip daily.\n"
+        XCTAssertEqual(try LearnedRules.inserting(bullet, into: setext), try expected(setext, inserting: bullet + "\n", at: "- a\n"))
+        for across in ["## Rules learned\n- a\n---\n", "## Rules learned\n- a\n  more\n---\n"] {
+            XCTAssertEqual(try LearnedRules.inserting(bullet, into: across), across + bullet + "\n", across)
+        }
         // The first section, when there are two.
         let twice = "## Rules learned\n- a\n\n## Rules learned\n- b\n"
         XCTAssertEqual(try LearnedRules.inserting(bullet, into: twice), try expected(twice, inserting: bullet + "\n", at: "- a\n"))
@@ -127,6 +134,9 @@ final class LearnedRulesTests: XCTestCase {
         ] {
             XCTAssertThrowsError(try LearnedRules.inserting(bullet, into: brief), brief)
         }
+        // The next heading shares its line with a comment's end: the rule
+        // would be inside the comment.
+        XCTAssertThrowsError(try LearnedRules.inserting(bullet, into: "## Rules learned\n- a\n<!-- off\n- b\n--> ## Next\n"))
         // A comment that ends on the section's last line is fine.
         let closed = "## Rules learned\n- a <!-- a note\nthat ends here -->\n"
         XCTAssertEqual(try LearnedRules.inserting(bullet, into: closed), closed + bullet + "\n")
@@ -144,6 +154,10 @@ final class LearnedRulesTests: XCTestCase {
         XCTAssertEqual(LearnedRules.splitLearned("Wait on state. (learned 2025-11-11, #395)").day, "2025-11-11")
         XCTAssertEqual(LearnedRules.splitLearned("Wait on state. (learned 2025-11-11, #395)").rule, "Wait on state.")
         XCTAssertNil(LearnedRules.splitLearned("Wait (learned the hard way)").day)
+        // The evidence may say "learned" too.
+        let tricky = LearnedRules.splitLearned("Wait on state. (learned 2025-11-11, #395 (learned the hard way))")
+        XCTAssertEqual(tricky.rule, "Wait on state.")
+        XCTAssertEqual(tricky.day, "2025-11-11")
     }
 
     /// A rule is one paragraph: whitespace folds; empty, too long, or
@@ -221,6 +235,25 @@ final class LearnedRulesTests: XCTestCase {
         }
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), brief)
         XCTAssertThrowsError(try LearnedRules.add(rule: "Wait <!--", evidence: "", to: url, spaceName: "N"))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), brief)
+    }
+
+    /// A UTF-8 byte order mark stays where it was.
+    func testAByteOrderMarkStays() throws {
+        let url = folder.appendingPathComponent("brief.md")
+        let mark = Data([0xEF, 0xBB, 0xBF])
+        try (mark + Data("Goals.\n".utf8)).write(to: url)
+        let written = try LearnedRules.add(rule: "b", evidence: "", to: url, spaceName: "N")
+        XCTAssertEqual(try Data(contentsOf: url), mark + Data("Goals.\n\n## Rules learned\n\n\(written)\n".utf8))
+    }
+
+    /// Few characters, many bytes: Codex would get it cut, the rule first.
+    func testABriefPastItsBytesIsRefused() throws {
+        let url = folder.appendingPathComponent("brief.md")
+        let brief = String(repeating: "👨‍👩‍👧", count: SpaceBrief.maxBytes / 18) + "\n"
+        try Data(brief.utf8).write(to: url)
+        XCTAssertLessThan(brief.count, SpaceBrief.maxCharacters)
+        XCTAssertThrowsError(try LearnedRules.add(rule: "Wait on state, never on a fixed sleep.", evidence: "#395", to: url, spaceName: "N"))
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), brief)
     }
 

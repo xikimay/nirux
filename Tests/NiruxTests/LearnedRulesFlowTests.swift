@@ -49,6 +49,11 @@ final class LearnedRulesFlowTests: XCTestCase {
         return shell.sidebar.lastInfos.first(where: \.isLead)?.ruleProposalCount
     }
 
+    /// The sheet gone from the window: the next one can open.
+    private func waitForNoSheet(_ harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line) {
+        harness.waitUntil("the sheet to close", file: file, line: line) { harness.window.attachedSheet == nil }
+    }
+
     /// Types into the rule's field as a user does (its delegate hears it).
     private func type(_ text: String, into sheet: LearnedRuleSheet) {
         let all = NSRange(location: 0, length: (sheet.ruleView.string as NSString).length)
@@ -68,8 +73,7 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertTrue(try propose("tests wait on STATE", lead: lead, in: harness).isError, "it waits already")
 
             // The row's click, as the sidebar sends it.
-            let leadIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace })
-            shell.sidebar.onRuleProposalsClicked?(leadIndex)
+            shell.sidebar.onRuleProposalsClicked?(lead.space)
             let sheet = try XCTUnwrap(shell.learnedRuleSheet)
             XCTAssertTrue(sheet.isOpen)
             XCTAssertIdentical(harness.window.attachedSheet, sheet.window)
@@ -80,14 +84,17 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertNotNil(sheet.dismissButton)
 
             type("Tests wait on state, never on a fixed sleep.", into: sheet)
+            // Either day, should it be midnight.
+            let days = [LearnedRules.dayText(Date())]
             try XCTUnwrap(sheet.addButton).performClick(nil)
             XCTAssertFalse(sheet.isOpen)
-            XCTAssertNil(harness.window.attachedSheet)
+            waitForNoSheet(harness)
 
-            let day = LearnedRules.dayText(Date())
-            let bullet = "- Tests wait on state, never on a fixed sleep. (learned \(day), #395, #417)"
             let brief = try briefText(lead)
-            XCTAssertTrue(brief.hasSuffix("## Rules learned\n\n\(bullet)\n"), brief)
+            let day = try XCTUnwrap((days + [LearnedRules.dayText(Date())]).first { day in
+                brief.hasSuffix("## Rules learned\n\n- Tests wait on state, never on a fixed sleep. (learned \(day), #395, #417)\n")
+            }, brief)
+            let bullet = "- Tests wait on state, never on a fixed sleep. (learned \(day), #395, #417)"
             XCTAssertEqual(leadRowCount(shell), 0)
             let injection = try XCTUnwrap(SpaceBrief.prepareInjection(spaceID: lead.space))
             XCTAssertTrue(try String(contentsOfFile: injection.claudePromptFile, encoding: .utf8).contains(bullet))
@@ -100,6 +107,10 @@ final class LearnedRulesFlowTests: XCTestCase {
             let again = try propose("Tests wait on state, never on a fixed sleep", lead: lead, in: harness)
             XCTAssertTrue(again.isError)
             XCTAssertTrue(again.text.contains("says this already (learned \(day))"), again.text)
+            // Its own first words, which the brief doesn't hold.
+            let original = try propose("Tests wait on state.", lead: lead, in: harness)
+            XCTAssertTrue(original.isError)
+            XCTAssertTrue(original.text.contains("added this rule"), original.text)
         }
     }
 
@@ -110,21 +121,22 @@ final class LearnedRulesFlowTests: XCTestCase {
             let shell = harness.shell
             let lead = try makeLead(harness)
             XCTAssertFalse(try propose("Check who owns the screen first.", lead: lead, in: harness).isError)
-            let leadIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === lead.workspace })
 
-            shell.showRuleProposal(workspaceIndex: leadIndex)
+            shell.showRuleProposal(spaceID: lead.space)
             let later = try XCTUnwrap(shell.learnedRuleSheet)
             XCTAssertEqual(later.closeButton?.title, "Later")
             later.closeButton?.performClick(nil)
             XCTAssertFalse(later.isOpen)
+            waitForNoSheet(harness)
             XCTAssertEqual(leadRowCount(shell), 1)
             XCTAssertEqual(try briefText(lead), "")
 
-            shell.showRuleProposal(workspaceIndex: leadIndex)
+            shell.showRuleProposal(spaceID: lead.space)
             let sheet = try XCTUnwrap(shell.learnedRuleSheet)
             XCTAssertFalse(sheet === later)
             try XCTUnwrap(sheet.dismissButton).performClick(nil)
             XCTAssertFalse(sheet.isOpen)
+            waitForNoSheet(harness)
             XCTAssertEqual(leadRowCount(shell), 0)
             XCTAssertEqual(try briefText(lead), "")
             XCTAssertEqual(shell.pendingLeadNotices.last?.text,
@@ -137,7 +149,7 @@ final class LearnedRulesFlowTests: XCTestCase {
             XCTAssertFalse(try propose("Draft PRs only.", lead: lead, in: harness).isError)
             let url = try XCTUnwrap(SpaceBrief.briefURL(spaceID: lead.space))
             try Data("## Rules learned\n- Draft PRs only\n".utf8).write(to: url)
-            shell.showRuleProposal(workspaceIndex: leadIndex)
+            shell.showRuleProposal(spaceID: lead.space)
             try XCTUnwrap(shell.learnedRuleSheet?.addButton).performClick(nil)
             XCTAssertEqual(try briefText(lead), "## Rules learned\n- Draft PRs only\n")
             XCTAssertEqual(leadRowCount(shell), 0)
@@ -175,6 +187,28 @@ final class LearnedRulesFlowTests: XCTestCase {
             sheet.closeButton?.performClick(nil)
             XCTAssertEqual(try briefText(lead), long)
             XCTAssertTrue(shell.pendingLeadNotices.isEmpty)
+            waitForNoSheet(harness)
+
+            // Edits not saved in Space Settings › Brief: its Save would drop
+            // the rule, so Add waits for them.
+            try Data("Goals.\n".utf8).write(to: url)
+            shell.showSpaceSettings(profileID: lead.space, tab: .brief)
+            let editor = try XCTUnwrap(shell.spaceSettings?.brief)
+            editor.checkDisk()
+            editor.textView.string += "Draft.\n"
+            editor.textDidChange(Notification(name: NSText.didChangeNotification))
+            XCTAssertTrue(editor.isDirty)
+            shell.showAddRuleSheet(for: task)
+            let waiting = try XCTUnwrap(shell.learnedRuleSheet)
+            type("Short.", into: waiting)
+            waiting.add()
+            XCTAssertTrue(waiting.isOpen)
+            XCTAssertEqual(waiting.statusLabel.stringValue, "Save or revert your edits in Space Settings › Brief first.")
+            XCTAssertEqual(try briefText(lead), "Goals.\n")
+            editor.revert()
+            waiting.add()
+            XCTAssertFalse(waiting.isOpen)
+            XCTAssertTrue(try briefText(lead).hasPrefix("Goals.\n\n## Rules learned\n\n- Short. (learned "))
         }
     }
 }

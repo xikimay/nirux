@@ -50,8 +50,9 @@ final class SidebarView: NSView {
     /// A card's Mission question row: the workspace, the column, and the
     /// row's label to anchor the reply popover to.
     var onMissionQuestionClicked: ((Int, Int, NSView) -> Void)?
-    /// The Lead row's "Rule proposed · Review", by workspace index.
-    var onRuleProposalsClicked: ((Int) -> Void)?
+    /// The Lead row's "Rule proposed · Review", by space id: the rows may
+    /// have moved since it was drawn.
+    var onRuleProposalsClicked: ((String) -> Void)?
     /// The menu of the card's PR feedback line, by workspace id; nil when
     /// there's nothing.
     var prFeedbackMenu: ((String) -> NSMenu?)?
@@ -610,8 +611,8 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
-            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.ruleProposalsActionPrefix) {
-                onRuleProposalsClicked?(workspaceIndex)
+            } else if url.hasPrefix(Self.ruleProposalsActionPrefix) {
+                onRuleProposalsClicked?(String(url.dropFirst(Self.ruleProposalsActionPrefix.count)))
             } else if let target = Self.resumeTarget(url) {
                 onDeferredAgentResume?(target.workspaceIndex, target.columnIndex, target.columnID)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
@@ -860,9 +861,9 @@ final class SidebarView: NSView {
     private static let missionQuestionActionPrefix = "action:mission-question:"
     private static let ruleProposalsActionPrefix = "action:rule-proposals:"
 
-    /// The Lead row's "Rule proposed · Review".
-    static func ruleProposalsActionURL(workspaceIndex: Int) -> String {
-        ruleProposalsActionPrefix + String(workspaceIndex)
+    /// The Lead row's "Rule proposed · Review", for its space.
+    static func ruleProposalsActionURL(spaceID: String) -> String {
+        ruleProposalsActionPrefix + spaceID
     }
 
     /// The card's "Asking …" / "Needs you · a question" row.

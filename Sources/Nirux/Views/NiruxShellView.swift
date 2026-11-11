@@ -304,7 +304,7 @@ final class NiruxShellView: NSView {
         sidebar.onMissionQuestionClicked = { [weak self] wsIndex, colIndex, anchor in
             self?.showMissionReplyPopover(workspaceIndex: wsIndex, columnIndex: colIndex, anchor: anchor)
         }
-        sidebar.onRuleProposalsClicked = { [weak self] wsIndex in self?.showRuleProposal(workspaceIndex: wsIndex) }
+        sidebar.onRuleProposalsClicked = { [weak self] spaceID in self?.showRuleProposal(spaceID: spaceID) }
         sidebar.onPermissionDecision = { [weak self] wsIndex, colIndex, requestID, behavior in
             self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.decidePermission(

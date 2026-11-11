@@ -337,7 +337,10 @@ extension SpaceFileEditorPane.Source {
             write: { try writeText($0, to: url) },
             template: { SpaceBrief.template(spaceName: spaceName) },
             sizeNote: { text in
-                LearnedRuleSheet.sizeText(before: LearnedRules.characterCount(of: text), after: nil, max: SpaceBrief.maxCharacters, prefix: "")
+                // Short: the status after it needs the room.
+                LearnedRuleSheet.sizeText(
+                    before: LearnedRules.characterCount(of: text), after: nil, max: SpaceBrief.maxCharacters, prefix: "", unit: ""
+                )
             }
         )
     }

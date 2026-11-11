@@ -73,17 +73,39 @@ final class RuleProposalStoreTests: XCTestCase {
         if case .refused = propose("Wait <!-- hidden") {} else { XCTFail("a comment mark") }
     }
 
-    /// Added, it leaves the file (the brief holds it); dismissed, it stays,
-    /// dated; decided already, nothing happens.
-    func testADecisionTakesTheProposalOut() throws {
+    /// A decision stays, dated, with the words the user added it in: the
+    /// Lead can't propose it again in either wording, even once the user
+    /// took it out of the brief; decided already, nothing happens.
+    func testADecisionIsKept() throws {
         let added = try proposed(propose("Tests wait on state."))
         let dismissed = try proposed(propose("Check who owns the screen first."))
-        XCTAssertEqual(try store.decide(added.id, added: true, now: now)?.id, added.id)
+        let decided = try store.decide(added.id, added: true, addedRule: "Tests wait on state, never on a sleep.", now: now)
+        XCTAssertEqual(decided?.addedAt, now.timeIntervalSince1970)
         XCTAssertEqual(try store.decide(dismissed.id, added: false, now: now)?.dismissedAt, now.timeIntervalSince1970)
-        XCTAssertEqual(store.load().proposals.map(\.id), [dismissed.id])
         XCTAssertTrue(store.load().pending.isEmpty)
         XCTAssertNil(try store.decide(added.id, added: false, now: now))
         XCTAssertNil(try store.decide(dismissed.id, added: true, now: now))
+        let words = "Tests wait on state, never on a sleep."
+        XCTAssertEqual(propose("tests wait on state"), .added(at: now.timeIntervalSince1970, as: words))
+        XCTAssertEqual(propose("Tests wait on state, never on a sleep"), .added(at: now.timeIntervalSince1970, as: words))
+    }
+
+    /// The newest 100 decisions stay: the file never grows past what it
+    /// reads.
+    func testOnlyTheNewestDecisionsAreKept() throws {
+        let many = (0..<(RuleProposalStore.maxDecided + 5)).map { index in
+            RuleProposal(
+                id: "\(index)", rule: "Rule \(index)", evidence: "#\(index)", proposedAt: now.timeIntervalSince1970,
+                leadWorkspaceID: nil, leadAgentUUID: nil, dismissedAt: now.timeIntervalSince1970 + Double(index)
+            )
+        }
+        try store.save(many + [RuleProposal(
+            id: "waiting", rule: "Waiting", evidence: "#1", proposedAt: 0, leadWorkspaceID: nil, leadAgentUUID: nil
+        )], now: now)
+        let kept = store.load().proposals
+        XCTAssertEqual(kept.count, RuleProposalStore.maxDecided + 1)
+        XCTAssertTrue(kept.contains { $0.id == "waiting" }, "a waiting one always stays")
+        XCTAssertFalse(kept.contains { $0.id == "0" }, "the oldest decision went")
     }
 
     /// A file this build can't read only held clicks to come: replaced.
@@ -100,6 +122,16 @@ final class RuleProposalStoreTests: XCTestCase {
         if case .refused = propose("Check who owns the screen first.") {} else { XCTFail("a newer file") }
         XCTAssertThrowsError(try store.decide("any", added: true))
         XCTAssertEqual(try Data(contentsOf: store.fileURL), newer)
+
+        // Unreadable just now: left alone, its dismissals kept.
+        try FileManager.default.removeItem(at: store.fileURL)
+        _ = try proposed(propose("Check who owns the screen first."))
+        let readable = try Data(contentsOf: store.fileURL)
+        XCTAssertEqual(chmod(store.fileURL.path, 0o000), 0)
+        XCTAssertNotNil(store.load().readOnlyReason)
+        if case .refused = propose("Never show a model's words next to Yes.") {} else { XCTFail("an unreadable file") }
+        XCTAssertEqual(chmod(store.fileURL.path, 0o600), 0)
+        XCTAssertEqual(try Data(contentsOf: store.fileURL), readable)
 
         try FileManager.default.removeItem(at: store.fileURL)
         XCTAssertEqual(mkfifo(store.fileURL.path, 0o600), 0)

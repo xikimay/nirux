@@ -59,15 +59,21 @@ enum LearnedRules {
     }
 
     /// A rule without the "(learned …)" it ends with, and that day.
+    /// The last " (learned " followed by a day counts: the evidence may
+    /// say "learned" too.
     static func splitLearned(_ text: String) -> (rule: String, day: String?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasSuffix(")"), let open = trimmed.range(of: " (learned ", options: .backwards) else { return (trimmed, nil) }
-        let day = trimmed[open.upperBound...].prefix(10)
-        let isDay = day.count == 10 && day.enumerated().allSatisfy { index, character in
-            [4, 7].contains(index) ? character == "-" : character.isASCII && character.isNumber
+        guard trimmed.hasSuffix(")") else { return (trimmed, nil) }
+        var end = trimmed.endIndex
+        while let open = trimmed.range(of: " (learned ", options: .backwards, range: trimmed.startIndex..<end) {
+            let day = trimmed[open.upperBound...].prefix(10)
+            let isDay = day.count == 10 && day.enumerated().allSatisfy { index, character in
+                [4, 7].contains(index) ? character == "-" : character.isASCII && character.isNumber
+            }
+            if isDay { return (String(trimmed[..<open.lowerBound]), String(day)) }
+            end = open.lowerBound
         }
-        guard isDay else { return (trimmed, nil) }
-        return (String(trimmed[..<open.lowerBound]), String(day))
+        return (trimmed, nil)
     }
 
     /// What two rules are compared by: their words, in any case, accent or
@@ -92,6 +98,19 @@ enum LearnedRules {
         SpaceBrief.body(of: briefText)?.count ?? 0
     }
 
+    /// Why sessions wouldn't get all of a brief, or nil: past
+    /// `maxCharacters`, or past the bytes Codex takes in one argument (a
+    /// brief of emoji can pass those first). The end is what gets cut: a
+    /// rule just added.
+    static func lengthProblem(of briefText: String, maxCharacters: Int = SpaceBrief.maxCharacters) -> ProjectMemory.WriteError? {
+        let body = SpaceBrief.body(of: briefText) ?? ""
+        if body.count > maxCharacters { return .tooLong(maxCharacters) }
+        if body.utf8.count > SpaceBrief.maxBytes {
+            return .failed("The space brief would pass \(SpaceBrief.maxBytes.formatted()) bytes, past what sessions get: shorten it first")
+        }
+        return nil
+    }
+
     // MARK: - Writing the brief
 
     /// The brief with `bullet` at the end of its "## Rules learned"
@@ -104,7 +123,7 @@ enum LearnedRules {
         let place: String.Index
         let inserted: String
         if let start = lines.firstIndex(where: \.isRulesHeading) {
-            let end = lines[(start + 1)...].firstIndex(where: \.isTopHeading) ?? lines.count
+            let end = sectionEnd(after: start, in: lines)
             let last = lines[(start + 1)..<end].lastIndex { !$0.raw.trimmingCharacters(in: .whitespaces).isEmpty }
             let after = lines[last ?? start]
             // Right under the heading, a blank line between.
@@ -126,7 +145,28 @@ enum LearnedRules {
             inserted = separator + heading + newline + newline + bullet + newline
             place = text.endIndex
         }
-        return String(text[..<place]) + inserted + String(text[place...])
+        let written = String(text[..<place]) + inserted + String(text[place...])
+        // Whatever the brief's comments do around it, sessions must get it.
+        guard SpaceBrief.body(of: written)?.contains(bullet) == true else { throw unsafePlace }
+        return written
+    }
+
+    /// The first line past the section that starts at `start`: a `#` or
+    /// `##` heading, or a setext one (a paragraph after a blank line,
+    /// underlined with `=` or `-`), else the end.
+    private static func sectionEnd(after start: Int, in lines: [Line]) -> Int {
+        var index = start + 1
+        while index < lines.count {
+            if lines[index].isTopHeading { return index }
+            if lines[index].isSetextUnderline, index - 1 > start, lines[index - 1].isParagraphLine {
+                var first = index - 1
+                while first - 1 > start, lines[first - 1].isParagraphLine { first -= 1 }
+                // After a list item it is a line across, not a heading.
+                if first - 1 == start || lines[first - 1].live.trimmingCharacters(in: .whitespaces).isEmpty { return first }
+            }
+            index += 1
+        }
+        return lines.count
     }
 
     private static var unsafePlace: ProjectMemory.WriteError {
@@ -154,15 +194,32 @@ enum LearnedRules {
         /// A code block is still open after it.
         let fenceOpenAfter: Bool
 
-        /// `## Rules learned`, in any case, outside comments and code.
+        /// `## Rules learned`, in any case, outside comments and code (a
+        /// comment on its line aside).
         var isRulesHeading: Bool {
-            !inFence && live == raw && Self.heading(live).map { $0.level == 2 && $0.title.lowercased() == "rules learned" } == true
+            !inFence && Self.heading(live).map { $0.level == 2 && $0.title.lowercased() == "rules learned" } == true
         }
 
         /// A `#` or `##` heading, outside comments and code: the end of a
         /// section.
         var isTopHeading: Bool {
             !inFence && Self.heading(live).map { $0.level <= 2 } == true
+        }
+
+        /// `===` or `---` under a paragraph line makes it a heading.
+        var isSetextUnderline: Bool {
+            let indent = live.prefix { $0 == " " }.count
+            let trimmed = live.trimmingCharacters(in: .whitespaces)
+            guard !inFence, indent <= 3, let first = trimmed.first, first == "=" || first == "-" else { return false }
+            return trimmed.allSatisfy { $0 == first }
+        }
+
+        /// Text that could be a setext heading's: not blank, code, a
+        /// heading, a list item or an underline.
+        var isParagraphLine: Bool {
+            let trimmed = live.trimmingCharacters(in: .whitespaces)
+            return !inFence && !trimmed.isEmpty && live.prefix { $0 == " " }.count <= 3 && Self.heading(live) == nil
+                && ProjectMemory.bulletMarker(trimmed) == nil && !isSetextUnderline
         }
 
         static func heading(_ line: String) -> (level: Int, title: String)? {
@@ -173,7 +230,15 @@ enum LearnedRules {
             guard (1...6).contains(level) else { return nil }
             let title = rest.dropFirst(level)
             guard title.isEmpty || title.first == " " || title.first == "\t" else { return nil }
-            return (level, title.trimmingCharacters(in: .whitespaces))
+            // `## Rules learned ##`: the closing run isn't the title's.
+            var text = title.trimmingCharacters(in: .whitespaces)
+            let closing = text.reversed().prefix { $0 == "#" }.count
+            if closing == text.count {
+                text = ""
+            } else if closing > 0, text.dropLast(closing).last.map({ $0 == " " || $0 == "\t" }) == true {
+                text = String(text.dropLast(closing)).trimmingCharacters(in: .whitespaces)
+            }
+            return (level, text)
         }
     }
 
@@ -255,7 +320,7 @@ enum LearnedRules {
             onRead?(current)
             let base = current.isEmpty ? SpaceBrief.template(spaceName: spaceName) : current
             let written = try inserting(bullet, into: base)
-            guard characterCount(of: written) <= maxCharacters else { throw ProjectMemory.WriteError.tooLong(maxCharacters) }
+            if let problem = lengthProblem(of: written, maxCharacters: maxCharacters) { throw problem }
             return written
         }
         return bullet
