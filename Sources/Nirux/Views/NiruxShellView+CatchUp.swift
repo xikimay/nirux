@@ -79,7 +79,7 @@ extension NiruxShellView {
     /// from the rows on screen; the next refresh brings the rest.
     func noteAway(missing: Set<AwayTracker.Condition>, now: TimeInterval = Date().timeIntervalSince1970) {
         guard case .cameBack(let since)? = catchUpState.tracker.update(missing: missing, at: now),
-              catchUpEnabled, now - since >= Self.catchUpAbsence
+              catchUpEnabled
         else { return }
         let ended = tasksWhoseTurnEnded(after: since, until: now)
         guard !ended.isEmpty else { return }
