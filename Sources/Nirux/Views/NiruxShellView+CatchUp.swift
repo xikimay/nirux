@@ -170,8 +170,7 @@ extension NiruxShellView {
     /// The user answered a listed task from its row (Yes, No, Reply…
     /// sent, Allow, Deny, Resume): it was seen.
     func noteCatchUpTaskAnswered(workspaceIndex: Int) {
-        guard let id = workspaces[safe: workspaceIndex]?.id else { return }
-        catchUpState.workspaceIDs.removeAll { $0 == id }
+        guard workspaces[safe: workspaceIndex]?.id != nil else { return }
     }
 
     /// The option on or off at once; off, the card goes.
