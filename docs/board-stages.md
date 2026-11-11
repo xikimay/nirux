@@ -48,13 +48,14 @@ what comes next. It becomes the overview of a space:
   allow, say). A pass started again is waited for again.
 - A pull request the running queue works on is where the queue has it: Checks
   while it updates the branch or waits for checks, Merge while it merges and
-  until the post-merge run ends, though GitHub says merged within a minute. A
-  post-merge failure keeps it at Merge, in red. The user confirmed its head at
-  Start, whatever its reviews.
+  until the post-merge run ends, though GitHub says merged within a minute:
+  its number stays on the Merge station meanwhile. A post-merge failure keeps
+  it at Merge, in red; a stop from before its merge says nothing once it
+  merged. The user confirmed its head at Start, whatever its reviews.
 - **No Reviews station**, drawn as a gap, where no review is waited for or
   none was seen: a pull request with no workspace here, one the queue took or
-  that merged without the reviews that count, rules that ask for none. The
-  rail never claims a review that didn't run.
+  that merged before a review that counts ever ran, rules that ask for none.
+  The rail never claims a review that didn't run.
 - A task without a repository has no rail.
 
 ## 2. States
@@ -109,7 +110,8 @@ The pull request cell reads "#52", "#53 · 2/3" in a straight stack, "#53 · on
 #52" in a fork, "no PR yet".
 
 The clock counts from the turn's start while an agent works, from the checks'
-while the line waits for them, else from the last activity. A line that is
+while the line waits for them, else from the last activity (as for a turn
+whose start isn't known). A line that is
 ready, blocked, merged or in the queue's hands has none.
 
 ## Known limits
@@ -125,5 +127,6 @@ ready, blocked, merged or in the queue's hands has none.
   later turn ends: nothing records that a review finished.
 - **Checks and reviews are about two commits**: the rollup is of the pull
   request's head on GitHub, the badges of the local HEAD.
-- **A queue's stop stays** on its pull request until the next Start, or until
-  the pull request's head moves.
+- **A queue's stop stays** on its pull request until the next Start, until
+  the pull request's head moves, or until it merges (unless the stop is the
+  post-merge run's failure).

@@ -140,10 +140,10 @@ extension BoardStages {
         /// required check none still runs.
         case passed
         /// No check at all, and none required: nothing to wait for.
-        case none
+        case absent
 
         /// Nothing in them holds a merge.
-        var allowMerge: Bool { self == .passed || self == .none }
+        var allowMerge: Bool { self == .passed || self == .absent }
     }
 
     /// What can be done with a merged pull request's worktree.
@@ -201,6 +201,12 @@ extension BoardStages {
         var message: String
         /// Not Stop pressed, nor a dry run reaching its first change.
         var isProblem: Bool
+        /// It stopped after merging it: its post-merge run failed. Any
+        /// other stop is moot once the pull request merged.
+        var isAfterMerge = false
+
+        /// It still says something of a pull request in this state.
+        func stands(merged: Bool) -> Bool { isProblem && (isAfterMerge || !merged) }
     }
 
     struct Queue: Equatable, Sendable {
@@ -309,9 +315,10 @@ extension BoardStages {
         guard facts.hasRepository else { return nil }
         let pullRequest = facts.pullRequest
         // Merged, and the queue is through with it: nothing is current.
-        let isSettled = pullRequest?.isMerged == true && facts.queue.step == nil && facts.queue.stop?.isProblem != true
-        let gaps = reviewGaps(facts, rules: rules)
-        let ranReviews = !gaps.contains { $0.gap != .running }
+        let isSettled = pullRequest?.isMerged == true && facts.queue.step == nil
+            && facts.queue.stop?.stands(merged: true) != true
+        // A pass on an earlier commit, or one that still runs, ran.
+        let ranReviews = !reviewGaps(facts, rules: rules).contains { $0.gap == .never }
         let marks = Station.allCases.map { candidate -> Mark in
             let isPast = isSettled || candidate < station
             if candidate == .reviews {
@@ -321,7 +328,7 @@ extension BoardStages {
             if isPast { return .done }
             return candidate == station ? .current : .ahead
         }
-        return Rail(marks: marks, queueOrder: pullRequest.flatMap { $0.isMerged ? nil : facts.queue.order })
+        return Rail(marks: marks, queueOrder: pullRequest == nil || isSettled ? nil : facts.queue.order)
     }
 
     /// "#52", "#53 · 2/3" in a straight stack, "#53 · on #52" in a fork.
@@ -364,7 +371,7 @@ extension BoardStages {
         case .failed(let what):
             return Reading(.failed, text(what) ?? "Stopped", since: last)
         case .working(let since):
-            return Reading(.working, "Working", since: since)
+            return Reading(.working, "Working", since: since ?? last)
         case .asking, .idle:
             break
         }
@@ -377,8 +384,9 @@ extension BoardStages {
             if !pullRequest.isMerged, let problem = problem(of: pullRequest, flakyReason: text(facts.flakyReason)) {
                 return Reading(.failed, problem.text, since: last, detail: problem.detail)
             }
-            if let stop = facts.queue.stop, stop.isProblem {
-                return Reading(.failed, "Queue stopped: \(stop.label)", since: last, detail: stop.message)
+            if let stop = facts.queue.stop, stop.stands(merged: pullRequest.isMerged) {
+                let label = text(stop.label).map { "Queue stopped: \($0)" } ?? "Queue stopped"
+                return Reading(.failed, label, since: last, detail: text(stop.message))
             }
         }
         if case .asking(let parent) = facts.activity {
@@ -401,7 +409,10 @@ extension BoardStages {
             let parent = pullRequest.stack?.parent
             switch station {
             case .checks:
-                guard case .pending(let since, let missing) = pullRequest.checks else { break }
+                // Pending: red checks were said above, green ones are at Merge.
+                var since: TimeInterval?
+                var missing: [String] = []
+                if case .pending(let start, let names) = pullRequest.checks { (since, missing) = (start, names.compactMap(text)) }
                 let checks = missing.isEmpty ? "Checks running" : "No \(missing.joined(separator: ", ")) run yet"
                 return Reading(.waiting, checks + (parent.map { " · lands after #\($0)" } ?? ""), since: since)
             case .merge:
@@ -449,8 +460,9 @@ extension BoardStages {
     /// more than which checks.
     private static func problem(of pullRequest: PullRequest, flakyReason: String?) -> (text: String, detail: String?)? {
         if pullRequest.isConflicting { return ("Conflicts with \(pullRequest.base)", nil) }
-        guard case .failed(let names) = pullRequest.checks else { return nil }
+        guard case .failed(let failed) = pullRequest.checks else { return nil }
         if let flakyReason { return ("Checks failed · likely flaky", flakyReason) }
+        let names = failed.compactMap(text)
         return ("Checks failed" + (names.isEmpty ? "" : ": " + names.joined(separator: ", ")), nil)
     }
 
@@ -473,8 +485,8 @@ extension BoardStages {
         ReviewPass.allCases.compactMap { pass in
             guard rules.requiredReviews.contains(pass) else { return nil }
             guard let reviews = facts.reviews, reviews.runs[pass] != nil else { return (pass, .never) }
-            if rules.reviewsMustBeOnHead, reviews.head != nil, !reviews.isFresh(pass) { return (pass, .earlier) }
-            return facts.reviewsInFlight.contains(pass) ? (pass, .running) : nil
+            if facts.reviewsInFlight.contains(pass) { return (pass, .running) }
+            return rules.reviewsMustBeOnHead && reviews.head != nil && !reviews.isFresh(pass) ? (pass, .earlier) : nil
         }
     }
 
@@ -493,10 +505,10 @@ extension BoardStages {
         return rules.requiredReviews.contains { reviews.runs[$0] != nil && !reviews.isFresh($0) }
     }
 
-    /// Trimmed, on one line; nil when empty. The facts come as their
-    /// sources hold them: a command to allow may span lines.
+    /// Safe to show, on one line, bounded; nil when empty. The facts come
+    /// as their sources hold them: a command to allow may span lines, and
+    /// a check's name is whatever its author posted.
     private static func text(_ value: String?) -> String? {
-        let words = (value ?? "").components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        return words.isEmpty ? nil : words.joined(separator: " ")
+        value.flatMap { AgentText.clean($0, maxLength: 300) }
     }
 }
