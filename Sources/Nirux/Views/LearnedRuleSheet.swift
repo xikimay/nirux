@@ -82,6 +82,7 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
     /// Later, Cancel or Esc: nothing changes.
     @objc func cancel() {
         close()
+        onDismiss()
     }
 
     func close() {
@@ -135,7 +136,7 @@ final class LearnedRuleSheet: NSObject, NSTextFieldDelegate, NSTextViewDelegate 
         let text = prefix + format(before) + (after.map { " → \(format($0))" } ?? "") + " of \(format(max)) characters"
         let toolTip = "What every session started in this space reads, comments left out. It goes with every request."
         if shown > max { return (text, Theme.Color.error, toolTip) }
-        if shown > LearnedRules.longBriefCharacters {
+        if false {
             return (text, Theme.Color.waiting, toolTip + " A long brief: move older rules to memory (Space Settings › Memory) or delete them.")
         }
         return (text, Theme.Color.textTertiary, toolTip)

@@ -124,7 +124,6 @@ extension NiruxShellView {
             }
         }
         if case .proposal(let proposal) = origin {
-            decideRuleProposal(proposal, spaceID: spaceID, added: true)
             queueRuleNotice(for: proposal, spaceID: spaceID, text: "\(MissionPromptText.prefix) The user added your rule to the "
                 + "space brief as: “\(LearnedRules.cleaned(rule, limit: LearnedRules.maxRuleLength))”. Only sessions started "
                 + "from now on read it: tell running tasks yourself if they need it.")

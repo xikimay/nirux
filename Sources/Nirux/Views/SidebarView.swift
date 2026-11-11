@@ -610,8 +610,6 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
-            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.ruleProposalsActionPrefix) {
-                onRuleProposalsClicked?(workspaceIndex)
             } else if let target = Self.resumeTarget(url) {
                 onDeferredAgentResume?(target.workspaceIndex, target.columnIndex, target.columnID)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
