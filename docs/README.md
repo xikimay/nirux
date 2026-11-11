@@ -32,7 +32,7 @@ A design record holds the decisions behind one feature, as they were taken. Reco
 | [Projects](design/projects.md) | Shipped in part, partly superseded by Spaces |
 | [Project Board](design/project-board.md) | Shipped, except the journal view and Ask Agent to Resolve |
 | [Stacked pull requests](design/pr-stacks.md) | v1 shipped |
-| [Board Stages](design/board-stages.md) | In progress: the model; the Board is still the table |
+| [Board Stages](design/board-stages.md) | In progress: the model and the view; the Board is still the table |
 | [Branch Review](design/branch-review.md) | Shipped |
 | [Review badges](design/review-badges.md) | Shipped in part |
 | [PR feedback inbox](design/pr-feedback-inbox.md) | Shipped, sidebar part changed since |

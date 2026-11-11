@@ -1,12 +1,13 @@
 # Board Stages
 
-> **Design record:** in progress. The model (lines, units, sections) is in the app; nothing draws it yet.\
+> **Design record:** in progress. The model and the view are in the app; the Board's column doesn't show them yet.\
 > **Differs today:** the Board is still the table of [Project Board](project-board.md), one per project.\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
-Status: design validated by the user on 2026-11-11 (study D). The model is
-implemented (`BoardStages`: lines, units, sections); the view and the
-per-space Board follow.
+Status: design validated by the user on 2026-11-11 (study D). The model
+(`BoardStages`: lines, units, sections) and the view (`BoardStagesView`) are
+implemented; the Board's column still shows the table, and the per-space
+Board follows.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -165,6 +166,35 @@ needs the user.
   whole.
 - One merged before today whose task is still open is a line, "Merged · Clean
   up": at midnight, the day's merged tasks not cleaned up return to the list.
+
+## 5. The view
+
+![The Board as stages: a space's header, then per repository its lines on four stations](../images/board-stages.png)
+
+`BoardStagesView` draws what the model decided, natively, and says what was
+clicked. The sizes are the mockup's.
+
+- **The space's header** stays in place: its colour and name, what it holds,
+  its Lead's state and line, the order switch. Under it, the columns' titles,
+  each station's over its place on the rails.
+- **A section per repository** scrolls below: its name, `owner/name`, and its
+  post-merge run's pill (or what went wrong reading it).
+- **A line** is 34 pt: its state's dot and its title, its rail, its phrase
+  (amber or red when it needs a look, else grey), its pull request, its time.
+  The whole line is one target: a click opens the task.
+- **The rail**: a filled dot for a station done, a larger one in the state's
+  colour for the current one, a hollow one ahead, nothing where there is no
+  Reviews station; solid up to the current station, dotted after. The queue's
+  number sits in a ring on Merge.
+- **A sub-task** sits in from its task, joined by an elbow; **a stack's** lines
+  sit on a rail numbered in merge order, under the stack's title.
+- **Pull requests without a task** start folded, each time the Board opens,
+  under a line that counts them.
+- **Merged today** wraps as the width asks. An entry whose task is still open
+  is a button that opens it.
+- **On a narrow Board** the time goes first, then the pull request, so the
+  title and the phrase keep 300 pt between them.
+- The lines are built again only when more than the clock changed.
 
 ## Known limits
 
