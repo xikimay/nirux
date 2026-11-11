@@ -98,7 +98,6 @@ extension NiruxShellView {
 
     func wireDeferredAgentResume() {
         sidebar.onDeferredAgentResume = { [weak self] wsIndex, colIndex, columnID in
-            self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.resumeDeferredAgent(workspaceIndex: wsIndex, columnIndex: colIndex, columnID: columnID)
         }
     }

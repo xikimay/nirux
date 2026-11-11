@@ -400,8 +400,6 @@ enum SidebarHitRegion {
     case workspace(Int)
     /// The "⋯" button on a workspace card — opens the workspace action menu.
     case workspaceMenu(Int)
-    /// The catch-up card: a task, "N more", another space, or ×.
-    case catchUp(SidebarCatchUpAction)
     /// Allow / Deny under a column holding a permission request.
     case permissionDecision(
         workspaceIndex: Int, columnIndex: Int, requestID: String, behavior: PermissionApproval.Behavior

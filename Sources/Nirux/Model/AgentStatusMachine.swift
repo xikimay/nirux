@@ -575,10 +575,6 @@ struct AgentStatusMachine {
             && now - lastReadAt >= Self.quietBeforeQuickAnswer
     }
 
-    /// When the agent's last turn ended (Claude's main thread, or Codex's
-    /// report), epoch seconds; 0 before any.
-    var lastTurnEndedAt: TimeInterval { max(mainTurnEndedAt, turnEndedAt) }
-
     /// The turn end of `turnEndedAt` is still the last thing that happened
     /// in this conversation: no prompt, turn end or conversation since.
     /// Seen or not, its question still waits for an answer.

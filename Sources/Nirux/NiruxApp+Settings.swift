@@ -248,11 +248,6 @@ extension NiruxApp {
         )
         turnStatus.state = current.showTurnStatus ? .on : .off
         settingsTurnStatusCheckbox = turnStatus
-        let catchUp = SettingsForm.checkbox(
-            "Show what happened while you were away", target: self, action: #selector(settingsCatchUpChanged(_:))
-        )
-        catchUp.state = current.showCatchUp ? .on : .off
-        settingsCatchUpCheckbox = catchUp
         let flakyCI = SettingsForm.checkbox(
             "Say when a CI failure looks flaky", target: self, action: #selector(settingsTriageCIFailuresChanged(_:))
         )
@@ -274,12 +269,6 @@ extension NiruxApp {
                         + "subscription only) and writes where the task stands on its row, in a few words. "
                         + "Every turn's last message is sent, including the turns you watch.",
                     under: turnStatus
-                ),
-                catchUp,
-                SettingsForm.hint(
-                    "Back after 15 minutes or more away (another app, another macOS account, the screen locked "
-                        + "or asleep), a card above the tasks lists those whose turn ended meanwhile. Nothing is sent.",
-                    under: catchUp
                 ),
                 flakyCI,
                 SettingsForm.hint(
@@ -509,12 +498,6 @@ extension NiruxApp {
         shell?.setTurnStatus(enabled: enabled)
     }
 
-    @objc func settingsCatchUpChanged(_ sender: NSButton) {
-        let enabled = sender.state == .on
-        guard saveSetting(revert: Self.toggledBack(sender), { $0.showCatchUp = enabled }) else { return }
-        shell?.setCatchUp(enabled: enabled)
-    }
-
     static func currentShowTurnStatus() -> Bool {
         PersistedSettings.effective(Persistence.load()?.settings).showTurnStatus
     }
@@ -613,7 +596,6 @@ extension NiruxApp {
         settingsExplainEffortPopup = nil
         settingsAlertOnlyWhenClaudeAsksCheckbox = nil
         settingsTurnStatusCheckbox = nil
-        settingsCatchUpCheckbox = nil
         settingsTriageCIFailuresCheckbox = nil
     }
 }

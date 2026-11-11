@@ -24,7 +24,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsExplainEffortPopup: NSPopUpButton?
     weak var settingsAlertOnlyWhenClaudeAsksCheckbox: NSButton?
     weak var settingsTurnStatusCheckbox: NSButton?
-    weak var settingsCatchUpCheckbox: NSButton?
     weak var settingsTriageCIFailuresCheckbox: NSButton?
     var keepAwakeController: KeepAwakeController?
     var keepAwakeIndicator: KeepAwakeIndicator?

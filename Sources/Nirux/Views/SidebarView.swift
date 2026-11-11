@@ -111,34 +111,6 @@ final class SidebarView: NSView {
         }
     }
     var onOnboardingAction: ((OnboardingChecklistAction) -> Void)?
-    /// What happened while the user was away, above the task list (see
-    /// `SidebarCatchUp`); nil shows nothing. Set before `update`, or
-    /// followed by `refreshCatchUpCard`.
-    var catchUp: SidebarCatchUp? {
-        didSet {
-            guard catchUp != oldValue else { return }
-            // It and the rows under it moved: no press acts until they
-            // have stood a moment (the click that activated Nirux, a
-            // double click).
-            catchUpChangedAt = clock()
-        }
-    }
-    var onCatchUpAction: ((SidebarCatchUpAction) -> Void)?
-    /// When the card last changed (`clock`).
-    var catchUpChangedAt: CFTimeInterval = -.infinity
-    var revealsCatchUpOnNextBuild = false
-    /// How long the card's presses wait after it changed.
-    static let catchUpArming: CFTimeInterval = 0.6
-
-    /// The card changed outside a refresh (the user just came back);
-    /// `reveal` brings it into view.
-    func refreshCatchUpCard(reveal: Bool = false) {
-        revealsCatchUpOnNextBuild = reveal && isExpanded && catchUp != nil
-        let signature = renderSignature()
-        guard signature != lastRenderSignature else { return }
-        lastRenderSignature = signature
-        rebuildContent()
-    }
     /// Kept across rebuilds (see OnboardingChecklistView).
     var onboardingCardView: OnboardingChecklistView?
     /// Set by `revealOnboardingCard()` while the card isn't laid out yet.
@@ -393,8 +365,6 @@ final class SidebarView: NSView {
         hasher.combine(isExpanded)
         hasher.combine(isInactiveSectionCollapsed)
         hasher.combine(onboardingChecklist)
-        // The rail draws no card.
-        if isExpanded { hasher.combine(catchUp) }
         hasher.combine(animates)
         for workspace in lastInfos {
             if let lastActivityAt = workspace.lastActivityAt {
@@ -477,9 +447,6 @@ final class SidebarView: NSView {
             return
         }
         if let area = hitArea(at: docLocation) {
-            // The catch-up card just came, went or changed: what is under
-            // the pointer moved (see `catchUpChangedAt`).
-            guard clock() - catchUpChangedAt >= Self.catchUpArming else { return }
             // Workspace rows don't click on mouseDown: run the drag
             // tracking loop, which decides between click and reorder.
             if case .workspace(let workspaceIndex) = area.region {
@@ -551,10 +518,6 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(Self.hoverTarget(of: area.region))
             NSCursor.pointingHand.set()
-        case .catchUp:
-            clearHover()
-            setHoverTarget(nil)
-            NSCursor.pointingHand.set()
         case .workspace(let workspaceIndex):
             clearHover()
             setHoverTarget(.workspaceCard(workspaceIndex))
@@ -597,10 +560,6 @@ final class SidebarView: NSView {
             onNewWorkspace?()
         case .archivedToggle:
             toggleInactiveSection()
-        case .catchUp(let action):
-            // Its second press lands on what moved under the pointer.
-            lastButtonActionAt = event.timestamp
-            onCatchUpAction?(action)
         case .link(let url, let label):
             if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
@@ -806,7 +765,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spacePicker, .newTask, .archivedToggle, .link, .railButton, .catchUp:
+            case .spacePicker, .newTask, .archivedToggle, .link, .railButton:
                 continue
             }
         }

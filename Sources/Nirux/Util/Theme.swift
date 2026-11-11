@@ -136,8 +136,6 @@ enum Theme {
         static let merged = "arrow.triangle.merge"
         static let checksPassed = "checkmark"
         static let checksFailed = "xmark"
-        /// Closes what the sidebar shows for a while (the catch-up card).
-        static let dismiss = "xmark"
         static let checksRunning = "circle.dashed"
         static let sidebar = "sidebar.left"
         static let inactiveWorkspaces = "archivebox"
