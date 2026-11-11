@@ -46,11 +46,11 @@ extension NiruxShellView {
 
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         // A space with anchors opens a plain workspace in its default
-        // folder, never in the home folder (docs/spaces.md).
+        // folder, never in the home folder (docs/design/spaces.md).
         let wsCwd = cwd ?? defaultFolder(forSpace: targetProfileID)
         let workspace = WorkspaceState(
             id: workspaceID,
-            // Unnamed: its folder's name (docs/spaces.md, "One door: ⌘N").
+            // Unnamed: its folder's name (docs/design/spaces.md, "One door: ⌘N").
             title: title ?? NewTask.folderTitle(wsCwd, home: sideEffects.homeDirectory()),
             cwd: wsCwd,
             profileID: targetProfileID,
@@ -105,7 +105,7 @@ extension NiruxShellView {
         return parent.id
     }
 
-    /// What can have sub-tasks (docs/spaces.md, "Sub-tasks under their
+    /// What can have sub-tasks (docs/design/spaces.md, "Sub-tasks under their
     /// task"): a workspace in a git worktree, as ⌘N and the Lead start
     /// tasks, or a task without a repository in its folder. Not the main
     /// checkout, where worktrees an agent opens are tasks of their own, nor

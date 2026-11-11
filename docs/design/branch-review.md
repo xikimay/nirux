@@ -1,5 +1,9 @@
 # Branch Review
 
+> **Design record:** shipped. All five plan steps (R1 to R5) are in the app.\
+> **Differs today:** the "Later" list was not built (a Review button on the Board, changes since the last review, posting to GitHub), and the text reads as a proposal because it predates the code.\
+> **User guide:** [Pull requests](../pull-requests.md#reading-a-branch-on-one-page).
+
 Status: design, validated by the user on 2026-10-02. Mockups of the page, on a
 real pull request (#57), are published as an artifact; its link is in this
 design's pull request.
@@ -945,7 +949,7 @@ The rules start built in, for Swift and macOS. Per-project rules
 **Send N Comments to Agent** builds one message from the unsent comments and
 types it into the agent's prompt as a bracketed paste, without Return, as
 "Send Selection to Agent" does (`AgentExcerpt`) and as "Ask Agent to Resolve"
-will (`docs/project-board.md`, section 3.3). The user reads it, can add to it,
+will (`docs/design/project-board.md`, section 3.3). The user reads it, can add to it,
 and submits it.
 
 ```text
@@ -1043,7 +1047,7 @@ say why and change nothing for it. Then say what you did for each number.
   zero-width characters are shown escaped, so what the user reads is what is
   sent.
 - **A queued PR:** if the PR is in the merge queue, the sheet warns that the
-  agent's push will stop the queue (`docs/project-board.md`, section 3.2).
+  agent's push will stop the queue (`docs/design/project-board.md`, section 3.2).
 - Claude Code collapses a long paste into "[Pasted text #1 +14 lines]", so the
   sheet is where the user reads what goes out. Copy Message puts it on the
   clipboard instead, whatever the column: for an agent the sheet refuses,

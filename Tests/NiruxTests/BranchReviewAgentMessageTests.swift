@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// What a Branch Review sends to its agent (docs/branch-review.md, section
+/// What a Branch Review sends to its agent (docs/design/branch-review.md, section
 /// 6.2): the message, as a paste, and when a column's prompt takes it.
 final class BranchReviewAgentMessageTests: XCTestCase, CommentFixtures {
     private let date = Date(timeIntervalSince1970: 1_790_000_000)

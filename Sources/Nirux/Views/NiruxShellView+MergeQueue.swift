@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Merge queue (docs/project-board.md, sections 3.6 and 4)
+// MARK: - Merge queue (docs/design/project-board.md, sections 3.6 and 4)
 
 /// A merge queue's place: its project and the repository it merges into.
 struct MergeQueueKey: Hashable {
@@ -10,7 +10,7 @@ struct MergeQueueKey: Hashable {
 
 /// The shell owns each project's merge queues, one per repository, so a
 /// queue outlives the board that shows it and queues on different
-/// repositories run side by side (docs/spaces.md, S12). It also tells a
+/// repositories run side by side (docs/design/spaces.md, S12). It also tells a
 /// queue which agents are busy in a pull request's worktrees, and fans the
 /// queue's changes out to the board, the status bar, keep-awake and a quit
 /// waiting on it.
@@ -44,7 +44,7 @@ extension NiruxShellView {
 
     /// Where a queue looks for its pull requests' worktrees: the project's
     /// workspace folders, and its repository anchors' checkouts, which the
-    /// board lists even with no workspace open there (docs/spaces.md, S12).
+    /// board lists even with no workspace open there (docs/design/spaces.md, S12).
     func mergeQueueFolders(of projectID: String) -> [String] {
         let folders = projectWorkspaces(of: projectID).map(\.cwd)
         let anchors = BoardSections.repositoryAnchors(profiles.first { $0.id == projectID }?.anchors ?? [])

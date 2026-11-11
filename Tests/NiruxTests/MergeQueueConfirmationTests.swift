@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// The confirmation sheet's content (docs/project-board.md, section 4):
+/// The confirmation sheet's content (docs/design/project-board.md, section 4):
 /// who joins, in which order, who is left out and why, the warnings, the
 /// refusals, and what will happen.
 final class MergeQueueConfirmationTests: XCTestCase {

@@ -2,7 +2,7 @@ import XCTest
 @testable import Nirux
 
 /// Which rows the Project Board shows, and in what order
-/// (docs/project-board.md, section 2). Pure: listings, workspaces and pull
+/// (docs/design/project-board.md, section 2). Pure: listings, workspaces and pull
 /// requests are given, nothing runs git or gh.
 final class ProjectBoardRowsTests: XCTestCase {
     private let widgets = GitHubRepository(owner: "acme", name: "widgets")
@@ -272,7 +272,7 @@ final class ProjectBoardRowsTests: XCTestCase {
         local\t/srv/git/widgets.git (fetch)
         """), [widgets, GitHubRepository(owner: "me", name: "widgets")])
     }
-    // MARK: - Several repositories (docs/spaces.md, S12)
+    // MARK: - Several repositories (docs/design/spaces.md, S12)
 
     /// Each anchor's repository in its section, by common git dir even when
     /// no remote names the configured repository (its worktrees then match

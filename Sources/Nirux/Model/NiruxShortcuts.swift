@@ -55,7 +55,7 @@ enum NiruxShortcuts: CaseIterable {
     case toggleSidebar
     case nextWaitingAgent
     case board
-    /// The active space's Lead (docs/spaces.md, "The Lead"). Not ⌘0: the
+    /// The active space's Lead (docs/design/spaces.md, "The Lead"). Not ⌘0: the
     /// editor's bridge keeps it for resetting the font size.
     case lead
     case settings

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Review badges (docs/review-badges.md)
+// MARK: - Review badges (docs/design/review-badges.md)
 
 extension WorkspaceState {
     /// Records passes that started at `timestamp` on `head`. A replayed

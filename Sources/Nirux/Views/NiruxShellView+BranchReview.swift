@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Branch Review (docs/branch-review.md)
+// MARK: - Branch Review (docs/design/branch-review.md)
 
 /// The Branch Review columns: opening one per worktree, from the palette or
 /// a workspace's menu, next to the agent that works there.
@@ -92,7 +92,7 @@ extension NiruxShellView {
 
     /// Explain's first-use notice: once per project (space) and account,
     /// asked again when the account changes, and every time for an account
-    /// billed per call (docs/branch-review.md, section 4.3).
+    /// billed per call (docs/design/branch-review.md, section 4.3).
     func confirmExplain(
         for review: BranchReviewController, account: BranchReview.ExplainAccount, files: Int,
         settings: BranchReview.ExplainSettings = .init()

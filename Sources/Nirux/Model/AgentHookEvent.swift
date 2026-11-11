@@ -91,7 +91,7 @@ struct AgentHookEvent: Codable, Equatable {
     let reviewPasses: [String]?
     /// On UserPromptSubmit, the header line of a Branch Review message the
     /// prompt holds ("Review comments on … from Nirux:"): the comments
-    /// pasted went to Claude (docs/branch-review.md, section 6.2). Only
+    /// pasted went to Claude (docs/design/branch-review.md, section 6.2). Only
     /// that line is kept of the prompt.
     let reviewHeader: String?
     /// On a main-thread Stop, Claude's final message

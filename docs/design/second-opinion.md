@@ -1,5 +1,9 @@
 # Second Opinion
 
+> **Design record:** shipped as the bundled `nirux-second-opinion` skill.\
+> **Differs today:** the skill is now installed with `nirux-draft` too; the options under "Rejected for now" are still not built.\
+> **User guide:** [URL scheme and agent skills](../url-scheme.md#agent-skills).
+
 Status: design, validated on 2026-10-03. Implemented as the bundled
 `nirux-second-opinion` skill.
 

@@ -172,7 +172,7 @@ enum PRDetect {
             return (check["conclusion"] as? String)?.isEmpty ?? false
         }
         let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
-        // Red as the Project Board defines it (docs/project-board.md,
+        // Red as the Project Board defines it (docs/design/project-board.md,
         // section 3.2): only the latest run of each check counts.
         let checks = ProjectBoard.latest(rollup.compactMap(ProjectBoard.check(from:)))
         let ciStatus: String?

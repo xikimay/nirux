@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - The Lead's tools (docs/spaces.md, "The Lead")
+// MARK: - The Lead's tools (docs/design/spaces.md, "The Lead")
 
 /// What the app does for each of the Lead's tools (see LeadTools), sent by
 /// the MCP server through LeadChannel. A request is checked against the

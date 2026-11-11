@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Anchors and the routing of new workspaces (docs/spaces.md, "Spaces and
+/// Anchors and the routing of new workspaces (docs/design/spaces.md, "Spaces and
 /// anchors" and "Routing").
 final class SpaceRoutingTests: XCTestCase {
     private static let webRepository = "/code/web/.git"

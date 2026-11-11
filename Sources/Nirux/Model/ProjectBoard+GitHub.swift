@@ -2,8 +2,8 @@ import Foundation
 
 // MARK: - Client
 
-/// The board's `gh` reads (docs/project-board.md, section 6), and its one
-/// change, a retarget (docs/pr-stacks.md). Each call runs `gh` and blocks:
+/// The board's `gh` reads (docs/design/project-board.md, section 6), and its one
+/// change, a retarget (docs/design/pr-stacks.md). Each call runs `gh` and blocks:
 /// never on the main thread. `NiruxShellView` holds the client, so tests
 /// inject a fake: GitHub's runners have `gh`, and a test must never reach
 /// the network.

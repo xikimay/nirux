@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a task row says under its title (docs/spaces.md, Interface): the
+/// What a task row says under its title (docs/design/spaces.md, Interface): the
 /// one thing to know first. Amber only when the user is needed.
 struct SidebarStatusLine: Hashable {
     enum Tone: Hashable {
@@ -103,7 +103,7 @@ extension WorkspaceInfo {
         }
         if let pullRequest = prInfo, pullRequest.state == "OPEN", pullRequest.ciStatus == "FAILURE",
            !columns.contains(where: { $0.agentStatus == .working }) {
-            // Only a likely flake says more (docs/ci-failure-triage.md).
+            // Only a likely flake says more (docs/design/ci-failure-triage.md).
             return row(.error, "#\(pullRequest.number) · checks failed" + (ciFlakyReason == nil ? "" : " · likely flaky"), .error)
         }
         // A child that asked ended its turn to wait (a Codex one blocks):

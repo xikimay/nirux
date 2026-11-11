@@ -139,7 +139,7 @@ final class NiruxShellView: NSView {
     /// Agent launches, the home folder, cookies and modal alerts; tests
     /// replace them (see ShellSideEffects).
     var sideEffects = ShellSideEffects()
-    /// The CI failure triage's state (docs/ci-failure-triage.md).
+    /// The CI failure triage's state (docs/design/ci-failure-triage.md).
     let ciTriageCenter = CITriageCenter()
 
     // Panel references (stored properties must live in main class declaration)

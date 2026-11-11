@@ -1,8 +1,8 @@
 import AppKit
 
-/// One Project Board column: its project, what it read (docs/project-board.md,
+/// One Project Board column: its project, what it read (docs/design/project-board.md,
 /// section 6) and its view. A project shows one section per repository
-/// anchor (docs/spaces.md, S12), each with its config from board.json and
+/// anchor (docs/design/spaces.md, S12), each with its config from board.json and
 /// its own reads; a space without one shows its one repository, as before.
 /// An anchor board.json has no config for shows its worktrees, and the pull
 /// requests of the repository Board Settings would suggest for it (where
@@ -480,7 +480,7 @@ final class ProjectBoardController {
         }
     }
 
-    /// Retarget (docs/pr-stacks.md): bases pull request `number` of the
+    /// Retarget (docs/design/pr-stacks.md): bases pull request `number` of the
     /// section's repository on `base`, then reads its open pull requests
     /// again. Never sent twice: another click is the user's.
     func retarget(_ number: Int, onto base: String, section id: String) {

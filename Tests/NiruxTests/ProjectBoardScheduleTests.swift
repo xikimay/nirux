@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// When the board reads what (docs/project-board.md, section 6), on an
+/// When the board reads what (docs/design/project-board.md, section 6), on an
 /// injected clock.
 final class ProjectBoardScheduleTests: XCTestCase {
     private let everything = Set(ProjectBoard.Source.allCases)

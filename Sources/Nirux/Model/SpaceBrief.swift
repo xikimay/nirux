@@ -3,7 +3,7 @@ import Foundation
 /// A short, personal brief per space (goals, priorities, workflow rules) that
 /// Nirux adds to every Claude and Codex session it starts in that space. It
 /// lives in Nirux's state directory, never in the repository. See "Brief" in
-/// docs/projects.md.
+/// docs/design/projects.md.
 ///
 /// Files, under `<state dir>/projects/<space id>/`:
 /// - `brief.md`: what the user (or an agent, on request) edits;

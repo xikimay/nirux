@@ -35,9 +35,9 @@ extension SidebarView {
     }
 
     /// The two CI failure actions, while the workspace's pull request is red
-    /// (docs/ci-failure-actions.md). A rerun needs a GitHub Actions run. A
+    /// (docs/design/ci-failure-actions.md). A rerun needs a GitHub Actions run. A
     /// failure that looks flaky says why and puts the rerun first
-    /// (docs/ci-failure-triage.md).
+    /// (docs/design/ci-failure-triage.md).
     func addCIFailureItems(
         to menu: NSMenu, pullRequest: PRInfo?, flakyReason: String? = nil, act: @escaping (WorkspaceSidebarAction) -> Void
     ) {

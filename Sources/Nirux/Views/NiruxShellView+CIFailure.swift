@@ -1,12 +1,12 @@
 import AppKit
 
-// MARK: - CI failure: notify once, Why Failed, Rerun Failed (docs/ci-failure-actions.md)
+// MARK: - CI failure: notify once, Why Failed, Rerun Failed (docs/design/ci-failure-actions.md)
 
 extension NiruxShellView {
     /// After each pull request read: a red run not reported yet marks the
     /// card like an agent asking for attention, and notifies while Nirux is
     /// in the background. The notification says when the failure looks
-    /// flaky (docs/ci-failure-triage.md), which it may wait a few seconds
+    /// flaky (docs/design/ci-failure-triage.md), which it may wait a few seconds
     /// to know. The caller refreshes the sidebar.
     func reportNewRedChecks(in workspace: WorkspaceState, isAppActive: Bool = NSApp.isActive) {
         triageRedChecks(in: workspace)

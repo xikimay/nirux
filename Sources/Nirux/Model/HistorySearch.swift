@@ -4,7 +4,7 @@ import Foundation
 /// (see `NiruxMCPServer`): the messages of the project's past conversations
 /// that hold every term of a query, as dated excerpts, newest first, with
 /// their branch and session. Read-only, and nothing is kept but the
-/// excerpts returned. See "Agent history search" in docs/projects.md.
+/// excerpts returned. See "Agent history search" in docs/design/projects.md.
 ///
 /// - What is searched: what the user typed and what Claude answered, read
 ///   as Search Everywhere reads them (`TranscriptSearch.message(in:)`): not

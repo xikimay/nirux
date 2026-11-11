@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - PR feedback inbox (docs/pr-feedback-inbox.md)
+// MARK: - PR feedback inbox (docs/design/pr-feedback-inbox.md)
 
 extension NiruxShellView {
     /// Shown in the card's menu; the rest is on GitHub.

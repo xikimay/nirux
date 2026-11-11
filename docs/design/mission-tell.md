@@ -1,5 +1,9 @@
 # Mission Tell
 
+> **Design record:** shipped. `--mission tell` is in the app.\
+> **Differs today:** the same guarded typing now carries questions and answers too, and a Claude Code child's `ask` returns at once.\
+> **User guide:** [Mission handoffs](../missions.md).
+
 Status: design validated on 2026-10-03, implemented. Since 2026-11-08 the
 same guarded typing also carries a child's questions and completion to the
 parent and the answers back to a Claude Code child, and the Activity feed is

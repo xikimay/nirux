@@ -1,6 +1,6 @@
 import Foundation
 
-/// A review pass the sidebar tracks per workspace (docs/review-badges.md).
+/// A review pass the sidebar tracks per workspace (docs/design/review-badges.md).
 enum ReviewPass: String, Codable, CaseIterable {
     case codeReview, premortem, codeStyleReview, adversarial
 

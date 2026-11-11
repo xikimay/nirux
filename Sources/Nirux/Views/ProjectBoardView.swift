@@ -1,10 +1,10 @@
 import AppKit
 
-/// The Project Board column's content (docs/project-board.md, sections 1
+/// The Project Board column's content (docs/design/project-board.md, sections 1
 /// and 2): the column header (its repository, the last post-merge run or
 /// what went wrong, Refresh, and the project and Board Settings in its ⋯
 /// menu), the merge queue's line, then one row per branch. A board with
-/// several repositories (docs/spaces.md, S12) names its space in the header,
+/// several repositories (docs/design/spaces.md, S12) names its space in the header,
 /// keeps one queue line per repository under it, always in sight, and
 /// groups the rows under a header per repository. Lines under the header
 /// say why the board shows less than it could: what went wrong reading
@@ -791,7 +791,7 @@ final class ProjectBoardView: NSView {
     }
 
     /// A pull request based on a merged branch can't join until it is
-    /// based on that branch's base (docs/pr-stacks.md): the button says
+    /// based on that branch's base (docs/design/pr-stacks.md): the button says
     /// so, under why it can't join yet. A dry run doesn't change GitHub.
     private nonisolated static func retargetCell(
         number: Int, merged: ProjectBoard.MergedBase, refusal: String, queue: ProjectBoard.QueueState, section: String?

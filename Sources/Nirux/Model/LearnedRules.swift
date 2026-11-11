@@ -1,6 +1,6 @@
 import Foundation
 
-/// Rules a space learns (docs/spaces.md, "Learned rules"): when the same
+/// Rules a space learns (docs/design/spaces.md, "Learned rules"): when the same
 /// kind of defect turns up twice across a space's tasks, its Lead proposes
 /// a one- or two-line rule (`propose_rule`, see RuleProposalStore), and once
 /// the user adds it, it goes into the space's brief, which every session

@@ -1,7 +1,7 @@
 import AppKit
 import os
 
-/// One Branch Review column (docs/branch-review.md): the branch checked out
+/// One Branch Review column (docs/design/branch-review.md): the branch checked out
 /// in a worktree when the column opened, read without writing to the
 /// repository, and shown read-only. git and gh run off the main thread: one
 /// read of the branch at a time, and one read of a file's diff at a time,

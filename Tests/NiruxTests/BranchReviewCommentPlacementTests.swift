@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Where a comment is in a file's diff (docs/branch-review.md, section
+/// Where a comment is in a file's diff (docs/design/branch-review.md, section
 /// 6.1), and how it follows its lines when the branch moves: rather
 /// outdated than under another line.
 final class BranchReviewCommentPlacementTests: XCTestCase, CommentFixtures {

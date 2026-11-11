@@ -8,7 +8,7 @@ import Foundation
 /// the same path (a rollback) takes the messages for a hook payload instead
 /// of launching its UI: it waits for the end of stdin, records nothing, and
 /// Claude reports the server as failed. See "Agent history search" in
-/// docs/projects.md.
+/// docs/design/projects.md.
 enum NiruxMCPServer {
     static let serverName = "nirux"
     /// Newest first: a client asking for another gets the first.
@@ -21,7 +21,7 @@ enum NiruxMCPServer {
         history_search: a feature or branch name, a PR number, a distinctive word.
         """
 
-    /// The Lead's role (docs/spaces.md, "The Lead"), for the Claude of a
+    /// The Lead's role (docs/design/spaces.md, "The Lead"), for the Claude of a
     /// space's Lead workspace: what it may do, and what it hands to the
     /// user.
     static let leadInstructions = """

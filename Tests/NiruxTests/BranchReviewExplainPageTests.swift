@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// What the page shows of Explain (docs/branch-review.md, sections 2, 3
+/// What the page shows of Explain (docs/design/branch-review.md, sections 2, 3
 /// and 4.3): Claude's groups replace the path groups without hiding a
 /// file, summaries say when their file changed since, and the bar counts
 /// what the next Explain sends.

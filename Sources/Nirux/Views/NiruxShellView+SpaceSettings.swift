@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Space Settings (docs/spaces.md, S8)
+// MARK: - Space Settings (docs/design/spaces.md, S8)
 
 extension NiruxShellView {
     /// Space Settings for `profileID`, on `tab`. One space at a time: the

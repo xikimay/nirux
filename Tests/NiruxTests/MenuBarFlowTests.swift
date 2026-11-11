@@ -147,7 +147,7 @@ final class MenuBarFlowTests: XCTestCase {
     }
 }
 
-// MARK: - The Lead (docs/spaces.md, "The Lead")
+// MARK: - The Lead (docs/design/spaces.md, "The Lead")
 
 extension MenuBarFlowTests {
     /// ⌃⌘L starts the space's Lead (none in General), comes back to it from

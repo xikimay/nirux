@@ -102,7 +102,7 @@ final class EditorConflictBanner: NSView {
 }
 
 /// Banner above the editor's "Full Branch Diff" tab: the same branch reads
-/// better in a Branch Review column (docs/branch-review.md, section 1).
+/// better in a Branch Review column (docs/design/branch-review.md, section 1).
 /// Native, so that a test can click it. Neutral: nothing waits for the user.
 final class EditorBranchReviewBanner: NSView {
     static let height: CGFloat = 34

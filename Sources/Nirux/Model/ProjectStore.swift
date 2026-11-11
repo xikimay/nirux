@@ -1,6 +1,6 @@
 import Foundation
 
-/// Persists spaces ("projects" in docs/projects.md, section 2) in their own
+/// Persists spaces ("projects" in docs/design/projects.md, section 2) in their own
 /// `projects.json`, so a space outlives its last workspace and keeps what is
 /// keyed by its id (the space brief). `state.json` keeps writing
 /// `workspaceProfiles` as a mirror, so older nightlies keep working.

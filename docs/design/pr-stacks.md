@@ -1,5 +1,9 @@
 # Stacked Pull Requests
 
+> **Design record:** v1 shipped. Stack labels and Retarget are on the Board.\
+> **Differs today:** v2 (the merge queue retargeting by itself) was not built.\
+> **User guide:** [Pull requests](../pull-requests.md#the-board).
+
 Status: v1 implemented. Validated by the user on 2026-10-02, with the
 recommendations below.
 

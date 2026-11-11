@@ -14,7 +14,7 @@ extension ProjectBoard {
         case postMergeRun
     }
 
-    /// When the board reads each source (docs/project-board.md, section 6):
+    /// When the board reads each source (docs/design/project-board.md, section 6):
     /// only while it is on screen; worktrees and open pull requests every
     /// 60 s, or 30 s while a check of an open pull request runs; merged
     /// pull requests every 10 minutes; the post-merge run every 5. A source

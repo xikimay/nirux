@@ -1,6 +1,6 @@
 import AppKit
 
-/// Space Settings › Defaults (docs/projects.md, section 5): the agent its
+/// Space Settings › Defaults (docs/design/projects.md, section 5): the agent its
 /// tasks preselect, the Claude and Codex launch modes, and environment
 /// variables for new shells. Each change is written at once
 /// (SpaceDefaultsStore); a variable list with a problem isn't, until it's

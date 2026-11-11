@@ -227,7 +227,7 @@ extension NiruxShellView {
     /// The agent resumes in `directory`: in a new column of the workspace
     /// it ran in, else of a workspace of `spaceID` open on that folder,
     /// else of a new workspace, in the space its folder belongs to, else
-    /// `spaceID` (docs/spaces.md, "Routing").
+    /// `spaceID` (docs/design/spaces.md, "Routing").
     private func openResumedSession(_ record: AgentSessionRecord, spaceID: String, directory: String) {
         // Resumed meanwhile, by a restored column or another Resume.
         if goToHeldSession(record) { return }

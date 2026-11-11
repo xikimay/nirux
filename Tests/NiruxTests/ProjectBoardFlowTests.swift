@@ -567,7 +567,7 @@ final class ProjectBoardFlowTests: XCTestCase {
         }
     }
 
-    /// A space with two repositories (docs/spaces.md, S12): a section and a
+    /// A space with two repositories (docs/design/spaces.md, S12): a section and a
     /// queue line for each, each read on its own repository, and a pull
     /// request queued and started in its own repository's queue only.
     @MainActor

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Sending a Branch Review's comments (docs/branch-review.md, section 6.2)
+// MARK: - Sending a Branch Review's comments (docs/design/branch-review.md, section 6.2)
 
 /// Why a Branch Review's comments can't go into a column's prompt now.
 enum ReviewSendRefusal: Equatable, Sendable {

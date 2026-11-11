@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// docs/spaces.md, "Interface": selecting an empty space shows what to do
+/// docs/design/spaces.md, "Interface": selecting an empty space shows what to do
 /// instead of opening a workspace. The view has the keyboard, so no key
 /// reaches a workspace it hides; it stays while workspaces elsewhere close,
 /// and comes back at launch.

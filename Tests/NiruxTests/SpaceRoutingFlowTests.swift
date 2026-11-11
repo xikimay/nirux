@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// docs/spaces.md, "Routing", through the shell: where new workspaces land,
+/// docs/design/spaces.md, "Routing", through the shell: where new workspaces land,
 /// the banner of one that lands in the default space, and the default
 /// folder of a space with a repository.
 @MainActor

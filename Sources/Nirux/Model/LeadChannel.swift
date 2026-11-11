@@ -1,6 +1,6 @@
 import Foundation
 
-/// How the Lead's tools reach the running app (docs/spaces.md, "The
+/// How the Lead's tools reach the running app (docs/design/spaces.md, "The
 /// Lead"): the MCP server Claude runs for a space's Lead (`Nirux --hook
 /// claude --mcp`, see NiruxMCPServer) writes one request per tool call
 /// into `<state dir>/lead/requests/`, and the app answers into

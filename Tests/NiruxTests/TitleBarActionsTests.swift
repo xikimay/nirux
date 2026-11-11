@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// The title bar's New, Board and Search (docs/spaces.md, Interface).
+/// The title bar's New, Board and Search (docs/design/spaces.md, Interface).
 @MainActor
 final class TitleBarActionsTests: XCTestCase {
     /// Three buttons in one capsule, each saying its name (to VoiceOver,

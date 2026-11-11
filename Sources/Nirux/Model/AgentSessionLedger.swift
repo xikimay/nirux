@@ -3,7 +3,7 @@ import Foundation
 /// The agent sessions of each space, kept after their worktree is gone:
 /// Claude files its transcripts by folder (`~/.claude/projects/<cwd>/`),
 /// so once a worktree is cleaned up nothing else ties its sessions to the
-/// project. See "History" in docs/projects.md.
+/// project. See "History" in docs/design/projects.md.
 ///
 /// Built from the hook events Nirux already routes (see
 /// `AgentSessionRecord.applying`). Only the column's own agent creates a

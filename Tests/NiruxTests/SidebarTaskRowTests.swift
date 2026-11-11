@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// A task row's two lines (docs/spaces.md, Interface): the one thing to know
+/// A task row's two lines (docs/design/spaces.md, Interface): the one thing to know
 /// first, amber only when the user is needed; the selected row's columns.
 @MainActor
 final class SidebarTaskRowTests: XCTestCase {

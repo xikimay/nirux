@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// One Explain run at a time in the whole app (docs/branch-review.md,
+/// One Explain run at a time in the whole app (docs/design/branch-review.md,
 /// section 4.3): a second waits in line, and either can be cancelled.
 final class ExplainQueueTests: XCTestCase {
     @MainActor

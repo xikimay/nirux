@@ -269,7 +269,7 @@ final class NewTaskTests: XCTestCase {
 
     /// Each repository anchor has its own board base; a repository the
     /// board doesn't set up has none; a space anchored to no repository
-    /// uses its one config, as before anchors (docs/spaces.md, S12).
+    /// uses its one config, as before anchors (docs/design/spaces.md, S12).
     func testTheBoardBaseIsEachRepositorysOwn() throws {
         let (root, repo) = try makeRepository()
         defer { try? FileManager.default.removeItem(atPath: root) }

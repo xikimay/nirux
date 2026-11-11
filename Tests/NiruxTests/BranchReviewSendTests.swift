@@ -2,7 +2,7 @@ import os
 import XCTest
 @testable import Nirux
 
-/// Sending a Branch Review's comments to its agent (docs/branch-review.md,
+/// Sending a Branch Review's comments to its agent (docs/design/branch-review.md,
 /// section 6.2): the paste, when the comments count as sent, and what the
 /// sheet says.
 final class BranchReviewSendTests: XCTestCase {

@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// What Explain sends (docs/branch-review.md, section 4.3): the author's
+/// What Explain sends (docs/design/branch-review.md, section 4.3): the author's
 /// texts fenced, the files, and the diff with numbered hunks, without
 /// secrets, folded files or untracked files' diffs.
 final class BranchReviewExplainInputTests: XCTestCase {

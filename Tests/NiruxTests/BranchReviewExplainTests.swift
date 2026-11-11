@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Explain from click to cache (docs/branch-review.md, sections 4.3 and 8),
+/// Explain from click to cache (docs/design/branch-review.md, sections 4.3 and 8),
 /// on a real repository with a fake `claude` that answers each run from
 /// its own file, records each run's input, and can run a script during a
 /// run (another writer, Clean Up).

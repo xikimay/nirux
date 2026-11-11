@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// docs/ci-failure-triage.md: what reading one failed run asks of `gh`,
+/// docs/design/ci-failure-triage.md: what reading one failed run asks of `gh`,
 /// of the local repository and of the model, and when it asks nothing.
 /// `gh`, `git` and the model are doubles; every log is made up.
 final class CITriageInvestigationTests: XCTestCase {

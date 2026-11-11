@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Comments in the column (docs/branch-review.md, section 6.1): what the
+/// Comments in the column (docs/design/branch-review.md, section 6.1): what the
 /// page gets of them, what it can ask, and what the column writes.
 final class BranchReviewPageCommentsTests: XCTestCase, CommentFixtures {
     private typealias Record = BranchReview.Record

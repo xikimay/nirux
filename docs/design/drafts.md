@@ -1,5 +1,9 @@
 # Drafts
 
+> **Design record:** shipped as the bundled `nirux-draft` skill.\
+> **Differs today:** the skill reuses one folder per session and passes the workspace in its link; there is still no Copy button.\
+> **User guide:** [URL scheme and agent skills](../url-scheme.md#agent-skills).
+
 Status: design, validated by the user on 2026-10-02. Implemented as the
 `nirux-draft` skill.
 

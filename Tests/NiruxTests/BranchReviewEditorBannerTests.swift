@@ -4,7 +4,7 @@ import XCTest
 
 /// The editor's "Full Branch Diff" tab offers the same branch in a Branch
 /// Review column, through a native banner a click reaches
-/// (docs/branch-review.md, section 1). The flow harness enumerates the
+/// (docs/design/branch-review.md, section 1). The flow harness enumerates the
 /// palette and the sidebar's menus, not this banner: it has its own test.
 final class BranchReviewEditorBannerTests: XCTestCase {
     @MainActor
