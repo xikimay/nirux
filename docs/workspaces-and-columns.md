@@ -1,6 +1,6 @@
 # Workspaces and columns
 
-This page describes what the window holds and how to move around it. Every shortcut is listed in [Keyboard shortcuts](keyboard-shortcuts.md).
+Every shortcut mentioned here is also listed in [Keyboard shortcuts](keyboard-shortcuts.md).
 
 ## The sidebar
 
@@ -8,9 +8,9 @@ Each workspace is a row of two lines: its title and time, then one status line. 
 
 | Status line | When |
 | --- | --- |
-| `Needs you · npm run migrate` (amber) | an agent waits for you, here for a permission |
-| `#39 · checks failed` (red) | the checks of its [pull request](pull-requests.md) failed |
-| `Asking <parent>` | the agent waits for an answer from the agent that started it ([Mission handoffs](missions.md)) |
+| `Needs you · npm run migrate` (amber) | an agent is waiting for you, here for a permission |
+| `#39 · checks failed` (red) | the checks of its [pull request](pull-requests.md) failed, and no agent is working |
+| `Asking <parent>` | the agent is waiting for an answer from the agent that started it ([Mission handoffs](missions.md)) |
 | `Working` | an agent is working |
 | `Blocked · waits for #212` | the blocker noted in the workspace's context |
 | `#39 · checks passed`, `Ready to merge` | the state of its pull request |
@@ -19,13 +19,13 @@ Each workspace is a row of two lines: its title and time, then one status line. 
 
 The row of the workspace on screen also lists its columns, its changes and its pull request's links.
 
-A row's `⋯` menu holds the rest:
+In a row's `⋯` menu:
 
 - `Rename Workspace` changes the title. A double-click on the row does too.
 - `View/Edit Context…` holds notes on the work: purpose, phase, latest summary, next step, blocker. They are saved with the workspace.
 - `Organize › Archive` puts a finished workspace away. Archived workspaces wait behind the **Archived** row at the bottom of the sidebar and don't poll GitHub.
 
-`Ctrl+Cmd+S` collapses the sidebar to a rail: the space on top, then one tile per workspace with its initials and its state in a corner, amber only when an agent waits for you. Hover a tile for what it is doing. Click, drag and right-click work as on the rows.
+`Ctrl+Cmd+S` collapses the sidebar to a rail: the space on top, then one tile per workspace with its initials and its state in a corner, amber only when an agent is waiting for you. Hover a tile for what it is doing. Click, drag and right-click work as on the rows.
 
 ## Columns
 
@@ -51,7 +51,7 @@ A browser column keeps its URL history, downloads files to `~/Downloads`, and op
 
 ## Finding your way
 
-- `Cmd+P` opens the command palette. It lists the current space's workspaces and its five most recent sessions, then the actions. Type a workspace's name, branch, space or folder and press Return to go to it, in any space, archived ones included. Each row shows its agents' state.
+- `Cmd+P` opens the command palette (`Shift+Cmd+P` from the editor). It lists the current space's workspaces and its five most recent sessions, then the actions. Type a workspace's name, branch, space or folder and press Return to go to it, in any space, archived ones included. Each row shows its agents' state.
 - `Cmd+J` goes to the agent that has waited for you longest.
 - `Session History…` (command palette, Space menu) lists every past Claude Code and Codex session of the space, including those whose worktree was cleaned up. Return resumes one, in its workspace or in a new one, and brings its worktree back if needed.
 - `Option+Cmd+F`, Search Everywhere, finds text in the scrollback of every terminal, in every workspace and space, then in the transcripts of your Claude sessions. Picking a terminal match opens that terminal's find bar on it. Picking a transcript match resumes the session or goes to its column.
@@ -61,4 +61,4 @@ At the right end of the title bar, three buttons open the New sheet (`Cmd+N`), t
 
 ## After a restart
 
-Nirux saves the layout of every workspace, its editor tabs, its browser URLs and the sidebar's state, and restores them at launch. Agents come back too, as [Agents](agent-status.md#after-a-restart) explains.
+Nirux saves the layout of every workspace, its editor tabs, its browser URLs and the sidebar's state, and restores them at launch. Agents come back too, as [Agent status](agent-status.md#after-a-restart) explains.

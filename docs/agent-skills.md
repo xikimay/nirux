@@ -11,7 +11,7 @@ Agent skills are instruction files that Nirux installs for Claude Code and Codex
 | `nirux-draft` | Put text you will paste elsewhere (a Slack message, a pull request description, a ticket, a SQL query) in an editor column, where `Cmd+A` then `Cmd+C` copies it exactly |
 | `nirux-second-opinion` | When you ask Claude Code for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply |
 
-The skills reach Nirux through its [URL scheme](url-scheme.md).
+The first three reach Nirux through its [URL scheme](url-scheme.md).
 
 ## Updates
 

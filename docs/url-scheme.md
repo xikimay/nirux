@@ -4,9 +4,9 @@ The installed app registers the `nirux://` URL scheme. The [agent skills](agent-
 
 ## When a link asks for confirmation
 
-Any app or web page can open a `nirux://` URL. A link therefore runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and sets it in its terminals, and the skills pass it automatically.
+Any app or web page can open a `nirux://` URL. A link therefore runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and sets it in its terminals, except in a workspace that a confirmed link opened. The skills pass it automatically.
 
-Without it, or with a value from before Nirux last restarted, Nirux shows a confirmation that spells out the folder or file, the branch, the agent and the permission mode. A request confirmed this way ignores `profile`, `parentWorkspace`, `parentAgent` and `workspace`, and opens in the space on screen.
+Without it, or with a value from before Nirux last restarted, Nirux shows a confirmation that spells out the folder or file, the branch, the agent and the permission mode. A request confirmed this way ignores `profile`, `parentWorkspace`, `parentAgent` and `workspace`. Its workspace opens in the space that has its repository, else in General.
 
 ## `nirux://new-workspace`
 
@@ -56,4 +56,4 @@ Opens a file in an editor column.
 - `line` and `endLine` are optional line numbers, starting at 1. With both, the editor highlights the range.
 - `workspace` is optional. When it matches a workspace ID (`NIRUX_WORKSPACE_ID` in Nirux terminals), Nirux switches to that workspace first.
 
-The editor becomes the focused column, so `Cmd+W` closes it, but the keyboard stays where you were typing.
+The editor becomes the focused column, so `Cmd+W` then closes the file's tab, but typing still goes where it went before.

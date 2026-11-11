@@ -6,7 +6,7 @@ A space holds the work of one product or client. A task is a workspace that Niru
 
 **Space › New Space…** gives a space a name, a color and the repositories or folders its work lives in, one of them the default. A repository belongs to one space, and its worktrees open there whatever space is on screen.
 
-The space picker at the top of the sidebar lists every space with its task count, amber while an agent there waits for you. `Option+Cmd+1…9` go to the first nine spaces, `Option+Cmd+Left` and `Option+Cmd+Right` to the previous and next.
+The space picker at the top of the sidebar lists every space with its task count, amber while an agent there is waiting for you. `Option+Cmd+1…9` go to the first nine spaces, `Option+Cmd+Left` and `Option+Cmd+Right` to the previous and next.
 
 **General** is the space every install starts with. It has no repository, comes first in every list and can't be deleted. A deleted space's workspaces move there.
 
@@ -24,11 +24,11 @@ Space Settings is one window with a tab per topic:
 | Board | per repository, the base branch and the checks the [Board](pull-requests.md#the-board) uses |
 | Templates | the task templates of the New sheet |
 
-A choice made in the New sheet overrides the space's defaults, which override Settings.
+The agent picked in the New sheet overrides the space's default agent. The space's Claude Code and Codex modes override those of Settings, unless they are left on Same as Settings.
 
 Environment values are literal (`$PATH` isn't expanded) and names starting with `NIRUX_` are reserved. They are kept in a file only you can read.
 
-A repository's setup script runs once in each new worktree made for a task, before the agent starts, with `/bin/sh -e` and no input. A worktree made by **Existing Branch…** runs none. Keep the script idempotent. If it fails, Nirux notifies you and the agent still starts.
+A repository's setup script runs once in each new worktree made for a task, before the agent starts, with `/bin/sh -e` and no input. A worktree made by **Existing Branch…** runs none. If the script fails, Nirux notifies you and the agent still starts.
 
 Deleting a space deletes its defaults and setup scripts but keeps its brief.
 
@@ -51,7 +51,7 @@ If the fetch fails, the sheet says why, and a second **Start** uses the branch a
 
 With the description empty, **Start** opens a plain workspace instead: a shell in the repository's main checkout, or in your home folder when **No Repository** is selected.
 
-**Existing Branch…** lists the repository's worktrees, then its local branches and origin's that have none. Picking one creates its worktree and opens a shell there.
+**Existing Branch…** lists the repository's worktrees, then its local branches and origin's that have none. Picking a worktree opens it. Picking a branch creates its worktree and opens a shell there.
 
 ### Tasks without a repository
 
@@ -69,7 +69,7 @@ A template is text added to the handover file. Each space has its own templates,
 
 When a task's pull request is merged, its row reads `Merged · Clean up`. The click removes the worktree folder and its local branch, then closes the workspaces open in it. The same action is **Clean Up Worktree…** in a workspace's `⋯` menu.
 
-**Clean Up Merged Worktrees…** in the command palette does it in bulk. It lists every worktree a workspace is open in, plus the other worktrees of the same repositories, and inspects them all. It checks in advance the ready ones that a workspace is open in and whose agents are idle, then cleans up the checked ones, one at a time. A worktree whose pull request isn't merged reads `Not merged yet` in grey, and a real blocker reads in orange.
+**Clean Up Merged Worktrees…** in the command palette does it in bulk. It lists every worktree a workspace is open in, plus the other worktrees of the same repositories, and inspects them all. Worktrees that are ready, open in a workspace and whose agents are idle come selected, and the selected ones are cleaned up one at a time. A worktree whose pull request isn't merged reads `Not merged yet` in grey, and a real blocker reads in orange.
 
 ### What Nirux checks first
 
@@ -85,9 +85,9 @@ When a check fails, the refusal names the files that block.
 
 ### What happens to ignored files
 
-Git would delete ignored files with the folder, so Nirux moves them to the Trash first, in one "\<folder\> leftovers" folder per worktree. Build output such as `.build/`, `node_modules/` or `DerivedData/` is deleted instead. The confirmation lists all of it, and any agent session that closing the workspaces ends. Return cancels it.
+Git would delete ignored files with the folder, so Nirux moves them to the Trash first, in one "\<folder\> leftovers" folder per worktree. Build output such as `.build/`, `node_modules/` or `DerivedData/` is deleted instead. The confirmation lists these files and the agent sessions that closing the workspaces would end. Return cancels it.
 
-Nirux never forces a removal. If git refuses to remove the worktree, the cleanup stops, shows git's message and puts the leftovers back. If only the branch deletion fails, the folder is gone, the branch is kept and the leftovers stay in the Trash.
+Nirux never forces the worktree's removal. If git refuses, the cleanup stops, shows git's message and puts the leftovers back. If only the branch deletion fails, the folder is gone, the branch is kept and the leftovers stay in the Trash.
 
 ## Space memory
 

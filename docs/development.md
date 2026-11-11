@@ -16,7 +16,7 @@ CI runs the tests one process per test class, several at a time:
 swift build --build-tests && scripts/run-tests.sh
 ```
 
-## A development build never opens your real workspaces
+## Development builds and your real workspaces
 
 Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a download run from elsewhere) quits unless `NIRUX_STATE_DIR` is set. It says why on stderr, and in an alert when Finder, the Dock, `open` or a `nirux://` link started it.
 
@@ -28,7 +28,7 @@ Delete old `Nirux.app` bundles left in checkouts. macOS may still hand them `nir
 | --- | --- |
 | `NIRUX_STATE_DIR` | Moves workspaces, settings, Mission history, URL history and agent hook events out of `~/Library/Application Support/nirux/`. The `nirux://` scheme stays shared with the installed app |
 | `NIRUX_ALLOW_REAL_STATE=1` | Lets another copy use the real state. It then restores and saves the installed app's workspaces and relaunches their agent sessions, even while the installed app runs |
-| `NIRUX_SKIP_HOOK_INSTALL=1` | Stops any build from writing the agent hooks and from updating the agent skills at launch. Set it when launching a local bundle, which would otherwise point the global hooks at itself |
+| `NIRUX_SKIP_HOOK_INSTALL=1` | Stops any build from writing the status hooks and from updating the agent skills at launch. Set it when launching a local bundle, which would otherwise point the global hooks at itself |
 | `NIRUX_FORCE_HOOK_INSTALL=1` | Makes a development build install the hooks, to test the installer. The global hooks then point at the dev binary until the installed app is relaunched |
 
 Only a Nirux running from an `.app` bundle installs the [status hooks](agent-status.md#status-hooks), so `swift run` leaves `~/.claude/settings.json` and `~/.codex/config.toml` alone. The hooks the installed app wrote keep working, and agents in the dev build's terminals report into its own state directory.

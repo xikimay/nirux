@@ -6,11 +6,11 @@ Nirux follows the pull request of each workspace's branch and shows its state in
 
 A workspace whose branch has an open pull request shows it in its status line: `#39 · checks passed`, `#39 · checks failed`, `Ready to merge`. Once the pull request is merged, the row reads `Merged`, followed by `Clean up` when its worktree can be removed (see [Cleaning up merged worktrees](spaces-and-tasks.md#cleaning-up-merged-worktrees)).
 
-The selected row also has a PR link and a CI link. Each opens in a browser column of the same workspace. CI opens the failed check, else the pull request's Checks tab.
+The selected row also has a PR link and, while the pull request is open, a CI link. Each opens in a browser column of the same workspace. CI opens the failed check, else the pull request's Checks tab.
 
 ## CI failures
 
-When the checks of a workspace's open pull request fail, its row reads `#N · checks failed` in red. Only the latest run of each check counts. While Nirux is in the background, it also sends a notification that names the checks that newly failed.
+When the checks of a workspace's open pull request fail, its row reads `#N · checks failed` in red once no agent there is working. Only the latest run of each check counts. While Nirux is in the background, it also sends a notification that names the checks that newly failed.
 
 The row's menu and the notification offer two actions:
 
@@ -21,13 +21,13 @@ Both act only on GitHub Actions runs of the pull request's own repository.
 
 ### Failures that look flaky
 
-A failure looks flaky when a job never ran, a dependency download failed, the failing tests passed on a rerun before, or the failing tests have nothing to do with the pull request. The row then reads `#N · checks failed · likely flaky`, the notification says why, and the rerun comes first in the menu. Nirux leaves the rerun to you.
+A failure looks flaky when a job never ran, a dependency download failed, the failing tests passed on a rerun before, or the failing tests have nothing to do with the pull request. The row then reads `#N · checks failed · likely flaky`, and the menu and the notification say why and offer the rerun first. Nirux leaves the rerun to you.
 
-Nirux judges from the failed log. When its rules can't decide, it asks Claude Sonnet, on a Claude subscription only, and only for a workspace whose Claude Code runs on that account. Only XCTest and Swift build logs are supported. **Settings › Notifications** turns this off.
+Nirux judges from the failed log. When tests fail that the pull request doesn't touch, it asks Claude Sonnet, on a Claude subscription only, and only for a workspace whose Claude Code runs on that account. Only XCTest and Swift build logs are supported. **Settings › Notifications** turns this off.
 
 ## Review badges
 
-The selected workspace's row shows which review passes ran in its Claude Code sessions: `/code-review`, `/premortem`, `/code-style-review` and an adversarial review, as `CR ✓  PM ✓  CS ·  ADV ·`.
+The selected workspace's row shows which review passes you ran in its Claude Code sessions: the slash commands `/code-review`, `/premortem` and `/code-style-review`, and an adversarial review, as `CR ✓  PM ✓  CS ·  ADV ·`.
 
 | Mark | Meaning |
 | --- | --- |
@@ -41,7 +41,7 @@ Nirux keeps the pass's name, never the prompt.
 
 For an open pull request, Nirux counts the feedback nobody has dealt with yet: unresolved review threads, and comments newer than both the head commit and your last reply. Only people with a role on the repository (owner, member, collaborator) and apps installed there count.
 
-The selected row shows the counts, people and bots apart. A click on them lists up to ten items, each opening on GitHub, then **Address**, which types a `/receiving-code-review` prompt naming every item into the workspace's Claude Code session.
+The selected row shows the counts, people and bots apart. A click on them lists up to ten items, each opening on GitHub. Below them, **Address** types a prompt into the workspace's Claude Code session that starts with `/receiving-code-review` and names every item.
 
 ## Branch Review
 
@@ -58,10 +58,10 @@ A row opens into its diff. The column follows its worktree, and reads the branch
 **Explain** asks Claude Code, on your Claude account, to read the branch and a read-only copy of its files, with secrets and instruction files left out. The model and effort are set in **Settings › Agents › Branch Review**.
 
 - The first time in a space, an alert says what is sent, with which model and under which account. It asks again when the account changes, and every time for an account billed per call.
-- Claude's overview shows above the author's own description of the change, with the author's claims that the code doesn't match and questions for the author. Files are regrouped by intent, and each gets a sentence.
-- In an open diff, Claude's notes sit under the hunks they explain. **Mark wrong** records a note as wrong, and the bar says how often notes were.
+- Claude's overview shows above the author's own description of the change. It lists the claims in that description that the code contradicts, and questions for the author. Files are regrouped by intent, and each gets a sentence.
+- In an open diff, Claude's notes sit under the hunks they explain. **Mark wrong** flags a note, and the page's bar shows how often notes were marked wrong.
 - The next Explain sends only the files changed since and those not explained yet. **Explain All Again** sends every file.
-- The bar shows the day's runs on the branch, their tokens and what they would cost at API prices.
+- The same bar shows the day's runs on the branch, their tokens and what they would cost at API prices.
 
 One Explain runs at a time in the whole app, and **Cancel** stops it. Explain is disabled, with the reason, when no `claude` 2.1.284 or later is found or it isn't logged in.
 

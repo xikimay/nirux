@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Standard macOS shortcuts (copy, paste, quit) work as usual and are not listed. Most command palette actions also have a menu bar item, sometimes under a slightly different title, so the Help menu's search finds them.
+Standard macOS shortcuts (copy, paste, quit) work as usual and are not listed. Most command palette actions also have a menu bar item, so the Help menu's search finds them. A few titles differ slightly.
 
 ## Everywhere
 
@@ -12,7 +12,7 @@ Standard macOS shortcuts (copy, paste, quit) work as usual and are not listed. M
 | `Cmd+J` | Next waiting agent: the one that has waited for you longest, then the next at each press |
 | `Ctrl+Cmd+B` | Board of the current space |
 | `Ctrl+Cmd+L` | The space's Lead |
-| `Ctrl+Cmd+S` | Show or hide the sidebar |
+| `Ctrl+Cmd+S` | Collapse or expand the sidebar |
 | `Cmd+,` | Settings (General, Agents, Notifications). A change applies at once |
 | `Ctrl+Cmd+F` | Enter or leave full screen |
 | `Cmd+M` | Minimize the window |

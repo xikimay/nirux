@@ -12,7 +12,7 @@
 | [Pull requests](pull-requests.md) | The pull request line, CI failures, review badges, Branch Review, the Board |
 | [Agent skills](agent-skills.md) | The instructions Nirux installs for Claude Code and Codex |
 | [Terminal appearance](terminal-appearance.md) | Which Ghostty settings the terminals follow |
-| [Keyboard shortcuts](keyboard-shortcuts.md) | Every shortcut and command palette action |
+| [Keyboard shortcuts](keyboard-shortcuts.md) | Nirux's shortcuts and command palette actions |
 | [URL scheme](url-scheme.md) | `nirux://` links, for scripts and skills |
 
 ## Working on Nirux
