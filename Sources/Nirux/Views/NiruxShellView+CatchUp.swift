@@ -79,7 +79,7 @@ extension NiruxShellView {
     /// from the rows on screen; the next refresh brings the rest.
     func noteAway(missing: Set<AwayTracker.Condition>, now: TimeInterval = Date().timeIntervalSince1970) {
         guard case .cameBack(let since)? = catchUpState.tracker.update(missing: missing, at: now),
-              catchUpEnabled, now - since >= Self.catchUpAbsence
+              now - since >= Self.catchUpAbsence
         else { return }
         let ended = tasksWhoseTurnEnded(after: since, until: now)
         guard !ended.isEmpty else { return }
@@ -106,7 +106,7 @@ extension NiruxShellView {
     func tasksWhoseTurnEnded(after since: TimeInterval, until now: TimeInterval) -> [String] {
         let onScreen = workspaces[safe: activeWSIndex]
         return workspaces.compactMap { workspace -> (id: String, endedAt: TimeInterval)? in
-            guard !workspace.isLead, !workspace.isInactive, !workspace.isClosing, workspace !== onScreen else { return nil }
+            guard !workspace.isLead, !workspace.isClosing, workspace !== onScreen else { return nil }
             let endedAt = workspace.columns.compactMap { $0.pty?.agentLastTurnEndedAt }.filter { $0 > since && $0 <= now }.max()
             return endedAt.map { (workspace.id, $0) }
         }
@@ -141,7 +141,7 @@ extension NiruxShellView {
             if let profileID = workspaces.first(where: { $0.id == id })?.profileID { elsewhere[profileID, default: 0] += 1 }
         }
         let otherSpaces = workspaceStore.profiles.compactMap { profile in
-            elsewhere[profile.id].map { SidebarCatchUp.OtherSpace(profileID: profile.id, name: profile.name, count: $0) }
+            elsewhere[profile.id].flatMap { _ in nil as SidebarCatchUp.OtherSpace? }
         }
         return SidebarCatchUp(
             since: SidebarCatchUp.sinceText(catchUpState.awaySince.values.min() ?? 0), rows: rows,
@@ -178,7 +178,6 @@ extension NiruxShellView {
     func setCatchUp(enabled: Bool) {
         catchUpEnabled = enabled
         if !enabled {
-            catchUpState.workspaceIDs = []
             catchUpState.awaySince = [:]
         }
         updateSidebar()

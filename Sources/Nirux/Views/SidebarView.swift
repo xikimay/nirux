@@ -133,7 +133,7 @@ final class SidebarView: NSView {
     /// The card changed outside a refresh (the user just came back);
     /// `reveal` brings it into view.
     func refreshCatchUpCard(reveal: Bool = false) {
-        revealsCatchUpOnNextBuild = reveal && isExpanded && catchUp != nil
+        revealsCatchUpOnNextBuild = false
         let signature = renderSignature()
         guard signature != lastRenderSignature else { return }
         lastRenderSignature = signature
@@ -599,7 +599,6 @@ final class SidebarView: NSView {
             toggleInactiveSection()
         case .catchUp(let action):
             // Its second press lands on what moved under the pointer.
-            lastButtonActionAt = event.timestamp
             onCatchUpAction?(action)
         case .link(let url, let label):
             if let target = Self.missionQuestionTarget(url) {
