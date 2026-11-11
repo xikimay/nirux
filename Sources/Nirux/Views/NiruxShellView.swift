@@ -314,7 +314,6 @@ final class NiruxShellView: NSView {
         wireDeferredAgentResume()
         wireAgentLights()
         sidebar.onCatchUpAction = { [weak self] action in self?.handleCatchUpAction(action) }
-        wireCatchUp()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }

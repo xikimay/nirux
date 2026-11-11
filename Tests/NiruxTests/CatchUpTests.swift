@@ -39,9 +39,18 @@ final class CatchUpTests: XCTestCase {
         _ = pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .stop, sessionID: "s", timestamp: time), isUserFocused: false)
     }
 
-    /// Lets the card come in after the activation's own work.
-    private func settle() {
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    /// Waits on state, never on time: the card comes in after the
+    /// activation's own work, and CI runs several classes at once.
+    @discardableResult
+    private func waitFor(
+        _ description: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line,
+        _ condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        let met = condition()
+        XCTAssertTrue(met, "timed out waiting for \(description)", file: file, line: line)
+        return met
     }
 
     /// Away an hour: the tasks whose turn ended meanwhile, latest first;
@@ -81,7 +90,7 @@ final class CatchUpTests: XCTestCase {
             shell.catchUpState.tracker = AwayTracker(now: leave - 1)
             shell.noteAway(missing: [.sessionActive], now: leave)
             shell.noteAway(missing: [], now: leave + 3_600)
-            settle()
+            waitFor("the card") { shell.sidebar.catchUp?.rows.count == 3 }
             let card = try XCTUnwrap(shell.sidebar.catchUp)
             XCTAssertEqual(card.rows.map(\.title), ["third", "second", "first"])
             XCTAssertEqual(card.rows.map(\.kind), [.done, .done, .done])
@@ -114,13 +123,12 @@ final class CatchUpTests: XCTestCase {
             shell.noteAway(missing: [], now: leave + 4_300)
             shell.noteAway(missing: [.screenUnlocked], now: leave + 5_000)
             shell.noteAway(missing: [], now: leave + 6_000)
-            settle()
             shell.updateSidebar()
             XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["second"])
             try endTurn(of: early, at: leave + 7_000)
             shell.noteAway(missing: [.appActive], now: leave + 6_500)
             shell.noteAway(missing: [], now: leave + 7_500)
-            settle()
+            waitFor("early on the card") { shell.sidebar.catchUp?.rows.count == 2 }
             XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["early", "second"])
             XCTAssertEqual(shell.sidebar.catchUp?.since, SidebarCatchUp.sinceText(leave))
             shell.handleCatchUpAction(.open(workspaceID: second.id))
@@ -133,7 +141,7 @@ final class CatchUpTests: XCTestCase {
             try endTurn(of: third, at: leave + 8_100)
             shell.noteAway(missing: [.appActive], now: leave + 7_600)
             shell.noteAway(missing: [], now: leave + 8_700)
-            settle()
+            waitFor("the card again") { shell.sidebar.catchUp != nil }
             XCTAssertEqual(shell.sidebar.catchUp?.rows.map(\.title), ["third"])
             shell.handleCatchUpAction(.dismiss)
             XCTAssertNil(shell.sidebar.catchUp)
@@ -143,7 +151,7 @@ final class CatchUpTests: XCTestCase {
             shell.setCatchUp(enabled: false)
             shell.noteAway(missing: [.appActive], now: leave + 9_000)
             shell.noteAway(missing: [], now: leave + 10_000)
-            settle()
+            shell.updateSidebar()
             XCTAssertNil(shell.sidebar.catchUp)
         }
     }
@@ -227,7 +235,7 @@ final class CatchUpTests: XCTestCase {
             shell.catchUpState.tracker = AwayTracker(now: t0 - 1)
             shell.noteAway(missing: [.appActive], now: t0)
             shell.noteAway(missing: [], now: t0 + 1_800)
-            settle()
+            waitFor("the card") { shell.sidebar.catchUp?.rows.count == 7 }
             let card = try XCTUnwrap(shell.sidebar.catchUp)
             XCTAssertEqual(card.rows.count, 7)
             XCTAssertEqual(card.shownRows.count, 5)
@@ -267,7 +275,6 @@ final class CatchUpTests: XCTestCase {
         sidebar.layoutSubtreeIfNeeded()
         sidebar.isExpanded = true
         sidebar.update(profiles: [], workspaces: rows)
-        settle()
         let visibleBefore = sidebar.contentScrollView.documentVisibleRect
         sidebar.catchUp = SidebarCatchUp(
             since: "since 12:40",
@@ -275,12 +282,13 @@ final class CatchUpTests: XCTestCase {
             otherSpaces: []
         )
         sidebar.refreshCatchUpCard(reveal: true)
-        settle()
         let dismiss = try XCTUnwrap(sidebar.hitAreas.first { area in
             guard case .catchUp(.dismiss) = area.region else { return false }
             return true
         })
-        XCTAssertTrue(sidebar.contentScrollView.documentVisibleRect.contains(dismiss.frame), "visible was \(visibleBefore)")
+        waitFor("the card in view (visible was \(visibleBefore))") {
+            sidebar.contentScrollView.documentVisibleRect.contains(dismiss.frame)
+        }
     }
 
     /// A row says what its task's row says: what it asks, what broke, that
