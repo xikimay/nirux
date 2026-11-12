@@ -290,6 +290,7 @@ final class BoardStagesView: NSView {
                 let merged = keptMerged.removeValue(forKey: id) ?? BoardStagesMergedView()
                 merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id))
                 merged.onOpen = { [weak self] line in self?.onOpen?(line) }
+                merged.onCleanUp = { [weak self] line in self?.onLink?(id, line, .cleanUp) }
                 merged.onUnfold = { [weak self] in self?.unfoldMerged(section: id) }
                 mergedViews[id] = merged
                 items.append(.merged(merged))

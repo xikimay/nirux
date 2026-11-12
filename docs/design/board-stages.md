@@ -203,11 +203,13 @@ clicked. The sizes are the mockup's.
   under a line that counts them.
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
-  (amber while its task needs the user), its title, then its number and time;
-  the title is what gives way. One whose task is still open opens it. Those
-  whose task needs the user come first, so amber is never behind the button;
-  were there more of them than two rows hold, the button says so, in amber
-  ("+12 more · 3 need you").
+  (amber while its task needs the user), its title, then its number and time,
+  and "Clean up" while its task's worktree is there ("cleaning up…" while
+  one runs); the title is what gives way first, the number and the time
+  last. One whose task is still open opens it. Those whose task needs the
+  user come first, so amber is never behind the button; were there more of
+  them than two rows hold, the button says so, in amber ("+12 more · 3 need
+  you").
 - **It follows its content without building itself again.** A refresh that
   only moves the clock touches the times that changed. A change of lines
   updates them where they are: what is still listed keeps its view (a line,
@@ -378,6 +380,10 @@ to the queue yet.
   and each station over 22 pt around it. A place that stays keeps its
   registration: a tooltip being read stays up while its words change, or
   another place comes or goes.
+- **"Merged today"** offers the same link on an entry: "Clean up" is a
+  target of its own, the entry's height, with its hint, its hand and its
+  VoiceOver action; the rest of the entry opens the task. An entry that went
+  behind "+12 more" between a press and its release opens nothing.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
