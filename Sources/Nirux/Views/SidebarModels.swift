@@ -40,6 +40,10 @@ struct ColumnInfo: Hashable {
     /// The question this column's Claude ended its turn on, while it waits
     /// at a quiet prompt: Yes / No / Reply… answer it from the card.
     var turnQuestion: SidebarTurnQuestion?
+    /// When the question that stands in this column was asked, whether or
+    /// not its card can take an answer now (subagents at work hide the
+    /// buttons): what "Dismiss Question" puts aside.
+    var questionAskedAt: TimeInterval?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
 
@@ -78,6 +82,7 @@ struct ColumnInfo: Hashable {
             && lhs.deferredAgent == rhs.deferredAgent
             && lhs.missionQuestion == rhs.missionQuestion
             && lhs.turnQuestion == rhs.turnQuestion
+            && lhs.questionAskedAt == rhs.questionAskedAt
             && lhs.circling == rhs.circling
     }
 
@@ -102,6 +107,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(deferredAgent)
         hasher.combine(missionQuestion)
         hasher.combine(turnQuestion)
+        hasher.combine(questionAskedAt)
         hasher.combine(circling)
     }
 }
@@ -351,15 +357,15 @@ struct WorkspaceInfo: Hashable {
         "Sub-task of “\(parentTitle)”"
     }
 
-    /// The blocker and the next step (the user's, or the Lead's), trimmed;
-    /// nil when empty.
+    /// The blocker and the next step (the user's, or the Lead's), on one
+    /// run of text: a row wraps them itself, and a line break in one
+    /// would spend its lines on blanks. Nil when empty.
     var blockerText: String? { normalizedContextText(blocker) }
     var nextStepText: String? { normalizedContextText(nextStep) }
 
     private func normalizedContextText(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else { return nil }
-        return value
+        let words = (value ?? "").split(whereSeparator: \.isWhitespace)
+        return words.isEmpty ? nil : words.joined(separator: " ")
     }
 }
 

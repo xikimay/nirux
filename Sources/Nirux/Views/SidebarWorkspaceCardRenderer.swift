@@ -500,9 +500,10 @@ final class SidebarWorkspaceCardRenderer {
         // Over the link's words only ("Clean up"), else the whole text.
         let full = ceil(label.attributedStringValue.size().width)
         var start: CGFloat = 0
-        if let link = status.linkText, status.text.hasSuffix(link) {
+        let printed = layout.summary.lineText
+        if let link = status.linkText, printed.hasSuffix(link) {
             let prefix = label.attributedStringValue.attributedSubstring(
-                from: NSRange(location: 0, length: (status.text as NSString).length - (link as NSString).length)
+                from: NSRange(location: 0, length: (printed as NSString).length - (link as NSString).length)
             )
             start = floor(prefix.size().width)
         }

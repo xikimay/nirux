@@ -95,6 +95,17 @@ final class TurnQuestionSidebarTests: XCTestCase {
         for answer in [SidebarTurnAnswer.yes, .no, .reply, .dismiss] {
             XCTAssertLessThanOrEqual(try XCTUnwrap(frame(of: answer, in: result)).maxY, asked.frame.minY + 3, "\(answer) under it")
         }
+        // A click on the question is the row's, as on any of its lines;
+        // between the buttons it does nothing.
+        func region(at point: NSPoint) -> SidebarHitRegion? { result.hitAreas.first { $0.frame.contains(point) }?.region }
+        guard case .workspace(2)? = region(at: NSPoint(x: asked.frame.midX, y: asked.frame.midY)) else {
+            return XCTFail("the question's lines select the row")
+        }
+        let dismiss = try XCTUnwrap(frame(of: .dismiss, in: result))
+        let reply = try XCTUnwrap(frame(of: .reply, in: result))
+        guard case .actionBlock? = region(at: NSPoint(x: (dismiss.maxX + reply.minX) / 2, y: reply.midY)) else {
+            return XCTFail("inert between the buttons")
+        }
         XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
         XCTAssertEqual(
             SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260)
@@ -124,6 +135,10 @@ final class TurnQuestionSidebarTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(reply.minY, result.bottomY, "inside its card")
         XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
         XCTAssertNotEqual(column(which), column(open), "choices redraw the card")
+        // One indent for a list, past its widest marker.
+        XCTAssertEqual(SidebarQuestionText.choices(which.choices).indent, SidebarExpandedMetrics.choiceIndent)
+        let wide = SidebarQuestionText.choices([TurnEndChoice(marker: "(10)", text: "Ship"), TurnEndChoice(marker: "(11)", text: "Wait")])
+        XCTAssertGreaterThan(wide.indent, SidebarExpandedMetrics.choiceIndent)
     }
 
     /// When the status line says something else first (another column's
@@ -141,22 +156,27 @@ final class TurnQuestionSidebarTests: XCTestCase {
         XCTAssertTrue(shown.contains("Needs you · Bash: npm run migrate"), "the line keeps its own sentence")
     }
 
-    /// "Dismiss Question" in the row's menu, while a question shows: each
-    /// of the row's questions, as its card's own Dismiss.
+    /// "Dismiss Question" in the row's menu, for each question that stands
+    /// in its columns: also while its card has no buttons (subagents at
+    /// work).
     func testRowMenuDismissesItsQuestions() throws {
         _ = NSApplication.shared
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
         sidebar.isExpanded = true
-        var dismissed: [SidebarTurnAnswerClick] = []
-        sidebar.onTurnAnswer = { question, answer, _ in dismissed.append(SidebarTurnAnswerClick(question: question, answer: answer)) }
+        var dismissed: [(UUID, TimeInterval)] = []
+        sidebar.onQuestionDismissed = { dismissed.append(($0, $1)) }
         sidebar.update(profiles: [], workspaces: [workspace([column(nil)])])
         XCTAssertFalse(sidebar.workspaceActionMenu(workspaceIndex: 2, columnIndex: nil).items.contains {
             $0.title == SidebarView.dismissQuestionTitle
         })
-        sidebar.update(profiles: [], workspaces: [workspace([column(yesNo)])])
+        var working = column(nil)
+        working.questionAskedAt = 1_005
+        working.id = columnID
+        sidebar.update(profiles: [], workspaces: [workspace([working])])
         let menu = sidebar.workspaceActionMenu(workspaceIndex: 2, columnIndex: nil)
         menu.performActionForItem(at: try XCTUnwrap(menu.items.firstIndex { $0.title == SidebarView.dismissQuestionTitle }))
-        XCTAssertEqual(dismissed, [SidebarTurnAnswerClick(question: yesNo, answer: .dismiss)])
+        XCTAssertEqual(dismissed.map(\.0), [columnID])
+        XCTAssertEqual(dismissed.map(\.1), [1_005])
     }
 
     func testOnlyASingleClickReleasedOnTheSameAnswerAnswers() {

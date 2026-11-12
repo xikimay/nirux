@@ -27,48 +27,55 @@ enum SidebarQuestionText {
         return label
     }
 
-    /// A choice as the message lists it, under its own marker ("1.",
-    /// "B)"), a dot for a bullet.
-    static func choice(_ choice: TurnEndChoice) -> NSAttributedString {
-        item(marker: choice.marker ?? "•", NSAttributedString(string: choice.text, attributes: [
-            .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
-        ]))
-    }
+    /// A list's items under their markers: all hang at one indent, past
+    /// the widest marker.
+    @MainActor
+    struct Items {
+        let texts: [NSAttributedString]
+        let indent: CGFloat
 
-    private static func item(marker: String, _ text: NSAttributedString) -> NSAttributedString {
-        let result = NSMutableAttributedString(string: marker + "\t", attributes: [
-            .font: Metrics.questionFont, .foregroundColor: Theme.Color.textTertiary,
-        ])
-        result.append(text)
-        return result
-    }
-
-    private static func height(of item: NSAttributedString, width: CGFloat) -> CGFloat {
-        SidebarWrappedText.height(
-            item, width: width, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines,
-            indent: Metrics.choiceIndent
-        )
-    }
-
-    /// The height of items stacked `choiceGap` apart; 0 without any.
-    static func height(of items: [NSAttributedString], width: CGFloat) -> CGFloat {
-        guard !items.isEmpty else { return 0 }
-        return items.reduce(CGFloat(0)) { $0 + height(of: $1, width: width) } + CGFloat(items.count - 1) * Metrics.choiceGap
-    }
-
-    /// The items' labels, stacked down from `top`.
-    static func itemLabels(_ items: [NSAttributedString], x: CGFloat, width: CGFloat, top: CGFloat) -> [NSTextField] {
-        var y = top
-        return items.map { item in
-            let height = height(of: item, width: width)
-            let label = SidebarWrappedText.label(
-                item, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines, indent: Metrics.choiceIndent
+        private func height(of item: NSAttributedString, width: CGFloat) -> CGFloat {
+            SidebarWrappedText.height(
+                item, width: width, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines, indent: indent
             )
-            label.frame = NSRect(x: x, y: y - height, width: width, height: height)
-            label.toolTip = item.string.replacingOccurrences(of: "\t", with: " ")
-            y -= height + Metrics.choiceGap
-            return label
         }
+
+        /// Stacked `choiceGap` apart; 0 without any.
+        func height(width: CGFloat) -> CGFloat {
+            guard !texts.isEmpty else { return 0 }
+            return texts.reduce(CGFloat(0)) { $0 + height(of: $1, width: width) } + CGFloat(texts.count - 1) * Metrics.choiceGap
+        }
+
+        /// Their labels, stacked down from `top`.
+        func labels(x: CGFloat, width: CGFloat, top: CGFloat) -> [NSTextField] {
+            var y = top
+            return texts.map { item in
+                let height = height(of: item, width: width)
+                let label = SidebarWrappedText.label(
+                    item, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines, indent: indent
+                )
+                label.frame = NSRect(x: x, y: y - height, width: width, height: height)
+                label.toolTip = item.string.replacingOccurrences(of: "\t", with: " ")
+                y -= height + Metrics.choiceGap
+                return label
+            }
+        }
+    }
+
+    /// The choices as the message lists them, each under its own marker
+    /// ("1.", "B)"), a dot for a bullet.
+    static func choices(_ choices: [TurnEndChoice]) -> Items {
+        let marker: [NSAttributedString.Key: Any] = [.font: Metrics.questionFont, .foregroundColor: Theme.Color.textTertiary]
+        let markers = choices.map { $0.marker ?? "•" }
+        let widest = markers.map { ceil(($0 as NSString).size(withAttributes: marker).width) }.max() ?? 0
+        let texts = zip(markers, choices).map { mark, choice in
+            let text = NSMutableAttributedString(string: mark + "\t", attributes: marker)
+            text.append(NSAttributedString(string: choice.text, attributes: [
+                .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
+            ]))
+            return text
+        }
+        return Items(texts: texts, indent: max(Metrics.choiceIndent, widest + Metrics.choiceMarkerGap))
     }
 }
 
@@ -92,16 +99,15 @@ struct SidebarTurnQuestionBlockRenderer {
     func render() -> SidebarApprovalBlockRenderer.Result {
         let metrics = SidebarExpandedMetrics.self
         let height = metrics.turnQuestionBlockHeight(for: question, width: width)
-        let blockFrame = NSRect(x: x, y: top - height, width: width, height: height)
         var views: [NSView] = []
         var hitAreas: [SidebarHitArea] = []
         var buttons: [String: SidebarBadgeView] = [:]
 
         var y = top
-        let choices = question.choices.map(SidebarQuestionText.choice)
-        if !choices.isEmpty {
-            views += SidebarQuestionText.itemLabels(choices, x: x, width: width, top: y)
-            y -= SidebarQuestionText.height(of: choices, width: width) + metrics.questionGap
+        let choices = SidebarQuestionText.choices(question.choices)
+        if !choices.texts.isEmpty {
+            views += choices.labels(x: x, width: width, top: y)
+            y -= choices.height(width: width) + metrics.questionGap
         }
         let asked = SidebarQuestionText.questionLabel(question.text)
         let askedHeight = SidebarQuestionText.questionHeight(question.text, width: width)
@@ -140,7 +146,10 @@ struct SidebarTurnQuestionBlockRenderer {
         )
         if let key = SidebarView.armedButtonKey(for: region) { buttons[key] = dismiss }
         hitAreas.append(SidebarHitArea(frame: dismiss.frame.insetBy(dx: 0, dy: -3), region: region))
-        hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
+        // Between the buttons a click does nothing. On the question and its
+        // choices it is the row's: it selects the task, as on any line.
+        let buttonsLine = NSRect(x: x, y: top - height - 3, width: width, height: metrics.buttonHeight + 6)
+        hitAreas.append(SidebarHitArea(frame: buttonsLine, region: .actionBlock(workspaceIndex: workspaceIndex)))
         return SidebarApprovalBlockRenderer.Result(views: views, hitAreas: hitAreas, buttons: buttons)
     }
 }

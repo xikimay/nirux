@@ -383,7 +383,7 @@ final class PtySession: @unchecked Sendable {
 
     /// See `AgentStatusMachine.dismissQuestion`.
     @discardableResult
-    func dismissAgentQuestion(askedAt since: TimeInterval) -> Bool {
+    func dismissAgentQuestion(askedAt since: TimeInterval? = nil) -> Bool {
         state.machine.dismissQuestion(askedAt: since)
     }
 

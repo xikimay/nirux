@@ -564,16 +564,20 @@ struct AgentStatusMachine {
         return askedQuestion
     }
 
-    /// The user puts aside the question asked at `since` without answering
-    /// it (Dismiss on its card): nothing says the agent waits any more, as
-    /// once answered. Its attention goes with it; a dialog's or a failed
-    /// turn's stays. The turn end stays the current one: a reply still
-    /// goes in. False for a question that is no longer the one asked.
+    /// The user puts the question aside without answering it (Dismiss on
+    /// its card, its row's menu, archiving its task): nothing says the
+    /// agent waits any more, as once answered. With `since`, only the
+    /// question asked then: false for one that is no longer the one asked.
+    /// Its attention goes with it, under whatever name a later event left
+    /// it (a subagent's work, then Claude's idle reminder, make it a
+    /// finished turn); a dialog still open keeps its own. (A failed turn
+    /// has no question: its end takes the place of the one that asked.)
+    /// The turn end stays the current one: a reply still goes in.
     @discardableResult
-    mutating func dismissQuestion(askedAt since: TimeInterval) -> Bool {
-        guard askedQuestion?.since == since else { return false }
+    mutating func dismissQuestion(askedAt since: TimeInterval? = nil) -> Bool {
+        guard let asked = askedQuestion, since == nil || asked.since == since else { return false }
         askedQuestion = nil
-        if case .askedInReply? = attentionReason { state = .idle }
+        if state == .needsAttention, openDialogs.isEmpty { state = .idle }
         return true
     }
 

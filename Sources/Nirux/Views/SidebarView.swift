@@ -43,6 +43,9 @@ final class SidebarView: NSView {
     /// (question, answer, the button): Yes, No or Reply… under a turn's
     /// question.
     var onTurnAnswer: ((SidebarTurnQuestion, SidebarTurnAnswer, NSView?) -> Void)?
+    /// "Dismiss Question" in a row's menu: (column id, when the question
+    /// was asked).
+    var onQuestionDismissed: ((UUID, TimeInterval) -> Void)?
     /// Resume on the row of a restored agent that hasn't resumed yet:
     /// (workspaceIndex, columnIndex, column id).
     var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
@@ -730,11 +733,15 @@ final class SidebarView: NSView {
         let cleanup = worktreeCleanupOffer?(workspaceIndex)
         menu.addClosureItem(title: "Review Branch") { act(.reviewBranch) }
         addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, flakyReason: workspace?.ciFlakyReason, act: act)
-        // The card's own Dismiss, for each question its blocks show.
-        let questions = workspace?.columns.compactMap(\.turnQuestion) ?? []
-        if !questions.isEmpty {
+        // The card's own Dismiss, for each question the row says: also
+        // while its card has no buttons to put it next to.
+        let asked = (workspace?.columns ?? []).compactMap { column -> (column: UUID, at: TimeInterval)? in
+            guard let id = column.id, let at = column.questionAskedAt else { return nil }
+            return (id, at)
+        }
+        if !asked.isEmpty {
             menu.addClosureItem(title: Self.dismissQuestionTitle) { [weak self] in
-                for question in questions { self?.onTurnAnswer?(question, .dismiss, nil) }
+                for question in asked { self?.onQuestionDismissed?(question.column, question.at) }
             }
         }
         if cleanup == .suggested { addWorktreeCleanupItem(to: menu, act: act) }
@@ -981,18 +988,19 @@ extension SidebarView {
             return
         }
         // Keep the toggle under the pointer for the next click. The
-        // document view isn't flipped, so a rebuild keeps the distance to
-        // the bottom: right for the Archived row, at the bottom with its
-        // list growing above it. The rail's tile has its list below it:
-        // keep the distance to the top.
+        // Archived row sits at the bottom with its list growing above it:
+        // it keeps its distance to the bottom, which the rebuild's own
+        // anchor (the top, or the topmost row) would give up. The rail's
+        // tile has its list below it: it keeps its distance to the top.
         let clip = contentScrollView.contentView
         let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
+        let originFromBottom = clip.bounds.origin.y
         rebuildContent()
-        if !isExpanded {
-            let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
-            let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
-            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
-        }
+        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
+        let originY = isExpanded
+            ? originFromBottom
+            : contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
         contentScrollView.reflectScrolledClipView(clip)
         // From the menu or ⌘P the header may be out of view.
         if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }

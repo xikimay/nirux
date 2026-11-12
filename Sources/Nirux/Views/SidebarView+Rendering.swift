@@ -13,6 +13,8 @@ extension SidebarView {
             rebuildSkippedDuringDrag = true
             return
         }
+        // Before the rows go: what the list hangs by.
+        let anchor = scrollAnchor()
         resetRenderState()
         guard isExpanded else {
             // Kept across rebuilds, put back by the next expanded one.
@@ -71,6 +73,7 @@ extension SidebarView {
             buildArchivedBlock(count: inactiveInfos.count, listed: listedInactiveInfos, listHeight: archivedListHeight)
         }
 
+        restoreScroll(to: anchor)
         refreshHoverTargetFromMouse()
         refreshApprovalArming()
         followActiveWorkspace(docHeight: docHeight)
@@ -80,6 +83,48 @@ extension SidebarView {
             revealsOnboardingCardOnNextBuild = false
             revealOnboardingCard()
         }
+    }
+
+    /// What the list hangs by while its rows are rebuilt. The document view
+    /// isn't flipped: left alone, a document that grows keeps its distance
+    /// to the bottom, and a row that takes one more line pushes all that
+    /// is above it up and out of view. So a list at its top stays at its
+    /// top, and a list scrolled down keeps its topmost row in view where
+    /// it is, whichever row changes height above or below.
+    struct ScrollAnchor {
+        /// The topmost row in view (its workspace's index); nil at the
+        /// top, or when no row shows.
+        var row: Int?
+        /// From the visible top down to that row's top.
+        var rowOffset: CGFloat = 0
+        /// The document's height hidden above the visible top.
+        var hiddenAbove: CGFloat
+    }
+
+    func scrollAnchor() -> ScrollAnchor {
+        let visible = contentScrollView.contentView.bounds
+        let hiddenAbove = max(0, contentDocumentView.frame.height - visible.maxY)
+        guard hiddenAbove > 0.5 else { return ScrollAnchor(hiddenAbove: 0) }
+        let rows = hitAreas.compactMap { area -> (index: Int, frame: NSRect)? in
+            guard case .workspace(let index) = area.region, area.frame.intersects(visible) else { return nil }
+            return (index, area.frame)
+        }
+        guard let top = rows.max(by: { $0.frame.maxY < $1.frame.maxY }) else { return ScrollAnchor(hiddenAbove: hiddenAbove) }
+        return ScrollAnchor(row: top.index, rowOffset: visible.maxY - top.frame.maxY, hiddenAbove: hiddenAbove)
+    }
+
+    /// Scrolls back to `anchor`, taken before the rows were rebuilt. A row
+    /// that left the list gives way to the height that was hidden above.
+    func restoreScroll(to anchor: ScrollAnchor) {
+        let clip = contentScrollView.contentView
+        let documentHeight = contentDocumentView.frame.height
+        let visibleTop = anchor.row.flatMap(workspaceFrame(for:)).map { $0.maxY + anchor.rowOffset }
+            ?? documentHeight - anchor.hiddenAbove
+        let highest = max(0, documentHeight - clip.bounds.height)
+        let origin = min(max(0, visibleTop - clip.bounds.height), highest)
+        guard abs(origin - clip.bounds.origin.y) > 0.01 else { return }
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: origin))
+        contentScrollView.reflectScrolledClipView(clip)
     }
 
     /// Scrolls the active workspace into view when it changed, or to the
@@ -303,8 +348,8 @@ extension SidebarView {
         card.views.forEach(addExpandedView)
         hitAreas += card.hitAreas
         let height = SidebarCatchUpCardRenderer.height(of: catchUp)
-        // A list taller than the sidebar keeps its distance to the bottom
-        // as it grows: the card would come in above the visible part.
+        // A list scrolled down keeps its topmost row where it is: the card
+        // would come in above the visible part.
         if revealsCatchUpOnNextBuild {
             revealsCatchUpOnNextBuild = false
             let frame = NSRect(x: 0, y: top - height, width: bounds.width, height: height)

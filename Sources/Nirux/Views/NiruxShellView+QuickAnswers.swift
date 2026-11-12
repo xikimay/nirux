@@ -66,17 +66,16 @@ extension NiruxShellView {
         )
     }
 
-    /// Yes, No, Reply… or Dismiss under a turn's question on a card (or
-    /// "Dismiss Question" in its row's menu), found by its column wherever
-    /// the card moved. Yes and No go in at once (or say why not); Reply…
-    /// opens a field next to the button; Dismiss puts the question aside.
+    /// Yes, No, Reply… or Dismiss under a turn's question on a card, found
+    /// by its column wherever the card moved. Yes and No go in at once (or
+    /// say why not); Reply… opens a field next to the button; Dismiss puts
+    /// the question aside.
     func answerFromCard(_ answer: SidebarTurnAnswer, to question: SidebarTurnQuestion, button: NSView?) {
-        guard let place = liveColumn(where: { $0.id == question.columnID }) else { return NSSound.beep() }
         if answer == .dismiss {
-            place.column.pty?.dismissAgentQuestion(askedAt: question.turnEndedAt)
-            return updateSidebar()
+            return dismissTurnQuestion(columnID: question.columnID, askedAt: question.turnEndedAt)
         }
-        guard let agentUUID = place.column.agentUUID else { return NSSound.beep() }
+        guard let place = liveColumn(where: { $0.id == question.columnID }), let agentUUID = place.column.agentUUID
+        else { return NSSound.beep() }
         guard let text = answer.typedText else {
             return showTurnReplyPopover(for: question, in: place.workspace, agentUUID: agentUUID, anchor: button)
         }
@@ -84,6 +83,27 @@ extension NiruxShellView {
             refuseQuickAnswer(in: place.workspace, columnIndex: place.columnIndex)
         }
         updateSidebar()
+    }
+
+    /// Dismiss on a question's card, "Dismiss Question" in its row's menu:
+    /// the question asked at `askedAt` in that column is put aside,
+    /// unanswered (`AgentStatusMachine.dismissQuestion`); a later one
+    /// stays. The user dealt with the row: it leaves the catch-up card, and
+    /// the turn end its workspace kept for a user away is seen.
+    func dismissTurnQuestion(columnID: UUID, askedAt: TimeInterval) {
+        defer { updateSidebar() }
+        guard let place = liveColumn(where: { $0.id == columnID }),
+              place.column.pty?.dismissAgentQuestion(askedAt: askedAt) == true
+        else { return }
+        if let index = workspaces.firstIndex(where: { $0 === place.workspace }) { noteCatchUpTaskAnswered(workspaceIndex: index) }
+        if place.workspace.notification == .finished { place.workspace.notification = nil }
+    }
+
+    /// An archived task asks nothing: the questions its agents' turns
+    /// ended on are put aside, or its row would stay listed, amber, in the
+    /// folded Archived list.
+    func dismissTurnQuestions(in workspace: WorkspaceState) {
+        for column in workspace.columns { column.pty?.dismissAgentQuestion() }
     }
 
     private func showTurnReplyPopover(

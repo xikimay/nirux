@@ -341,7 +341,16 @@ final class TurnEndClassificationTests: XCTestCase {
             TurnEndChoice(marker: nil, text: "Merge main in"),
         ])
         XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "A) Ship today\nB) Wait for the audit\nWhich?").map(\.marker), ["A)", "B)"])
-        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "(a) Ship today\n(2) Wait\n\nWhich?").map(\.marker), ["(a)", "(2)"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "(a) Ship today\n(b) Wait\n\nWhich?").map(\.marker), ["(a)", "(b)"])
+        // Of two lists in a row, the one next to the question.
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "Done:\n- x\n- y\n\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
+
+        // The list before a question that names no choice is what the turn
+        // did, and a line that goes on with an item is no question to it.
+        let report = "Done:\n\n- Added the retry\n- Updated the tests\n\nWant me to open a pull request?"
+        XCTAssertEqual(TurnEndText.choices(for: "Want me to open a pull request?", in: report), [])
+        XCTAssertEqual(TurnEndText.choices(for: "Laquelle préfères-tu ?", in: "- Livrer\n- Attendre\n\nLaquelle préfères-tu ?").count, 2)
+        XCTAssertEqual(TurnEndText.choices(for: "Which is fine?", in: "- A\n  Which is fine?\n- B\n- C"), [])
 
         let none = [
             "- One thing done\n\nWhich?": "one item is no choice",
@@ -349,6 +358,10 @@ final class TurnEndClassificationTests: XCTestCase {
             (1...7).map { "\($0). Step \($0)" }.joined(separator: "\n") + "\n\nWhich?": "a longer list is a report",
             "- Rebase\n- Merge\n- Which?": "a question among items",
             "    1. a\n    2. b\nWhich?": "code",
+            "Head.\n[…]\n- c\n- d\n\nWhich?": "a list the excerpt cut",
+            "Head.\n[…]\nthe end of an item\n- c\n- d\n\nWhich?": "under the rest of a cut line",
+            "3. C\n4. D\n\nWhich?": "a counted list that doesn't count from its start",
+            "a) A\nc) C\n\nWhich?": "letters out of order",
             "1. A\n2. B\n\nDone.": "no such question",
         ]
         for (message, why) in none {
@@ -840,6 +853,15 @@ final class TurnEndClassificationTests: XCTestCase {
         _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
         XCTAssertTrue(machine.dismissQuestion(askedAt: behindADialog))
         XCTAssertEqual(machine.state, .needsAttention, "the dialog still waits")
+        // Its attention under another name: a subagent worked on, then
+        // Claude's idle reminder called the turn finished.
+        try ask()
+        _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        _ = machine.apply(event(.notification, at: 70, notificationType: "idle_prompt"), isUserFocused: false)
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
+        XCTAssertTrue(machine.dismissQuestion(), "whichever stands (an archived task's)")
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertFalse(machine.dismissQuestion(), "none left")
 
         try ask()
         _ = machine.apply(event(.userPromptSubmit, at: 9), isUserFocused: true)

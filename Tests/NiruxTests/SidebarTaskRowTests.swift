@@ -224,6 +224,8 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(workspace([column()], pr: pullRequest("MERGED"), cleanup: .available).rowSummary.statusLineLimit(isSelected: true), 1)
         let broken = SidebarRowSummary(mark: .error, status: SidebarStatusLine(text: sentence, tone: .error), trailing: nil)
         XCTAssertEqual(broken.statusLineLimit(isSelected: false), 4, "what broke stops the task too")
+        // Its own line breaks would spend those lines on blanks.
+        XCTAssertEqual(status(workspace([column()], nextStep: "Write the importer\n\n then the export side ")), "Next · Write the importer then the export side")
 
         func render(_ info: WorkspaceInfo) -> SidebarWorkspaceCardRenderResult {
             SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
@@ -266,6 +268,70 @@ final class SidebarTaskRowTests: XCTestCase {
         let status = try XCTUnwrap(tall.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Next · \(sentence)" })
         let chip = try XCTUnwrap(tall.hitAreas.first { if case .column = $0.region { true } else { false } })
         XCTAssertLessThanOrEqual(chip.frame.maxY, status.frame.minY)
+    }
+
+    /// Rows change height as their text does. A list at its top stays at
+    /// its top, and a list scrolled down keeps its topmost row in view
+    /// where it is, whether a row above or below takes more lines.
+    func testListKeepsItsPlaceWhenARowChangesHeight() throws {
+        _ = NSApplication.shared
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 300))
+        let window = NSWindow(contentRect: sidebar.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = sidebar
+        defer { window.close() }
+        sidebar.isExpanded = true
+        let sentence = String(repeating: "waiting for the search team to rotate the staging key ", count: 4)
+        func rows(blocked: Set<Int>) -> [WorkspaceInfo] {
+            (0..<20).map { index in
+                WorkspaceInfo(
+                    id: "ws-\(index)", index: index, title: "Task \(index)", profileID: WorkspaceProfile.defaultID, isInactive: false,
+                    columnCount: 1, focusedColumn: 0, gitBranch: "fix/\(index)", notification: nil, isActive: false,
+                    columns: [column()], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil,
+                    blocker: blocked.contains(index) ? sentence : nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+                )
+            }
+        }
+        let clip = sidebar.contentScrollView.contentView
+        func hiddenAbove() -> CGFloat { sidebar.contentDocumentView.frame.height - clip.bounds.maxY }
+        /// From the visible top down to the row's top.
+        func place(of index: Int) throws -> CGFloat {
+            let row = try XCTUnwrap(sidebar.hitAreas.first { if case .workspace(index) = $0.region { true } else { false } })
+            return clip.bounds.maxY - row.frame.maxY
+        }
+        sidebar.update(profiles: [], workspaces: rows(blocked: []))
+        sidebar.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(sidebar.contentDocumentView.frame.height, 600, "a list taller than the sidebar")
+        XCTAssertEqual(hiddenAbove(), 0, accuracy: 0.5)
+        let short = sidebar.contentDocumentView.frame.height
+        sidebar.update(profiles: [], workspaces: rows(blocked: [15]))
+        XCTAssertGreaterThan(sidebar.contentDocumentView.frame.height, short, "a row out of view grew")
+        XCTAssertEqual(hiddenAbove(), 0, accuracy: 0.5, "the top stays")
+
+        clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y - 200))
+        sidebar.contentScrollView.reflectScrolledClipView(clip)
+        XCTAssertEqual(hiddenAbove(), 200, accuracy: 0.5)
+        let inView = try XCTUnwrap(sidebar.hitAreas.compactMap { area -> Int? in
+            guard case .workspace(let index) = area.region, clip.bounds.contains(area.frame) else { return nil }
+            return index
+        }.min())
+        let before = try place(of: inView)
+        sidebar.update(profiles: [], workspaces: rows(blocked: []))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row below shrank")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row above grew")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row below grew")
+
+        // Back at its top: what comes in above the first row shows.
+        clip.scroll(to: NSPoint(x: 0, y: sidebar.contentDocumentView.frame.height - clip.bounds.height))
+        sidebar.contentScrollView.reflectScrolledClipView(clip)
+        let space = ProfileInfo(
+            id: WorkspaceProfile.defaultID, name: "Acme", colorHex: "#78A3F7", isActive: true, workspaceCount: 20,
+            taskCount: 20, attention: nil
+        )
+        sidebar.update(profiles: [space], workspaces: rows(blocked: [0, 15]))
+        XCTAssertEqual(hiddenAbove(), 0, accuracy: 0.5, "the space picker, not hidden above the first row")
     }
 
     /// "Clean up" is a link over its own words: a click on "Merged" or

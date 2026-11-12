@@ -103,9 +103,11 @@ enum SidebarExpandedMetrics {
     static var questionFont: NSFont { Theme.Font.body }
     static let questionLineHeight: CGFloat = 15
     static let questionMaxLines = 8
-    /// A choice the message lists, under its marker.
+    /// A choice the message lists, under its marker: 18 points in, or
+    /// past a marker wider than "1.".
     static let choiceMaxLines = 6
     static let choiceIndent: CGFloat = 18
+    static let choiceMarkerGap: CGFloat = 6
     static let choiceGap: CGFloat = 2
     /// Between the choices and the question.
     static let questionGap: CGFloat = 5
@@ -116,7 +118,7 @@ enum SidebarExpandedMetrics {
     /// The choices the message lists, the question, then the buttons.
     @MainActor
     static func turnQuestionBlockHeight(for question: SidebarTurnQuestion, width: CGFloat) -> CGFloat {
-        let choices = SidebarQuestionText.height(of: question.choices.map(SidebarQuestionText.choice), width: width)
+        let choices = SidebarQuestionText.choices(question.choices).height(width: width)
         return (choices > 0 ? choices + questionGap : 0) + SidebarQuestionText.questionHeight(question.text, width: width)
             + actionRowGap + buttonHeight
     }

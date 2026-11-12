@@ -360,18 +360,20 @@ enum TurnEndText {
         return nil
     }
 
-    /// The choices `question` asks about, when `message` lists them right
-    /// before it, else right after: that list's items, in the message's
-    /// order and words, each cleaned for a few lines of a card. Two to
-    /// `maxItems` items, with at most a blank line between the list and
-    /// the question's paragraph. Anything else gives none: a longer list
-    /// is a report, and half a list of choices would mislead.
+    /// The choices `question` asks about, when it names a choice
+    /// (`asksToChoose`) and `message` lists them right before it, else
+    /// right after: that list's items, in the message's order and words,
+    /// each cleaned for a few lines of a card. Two to `maxItems` items of
+    /// one list, whole, with at most a blank line between the list and the
+    /// question's paragraph. Anything else gives none: a longer list is a
+    /// report, and half a list of choices would mislead.
     static func choices(
         for question: String, in message: String, maxItems: Int = 6, maxLength: Int = 200
     ) -> [TurnEndChoice] {
+        guard asksToChoose(question) else { return [] }
         let lines = Array(linesFromTheEnd(of: message).reversed())
         let raw = message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-        guard raw.count == lines.count, let paragraph = paragraph(holding: question, in: lines) else { return [] }
+        guard raw.count == lines.count, let paragraph = paragraph(holding: question, in: lines, raw: raw) else { return [] }
         for (first, step) in [(paragraph.lowerBound - 1, -1), (paragraph.upperBound, 1)] {
             let found = listItems(from: first, step: step, lines: lines, raw: raw, maxLength: maxLength)
             if (2...maxItems).contains(found.count) { return found }
@@ -379,12 +381,26 @@ enum TurnEndText {
         return []
     }
 
+    /// The question names a choice: "which", "option", "choice", and their
+    /// French. The list next to any other question is most often what the
+    /// turn did ("- Added the retry\n- Updated the tests\n\nWant me to open
+    /// a pull request?"), not what to choose from. Not "or": a question
+    /// that says "this or that" names its own alternatives.
+    static func asksToChoose(_ question: String) -> Bool {
+        question.lowercased().split { !$0.isLetter }.contains { choosingWords.contains(String($0)) }
+    }
+
+    private static let choosingWords: Set<String> = [
+        "which", "option", "options", "choice", "choices",
+        "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles", "choix",
+    ]
+
     /// The lines of the last paragraph of prose that holds `question` (the
     /// card's text: cleaned for one line, "…" where it was cut). A list
-    /// item is no such paragraph: a question among items has no choices
-    /// around it.
+    /// item is no such paragraph, nor a line that goes on with one: a
+    /// question among items has no choices around it.
     private static func paragraph(
-        holding question: String, in lines: [(trimmed: String, kind: LineKind)]
+        holding question: String, in lines: [(trimmed: String, kind: LineKind)], raw: [Substring]
     ) -> Range<Int>? {
         guard let needle = AgentText.clean(question.hasSuffix("…") ? String(question.dropLast()) : question, maxLength: 10_000)
         else { return nil }
@@ -397,7 +413,10 @@ enum TurnEndText {
             var start = end - 1
             while start > 0, lines[start - 1].kind == .prose, choiceItem(lines[start - 1].trimmed) == nil { start -= 1 }
             let text = lines[start..<end].map(\.trimmed).joined(separator: " ")
-            if AgentText.clean(text, maxLength: 10_000)?.contains(needle) == true { return start..<end }
+            if AgentText.clean(text, maxLength: 10_000)?.contains(needle) == true {
+                let goesOnWithAnItem = start > 0 && lines[start - 1].kind == .prose && indent(of: raw[start]) >= 2
+                return goesOnWithAnItem ? nil : start..<end
+            }
             end = start
         }
         return nil
@@ -407,7 +426,10 @@ enum TurnEndText {
     /// line) and goes on in `step`'s direction, in the message's order:
     /// lines that start an item, the indented lines that go on with one,
     /// and a single blank line between two of them. An item deeper than
-    /// the list's own goes on with the one above it.
+    /// the list's own goes on with the one above it. Of two lists in a
+    /// row (bullets, then numbers), the one next to the question. None for
+    /// a list an excerpt's "[…]" may have cut, nor for a counted one that
+    /// doesn't count from its start.
     private static func listItems(
         from first: Int, step: Int, lines: [(trimmed: String, kind: LineKind)], raw: [Substring], maxLength: Int
     ) -> [TurnEndChoice] {
@@ -428,6 +450,10 @@ enum TurnEndText {
                 break
             }
         }
+        // Where it stops: the cut of a long message, or the rest of a line
+        // it cut, may hide the list's other items.
+        func isCut(_ index: Int) -> Bool { lines.indices.contains(index) && lines[index].kind == .gap }
+        guard !isCut(index), !isCut(index + step) else { return [] }
         block.sort()
         let depths = block.filter { choiceItem(lines[$0].trimmed) != nil }.map { indent(of: raw[$0]) }
         guard let depth = depths.min() else { return [] }
@@ -442,10 +468,28 @@ enum TurnEndText {
                 return []
             }
         }
-        let choices = items.compactMap { item in
+        // One list: those marked like the item next to the question.
+        let nearestFirst = step < 0 ? Array(items.reversed()) : items
+        guard let nearest = nearestFirst.first else { return [] }
+        var list = Array(nearestFirst.prefix { ($0.marker == nil) == (nearest.marker == nil) })
+        if step < 0 { list.reverse() }
+        guard nearest.marker == nil || countsFromItsStart(list.compactMap(\.marker)) else { return [] }
+        let choices = list.compactMap { item in
             AgentText.clean(item.parts.joined(separator: " "), maxLength: maxLength).map { TurnEndChoice(marker: item.marker, text: $0) }
         }
-        return choices.count == items.count ? choices : []
+        return choices.count == list.count ? choices : []
+    }
+
+    /// "1." "2." "3.", "a)" "b)", "(A)" "(B)": numbers or letters in
+    /// order from the first.
+    private static func countsFromItsStart(_ markers: [String]) -> Bool {
+        let labels = markers.map { $0.filter { $0.isLetter || $0.isNumber }.lowercased() }
+        if labels.allSatisfy({ Int($0) != nil }) {
+            return labels.compactMap { Int($0) } == Array(1...labels.count)
+        }
+        let letters = labels.compactMap { $0.count == 1 ? $0.unicodeScalars.first?.value : nil }
+        let first = UInt32(UnicodeScalar("a").value)
+        return letters.count == labels.count && letters == Array(first..<first + UInt32(labels.count))
     }
 
     /// A list item's marker and text: a bullet (no marker to show), or a
