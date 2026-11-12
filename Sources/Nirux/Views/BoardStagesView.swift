@@ -48,6 +48,12 @@ final class BoardStagesView: NSView {
     var onOrder: ((BoardStages.Order) -> Void)?
     /// A line was clicked, or a "Merged today" entry with a task: its id.
     var onOpen: ((String) -> Void)?
+    /// A line's Merge station was clicked where that changes the queue's
+    /// list: its section's id, and what the click does.
+    var onOffer: ((_ section: String, BoardStages.QueueOffer) -> Void)?
+    /// The link ending a line's phrase was clicked: its section's id, the
+    /// line's, and the link.
+    var onLink: ((_ section: String, _ line: String, BoardStages.Link) -> Void)?
 
     private(set) var content: Content?
     /// The lines drawn, from the top, for the tests to click through.
@@ -195,6 +201,8 @@ final class BoardStagesView: NSView {
         foldButtons = [:]
         mergedViews = [:]
         captions = []
+        // The section being listed.
+        var sectionID = ""
         func add(_ line: BoardStages.Line, link: BoardStagesLineView.Link) {
             let view: BoardStagesLineView
             if let kept = keptLines.removeValue(forKey: line.id) {
@@ -207,6 +215,13 @@ final class BoardStagesView: NSView {
                     self.onOpen?(made.line.id)
                 }
                 view = made
+            }
+            // The line's section may be another one than when its view was made.
+            let section = sectionID
+            view.onOffer = { [weak self] offer in self?.onOffer?(section, offer) }
+            view.onLink = { [weak self, weak view] link in
+                guard let self, let view else { return }
+                self.onLink?(section, view.line.id, link)
             }
             lineViews.append(view)
             items.append(.line(view))
@@ -230,6 +245,7 @@ final class BoardStagesView: NSView {
         }
         for section in sections {
             let id = section.id
+            sectionID = id
             let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
             header.show(title: section.title, detail: section.detail, status: section.status)
             sectionHeaders[id] = header
