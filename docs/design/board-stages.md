@@ -322,9 +322,19 @@ to the queue yet.
   - **In the view**, the station is a target 22 pt wide, the line's height,
     while a click there acts; elsewhere, and where it is refused or locked,
     it is the line's. Under the pointer it says what a click does: a plus
-    in a bright ring to join, a minus in place of its number to leave. A
-    click is a press and its release on the station, while it still offers
-    what was pressed: a list locked meanwhile changes nothing.
+    in a ring to join, a minus in place of its number to leave. The ring
+    is bright, or keeps the state's colour when the line is at Merge: amber
+    is never hidden.
+  - **A click** is a press and its release on the station, where the line
+    is in sight, while it still offers what was pressed: a list locked
+    meanwhile, or a pull request that joined it, changes nothing. The
+    station acts at each click (a second one, at once, takes back the
+    first); a double click still opens a task once.
+  - **The Board follows the pointer**, not each line: lines move under a
+    still pointer (a new order, a scroll, a resize), which no event of
+    theirs says. It asks where the pointer is after each of those, and
+    lights the one station under it; none while the app isn't the active
+    one, whose windows don't hear the pointer leave.
 - **Retarget** is the Board's own call to GitHub, not the queue's: a queue
   that runs, or that holds the pull request, changes nothing to it.
   - In a repository that isn't saved, the phrase reads "Base #52 merged",
@@ -336,8 +346,11 @@ to the queue yet.
 - **A link says what its click does** under the pointer: "Bases #53 on main,
   as GitHub does when a merged branch is deleted"; "Checks the worktree, then
   asks what goes". It is drawn apart, in the accent colour, right after the
-  words before it: on a narrow Board those give way, and the link stays
-  whole. Its target is the line's height.
+  words before it (`Phrase.wordsBeforeLink`): on a narrow Board those give
+  way, down to nothing when a letter or two is all the room they have, and
+  the link stays whole. Where the words are cut or gone, the link says the
+  whole phrase under the pointer, before what its click does. Its target is
+  the line's height, over its own words.
 - **Under the pointer**, what the line can't hold:
   - its title: the task's branch and worktree ("feat/login ·
     /Users/me/app.feat-login"), with "main checkout", "not checked out" or
@@ -359,12 +372,14 @@ to the queue yet.
     address.
 
   Each place says its own: the title, the phrase, the link, the pull request,
-  and each station over 22 pt around it.
+  and each station over 22 pt around it. A place is registered again only
+  when it moves: a tooltip being read stays up while its words change.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
-  "Retarget to main").
+  "Retarget to main"), and do what a click then does. Where the station
+  refuses, the line's help says why.
 - **A hand** shows where a click does something of its own: on a station
-  that acts, on a link.
+  that acts, on a link, as far as the line is in sight.
 
 ## Known limits
 
@@ -392,8 +407,10 @@ to the queue yet.
 - **"Merging" also shows** while the queue waits for a run on the base before
   it merges, as in the table.
 - **"Merged today" lists what the Board read**: the 100 merged pull requests
-  opened last ([project-board.md](project-board.md), section 6). One opened
-  before those and merged today isn't on it.
+  opened last and the 100 updated last ([project-board.md](project-board.md),
+  section 6). One merged today is missing only if it is behind 100 merged
+  ones opened since, and 100 merged pull requests were updated after it:
+  merged, commented on, reviewed, labelled, locked, or their branch deleted.
 - **Checks are read from the pull request's rollup**, which doesn't say a
   commit status from a check run, nor two workflows of one name apart. A
   required check that only a commit status reports reads green here, while the
