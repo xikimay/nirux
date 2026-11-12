@@ -306,7 +306,7 @@ final class CatchUpTests: XCTestCase {
         @MainActor func state(_ label: String) {
             watch.log("""
                 \(label): visible \(scroll.documentVisibleRect), clip frame \(clip.frame), document \(document.frame), \
-                style \(scroll.scrollerStyle.rawValue) (preferred \(NSScroller.preferredScrollerStyle.rawValue)), \
+                style \(scroll.scrollerStyle.rawValue), \
                 scroller \(scroll.verticalScroller.map { "\($0.frame) hidden \($0.isHidden)" } ?? "-"), \
                 needs layout \(sidebar.needsLayout)/\(scroll.needsLayout), sidebar \(sidebar.bounds), scale \(window.backingScaleFactor)
                 """)
@@ -358,6 +358,72 @@ final class CatchUpTests: XCTestCase {
             NSScroller.preferredScrollerStyle.rawValue, "\(dismiss.frame)", "\(nowDismiss.map { "\($0)" } ?? "-")"
         ), full: !met || longestSpin > 0.5)
         XCTAssertTrue(met, "timed out waiting for the card in view (visible was \(visibleBefore))")
+    }
+
+    /// DO NOT MERGE. The scroller style changes while the card comes in:
+    /// what the test's check sees then.
+    func testZZTheScrollerStyleChangesMidTest() throws {
+        ZZScrollerStyle.note(#function)
+        let rows = (0..<30).map { index in
+            WorkspaceInfo(
+                id: "ws\(index)", index: index, title: "task \(index)", profileID: WorkspaceProfile.defaultID,
+                isInactive: false, columnCount: 1, focusedColumn: 0, gitBranch: "feat/\(index)", notification: nil,
+                isActive: index == 29, columns: [ColumnInfo(
+                    index: 0, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
+                    terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, attentionReason: nil
+                )],
+                prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
+                lastSummary: nil, lastActivityAt: nil
+            )
+        }
+        for trigger in ["none", "notification", "set"] {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
+            let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 300))
+            let scroll = sidebar.contentScrollView
+            window.contentView = sidebar
+            sidebar.layoutSubtreeIfNeeded()
+            sidebar.isExpanded = true
+            sidebar.update(profiles: [], workspaces: rows)
+            sidebar.catchUp = SidebarCatchUp(
+                since: "since 12:40",
+                rows: (0..<3).map { SidebarCatchUp.Row(workspaceID: "ws\($0)", title: "task \($0)", kind: .done, text: "Done") },
+                otherSpaces: []
+            )
+            sidebar.refreshCatchUpCard(reveal: true)
+            let dismiss = try XCTUnwrap(sidebar.hitAreas.first { area in
+                guard case .catchUp(.dismiss) = area.region else { return false }
+                return true
+            })
+            let before = "style \(scroll.scrollerStyle.rawValue), clip \(scroll.contentView.frame)"
+            switch trigger {
+            case "notification":
+                // As AppKit posts it once it has looked at the pointing devices.
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+                }
+            case "set":
+                DispatchQueue.main.async { MainActor.assumeIsolated { scroll.scrollerStyle = .legacy } }
+            default:
+                break
+            }
+            let deadline = Date().addingTimeInterval(2)
+            var spins = 0
+            var metAt: Int?
+            while Date() < deadline {
+                if metAt == nil, scroll.documentVisibleRect.contains(dismiss.frame) { metAt = spins }
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                spins += 1
+            }
+            let visible = scroll.documentVisibleRect
+            let inHeight = visible.minY <= dismiss.frame.minY && dismiss.frame.maxY <= visible.maxY
+            print("""
+                ZZ flip (\(trigger)): before \(before); after style \(scroll.scrollerStyle.rawValue), clip \(scroll.contentView.frame), \
+                visible \(visible), dismiss \(dismiss.frame), the check holds at the end \(visible.contains(dismiss.frame)) \
+                (first held at spin \(metAt.map(String.init) ?? "never")), in height \(inHeight), preferred \(NSScroller.preferredScrollerStyle.rawValue)
+                """)
+        }
     }
 
     /// A row says what its task's row says: what it asks, what broke, that

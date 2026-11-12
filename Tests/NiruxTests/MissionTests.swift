@@ -491,7 +491,7 @@ extension MissionTests {
     }
 
     func testCenterRetriesProcessingFileUntilMissionSaveSucceeds() async throws {
-        let watch = ZZStallWatch(label: "Mission", sampleAfter: 0.4)
+        let watch = ZZStallWatch(label: "Mission", sampleAfter: 0.1)
         let directory = try makeDirectory()
         let missionsURL = directory.appendingPathComponent("missions.json")
         let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
@@ -545,7 +545,7 @@ extension MissionTests {
         let restoredStore = MissionStore(fileURL: missionsURL)
         restoredStore.load()
         XCTAssertEqual(restoredStore.missions[0].events.map(\.id), [pending.id])
-        watch.finish(String(format: "waited %.3f s, delivered %@", waited, "\(store.missions[0].events.map(\.id) == [pending.id])"), full: waited > 0.25)
+        watch.finish(String(format: "waited %.3f s, delivered %@", waited, "\(store.missions[0].events.map(\.id) == [pending.id])"), full: waited > 0.15)
     }
 
     func testPendingEventSurvivesRestartAndDeliversOnce() throws {

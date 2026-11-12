@@ -56,7 +56,7 @@ while (( SECONDS < deadline )); do
     run "$work/run-$runs.log" "$class" 300 || status=$?
     summary=$({ grep -E 'Executed [0-9]+ tests?, with' "$work/run-$runs.log" || true; } | tail -1 | sed -E 's/^[[:space:]]*//')
     echo "run $runs: exit $status in $((SECONDS - started))s · ${summary:-no summary}"
-    { grep -E '^ZZ [A-Za-z ]+: ' "$work/run-$runs.log" || true; } | grep -vE 'starts [0-9.]+ s into|watching' | sed 's/^/    /'
+    { grep -E '^ZZ [A-Za-z ()]+: ' "$work/run-$runs.log" || true; } | cut -c1-900 | sed 's/^/    /'
     if [[ $status -ne 0 ]]; then
         failed=$((failed + 1))
         echo "::group::run $runs failed"

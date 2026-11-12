@@ -134,8 +134,9 @@ final class ZZStallWatch: @unchecked Sendable {
     }
 }
 
-/// DO NOT MERGE. The preferred scroller style, and each time it changes in
-/// this process.
+/// DO NOT MERGE. Each time the preferred scroller style changes in this
+/// process, and when each test starts. Never reads the style itself: the
+/// first read is what starts AppKit's look at the pointing devices.
 @MainActor
 enum ZZScrollerStyle {
     private static var observer: NSObjectProtocol?
@@ -143,21 +144,14 @@ enum ZZScrollerStyle {
     static func note(_ test: String) {
         if observer == nil {
             _ = ZZStallWatch.processStart
-            print("ZZ scroller style: watching, AppleShowScrollBars \(UserDefaults.standard.string(forKey: "AppleShowScrollBars") ?? "-")")
             observer = NotificationCenter.default.addObserver(
                 forName: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil, queue: nil
             ) { _ in
                 let stack = ZZStallWatch.stack()
                 let at = CACurrentMediaTime() - ZZStallWatch.processStart
-                if Thread.isMainThread {
-                    MainActor.assumeIsolated {
-                        print(String(format: "ZZ scroller style: CHANGED %.3f s into the process, preferred now %ld :: %@", at, NSScroller.preferredScrollerStyle.rawValue, stack))
-                    }
-                } else {
-                    print(String(format: "ZZ scroller style: CHANGED off the main thread %.3f s into the process :: %@", at, stack))
-                }
+                print(String(format: "ZZ scroller style: CHANGED %.3f s into the process (main thread %@) :: %@", at, "\(Thread.isMainThread)", stack))
             }
         }
-        print(String(format: "ZZ scroller style: %@ starts %.3f s into the process, preferred %ld", test, CACurrentMediaTime() - ZZStallWatch.processStart, NSScroller.preferredScrollerStyle.rawValue))
+        print(String(format: "ZZ scroller style: %@ starts %.3f s into the process", test, CACurrentMediaTime() - ZZStallWatch.processStart))
     }
 }
