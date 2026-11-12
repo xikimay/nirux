@@ -98,6 +98,13 @@ extension BoardStages {
         var link: Link?
         /// What the line can't hold, for its tooltip.
         var detail: String?
+
+        /// The words before the link, for whoever draws the link apart:
+        /// "Merged ·". Nil without a link.
+        var wordsBeforeLink: String? {
+            guard let link, text.hasSuffix(link.title) else { return nil }
+            return String(text.dropLast(link.title.count)).trimmingCharacters(in: .whitespaces)
+        }
     }
 
     /// What a click on a line's Merge station changes in the next Start's

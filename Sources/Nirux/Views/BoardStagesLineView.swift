@@ -50,13 +50,20 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     var onClick: (() -> Void)?
     var onOffer: ((BoardStages.QueueOffer) -> Void)?
     var onLink: ((BoardStages.Link) -> Void)?
+    /// The mouse moved with its button down, or came up, at this place in
+    /// the window: no other event says where the pointer is meanwhile.
+    var onPointer: ((NSPoint) -> Void)?
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
-    /// The pointer is on the Merge station.
-    private(set) var isStationHovered = false
-    private var hoverArea: NSTrackingArea?
+    /// The pointer is on the Merge station, as the Board follows it. The
+    /// station says what a click does only while one acts.
+    var isStationHovered = false {
+        didSet { if isStationHovered != oldValue { needsDisplay = true } }
+    }
     /// What the words and the stations say under the pointer, by where.
     private(set) var hints: [(rect: NSRect, text: String)] = []
+    /// The places registered as tooltips'.
+    private var toolTipRects: [NSRect] = []
 
     private typealias Metrics = BoardStagesView.Metrics
 
@@ -99,28 +106,23 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         self.line = line
         self.link = link
         apply()
-        updateTrackingAreas()
         needsLayout = true
         needsDisplay = true
     }
 
     private func apply() {
         titleLabel.stringValue = line.title
-        let phrase = line.phrase
-        if let link = phrase.link, phrase.text.hasSuffix(link.title) {
-            phraseLabel.stringValue = String(phrase.text.dropLast(link.title.count)).trimmingCharacters(in: .whitespaces)
-            linkLabel.stringValue = link.title
-        } else {
-            phraseLabel.stringValue = phrase.text
-            linkLabel.stringValue = ""
-        }
+        phraseLabel.stringValue = line.phrase.wordsBeforeLink ?? line.phrase.text
+        linkLabel.stringValue = shownLink?.title ?? ""
         phraseLabel.textColor = Self.phraseColor(of: line.state)
         pullRequestLabel.stringValue = line.pullRequest
         setAccessibilityLabel(Self.accessibilityLabel(of: line, link: link))
+        // What the Merge station says where it refuses: VoiceOver has no pointer to put on it.
+        setAccessibilityHelp(line.offer?.blocked)
     }
 
-    /// The link drawn: the phrase's, when the phrase ends with it.
-    private var shownLink: BoardStages.Link? { linkLabel.stringValue.isEmpty ? nil : line.phrase.link }
+    /// The link drawn apart: the phrase's, when the phrase ends with it.
+    private var shownLink: BoardStages.Link? { line.phrase.wordsBeforeLink == nil ? nil : line.phrase.link }
 
     /// What a click on the Merge station does; nil where it does nothing
     /// more than anywhere on the line.
@@ -174,13 +176,17 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         noRailLabel.isHidden = line.rail != nil || columns.rail.width == 0
         // The link keeps its width right after the words before it, which
         // give way first. (Two labels' own margins are a space between them.)
-        let hasLink = shownLink != nil
-        let linkWidth = hasLink ? min(ColumnHeaderView.textWidth(linkLabel), columns.phrase.width) : 0
-        let wordsWidth = hasLink
-            ? min(ColumnHeaderView.textWidth(phraseLabel), columns.phrase.width - linkWidth)
-            : columns.phrase.width
+        let linkWidth = shownLink == nil ? 0 : min(ColumnHeaderView.textWidth(linkLabel), columns.phrase.width)
+        var wordsWidth = columns.phrase.width
+        if shownLink != nil {
+            let whole = ColumnHeaderView.textWidth(phraseLabel)
+            wordsWidth = min(whole, columns.phrase.width - linkWidth)
+            // A letter or two and an ellipsis say nothing: the words go,
+            // and the link's tooltip has them.
+            if wordsWidth < min(whole, Self.fewestWords) { wordsWidth = 0 }
+        }
         phraseLabel.frame = NSRect(x: columns.phrase.minX, y: 9, width: wordsWidth, height: 16)
-        phraseLabel.isHidden = columns.phrase.width == 0
+        phraseLabel.isHidden = wordsWidth == 0
         linkLabel.frame = NSRect(x: phraseLabel.frame.maxX, y: 9, width: linkWidth, height: 16)
         linkLabel.isHidden = linkWidth == 0
         for (label, frame) in [(pullRequestLabel, columns.pullRequest), (timeLabel, columns.time)] {
@@ -190,6 +196,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         layoutHints(stations: columns.stations)
         window?.invalidateCursorRects(for: self)
     }
+
+    /// Under this, the words before a link aren't worth their place.
+    private static let fewestWords: CGFloat = 30
 
     // MARK: Targets
 
@@ -204,17 +213,39 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         BoardStagesView.Columns(width: bounds.width, height: bounds.height).stations.last.map(stationRect(at:))
     }
 
-    /// The link, the line's height.
+    /// The link, the line's height, over its words and no further: what
+    /// is beside it is the phrase's. (No width where it has no room.)
     private var linkRect: NSRect? {
-        guard shownLink != nil, !linkLabel.isHidden else { return nil }
-        return NSRect(x: linkLabel.frame.minX - 2, y: 0, width: linkLabel.frame.width + 4, height: bounds.height)
+        guard shownLink != nil else { return nil }
+        return NSRect(x: linkLabel.frame.minX, y: 0, width: linkLabel.frame.width, height: bounds.height)
+    }
+
+    /// A click at `point` changes the queue's list: on the Merge station,
+    /// while one acts there.
+    func actsOnStation(at point: NSPoint) -> Bool {
+        actingOffer != nil && mergeStationRect?.contains(point) == true
     }
 
     /// What a click at `point` does.
     func target(at point: NSPoint) -> Target {
-        if let offer = actingOffer, mergeStationRect?.contains(point) == true { return .offer(offer) }
+        if let offer = actingOffer, actsOnStation(at: point) { return .offer(offer) }
         if let link = shownLink, linkRect?.contains(point) == true { return .link(link) }
         return .line
+    }
+
+    /// The part of the line in sight: what the scroll view it is in
+    /// shows of it. (Not `visibleRect`, which isn't held to the line's
+    /// own bounds in a window that was never shown.)
+    private var rectInSight: NSRect {
+        guard let clip = enclosingScrollView?.contentView else { return bounds }
+        return bounds.intersection(convert(clip.bounds, from: clip))
+    }
+
+    /// Where a hand shows: what a click does something of its own on, as
+    /// far as it is in sight (a cursor's place isn't clipped by what
+    /// scrolls the line).
+    var handRects: [NSRect] {
+        [actingOffer == nil ? nil : mergeStationRect, linkRect].compactMap { $0?.intersection(rectInSight) }.filter { !$0.isEmpty }
     }
 
     // MARK: Tooltips
@@ -235,8 +266,11 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             ColumnHeaderView.textWidth(label) > label.frame.width ? text : nil
         }
         add(titleLabel.frame, [whole(titleLabel, line.title), line.tooltips.title])
-        if !phraseLabel.isHidden { add(phraseLabel.frame, [whole(phraseLabel, line.phrase.text), line.phrase.detail]) }
-        if let link = shownLink { add(linkRect, [whole(linkLabel, link.title), link.hint]) }
+        // The phrase whole where it is cut: on its words, which give way
+        // first, and on its link, which may be all that is left of it.
+        let phrase = whole(phraseLabel, line.phrase.text)
+        if !phraseLabel.isHidden { add(phraseLabel.frame, [phrase, line.phrase.detail]) }
+        if let link = shownLink { add(linkRect, [phrase, link.hint]) }
         if !pullRequestLabel.isHidden {
             add(pullRequestLabel.frame, [whole(pullRequestLabel, line.pullRequest), line.tooltips.pullRequest])
         }
@@ -245,8 +279,13 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
                 add(stationRect(at: x), [line.tooltips.stations[station]])
             }
         }
+        // Their words are asked for when shown: only a place that moved
+        // is registered again, so a tooltip being read stays up.
+        let rects = hints.map(\.rect)
+        guard rects != toolTipRects else { return }
+        toolTipRects = rects
         removeAllToolTips()
-        for hint in hints { addToolTip(hint.rect, owner: self, userData: nil) }
+        for rect in rects { addToolTip(rect, owner: self, userData: nil) }
     }
 
     /// What the pointer shows at `point`, if anything.
@@ -306,7 +345,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         Theme.Color.textDisabled.setStroke()
         path.stroke()
         if case .stack(let number, _) = link {
-            Self.draw("\(number)", at: NSPoint(x: x, y: midY), radius: 8, ring: Theme.Color.textDisabled, text: Theme.Color.textSecondary)
+            Self.draw(number: number, at: NSPoint(x: x, y: midY), radius: 8, ring: Theme.Color.textDisabled, text: Theme.Color.textSecondary)
         }
     }
 
@@ -316,7 +355,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// hollow one ahead, nothing where there is no Reviews station. The
     /// queue's number sits in a ring on Merge, in the state's colour when
     /// Merge is the current station. Under the pointer, the Merge station
-    /// says what a click does: "+" joins the queue's list, "−" leaves it.
+    /// says what a click does: a plus joins the queue's list, a minus
+    /// leaves it, in a ring that keeps the state's colour when the line
+    /// is at Merge (amber is never hidden), and is bright otherwise.
     static func draw(
         _ rail: BoardStages.Rail, state: BoardStages.State, stations: [CGFloat], y: CGFloat,
         hovered: BoardStages.QueueOffer.Change? = nil
@@ -341,12 +382,12 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         for (index, mark) in rail.marks.enumerated() where index < stations.count {
             let center = NSPoint(x: stations[index], y: y)
             if index == BoardStages.Station.merge.rawValue, let hovered {
-                draw(sign: hovered, at: center)
+                draw(sign: hovered, at: center, ring: mark == .current ? BoardStagesView.color(of: state) : Theme.Color.textPrimary)
                 continue
             }
             if index == BoardStages.Station.merge.rawValue, let order = rail.queueOrder {
                 let isCurrent = mark == .current
-                draw("\(order)", at: center, radius: 7.5,
+                draw(number: order, at: center, radius: 7.5,
                      ring: isCurrent ? BoardStagesView.color(of: state) : Theme.Color.textDisabled,
                      text: isCurrent ? Theme.Color.textPrimary : Theme.Color.textSecondary)
                 continue
@@ -384,29 +425,29 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         circle.stroke()
     }
 
-    /// What a click on the Merge station does, in a bright ring: a plus
-    /// joins the queue's list, a minus leaves it. Drawn, not set in type:
-    /// a sign sits on the station's centre.
-    private static func draw(sign: BoardStages.QueueOffer.Change, at center: NSPoint) {
-        drawRing(at: center, radius: 7.5, Theme.Color.textPrimary)
+    /// What a click on the Merge station does, in a ring: a plus joins
+    /// the queue's list, a minus leaves it. Drawn, not set in type: the
+    /// sign sits on the station's centre, its 2 pt strokes on whole pixels.
+    private static func draw(sign: BoardStages.QueueOffer.Change, at center: NSPoint, ring: NSColor) {
+        drawRing(at: center, radius: 7.5, ring)
         let strokes = NSBezierPath()
-        strokes.move(to: NSPoint(x: center.x - 3.5, y: center.y))
-        strokes.line(to: NSPoint(x: center.x + 3.5, y: center.y))
+        strokes.move(to: NSPoint(x: center.x - 4, y: center.y))
+        strokes.line(to: NSPoint(x: center.x + 4, y: center.y))
         if sign == .add {
-            strokes.move(to: NSPoint(x: center.x, y: center.y - 3.5))
-            strokes.line(to: NSPoint(x: center.x, y: center.y + 3.5))
+            strokes.move(to: NSPoint(x: center.x, y: center.y - 4))
+            strokes.line(to: NSPoint(x: center.x, y: center.y + 4))
         }
-        strokes.lineWidth = 1.5
+        strokes.lineWidth = 2
         Theme.Color.textPrimary.setStroke()
         strokes.stroke()
     }
 
     /// A number in a ring, on the canvas: a stack's place, the queue's
     /// order. Two digits are set smaller, to stay inside.
-    private static func draw(_ mark: String, at center: NSPoint, radius: CGFloat, ring: NSColor, text: NSColor) {
+    private static func draw(number: Int, at center: NSPoint, radius: CGFloat, ring: NSColor, text: NSColor) {
         drawRing(at: center, radius: radius, ring)
-        let string = NSAttributedString(string: mark, attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: mark.count < 2 ? 9 : 7.5, weight: .semibold), .foregroundColor: text
+        let string = NSAttributedString(string: "\(number)", attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: number < 10 ? 9 : 7.5, weight: .semibold), .foregroundColor: text
         ])
         let size = string.size()
         string.draw(at: NSPoint(x: center.x - size.width / 2, y: center.y - size.height / 2))
@@ -420,16 +461,25 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     }
 
     override func mouseDown(with event: NSEvent) {
-        pressed = event.clickCount == 1 ? target(at: convert(event.locationInWindow, from: nil)) : nil
+        let target = target(at: convert(event.locationInWindow, from: nil))
+        // A double click opens a task once; a station or a link acts at each click.
+        pressed = target == .line && event.clickCount != 1 ? nil : target
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onPointer?(event.locationInWindow)
     }
 
     /// The click is the mouse going up on what it went down on, as that
-    /// still is: a station that stopped offering what was pressed, or a
-    /// release elsewhere on the line, does nothing.
+    /// still is, and where the line is in sight: a station that stopped
+    /// offering what was pressed, or a release elsewhere, does nothing.
     override func mouseUp(with event: NSEvent) {
-        defer { pressed = nil }
+        defer {
+            pressed = nil
+            onPointer?(event.locationInWindow)
+        }
         let point = convert(event.locationInWindow, from: nil)
-        guard let pressed, bounds.contains(point), target(at: point) == pressed else { return }
+        guard let pressed, rectInSight.contains(point), target(at: point) == pressed else { return }
         switch pressed {
         case .line: onClick?()
         case .offer(let offer): onOffer?(offer)
@@ -442,18 +492,21 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         return true
     }
 
-    /// What the mouse reaches on the Merge station and the link, by name.
+    /// What the mouse reaches on the Merge station and the link, by name,
+    /// and as a click: only while the line still offers it.
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
         var actions: [NSAccessibilityCustomAction] = []
         if let offer = actingOffer {
             actions.append(NSAccessibilityCustomAction(name: offer.title) { [weak self] in
-                self?.onOffer?(offer)
+                guard let self, self.actingOffer == offer, let onOffer = self.onOffer else { return false }
+                onOffer(offer)
                 return true
             })
         }
-        if let link = line.phrase.link {
+        if let link = shownLink {
             actions.append(NSAccessibilityCustomAction(name: link.title) { [weak self] in
-                self?.onLink?(link)
+                guard let self, self.shownLink == link, let onLink = self.onLink else { return false }
+                onLink(link)
                 return true
             })
         }
@@ -462,37 +515,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     // MARK: Under the pointer
 
-    /// The pointer is followed only where the Merge station says what a
-    /// click does.
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea { removeTrackingArea(hoverArea) }
-        hoverArea = nil
-        guard actingOffer != nil else { return setStationHovered(false) }
-        let area = NSTrackingArea(
-            rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self
-        )
-        addTrackingArea(area)
-        hoverArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { pointerMoved(event) }
-    override func mouseMoved(with event: NSEvent) { pointerMoved(event) }
-    override func mouseExited(with event: NSEvent) { setStationHovered(false) }
-
-    private func pointerMoved(_ event: NSEvent) {
-        setStationHovered(actingOffer != nil && mergeStationRect?.contains(convert(event.locationInWindow, from: nil)) == true)
-    }
-
-    private func setStationHovered(_ isHovered: Bool) {
-        guard isHovered != isStationHovered else { return }
-        isStationHovered = isHovered
-        needsDisplay = true
-    }
-
-    /// A hand where a click does something of its own.
     override func resetCursorRects() {
-        if actingOffer != nil, let rect = mergeStationRect { addCursorRect(rect, cursor: .pointingHand) }
-        if let rect = linkRect { addCursorRect(rect, cursor: .pointingHand) }
+        for rect in handRects { addCursorRect(rect, cursor: .pointingHand) }
     }
 }
