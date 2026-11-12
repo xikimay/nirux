@@ -72,7 +72,10 @@ final class BoardStagesView: NSView {
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
     private var sectionHeaders: [String: BoardStagesSectionHeaderView] = [:]
+    private var foldButtons: [String: NSButton] = [:]
     private var mergedViews: [String: BoardStagesMergedView] = [:]
+    /// The stacks' titles, from the top.
+    private var captions: [NSTextField] = []
 
     private enum Item {
         case sectionHeader(BoardStagesSectionHeaderView)
@@ -143,8 +146,8 @@ final class BoardStagesView: NSView {
 
     /// Draws `content`. A refresh that only moves the clock touches the
     /// times that changed and nothing else; one that changes lines updates
-    /// them where they are, so a line keeps its view (a press in flight,
-    /// its tooltip) as long as it is listed.
+    /// them where they are, so what is listed keeps its view (a press in
+    /// flight, the keyboard, a tooltip).
     func show(_ content: Content) {
         guard content != self.content else { return }
         let previous = self.content
@@ -157,6 +160,8 @@ final class BoardStagesView: NSView {
         summaryLabel.stringValue = content.header.summary
         leadDot.layer?.backgroundColor = content.header.lead.map { Self.color(of: $0.state).cgColor }
         leadLabel.stringValue = content.header.lead?.text ?? ""
+        // Where the Lead's line has no room, its dot says it.
+        leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
         if content.sections != previous?.sections { buildItems() }
         showTimes()
@@ -168,22 +173,30 @@ final class BoardStagesView: NSView {
         lineViews.forEach { $0.showTime(now: now) }
     }
 
-    /// The scrolling area's items for the sections shown. A line, a
-    /// repository's header and its "Merged today" keep their view from one
-    /// content to the next, by id.
+    /// The scrolling area's items for the sections shown. What is still
+    /// listed keeps its view from one content to the next: a line by its
+    /// id, a repository's header, fold and "Merged today" by its section's,
+    /// a stack's title by its place.
     private func buildItems() {
         let sections = content?.sections ?? []
         let ids = Set(sections.map(\.id))
         unfolded.formIntersection(ids)
         unfoldedMerged.formIntersection(ids)
-        var reusable = Dictionary(lineViews.map { ($0.line.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // What is kept is taken out of these: a view is listed once.
+        var keptLines = Dictionary(lineViews.map { ($0.line.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var keptHeaders = sectionHeaders
+        var keptFolds = foldButtons
+        var keptMerged = mergedViews
+        var keptCaptions = captions[...]
         var items: [Item] = []
-        var lines: [BoardStagesLineView] = []
-        var headers: [String: BoardStagesSectionHeaderView] = [:]
-        var mergeds: [String: BoardStagesMergedView] = [:]
+        lineViews = []
+        sectionHeaders = [:]
+        foldButtons = [:]
+        mergedViews = [:]
+        captions = []
         func add(_ line: BoardStages.Line, link: BoardStagesLineView.Link) {
             let view: BoardStagesLineView
-            if let kept = reusable.removeValue(forKey: line.id) {
+            if let kept = keptLines.removeValue(forKey: line.id) {
                 kept.update(line, link: link)
                 view = kept
             } else {
@@ -194,7 +207,7 @@ final class BoardStagesView: NSView {
                 }
                 view = made
             }
-            lines.append(view)
+            lineViews.append(view)
             items.append(.line(view))
         }
         func add(_ unit: BoardStages.Unit) {
@@ -205,11 +218,9 @@ final class BoardStagesView: NSView {
                     add(subtask, link: .subtask(isLast: index == subtasks.count - 1))
                 }
             case .stack(let title, let stacked):
-                let caption = NSTextField(labelWithString: title)
-                caption.font = Theme.Font.caption
-                caption.textColor = Theme.Color.textTertiary
-                caption.lineBreakMode = .byTruncatingTail
-                caption.allowsExpansionToolTips = true
+                let caption = keptCaptions.popFirst() ?? Self.makeCaption()
+                caption.stringValue = title
+                captions.append(caption)
                 items.append(.caption(caption))
                 for (index, line) in stacked.enumerated() {
                     add(line, link: .stack(number: index + 1, isLast: index == stacked.count - 1))
@@ -217,45 +228,57 @@ final class BoardStagesView: NSView {
             }
         }
         for section in sections {
-            let header = sectionHeaders[section.id] ?? BoardStagesSectionHeaderView()
+            let id = section.id
+            let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
             header.show(title: section.title, detail: section.detail, status: section.status)
-            headers[section.id] = header
+            sectionHeaders[id] = header
             items.append(.sectionHeader(header))
             section.lines.units.forEach(add)
             let withoutTask = section.lines.withoutTask
             if !withoutTask.isEmpty {
-                let isUnfolded = unfolded.contains(section.id)
+                let isUnfolded = unfolded.contains(id)
                 let count = withoutTask.reduce(0) { $0 + $1.lines.count }
-                let fold = NSButton(title: "", target: self, action: #selector(foldClicked(_:)))
-                fold.identifier = NSUserInterfaceItemIdentifier(section.id)
-                fold.isBordered = false
-                fold.alignment = .left
+                let fold = keptFolds.removeValue(forKey: id) ?? makeFold(section: id)
                 fold.attributedTitle = NSAttributedString(
                     string: "\(isUnfolded ? "▾" : "▸") Pull requests without a task · \(count)",
                     attributes: [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary]
                 )
                 fold.setAccessibilityLabel("Pull requests without a task, \(count)")
                 fold.setAccessibilityExpanded(isUnfolded)
+                foldButtons[id] = fold
                 items.append(.fold(fold))
                 if isUnfolded { withoutTask.forEach(add) }
             }
             if !section.lines.merged.isEmpty {
-                let merged = mergedViews[section.id] ?? BoardStagesMergedView()
-                let id = section.id
+                let merged = keptMerged.removeValue(forKey: id) ?? BoardStagesMergedView()
                 merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id))
                 merged.onOpen = { [weak self] line in self?.onOpen?(line) }
                 merged.onUnfold = { [weak self] in self?.unfoldMerged(section: id) }
-                mergeds[id] = merged
+                mergedViews[id] = merged
                 items.append(.merged(merged))
             }
         }
-        sectionHeaders = headers
-        mergedViews = mergeds
-        let kept = Set(items.map { ObjectIdentifier($0.view) })
-        for view in documentView.subviews where !kept.contains(ObjectIdentifier(view)) { view.removeFromSuperview() }
-        for item in items where item.view.superview !== documentView { documentView.addSubview(item.view) }
+        // In the items' order, as VoiceOver reads them; what stays is moved,
+        // not taken out and put back.
+        documentView.subviews = items.map(\.view)
         self.items = items
-        lineViews = lines
+    }
+
+    private static func makeCaption() -> NSTextField {
+        let caption = NSTextField(labelWithString: "")
+        caption.font = Theme.Font.caption
+        caption.textColor = Theme.Color.textTertiary
+        caption.lineBreakMode = .byTruncatingTail
+        caption.allowsExpansionToolTips = true
+        return caption
+    }
+
+    private func makeFold(section id: String) -> NSButton {
+        let fold = NSButton(title: "", target: self, action: #selector(foldClicked(_:)))
+        fold.identifier = NSUserInterfaceItemIdentifier(id)
+        fold.isBordered = false
+        fold.alignment = .left
+        return fold
     }
 
     // MARK: - Layout
@@ -277,14 +300,18 @@ final class BoardStagesView: NSView {
         /// far from its right one (a little more: the queue's ring).
         static let firstStation: CGFloat = 10
         static let lastStation: CGFloat = 11
-        static let pullRequestWidth: CGFloat = 100
+        /// "#1451 · on #1450" whole.
+        static let pullRequestWidth: CGFloat = 114
         static let timeWidth: CGFloat = 50
         /// The task's column: two fifths of the Board, between these.
         static let minimumTask: CGFloat = 140
         static let maximumTask: CGFloat = 280
         /// What the phrase keeps before the pull request, then the time,
-        /// take their columns.
+        /// take their columns; and under what it isn't worth showing.
         static let minimumPhrase: CGFloat = 180
+        static let shortestPhrase: CGFloat = 70
+        /// What the name keeps before the order switch gives way.
+        static let minimumName: CGFloat = 60
         /// A sub-task's or a stack line's inset, and its connector's x.
         static let inset: CGFloat = 26
         static let connectorX: CGFloat = padding + dot / 2
@@ -296,11 +323,16 @@ final class BoardStagesView: NSView {
     ///   jump: widening a column moves no rail back.
     /// - Below about 760 pt the rail tightens, its stations closer, before
     ///   any title is cut further.
-    /// - The phrase takes the rest. The pull request, then the time, show
-    ///   once the phrase keeps `minimumPhrase` beside them.
+    /// - The phrase takes the rest, from `shortestPhrase`. The pull
+    ///   request, then the time, show once the phrase keeps
+    ///   `minimumPhrase` beside them.
+    /// - A Board too narrow for a rail beside a title (about 300 pt) keeps
+    ///   each line's dot and title.
     struct Columns: Equatable {
         var task: NSRect
+        /// No width when the Board is too narrow for it.
         var rail: NSRect
+        /// No width when the Board is too narrow for it.
         var phrase: NSRect
         /// Nil when the Board is too narrow for it.
         var pullRequest: NSRect?
@@ -309,10 +341,13 @@ final class BoardStagesView: NSView {
         init(width: CGFloat, height: CGFloat = Metrics.lineHeight) {
             let inner = max(0, width - 2 * Metrics.padding)
             let eased = (Metrics.compactRailWidth + 0.4 * (width - 600)).rounded(.down)
-            let railWidth = min(Metrics.railWidth, max(Metrics.compactRailWidth, eased))
+            let wholeRail = min(Metrics.railWidth, max(Metrics.compactRailWidth, eased))
+            let showsRail = inner - wholeRail - Metrics.gap >= Metrics.minimumTask
+            let railWidth = showsRail ? wholeRail : 0
             let wanted = min(Metrics.maximumTask, max(Metrics.minimumTask, (inner * 0.4).rounded(.down)))
-            let taskWidth = min(wanted, max(0, inner - railWidth - Metrics.gap))
+            let taskWidth = showsRail ? wanted : inner
             var phraseWidth = max(0, inner - taskWidth - railWidth - 2 * Metrics.gap)
+            if phraseWidth < Metrics.shortestPhrase { phraseWidth = 0 }
             let showsPullRequest = phraseWidth - Metrics.pullRequestWidth - Metrics.gap >= Metrics.minimumPhrase
             if showsPullRequest { phraseWidth -= Metrics.pullRequestWidth + Metrics.gap }
             let showsTime = showsPullRequest && phraseWidth - Metrics.timeWidth - Metrics.gap >= Metrics.minimumPhrase
@@ -329,8 +364,10 @@ final class BoardStagesView: NSView {
             time = showsTime ? next(Metrics.timeWidth) : nil
         }
 
-        /// Where the rail's four stations sit, from the Board's left edge.
+        /// Where the rail's four stations sit, from the Board's left edge;
+        /// none without a rail.
         var stations: [CGFloat] {
+            guard rail.width > 0 else { return [] }
             let step = (rail.width - Metrics.firstStation - Metrics.lastStation) / CGFloat(BoardStages.Station.allCases.count - 1)
             return BoardStages.Station.allCases.indices.map { (rail.minX + Metrics.firstStation + CGFloat($0) * step).rounded() }
         }
@@ -356,13 +393,15 @@ final class BoardStagesView: NSView {
         // On a tightened rail only its two ends are named: the four
         // titles would run into each other.
         let stations = columns.stations
-        let isTight = stations[1] - stations[0] < 50
+        let isTight = stations.count > 1 && stations[1] - stations[0] < 50
         for (index, title) in stationTitles.enumerated() {
+            guard index < stations.count else {
+                title.isHidden = true
+                continue
+            }
             let titleWidth = ColumnHeaderView.textWidth(title)
             title.isHidden = isTight && index != 0 && index != stationTitles.count - 1
-            // Inside the rail's column: "Merge" doesn't run into "Now".
-            let x = min(max(stations[index] - titleWidth / 2, columns.rail.minX - 2), columns.rail.maxX - titleWidth)
-            title.frame = NSRect(x: x.rounded(), y: titlesY, width: titleWidth, height: 14)
+            title.frame = NSRect(x: (stations[index] - titleWidth / 2).rounded(), y: titlesY, width: titleWidth, height: 14)
         }
         let top = Metrics.headerHeight + Metrics.titlesHeight
         separator.frame = NSRect(x: 0, y: top - 1, width: width, height: 1)
@@ -393,33 +432,46 @@ final class BoardStagesView: NSView {
     }
 
     /// The space: its colour and name first, then at the right the order
-    /// switch, before it the Lead where there is room, and what the space
-    /// holds in what is left. The name is the last to give way.
+    /// switch, before it the Lead, and what the space holds in what is
+    /// left. On a narrow Board they give way in this order: the summary,
+    /// the Lead's line, the order switch; the name is the last to. The
+    /// Lead's dot keeps its place: its state is never hidden.
     private func layoutHeader(width: CGFloat) {
         let pad = Metrics.padding
         let midY = Metrics.headerHeight / 2
         spaceDot.frame = NSRect(x: pad, y: midY - 5, width: 10, height: 10)
-        let switchWidth = ceil(orderSwitch.fittingSize.width)
-        orderSwitch.frame = NSRect(x: width - pad - switchWidth, y: midY - 11, width: switchWidth, height: 22)
         let nameX = spaceDot.frame.maxX + 8
-        var right = orderSwitch.frame.minX - 12
-        let nameWidth = min(ColumnHeaderView.textWidth(nameLabel), max(0, right - nameX))
+        let hasLead = content?.header.lead != nil
+        let dotRoom = hasLead ? Metrics.dot + 12 : 0
+        var right = width - pad
+        let switchWidth = ceil(orderSwitch.fittingSize.width)
+        orderSwitch.isHidden = right - switchWidth - 12 - dotRoom - nameX < Metrics.minimumName
+        if !orderSwitch.isHidden {
+            orderSwitch.frame = NSRect(x: right - switchWidth, y: midY - 11, width: switchWidth, height: 22)
+            right = orderSwitch.frame.minX - 12
+        }
+        let nameWidth = min(ColumnHeaderView.textWidth(nameLabel), max(0, right - dotRoom - nameX))
         nameLabel.frame = NSRect(x: nameX, y: midY - 10, width: nameWidth, height: 20)
+
         let free = right - nameLabel.frame.maxX - 12
-        let leadWidth = min(ColumnHeaderView.textWidth(leadLabel), free - Metrics.dot - 8)
+        let wholeLead = ColumnHeaderView.textWidth(leadLabel)
+        let leadWidth = min(wholeLead, free - Metrics.dot - 8)
         // (A space without a Lead has an empty line: no width.)
-        let showsLead = leadWidth >= 60
-        leadLabel.isHidden = !showsLead
-        leadDot.isHidden = !showsLead
-        if showsLead {
+        let showsLeadLine = !orderSwitch.isHidden && leadWidth >= 60
+        leadLabel.isHidden = !showsLeadLine
+        leadDot.isHidden = !hasLead
+        if showsLeadLine {
             leadLabel.frame = NSRect(x: right - leadWidth, y: midY - 8, width: leadWidth, height: 16)
-            leadDot.frame = NSRect(
-                x: leadLabel.frame.minX - 8 - Metrics.dot, y: midY - Metrics.dot / 2, width: Metrics.dot, height: Metrics.dot
-            )
+            right = leadLabel.frame.minX - 8
+        }
+        if !leadDot.isHidden {
+            leadDot.frame = NSRect(x: right - Metrics.dot, y: midY - Metrics.dot / 2, width: Metrics.dot, height: Metrics.dot)
             right = leadDot.frame.minX - 12
         }
+        // What the space holds, where 60 pt are left for it: never beside
+        // a Lead's line that is cut, nor beside its dot alone.
         let summaryX = nameLabel.frame.maxX + 12
-        summaryLabel.isHidden = right - summaryX < 60
+        summaryLabel.isHidden = orderSwitch.isHidden || right - summaryX < 60
         summaryLabel.frame = NSRect(x: summaryX, y: midY - 8, width: max(0, right - summaryX), height: 16)
     }
 
@@ -464,11 +516,8 @@ final class BoardStagesView: NSView {
 
     @objc private func foldClicked(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
-        let hadKeyboard = window?.firstResponder === sender
         if unfolded.remove(id) == nil { unfolded.insert(id) }
         rebuild()
-        // The button was replaced: the keyboard stays on the fold.
-        if hadKeyboard, let fold = foldButton(section: id) { window?.makeFirstResponder(fold) }
     }
 
     private func unfoldMerged(section id: String) {
@@ -483,22 +532,13 @@ final class BoardStagesView: NSView {
     }
 
     /// The fold of a section's pull requests without a task, when it has some.
-    func foldButton(section id: String) -> NSButton? {
-        for case .fold(let button) in items where button.identifier?.rawValue == id { return button }
-        return nil
-    }
+    func foldButton(section id: String) -> NSButton? { foldButtons[id] }
 
     /// A section's "Merged today", when it has one.
-    func mergedView(section id: String) -> BoardStagesMergedView? {
-        for case .merged(let view) in items where mergedViews[id] === view { return view }
-        return nil
-    }
+    func mergedView(section id: String) -> BoardStagesMergedView? { mergedViews[id] }
 
     /// A section's header, while the section is shown.
-    func sectionHeader(section id: String) -> BoardStagesSectionHeaderView? {
-        for case .sectionHeader(let view) in items where sectionHeaders[id] === view { return view }
-        return nil
-    }
+    func sectionHeader(section id: String) -> BoardStagesSectionHeaderView? { sectionHeaders[id] }
 }
 
 /// The scrolling area: its lines run from the top.

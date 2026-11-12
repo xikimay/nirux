@@ -1,19 +1,18 @@
 import AppKit
 
 /// The line closing a section: "MERGED TODAY", then the pull requests
-/// merged since midnight, the newest first. Two rows at most, then
-/// "+12 more": a day of twenty merges doesn't push the next repository
-/// off the Board.
+/// merged since midnight: those whose task needs the user, then the
+/// others, the newest first. Two rows at most, then "+12 more": a day of
+/// twenty merges doesn't push the next repository off the Board.
 @MainActor
 final class BoardStagesMergedView: NSView {
     let caption = NSTextField(labelWithString: "")
-    /// One per pull request, the newest first.
+    /// One per pull request, in the order shown.
     private(set) var entries: [BoardStagesMergedEntryView] = []
     /// "+12 more": shows every pull request merged today.
     let moreButton = NSButton(title: "", target: nil, action: nil)
     var onOpen: ((String) -> Void)?
     var onUnfold: (() -> Void)?
-    private var merged: [BoardStages.Merged] = []
     private var isUnfolded = false
 
     private static let rowHeight: CGFloat = 22
@@ -35,19 +34,24 @@ final class BoardStagesMergedView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// A pull request still listed keeps its entry, by its number.
     func show(_ merged: [BoardStages.Merged], now: TimeInterval, isUnfolded: Bool) {
         self.isUnfolded = isUnfolded
-        guard merged != self.merged else { return }
-        self.merged = merged
-        entries.forEach { $0.removeFromSuperview() }
-        entries = merged.map { pullRequest in
-            let entry = BoardStagesMergedEntryView(pullRequest, now: now)
-            entry.onClick = { [weak self] in
-                if let line = pullRequest.lineID { self?.onOpen?(line) }
+        // Amber is never behind "+12 more".
+        let inOrder = merged.filter(\.needsYou) + merged.filter { !$0.needsYou }
+        var kept = Dictionary(entries.map { ($0.pullRequest.number, $0) }, uniquingKeysWith: { first, _ in first })
+        entries = inOrder.map { pullRequest in
+            if let entry = kept.removeValue(forKey: pullRequest.number) {
+                entry.show(pullRequest, now: now)
+                return entry
             }
-            addSubview(entry)
+            let entry = BoardStagesMergedEntryView(pullRequest, now: now)
+            entry.onClick = { [weak self, weak entry] in
+                if let line = entry?.pullRequest.lineID { self?.onOpen?(line) }
+            }
             return entry
         }
+        subviews = [caption] + entries + [moreButton]
     }
 
     /// Lays the entries out for `width`, each row starting under the
@@ -80,16 +84,23 @@ final class BoardStagesMergedView: NSView {
         moreButton.isHidden = shown.count == entries.count
         if !moreButton.isHidden {
             func fit() -> CGFloat {
-                moreButton.attributedTitle = NSAttributedString(string: "+\(entries.count - shown.count) more", attributes: [
-                    .font: Theme.Font.body, .foregroundColor: Theme.Color.textTertiary
-                ])
-                moreButton.setAccessibilityLabel("\(entries.count - shown.count) more pull requests merged today")
+                // More of them need the user than two rows hold: it says so.
+                let hidden = entries.dropFirst(shown.count)
+                let waiting = hidden.filter(\.pullRequest.needsYou).count
+                let needs = waiting == 0 ? nil : "\(waiting) \(waiting == 1 ? "needs" : "need") you"
+                moreButton.attributedTitle = NSAttributedString(
+                    string: (["+\(hidden.count) more"] + (needs.map { [$0] } ?? [])).joined(separator: " · "),
+                    attributes: [.font: Theme.Font.body, .foregroundColor: waiting == 0 ? Theme.Color.textTertiary : Theme.Color.waiting]
+                )
+                moreButton.setAccessibilityLabel(
+                    (["\(hidden.count) more pull requests merged today"] + (needs.map { [$0] } ?? [])).joined(separator: ", ")
+                )
                 return ceil(moreButton.fittingSize.width)
             }
             var moreWidth = fit()
             var origin = shown.last.map { NSPoint(x: $0.frame.maxX + 18, y: $0.frame.minY) }
                 ?? NSPoint(x: left, y: 12 + CGFloat(firstRow) * Self.rowHeight)
-            if let last = shown.last, shown.count > 1, origin.x + moreWidth > limit {
+            while let last = shown.last, shown.count > 1, origin.x + moreWidth > limit {
                 origin = last.frame.origin
                 shown.removeLast()
                 moreWidth = fit()
@@ -115,7 +126,7 @@ final class BoardStagesMergedView: NSView {
 /// open here.
 @MainActor
 final class BoardStagesMergedEntryView: NSView {
-    let pullRequest: BoardStages.Merged
+    private(set) var pullRequest: BoardStages.Merged
     let titleLabel = NSTextField(labelWithString: "")
     let detailLabel = NSTextField(labelWithString: "")
     var onClick: (() -> Void)?
@@ -128,13 +139,9 @@ final class BoardStagesMergedEntryView: NSView {
     init(_ pullRequest: BoardStages.Merged, now: TimeInterval) {
         self.pullRequest = pullRequest
         super.init(frame: .zero)
-        let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: pullRequest.mergedAt), now: Date(timeIntervalSince1970: now))
-        titleLabel.stringValue = pullRequest.title
         titleLabel.font = Theme.Font.body
         titleLabel.textColor = Theme.Color.textSecondary
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.allowsExpansionToolTips = true
-        detailLabel.stringValue = "#\(pullRequest.number) · \(time)"
         detailLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         detailLabel.textColor = Theme.Color.textTertiary
         for label in [titleLabel, detailLabel] {
@@ -142,6 +149,22 @@ final class BoardStagesMergedEntryView: NSView {
             addSubview(label)
         }
         setAccessibilityElement(true)
+        apply(now: now)
+    }
+
+    /// Shows another state of the pull request, in the same view.
+    func show(_ pullRequest: BoardStages.Merged, now: TimeInterval) {
+        guard pullRequest != self.pullRequest else { return }
+        self.pullRequest = pullRequest
+        apply(now: now)
+        needsLayout = true
+        needsDisplay = true
+    }
+
+    private func apply(now: TimeInterval) {
+        let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: pullRequest.mergedAt), now: Date(timeIntervalSince1970: now))
+        titleLabel.stringValue = pullRequest.title
+        detailLabel.stringValue = "#\(pullRequest.number) · \(time)"
         setAccessibilityRole(pullRequest.lineID == nil ? .staticText : .button)
         setAccessibilityLabel(
             "\(pullRequest.title), #\(pullRequest.number), merged at \(time)" + (pullRequest.needsYou ? ", needs you" : "")
@@ -166,6 +189,10 @@ final class BoardStagesMergedEntryView: NSView {
         let titleWidth = max(0, min(ColumnHeaderView.textWidth(titleLabel), bounds.width - titleX - 4 - detailWidth))
         titleLabel.frame = NSRect(x: titleX, y: 1, width: titleWidth, height: 16)
         detailLabel.frame = NSRect(x: titleLabel.frame.maxX + 4, y: 2, width: detailWidth, height: 15)
+        // The entry takes the mouse for its words: a title that is cut
+        // shows whole under the pointer.
+        let whole = titleWidth < ColumnHeaderView.textWidth(titleLabel) ? pullRequest.title : nil
+        if toolTip != whole { toolTip = whole }
     }
 
     override func draw(_ dirtyRect: NSRect) {
