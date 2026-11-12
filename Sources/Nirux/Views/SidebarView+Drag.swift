@@ -68,8 +68,11 @@ extension SidebarView {
         }
         workspaceDrag = drag
         var lastDragEvent: NSEvent?
+        // When a tick first found the press gone, its mouse-up not here
+        // (`clock`).
+        var releasedAt: CFTimeInterval?
 
-        while true {
+        tracking: while true {
             guard let event = window.nextEvent(
                 matching: Self.gestureEventMask,
                 until: Date(timeIntervalSinceNow: Self.eventTimeout),
@@ -77,15 +80,21 @@ extension SidebarView {
                 dequeue: true
             ) else {
                 // Timeout tick: bail if the gesture can no longer finish.
-                if !window.isVisible || NSEvent.pressedMouseButtons & 1 == 0 { break }
+                if rowPressIsLost(in: window, since: &releasedAt) { break }
                 continue
             }
             switch event.type {
             case .leftMouseDragged:
+                // Drags still come: the press holds as far as the events
+                // say (events posted to the app move no button).
+                releasedAt = nil
                 lastDragEvent = event
                 dragMoved(event, drag: &drag)
                 workspaceDrag = drag
             case .periodic:
+                // A drag's own ticks keep the timeout above from ever
+                // coming.
+                if rowPressIsLost(in: window, since: &releasedAt) { break tracking }
                 // Keeps autoscroll running while the cursor holds still
                 // past the sidebar edge.
                 if drag.isDragging, let lastDragEvent {
@@ -114,6 +123,29 @@ extension SidebarView {
             }
         }
         finishWorkspaceDrag()
+    }
+
+    /// At a tick of a row gesture (a timeout, a drag's periodic event):
+    /// whether its press is lost. The button up, or the window gone, the
+    /// mouse-up is on its way behind what is queued, or it went elsewhere
+    /// (a modal, another app): the gesture would then hold the sidebar's
+    /// updates, and a drag the keyboard, until the next click. It gets as
+    /// long as the timeout to come, and is never taken ahead of the drags
+    /// and keys queued before it.
+    private func rowPressIsLost(in window: NSWindow, since releasedAt: inout CFTimeInterval?) -> Bool {
+        guard !rowPressHolds(window) else {
+            releasedAt = nil
+            return false
+        }
+        let now = clock()
+        guard let released = releasedAt else {
+            releasedAt = now
+            return false
+        }
+        // Queued already (the app was busy): it comes in its turn.
+        return now - released >= Self.eventTimeout && window.nextEvent(
+            matching: .leftMouseUp, until: .distantPast, inMode: .eventTracking, dequeue: false
+        ) == nil
     }
 
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
@@ -221,7 +253,7 @@ extension SidebarView {
                 inMode: .eventTracking,
                 dequeue: true
             ) else {
-                if !window.isVisible || NSEvent.pressedMouseButtons & 1 == 0 { return }
+                if !rowPressHolds(window) { return }
                 continue
             }
             switch event.type {
@@ -341,8 +373,9 @@ extension SidebarView {
     }
 
     /// Tear down drag state/visuals, then repair whatever was suppressed
-    /// mid-drag: apply the deferred data update, or redo a skipped
-    /// layout()-driven rebuild.
+    /// mid-drag: apply the deferred data update, and make the rebuild
+    /// that was skipped if that update made none (the same data, under a
+    /// signature already stored: `animates`, the catch-up card).
     private func finishWorkspaceDrag() {
         let hadDragVisuals = dragDimView != nil
         workspaceDrag = nil
@@ -361,9 +394,7 @@ extension SidebarView {
             update(
                 profiles: deferred.profiles, workspaces: deferred.workspaces
             )
-        } else if rebuildSkippedDuringDrag {
-            rebuildContent()
         }
-        rebuildSkippedDuringDrag = false
+        if rebuildSkippedDuringDrag { rebuildContent() }
     }
 }
