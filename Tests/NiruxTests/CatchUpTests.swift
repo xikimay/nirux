@@ -13,6 +13,7 @@ final class CatchUpTests: XCTestCase {
     /// are away, until every one is over. Read whole each time: a lock's
     /// notifications that reach an inactive app late leave nothing behind.
     func testEveryWayOfLeavingIsAway() {
+        ZZScrollerStyle.note(#function)
         var tracker = AwayTracker(now: 0)
         XCTAssertEqual(tracker.update(missing: [.appActive], at: 10), .wentAway)
         XCTAssertNil(tracker.update(missing: [.appActive, .screenUnlocked], at: 20))
@@ -59,6 +60,7 @@ final class CatchUpTests: XCTestCase {
     /// later absence puts its own ahead and keeps the rest; × takes the
     /// card away.
     func testTheCardListsWhatEndedWhileAway() throws {
+        ZZScrollerStyle.note(#function)
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             // The rail draws no card.
@@ -162,6 +164,7 @@ final class CatchUpTests: XCTestCase {
     /// The click that activated Nirux, or a double click, never lands on
     /// the card's rows as they come or move.
     func testThePressesWaitForTheCardToStand() throws {
+        ZZScrollerStyle.note(#function)
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             if !shell.isSidebarExpanded { harness.runPaletteCommand("Show/Hide Sidebar") }
@@ -218,6 +221,7 @@ final class CatchUpTests: XCTestCase {
     /// Five rows, then "N more"; another space's tasks get a line that
     /// goes there.
     func testMoreRowsAndOtherSpaces() throws {
+        ZZScrollerStyle.note(#function)
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let home = shell.activeProfileID
@@ -258,6 +262,7 @@ final class CatchUpTests: XCTestCase {
     /// A list taller than the sidebar: the card comes into view, not above
     /// the visible part.
     func testTheCardComesIntoView() throws {
+        ZZScrollerStyle.note(#function)
         let rows = (0..<30).map { index in
             WorkspaceInfo(
                 id: "ws\(index)", index: index, title: "task \(index)", profileID: WorkspaceProfile.defaultID,
@@ -270,14 +275,48 @@ final class CatchUpTests: XCTestCase {
                 lastSummary: nil, lastActivityAt: nil
             )
         }
+        let watch = ZZStallWatch(label: "CatchUp")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.close() }
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 300))
+        let scroll = sidebar.contentScrollView
+        let clip = scroll.contentView
+        let document = sidebar.contentDocumentView
+        clip.postsFrameChangedNotifications = true
+        document.postsFrameChangedNotifications = true
+        let center = NotificationCenter.default
+        let observers = [
+            center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: nil) { _ in
+                let stack = ZZStallWatch.stack()
+                MainActor.assumeIsolated { watch.log("CLIP bounds \(clip.bounds) :: \(stack)") }
+            },
+            center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: nil) { _ in
+                let stack = ZZStallWatch.stack()
+                MainActor.assumeIsolated { watch.log("CLIP frame \(clip.frame) :: \(stack)") }
+            },
+            center.addObserver(forName: NSView.frameDidChangeNotification, object: document, queue: nil) { _ in
+                MainActor.assumeIsolated { watch.log("DOCUMENT frame \(document.frame), clip at \(clip.bounds.origin)") }
+            },
+            center.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil, queue: nil) { _ in
+                watch.log("PREFERRED SCROLLER STYLE CHANGED")
+            }
+        ]
+        defer { observers.forEach(center.removeObserver) }
+        @MainActor func state(_ label: String) {
+            watch.log("""
+                \(label): visible \(scroll.documentVisibleRect), clip frame \(clip.frame), document \(document.frame), \
+                style \(scroll.scrollerStyle.rawValue) (preferred \(NSScroller.preferredScrollerStyle.rawValue)), \
+                scroller \(scroll.verticalScroller.map { "\($0.frame) hidden \($0.isHidden)" } ?? "-"), \
+                needs layout \(sidebar.needsLayout)/\(scroll.needsLayout), sidebar \(sidebar.bounds), scale \(window.backingScaleFactor)
+                """)
+        }
         window.contentView = sidebar
         sidebar.layoutSubtreeIfNeeded()
+        state("laid out")
         sidebar.isExpanded = true
         sidebar.update(profiles: [], workspaces: rows)
+        state("rows in")
         let visibleBefore = sidebar.contentScrollView.documentVisibleRect
         sidebar.catchUp = SidebarCatchUp(
             since: "since 12:40",
@@ -285,18 +324,46 @@ final class CatchUpTests: XCTestCase {
             otherSpaces: []
         )
         sidebar.refreshCatchUpCard(reveal: true)
+        // Queued after the reveal's own block: the main queue reached here.
+        DispatchQueue.main.async { MainActor.assumeIsolated { state("the main queue ran past the reveal") } }
         let dismiss = try XCTUnwrap(sidebar.hitAreas.first { area in
             guard case .catchUp(.dismiss) = area.region else { return false }
             return true
         })
-        waitFor("the card in view (visible was \(visibleBefore))") {
-            sidebar.contentScrollView.documentVisibleRect.contains(dismiss.frame)
+        state("card in, dismiss \(dismiss.frame)")
+        // The test's own wait, counted.
+        let condition = { sidebar.contentScrollView.documentVisibleRect.contains(dismiss.frame) }
+        let deadline = Date().addingTimeInterval(15)
+        var spins = 0
+        var longestSpin = 0.0
+        while !condition(), Date() < deadline {
+            let began = CACurrentMediaTime()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            let took = CACurrentMediaTime() - began
+            if took > longestSpin { longestSpin = took }
+            if took > 0.5 { state(String(format: "spin %d took %.3f s", spins, took)) }
+            spins += 1
         }
+        let met = condition()
+        let visible = scroll.documentVisibleRect
+        let inHeight = visible.minY <= dismiss.frame.minY && dismiss.frame.maxY <= visible.maxY
+        state("end")
+        let nowDismiss = sidebar.hitAreas.first { area in
+            guard case .catchUp(.dismiss) = area.region else { return false }
+            return true
+        }?.frame
+        watch.finish(String(
+            format: "met %@ after %d spins (longest %.3f s), in height %@, visible %@, clip frame %@, style %ld, preferred %ld, dismiss %@ (now %@)",
+            "\(met)", spins, longestSpin, "\(inHeight)", "\(visible)", "\(clip.frame)", scroll.scrollerStyle.rawValue,
+            NSScroller.preferredScrollerStyle.rawValue, "\(dismiss.frame)", "\(nowDismiss.map { "\($0)" } ?? "-")"
+        ), full: !met || longestSpin > 0.5)
+        XCTAssertTrue(met, "timed out waiting for the card in view (visible was \(visibleBefore))")
     }
 
     /// A row says what its task's row says: what it asks, what broke, that
     /// it works or waits on something else; else its last turn's line.
     func testARowSaysWhatItsTaskRowSays() {
+        ZZScrollerStyle.note(#function)
         func info(_ reason: AgentAttentionReason?, status: AgentStatus, blocker: String? = nil, line: String? = nil) -> WorkspaceInfo {
             var info = WorkspaceInfo(
                 id: "ws", index: 0, title: "feat/export", profileID: WorkspaceProfile.defaultID, isInactive: false,
@@ -334,6 +401,7 @@ final class CatchUpTests: XCTestCase {
     /// The card's views: a group VoiceOver names, buttons it can press,
     /// and nothing that takes the keyboard.
     func testTheCardNeverTakesTheKeyboard() {
+        ZZScrollerStyle.note(#function)
         var pressed: [SidebarCatchUpAction] = []
         let catchUp = SidebarCatchUp(
             since: "since 12:40",

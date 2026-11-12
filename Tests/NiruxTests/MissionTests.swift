@@ -1,3 +1,4 @@
+import QuartzCore
 import XCTest
 @testable import Nirux
 
@@ -490,16 +491,19 @@ extension MissionTests {
     }
 
     func testCenterRetriesProcessingFileUntilMissionSaveSucceeds() async throws {
+        let watch = ZZStallWatch(label: "Mission", sampleAfter: 0.4)
         let directory = try makeDirectory()
         let missionsURL = directory.appendingPathComponent("missions.json")
         let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
         let processingURL = eventsURL.deletingPathExtension().appendingPathExtension("processing")
         let store = MissionStore(fileURL: missionsURL)
         XCTAssertNotNil(store.create(request(), enabled: true, now: 10))
+        watch.log("created")
         try FileManager.default.removeItem(at: missionsURL)
         try FileManager.default.createDirectory(at: missionsURL, withIntermediateDirectories: false)
         let pending = event()
         try write(pending, to: processingURL)
+        watch.log("ledger blocked, event written")
         let delivered = expectation(description: "processing file retried")
         let center = MissionEventCenter(
             store: store,
@@ -509,23 +513,31 @@ extension MissionTests {
             isEnabled: { true }
         )
         center.onEvent = { _, event in
+            watch.log("onEvent \(event.id == pending.id)")
             if event.id == pending.id { delivered.fulfill() }
             return true
         }
 
         center.drain()
+        watch.log("first drain done")
 
         XCTAssertTrue(store.missions[0].events.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: processingURL.path))
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.005) {
+            watch.log("unblocking")
             do {
                 try FileManager.default.removeItem(at: missionsURL)
             } catch {
                 XCTFail("Failed to restore mission persistence: \(error)")
             }
+            watch.log("unblocked")
         }
+        watch.log("waiting")
+        let began = CACurrentMediaTime()
         await fulfillment(of: [delivered], timeout: 1)
+        let waited = CACurrentMediaTime() - began
+        watch.log("wait over")
         center.stop()
 
         XCTAssertEqual(store.missions[0].events.map(\.id), [pending.id])
@@ -533,6 +545,7 @@ extension MissionTests {
         let restoredStore = MissionStore(fileURL: missionsURL)
         restoredStore.load()
         XCTAssertEqual(restoredStore.missions[0].events.map(\.id), [pending.id])
+        watch.finish(String(format: "waited %.3f s, delivered %@", waited, "\(store.missions[0].events.map(\.id) == [pending.id])"), full: waited > 0.25)
     }
 
     func testPendingEventSurvivesRestartAndDeliversOnce() throws {
