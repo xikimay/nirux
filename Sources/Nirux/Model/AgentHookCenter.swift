@@ -337,20 +337,22 @@ final class AgentHookCenter {
     /// user looks elsewhere (`AgentStatusMachine.noteQuestion`). The
     /// message's own line, as for a turn nobody watched, after the same
     /// moment's wait: a Stop hook's continuation puts that end behind
-    /// first. Only with the option that reads final messages on.
+    /// first. Only with the option that reads final messages on, at the
+    /// end of that wait too. (A final message is the Stop's of a Claude
+    /// main thread: no other event carries one.)
     private func noteQuestionReadAsItCame(_ event: AgentHookEvent) {
-        guard turnEndClassifier != nil, event.kind == .claude, event.name == .stop, event.agentID == nil,
-              let agentUUID = event.agentUUID, let message = event.finalMessage,
+        guard let agentUUID = event.agentUUID, let message = event.finalMessage,
               let line = TurnEndText.questionLine(of: message)
         else { return }
         let question = TurnEndQuestion(text: line, isYesNo: TurnEndText.isYesNoQuestion(line))
         let delay = questionVerdictDelay
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            guard let resolution = self?.resolver?(agentUUID),
+            guard let self, self.turnEndClassifier != nil, let resolution = self.resolver?(agentUUID),
                   resolution.column.pty?.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp) == true
             else { return }
-            // No alert refreshes the sidebar for it.
+            // No alert refreshes the sidebar for it, and no heartbeat with
+            // Nirux in the background.
             resolution.workspace.onMetadataChanged?()
         }
     }

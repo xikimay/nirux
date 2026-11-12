@@ -934,13 +934,29 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(note(at), "a Stop hook kept the turn going")
         at = end()
         XCTAssertFalse(note(at - 1), "another turn end")
-        // A subagent's work puts nothing behind; its dialog is what waits.
+        at = end()
+        machine.notePromptFromUser()
+        XCTAssertFalse(note(at), "the user's click typed a prompt")
+        at = end()
+        machine.dismissQuestion()
+        XCTAssertFalse(note(at), "its task was archived")
+        at = end()
+        machine.tick(fgName: "zsh", isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 6))
+        XCTAssertFalse(note(at), "claude left the front")
+        // Not behind: another question's Dismiss, `claude` seen in front
+        // only now (its hooks come before the process table's next read).
+        at = end()
+        machine.dismissQuestion(askedAt: at - 1)
+        machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 6))
+        XCTAssertTrue(note(at))
+        // A subagent puts nothing behind: its work, or its dialog, which
+        // shows first.
         at = end()
         _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: true)
         XCTAssertTrue(note(at), "a subagent works on")
         at = end()
         _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: true)
-        XCTAssertFalse(note(at), "a dialog is open")
+        XCTAssertTrue(note(at), "behind a subagent's dialog")
         // Its verdict is coming: that says.
         machine = AgentStatusMachine()
         let awaited = try XCTUnwrap(endTurn(message: message).turnEnd)
@@ -951,7 +967,8 @@ final class TurnEndClassificationTests: XCTestCase {
         _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: true)
         _ = machine.apply(event(.stopFailure, at: 7), isUserFocused: true)
         XCTAssertFalse(note(t0 + 7))
-        // Where a Stop hook keeps turns going, only the Stop after it ends one.
+        // Where a Stop hook keeps turns going: the end of its continuation,
+        // and a later turn's end, which it may let through.
         func stop(at offset: TimeInterval, afterHook: Bool) -> AgentHookEvent {
             AgentHookEvent(
                 kind: .claude, name: .stop, sessionID: "s", finalMessage: message, stopHookActive: afterHook, timestamp: t0 + offset
@@ -963,7 +980,7 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(note(t0 + 7), "the end of the hook's continuation")
         _ = machine.apply(event(.userPromptSubmit, at: 8), isUserFocused: true)
         _ = machine.apply(stop(at: 9, afterHook: false), isUserFocused: true)
-        XCTAssertFalse(note(t0 + 9), "its hook may keep it going")
+        XCTAssertTrue(note(t0 + 9), "its hook let it through, or its continuation takes the question back")
     }
 
     /// The question carries the choices its message lists next to it.
@@ -1709,20 +1726,30 @@ final class TurnEndClassificationTests: XCTestCase {
 
     /// A turn that ends on a question while the user looks at its column:
     /// no alert, no model call, and a moment later the question stands on
-    /// its card. Not for a column nobody looks at (its own paths say), a
-    /// Mission child that waits on its parent, or with the option off.
+    /// its card, the sidebar told. Not before that moment, for a column
+    /// nobody looks at (its own paths say), a Mission child that waits on
+    /// its parent, or with the option off.
     func testQuestionReadAsItCameReachesItsColumn() async throws {
         let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
-        var centers: [AgentHookCenter] = []
+        typealias Watched = (
+            center: AgentHookCenter, alerts: LockedValue<[AgentAttentionReason?]>, classifier: FakeClassifier,
+            shown: LockedValue<AgentStatusMachine.AskedQuestion?>
+        )
         @MainActor func watched(
-            focused: Bool = true, waitsOnParent: Bool = false, optionOn: Bool = true
-        ) throws -> (pty: PtySession, alerts: LockedValue<[AgentAttentionReason?]>, classifier: FakeClassifier) {
+            focused: Bool = true, waitsOnParent: Bool = false, optionOn: Bool = true, delay: TimeInterval = 0.05
+        ) throws -> Watched {
             let workspace = WorkspaceState(title: "ws", cwd: NSTemporaryDirectory())
             let column = try XCTUnwrap(workspace.columns.first)
             let pty = try XCTUnwrap(column.pty)
             let alerts = LockedValue<[AgentAttentionReason?]>([])
             // Never the notification center: it aborts a test run.
             column.onAgentAttention = { alerts.value.append($0) }
+            // The question as the sidebar finds it when told to look: the
+            // column's shell, started half a second on, resets its state.
+            let shown = LockedValue<AgentStatusMachine.AskedQuestion?>(nil)
+            workspace.onMetadataChanged = { [weak pty] in
+                if let question = pty?.agentQuestion(foreground: claude) { shown.value = question }
+            }
             _ = pty.applyAgentHook(event(.sessionStart, at: 0), isUserFocused: focused)
             _ = pty.applyAgentHook(event(.userPromptSubmit, at: 1), isUserFocused: focused)
             // Nobody looks, but a subagent's dialog is open: no verdict either.
@@ -1733,38 +1760,38 @@ final class TurnEndClassificationTests: XCTestCase {
             )
             let outcome = pty.applyAgentHook(stop, isUserFocused: focused)
             XCTAssertNil(outcome.turnEnd)
-            // The dialog closed meanwhile.
-            if !focused { _ = pty.applyAgentHook(event(.subagentStop, at: 5.01, agent: "sub"), isUserFocused: false) }
             let center = AgentHookCenter()
             let classifier = FakeClassifier(verdict: .done)
             center.turnEndClassifier = optionOn ? classifier : nil
-            center.questionVerdictDelay = 0.05
+            center.questionVerdictDelay = delay
+            // Holds them: the caller keeps the centre only.
             let resolution = AgentHookCenter.Resolution(
                 workspace: workspace, column: column, columnIndex: 0, isUserFocused: focused, approvalHold: .never
             )
             center.resolver = { _ in resolution }
             center.settleTurnEnd(of: stop, outcome: outcome, in: resolution, waitsOnParent: waitsOnParent)
-            centers.append(center)
-            return (pty, alerts, classifier)
+            return (center, alerts, classifier, shown)
         }
         let unwatched = try watched(focused: false)
         let child = try watched(waitsOnParent: true)
         let off = try watched(optionOn: false)
+        let later = try watched(delay: 60)
         let asked = try watched()
         let deadline = Date().addingTimeInterval(10)
-        while asked.pty.agentQuestion(foreground: claude) == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        while asked.shown.value == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(
-            asked.pty.agentQuestion(foreground: claude),
+            asked.shown.value,
             AgentStatusMachine.AskedQuestion(text: "Tests pass. Ready to push?", since: t0 + 5, isYesNo: true)
         )
         XCTAssertEqual(asked.alerts.value, [], "nobody to alert")
         XCTAssertEqual(asked.classifier.messages.value, [], "no model call")
         // The others had as long.
-        try await Task.sleep(for: .milliseconds(400))
-        XCTAssertNil(unwatched.pty.agentQuestion(foreground: claude), "nobody looked: not this path's")
-        XCTAssertNil(child.pty.agentQuestion(foreground: claude), "it waits on its parent")
-        XCTAssertNil(off.pty.agentQuestion(foreground: claude), "final messages aren't read")
-        withExtendedLifetime(centers) {}
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(unwatched.shown.value, "nobody looked: not this path's")
+        XCTAssertNil(child.shown.value, "it waits on its parent")
+        XCTAssertNil(off.shown.value, "final messages aren't read")
+        XCTAssertNil(later.shown.value, "not before its moment")
+        withExtendedLifetime([unwatched.center, child.center, off.center, later.center, asked.center]) {}
     }
 
     /// A Stop hook blocked that end (a review gate) and the turn went on:

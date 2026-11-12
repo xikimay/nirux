@@ -102,10 +102,12 @@ struct AgentStatusMachine {
     /// said it asks. Whoever looks at the column reads it there and gets
     /// no alert, but the turn isn't done.
     private var mainTurnEndAsks = false
-    /// Claude's main thread did something since its last turn end (a tool
-    /// call: a Stop hook's continuation, a wakeup): that end's question,
-    /// if any, is behind it.
-    private var mainThreadMovedSinceTurnEnd = false
+    /// What the last turn end asked, if anything, is behind: Claude's main
+    /// thread did something since (a tool call: a Stop hook's
+    /// continuation, a wakeup), the user's click typed a prompt or
+    /// archived the task, or `claude` left the front. A question read as
+    /// it came is not noted after that (`noteQuestion`).
+    private var turnEndQuestionIsBehind = false
     /// The last new conversation in this process, or its end: a quick
     /// answer never crosses one (`acceptsQuickAnswer`).
     private var conversationChangedAt: TimeInterval = 0
@@ -464,7 +466,7 @@ struct AgentStatusMachine {
         }
         askedQuestion = nil
         mainTurnEndedAt = now
-        mainThreadMovedSinceTurnEnd = false
+        turnEndQuestionIsBehind = false
         mainTurnEndIsLast = event.stopHookActive == true || !stopHooksKeepGoing
         mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
         turnFailure = event.name == .stopFailure
@@ -566,12 +568,15 @@ struct AgentStatusMachine {
     /// all the same, and its column says so once the user looks elsewhere.
     /// Nothing alerts, and the status stays as it is. False, and nothing
     /// kept, when that turn end is behind (a prompt, a later end, another
-    /// conversation, Claude going on by itself), was not the turn's last
-    /// Stop, failed, waits behind a dialog, or has its verdict coming.
+    /// conversation, Claude going on by itself, the task archived,
+    /// `claude` gone from the front), failed, or has its verdict coming.
+    /// As a verdict's, it stands behind a subagent's dialog, which shows
+    /// first, and where a Stop hook may still keep the turn going: the
+    /// continuation's first tool call takes it back.
     @discardableResult
     mutating func noteQuestion(_ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval) -> Bool {
-        guard isCurrentTurnEnd(turnEndedAt), !mainThreadMovedSinceTurnEnd, mainTurnEndIsLast, turnFailure == nil,
-              openDialogs.isEmpty, quietTurnEnd == nil, askedQuestion == nil
+        guard isCurrentTurnEnd(turnEndedAt), !turnEndQuestionIsBehind, turnFailure == nil,
+              quietTurnEnd == nil, askedQuestion == nil
         else { return false }
         askedQuestion = AskedQuestion(
             text: question.text, since: turnEndedAt, isYesNo: question.isYesNo,
@@ -600,6 +605,9 @@ struct AgentStatusMachine {
     /// The turn end stays the current one: a reply still goes in.
     @discardableResult
     mutating func dismissQuestion(askedAt since: TimeInterval? = nil) -> Bool {
+        // Whatever the last turn end asked: one read as it came, not
+        // noted yet, too.
+        if since == nil { turnEndQuestionIsBehind = true }
         guard let asked = askedQuestion, since == nil || asked.since == since else { return false }
         askedQuestion = nil
         if state == .needsAttention, openDialogs.isEmpty { state = .idle }
@@ -645,6 +653,7 @@ struct AgentStatusMachine {
     mutating func notePromptFromUser() {
         if quietTurnEnd != nil { quietTurnEnd = .done }
         askedQuestion = nil
+        turnEndQuestionIsBehind = true
     }
 
     /// A turn end waits for its verdict: Nirux types nothing of its own
@@ -659,7 +668,7 @@ struct AgentStatusMachine {
     /// A main-thread tool event: the failed turn is behind.
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
-        mainThreadMovedSinceTurnEnd = true
+        turnEndQuestionIsBehind = true
         turnFailure = nil
         // Went on by itself (a Stop hook blocked its end, a background
         // task, a wakeup): a verdict would land on an agent at work, and
@@ -1079,6 +1088,7 @@ struct AgentStatusMachine {
         if fgName != "claude" {
             if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
+            turnEndQuestionIsBehind = true
         }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
@@ -1193,7 +1203,7 @@ struct AgentStatusMachine {
         stopHooksKeepGoing = false
         mainTurnEndIsLast = true
         mainTurnEndAsks = false
-        mainThreadMovedSinceTurnEnd = false
+        turnEndQuestionIsBehind = false
         conversationChangedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
