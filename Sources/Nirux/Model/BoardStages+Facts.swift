@@ -64,7 +64,7 @@ extension BoardStages {
     ) -> SectionFacts {
         var places: [String: (row: ProjectBoard.Row, workspace: ProjectBoard.WorkspaceRef)] = [:]
         for row in repository.rows {
-            for workspace in row.workspaces where places[workspace.id] == nil { places[workspace.id] = (row, workspace) }
+            for workspace in row.workspaces { places[workspace.id] = (row, workspace) }
         }
         var lines: [Facts] = []
         var listed = Set<String>()
@@ -101,7 +101,8 @@ extension BoardStages {
         in repository: RepositoryReading
     ) -> Facts {
         var facts = Facts(id: id, title: workspace.title)
-        // A workspace in another repository, or in none, has no rail.
+        // A workspace in another repository, or in none, has no rail: no
+        // pull request is read there, and none of this one's is its own.
         facts.hasRepository = repository.readsPullRequests && row.group != .otherRepository
         facts.isArchived = workspace.isInactive
         facts.activity = reading.activity
@@ -117,6 +118,7 @@ extension BoardStages {
         let isAboutRow = reading.gitRoot == nil || reading.gitRoot == row.worktreePath
         facts.reviews = isAboutRow ? reading.reviews : reading.reviews.map { ReviewBadges(runs: $0.runs, head: nil) }
         facts.flakyReason = isAboutRow ? reading.flakyReason : nil
+        guard facts.hasRepository else { return facts }
         if let pullRequest = row.pullRequest {
             facts.queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue)
             facts.pullRequest = self.pullRequest(
@@ -138,13 +140,18 @@ extension BoardStages {
 
     /// The merged pull request of a row that shows none. The queue's own
     /// branch update leaves the worktree a commit behind its merged head,
-    /// at a head the queue knew: then it is the one the queue merged from
-    /// that branch. (A worktree that moved on since has new work.) Else
-    /// the one the task's own detection says merged.
+    /// at a head the queue knew: then it is the pull request of that
+    /// branch in the queue shown, once it merged. (A worktree that moved
+    /// on since has new work.) Else the one the task's own detection says
+    /// merged.
     private static func mergedNumber(of row: ProjectBoard.Row, detected: Int?, in repository: RepositoryReading) -> Int? {
         if let branch = row.branch, let head = row.worktreePath.flatMap({ repository.heads[$0] }),
-           let entry = repository.queue?.entries.first(where: {
-               $0.branch == branch && $0.mergeCommit != nil && $0.heads.contains(head)
+           let entry = repository.queue?.entries.first(where: { entry in
+               // Merged as the queue saw it; or as GitHub's list says, at
+               // a head the queue knew: its merge went unanswered.
+               entry.branch == branch && entry.heads.contains(head) && (entry.mergeCommit != nil || repository.merged.contains {
+                   $0.number == entry.number && $0.state == "MERGED" && entry.heads.contains($0.headOid)
+               })
            }) {
             return entry.number
         }
@@ -165,7 +172,7 @@ extension BoardStages {
             || pullRequest.baseRefName == repository.baseBranch
         return PullRequest(
             number: pullRequest.number, isMerged: isMerged, isDraft: pullRequest.isDraft, isConflicting: pullRequest.isConflicting,
-            base: pullRequest.baseRefName ?? "", isOnBaseBranch: isOnBaseBranch,
+            base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,
             checks: isMerged ? .passed : checks(pullRequest.checks, required: repository.requiredChecks),
             reviewRequest: reviewRequest, stack: stack
         )
@@ -218,19 +225,21 @@ extension BoardStages {
     /// on GitHub now, when the Board knows it.
     /// - In the queue shown while it runs, here or in another Nirux, its
     ///   place is the queue's own ("3 of 7") until the queue is through
-    ///   with it. Else its place is the next Start's, and one the queue
-    ///   merged has none.
-    /// - A stop about the commit the queue was at (its checks, a conflict,
-    ///   a merge or an update that failed) is over once the head moved.
-    ///   The others stay until the next Start: "changed" is itself a head
-    ///   that moved. After its merge, every stop stays.
+    ///   with it. Else its place is the next Start's, among those the
+    ///   queue hasn't merged: one it merged has none.
+    /// - A stop a push answers (its checks, a conflict, a merge or an
+    ///   update that failed, commits not pushed, a busy agent) is over
+    ///   once the head moved. The others stay until the next Start:
+    ///   "changed" is itself a head that moved, and a draft or another
+    ///   base is no commit's. After its merge, every stop stays.
     static func queue(of number: Int, head: String?, in state: ProjectBoard.QueueState?) -> Queue {
         guard let state else { return Queue() }
-        let proposed = state.selection.firstIndex(of: number).map { $0 + 1 }
+        let merged = Set(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
+        let proposed = state.selection.filter { !merged.contains($0) }.firstIndex(of: number).map { $0 + 1 }
         guard let index = state.entries.firstIndex(where: { $0.number == number }) else { return Queue(order: proposed) }
         let entry = state.entries[index]
         let isMerged = entry.mergeCommit != nil
-        var queue = Queue(order: state.isLocked ? (entry.step == .done ? nil : index + 1) : (isMerged ? nil : proposed))
+        var queue = Queue(order: state.isLocked ? (entry.step == .done ? nil : index + 1) : proposed)
         switch entry.step {
         case .waiting, .done:
             break
@@ -239,9 +248,9 @@ extension BoardStages {
         case .merging, .waitingForPostMerge:
             queue.step = .merge(sentence(ProjectBoard.queueStepLabel(entry.step, workflow: state.workflow)))
         case .stopped(let reason):
-            let isAboutItsHead = [.checks, .conflict, .notMergeable, .merge, .update].contains(reason.kind)
+            let isAnsweredByAPush = [.checks, .conflict, .merge, .update, .local, .agentBusy].contains(reason.kind)
             let moved = head.map { !entry.heads.contains($0) } ?? false
-            if isMerged || !isAboutItsHead || !moved {
+            if isMerged || !isAnsweredByAPush || !moved {
                 queue.stop = QueueStop(
                     label: ProjectBoard.queueStopLabel(reason, workflow: state.workflow), message: reason.message,
                     isProblem: reason.isProblem, isAfterMerge: isMerged

@@ -247,36 +247,40 @@ read. Pure; nothing is read again.
 - **A task says what its sidebar row read**: what its agents do, its reviews,
   its texts. One the sidebar hasn't read yet is a line at rest. What the
   sidebar read of git in another worktree (the task's focused column is
-  elsewhere) is left out: the pull request there, what GitHub asks of it, its
-  clean-up, and the HEAD the reviews would be fresh on.
+  elsewhere) is left out: the pull request there, what GitHub asks of it, why
+  its checks look flaky, its clean-up, and the HEAD the reviews would be
+  fresh on.
 - **A sub-task** is under its task when both are lines of the section.
 - **A merged pull request stays on the task the queue left behind.** The row
   has it while the worktree is at its head. The queue's own branch update
   leaves the worktree a commit behind, at a head the queue knew: then it is
-  the pull request the queue merged from that branch. Else it is the one the
-  task's own detection says merged. One the queue merged reads merged at
-  once, before GitHub's list says so. Its worktree, still there, offers the
-  clean-up.
+  that branch's pull request in the queue shown, once it merged (as the queue
+  saw it; or as GitHub's list says, at a head the queue knew, when its merge
+  went unanswered). Else it is the one the task's own detection says merged.
+  One the queue merged reads merged at once, before GitHub's list says so. A
+  project's worktree whose pull request merged offers the clean-up.
 - **Checks are counted by the merge queue's rules**
   ([project-board.md](project-board.md), section 3.2): the latest run of each;
   every check of a required name green, and one that hasn't reported waited
-  for; skipped and neutral neither green nor red; a red check by name,
-  required or not. Without a required check, every check counts: none may
-  still run.
+  for; a required one that ended skipped or neutral counts as failed, since no
+  wait turns it green; a red check by name, required or not. Without a
+  required check, every check counts: none may still run.
 - **The queue.** In the queue shown while it runs, here or in another Nirux,
   a pull request's place is the queue's own ("3 of 7") and its step shows; its
   number stays through the post-merge wait, and goes once the queue is through
-  with it. Else its place is the next Start's, and one the queue merged has
-  none.
-- **A queue's stop** about the commit the queue was at (its checks, a
-  conflict, a merge or an update that failed) is over once the pull request's
-  head moved. The others stay until the next Start: "changed" is itself a head
-  that moved. After its merge, every stop stays: something still needs a look.
+  with it. Else its place is the next Start's, counted without those the queue
+  merged.
+- **A queue's stop** a push answers (its checks, a conflict, a merge or an
+  update that failed, commits not pushed, a busy agent) is over once the pull
+  request's head moved. The others stay until the next Start: "changed" is
+  itself a head that moved, and a draft or another base is no commit's. After
+  its merge, every stop stays: something still needs a look.
 - **Merged today** is the merged list's pull requests that have a merge date,
   a fork's included, with their title.
-- **No rail** where no pull request is read: a workspace in another
-  repository or in none, a section whose repository isn't on GitHub, and any
-  section until its open pull requests were read once.
+- **No rail** where no pull request is read, and none is looked up there: a
+  workspace in another repository or in none, a section whose repository
+  isn't on GitHub, and any section until its open pull requests were read
+  once.
 
 Still to come with the Board's column: the tasks' readings filled from the
 sidebar, kept from one sidebar pass to the next and for a space that isn't on
@@ -295,9 +299,18 @@ screen.
   later turn ends: nothing records that a review finished.
 - **Checks and reviews are about two commits**: the rollup is of the pull
   request's head on GitHub, the badges of the local HEAD.
-- **A queue's stop stays** on its pull request until the next Start, until
-  the pull request's head moves, or until it merges (unless the stop is the
-  post-merge run's failure).
+- **A queue's stop stays** on its pull request until the next Start; one a
+  push answers, until the pull request's head moves; one from before its
+  merge, until it merges (section 6).
+- **The queue's knowledge ends at the next Start.** A task the last queue
+  left a commit behind reads "No pull request yet" again once another queue
+  starts, and comes back to the list, while "Merged today" keeps its pull
+  request under its own title.
+- **A merge the queue sent and never saw answered** (Nirux quit, or Stop was
+  pressed meanwhile) reads a settled "Merged": as far as the queue knows, its
+  stop is from before the merge.
+- **"Merging" also shows** while the queue waits for a run on the base before
+  it merges, as in the table.
 - **"Merged today" lists what the Board read**: the 100 merged pull requests
   opened last ([project-board.md](project-board.md), section 6). One opened
   before those and merged today isn't on it.
@@ -305,7 +318,8 @@ screen.
   commit status from a check run, nor two workflows of one name apart. A
   required check that only a commit status reports reads green here, while the
   queue waits for a check run of that name; of two workflows named alike, only
-  the later run of a job counts.
+  the later run of a job counts; and a completed run whose conclusion the
+  Board doesn't know reads as still running, where the queue refuses it.
 - **A pull request without a task doesn't know what GitHub asks of it**:
   changes requested or a review required show on a task's line only.
 - **A pull request merged by hand after its branch moved** (GitHub's "Update
