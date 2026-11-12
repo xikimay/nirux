@@ -123,8 +123,7 @@ extension WorkspaceInfo {
             var summary: SidebarRowSummary
             if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
                 // The question itself: a click on it opens the reply popover.
-                let asked = AgentText.clean(question.text, maxLength: 300) ?? "a question"
-                summary = row(.needsYou, "Needs you · \(asked)", .needsYou, .missionQuestion(columnIndex: waiting.index))
+                summary = row(.needsYou, question.needsYouLine, .needsYou, .missionQuestion(columnIndex: waiting.index))
             } else {
                 summary = row(.needsYou, "Needs you · \(Self.needsYouDetail(waiting))", .needsYou)
                 // Its block has it whole: the command in its box, the

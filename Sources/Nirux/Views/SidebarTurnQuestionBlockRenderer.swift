@@ -8,15 +8,8 @@ import AppKit
 enum SidebarQuestionText {
     typealias Metrics = SidebarExpandedMetrics
 
-    /// The agent's words without the marks around them: "**Rebase** on
-    /// `main`" reads "Rebase on main" on a card, which draws no Markdown.
-    /// Only the marks that are never words ("_" and "*" may be).
-    static func plain(_ text: String) -> String {
-        text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
-    }
-
     static func question(_ text: String) -> NSAttributedString {
-        NSAttributedString(string: plain(text), attributes: [
+        NSAttributedString(string: AgentText.withoutMarks(text), attributes: [
             .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
         ])
     }
@@ -68,7 +61,7 @@ enum SidebarQuestionText {
     /// ("1.", "B)"), a dot for a bullet.
     static func choices(_ choices: [TurnEndChoice]) -> Items {
         items(choices.map { choice in
-            (choice.marker ?? "•", NSAttributedString(string: plain(choice.text), attributes: [
+            (choice.marker ?? "•", NSAttributedString(string: AgentText.withoutMarks(choice.text), attributes: [
                 .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
             ]))
         })
@@ -78,11 +71,11 @@ enum SidebarQuestionText {
     /// numbers them: the label, then what the agent says it means.
     static func options(_ question: AgentDialog.Question) -> Items {
         var items = items(question.options.enumerated().map { index, option in
-            let text = NSMutableAttributedString(string: plain(option.label), attributes: [
+            let text = NSMutableAttributedString(string: AgentText.withoutMarks(option.label), attributes: [
                 .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
             ])
             if let detail = option.detail {
-                text.append(NSAttributedString(string: " — \(plain(detail))", attributes: [
+                text.append(NSAttributedString(string: " — \(AgentText.withoutMarks(detail))", attributes: [
                     .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
                 ]))
             }

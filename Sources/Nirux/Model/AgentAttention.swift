@@ -326,6 +326,13 @@ struct AgentHookOutcome: Equatable {
 /// inputs): no control or invisible formatting characters (terminal
 /// escapes, bidi overrides), whitespace runs folded to one space, bounded.
 enum AgentText {
+    /// The agent's words without the marks around them: "**Rebase** on
+    /// `main`" reads "Rebase on main" where no Markdown is drawn. Only
+    /// the marks that are never words ("_" and "*" may be).
+    static func withoutMarks(_ text: String) -> String {
+        text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+    }
+
     static func clean(_ text: String, maxLength: Int) -> String? {
         guard maxLength > 0 else { return nil }
         var scalars = String.UnicodeScalarView()

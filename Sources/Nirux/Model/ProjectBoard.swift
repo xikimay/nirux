@@ -233,8 +233,11 @@ extension ProjectBoard {
             configured && pullRequest.isFromConfiguredRepository && pullRequest.state == "MERGED"
         }
         let merged = latestByBranch(sources.mergedPullRequests.filter(isOurs))
-        // The window first, on the list as parsed: a fork's pull
-        // request counts in it, as it did when gh listed 30.
+        // The window first, on the list as parsed: the 30 merged pull
+        // requests opened last, a fork's among them. (The 100 opened
+        // last are read with the others: one read for its late update
+        // has a lower number than each of them, but for one merged
+        // between the two lists of a read, which the next read settles.)
         let mergedBases = latestByBranch(
             sources.mergedPullRequests.sorted { $0.number > $1.number }.prefix(mergedBaseWindow).filter(isOurs)
         )

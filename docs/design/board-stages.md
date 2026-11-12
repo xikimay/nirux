@@ -27,8 +27,8 @@ what comes next. It becomes the overview of a space:
   The current one is the first not done.
 - **A commit doesn't send a line back.** Reviews is done once a code review
   ran in the task, on any commit, and its turn is over: fixes always follow a
-  review. The station's tooltip then says the review is older than HEAD; no
-  mark is drawn for it, since it would be on most lines.
+  review. The station's tooltip then says the review ran on another commit;
+  no mark is drawn for it, since it would be on most lines.
 - **Which reviews count, and whether they must be on HEAD, are two constants**
   (`BoardStages.Rules`), built to become space settings.
 - **Amber means an agent waits for the user**, and nothing else. It is never
@@ -99,7 +99,8 @@ The phrase is the state's own line of the ladder:
   changed";
 - "Asking Lead"; "Blocked · …";
 - "Merged", "Merged · Clean up", "Merged · cleaning up…";
-- "Base #52 merged · Retarget to main" ([stacked pull requests](pr-stacks.md));
+- "Base #52 merged · Retarget to main" ([stacked pull requests](pr-stacks.md)),
+  or "Base #52 merged" alone where nothing here can retarget it (section 7);
 - at Checks, "Checks running", or "No test run yet" while a required check
   hasn't reported, each followed by "lands after #52" in a stack;
 - at Merge, "Lands after #52", "Draft", "Targets release", "Changes
@@ -110,7 +111,8 @@ The phrase is the state's own line of the ladder:
   what the station needs: "No code review yet", "No pull request yet".
 
 "Clean up" and "Retarget to main" are links: the one click that moves the line
-on. While an agent works the line says "Working", or the user's own summary
+on. A branch a phrase names ("Targets release", "Retarget to main") is shown
+cleaned: it is named on GitHub, by whoever pushed it. While an agent works the line says "Working", or the user's own summary
 of the task: the last turn's line is about the turn before.
 
 The pull request cell reads "#52", "#53 · 2/3" in a straight stack, "#53 · on
@@ -257,8 +259,9 @@ read. Pure; nothing is read again.
   that branch's pull request in the queue shown, once it merged (as the queue
   saw it; or as GitHub's list says, at a head the queue knew, when its merge
   went unanswered). Else it is the one the task's own detection says merged.
-  One the queue merged reads merged at once, before GitHub's list says so. A
-  project's worktree whose pull request merged offers the clean-up.
+  One the queue merged reads merged at once, before GitHub's list says so; so
+  does one the merged list has while the open list, read before it, still
+  does. A project's worktree whose pull request merged offers the clean-up.
 - **Checks are counted by the merge queue's rules**
   ([project-board.md](project-board.md), section 3.2): the latest run of each;
   every check of a required name green, and one that hasn't reported waited
@@ -268,8 +271,11 @@ read. Pure; nothing is read again.
 - **The queue.** In the queue shown while it runs, here or in another Nirux,
   a pull request's place is the queue's own ("3 of 7") and its step shows; its
   number stays through the post-merge wait, and goes once the queue is through
-  with it. Else its place is the next Start's, counted without those the queue
-  merged.
+  with it. One that isn't in that queue has no place meanwhile: the numbers
+  are one list's. Else its place is the next Start's, counted without those
+  that merged: by the queue, or as the merged list, a row or a task's own
+  detection says (by hand, say). The list holds those until Start, whose
+  sheet drops them.
 - **A queue's stop** a push answers (its checks, a conflict, a merge or an
   update that failed, commits not pushed, a busy agent) is over once the pull
   request's head moved. The others stay until the next Start: "changed" is
@@ -285,6 +291,60 @@ read. Pure; nothing is read again.
 Still to come with the Board's column: the tasks' readings filled from the
 sidebar, kept from one sidebar pass to the next and for a space that isn't on
 screen.
+
+## 7. What a line offers
+
+The model says what a click does and what shows under the pointer
+(`Line.offer`, `Phrase.link`, `Line.tooltips`); the view doesn't act on them
+yet: a click on a line still opens its task, wherever it lands.
+
+- **The Merge station is the control of the queue's list**, which stays the
+  user's. A pull request outside the next Start's list joins it by a click on
+  its Merge station, at whatever station its line is: the queue asks for no
+  review, and waits for the checks itself. One in the list leaves it by a
+  click on its number.
+  - **Refused**, in the queue's own words (`ProjectBoard.queueRefusal`):
+    "Can’t join the queue: draft", another base ("after #52", "targets
+    release"), a conflict, an agent at work in its worktree. One already in
+    the list can still leave it. Only what the queue's rule refuses without
+    a call: a red check or a review GitHub asks for keeps nothing out of the
+    list, and the Start sheet checks the rest.
+  - **Locked** while a queue runs, here or in another Nirux, and while the
+    confirmation sheet is open: the sheet shows the list as it was when it
+    opened. The station says which, after what the queue's rule refuses:
+    that doesn't end with the queue.
+  - **Nothing to click** without an open pull request, and in a repository
+    that isn't saved in Board Settings, which has no merge queue.
+- **Retarget** is the Board's own call to GitHub, not the queue's: a queue
+  that runs, or that holds the pull request, changes nothing to it.
+  - In a repository that isn't saved, the phrase reads "Base #52 merged",
+    without what nothing here can do.
+  - In a build that can't change GitHub (a dry run), the words stay, as what
+    to do, and are no link: the phrase's tooltip says why.
+  - The link is the phrase's. A line that says something more pressing (a red
+    check, an agent at work) has none: Retarget will be in its menu.
+- **A link says what its click does** under the pointer: "Bases #53 on main,
+  as GitHub does when a merged branch is deleted"; "Checks the worktree, then
+  asks what goes".
+- **Under the pointer**, what the line can't hold:
+  - its title: the task's branch and worktree ("feat/login ·
+    /Users/me/app.feat-login"), with "main checkout", "not checked out" or
+    "folder is gone" where it applies;
+  - Reviews: each pass that ran, "Code review ran on another commit",
+    "Premortem ran on this commit", "Adversarial review running" (no commit
+    is named while HEAD isn't known), and each pass asked for that didn't,
+    "No code review yet". Another commit, not an earlier one: HEAD may have
+    moved back;
+  - Checks: the latest run of each check by name, with its result: those that
+    hold the pull request first (the red ones, a required one that ended
+    skipped or neutral), then the required ones no check reported ("nightly:
+    no run yet"), those it waits for, then the rest. Twelve, then "and 5
+    more"; a workflow's name and a job's are each cut at 40 characters,
+    before the result;
+  - Merge: what a click does, "Add to Queue" or "Remove from Queue", or why
+    it does nothing;
+  - its pull request: its stack ("Stack: #52 → #53 → #54, on main") and its
+    address.
 
 ## Known limits
 
@@ -312,8 +372,10 @@ screen.
 - **"Merging" also shows** while the queue waits for a run on the base before
   it merges, as in the table.
 - **"Merged today" lists what the Board read**: the 100 merged pull requests
-  opened last ([project-board.md](project-board.md), section 6). One opened
-  before those and merged today isn't on it.
+  opened last and the 100 updated last ([project-board.md](project-board.md),
+  section 6). One merged today is missing only if it is behind 100 merged
+  ones opened since, and 100 merged pull requests were updated after it:
+  merged, commented on, reviewed, labelled, locked, or their branch deleted.
 - **Checks are read from the pull request's rollup**, which doesn't say a
   commit status from a check run, nor two workflows of one name apart. A
   required check that only a commit status reports reads green here, while the

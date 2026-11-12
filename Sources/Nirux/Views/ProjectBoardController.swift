@@ -780,7 +780,7 @@ final class ProjectBoardController {
 
     /// What went wrong reading a section: "GitHub error" and the messages.
     private static func errorText(_ reads: RepositoryReads) -> (title: String, message: String)? {
-        let messages = Set(reads.errors.values.map(\.message) + [reads.retargetFailure].compactMap { $0 }).sorted()
+        let messages = (ProjectBoard.messages(of: reads.errors) + [reads.retargetFailure].compactMap { $0 }).sorted()
         guard !messages.isEmpty else { return nil }
         return ("GitHub error", messages.joined(separator: " "))
     }
