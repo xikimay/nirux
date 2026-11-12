@@ -52,5 +52,6 @@ while read -r status name; do
     fi
 done < <(sort -k2 -V "$work/results")
 { grep -h "SCROLLER-STYLE" "$work"/run1.log || true; } | head -1
+{ grep -h "TOOLTIP-AREAS" "$work"/run1.log || true; } | head -1
 echo "$class: $((runs - failed)) of $runs runs passed"
 exit $(( failed > 0 ? 1 : 0 ))
