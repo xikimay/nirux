@@ -63,4 +63,4 @@ jobs:
         run: scripts/repeat-class.sh NiruxTests.TurnEndClassificationTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.LeadToolsFlowTests
 
       - name: Reverts TurnEndClassificationTests catches
-        run: scripts/mutants-class.sh NiruxTests.TurnEndClassificationTests no-note note-unwatched note-child note-option-off
+        run: scripts/mutants-class.sh NiruxTests.TurnEndClassificationTests no-note note-unwatched note-child note-option-off no-sleep no-refresh
