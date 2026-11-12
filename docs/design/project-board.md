@@ -978,9 +978,13 @@ What the board adds:
   --state open --limit 100 --json number,state,headRefName,headRefOid,
   headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,mergeable,
   statusCheckRollup,url,title`. It costs about 2 GraphQL points (measured with
-  `rateLimit(dryRun: true)` on 2026-09-27). Recently merged PRs
-  (`--state merged --limit 30`) are read every 10 minutes, for the "merged,
-  clean up" rows.
+  `rateLimit(dryRun: true)` on 2026-09-27). The 100 merged pull requests
+  opened last (`--state merged --limit 100`, with their `title` and
+  `mergedAt`; 1 GraphQL point, about 48 kB, measured on 2026-11-12) are read
+  every 10 minutes, and as soon as a pull request leaves the open list. They
+  only say something of what is still at them: a worktree at one's head reads
+  "merged, clean up", and an open pull request based on one's branch,
+  untouched since, is a stack on a merged base.
 - **Its one change:** Retarget, `PATCH pulls/{n}` with a new base, on one
   click ([stacked pull requests](pr-stacks.md)).
 - **Cadence:** every 60 s while the board is on screen, 30 s while a row has

@@ -223,7 +223,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
         )
         XCTAssertEqual(
             GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .merged),
-            ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "merged", "--limit", "30", "--json",
+            ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "merged", "--limit", "100", "--json",
              "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,url,title,mergedAt"]
         )
         XCTAssertEqual(

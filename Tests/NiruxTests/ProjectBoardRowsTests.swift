@@ -218,6 +218,29 @@ final class ProjectBoardRowsTests: XCTestCase {
         XCTAssertEqual(result[2].pullRequest?.state, "MERGED", "merged, ready to clean up")
     }
 
+    func testOlderMergedPullRequestsOnlyFindWhatIsStillAtTheirHead() {
+        let head = String(repeating: "a", count: 40)
+        let repository = ProjectBoard.LocalRepository(worktrees: [
+            worktree("/p/widgets", branch: "main"),
+            worktree("/p/widgets.done", branch: "done", head: head),
+            worktree("/p/widgets.old", branch: "old", head: head),
+            worktree("/p/widgets.moved", branch: "moved", head: String(repeating: "b", count: 40))
+        ], remotes: [widgets])
+        // What a shorter list read, then older merges after it, as gh
+        // lists them: the last opened first.
+        let recent = [pullRequest(21, "done", state: "MERGED")]
+        let older = [pullRequest(9, "done", state: "MERGED"), pullRequest(5, "old", state: "MERGED"),
+                     pullRequest(4, "moved", state: "MERGED")]
+        XCTAssertEqual(summary(rows(local: [repository], merged: recent)),
+                       ["main main", "otherWorktree done #21", "otherWorktree moved", "otherWorktree old"])
+        XCTAssertEqual(summary(rows(local: [repository], merged: recent + older)),
+                       ["main main", "otherWorktree done #21", "otherWorktree moved", "otherWorktree old #5"],
+                       "a branch keeps its newest merge; an older one is found only by a worktree still at its head")
+        XCTAssertEqual(summary(rows(local: [repository], merged: older + recent)),
+                       ["main main", "otherWorktree done #21", "otherWorktree moved", "otherWorktree old #5"],
+                       "whatever the list's order")
+    }
+
     // MARK: - Other repositories
 
     func testWorkspacesInAnotherRepositoryOrOutsideAnyComeLastWithoutPullRequests() {

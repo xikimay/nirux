@@ -21,7 +21,10 @@ extension ProjectBoard {
     enum PullRequestList: Sendable {
         /// Up to 100 open pull requests, with their checks.
         case open
-        /// The last 30 merged, for the "merged, clean up" rows.
+        /// The 100 merged pull requests opened last: a worktree still at
+        /// one's head reads "merged, clean up", an open pull request based
+        /// on one's branch is a stack on a merged base, and those merged
+        /// today close the Board's sections.
         case merged
     }
 
@@ -84,7 +87,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "open", "--limit", "100",
                     "--json", openFields]
         case .merged:
-            return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "merged", "--limit", "30",
+            return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "merged", "--limit", "100",
                     "--json", mergedFields]
         }
     }
