@@ -94,12 +94,18 @@ enum SidebarStaleLog {
 }
 
 extension NiruxShellView {
-    /// The sidebar tells when the pointer comes back to it, and the system
-    /// what may leave the screen behind: each is kept for the next line.
+    /// The sidebar tells when the pointer comes back to it.
     func wireSidebarStaleLog() {
         sidebar.onPointerReturn = { [weak self] gesture, idle in
             self?.logSidebarState(gesture == .move ? .move : .press, pointerIdle: idle)
         }
+    }
+
+    /// What may leave the screen behind, as the system says it: kept for
+    /// the next line, and a line when Nirux comes to the front. The app's
+    /// shell only (`NiruxApp`): a test's shell would hear the activation
+    /// other processes take from each other.
+    func followSystemForSidebarStaleLog() {
         let system = NSWorkspace.shared.notificationCenter
         let events: [(NotificationCenter, Notification.Name, SidebarStaleLogEvent)] = [
             (system, NSWorkspace.screensDidWakeNotification, .wake),

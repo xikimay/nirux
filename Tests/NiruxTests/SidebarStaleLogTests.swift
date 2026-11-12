@@ -200,21 +200,21 @@ final class SidebarStaleLogTests: XCTestCase {
             XCTAssertTrue(try XCTUnwrap(lines.last).hasPrefix("trigger=move idle=3.0 store=2 held=2 same=1 "), lines.last ?? "")
             XCTAssertTrue(try XCTUnwrap(lines.last).hasSuffix(" wake=- unlock=- session=- front=- uncovered=-"), lines.last ?? "")
 
-            // What may leave the screen behind, as it happens.
-            let system = NSWorkspace.shared.notificationCenter
-            system.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+            // What may leave the screen behind, as it happens (told by
+            // hand: a test's shell doesn't follow the system).
+            shell.noteSidebarStaleLogEvent(.wake)
             clock.time += 1
-            system.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+            shell.noteSidebarStaleLogEvent(.sessionReturn)
             clock.time += 1
             shell.noteSidebarStaleLogEvent(.unlock)
             clock.time += 1
             // Another window's occlusion, this one still covered; then this one shows.
-            NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+            shell.noteSidebarStaleLogEvent(.occlusion)
             shell.sideEffects.windowShows = { _ in true }
             clock.time += 1
-            NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+            shell.noteSidebarStaleLogEvent(.occlusion)
             clock.time += 1
-            NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+            shell.noteSidebarStaleLogEvent(.occlusion)
             clock.time += 1
             // Nirux comes to the front: a line of its own, before anything refreshes.
             let before = lines.count
