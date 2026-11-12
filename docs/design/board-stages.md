@@ -1,13 +1,13 @@
 # Board Stages
 
-> **Design record:** in progress. The model and the view are in the app; the Board's column doesn't show them yet.\
+> **Design record:** in progress. The model, the view and what fills them are in the app; the Board's column doesn't show them yet.\
 > **Differs today:** the Board is still the table of [Project Board](project-board.md), one per project.\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design validated by the user on 2026-11-11 (study D). The model
-(`BoardStages`: lines, units, sections) and the view (`BoardStagesView`) are
-implemented; the Board's column still shows the table, and the per-space
-Board follows.
+(`BoardStages`: lines, units, sections), the view (`BoardStagesView`) and the
+facts read from today's Board (`BoardStages.sectionFacts`) are implemented;
+the Board's column still shows the table, and the per-space Board follows.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -230,6 +230,58 @@ no title):
 - below about 300 pt there is no room for a rail beside a title: a line keeps
   its dot and its title.
 
+## 6. Where the facts come from
+
+`BoardStages.sectionFacts` fills a section's facts from what the app already
+holds: the rows of today's Board ([project-board.md](project-board.md),
+section 2), its merge queue's state, the merged pull requests read, the
+space's tasks in the sidebar's order, and what each task's sidebar row last
+read. Pure; nothing is read again.
+
+- **Lines.** Each task whose workspace is in a row of the repository is a
+  line, in the sidebar's order (the rows are in pull request order). The Lead
+  is no task: it isn't in the list given. Two tasks sharing a worktree are two
+  lines, on the same pull request. An open pull request no task's line shows
+  is a pull request without a task: after the tasks, in the rows' order, once,
+  named by its title. A main checkout or a worktree with neither is no line.
+- **A task says what its sidebar row read**: what its agents do, its reviews,
+  its texts. One the sidebar hasn't read yet is a line at rest. What the
+  sidebar read of git in another worktree (the task's focused column is
+  elsewhere) is left out: the pull request there, what GitHub asks of it, its
+  clean-up, and the HEAD the reviews would be fresh on.
+- **A sub-task** is under its task when both are lines of the section.
+- **A merged pull request stays on the task the queue left behind.** The row
+  has it while the worktree is at its head. The queue's own branch update
+  leaves the worktree a commit behind, at a head the queue knew: then it is
+  the pull request the queue merged from that branch. Else it is the one the
+  task's own detection says merged. One the queue merged reads merged at
+  once, before GitHub's list says so. Its worktree, still there, offers the
+  clean-up.
+- **Checks are counted by the merge queue's rules**
+  ([project-board.md](project-board.md), section 3.2): the latest run of each;
+  every check of a required name green, and one that hasn't reported waited
+  for; skipped and neutral neither green nor red; a red check by name,
+  required or not. Without a required check, every check counts: none may
+  still run.
+- **The queue.** In the queue shown while it runs, here or in another Nirux,
+  a pull request's place is the queue's own ("3 of 7") and its step shows; its
+  number stays through the post-merge wait, and goes once the queue is through
+  with it. Else its place is the next Start's, and one the queue merged has
+  none.
+- **A queue's stop** about the commit the queue was at (its checks, a
+  conflict, a merge or an update that failed) is over once the pull request's
+  head moved. The others stay until the next Start: "changed" is itself a head
+  that moved. After its merge, every stop stays: something still needs a look.
+- **Merged today** is the merged list's pull requests that have a merge date,
+  a fork's included, with their title.
+- **No rail** where no pull request is read: a workspace in another
+  repository or in none, a section whose repository isn't on GitHub, and any
+  section until its open pull requests were read once.
+
+Still to come with the Board's column: the tasks' readings filled from the
+sidebar, kept from one sidebar pass to the next and for a space that isn't on
+screen.
+
 ## Known limits
 
 - **Reviews Nirux can't see.** Codex has no prompt hook, and a `claude -p`
@@ -249,3 +301,17 @@ no title):
 - **"Merged today" lists what the Board read**: the 100 merged pull requests
   opened last ([project-board.md](project-board.md), section 6). One opened
   before those and merged today isn't on it.
+- **Checks are read from the pull request's rollup**, which doesn't say a
+  commit status from a check run, nor two workflows of one name apart. A
+  required check that only a commit status reports reads green here, while the
+  queue waits for a check run of that name; of two workflows named alike, only
+  the later run of a job counts.
+- **A pull request without a task doesn't know what GitHub asks of it**:
+  changes requested or a review required show on a task's line only.
+- **A pull request merged by hand after its branch moved** (GitHub's "Update
+  branch", a commit made since) is no longer on its task: the line reads "No
+  pull request yet" while "Merged today" has it under its own title. Only the
+  queue's own update is followed.
+- **Between two reads**, a pull request that just left the open list isn't in
+  the merged one yet: its task reads "No pull request yet" until the merged
+  list is read again.
