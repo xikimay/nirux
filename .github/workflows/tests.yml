@@ -56,3 +56,8 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the flake gate of a new test class that builds a
+      # shell and waits on AppKit's display pass.
+      - name: Repeat SidebarStaleLogTests
+        run: scripts/repeat-class.sh NiruxTests.SidebarStaleLogTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.LeadToolsFlowTests
