@@ -329,12 +329,13 @@ to the queue yet.
     is in sight, while it still offers what was pressed: a list locked
     meanwhile, or a pull request that joined it, changes nothing. The
     station acts at each click (a second one, at once, takes back the
-    first); a double click still opens a task once.
+    first); a double click opens a task, or follows a link, once.
   - **The Board follows the pointer**, not each line: lines move under a
     still pointer (a new order, a scroll, a resize), which no event of
     theirs says. It asks where the pointer is after each of those, and
-    lights the one station under it; none while the app isn't the active
-    one, whose windows don't hear the pointer leave.
+    lights the one station under it; none while the Board is hidden, nor
+    while the app isn't the active one, whose windows don't hear the
+    pointer leave.
 - **Retarget** is the Board's own call to GitHub, not the queue's: a queue
   that runs, or that holds the pull request, changes nothing to it.
   - In a repository that isn't saved, the phrase reads "Base #52 merged",
@@ -346,11 +347,13 @@ to the queue yet.
 - **A link says what its click does** under the pointer: "Bases #53 on main,
   as GitHub does when a merged branch is deleted"; "Checks the worktree, then
   asks what goes". It is drawn apart, in the accent colour, right after the
-  words before it (`Phrase.wordsBeforeLink`): on a narrow Board those give
+  words before it (`Phrase.wordsBeforeLink`). On a narrow Board those give
   way, down to nothing when a letter or two is all the room they have, and
-  the link stays whole. Where the words are cut or gone, the link says the
-  whole phrase under the pointer, before what its click does. Its target is
-  the line's height, over its own words.
+  the link stays whole while the phrase's column holds it. A link too long
+  for the column (a long branch's name) is cut, and leaves its words half
+  of it, from 120 pt. Where any of the phrase is cut or gone, its words and
+  its link say it whole under the pointer, the link before what its click
+  does. The link's target is the line's height, over its own words.
 - **Under the pointer**, what the line can't hold:
   - its title: the task's branch and worktree ("feat/login ·
     /Users/me/app.feat-login"), with "main checkout", "not checked out" or
@@ -372,8 +375,9 @@ to the queue yet.
     address.
 
   Each place says its own: the title, the phrase, the link, the pull request,
-  and each station over 22 pt around it. A place is registered again only
-  when it moves: a tooltip being read stays up while its words change.
+  and each station over 22 pt around it. A place that stays keeps its
+  registration: a tooltip being read stays up while its words change, or
+  another place comes or goes.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station

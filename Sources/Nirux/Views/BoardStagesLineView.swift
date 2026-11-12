@@ -62,8 +62,8 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     }
     /// What the words and the stations say under the pointer, by where.
     private(set) var hints: [(rect: NSRect, text: String)] = []
-    /// The places registered as tooltips'.
-    private var toolTipRects: [NSRect] = []
+    /// The places registered as tooltips', each with AppKit's tag for it.
+    private var toolTips: [(rect: NSRect, tag: NSView.ToolTipTag)] = []
 
     private typealias Metrics = BoardStagesView.Metrics
 
@@ -176,14 +176,20 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         noRailLabel.isHidden = line.rail != nil || columns.rail.width == 0
         // The link keeps its width right after the words before it, which
         // give way first. (Two labels' own margins are a space between them.)
-        let linkWidth = shownLink == nil ? 0 : min(ColumnHeaderView.textWidth(linkLabel), columns.phrase.width)
-        var wordsWidth = columns.phrase.width
+        let column = columns.phrase.width
+        var linkWidth: CGFloat = 0
+        var wordsWidth = column
         if shownLink != nil {
             let whole = ColumnHeaderView.textWidth(phraseLabel)
-            wordsWidth = min(whole, columns.phrase.width - linkWidth)
+            let link = ColumnHeaderView.textWidth(linkLabel)
+            // A link too long for the column is cut, and leaves its words
+            // half of it where that is worth reading.
+            let room = link <= column ? column - link : (column >= Self.widthToShare ? column / 2 : 0)
+            wordsWidth = min(whole, room)
             // A letter or two and an ellipsis say nothing: the words go,
             // and the link's tooltip has them.
             if wordsWidth < min(whole, Self.fewestWords) { wordsWidth = 0 }
+            linkWidth = min(link, column - wordsWidth)
         }
         phraseLabel.frame = NSRect(x: columns.phrase.minX, y: 9, width: wordsWidth, height: 16)
         phraseLabel.isHidden = wordsWidth == 0
@@ -199,6 +205,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     /// Under this, the words before a link aren't worth their place.
     private static let fewestWords: CGFloat = 30
+    /// From this, a phrase's column holds some of both its words and a
+    /// link too long for it.
+    private static let widthToShare: CGFloat = 120
 
     // MARK: Targets
 
@@ -233,13 +242,10 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         return .line
     }
 
-    /// The part of the line in sight: what the scroll view it is in
-    /// shows of it. (Not `visibleRect`, which isn't held to the line's
-    /// own bounds in a window that was never shown.)
-    private var rectInSight: NSRect {
-        guard let clip = enclosingScrollView?.contentView else { return bounds }
-        return bounds.intersection(convert(clip.bounds, from: clip))
-    }
+    /// The part of the line in sight: what the views it is in show of
+    /// it. (`visibleRect` alone isn't held to the line's own bounds in a
+    /// window that was never shown.)
+    private var rectInSight: NSRect { bounds.intersection(visibleRect) }
 
     /// Where a hand shows: what a click does something of its own on, as
     /// far as it is in sight (a cursor's place isn't clipped by what
@@ -266,9 +272,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             ColumnHeaderView.textWidth(label) > label.frame.width ? text : nil
         }
         add(titleLabel.frame, [whole(titleLabel, line.title), line.tooltips.title])
-        // The phrase whole where it is cut: on its words, which give way
-        // first, and on its link, which may be all that is left of it.
-        let phrase = whole(phraseLabel, line.phrase.text)
+        // The phrase whole where any of it is cut: on its words, and on
+        // its link, which may be all that is left of it.
+        let phrase = whole(phraseLabel, line.phrase.text) ?? (shownLink == nil ? nil : whole(linkLabel, line.phrase.text))
         if !phraseLabel.isHidden { add(phraseLabel.frame, [phrase, line.phrase.detail]) }
         if let link = shownLink { add(linkRect, [phrase, link.hint]) }
         if !pullRequestLabel.isHidden {
@@ -279,13 +285,11 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
                 add(stationRect(at: x), [line.tooltips.stations[station]])
             }
         }
-        // Their words are asked for when shown: only a place that moved
-        // is registered again, so a tooltip being read stays up.
+        // Their words are asked for when shown: a place that stays keeps
+        // its registration, so a tooltip being read stays up.
         let rects = hints.map(\.rect)
-        guard rects != toolTipRects else { return }
-        toolTipRects = rects
-        removeAllToolTips()
-        for rect in rects { addToolTip(rect, owner: self, userData: nil) }
+        for gone in toolTips where !rects.contains(gone.rect) { removeToolTip(gone.tag) }
+        toolTips = rects.map { rect in toolTips.first { $0.rect == rect } ?? (rect, addToolTip(rect, owner: self, userData: nil)) }
     }
 
     /// What the pointer shows at `point`, if anything.
@@ -462,8 +466,13 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     override func mouseDown(with event: NSEvent) {
         let target = target(at: convert(event.locationInWindow, from: nil))
-        // A double click opens a task once; a station or a link acts at each click.
-        pressed = target == .line && event.clickCount != 1 ? nil : target
+        // The station takes the list's change back at a second click; a
+        // double click opens a task, or follows a link, once.
+        if case .offer = target {
+            pressed = target
+        } else {
+            pressed = event.clickCount == 1 ? target : nil
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {

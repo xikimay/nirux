@@ -334,6 +334,13 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertTrue(view.lineViews[2] === listed)
         XCTAssertEqual(stale.handler?(), false)
         XCTAssertEqual(offered.count, 5)
+        XCTAssertNil(joining.accessibilityHelp(), "its station acts again: nothing left to say why not")
+        // Nor for another pull request than the one it was named for.
+        let named = try XCTUnwrap(joining.accessibilityCustomActions()?.first)
+        view.show(content([section(units: tasks([offering("joining", .add, 99)]))]))
+        XCTAssertTrue(view.lineViews[0] === joining)
+        XCTAssertEqual(named.handler?(), false)
+        XCTAssertEqual(offered.count, 5)
     }
 
     func testAClickNeedsItsLineInSight() throws {
@@ -430,15 +437,15 @@ final class BoardStagesViewTests: XCTestCase {
         let link = shown.linkLabel.frame
         XCTAssertEqual([NSPoint(x: link.minX, y: 0), NSPoint(x: link.maxX - 1, y: 33)].map(shown.target(at:)), [.link(retarget), .link(retarget)])
         XCTAssertEqual([link.minX - 1, link.maxX].map { shown.target(at: NSPoint(x: $0, y: 17)) }, [.line, .line])
-        // It acts at each click; pressed on it and released on the words, or on the station, it doesn't.
+        // A double click follows it once; pressed on it and released on the words, or on the station, it isn't followed.
         try press(merged, at: merged.linkLabel.frame.midX, clicks: 2)
-        XCTAssertEqual(linked.count, 3)
+        XCTAssertEqual(linked.count, 2)
         try press(shown, at: link.midX, releaseAt: shown.phraseLabel.frame.midX)
         let both = view.lineViews[3]
         let merge = BoardStagesView.Columns(width: 940).stations[3]
         try press(both, at: merge, releaseAt: both.linkLabel.frame.midX)
         try press(both, at: both.linkLabel.frame.midX, releaseAt: merge)
-        XCTAssertEqual([linked.count, opened.count, offered], [3, 3, 0])
+        XCTAssertEqual([linked.count, opened.count, offered], [2, 3, 0])
 
         // A hand on what a click does something of its own on: a station that acts, a link.
         XCTAssertEqual(merged.handRects, [NSRect(x: merged.linkLabel.frame.minX, y: 0, width: merged.linkLabel.frame.width, height: 34)])
@@ -462,7 +469,7 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertTrue(shown.linkLabel.isHidden)
         XCTAssertEqual(shown.target(at: NSPoint(x: link.midX, y: 17)), .line)
         XCTAssertEqual(action.handler?(), false)
-        XCTAssertEqual(linked.count, 4)
+        XCTAssertEqual(linked.count, 3)
         // A phrase that doesn't end with its link's words is shown as it is, without one.
         let odd = BoardStagesLineView(with(line("odd", phrase: "Retarget to main, then merge")) { $0.phrase.link = retarget }, link: .none)
         XCTAssertEqual([odd.phraseLabel.stringValue, odd.linkLabel.stringValue], ["Retarget to main, then merge", ""])
@@ -509,6 +516,27 @@ final class BoardStagesViewTests: XCTestCase {
         resize(less)
         XCTAssertEqual(shown.linkLabel.frame.width, column(less).width, "no wider than its column")
         XCTAssertEqual(said(shown.linkLabel), "\(phrase)\n\(hint)")
+
+        // A link too long for the column is cut, and leaves its words half of it: the line still says what it is about.
+        resize(940)
+        let long = BoardStages.Link.retarget(number: 53, onto: "release/2026-11-a-branch-with-a-name-far-too-long-for-any-column")
+        view.show(content([section(units: tasks([
+            with(line("based", state: .idle, phrase: "Base #52 merged · \(long.title)")) { $0.phrase.link = long }
+        ]))]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(ColumnHeaderView.textWidth(shown.linkLabel), column(940).width)
+        XCTAssertEqual(shown.phraseLabel.frame.width, words, "its words whole, in less than half the column")
+        XCTAssertEqual(shown.linkLabel.frame, NSRect(x: column(940).minX + words, y: 9, width: column(940).width - words, height: 16))
+        XCTAssertEqual([said(shown.phraseLabel), said(shown.linkLabel)],
+                       ["Base #52 merged · \(long.title)", "Base #52 merged · \(long.title)\n\(long.hint)"],
+                       "the phrase whole under the pointer, on its words as on its link")
+        let sharing = try XCTUnwrap(widths.first { column($0).width >= 120 && column($0).width / 2 < words })
+        resize(sharing)
+        XCTAssertEqual([shown.phraseLabel.frame.width, shown.linkLabel.frame.width], [column(sharing).width / 2, column(sharing).width / 2])
+        let tight = try XCTUnwrap(widths.last { column($0).width > 0 && column($0).width < 120 })
+        resize(tight)
+        XCTAssertTrue(shown.phraseLabel.isHidden, "no room for some of both")
+        XCTAssertEqual(shown.linkLabel.frame.width, column(tight).width)
 
         // Words that are whole stay, however short.
         resize(940)
@@ -578,6 +606,17 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(at(shown, stations[2]), "test: ✓\nlint: ✓")
         XCTAssertEqual(shown.trackingAreas.count, registered.count)
         XCTAssertTrue(zip(shown.trackingAreas, registered).allSatisfy { $0 === $1 })
+        // A place that comes (the phrase's, with a detail) or goes leaves the others' as they are.
+        let checksArea = try XCTUnwrap(registered.first { $0.rect.midX == stations[2] })
+        view.show(content([section(units: tasks([with(told) { $0.phrase.detail = "test started 4 minutes ago" }]))]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(at(shown, shown.phraseLabel.frame.midX), "test started 4 minutes ago")
+        XCTAssertEqual(shown.trackingAreas.count, registered.count + 1)
+        XCTAssertTrue(shown.trackingAreas.contains { $0 === checksArea })
+        view.show(content([section(units: tasks([told]))]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(shown.trackingAreas.count, registered.count, "the phrase's is gone")
+        XCTAssertTrue(shown.trackingAreas.contains { $0 === checksArea })
         // A narrower Board moves them with the stations.
         view.setFrameSize(NSSize(width: 700, height: 600))
         view.layoutSubtreeIfNeeded()
@@ -642,7 +681,10 @@ final class BoardStagesViewTests: XCTestCase {
         view.mouseMoved(with: try moved(to: place(merge, on: view.lineViews[3]), in: view))
         XCTAssertEqual(lit(), [false, false, false, false])
         view.mouseMoved(with: try moved(to: place(merge, on: joining), in: view))
-        view.mouseExited(with: try moved(to: .zero, in: view))
+        // The pointer left something inside the Board (a button's own area): it is still on the station.
+        view.mouseExited(with: try moved(to: place(merge, on: joining), in: view))
+        XCTAssertEqual(lit(), [true, false, false, false])
+        view.mouseExited(with: try moved(to: NSPoint(x: -10, y: -10), in: view))
         XCTAssertEqual(lit(), [false, false, false, false], "the pointer left the Board")
 
         // A press that leaves the station, its button down, no longer lights it: no other event says so.
@@ -676,8 +718,29 @@ final class BoardStagesViewTests: XCTestCase {
         view.pointerLocation = { still }
         NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
         XCTAssertEqual(lit(), [true, false, false, false])
+        // A Board that doesn't show lights nothing, whatever asks; shown again, it asks where the pointer is.
         view.isHidden = true
         XCTAssertEqual(lit(), [false, false, false, false], "hidden")
+        view.show(content([section(units: tasks(Array(lines(nil).prefix(3))))]))
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        XCTAssertEqual(view.lineViews.map(\.isStationHovered), [false, false, false])
+        view.isHidden = false
+        XCTAssertEqual(view.lineViews.map(\.isStationHovered), [true, false, false])
+    }
+
+    func testOnlyAStationThatActsIsLit() throws {
+        // In the queue's list, on a merged base: its station acts, and so does its link.
+        let retarget = BoardStages.Link.retarget(number: 53, onto: "main")
+        let both = with(offering("both", .remove, 53, state: .idle)) {
+            $0.phrase = BoardStages.Phrase(text: "Base #52 merged · Retarget to main", link: retarget)
+        }
+        let view = board(content([section(units: tasks([both]))]))
+        let shown = view.lineViews[0]
+        view.mouseMoved(with: try moved(to: place(shown.linkLabel.frame.midX, on: shown), in: view))
+        XCTAssertFalse(shown.isStationHovered, "the pointer on its link lights no station")
+        view.mouseMoved(with: try moved(to: place(BoardStagesView.Columns(width: 940).stations[3], on: shown), in: view))
+        XCTAssertTrue(shown.isStationHovered)
+        XCTAssertNil(view.pointerLocation(), "a Board that isn't on screen doesn't hear the pointer: it asks for none")
     }
 
     func testTheListScrollsUnderAStillPointer() throws {
