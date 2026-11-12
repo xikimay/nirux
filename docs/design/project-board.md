@@ -134,7 +134,7 @@ Order:
 | --- | --- | --- |
 | Name | Workspace title, else branch. Click focuses the workspace | `WorkspaceState`, git context |
 | Agent | waiting (permission: Bash) · working · idle · none. With stuck-agent detection: waiting 12m, stopped on error, exited | `AgentStatusMachine`: state and open dialogs, #38's reasons; stuck states from #55 |
-| PR | #52, draft, open, merged or closed; conflicting | Batched `gh pr list` (section 6) |
+| PR | #52, draft, open, merged or closed; conflicting | The two batched reads (section 6) |
 | Checks | Each required check by name; the others as one summary | The batch's `statusCheckRollup`, for display only |
 | Queue | Position, current step, or why the PR can't join | Merge queue (section 3) |
 | Actions | Focus, Open, Resume, Clean Up, Add to Queue | Existing commands |
@@ -251,7 +251,9 @@ documented in B1's pull request:
   any error before a section's first answer. A failure after a good read
   stays in its pill, as a failed merged read or Retarget does, and errors
   stay through Refresh until the next answer: the rows don't move for a
-  blip. Board Settings… shows only where settings can help: not for a
+  blip. The pill says each thing once: gh signed out fails every read, each
+  in its call's own words, and is said as the open pull requests' read says
+  it. Board Settings… shows only where settings can help: not for a
   checkout gone, nor for a repository another section reads.
 - **Known limits** of the read-only sections (written down on 2026-11-09,
   not solved): the one-repository case (origin only) is what they are for.
@@ -978,16 +980,33 @@ What the board adds:
   --state open --limit 100 --json number,state,headRefName,headRefOid,
   headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,mergeable,
   statusCheckRollup,url,title`. It costs about 2 GraphQL points (measured with
-  `rateLimit(dryRun: true)` on 2026-09-27). The 100 merged pull requests
-  opened last (`--state merged --limit 100`, with their `title` and
-  `mergedAt`; 1 GraphQL point, about 48 kB, measured on 2026-11-12) are read
-  every 10 minutes, and as soon as a pull request leaves the open list. They
-  only say something of what is still at them: a worktree at one's head reads
-  "merged, clean up"; and an open pull request based on the branch of one of
-  the 30 opened last is a stack on a merged base
-  ([stacked pull requests](pr-stacks.md)). gh lists them by creation: one
-  opened before those 100 and merged now is not read, so its worktree stays a
-  branch without a pull request.
+  `rateLimit(dryRun: true)` on 2026-09-27). The merged pull requests, with
+  their `title` and `mergedAt`, are read every 10 minutes, and as soon as a
+  pull request leaves the open list: one GraphQL query through `gh api
+  graphql`, for two lists of 100 (1 GraphQL point, about 80 kB; 0.8 to 1.3 s
+  on this repository, 4 to 6 s on the largest public ones, where `gh pr list`
+  took 3 to 4; measured on 2026-11-12).
+  - Those opened last, as `gh pr list --state merged` lists them.
+  - Those updated last, a merge being an update: a pull request that waited
+    a week is read when it merges, though it is behind every one opened
+    since. GitHub's lists have no order by merge date (creation, update or
+    comments only), and a search by `merged:` reads another index, which
+    lags behind the lists.
+  - A comment, a review, a label, a lock or a deleted branch updates an old
+    merged pull request too: it then takes a place among those updated last,
+    and a burst of them (a purge of old branches) can fill that list. The
+    first list is untouched: what the board read before is still read.
+  - Both lists come in one answer. When the query fails, or answers without
+    one of its lists, the board asks `gh pr list --state merged --limit 100`
+    as it did before: the merged read is never less than the list opened
+    last, and a failure reads as the open pull requests' does. Not when gh
+    is missing or signed out, which fails every call. An answer that can't
+    be read never counts as an empty list: the list read before stays.
+
+  The merged pull requests only say something of what is still at them: a
+  worktree at one's head reads "merged, clean up"; and an open pull request
+  based on the branch of one of the 30 opened last is a stack on a merged base
+  ([stacked pull requests](pr-stacks.md)).
 - **Its one change:** Retarget, `PATCH pulls/{n}` with a new base, on one
   click ([stacked pull requests](pr-stacks.md)).
 - **Cadence:** every 60 s while the board is on screen, 30 s while a row has
