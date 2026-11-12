@@ -62,7 +62,7 @@ extension NiruxShellView {
                     circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
                     turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
                     questionAskedAt: asked?.since,
-                    dialog: dialog?.dialog,
+                    dialog: ZZ("no-dialog") ? nil : dialog?.dialog,
                     id: col.id
                 )
             }

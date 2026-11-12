@@ -56,3 +56,11 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the UI flow class several times at once next to
+      # heavy classes, then the revert its dialog test must catch.
+      - name: Repeat TurnQuestionFlowTests
+        run: scripts/repeat-class.sh NiruxTests.TurnQuestionFlowTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.LeadToolsFlowTests
+
+      - name: Reverts TurnQuestionFlowTests catches
+        run: scripts/mutants-class.sh NiruxTests.TurnQuestionFlowTests no-dialog
