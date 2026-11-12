@@ -157,7 +157,7 @@ final class BoardStagesView: NSView {
         // an app that isn't active doesn't hear the pointer leave.
         scrollView.contentView.postsBoundsChangedNotifications = true
         let center = NotificationCenter.default
-        center.addObserver(self, selector: #selector(refreshHover), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        center.addObserver(self, selector: #selector(listScrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification] {
             center.addObserver(self, selector: #selector(refreshHover), name: name, object: nil)
         }
@@ -575,15 +575,17 @@ final class BoardStagesView: NSView {
 
     override func mouseEntered(with event: NSEvent) { hover(at: event.locationInWindow) }
     override func mouseMoved(with event: NSEvent) { hover(at: event.locationInWindow) }
-    override func mouseExited(with event: NSEvent) { hover(at: nil) }
+    /// Whoever's area the pointer left, the Board's or one inside it,
+    /// which passed the event on: where it is now says what is lit.
+    override func mouseExited(with event: NSEvent) { hover(at: event.locationInWindow) }
 
     override func viewDidHide() {
         super.viewDidHide()
-        hover(at: nil)
+        refreshHover()
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
         refreshHover()
     }
 
@@ -601,9 +603,16 @@ final class BoardStagesView: NSView {
         hoveredLine = line
     }
 
-    /// The hover, from where the pointer is now.
+    /// The hover, from where the pointer is now; none on a Board that
+    /// doesn't show.
     @objc private func refreshHover() {
-        hover(at: pointerLocation())
+        hover(at: isHiddenOrHasHiddenAncestor ? nil : pointerLocation())
+    }
+
+    /// The lines moved under the pointer, and under their hands.
+    @objc private func listScrolled() {
+        window?.invalidateCursorRects(for: documentView)
+        refreshHover()
     }
 
     // MARK: - Clicks
