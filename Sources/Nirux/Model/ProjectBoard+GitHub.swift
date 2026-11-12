@@ -9,7 +9,7 @@ import Foundation
 /// the network.
 protocol ProjectBoardGitHub: Sendable {
     /// The pull requests of `repository` (`owner/name`) as JSON: the open
-    /// ones with their checks, or the merged ones updated last.
+    /// ones with their checks, or the merged ones opened or updated last.
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError>
     /// `gh run list` as JSON: the last push run of `workflow` on `branch`.
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError>
@@ -21,11 +21,11 @@ extension ProjectBoard {
     enum PullRequestList: Sendable {
         /// Up to 100 open pull requests, with their checks.
         case open
-        /// The 100 merged pull requests updated last, a merge being an
-        /// update, with their title and merge date: a worktree still at
-        /// one's head reads "merged, clean up", and an open pull request
-        /// based on the branch of one of the 30 opened last among them is
-        /// a stack on a merged base.
+        /// The 100 merged pull requests opened last and the 100 updated
+        /// last, a merge being an update, with their title and merge
+        /// date: a worktree still at one's head reads "merged, clean up",
+        /// and an open pull request based on the branch of one of the 30
+        /// opened last is a stack on a merged base.
         case merged
     }
 
@@ -74,30 +74,34 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
         "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url", "title"
     ].joined(separator: ",")
-    /// The merged pull requests by their last update: one that waited a
-    /// week is read when it merges. (`gh pr list` lists by creation,
-    /// where it would be behind every pull request opened since.) Not a
-    /// search: the list is GitHub's own, as up to date as the open one.
-    /// The fields are named as `gh pr list` names them.
+    /// Two lists of merged pull requests in one query, the fields named
+    /// as `gh pr list` names them.
+    /// - Those opened last, as `gh pr list` lists them: what the Board
+    ///   read before, so nothing it read is lost.
+    /// - Those updated last, a merge being an update: one that waited a
+    ///   week is read when it merges, though it is behind every pull
+    ///   request opened since. (GitHub has no order by merge date.) A
+    ///   comment, a label or a deleted branch updates an old one too:
+    ///   such a one only takes a place in this list.
     static let mergedQuery = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { "
-        + "pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { "
-        + "number state headRefName headRefOid headRepositoryOwner { login } headRepository { name } baseRefName url "
-        + "title mergedAt } } } }"
+        + "opened: pullRequests(states: MERGED, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ...merged } } "
+        + "updated: pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...merged } } } } "
+        + "fragment merged on PullRequest { number state headRefName headRefOid headRepositoryOwner { login } "
+        + "headRepository { name } baseRefName url title mergedAt }"
+    /// Both lists, one after the other: the parser keeps each pull request once.
+    static let mergedFilter = "[.data.repository | .opened.nodes[]?, .updated.nodes[]?]"
     static let runFields = "status,conclusion,headSha,createdAt,updatedAt,url"
 
-    /// `--repo` names the host: a terminal's `GH_HOST` would otherwise
-    /// point `owner/name` at another server.
+    /// Both name the host (`--repo`, `--hostname`): a terminal's
+    /// `GH_HOST` would otherwise point `owner/name` at another server.
     static func pullRequestArguments(repository: String, state: ProjectBoard.PullRequestList) -> [String] {
         switch state {
         case .open:
             return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "open", "--limit", "100",
                     "--json", openFields]
         case .merged:
-            // Raw fields (`-f`): a repository named "123" stays a string.
-            let parts = repository.split(separator: "/", maxSplits: 1).map(String.init)
-            return ["api", "graphql", "--hostname", "github.com", "-f", "query=\(mergedQuery)",
-                    "-f", "owner=\(parts.first ?? "")", "-f", "name=\(parts.dropFirst().first ?? "")",
-                    "--jq", ".data.repository.pullRequests.nodes"]
+            return GitHubCLIQueueClient.graphQL(mergedQuery, strings: GitHubCLIQueueClient.ownerAndName(repository))
+                + ["--jq", mergedFilter]
         }
     }
 
@@ -157,20 +161,35 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
                 return .failure(.notSignedIn(message.lowercased().contains("gh auth login") ? nil : message))
             }
             let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
-            return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
+            return .failure(.failed(WorktreeCleanup.firstLine(stderr).map(Self.reason) ?? "exit status \(result.terminationStatus)"))
         }
         return .success(result.standardOutput)
+    }
+
+    /// gh's line of error without what only says where it came from:
+    /// "gh: ", "GraphQL: ", and the field a GraphQL error names at its
+    /// end ("(repository)"). One failure then reads the same from `gh pr
+    /// list` and from `gh api`, and the header says it once.
+    static func reason(_ line: String) -> String {
+        var text = line
+        for prefix in ["gh: ", "GraphQL: "] where text.hasPrefix(prefix) { text.removeFirst(prefix.count) }
+        if let path = text.range(of: #" \([A-Za-z0-9_.]+\)$"#, options: .regularExpression) { text.removeSubrange(path) }
+        return text
     }
 }
 
 // MARK: - Parsing
 
 extension ProjectBoard {
-    /// `gh pr list --json …` output. A pull request missing a field it
-    /// needs is left out; nil when the output isn't a JSON list.
+    /// A list of pull requests as gh gives it (`gh pr list --json …`, or
+    /// the merged query's two lists one after the other), each pull
+    /// request once. An entry that isn't one, or misses a field it needs,
+    /// is left out; nil when the output isn't a JSON list.
     static func parsePullRequests(_ data: Data, repository: GitHubRepository) -> [PullRequest]? {
-        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
-        return json.compactMap { pullRequest(from: $0, repository: repository) }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
+        var numbers = Set<Int>()
+        return json.compactMap { ($0 as? [String: Any]).flatMap { pullRequest(from: $0, repository: repository) } }
+            .filter { numbers.insert($0.number).inserted }
     }
 
     static func pullRequest(from json: [String: Any], repository: GitHubRepository) -> PullRequest? {

@@ -107,22 +107,34 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertFalse(pullRequests[2].isFromConfiguredRepository, "a fork's")
     }
 
-    func testAMergedPullRequestIsReadWithItsTitleAndWhenItMerged() throws {
-        // The first as gh writes it; the second as a list that says less would.
+    func testTheMergedPullRequestsAreReadFromTheQuerysTwoLists() throws {
+        // As the query's nodes come, one list after the other: #52 is in both; an entry GitHub couldn't
+        // load; a pull request whose author's account is gone; one that says less than was asked.
         let merged = """
         [
           {"baseRefName": "main", "headRefName": "feat/login", "headRefOid": "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984",
-           "headRepository": {"id": "R_kgDOAAAAAA", "name": "widgets", "nameWithOwner": "acme/widgets"},
-           "headRepositoryOwner": {"id": "MDQ6VXNlcjAwMDAwMDA=", "login": "acme", "name": "Acme"},
+           "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"},
            "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "state": "MERGED", "title": "Sign in with a passkey",
            "url": "https://github.com/acme/widgets/pull/52"},
-          {"number": 51, "state": "MERGED", "headRefName": "fix/typo", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
-           "url": "https://github.com/acme/widgets/pull/51", "mergedAt": null}
+          null,
+          {"baseRefName": "main", "headRefName": "patch-1", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+           "headRepository": {"name": "widgets"}, "headRepositoryOwner": null,
+           "mergedAt": "2026-11-10T08:00:00Z", "number": 51, "state": "MERGED", "title": "A typo",
+           "url": "https://github.com/acme/widgets/pull/51"},
+          {"number": 50, "state": "MERGED", "headRefName": "fix/crash", "headRefOid": "a1b58d96ada210a3592b1d1c13e07130b7c425f0",
+           "url": "https://github.com/acme/widgets/pull/50", "mergedAt": null},
+          {"baseRefName": "main", "headRefName": "feat/login", "headRefOid": "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984",
+           "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"},
+           "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "state": "MERGED", "title": "Sign in with a passkey",
+           "url": "https://github.com/acme/widgets/pull/52"}
         ]
         """
         let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(merged.utf8), repository: widgets))
-        XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a passkey", ""], "one read without its title has none")
-        XCTAssertEqual(pullRequests.map { $0.mergedAt?.timeIntervalSince1970 }, [1_794_402_131, nil], "no date, as gh writes one that hasn't merged")
+        XCTAssertEqual(pullRequests.map(\.number), [52, 51, 50], "each pull request once; an entry that isn't one is left out, not the list")
+        XCTAssertEqual(pullRequests.map(\.isFromConfiguredRepository), [true, false, false], "by its head repository's owner and name")
+        XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a passkey", "A typo", ""], "one read without its title has none")
+        XCTAssertEqual(pullRequests.map { $0.mergedAt?.timeIntervalSince1970 }, [1_794_402_131, 1_794_297_600, nil],
+                       "no date, as gh writes one that hasn't merged")
     }
 
     func testNotAListReadsAsNothing() {
@@ -219,16 +231,17 @@ final class ProjectBoardGitHubTests: XCTestCase {
              "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,"
                 + "mergeable,statusCheckRollup,url,title"]
         )
-        // The merged ones by their last update, which `gh pr list` can't ask for: one GraphQL query,
-        // with the fields under the names `gh pr list` gives them.
+        // The merged ones in one GraphQL query: those opened last, as `gh pr list` lists them, and
+        // those updated last, which it can't ask for; the fields under the names it gives them.
         XCTAssertEqual(
             GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .merged),
             ["api", "graphql", "--hostname", "github.com", "-f",
              "query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { "
-                + "pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { "
-                + "number state headRefName headRefOid headRepositoryOwner { login } headRepository { name } baseRefName url "
-                + "title mergedAt } } } }",
-             "-f", "owner=acme", "-f", "name=widgets", "--jq", ".data.repository.pullRequests.nodes"]
+                + "opened: pullRequests(states: MERGED, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ...merged } } "
+                + "updated: pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...merged } } } } "
+                + "fragment merged on PullRequest { number state headRefName headRefOid headRepositoryOwner { login } "
+                + "headRepository { name } baseRefName url title mergedAt }",
+             "-f", "owner=acme", "-f", "name=widgets", "--jq", "[.data.repository | .opened.nodes[]?, .updated.nodes[]?]"]
         )
         XCTAssertEqual(
             GitHubCLIBoardClient.runArguments(repository: "acme/widgets", workflow: "nightly.yml", branch: "main"),
@@ -260,6 +273,15 @@ final class ProjectBoardGitHubTests: XCTestCase {
         let revoked = try fakeGH("revoked", "HTTP 401: Bad credentials (https://api.github.com/graphql)", 1)
         let refusal = "HTTP 401: Bad credentials (https://api.github.com/graphql)"
         XCTAssertEqual(revoked.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(refusal)))
+        // One failure reads the same from `gh pr list` and from `gh api`: the header says it once.
+        let unresolved = "Could not resolve to a Repository with the name acme/widgets."
+        let listing = try fakeGH("listing", "GraphQL: \(unresolved) (repository)", 1)
+        XCTAssertEqual(listing.pullRequests(repository: "acme/widgets", state: .open), .failure(.failed(unresolved)))
+        let querying = try fakeGH("querying", "gh: \(unresolved)", 1)
+        XCTAssertEqual(querying.pullRequests(repository: "acme/widgets", state: .merged), .failure(.failed(unresolved)))
+        XCTAssertEqual(ProjectBoard.FetchError.failed(unresolved).message, "gh: \(unresolved)")
+        XCTAssertEqual(GitHubCLIBoardClient.reason("could not connect (see the proxy settings)"), "could not connect (see the proxy settings)",
+                       "only a GraphQL error's field is taken off its end")
         XCTAssertEqual(
             ProjectBoard.FetchError.notSignedIn(nil).message,
             "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."

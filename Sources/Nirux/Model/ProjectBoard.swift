@@ -233,8 +233,10 @@ extension ProjectBoard {
             configured && pullRequest.isFromConfiguredRepository && pullRequest.state == "MERGED"
         }
         let merged = latestByBranch(sources.mergedPullRequests.filter(isOurs))
-        // The window first, on the list as parsed: the 30 opened last
-        // of those read, a fork's pull request among them.
+        // The window first, on the list as parsed: the 30 merged pull
+        // requests opened last, a fork's among them. (The 100 opened
+        // last are always read: one read for its late update has a lower
+        // number than each of them.)
         let mergedBases = latestByBranch(
             sources.mergedPullRequests.sorted { $0.number > $1.number }.prefix(mergedBaseWindow).filter(isOurs)
         )
@@ -306,8 +308,7 @@ extension ProjectBoard {
     }
 
     /// A merged base is looked for among this many merged pull requests,
-    /// the last opened of those read, a fork's included
-    /// (docs/design/pr-stacks.md). A
+    /// the last opened, a fork's included (docs/design/pr-stacks.md). A
     /// root's base reads spent when the open pull request's `baseRefOid`
     /// is a merged one's head, and that is the base's tip when the open
     /// one was opened or last pushed, not now: a long-lived branch that

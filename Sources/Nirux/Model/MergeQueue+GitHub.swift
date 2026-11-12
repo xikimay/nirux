@@ -496,13 +496,13 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
 
     /// `-f` sends each value as a plain string: `-F` would read `@file`
     /// and turn `true` or `12` into other types.
-    private static func graphQL(_ query: String, strings: [(String, String)], integers: [(String, Int)] = []) -> [String] {
+    static func graphQL(_ query: String, strings: [(String, String)], integers: [(String, Int)] = []) -> [String] {
         ["api", "graphql", "--hostname", host, "-f", "query=\(query)"]
             + strings.flatMap { ["-f", "\($0.0)=\($0.1)"] }
             + integers.flatMap { ["-F", "\($0.0)=\($0.1)"] }
     }
 
-    private static func ownerAndName(_ repository: String) -> [(String, String)] {
+    static func ownerAndName(_ repository: String) -> [(String, String)] {
         let parts = repository.split(separator: "/", maxSplits: 1).map(String.init)
         return [("owner", parts.first ?? ""), ("name", parts.count > 1 ? parts[1] : "")]
     }

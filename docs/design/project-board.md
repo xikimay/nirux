@@ -978,19 +978,25 @@ What the board adds:
   --state open --limit 100 --json number,state,headRefName,headRefOid,
   headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,mergeable,
   statusCheckRollup,url,title`. It costs about 2 GraphQL points (measured with
-  `rateLimit(dryRun: true)` on 2026-09-27). The 100 merged pull requests
-  updated last, with their `title` and `mergedAt`, are read every 10 minutes,
-  and as soon as a pull request leaves the open list. A merge is an update, so
-  one that waited a week is read when it merges; `gh pr list` lists by
-  creation, where it would be behind every pull request opened since. Hence
-  one GraphQL query through `gh api graphql`: `repository.pullRequests(states:
-  MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC})`, the
-  fields named as `gh pr list` names them (1 GraphQL point, about 39 kB,
-  0.85 s, measured on 2026-11-12). It is GitHub's own list, not a search: as
-  up to date as the open one, and outside the search rate limit. The merged
-  pull requests only say something of what is still at them: a worktree at
-  one's head reads "merged, clean up"; and an open pull request based on the
-  branch of one of the 30 opened last among them is a stack on a merged base
+  `rateLimit(dryRun: true)` on 2026-09-27). The merged pull requests, with
+  their `title` and `mergedAt`, are read every 10 minutes, and as soon as a
+  pull request leaves the open list: one GraphQL query through `gh api
+  graphql`, for two lists of 100 (1 GraphQL point, about 80 kB, 0.8 to 1.3 s,
+  measured on 2026-11-12).
+  - Those opened last, as `gh pr list --state merged` lists them.
+  - Those updated last, a merge being an update: a pull request that waited
+    a week is read when it merges, though it is behind every one opened
+    since. GitHub's lists have no order by merge date (`CREATED_AT`,
+    `UPDATED_AT`), and a search by `merged:` reads another index, which
+    lags behind the lists.
+  - A comment, a label, a lock or a deleted branch updates an old merged pull
+    request too: it then takes a place among those updated last, and a burst
+    of them (a purge of old branches) can fill that list. The first list is
+    untouched: what the board read before is always read.
+
+  The merged pull requests only say something of what is still at them: a
+  worktree at one's head reads "merged, clean up"; and an open pull request
+  based on the branch of one of the 30 opened last is a stack on a merged base
   ([stacked pull requests](pr-stacks.md)).
 - **Its one change:** Retarget, `PATCH pulls/{n}` with a new base, on one
   click ([stacked pull requests](pr-stacks.md)).
