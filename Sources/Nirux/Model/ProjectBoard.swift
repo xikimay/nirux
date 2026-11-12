@@ -72,9 +72,12 @@ extension ProjectBoard {
         /// last pushed: at a merged pull request's head, the base reads
         /// spent (`stackPlaces`).
         var baseOid: String?
-        /// Empty when gh didn't say.
+        /// Empty when gh didn't say. Written by whoever opened it, a
+        /// fork's included: untrusted. Shown cleaned, on one line
+        /// (`BoardStages.text`).
         var title = ""
-        /// When it merged; nil for one that hasn't.
+        /// When it merged; nil for one that hasn't, and for one whose
+        /// date gh didn't give.
         var mergedAt: Date?
 
         var isOpen: Bool { state == "OPEN" }
@@ -230,7 +233,7 @@ extension ProjectBoard {
             configured && pullRequest.isFromConfiguredRepository && pullRequest.state == "MERGED"
         }
         let merged = latestByBranch(sources.mergedPullRequests.filter(isOurs))
-        // The window first, on the list as gh gave it: a fork's pull
+        // The window first, on the list as parsed: a fork's pull
         // request counts in it, as it did when gh listed 30.
         let mergedBases = latestByBranch(
             sources.mergedPullRequests.sorted { $0.number > $1.number }.prefix(mergedBaseWindow).filter(isOurs)

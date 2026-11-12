@@ -202,8 +202,9 @@ extension BoardStages {
         var message: String
         /// Not Stop pressed, nor a dry run reaching its first change.
         var isProblem: Bool
-        /// It stopped after merging it: its post-merge run failed. Any
-        /// other stop is moot once the pull request merged.
+        /// The queue had merged it when it stopped: its post-merge run
+        /// failed, or was never watched to its end. A stop from before
+        /// its merge is moot once the pull request merged.
         var isAfterMerge = false
 
         /// It still says something of a pull request in this state.
@@ -216,8 +217,9 @@ extension BoardStages {
         var order: Int?
         /// Nil while it waits its turn, or no queue runs.
         var step: QueueStep?
-        /// While it still stands: whoever fills the facts drops it once
-        /// the pull request's head moved.
+        /// While it still stands: whoever fills the facts drops one a
+        /// push answers once the pull request's head moved
+        /// (`BoardStages.queue(of:head:in:)`).
         var stop: QueueStop?
     }
 

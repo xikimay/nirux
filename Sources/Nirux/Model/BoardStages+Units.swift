@@ -57,8 +57,8 @@ extension BoardStages {
         /// Its tasks in the sidebar's order, then its pull requests
         /// without a task (oldest first, a stack in its order), one line
         /// per pull request, each `id` its own. A task's merged pull
-        /// request is on its facts wherever its worktree's HEAD stands:
-        /// the queue's own branch update leaves it a commit behind.
+        /// request is on its facts where the queue's own branch update
+        /// left its worktree a commit behind (`BoardStages.sectionFacts`).
         var lines: [Facts]
         /// The line each sub-task is listed under in the sidebar
         /// (`WorkspaceStore.activeParents`), by their facts' `id`.
