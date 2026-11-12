@@ -119,6 +119,9 @@ final class TurnQuestionSidebarTests: XCTestCase {
         XCTAssertGreaterThan(first.frame.height, SidebarExpandedMetrics.questionLineHeight, "a choice wraps too")
         XCTAssertGreaterThanOrEqual(first.frame.minY, second.frame.maxY)
         XCTAssertGreaterThanOrEqual(second.frame.minY, asked.frame.maxY)
+        let reply = try XCTUnwrap(frame(of: .reply, in: result))
+        XCTAssertLessThanOrEqual(reply.maxY, asked.frame.minY + 3, "the buttons under them all")
+        XCTAssertGreaterThanOrEqual(reply.minY, result.bottomY, "inside its card")
         XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
         XCTAssertNotEqual(column(which), column(open), "choices redraw the card")
     }

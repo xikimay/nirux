@@ -347,8 +347,8 @@ final class TurnEndClassificationTests: XCTestCase {
             "- One thing done\n\nWhich?": "one item is no choice",
             "1. A\n2. B\n\nBoth are fine.\n\nWhich?": "not next to the question",
             (1...7).map { "\($0). Step \($0)" }.joined(separator: "\n") + "\n\nWhich?": "a longer list is a report",
-            "- Should I rebase?\n- Which?": "a question among items",
-            "```\n1. a\n2. b\n```\nWhich?": "code",
+            "- Rebase\n- Merge\n- Which?": "a question among items",
+            "    1. a\n    2. b\nWhich?": "code",
             "1. A\n2. B\n\nDone.": "no such question",
         ]
         for (message, why) in none {

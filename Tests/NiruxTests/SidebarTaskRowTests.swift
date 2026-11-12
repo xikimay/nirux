@@ -222,6 +222,8 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(lines(workspace([column()], isActive: true, nextStep: sentence)), 4, "the selected row")
         XCTAssertEqual(lines(workspace([column()], branch: "feat/" + String(repeating: "a-very-long-name-", count: 6))), 1)
         XCTAssertEqual(workspace([column()], pr: pullRequest("MERGED"), cleanup: .available).rowSummary.statusLineLimit(isSelected: true), 1)
+        let broken = SidebarRowSummary(mark: .error, status: SidebarStatusLine(text: sentence, tone: .error), trailing: nil)
+        XCTAssertEqual(broken.statusLineLimit(isSelected: false), 4, "what broke stops the task too")
 
         func render(_ info: WorkspaceInfo) -> SidebarWorkspaceCardRenderResult {
             SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
@@ -252,12 +254,18 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(lines(workspace([approval])), 1)
 
         // The selected row's next step, under a line that says something
-        // else: up to three lines.
+        // else: up to three lines, inside its row.
         let next = workspace([column(0, .working)], isActive: true, nextStep: sentence)
         let selected = render(next)
         let step = try XCTUnwrap(selected.views.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasSuffix(sentence) })
         XCTAssertEqual(step.frame.height, 3 * SidebarExpandedMetrics.actionLineHeight)
-        XCTAssertEqual(500 - selected.bottomY, SidebarExpandedMetrics.workspaceHeight(for: next, sidebarWidth: 260))
+        XCTAssertEqual(step.frame.minY, selected.bottomY + SidebarExpandedMetrics.rowPaddingY, accuracy: 0.5)
+
+        // What follows a status of several lines starts under it.
+        let tall = render(workspace([column()], isActive: true, nextStep: sentence))
+        let status = try XCTUnwrap(tall.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Next · \(sentence)" })
+        let chip = try XCTUnwrap(tall.hitAreas.first { if case .column = $0.region { true } else { false } })
+        XCTAssertLessThanOrEqual(chip.frame.maxY, status.frame.minY)
     }
 
     /// "Clean up" is a link over its own words: a click on "Merged" or
@@ -354,6 +362,11 @@ final class SidebarTaskRowTests: XCTestCase {
         )
         askingLead.isLead = true
         XCTAssertEqual(askingLead.cardActions, [.missionQuestion(columnIndex: 1, question)])
+        XCTAssertTrue(
+            SidebarWorkspaceCardRenderer(workspace: askingLead, sidebarWidth: 260, yOffset: 500).render().views
+                .contains { ($0 as? NSTextField)?.stringValue == "Needs you · Ship it?" },
+            "the question itself"
+        )
         XCTAssertEqual(
             SidebarExpandedMetrics.workspaceHeight(for: askingLead, sidebarWidth: 260),
             SidebarExpandedMetrics.leadRowHeight
