@@ -15,12 +15,17 @@ final class SidebarRowDragTests: XCTestCase {
         )
     }
 
-    /// An expanded sidebar in a window that is never shown.
-    private func sidebar(_ rows: [WorkspaceInfo]) -> (SidebarView, NSWindow) {
+    /// How long a mouse-up is waited for once the button is up.
+    private let wait: CFTimeInterval = 0.25
+
+    /// An expanded sidebar in a window that is never shown, on a clock the
+    /// test moves.
+    private func sidebar(_ rows: [WorkspaceInfo], clock: Clock = Clock()) -> (SidebarView, NSWindow) {
         // What an earlier test left in the queue isn't this one's.
         NSApplication.shared.discardEvents(matching: .any, before: nil)
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 660))
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
+        sidebar.clock = { clock.time }
         host.addSubview(sidebar)
         let window = NSWindow(contentRect: host.bounds, styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -66,12 +71,13 @@ final class SidebarRowDragTests: XCTestCase {
         NSApp.postEvent(tick, atStart: false)
     }
 
-    /// The button is held for `delay` (the drag's ticks are running by
-    /// then), then reads up. Each time the gesture then finds it up, the
-    /// next of `found` runs first.
-    private func releaseButton(of sidebar: SidebarView, after delay: TimeInterval, found: [@MainActor () -> Void] = []) {
-        let press = Press(until: Date().addingTimeInterval(delay), found: found)
+    /// The button reads up. Each time the gesture finds it so, the next
+    /// of `found` runs first.
+    @discardableResult
+    private func releaseButton(of sidebar: SidebarView, found: [@MainActor () -> Void] = []) -> Press {
+        let press = Press(found: found)
         sidebar.rowPressHolds = { _ in press.holds() }
+        return press
     }
 
     /// What ended a stuck drag before: the next click's mouse-up, long
@@ -87,17 +93,20 @@ final class SidebarRowDragTests: XCTestCase {
     }
 
     /// A row dragged past the click threshold whose mouse-up never comes
-    /// (a modal or another app took it) ends by itself once the button is
-    /// up: the list that changed meanwhile shows, and nothing is clicked
-    /// or moved.
+    /// (a modal or another app took it) ends by itself once the button
+    /// has been up for as long as a mouse-up is waited for, not before:
+    /// the list that changed meanwhile shows, and nothing is clicked or
+    /// moved.
     func testADragThatLosesItsMouseUpEndsByItself() throws {
-        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)])
+        let clock = Clock()
+        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)], clock: clock)
         defer { window.close() }
         var clicked: [Int] = []
         var moved: [[Int]] = []
         sidebar.onWorkspaceClicked = { clicked.append($0) }
         sidebar.onWorkspaceReordered = { moved.append([$0, $1]) }
-        releaseButton(of: sidebar, after: 0.6)
+        // Found up; again at once; again short of the wait; then past it.
+        let press = releaseButton(of: sidebar, found: [{}, {}, { clock.time += self.wait - 0.05 }, { clock.time += 0.1 }])
 
         let start = try frame(ofRow: 1, in: sidebar).center
         post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window)
@@ -107,6 +116,7 @@ final class SidebarRowDragTests: XCTestCase {
         sidebar.mouseDown(with: try mouse(.leftMouseDown, at: start, in: sidebar, window: window))
 
         XCTAssertFalse(later.wasNeeded, "the drag held the sidebar until another mouse-up")
+        XCTAssertEqual(press.timesFoundUp, 4, "lost once the wait is over, not before")
         XCTAssertNil(sidebar.workspaceDrag)
         XCTAssertNil(sidebar.dragGhostView, "its ghost goes with it")
         XCTAssertEqual(sidebar.lastInfos.map(\.id), ["a", "b"], "the update put aside is applied")
@@ -120,7 +130,8 @@ final class SidebarRowDragTests: XCTestCase {
     /// after the drags queued before it, and drops the row where the last
     /// of them left it.
     func testAMouseUpBehindWhatIsQueuedDropsTheRowWhereItWasDragged() throws {
-        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)])
+        let clock = Clock()
+        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)], clock: clock)
         defer { window.close() }
         var moved: [[Int]] = []
         sidebar.onWorkspaceReordered = { moved.append([$0, $1]) }
@@ -128,7 +139,7 @@ final class SidebarRowDragTests: XCTestCase {
         let start = try frame(ofRow: 0, in: sidebar).center
         let underAll = NSPoint(x: start.x, y: try frame(ofRow: 2, in: sidebar).minY + 2)
         let underTheSecond = NSPoint(x: start.x, y: try frame(ofRow: 1, in: sidebar).minY + 2)
-        releaseButton(of: sidebar, after: 0.6, found: [
+        releaseButton(of: sidebar, found: [
             // Up: a tick, a last drag back up a row and the mouse-up are queued…
             { [weak self, weak sidebar, weak window] in
                 guard let self, let sidebar, let window else { return }
@@ -137,7 +148,7 @@ final class SidebarRowDragTests: XCTestCase {
                 self.post(.leftMouseUp, at: underTheSecond, in: sidebar, window: window)
             },
             // …and the app is busy for longer than a mouse-up is waited for.
-            { Thread.sleep(forTimeInterval: 0.3) }
+            { clock.time += self.wait + 0.05 }
         ])
         post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window)
         post(.leftMouseDragged, at: underAll, in: sidebar, window: window)
@@ -152,21 +163,22 @@ final class SidebarRowDragTests: XCTestCase {
     /// Events posted to the app move no button: a drag whose button reads
     /// up all along isn't taken for lost while it keeps moving.
     func testADragThatKeepsMovingIsNotLost() throws {
-        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)])
+        let clock = Clock()
+        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)], clock: clock)
         defer { window.close() }
         var moved: [[Int]] = []
         sidebar.onWorkspaceReordered = { moved.append([$0, $1]) }
 
         let start = try frame(ofRow: 0, in: sidebar).center
         let underAll = NSPoint(x: start.x, y: try frame(ofRow: 2, in: sidebar).minY + 2)
-        releaseButton(of: sidebar, after: 0, found: [
+        releaseButton(of: sidebar, found: [
             // It moves on…
             { [weak self, weak sidebar, weak window] in
                 guard let self, let sidebar, let window else { return }
                 self.post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 20), in: sidebar, window: window)
             },
             // …and longer than a mouse-up is waited for after the first tick…
-            { Thread.sleep(forTimeInterval: 0.3) },
+            { clock.time += self.wait + 0.05 },
             // …it is dropped.
             { [weak self, weak sidebar, weak window] in
                 guard let self, let sidebar, let window else { return }
@@ -221,19 +233,24 @@ final class SidebarRowDragTests: XCTestCase {
     }
 }
 
-/// A button that is held until a moment, then up.
+/// A clock the test moves by hand.
+@MainActor
+private final class Clock {
+    var time: CFTimeInterval = 9_000
+}
+
+/// A button that reads up.
 @MainActor
 private final class Press {
-    private let until: Date
     private var found: [@MainActor () -> Void]
+    private(set) var timesFoundUp = 0
 
-    init(until: Date, found: [@MainActor () -> Void]) {
-        self.until = until
+    init(found: [@MainActor () -> Void]) {
         self.found = found
     }
 
     func holds() -> Bool {
-        guard Date() >= until else { return true }
+        timesFoundUp += 1
         if !found.isEmpty { found.removeFirst()() }
         return false
     }

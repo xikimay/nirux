@@ -68,8 +68,9 @@ extension SidebarView {
         }
         workspaceDrag = drag
         var lastDragEvent: NSEvent?
-        // When a tick first found the press gone, its mouse-up not here.
-        var releasedAt: TimeInterval?
+        // When a tick first found the press gone, its mouse-up not here
+        // (`clock`).
+        var releasedAt: CFTimeInterval?
 
         tracking: while true {
             guard let event = window.nextEvent(
@@ -131,12 +132,12 @@ extension SidebarView {
     /// updates, and a drag the keyboard, until the next click. It gets as
     /// long as the timeout to come, and is never taken ahead of the drags
     /// and keys queued before it.
-    private func rowPressIsLost(in window: NSWindow, since releasedAt: inout TimeInterval?) -> Bool {
+    private func rowPressIsLost(in window: NSWindow, since releasedAt: inout CFTimeInterval?) -> Bool {
         guard !rowPressHolds(window) else {
             releasedAt = nil
             return false
         }
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = clock()
         guard let released = releasedAt else {
             releasedAt = now
             return false
