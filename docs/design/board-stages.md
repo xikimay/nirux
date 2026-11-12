@@ -99,7 +99,8 @@ The phrase is the state's own line of the ladder:
   changed";
 - "Asking Lead"; "Blocked · …";
 - "Merged", "Merged · Clean up", "Merged · cleaning up…";
-- "Base #52 merged · Retarget to main" ([stacked pull requests](pr-stacks.md));
+- "Base #52 merged · Retarget to main" ([stacked pull requests](pr-stacks.md)),
+  or "Base #52 merged" alone where nothing here can retarget it (section 7);
 - at Checks, "Checks running", or "No test run yet" while a required check
   hasn't reported, each followed by "lands after #52" in a stack;
 - at Merge, "Lands after #52", "Draft", "Targets release", "Changes
@@ -285,6 +286,46 @@ read. Pure; nothing is read again.
 Still to come with the Board's column: the tasks' readings filled from the
 sidebar, kept from one sidebar pass to the next and for a space that isn't on
 screen.
+
+## 7. What a line offers
+
+The model says what a click does and what shows under the pointer
+(`Line.offer`, `Phrase.link`, `Line.tooltips`); the view doesn't act on them
+yet: a click on a line still opens its task, wherever it lands.
+
+- **The Merge station is the control of the queue's list**, which stays the
+  user's. A pull request outside the next Start's list joins it by a click on
+  its Merge station, at whatever station its line is: the queue asks for no
+  review, and waits for the checks itself. One in the list leaves it by a
+  click on its number.
+  - **Refused**, in the queue's own words (`ProjectBoard.queueRefusal`):
+    "Can’t join the queue: draft", another base ("after #52", "targets
+    release"), a conflict, an agent at work in its worktree. One already in
+    the list can still leave it.
+  - **Locked** while a queue runs, here or in another Nirux, and while the
+    confirmation sheet is open: the sheet shows the list as it was when it
+    opened. The station says which.
+  - **Nothing to click** without an open pull request, and in a repository
+    without a merge queue (one not saved in Board Settings).
+- **Retarget** is the merge queue's repository's to run. Without one, the
+  phrase reads "Base #52 merged", with no link. In a build that can't change
+  GitHub (a dry run), the link is there and does nothing: the phrase's tooltip
+  says why.
+- **Under the pointer**, what the line can't hold:
+  - its title: the task's branch and worktree ("feat/login ·
+    /Users/me/app.feat-login"), with "main checkout", "not checked out" or
+    "folder is gone" where it applies;
+  - Reviews: each pass that ran, "Code review ran before the last commits",
+    "Premortem ran on this commit", "Adversarial review running" (no commit
+    is named while HEAD isn't known), and each pass asked for that didn't,
+    "No code review yet";
+  - Checks: the latest run of each check by name, with its result: the red
+    ones first, then the required ones no check reported ("nightly: no run
+    yet"), those that run, then the rest; twelve, then "and 5 more";
+  - Merge: what a click does, "Add to Queue" or "Remove from Queue", or why
+    it does nothing;
+  - its pull request: its stack ("Stack: #52 → #53 → #54, on main") and its
+    address.
 
 ## Known limits
 

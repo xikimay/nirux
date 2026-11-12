@@ -77,8 +77,9 @@ extension BoardStages {
             guard let pullRequest = row.pullRequest, pullRequest.isOpen, shown.insert(pullRequest.number).inserted else { continue }
             // Its title is text from GitHub: cleaned, on one line.
             var facts = Facts(id: "\(repository.id)#\(pullRequest.number)", title: text(pullRequest.title) ?? row.branch ?? "")
+            facts.location = location(of: row)
             facts.hasTask = false
-            facts.queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue)
+            facts.queue = queue(of: row, pullRequest, in: repository)
             facts.pullRequest = self.pullRequest(pullRequest, stack: row.stack, in: repository)
             lines.append(facts)
         }
@@ -101,6 +102,7 @@ extension BoardStages {
         in repository: RepositoryReading
     ) -> Facts {
         var facts = Facts(id: id, title: workspace.title)
+        facts.location = location(of: row)
         // A workspace in another repository, or in none, has no rail: no
         // pull request is read there, and none of this one's is its own.
         facts.hasRepository = repository.readsPullRequests && row.group != .otherRepository
@@ -120,7 +122,7 @@ extension BoardStages {
         facts.flakyReason = isAboutRow ? reading.flakyReason : nil
         guard facts.hasRepository else { return facts }
         if let pullRequest = row.pullRequest {
-            facts.queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue)
+            facts.queue = queue(of: row, pullRequest, in: repository)
             facts.pullRequest = self.pullRequest(
                 pullRequest, stack: row.stack, in: repository, reviewRequest: isAboutRow ? reading.reviewRequest : nil
             )
@@ -128,7 +130,7 @@ extension BoardStages {
             facts.queue = queue(of: number, head: nil, in: repository.queue)
             let read = repository.merged.first { $0.number == number }
             facts.pullRequest = PullRequest(
-                number: number, isMerged: true, base: read?.baseRefName ?? repository.baseBranch ?? "", checks: .passed
+                number: number, isMerged: true, base: read?.baseRefName ?? repository.baseBranch ?? "", checks: .passed, url: read?.url
             )
         }
         // Its merged pull request's worktree, still there: the sidebar
@@ -158,6 +160,22 @@ extension BoardStages {
         return detected
     }
 
+    /// "feat/login · /Users/me/app.feat-login": the row's branch and its
+    /// worktree, or its folder.
+    private static func location(of row: ProjectBoard.Row) -> String {
+        var parts: [String] = []
+        if row.group == .main { parts.append("main checkout") }
+        if let branch = row.branch {
+            parts.append(branch)
+        } else if let head = row.detachedHead {
+            parts.append("detached HEAD (\(WorktreeCleanup.short(head)))")
+        }
+        if let path = row.worktreePath ?? row.folder { parts.append(path) }
+        if row.folderIsGone { parts.append("folder is gone") }
+        if row.worktreePath == nil, row.folder == nil { parts.append("not checked out") }
+        return parts.joined(separator: " · ")
+    }
+
     // MARK: A pull request
 
     private static func pullRequest(
@@ -174,8 +192,21 @@ extension BoardStages {
             number: pullRequest.number, isMerged: isMerged, isDraft: pullRequest.isDraft, isConflicting: pullRequest.isConflicting,
             base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,
             checks: isMerged ? .passed : checks(pullRequest.checks, required: repository.requiredChecks),
-            reviewRequest: reviewRequest, stack: stack
+            reviewRequest: reviewRequest, stack: stack, url: pullRequest.url,
+            checkLines: isMerged ? [] : checkLines(pullRequest.checks, required: repository.requiredChecks)
         )
+    }
+
+    /// Each check's latest run by name, with its result as the Board
+    /// writes it: the red ones first, then the required ones no check
+    /// reported, then those that run, then the rest.
+    static func checkLines(_ checks: [ProjectBoard.Check], required: [String]) -> [String] {
+        let latest = ProjectBoard.latest(checks)
+        let lines = { (result: ProjectBoard.CheckResult) in
+            latest.filter { $0.result == result }.map { "\($0.qualifiedName ?? $0.name): \(ProjectBoard.glyph($0.result))" }
+        }
+        let missing = required.filter { name in !latest.contains { $0.matches(name) } }.map { "\($0): no run yet" }
+        return lines(.failure) + missing + [.pending, .success, .neutral, .skipped].flatMap(lines)
     }
 
     /// The rollup's checks, by the merge queue's rules (`MergeQueue.judge`;
@@ -232,14 +263,21 @@ extension BoardStages {
     ///   once the head moved. The others stay until the next Start:
     ///   "changed" is itself a head that moved, and a draft or another
     ///   base is no commit's. After its merge, every stop stays.
+    /// - The list is the user's to change unless a queue runs, here or
+    ///   in another Nirux, or its confirmation sheet is open: the sheet
+    ///   shows the list as it was when it opened.
     static func queue(of number: Int, head: String?, in state: ProjectBoard.QueueState?) -> Queue {
         guard let state else { return Queue() }
         let merged = Set(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
         let proposed = state.selection.filter { !merged.contains($0) }.firstIndex(of: number).map { $0 + 1 }
-        guard let index = state.entries.firstIndex(where: { $0.number == number }) else { return Queue(order: proposed) }
+        var queue = Queue(list: listLock(state).map(QueueList.locked) ?? .open, order: proposed)
+        if state.isDryRun {
+            queue.dryRun = "Dry run: this build doesn’t change GitHub." + (state.dryRunReason.map { "\nThis build: \($0)." } ?? "")
+        }
+        guard let index = state.entries.firstIndex(where: { $0.number == number }) else { return queue }
         let entry = state.entries[index]
         let isMerged = entry.mergeCommit != nil
-        var queue = Queue(order: state.isLocked ? (entry.step == .done ? nil : index + 1) : proposed)
+        if state.isLocked { queue.order = entry.step == .done ? nil : index + 1 }
         switch entry.step {
         case .waiting, .done:
             break
@@ -258,6 +296,21 @@ extension BoardStages {
             }
         }
         return queue
+    }
+
+    /// What the queue says of a row's pull request, and why the queue's
+    /// rule keeps it out of the list, as far as the Board knows without
+    /// a call (`ProjectBoard.queueRefusal`).
+    private static func queue(of row: ProjectBoard.Row, _ pullRequest: ProjectBoard.PullRequest, in repository: RepositoryReading) -> Queue {
+        var queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue)
+        queue.refusal = ProjectBoard.queueRefusal(row, baseBranch: repository.baseBranch)
+        return queue
+    }
+
+    private static func listLock(_ state: ProjectBoard.QueueState) -> String? {
+        if state.run == .elsewhere { return "Another Nirux runs this repository’s queue: wait until it ends." }
+        if state.isRunning { return "The queue is running: change the list once it stops." }
+        return state.isConfirming ? "The confirmation sheet is open: change the list once it closes." : nil
     }
 
     /// "waiting for checks" → "Waiting for checks".

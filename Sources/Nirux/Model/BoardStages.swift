@@ -84,8 +84,38 @@ extension BoardStages {
         var text: String
         /// `text` ends with its title.
         var link: Link?
+        /// Why the link does nothing in this build, for its tooltip.
+        var linkBlocked: String?
         /// What the line can't hold, for its tooltip.
         var detail: String?
+    }
+
+    /// What a click on a line's Merge station changes in the next Start's
+    /// list, which stays the user's.
+    struct QueueOffer: Equatable, Sendable {
+        enum Change: Equatable, Sendable {
+            case add, remove
+        }
+
+        var change: Change
+        /// Why a click changes nothing: the pull request can't join, or
+        /// the list can't change for now.
+        var blocked: String?
+
+        var title: String { change == .add ? "Add to Queue" : "Remove from Queue" }
+    }
+
+    /// What a line says under the pointer, beside its words when they
+    /// are cut.
+    struct Tooltips: Equatable, Sendable {
+        /// Where its work is: "feat/login · /Users/me/app.feat-login".
+        var title: String?
+        /// The stations that have something to add: Reviews, each pass
+        /// that ran and on which commit; Checks, each check by name;
+        /// Merge, what a click does.
+        var stations: [Station: String] = [:]
+        /// Its stack, its address.
+        var pullRequest: String?
     }
 
     struct Line: Equatable, Sendable {
@@ -104,6 +134,10 @@ extension BoardStages {
         /// activity. Nil where no clock of its own runs: a line that is
         /// ready, blocked, merged or in the queue's hands.
         var since: TimeInterval?
+        /// Nil where a click on its Merge station does nothing: no open
+        /// pull request, no merge queue.
+        var offer: QueueOffer?
+        var tooltips = Tooltips()
     }
 }
 
@@ -185,6 +219,10 @@ extension BoardStages {
         var reviewRequest: ReviewRequest?
         /// Its place in a stack (docs/design/pr-stacks.md).
         var stack: ProjectBoard.StackPlace?
+        var url: String?
+        /// Each check with its result, those that hold it first:
+        /// "Tests / unit: ✗".
+        var checkLines: [String] = []
     }
 
     /// What the running queue does with a pull request.
@@ -211,7 +249,19 @@ extension BoardStages {
         func stands(merged: Bool) -> Bool { isProblem && (isAfterMerge || !merged) }
     }
 
+    /// The next Start's list, as far as the user can change it.
+    enum QueueList: Equatable, Sendable {
+        /// The repository has no merge queue: nothing to join, and no
+        /// Retarget, which the queue's client runs.
+        case none
+        case open
+        /// A queue runs, or its confirmation sheet is open: why, in a
+        /// sentence.
+        case locked(String)
+    }
+
     struct Queue: Equatable, Sendable {
+        var list = QueueList.none
         /// Its place in the queue's list, from 1: in the running queue's
         /// as the queue counts it ("3 of 7"), else in the next Start's.
         var order: Int?
@@ -221,6 +271,11 @@ extension BoardStages {
         /// push answers once the pull request's head moved
         /// (`BoardStages.queue(of:head:in:)`).
         var stop: QueueStop?
+        /// Why its pull request can't join the list, as the queue's own
+        /// rule says it in a word or two ("draft", "after #52"). Nil: it can.
+        var refusal: String?
+        /// Why this build's queue changes nothing on GitHub: no Retarget.
+        var dryRun: String?
     }
 
     /// Everything one line is derived from.
@@ -229,6 +284,8 @@ extension BoardStages {
         /// when it has none.
         var id: String
         var title: String
+        /// Its branch and its folder, for the title's tooltip.
+        var location: String?
         /// False for a task without a repository: no rail.
         var hasRepository = true
         /// False for a pull request with no workspace here: no agent, and
@@ -277,15 +334,19 @@ extension BoardStages {
     static func line(_ facts: Facts, rules: Rules = Rules()) -> Line {
         let station = station(of: facts, rules: rules)
         let reading = reading(of: facts, at: station, rules: rules)
+        let rail = rail(of: facts, at: station, rules: rules)
+        let offer = rail == nil ? nil : offer(facts)
         return Line(
             id: facts.id,
             title: facts.title,
             station: station,
             state: reading.state,
-            rail: rail(of: facts, at: station, rules: rules),
+            rail: rail,
             phrase: reading.phrase,
             pullRequest: pullRequestText(facts),
-            since: reading.since
+            since: reading.since,
+            offer: offer,
+            tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules)
         )
     }
 
@@ -336,6 +397,62 @@ extension BoardStages {
         )
     }
 
+    /// The Merge station is the list's control (docs/design/board-stages.md,
+    /// section 7): a pull request in the list leaves it, another one
+    /// joins unless the queue's rule refuses it, at whatever station.
+    private static func offer(_ facts: Facts) -> QueueOffer? {
+        guard let pullRequest = facts.pullRequest, !pullRequest.isMerged else { return nil }
+        let lock: String?
+        switch facts.queue.list {
+        case .none: return nil
+        case .open: lock = nil
+        case .locked(let why): lock = why
+        }
+        if facts.queue.order != nil { return QueueOffer(change: .remove, blocked: lock) }
+        if let refusal = text(facts.queue.refusal) { return QueueOffer(change: .add, blocked: "Can’t join the queue: \(refusal)") }
+        return QueueOffer(change: .add, blocked: lock)
+    }
+
+    /// This many checks under the pointer, then how many more: a tooltip
+    /// stays on screen.
+    static let checkLinesShown = 12
+
+    private static func tooltips(of facts: Facts, rail: Rail?, offer: QueueOffer?, rules: Rules) -> Tooltips {
+        var tooltips = Tooltips(title: text(facts.location))
+        guard let rail else { return tooltips }
+        if rail.marks[Station.reviews.rawValue] != .skipped {
+            tooltips.stations[.reviews] = reviewsTooltip(facts, rules: rules)
+        }
+        if let pullRequest = facts.pullRequest {
+            let checks = pullRequest.checkLines.compactMap(text)
+            if !checks.isEmpty {
+                // "and 1 more" would take the line of the check it stands for.
+                let shown = checks.count == checkLinesShown + 1 ? checks.count : checkLinesShown
+                let more = checks.count - shown
+                tooltips.stations[.checks] = (checks.prefix(shown) + (more > 0 ? ["and \(more) more"] : [])).joined(separator: "\n")
+            }
+            let address = [pullRequest.stack?.tooltip, text(pullRequest.url)].compactMap { $0 }
+            tooltips.pullRequest = address.isEmpty ? nil : address.joined(separator: "\n")
+        }
+        tooltips.stations[.merge] = offer.map { $0.blocked ?? $0.title }
+        return tooltips
+    }
+
+    /// Each pass that ran, and on which commit; a required one that didn't.
+    private static func reviewsTooltip(_ facts: Facts, rules: Rules) -> String? {
+        let lines = ReviewPass.allCases.compactMap { pass -> String? in
+            let name = pass.displayName
+            guard let reviews = facts.reviews, reviews.runs[pass] != nil else {
+                return rules.requiredReviews.contains(pass) ? "No \(name.lowercased()) yet" : nil
+            }
+            if facts.reviewsInFlight.contains(pass) { return "\(name) running" }
+            // While HEAD isn't known, nothing says which commit it ran on.
+            if reviews.head == nil { return "\(name) ran" }
+            return reviews.isFresh(pass) ? "\(name) ran on this commit" : "\(name) ran before the last commits"
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
     /// "#52", "#53 · 2/3" in a straight stack, "#53 · on #52" in a fork.
     private static func pullRequestText(_ facts: Facts) -> String {
         guard facts.hasRepository else { return "" }
@@ -352,9 +469,12 @@ extension BoardStages {
         var phrase: Phrase
         var since: TimeInterval?
 
-        init(_ state: State, _ text: String, since: TimeInterval? = nil, link: Link? = nil, detail: String? = nil) {
+        init(
+            _ state: State, _ text: String, since: TimeInterval? = nil, link: Link? = nil, linkBlocked: String? = nil,
+            detail: String? = nil
+        ) {
             self.state = state
-            phrase = Phrase(text: text, link: link, detail: detail)
+            phrase = Phrase(text: text, link: link, linkBlocked: linkBlocked, detail: detail)
             self.since = since
         }
     }
@@ -408,8 +528,14 @@ extension BoardStages {
             }
             // Whatever its station: nothing lands on a merged branch.
             if let merged = pullRequest.stack?.mergedBase {
+                // Without a merge queue, nothing here can move it.
+                guard facts.queue.list != .none else { return Reading(.idle, "Base #\(merged.number) merged", since: last) }
                 let link = Link.retarget(number: pullRequest.number, onto: merged.onto)
-                return Reading(.idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: link)
+                return Reading(
+                    .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: link, linkBlocked: text(facts.queue.dryRun),
+                    detail: "#\(merged.number) is merged: base #\(pullRequest.number) on \(merged.onto), "
+                        + "as GitHub does when a merged branch is deleted"
+                )
             }
             let parent = pullRequest.stack?.parent
             switch station {
