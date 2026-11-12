@@ -63,4 +63,4 @@ jobs:
         run: scripts/repeat-class.sh NiruxTests.TurnQuestionFlowTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.LeadToolsFlowTests
 
       - name: Reverts TurnQuestionFlowTests catches
-        run: scripts/mutants-class.sh NiruxTests.TurnQuestionFlowTests no-dismiss keep-catch-up keep-notification archive-keeps no-asked-at seen-clears
+        run: scripts/mutants-class.sh NiruxTests.TurnQuestionFlowTests no-dismiss keep-catch-up keep-notification archive-keeps archive-keeps-notification no-asked-at seen-clears

@@ -385,7 +385,9 @@ enum TurnEndText {
     /// French. The list next to any other question is most often what the
     /// turn did ("- Added the retry\n- Updated the tests\n\nWant me to open
     /// a pull request?"), not what to choose from. Not "or": a question
-    /// that says "this or that" names its own alternatives.
+    /// that says "this or that" names its own alternatives. Words can't
+    /// tell every case: "Which branch should I push to?" after a list of
+    /// what was done still shows that list, the message's own lines.
     static func asksToChoose(_ question: String) -> Bool {
         question.lowercased().split { !$0.isLetter }.contains { choosingWords.contains(String($0)) }
     }
@@ -424,42 +426,47 @@ enum TurnEndText {
 
     /// The items of the list that starts at line `first` (past one blank
     /// line) and goes on in `step`'s direction, in the message's order:
-    /// lines that start an item, the indented lines that go on with one,
-    /// and a single blank line between two of them. An item deeper than
-    /// the list's own goes on with the one above it. Of two lists in a
-    /// row (bullets, then numbers), the one next to the question. None for
-    /// a list an excerpt's "[…]" may have cut, nor for a counted one that
-    /// doesn't count from its start.
+    /// lines that start an item and the indented lines that go on with
+    /// one. An item deeper than the list's own goes on with the one above
+    /// it. Only a whole list counts, and one that can be told whole:
+    /// - counted items ("1.", "b)") count from their start, and may have
+    ///   a blank line between them; of two such lists in a row, the one
+    ///   next to the question;
+    /// - bullets have no blank line between them (two lists can't be told
+    ///   from one), and none follows them past one;
+    /// - past its last item, a heading, a paragraph or the message's edge.
+    ///   Code there, an indented line or an excerpt's "[…]" (or the rest of
+    ///   the line it cut) may hide other items.
+    /// Of bullets and counted items in a row, those next to the question.
     private static func listItems(
         from first: Int, step: Int, lines: [(trimmed: String, kind: LineKind)], raw: [Substring], maxLength: Int
     ) -> [TurnEndChoice] {
-        func belongs(_ index: Int) -> Bool {
-            lines.indices.contains(index) && lines[index].kind == .prose
-                && (choiceItem(lines[index].trimmed) != nil || indent(of: raw[index]) >= 2)
+        func item(_ index: Int) -> (marker: String?, text: String)? {
+            guard lines.indices.contains(index), lines[index].kind == .prose else { return nil }
+            return choiceItem(lines[index].trimmed)
         }
+        func goesOn(_ index: Int) -> Bool {
+            lines.indices.contains(index) && lines[index].kind == .prose && indent(of: raw[index]) >= 2
+        }
+        func isBlank(_ index: Int) -> Bool { lines.indices.contains(index) && lines[index].kind == .blank }
         var index = first
-        if lines.indices.contains(index), lines[index].kind == .blank { index += step }
+        if isBlank(index) { index += step }
         var block: [Int] = []
-        while lines.indices.contains(index) {
-            if belongs(index) {
-                block.append(index)
-                index += step
-            } else if lines[index].kind == .blank, !block.isEmpty, belongs(index + step) {
-                index += step
-            } else {
-                break
-            }
+        // Whether the item next to the question is counted: the others'
+        // numbers then tell where its list goes on past a blank line.
+        var isCounted: Bool?
+        while item(index) != nil || goesOn(index) {
+            if isCounted == nil, let marked = item(index) { isCounted = marked.marker != nil }
+            block.append(index)
+            index += step
+            if isCounted == true, isBlank(index), item(index + step)?.marker != nil { index += step }
         }
-        // Where it stops: the cut of a long message, or the rest of a line
-        // it cut, may hide the list's other items.
-        func isCut(_ index: Int) -> Bool { lines.indices.contains(index) && lines[index].kind == .gap }
-        guard !isCut(index), !isCut(index + step) else { return [] }
         block.sort()
-        let depths = block.filter { choiceItem(lines[$0].trimmed) != nil }.map { indent(of: raw[$0]) }
+        let depths = block.filter { item($0) != nil }.map { indent(of: raw[$0]) }
         guard let depth = depths.min() else { return [] }
         var items: [(marker: String?, parts: [String])] = []
         for index in block {
-            if indent(of: raw[index]) == depth, let item = choiceItem(lines[index].trimmed) {
+            if indent(of: raw[index]) == depth, let item = item(index) {
                 items.append((item.marker, [item.text]))
             } else if !items.isEmpty {
                 items[items.count - 1].parts.append(lines[index].trimmed)
@@ -468,28 +475,47 @@ enum TurnEndText {
                 return []
             }
         }
-        // One list: those marked like the item next to the question.
+        // One list: those marked like the item next to the question; of
+        // counted ones, up to where the count starts or stops.
         let nearestFirst = step < 0 ? Array(items.reversed()) : items
         guard let nearest = nearestFirst.first else { return [] }
         var list = Array(nearestFirst.prefix { ($0.marker == nil) == (nearest.marker == nil) })
+        if nearest.marker != nil {
+            let ordinals = list.map { $0.marker.flatMap(ordinal(of:)) }
+            let count = step < 0
+                ? (ordinals.firstIndex(of: 1).map { $0 + 1 } ?? 0)
+                : ordinals.enumerated().prefix { $0.element == $0.offset + 1 }.count
+            list = Array(list.prefix(count))
+            let fromItsStart = step < 0 ? Array(ordinals.prefix(count).reversed()) : Array(ordinals.prefix(count))
+            guard fromItsStart == (1...max(count, 1)).map(Optional.some) else { return [] }
+        }
         if step < 0 { list.reverse() }
-        guard nearest.marker == nil || countsFromItsStart(list.compactMap(\.marker)) else { return [] }
+        // Where the whole run stopped, when the list is all of it: what
+        // lies there may hide other items. Not above a counted list: it
+        // starts at its "1.".
+        if list.count == items.count, nearest.marker == nil || step > 0 {
+            var beyond = index
+            while isBlank(beyond) { beyond += step }
+            if lines.indices.contains(beyond) {
+                let isParagraph = lines[beyond].kind == .prose && !goesOn(beyond)
+                    && (item(beyond).map { ($0.marker == nil) != (nearest.marker == nil) } ?? true)
+                let nextIsCut = lines.indices.contains(beyond + step) && lines[beyond + step].kind == .gap
+                guard lines[beyond].kind == .other || (isParagraph && !nextIsCut) else { return [] }
+            }
+        }
         let choices = list.compactMap { item in
             AgentText.clean(item.parts.joined(separator: " "), maxLength: maxLength).map { TurnEndChoice(marker: item.marker, text: $0) }
         }
         return choices.count == list.count ? choices : []
     }
 
-    /// "1." "2." "3.", "a)" "b)", "(A)" "(B)": numbers or letters in
-    /// order from the first.
-    private static func countsFromItsStart(_ markers: [String]) -> Bool {
-        let labels = markers.map { $0.filter { $0.isLetter || $0.isNumber }.lowercased() }
-        if labels.allSatisfy({ Int($0) != nil }) {
-            return labels.compactMap { Int($0) } == Array(1...labels.count)
-        }
-        let letters = labels.compactMap { $0.count == 1 ? $0.unicodeScalars.first?.value : nil }
-        let first = UInt32(UnicodeScalar("a").value)
-        return letters.count == labels.count && letters == Array(first..<first + UInt32(labels.count))
+    /// "2." → 2, "b)" and "(B)" → 2: where a counted item stands in its
+    /// list.
+    private static func ordinal(of marker: String) -> Int? {
+        let label = marker.filter { $0.isLetter || $0.isNumber }.lowercased()
+        if let number = Int(label) { return number }
+        guard label.count == 1, let letter = label.unicodeScalars.first, ("a"..."z").contains(Character(letter)) else { return nil }
+        return Int(letter.value - UnicodeScalar("a").value) + 1
     }
 
     /// A list item's marker and text: a bullet (no marker to show), or a

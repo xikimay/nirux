@@ -105,6 +105,10 @@ final class SidebarView: NSView {
 
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
+    /// The workspace each row of the last build stands for, by the index
+    /// its hit area carries: `lastInfos` is already the next build's when
+    /// a rebuild reads where the list was (`scrollAnchor`).
+    var builtRowIDs: [Int: String] = [:]
 
     /// First-launch checklist, shown below the workspaces while set; nil
     /// hides it. Owned by NiruxShellView.
@@ -735,8 +739,10 @@ final class SidebarView: NSView {
         addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, flakyReason: workspace?.ciFlakyReason, act: act)
         // The card's own Dismiss, for each question the row says: also
         // while its card has no buttons to put it next to.
+        // From a column's own menu, that column's alone.
         let asked = (workspace?.columns ?? []).compactMap { column -> (column: UUID, at: TimeInterval)? in
-            guard let id = column.id, let at = column.questionAskedAt else { return nil }
+            guard columnIndex == nil || column.index == columnIndex, let id = column.id, let at = column.questionAskedAt
+            else { return nil }
             return (id, at)
         }
         if !asked.isEmpty {

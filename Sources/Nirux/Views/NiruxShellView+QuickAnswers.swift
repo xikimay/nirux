@@ -71,7 +71,8 @@ extension NiruxShellView {
     /// say why not); Reply… opens a field next to the button; Dismiss puts
     /// the question aside.
     func answerFromCard(_ answer: SidebarTurnAnswer, to question: SidebarTurnQuestion, button: NSView?) {
-        if answer == .dismiss {
+        // Not an answer: no agent to type into.
+        guard answer != .dismiss else {
             return dismissTurnQuestion(columnID: question.columnID, askedAt: question.turnEndedAt)
         }
         guard let place = liveColumn(where: { $0.id == question.columnID }), let agentUUID = place.column.agentUUID
@@ -101,10 +102,12 @@ extension NiruxShellView {
 
     /// An archived task asks nothing: the questions its agents' turns
     /// ended on are put aside, or its row would stay listed, amber, in the
-    /// folded Archived list.
+    /// folded Archived list; and the turn end kept for a user away is
+    /// seen, as when one is dismissed from its row.
     func dismissTurnQuestions(in workspace: WorkspaceState) {
         guard !ZZ("archive-keeps") else { return }
-        for column in workspace.columns { column.pty?.dismissAgentQuestion() }
+        let dismissed = workspace.columns.filter { $0.pty?.dismissAgentQuestion() == true }
+        if !ZZ("archive-keeps-notification"), !dismissed.isEmpty, workspace.notification == .finished { workspace.notification = nil }
     }
 
     private func showTurnReplyPopover(
