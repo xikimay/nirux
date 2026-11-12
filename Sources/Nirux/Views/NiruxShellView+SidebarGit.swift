@@ -20,6 +20,8 @@ extension NiruxShellView {
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
                 let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
+                // What main did, without its test for an active app (xctest's never is).
+                if ZZ("seen-clears"), isUserFocused { col.pty?.dismissAgentQuestion() }
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
                 }
@@ -61,7 +63,7 @@ extension NiruxShellView {
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
                     turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
-                    questionAskedAt: asked?.since,
+                    questionAskedAt: ZZ("no-asked-at") ? nil : asked?.since,
                     id: col.id
                 )
             }

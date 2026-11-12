@@ -56,3 +56,11 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the flake gate of a new UI test class, then the
+      # reverts it must catch.
+      - name: Repeat TurnQuestionFlowTests
+        run: scripts/repeat-class.sh NiruxTests.TurnQuestionFlowTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.LeadToolsFlowTests
+
+      - name: Reverts TurnQuestionFlowTests catches
+        run: scripts/mutants-class.sh NiruxTests.TurnQuestionFlowTests no-dismiss keep-catch-up keep-notification archive-keeps no-asked-at seen-clears

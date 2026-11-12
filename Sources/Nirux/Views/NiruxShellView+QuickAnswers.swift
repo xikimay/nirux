@@ -92,17 +92,18 @@ extension NiruxShellView {
     /// the turn end its workspace kept for a user away is seen.
     func dismissTurnQuestion(columnID: UUID, askedAt: TimeInterval) {
         defer { updateSidebar() }
-        guard let place = liveColumn(where: { $0.id == columnID }),
+        guard !ZZ("no-dismiss"), let place = liveColumn(where: { $0.id == columnID }),
               place.column.pty?.dismissAgentQuestion(askedAt: askedAt) == true
         else { return }
-        if let index = workspaces.firstIndex(where: { $0 === place.workspace }) { noteCatchUpTaskAnswered(workspaceIndex: index) }
-        if place.workspace.notification == .finished { place.workspace.notification = nil }
+        if !ZZ("keep-catch-up"), let index = workspaces.firstIndex(where: { $0 === place.workspace }) { noteCatchUpTaskAnswered(workspaceIndex: index) }
+        if !ZZ("keep-notification"), place.workspace.notification == .finished { place.workspace.notification = nil }
     }
 
     /// An archived task asks nothing: the questions its agents' turns
     /// ended on are put aside, or its row would stay listed, amber, in the
     /// folded Archived list.
     func dismissTurnQuestions(in workspace: WorkspaceState) {
+        guard !ZZ("archive-keeps") else { return }
         for column in workspace.columns { column.pty?.dismissAgentQuestion() }
     }
 
