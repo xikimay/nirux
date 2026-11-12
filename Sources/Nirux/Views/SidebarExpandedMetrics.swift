@@ -103,13 +103,13 @@ enum SidebarExpandedMetrics {
     static var questionFont: NSFont { Theme.Font.body }
     static let questionLineHeight: CGFloat = 15
     static let questionMaxLines = 8
-    /// A choice the message lists, under its marker: 18 points in, or
-    /// past a marker wider than "1.".
+    /// A choice the message lists, a dialog's option, under its marker:
+    /// 18 points in, or past a marker wider than "1.".
     static let choiceMaxLines = 6
     static let choiceIndent: CGFloat = 18
     static let choiceMarkerGap: CGFloat = 6
     static let choiceGap: CGFloat = 2
-    /// Between the choices and the question.
+    /// Between the choices and the question, the question and its options.
     static let questionGap: CGFloat = 5
     /// The selected row's next step, a Mission question's line.
     static let nextStepMaxLines = 3
@@ -123,6 +123,14 @@ enum SidebarExpandedMetrics {
             + actionRowGap + buttonHeight
     }
 
+    /// The question, the options it offers, then where to answer.
+    @MainActor
+    static func dialogQuestionBlockHeight(for dialog: AgentDialogQuestion, width: CGFloat) -> CGFloat {
+        let options = SidebarQuestionText.options(dialog).height(width: width)
+        return SidebarQuestionText.questionHeight(dialog.question, width: width) + (options > 0 ? questionGap + options : 0)
+            + actionRowGap + actionLineHeight
+    }
+
     /// `width`: the block's, the card's content. `textWidth`: a line's
     /// that starts under the title.
     @MainActor
@@ -131,6 +139,7 @@ enum SidebarExpandedMetrics {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
         case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
+        case .dialogQuestion(_, let dialog): return dialogQuestionBlockHeight(for: dialog, width: width)
         case .next(let text):
             return SidebarWrappedText.height(
                 SidebarWorkspaceCardRenderer.nextText(text), width: textWidth, lineHeight: actionLineHeight, maxLines: nextStepMaxLines

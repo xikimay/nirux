@@ -304,10 +304,12 @@ final class AgentStatusMachineTests: XCTestCase {
 
     func testAskUserQuestionIsAQuestion() {
         startTurn()
-        _ = machine.apply(
-            event(.permissionRequest, tool: "AskUserQuestion", summary: "Which DB?", key: "q"), isUserFocused: false
-        )
+        var request = event(.permissionRequest, tool: "AskUserQuestion", summary: "Which DB?", key: "q")
+        let dialog = AgentDialogQuestion(question: "Which DB?", options: [.init(label: "Postgres", detail: nil)])
+        request.dialogQuestion = dialog
+        _ = machine.apply(request, isUserFocused: false)
         XCTAssertEqual(machine.attentionReason, .question("Which DB?"))
+        XCTAssertEqual(machine.openDialogs.first?.dialogQuestion, dialog, "what it asks and offers, for its row")
         _ = machine.apply(event(.postToolUse, tool: "AskUserQuestion", key: "q"), isUserFocused: false)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
         XCTAssertEqual(machine.state, .working)

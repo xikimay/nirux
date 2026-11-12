@@ -5,7 +5,7 @@ import XCTest
 /// The question a Claude turn ended on, in a real window: it stays on its
 /// card when its row is clicked, with the choices its message lists, until
 /// it is put aside from the row's menu, the card's Dismiss, or by
-/// archiving its task.
+/// archiving its task. And a question dialog's options on its task's row.
 @MainActor
 final class TurnQuestionFlowTests: UIFlowTestCase {
     /// The row's menu item this class runs: `SidebarPanelFlowTests` never
@@ -20,19 +20,60 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
 
     private static let message = "Two ways to fix it:\n\n1. Rebase on main\n2. Merge main in\n\nWhich one do you want?"
 
+    /// A task whose column runs a stand-in `claude`, while the user looks
+    /// at another task.
+    private func askingTask(
+        in harness: UIFlowHarness
+    ) throws -> (task: WorkspaceState, columnIndex: Int, pty: PtySession, elsewhere: WorkspaceState) {
+        let shell = harness.shell
+        let elsewhere = try XCTUnwrap(shell.activeWorkspace)
+        shell.addWorkspace(title: "asks", cwd: harness.worktree)
+        let task = try XCTUnwrap(shell.activeWorkspace)
+        task.addColumn(command: "exec -a claude /bin/sleep 600", cwd: harness.worktree)
+        let pty = try XCTUnwrap(task.columns.last?.pty)
+        shell.focusWorkspace(id: elsewhere.id)
+        harness.waitUntil("its claude in front") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        return (task, task.columns.count - 1, pty, elsewhere)
+    }
+
+    /// A question dialog's options reach its task's row while the dialog
+    /// is the one on screen, and leave once it is answered in the terminal.
+    func testADialogsOptionsShowOnItsRow() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let (task, columnIndex, pty, _) = try askingTask(in: harness)
+            @MainActor func row() -> WorkspaceInfo? {
+                shell.updateSidebar()
+                return shell.sidebar.displayedWorkspaceInfos.first { $0.id == task.id }
+            }
+            let dialog = AgentDialogQuestion(
+                question: "Which one do you want?", options: [.init(label: "Rebase", detail: "on main"), .init(label: "Merge", detail: nil)]
+            )
+            func event(_ name: AgentHookEvent.Name, tool: String? = nil) -> AgentHookEvent {
+                AgentHookEvent(
+                    kind: .claude, name: name, sessionID: "s", toolName: tool, toolSummary: tool.map { _ in dialog.question },
+                    toolKey: tool.map { _ in "q" }, timestamp: Date().timeIntervalSince1970
+                )
+            }
+            _ = pty.applyAgentHook(event(.userPromptSubmit), isUserFocused: false)
+            var request = event(.permissionRequest, tool: "AskUserQuestion")
+            request.dialogQuestion = dialog
+            _ = pty.applyAgentHook(request, isUserFocused: false)
+            let asking = try XCTUnwrap(row())
+            XCTAssertEqual(asking.columns[safe: columnIndex]?.dialogQuestion, dialog)
+            XCTAssertEqual(asking.cardActions, [.dialogQuestion(columnIndex: columnIndex, dialog)])
+            XCTAssertEqual(asking.rowSummary.lineText, "Needs you · a question")
+            XCTAssertEqual(asking.rowSummary.focusColumn, columnIndex, "a click on the row brings the dialog up")
+
+            _ = pty.applyAgentHook(event(.postToolUse, tool: "AskUserQuestion"), isUserFocused: false)
+            XCTAssertNil(row()?.columns[safe: columnIndex]?.dialogQuestion, "answered")
+        }
+    }
+
     func testAClickKeepsTheQuestionUntilItIsDismissed() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            let elsewhere = try XCTUnwrap(shell.activeWorkspace)
-            shell.addWorkspace(title: "asks", cwd: harness.worktree)
-            let task = try XCTUnwrap(shell.activeWorkspace)
-            task.addColumn(command: "exec -a claude /bin/sleep 600", cwd: harness.worktree)
-            let column = try XCTUnwrap(task.columns.last)
-            let columnIndex = task.columns.count - 1
-            let pty = try XCTUnwrap(column.pty)
-            // The user looks at another task while this one's agent asks.
-            shell.focusWorkspace(id: elsewhere.id)
-            harness.waitUntil("its claude in front") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            let (task, columnIndex, pty, elsewhere) = try askingTask(in: harness)
 
             @MainActor func row() -> WorkspaceInfo? {
                 shell.updateSidebar()

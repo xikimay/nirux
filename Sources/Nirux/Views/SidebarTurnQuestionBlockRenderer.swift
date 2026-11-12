@@ -2,7 +2,8 @@ import AppKit
 
 /// The texts of a question's block, as its renderer draws them and
 /// `SidebarExpandedMetrics` measures them: the question whole, and under
-/// their markers the choices the message lists.
+/// their markers the choices a message lists or the options a dialog
+/// offers.
 @MainActor
 enum SidebarQuestionText {
     typealias Metrics = SidebarExpandedMetrics
@@ -72,14 +73,35 @@ enum SidebarQuestionText {
     /// The choices as the message lists them, each under its own marker
     /// ("1.", "B)"), a dot for a bullet.
     static func choices(_ choices: [TurnEndChoice]) -> Items {
-        let marker: [NSAttributedString.Key: Any] = [.font: Metrics.questionFont, .foregroundColor: Theme.Color.textTertiary]
-        let markers = choices.map { $0.marker ?? "•" }
-        let widest = markers.map { ceil(($0 as NSString).size(withAttributes: marker).width) }.max() ?? 0
-        let texts = zip(markers, choices).map { mark, choice in
-            let text = NSMutableAttributedString(string: mark + "\t", attributes: marker)
-            text.append(NSAttributedString(string: plain(choice.text), attributes: [
+        items(choices.map { choice in
+            (choice.marker ?? "•", NSAttributedString(string: plain(choice.text), attributes: [
                 .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
             ]))
+        })
+    }
+
+    /// A dialog's options, numbered as the terminal numbers them: the
+    /// label, then what the agent says it means.
+    static func options(_ dialog: AgentDialogQuestion) -> Items {
+        items(dialog.options.enumerated().map { index, option in
+            let text = NSMutableAttributedString(string: plain(option.label), attributes: [
+                .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
+            ])
+            if let detail = option.detail {
+                text.append(NSAttributedString(string: " — \(plain(detail))", attributes: [
+                    .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
+                ]))
+            }
+            return ("\(index + 1).", text)
+        })
+    }
+
+    private static func items(_ items: [(marker: String, text: NSAttributedString)]) -> Items {
+        let marker: [NSAttributedString.Key: Any] = [.font: Metrics.questionFont, .foregroundColor: Theme.Color.textTertiary]
+        let widest = items.map { ceil(($0.marker as NSString).size(withAttributes: marker).width) }.max() ?? 0
+        let texts = items.map { item in
+            let text = NSMutableAttributedString(string: item.marker + "\t", attributes: marker)
+            text.append(item.text)
             return text
         }
         return Items(texts: texts, indent: max(Metrics.choiceIndent, widest + Metrics.choiceMarkerGap))
@@ -158,5 +180,48 @@ struct SidebarTurnQuestionBlockRenderer {
         let buttonsLine = NSRect(x: x, y: top - height - 3, width: width, height: metrics.buttonHeight + 6)
         hitAreas.append(SidebarHitArea(frame: buttonsLine, region: .actionBlock(workspaceIndex: workspaceIndex)))
         return SidebarApprovalBlockRenderer.Result(views: views, hitAreas: hitAreas, buttons: buttons)
+    }
+}
+
+/// The block of a card whose agent shows a question dialog (Claude's
+/// AskUserQuestion): the question whole, the options it offers, then where
+/// to answer. Nothing to press: a click there is the row's, which brings
+/// the dialog's column in front.
+@MainActor
+struct SidebarDialogQuestionBlockRenderer {
+    let dialog: AgentDialogQuestion
+    /// Left edge and width of the card's content.
+    let x: CGFloat
+    let width: CGFloat
+    let top: CGFloat
+
+    func render() -> [NSView] {
+        let metrics = SidebarExpandedMetrics.self
+        var views: [NSView] = []
+        var y = top
+        let asked = SidebarQuestionText.questionLabel(dialog.question)
+        let askedHeight = SidebarQuestionText.questionHeight(dialog.question, width: width)
+        asked.frame = NSRect(x: x, y: y - askedHeight, width: width, height: askedHeight)
+        asked.setAccessibilityLabel("Claude asks: \(dialog.question)")
+        views.append(asked)
+        y -= askedHeight
+        let options = SidebarQuestionText.options(dialog)
+        if !options.texts.isEmpty {
+            y -= metrics.questionGap
+            views += options.labels(x: x, width: width, top: y)
+            y -= options.height(width: width)
+        }
+        y -= metrics.actionRowGap
+        let hint = NSTextField.sidebarLine(NSAttributedString(string: Self.hint(dialog), attributes: [
+            .font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary,
+        ]))
+        hint.frame = NSRect(x: x, y: y - metrics.actionLineHeight - 1, width: width, height: metrics.actionLineHeight + 2)
+        views.append(hint)
+        return views
+    }
+
+    /// "Answer in the terminal"; the first of several questions says so.
+    static func hint(_ dialog: AgentDialogQuestion) -> String {
+        dialog.questionCount > 1 ? "First of \(dialog.questionCount) questions · answer in the terminal" : "Answer in the terminal"
     }
 }

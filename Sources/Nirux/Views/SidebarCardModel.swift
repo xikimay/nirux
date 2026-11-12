@@ -222,6 +222,9 @@ extension WorkspaceInfo {
             if let question = column.turnQuestion {
                 actions.append(.turnQuestion(columnIndex: column.index, question))
             }
+            if let dialog = column.dialogQuestion {
+                actions.append(.dialogQuestion(columnIndex: column.index, dialog))
+            }
             if let question = column.missionQuestion, column.index != questionShown {
                 actions.append(.missionQuestion(columnIndex: column.index, question))
             }
@@ -268,6 +271,9 @@ enum SidebarCardAction: Hashable {
     /// The question a Claude turn ended on: the choices it lists, the
     /// question whole, then Yes / No / Reply….
     case turnQuestion(columnIndex: Int, SidebarTurnQuestion)
+    /// What a question dialog asks and offers: read here, answered in the
+    /// terminal.
+    case dialogQuestion(columnIndex: Int, AgentDialogQuestion)
     /// The Lead's row: rules it proposed for the brief wait for the user;
     /// a click shows the oldest.
     case ruleProposals(count: Int)
@@ -278,7 +284,7 @@ enum SidebarCardAction: Hashable {
         switch self {
         case .next, .reviewBadges, .ruleProposals: return true
         case .missionQuestion(_, let question): return question.handOff == nil
-        case .approval, .resume, .cleanup, .turnQuestion: return false
+        case .approval, .resume, .cleanup, .turnQuestion, .dialogQuestion: return false
         }
     }
 }

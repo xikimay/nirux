@@ -161,6 +161,57 @@ final class TurnQuestionSidebarTests: XCTestCase {
         XCTAssertTrue(shown.contains("Needs you · Bash: npm run migrate"), "the line keeps its own sentence")
     }
 
+    /// A question dialog on its row: the question whole, each option under
+    /// its number, then where to answer. Nothing to press.
+    func testDialogShowsItsQuestionAndEveryOption() throws {
+        let dialog = AgentDialogQuestion(
+            question: "Which database should the import job write to while the migration runs?",
+            options: [
+                .init(label: "Staging replica (Recommended)", detail: "Safe to wipe; refreshed from production every night"),
+                .init(label: "Local **Postgres**", detail: nil),
+            ],
+            questionCount: 2
+        )
+        var asking = ColumnInfo(
+            index: 1, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .needsAttention, isEditor: false, editorFileName: nil,
+            attentionReason: .question("Which database should the import job write to…"),
+            openDialog: .question("Which database should the import job write to…")
+        )
+        XCTAssertEqual(workspace([asking]).cardActions, [], "a dialog whose hook said nothing more")
+        XCTAssertEqual(workspace([asking]).rowSummary.lineText, "Needs you · Which database should the import job write to…")
+        asking.dialogQuestion = dialog
+        let card = workspace([asking])
+        XCTAssertEqual(card.cardActions, [.dialogQuestion(columnIndex: 1, dialog)])
+        XCTAssertEqual(card.rowSummary.lineText, "Needs you · a question")
+
+        let result = render(card)
+        let asked = try XCTUnwrap(labels(result).first { $0.stringValue == dialog.question })
+        let first = try XCTUnwrap(labels(result).first {
+            $0.stringValue == "1.\tStaging replica (Recommended) — Safe to wipe; refreshed from production every night"
+        })
+        let second = try XCTUnwrap(labels(result).first { $0.stringValue == "2.\tLocal Postgres" })
+        let hint = try XCTUnwrap(labels(result).first { $0.stringValue == "First of 2 questions · answer in the terminal" })
+        XCTAssertGreaterThan(asked.frame.height, SidebarExpandedMetrics.questionLineHeight, "whole, on its lines")
+        XCTAssertGreaterThanOrEqual(asked.frame.minY, first.frame.maxY)
+        XCTAssertGreaterThanOrEqual(first.frame.minY, second.frame.maxY)
+        XCTAssertGreaterThanOrEqual(second.frame.minY, hint.frame.maxY)
+        XCTAssertGreaterThanOrEqual(hint.frame.minY, result.bottomY, "inside its card")
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
+        // A click anywhere in it is the row's: it brings the dialog up.
+        XCTAssertTrue(result.approvalButtons.isEmpty)
+        for label in [asked, second, hint] {
+            guard case .workspace(2)? = result.hitAreas.first(where: { $0.frame.contains(NSPoint(x: label.frame.midX, y: label.frame.midY)) })?.region
+            else { return XCTFail("\(label.stringValue) selects the row") }
+        }
+        XCTAssertEqual(SidebarDialogQuestionBlockRenderer.hint(AgentDialogQuestion(question: "Sign in?", options: [])), "Answer in the terminal")
+        XCTAssertNotEqual(asking, ColumnInfo(
+            index: 1, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .needsAttention, isEditor: false, editorFileName: nil,
+            attentionReason: asking.attentionReason, openDialog: asking.openDialog
+        ), "its options redraw the card")
+    }
+
     /// "Dismiss Question" in the row's menu, for each question that stands
     /// in its columns: also while its card has no buttons (subagents at
     /// work).

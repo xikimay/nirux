@@ -126,6 +126,56 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertEqual(event?.toolSummary, "Which database?")
     }
 
+    /// A question dialog's request carries what it asks and offers, for
+    /// its task's row: the first question, every option or none, bounded.
+    func testQuestionDialogCarriesItsQuestionAndOptions() throws {
+        let options: [[String: Any]] = [
+            ["label": "Staging replica (Recommended)", "description": "Safe to wipe;\nrefreshed every night"],
+            ["label": "Local Postgres"],
+        ]
+        let input: [String: Any] = ["questions": [
+            ["question": "Which database should the import job write to?", "header": "DB", "multiSelect": false, "options": options],
+            ["question": "And when?", "options": []],
+        ]]
+        func request(_ hook: String = "PermissionRequest", tool: String = "AskUserQuestion") -> AgentHookEvent? {
+            claudeEvent(["hook_event_name": hook, "tool_name": tool, "tool_input": input])
+        }
+        let event = try XCTUnwrap(request())
+        let dialog = AgentDialogQuestion(
+            question: "Which database should the import job write to?",
+            options: [
+                .init(label: "Staging replica (Recommended)", detail: "Safe to wipe; refreshed every night"),
+                .init(label: "Local Postgres", detail: nil),
+            ],
+            questionCount: 2
+        )
+        XCTAssertEqual(event.dialogQuestion, dialog)
+        XCTAssertNil(request("PreToolUse")?.dialogQuestion, "the dialog's own request alone")
+        XCTAssertNil(request("PostToolUse")?.dialogQuestion)
+        XCTAssertNil(request(tool: "Bash")?.dialogQuestion)
+
+        // Through the queue's line, and from one written before the field.
+        let line = try JSONEncoder().encode(event)
+        XCTAssertEqual(try JSONDecoder().decode(AgentHookEvent.self, from: line).dialogQuestion, dialog)
+        var older = try XCTUnwrap(JSONSerialization.jsonObject(with: line) as? [String: Any])
+        older["dialogQuestion"] = nil
+        XCTAssertNil(try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: older)).dialogQuestion)
+
+        // Every option, or none: half of them would mislead.
+        func parsed(_ listed: [[String: Any]], question: Any = "Which?") -> AgentDialogQuestion? {
+            AgentDialogQuestion(toolInput: ["questions": [["question": question, "options": listed]]])
+        }
+        XCTAssertEqual(parsed(options + [["description": "no label"]])?.options, [])
+        XCTAssertEqual(parsed((1...7).map { ["label": "Option \($0)"] })?.options, [])
+        XCTAssertEqual(parsed((1...6).map { ["label": "Option \($0)"] })?.options.count, 6)
+        XCTAssertEqual(parsed([])?.questionCount, 1)
+        XCTAssertNil(parsed(options, question: 7), "no question to show")
+        let long = try XCTUnwrap(parsed([["label": String(repeating: "label ", count: 40), "description": String(repeating: "detail ", count: 60)]]))
+        XCTAssertEqual(long.options.first?.label.count, 80)
+        XCTAssertEqual(long.options.first?.detail?.count, 200)
+        XCTAssertEqual(parsed([], question: String(repeating: "why ", count: 200))?.question.count, 300)
+    }
+
     func testLongInputIsBoundedAndNeverStored() throws {
         let content = String(repeating: "secret ", count: 50_000)
         let event = try XCTUnwrap(claudeEvent([

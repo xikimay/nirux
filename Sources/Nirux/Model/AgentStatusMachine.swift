@@ -330,6 +330,7 @@ struct AgentStatusMachine {
                 sessionID: event.sessionID,
                 requestedAt: now
             )
+            request.dialogQuestion = event.dialogQuestion
             if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
                let text = event.approvalText {
                 request.approval = PermissionApprovalTicket(
