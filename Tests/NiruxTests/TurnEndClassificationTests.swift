@@ -315,6 +315,81 @@ final class TurnEndClassificationTests: XCTestCase {
         ))
     }
 
+    /// The choices a question asks about: the list right before it, else
+    /// right after, in the message's own words.
+    func testChoicesAreTheListNextToTheQuestion() {
+        let before = """
+        Two ways to fix the flaky test:
+
+        1. Give every test its own database, which is slower
+           but removes the shared state.
+        2. Keep the shared one and reset three tables.
+
+        Which one do you want?
+        """
+        let listed = [
+            TurnEndChoice(marker: "1.", text: "Give every test its own database, which is slower but removes the shared state."),
+            TurnEndChoice(marker: "2.", text: "Keep the shared one and reset three tables."),
+        ]
+        XCTAssertEqual(TurnEndText.choices(for: "Which one do you want?", in: before), listed)
+        XCTAssertEqual(TurnEndText.choices(for: "Which one do…", in: before), listed, "the card's text, cut")
+        // After it: bullets, a sub-item that goes on with its item.
+        let after = "Which do you prefer?\n- **Rebase** on main\n  - keeps history linear\n- Merge main in\n\nI can start now."
+        XCTAssertEqual(TurnEndText.choices(for: "Which do you prefer?", in: after), [
+            TurnEndChoice(marker: nil, text: "**Rebase** on main - keeps history linear"),
+            TurnEndChoice(marker: nil, text: "Merge main in"),
+        ])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "A) Ship today\nB) Wait for the audit\nWhich?").map(\.marker), ["A)", "B)"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "(a) Ship today\n(b) Wait\n\nWhich?").map(\.marker), ["(a)", "(b)"])
+        // Counted items may have a blank line between them: their numbers
+        // tell one list from two, and the one next to the question.
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "1. Ship today\n\n2. Wait for the audit\n\nWhich?").map(\.marker), ["1.", "2."])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "1. x\n2. y\n\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "Which?\n1. A\n2. B\n\n1. x\n2. y").map(\.text), ["A", "B"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "Done:\n- x\n- y\n\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
+        // Whole whatever is above it: a counted list starts at its "1.",
+        // and bullets under a counted list end where it does.
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "```\nx\n```\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "```\nx\n```\n1. x\n2. y\n- A\n- B\n\nWhich?").map(\.text), ["A", "B"])
+
+        // The list after the question is its choices, whatever is listed
+        // before it. A list that counts from 0 is whole from its "0.".
+        let both = "I did:\n- x\n- y\n\nWhich option next?\n\n1. A\n2. B"
+        XCTAssertEqual(TurnEndText.choices(for: "Which option next?", in: both).map(\.text), ["A", "B"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "0. A\n1. B\n2. C\n\nWhich?").map(\.marker), ["0.", "1.", "2."])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "Which?\n0. A\n1. B").map(\.text), ["A", "B"])
+
+        // The list before a question that names no choice is what the turn
+        // did, and a line that goes on with an item is no question to it.
+        let report = "Done:\n\n- Added the retry\n- Updated the tests\n\nWant me to open a pull request?"
+        XCTAssertEqual(TurnEndText.choices(for: "Want me to open a pull request?", in: report), [])
+        XCTAssertEqual(TurnEndText.choices(for: "Laquelle préfères-tu ?", in: "- Livrer\n- Attendre\n\nLaquelle préfères-tu ?").count, 2)
+        XCTAssertEqual(TurnEndText.choices(for: "Which is fine?", in: "- A\n  Which is fine?\n- B\n- C"), [])
+
+        let none = [
+            "- One thing done\n\nWhich?": "one item is no choice",
+            "Which?\n\n- One thing to do": "nor one item after it",
+            "1. A\n2. B\n\nBoth are fine.\n\nWhich?": "not next to the question",
+            (1...7).map { "\($0). Step \($0)" }.joined(separator: "\n") + "\n\nWhich?": "a longer list is a report",
+            "- Rebase\n- Merge\n- Which?": "a question among items",
+            "    1. a\n    2. b\nWhich?": "code",
+            "Head.\n[…]\n- c\n- d\n\nWhich?": "a list the excerpt cut",
+            "Head.\n[…]\nthe end of an item\n- c\n- d\n\nWhich?": "under the rest of a cut line",
+            "3. C\n4. D\n\nWhich?": "a counted list that doesn't count from its start",
+            "a) A\nc) C\n\nWhich?": "letters out of order",
+            "Changes:\n- x\n- y\n\n- A\n- B\n\nWhich?": "bullets past a blank line: one list or two",
+            "- Fast\n  ```\n  x\n  ```\n- Safe\n- Third\n\nWhich?": "code inside the list: its first item is out of reach",
+            "Which?\n1. A\n2. B\n```\nx\n```\n3. C": "code after a counted list: it may go on",
+            "Which?\n- A\n- B\n\n  more about B": "an indented line past the blank",
+            "- x\n- y\n\nWhich?\n\n" + (1...7).map { "\($0). Step \($0)" }.joined(separator: "\n"): "a longer list after it: not the one before",
+            "0. A\n2. C\n\nWhich?": "from 0, a number missing",
+            "1. A\n2. B\n\nDone.": "no such question",
+        ]
+        for (message, why) in none {
+            XCTAssertEqual(TurnEndText.choices(for: "Which?", in: message), [], why)
+        }
+    }
+
     // MARK: - The column
 
     private var machine = AgentStatusMachine()
@@ -757,24 +832,68 @@ final class TurnEndClassificationTests: XCTestCase {
     }
 
     /// A question stays said (sidebar, header, ⌘J) after Nirux is
-    /// activated, until it is answered or read on screen.
-    func testQuestionLastsUntilAnsweredOrSeen() throws {
+    /// activated and while the user looks at its column, until it is
+    /// answered or put aside.
+    func testQuestionLastsUntilAnsweredOrDismissed() throws {
         let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
-        func ask() throws {
+        @discardableResult
+        func ask() throws -> TimeInterval {
             machine = AgentStatusMachine()
             let request = try XCTUnwrap(endTurn().turnEnd)
             _ = machine.applyTurnEndVerdict(.asks(nil), for: request, isUserFocused: false)
+            return request.turnEndedAt
         }
-        try ask()
+        let askedAt = try ask()
         machine.clearAttention()
-        XCTAssertEqual(
-            machine.blockedWait(now: t0 + 60, foreground: claude),
-            AgentWait(reason: .askedInReply("Shall I merge?"), since: t0 + 5)
-        )
+        let wait = AgentWait(reason: .askedInReply("Shall I merge?"), since: t0 + 5)
+        XCTAssertEqual(machine.blockedWait(now: t0 + 60, foreground: claude), wait)
         let newer = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: t0 + 30), name: "claude", arguments: ["claude"])
         XCTAssertNil(machine.visibleQuestion(foreground: newer), "another claude's")
-        machine.noteSeen()
-        XCTAssertNil(machine.blockedWait(now: t0 + 60, foreground: claude))
+        // Its row clicked: its column in front, Nirux active.
+        _ = machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 61))
+        XCTAssertEqual(machine.blockedWait(now: t0 + 62, foreground: claude), wait, "reading it takes nothing off the card")
+        // Clicked with Nirux already in front: the click ends the alert
+        // itself, and still not the question.
+        try ask()
+        _ = machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 61))
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertEqual(machine.blockedWait(now: t0 + 62, foreground: claude), wait)
+        XCTAssertFalse(machine.dismissQuestion(askedAt: askedAt - 1), "another turn end's")
+        XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
+        XCTAssertTrue(machine.dismissQuestion(askedAt: askedAt))
+        XCTAssertNil(machine.blockedWait(now: t0 + 62, foreground: claude), "put aside")
+        XCTAssertTrue(machine.isCurrentTurnEnd(askedAt), "a reply still goes in")
+
+        // Put aside before anyone looked: its amber goes with it. A
+        // dialog's is not the question's to end.
+        let unseen = try ask()
+        XCTAssertEqual(machine.state, .needsAttention)
+        machine.dismissQuestion(askedAt: unseen)
+        XCTAssertEqual(machine.state, .idle)
+        let behindADialog = try ask()
+        _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertTrue(machine.dismissQuestion(askedAt: behindADialog))
+        XCTAssertEqual(machine.state, .needsAttention, "the dialog still waits")
+        // Its attention under another name: a subagent worked on, then
+        // Claude's idle reminder called the turn finished.
+        try ask()
+        _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        _ = machine.apply(event(.notification, at: 70, notificationType: "idle_prompt"), isUserFocused: false)
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
+        XCTAssertTrue(machine.dismissQuestion(), "whichever stands (an archived task's)")
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertFalse(machine.dismissQuestion(), "none left")
+        // Archived while its verdict was on its way: nothing asks later.
+        // Another question's Dismiss leaves that verdict to come.
+        machine = AgentStatusMachine()
+        var awaited = try XCTUnwrap(endTurn().turnEnd)
+        XCTAssertFalse(machine.dismissQuestion())
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: awaited, isUserFocused: false))
+        XCTAssertNil(machine.visibleQuestion(foreground: claude))
+        machine = AgentStatusMachine()
+        awaited = try XCTUnwrap(endTurn().turnEnd)
+        XCTAssertFalse(machine.dismissQuestion(askedAt: awaited.turnEndedAt - 1))
+        XCTAssertNotNil(machine.applyTurnEndVerdict(.asks(nil), for: awaited, isUserFocused: false))
 
         try ask()
         _ = machine.apply(event(.userPromptSubmit, at: 9), isUserFocused: true)
@@ -791,10 +910,25 @@ final class TurnEndClassificationTests: XCTestCase {
         _ = machine.apply(event(.notification, at: 70, notificationType: "idle_prompt"), isUserFocused: false)
         XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
 
+        // Its verdict lands while the user looks at the column (they
+        // clicked its row meanwhile): no alert, and it stands all the same.
         machine = AgentStatusMachine()
         let seen = try XCTUnwrap(endTurn().turnEnd)
-        _ = machine.applyTurnEndVerdict(.asks(nil), for: seen, isUserFocused: true)
-        XCTAssertNil(machine.visibleQuestion(foreground: claude), "read as it came")
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: seen, isUserFocused: true))
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
+    }
+
+    /// The question carries the choices its message lists next to it.
+    func testQuestionCarriesTheChoicesItsMessageLists() throws {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: 0), name: "claude", arguments: ["claude"])
+        let request = try XCTUnwrap(endTurn(message: "Two ways:\n\n1. Rebase on main\n2. Merge main in\n\nWhich one do you want?").turnEnd)
+        _ = machine.applyTurnEndVerdict(
+            .asks(TurnEndQuestion(text: "Which one do you want?", isYesNo: false)), for: request, isUserFocused: false
+        )
+        XCTAssertEqual(machine.visibleQuestion(foreground: claude)?.choices, [
+            TurnEndChoice(marker: "1.", text: "Rebase on main"), TurnEndChoice(marker: "2.", text: "Merge main in"),
+        ])
     }
 
     /// `claude` left the terminal (a `claude -p` done, a crash) before
@@ -1418,8 +1552,8 @@ final class TurnEndClassificationTests: XCTestCase {
         }
     }
 
-    /// The question still waits, seen or not, until a prompt, a later turn
-    /// end or another conversation: what keeps a Reply… popover open.
+    /// The turn end stays the current one until a prompt, a later turn end
+    /// or another conversation: what keeps a Reply… popover open.
     func testTurnEndStaysCurrentUntilSomethingFollows() throws {
         func ended() throws -> TimeInterval {
             machine = AgentStatusMachine()
@@ -1427,8 +1561,6 @@ final class TurnEndClassificationTests: XCTestCase {
         }
         var at = try ended()
         XCTAssertTrue(machine.isCurrentTurnEnd(at))
-        machine.noteSeen()
-        XCTAssertTrue(machine.isCurrentTurnEnd(at), "read on screen")
         _ = machine.apply(event(.userPromptSubmit, at: 6), isUserFocused: false)
         XCTAssertFalse(machine.isCurrentTurnEnd(at), "answered at the terminal")
         at = try ended()
@@ -1454,8 +1586,20 @@ final class TurnEndClassificationTests: XCTestCase {
             )
         )
         XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .working, foreground: claude), "at work")
-        _ = column.pty?.applyAgentHook(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
-        XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .needsAttention, foreground: claude), "a dialog")
+        // Put aside: off the card, though no dialog is open.
+        XCTAssertEqual(column.pty?.dismissAgentQuestion(askedAt: request.turnEndedAt), true)
+        XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: column, status: .idle, foreground: claude), "dismissed")
+
+        let (listing, _, choosing, listed, _) = try turnEndColumn(message: "1. Ship today\n2. Wait for the audit\n\nWhich one?")
+        listing.applyTurnEndVerdict(
+            .asks(TurnEndQuestion(text: "Which one?", isYesNo: false)), for: listed, agentUUID: try XCTUnwrap(choosing.agentUUID)
+        )
+        XCTAssertEqual(
+            NiruxShellView.sidebarTurnQuestion(of: choosing, status: .needsAttention, foreground: claude)?.choices.map(\.text),
+            ["Ship today", "Wait for the audit"]
+        )
+        _ = choosing.pty?.applyAgentHook(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertNil(NiruxShellView.sidebarTurnQuestion(of: choosing, status: .needsAttention, foreground: claude), "a dialog")
     }
 
     /// A notification's Reply carries the turn end it answers.

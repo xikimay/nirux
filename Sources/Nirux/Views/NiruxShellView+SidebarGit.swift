@@ -20,8 +20,6 @@ extension NiruxShellView {
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
                 let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
-                // Read on screen: the question its turn ended on is seen.
-                if isUserFocused, NSApp.isActive { col.pty?.noteAgentSeen() }
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
                 }
@@ -32,6 +30,12 @@ extension NiruxShellView {
                     claudeFiredHooks: foregroundProcess.map { col.claudeHooksFired(by: $0.instance) } ?? false
                 ) ?? .idle
                 let permissionApproval = sidebarApproval(for: col, hold: approvalHolds[ObjectIdentifier(col)])
+                // The Project Board's rule: an approved dialog stays listed
+                // while its tool runs, the column working. A question
+                // waits even while subagents work, as the header and ⌘J
+                // say; behind a dialog, the dialog is what waits.
+                let dialog = agentStatus == .working ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason
+                let asked = dialog == nil ? col.pty?.agentQuestion(foreground: foregroundProcess) : nil
                 return ColumnInfo(
                     index: colIndex,
                     processName: foregroundProcess?.name,
@@ -50,19 +54,14 @@ extension NiruxShellView {
                         .map { Date().timeIntervalSince($0) },
                     attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
                     permissionApproval: permissionApproval,
-                    // The Project Board's rule: an approved dialog stays
-                    // listed while its tool runs, the column working.
-                    // A question waits even while subagents work, as the
-                    // header and ⌘J say.
-                    openDialog: (agentStatus == .working ? nil
-                        : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason)
-                        ?? col.pty?.agentAskedQuestion(foreground: foregroundProcess)
+                    openDialog: dialog ?? asked.map { .askedInReply($0.text) }
                         ?? col.pty?.agentTrustPrompt(foreground: foregroundProcess).map { _ in AgentTrustPrompt.reason },
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
                     missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
                     turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
+                    questionAskedAt: asked?.since,
                     id: col.id
                 )
             }

@@ -319,6 +319,9 @@ final class NiruxShellView: NSView {
         sidebar.onTurnAnswer = { [weak self] question, answer, button in
             self?.answerFromCard(answer, to: question, button: button)
         }
+        sidebar.onQuestionDismissed = { [weak self] columnID, askedAt in
+            self?.dismissTurnQuestion(columnID: columnID, askedAt: askedAt)
+        }
         wireDeferredAgentResume()
         wireAgentLights()
         wireSidebarStaleLog()

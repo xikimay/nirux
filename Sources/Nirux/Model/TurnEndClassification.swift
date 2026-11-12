@@ -27,6 +27,14 @@ struct TurnEndQuestion: Equatable, Sendable {
     let isYesNo: Bool
 }
 
+/// One of the choices a final message lists next to its question
+/// (`TurnEndText.choices`), as the message writes it.
+struct TurnEndChoice: Hashable, Sendable {
+    /// "1.", "B)", "(a)"; nil for a bullet.
+    let marker: String?
+    let text: String
+}
+
 /// A Claude turn end waiting for its verdict. `turnEndedAt` (the Stop's
 /// timestamp) tells it from a later turn end of the same column.
 struct TurnEndRequest: Equatable, Sendable {
@@ -350,6 +358,215 @@ enum TurnEndText {
             if let cleaned = AgentText.clean(line.trimmed, maxLength: maxLength) { return cleaned }
         }
         return nil
+    }
+
+    /// The choices `question` asks about, when it names a choice
+    /// (`asksToChoose`) and `message` lists them right after it, else,
+    /// with no list there, right before it: that list's items, in the
+    /// message's order and words, each cleaned for a few lines of a card.
+    /// Two to `maxItems` items of one list, whole, with at most a blank
+    /// line between the list and the question's paragraph. Anything else
+    /// gives none: a longer list is a report, and half a list of choices
+    /// would mislead.
+    static func choices(
+        for question: String, in message: String, maxItems: Int = 6, maxLength: Int = 200
+    ) -> [TurnEndChoice] {
+        guard asksToChoose(question) else { return [] }
+        let lines = Array(linesFromTheEnd(of: message).reversed())
+        let raw = message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        guard raw.count == lines.count, let paragraph = paragraph(holding: question, in: lines, raw: raw) else { return [] }
+        // The list after the question is what it asks about. One before
+        // it counts only when none follows, whole or not: what the turn
+        // did often comes first ("I did:\n- …\n\nWhich option next?\n\n1. …").
+        let after = listItems(from: paragraph.upperBound, step: 1, lines: lines, raw: raw, maxLength: maxLength)
+        if (2...maxItems).contains(after.count) { return after }
+        var next = paragraph.upperBound
+        if lines.indices.contains(next), lines[next].kind == .blank { next += 1 }
+        guard !(lines.indices.contains(next) && lines[next].kind == .prose && choiceItem(lines[next].trimmed) != nil) else { return [] }
+        let before = listItems(from: paragraph.lowerBound - 1, step: -1, lines: lines, raw: raw, maxLength: maxLength)
+        return (2...maxItems).contains(before.count) ? before : []
+    }
+
+    /// The question names a choice: "which", "option", "choice", and their
+    /// French. The list next to any other question is most often what the
+    /// turn did ("- Added the retry\n- Updated the tests\n\nWant me to open
+    /// a pull request?"), not what to choose from. Not "or": a question
+    /// that says "this or that" names its own alternatives. Words can't
+    /// tell every case: "Which branch should I push to?" after a list of
+    /// what was done still shows that list, the message's own lines.
+    static func asksToChoose(_ question: String) -> Bool {
+        question.lowercased().split { !$0.isLetter }.contains { choosingWords.contains(String($0)) }
+    }
+
+    private static let choosingWords: Set<String> = [
+        "which", "option", "options", "choice", "choices",
+        "quel", "quelle", "quels", "quelles", "lequel", "laquelle", "lesquels", "lesquelles", "choix",
+    ]
+
+    /// The lines of the last paragraph of prose that holds `question` (the
+    /// card's text: cleaned for one line, "…" where it was cut). A list
+    /// item is no such paragraph, nor a line that goes on with one: a
+    /// question among items has no choices around it.
+    private static func paragraph(
+        holding question: String, in lines: [(trimmed: String, kind: LineKind)], raw: [Substring]
+    ) -> Range<Int>? {
+        guard let needle = AgentText.clean(question.hasSuffix("…") ? String(question.dropLast()) : question, maxLength: 10_000)
+        else { return nil }
+        var end = lines.count
+        while end > 0 {
+            guard lines[end - 1].kind == .prose, choiceItem(lines[end - 1].trimmed) == nil else {
+                end -= 1
+                continue
+            }
+            var start = end - 1
+            while start > 0, lines[start - 1].kind == .prose, choiceItem(lines[start - 1].trimmed) == nil { start -= 1 }
+            let text = lines[start..<end].map(\.trimmed).joined(separator: " ")
+            if AgentText.clean(text, maxLength: 10_000)?.contains(needle) == true {
+                let goesOnWithAnItem = start > 0 && lines[start - 1].kind == .prose && indent(of: raw[start]) >= 2
+                return goesOnWithAnItem ? nil : start..<end
+            }
+            end = start
+        }
+        return nil
+    }
+
+    /// The items of the list that starts at line `first` (past one blank
+    /// line) and goes on in `step`'s direction, in the message's order:
+    /// lines that start an item and the indented lines that go on with
+    /// one. An item deeper than the list's own goes on with the one above
+    /// it. Only a whole list counts, and one that can be told whole:
+    /// - counted items ("1.", "b)") count from their start (1, or 0), and
+    ///   may have a blank line between them; of two such lists in a row,
+    ///   the one next to the question;
+    /// - bullets have no blank line between them (two lists can't be told
+    ///   from one), and none follows them past one;
+    /// - past its last item, a heading, a paragraph or the message's edge.
+    ///   Code there, an indented line or an excerpt's "[…]" (or the rest of
+    ///   the line it cut) may hide other items.
+    /// Of bullets and counted items in a row, those next to the question.
+    private static func listItems(
+        from first: Int, step: Int, lines: [(trimmed: String, kind: LineKind)], raw: [Substring], maxLength: Int
+    ) -> [TurnEndChoice] {
+        func item(_ index: Int) -> (marker: String?, text: String)? {
+            guard lines.indices.contains(index), lines[index].kind == .prose else { return nil }
+            return choiceItem(lines[index].trimmed)
+        }
+        func goesOn(_ index: Int) -> Bool {
+            lines.indices.contains(index) && lines[index].kind == .prose && indent(of: raw[index]) >= 2
+        }
+        func isBlank(_ index: Int) -> Bool { lines.indices.contains(index) && lines[index].kind == .blank }
+        var index = first
+        if isBlank(index) { index += step }
+        var block: [Int] = []
+        // Whether the item next to the question is counted: the others'
+        // numbers then tell where its list goes on past a blank line.
+        var isCounted: Bool?
+        while item(index) != nil || goesOn(index) {
+            if isCounted == nil, let marked = item(index) { isCounted = marked.marker != nil }
+            block.append(index)
+            index += step
+            if isCounted == true, isBlank(index), item(index + step)?.marker != nil { index += step }
+        }
+        block.sort()
+        let depths = block.filter { item($0) != nil }.map { indent(of: raw[$0]) }
+        guard let depth = depths.min() else { return [] }
+        var items: [(marker: String?, parts: [String])] = []
+        for index in block {
+            if indent(of: raw[index]) == depth, let item = item(index) {
+                items.append((item.marker, [item.text]))
+            } else if !items.isEmpty {
+                items[items.count - 1].parts.append(lines[index].trimmed)
+            } else {
+                // Lines of an item that isn't there.
+                return []
+            }
+        }
+        // One list: those marked like the item next to the question; of
+        // counted ones, up to where the count starts or stops.
+        let nearestFirst = step < 0 ? Array(items.reversed()) : items
+        guard let nearest = nearestFirst.first else { return [] }
+        var list = Array(nearestFirst.prefix { ($0.marker == nil) == (nearest.marker == nil) })
+        if nearest.marker != nil {
+            let ordinals = list.map { $0.marker.flatMap(ordinal(of:)) }
+            var count: Int
+            if step < 0 {
+                // Up to its "1.", and the "0." right above it.
+                count = ordinals.firstIndex(of: 1).map { $0 + 1 } ?? 0
+                if count < ordinals.count, ordinals[count] == 0 { count += 1 }
+            } else {
+                let start = ordinals.first == 0 ? 0 : 1
+                count = ordinals.enumerated().prefix { $0.element == $0.offset + start }.count
+            }
+            list = Array(list.prefix(count))
+            let fromItsStart = step < 0 ? Array(ordinals.prefix(count).reversed()) : Array(ordinals.prefix(count))
+            let start = fromItsStart.first == 0 ? 0 : 1
+            guard fromItsStart == (0..<count).map({ Optional($0 + start) }) else { return [] }
+        }
+        if step < 0 { list.reverse() }
+        // Where the whole run stopped, when the list is all of it: what
+        // lies there may hide other items. Not above a counted list: it
+        // starts at its "1." (or "0.").
+        if list.count == items.count, nearest.marker == nil || step > 0 {
+            var beyond = index
+            while isBlank(beyond) { beyond += step }
+            if lines.indices.contains(beyond) {
+                let isParagraph = lines[beyond].kind == .prose && !goesOn(beyond)
+                    && (item(beyond).map { ($0.marker == nil) != (nearest.marker == nil) } ?? true)
+                let nextIsCut = lines.indices.contains(beyond + step) && lines[beyond + step].kind == .gap
+                guard lines[beyond].kind == .other || (isParagraph && !nextIsCut) else { return [] }
+            }
+        }
+        let choices = list.compactMap { item in
+            AgentText.clean(item.parts.joined(separator: " "), maxLength: maxLength).map { TurnEndChoice(marker: item.marker, text: $0) }
+        }
+        return choices.count == list.count ? choices : []
+    }
+
+    /// "2." → 2, "b)" and "(B)" → 2: where a counted item stands in its
+    /// list.
+    private static func ordinal(of marker: String) -> Int? {
+        let label = marker.filter { $0.isLetter || $0.isNumber }.lowercased()
+        if let number = Int(label) { return number }
+        guard label.count == 1, let letter = label.unicodeScalars.first, ("a"..."z").contains(Character(letter)) else { return nil }
+        return Int(letter.value - UnicodeScalar("a").value) + 1
+    }
+
+    /// A list item's marker and text: a bullet (no marker to show), or a
+    /// number or a letter before "." or ")", or in brackets ("2.", "B)",
+    /// "(a)").
+    static func choiceItem(_ line: String) -> (marker: String?, text: String)? {
+        if let bullet = ["- ", "* ", "+ ", "• "].first(where: line.hasPrefix) {
+            let text = line.dropFirst(bullet.count).trimmingCharacters(in: .whitespaces)
+            return text.isEmpty ? nil : (nil, text)
+        }
+        var rest = Substring(line)
+        let bracketed = rest.hasPrefix("(")
+        if bracketed { rest = rest.dropFirst() }
+        let digits = rest.prefix { ("0"..."9").contains($0) }
+        let label: Substring
+        if (1...3).contains(digits.count) {
+            label = digits
+        } else if let first = rest.first, first.isASCII, first.isLetter {
+            label = rest.prefix(1)
+        } else {
+            return nil
+        }
+        rest = rest.dropFirst(label.count)
+        let closing: String
+        if rest.hasPrefix(") ") {
+            closing = ")"
+        } else if !bracketed, rest.hasPrefix(". ") {
+            closing = "."
+        } else {
+            return nil
+        }
+        let text = rest.dropFirst(2).trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? nil : ((bracketed ? "(" : "") + label + closing, text)
+    }
+
+    /// Spaces in front of a line, a tab as four.
+    private static func indent(of line: Substring) -> Int {
+        line.prefix { $0 == " " || $0 == "\t" }.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
     }
 
     /// A prose paragraph (a list item is one of its own, its marker left

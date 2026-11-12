@@ -133,7 +133,7 @@ final class ReviewBadgesTests: XCTestCase {
         XCTAssertEqual(
             SidebarExpandedMetrics.workspaceHeight(for: workspace, sidebarWidth: 260)
                 - SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo(), sidebarWidth: 260),
-            SidebarExpandedMetrics.actionBlockHeight([.reviewBadges(badges)])
+            SidebarExpandedMetrics.actionBlockHeight([.reviewBadges(badges)], width: 224, textWidth: 208)
         )
 
         let labels = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, yOffset: 400)

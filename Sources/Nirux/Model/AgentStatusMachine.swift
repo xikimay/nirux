@@ -43,10 +43,11 @@ struct AgentStatusMachine {
 
     /// The last turn end's final message asks the user something (its
     /// verdict): the message's last line, and when the turn ended. Unlike
-    /// the attention, which activating Nirux clears, it lasts like an open
-    /// dialog, so the sidebar, the column's header and ⌘J keep saying who
-    /// waits for an answer: until the next prompt (the answer), turn end or
-    /// conversation, or until the user looks at the column (`noteSeen`).
+    /// the attention, which activating Nirux or looking at the column
+    /// clears, it lasts like an open dialog, so the sidebar, the column's
+    /// header and ⌘J keep saying who waits for an answer: until the next
+    /// prompt (the answer), turn end or conversation, or until the user
+    /// puts it aside (`dismissQuestion`).
     private(set) var askedQuestion: AskedQuestion?
 
     struct AskedQuestion: Equatable {
@@ -55,6 +56,9 @@ struct AgentStatusMachine {
         /// A plain yes or no answers it, and its text is the message's
         /// own (`TurnEndQuestion`).
         var isYesNo = false
+        /// What it chooses between, when the message lists it right next
+        /// to the question (`TurnEndText.choices`).
+        var choices: [TurnEndChoice] = []
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
@@ -536,10 +540,12 @@ struct AgentStatusMachine {
             let line = question?.text ?? TurnEndText.questionLine(of: request.message) ?? TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
             mainTurnEndAsks = true
-            // A user looking at the column reads it there.
-            if !isUserFocused {
-                askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true)
-            }
+            // It stands until it is answered, whoever looks at the column
+            // meanwhile: only its alert is theirs to miss.
+            askedQuestion = AskedQuestion(
+                text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true,
+                choices: line.map { TurnEndText.choices(for: $0, in: request.message) } ?? []
+            )
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
             attentionAlerted = false
@@ -558,10 +564,24 @@ struct AgentStatusMachine {
         return askedQuestion
     }
 
-    /// The user looks at the column (Nirux active, the column focused):
-    /// they read the question there.
-    mutating func noteSeen() {
+    /// The user puts the question aside without answering it (Dismiss on
+    /// its card, its row's menu, archiving its task): nothing says the
+    /// agent waits any more, as once answered. With `since`, only the
+    /// question asked then: false for one that is no longer the one asked.
+    /// Its attention goes with it, under whatever name a later event left
+    /// it (a subagent's work, then Claude's idle reminder, make it a
+    /// finished turn); a dialog still open keeps its own. (A failed turn
+    /// has no question: its end takes the place of the one that asked.)
+    /// The turn end stays the current one: a reply still goes in.
+    /// Without `since`, the verdict a turn end still waits for is put
+    /// aside too: it would ask on the archived task's row.
+    @discardableResult
+    mutating func dismissQuestion(askedAt since: TimeInterval? = nil) -> Bool {
+        if since == nil, case .pending = quietTurnEnd { quietTurnEnd = .done }
+        guard let asked = askedQuestion, since == nil || asked.since == since else { return false }
         askedQuestion = nil
+        if state == .needsAttention, openDialogs.isEmpty { state = .idle }
+        return true
     }
 
     /// A quick answer (Yes, No, a reply) to the turn end of `turnEndedAt`
@@ -588,7 +608,7 @@ struct AgentStatusMachine {
 
     /// The turn end of `turnEndedAt` is still the last thing that happened
     /// in this conversation: no prompt, turn end or conversation since.
-    /// Seen or not, its question still waits for an answer.
+    /// Put aside or not, its question still takes an answer.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {
         mainTurnEndedAt == turnEndedAt && conversationChangedAt < turnEndedAt && (lastPromptAt ?? 0) < turnEndedAt
     }

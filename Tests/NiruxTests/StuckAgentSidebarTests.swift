@@ -86,7 +86,7 @@ final class StuckAgentSidebarTests: XCTestCase {
             stopped - plain,
             SidebarExpandedMetrics.actionBlockHeight([
                 .resume(columnIndex: 1, kind: "rate_limit", detail: nil, failedAt: 1_005, resume: .offered)
-            ])
+            ], width: 224, textWidth: 208)
         )
         let waiting = column(.waiting(.question(nil), duration: "12m"))
         XCTAssertEqual(height(workspace([waiting])), plain)

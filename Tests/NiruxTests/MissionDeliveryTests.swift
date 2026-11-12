@@ -296,8 +296,8 @@ final class MissionDeliveryTests: XCTestCase {
 
         let handedOff = workspace([column(question(.parentClosed))])
         XCTAssertEqual(handedOff.rowSummary.status, SidebarStatusLine(
-            text: "Needs you · a question", tone: .needsYou, action: .missionQuestion(columnIndex: 0)
-        ))
+            text: "Needs you · Keep date=?", tone: .needsYou, action: .missionQuestion(columnIndex: 0)
+        ), "the question itself, not that there is one")
         XCTAssertEqual(handedOff.rowSummary.mark, .needsYou)
         XCTAssertEqual(handedOff.columns[0].attention, .waiting)
         XCTAssertEqual(handedOff.columns[0].attentionLabel, "question")
@@ -321,7 +321,7 @@ final class MissionDeliveryTests: XCTestCase {
             clicked.append((workspaceIndex, columnIndex))
         }
         let rows: [(SidebarMissionQuestion.HandOff?, String)] = [
-            (nil, "Asking web-main"), (.unanswered(minutes: 10), "Needs you · a question")
+            (nil, "Asking web-main"), (.unanswered(minutes: 10), "Needs you · Keep date=?")
         ]
         for (handOff, text) in rows {
             sidebar.update(profiles: [], workspaces: [workspace([column(question(handOff))], index: 3)])

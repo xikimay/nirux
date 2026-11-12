@@ -136,9 +136,10 @@ struct SidebarCardLink {
 
 /// What a task row shows and where, before any view exists: the renderer
 /// draws it, `SidebarExpandedMetrics.workspaceHeight` measures it. Every row
-/// has two lines (`rowSummary`); the selected one adds its columns, as
-/// chips, and its pull request's links; an action block follows when there
-/// is something to do. An archived row that asks nothing is one line.
+/// has its title and its status (`rowSummary`), which wraps when it is
+/// long; the selected one adds its columns, as chips, and its pull
+/// request's links; an action block follows when there is something to do.
+/// An archived row that asks nothing is one line.
 @MainActor
 struct SidebarCardLayout {
     typealias Metrics = SidebarExpandedMetrics
@@ -160,6 +161,10 @@ struct SidebarCardLayout {
     let links: [SidebarCardLink]
     let chipRows: [[ChipPlacement]]
     let actions: [SidebarCardAction]
+    /// The lines the status may take (`SidebarRowSummary.statusLineLimit`),
+    /// and those its text takes in this row's width.
+    let statusLineLimit: Int
+    let statusLineCount: Int
     let height: CGFloat
 
     init(workspace: WorkspaceInfo, sidebarWidth: CGFloat) {
@@ -182,6 +187,11 @@ struct SidebarCardLayout {
         }
         self.links = links
         actions = isCompact ? [] : workspace.cardActions
+        statusLineLimit = summary.statusLineLimit(isSelected: workspace.isActive)
+        statusLineCount = isCompact || workspace.isLead ? 1 : SidebarWrappedText.lineCount(
+            SidebarWorkspaceCardRenderer.statusText(summary), width: rowWidth,
+            lineHeight: Metrics.statusRowHeight, maxLines: statusLineLimit
+        )
 
         let linksWidth = links.reduce(CGFloat(0)) { $0 + $1.width } + Self.linkGaps(links)
         let firstRowWidth = rowWidth - (links.isEmpty ? 0 : linksWidth + Theme.Space.sm)
@@ -203,18 +213,24 @@ struct SidebarCardLayout {
         if !row.isEmpty { rows.append(row) }
         chipRows = rows
 
+        // The block is as wide as the card's content; its lines of text
+        // start under the title.
+        let blockHeight = Metrics.actionBlockHeight(
+            actions, width: rowWidth + Metrics.textX - Metrics.workspaceInsetX - Metrics.cardPaddingX, textWidth: rowWidth
+        )
         if isCompact {
             height = Metrics.compactRowHeight
         } else if workspace.isLead {
             // A block ends a row's padding above its edge, as on a task row.
-            height = Metrics.leadRowHeight + Metrics.actionBlockHeight(actions) + (actions.isEmpty ? 0 : Metrics.rowPaddingY)
+            height = Metrics.leadRowHeight + blockHeight + (actions.isEmpty ? 0 : Metrics.rowPaddingY)
         } else {
-            var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap + Metrics.statusRowHeight
+            var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap
+                + CGFloat(statusLineCount) * Metrics.statusRowHeight
             let lineCount = CGFloat(max(rows.count, links.isEmpty ? 0 : 1))
             if lineCount > 0 {
                 height += Metrics.columnsGap + lineCount * Metrics.chipHeight + (lineCount - 1) * Metrics.chipGap
             }
-            self.height = height + Metrics.actionBlockHeight(actions)
+            self.height = height + blockHeight
         }
     }
 
