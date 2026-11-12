@@ -352,6 +352,13 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "```\nx\n```\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
         XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "```\nx\n```\n1. x\n2. y\n- A\n- B\n\nWhich?").map(\.text), ["A", "B"])
 
+        // The list after the question is its choices, whatever is listed
+        // before it. A list that counts from 0 is whole from its "0.".
+        let both = "I did:\n- x\n- y\n\nWhich option next?\n\n1. A\n2. B"
+        XCTAssertEqual(TurnEndText.choices(for: "Which option next?", in: both).map(\.text), ["A", "B"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "0. A\n1. B\n2. C\n\nWhich?").map(\.marker), ["0.", "1.", "2."])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "Which?\n0. A\n1. B").map(\.text), ["A", "B"])
+
         // The list before a question that names no choice is what the turn
         // did, and a line that goes on with an item is no question to it.
         let report = "Done:\n\n- Added the retry\n- Updated the tests\n\nWant me to open a pull request?"
@@ -361,6 +368,7 @@ final class TurnEndClassificationTests: XCTestCase {
 
         let none = [
             "- One thing done\n\nWhich?": "one item is no choice",
+            "Which?\n\n- One thing to do": "nor one item after it",
             "1. A\n2. B\n\nBoth are fine.\n\nWhich?": "not next to the question",
             (1...7).map { "\($0). Step \($0)" }.joined(separator: "\n") + "\n\nWhich?": "a longer list is a report",
             "- Rebase\n- Merge\n- Which?": "a question among items",
@@ -373,6 +381,8 @@ final class TurnEndClassificationTests: XCTestCase {
             "- Fast\n  ```\n  x\n  ```\n- Safe\n- Third\n\nWhich?": "code inside the list: its first item is out of reach",
             "Which?\n1. A\n2. B\n```\nx\n```\n3. C": "code after a counted list: it may go on",
             "Which?\n- A\n- B\n\n  more about B": "an indented line past the blank",
+            "- x\n- y\n\nWhich?\n\n" + (1...7).map { "\($0). Step \($0)" }.joined(separator: "\n"): "a longer list after it: not the one before",
+            "0. A\n2. C\n\nWhich?": "from 0, a number missing",
             "1. A\n2. B\n\nDone.": "no such question",
         ]
         for (message, why) in none {
@@ -873,6 +883,17 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.dismissQuestion(), "whichever stands (an archived task's)")
         XCTAssertEqual(machine.state, .idle)
         XCTAssertFalse(machine.dismissQuestion(), "none left")
+        // Archived while its verdict was on its way: nothing asks later.
+        // Another question's Dismiss leaves that verdict to come.
+        machine = AgentStatusMachine()
+        var awaited = try XCTUnwrap(endTurn().turnEnd)
+        XCTAssertFalse(machine.dismissQuestion())
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks(nil), for: awaited, isUserFocused: false))
+        XCTAssertNil(machine.visibleQuestion(foreground: claude))
+        machine = AgentStatusMachine()
+        awaited = try XCTUnwrap(endTurn().turnEnd)
+        XCTAssertFalse(machine.dismissQuestion(askedAt: awaited.turnEndedAt - 1))
+        XCTAssertNotNil(machine.applyTurnEndVerdict(.asks(nil), for: awaited, isUserFocused: false))
 
         try ask()
         _ = machine.apply(event(.userPromptSubmit, at: 9), isUserFocused: true)

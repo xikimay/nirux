@@ -361,12 +361,13 @@ enum TurnEndText {
     }
 
     /// The choices `question` asks about, when it names a choice
-    /// (`asksToChoose`) and `message` lists them right before it, else
-    /// right after: that list's items, in the message's order and words,
-    /// each cleaned for a few lines of a card. Two to `maxItems` items of
-    /// one list, whole, with at most a blank line between the list and the
-    /// question's paragraph. Anything else gives none: a longer list is a
-    /// report, and half a list of choices would mislead.
+    /// (`asksToChoose`) and `message` lists them right after it, else,
+    /// with no list there, right before it: that list's items, in the
+    /// message's order and words, each cleaned for a few lines of a card.
+    /// Two to `maxItems` items of one list, whole, with at most a blank
+    /// line between the list and the question's paragraph. Anything else
+    /// gives none: a longer list is a report, and half a list of choices
+    /// would mislead.
     static func choices(
         for question: String, in message: String, maxItems: Int = 6, maxLength: Int = 200
     ) -> [TurnEndChoice] {
@@ -374,11 +375,16 @@ enum TurnEndText {
         let lines = Array(linesFromTheEnd(of: message).reversed())
         let raw = message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         guard raw.count == lines.count, let paragraph = paragraph(holding: question, in: lines, raw: raw) else { return [] }
-        for (first, step) in [(paragraph.lowerBound - 1, -1), (paragraph.upperBound, 1)] {
-            let found = listItems(from: first, step: step, lines: lines, raw: raw, maxLength: maxLength)
-            if (2...maxItems).contains(found.count) { return found }
-        }
-        return []
+        // The list after the question is what it asks about. One before
+        // it counts only when none follows, whole or not: what the turn
+        // did often comes first ("I did:\n- …\n\nWhich option next?\n\n1. …").
+        let after = listItems(from: paragraph.upperBound, step: 1, lines: lines, raw: raw, maxLength: maxLength)
+        if (2...maxItems).contains(after.count) { return after }
+        var next = paragraph.upperBound
+        if lines.indices.contains(next), lines[next].kind == .blank { next += 1 }
+        guard !(lines.indices.contains(next) && lines[next].kind == .prose && choiceItem(lines[next].trimmed) != nil) else { return [] }
+        let before = listItems(from: paragraph.lowerBound - 1, step: -1, lines: lines, raw: raw, maxLength: maxLength)
+        return (2...maxItems).contains(before.count) ? before : []
     }
 
     /// The question names a choice: "which", "option", "choice", and their
@@ -429,9 +435,9 @@ enum TurnEndText {
     /// lines that start an item and the indented lines that go on with
     /// one. An item deeper than the list's own goes on with the one above
     /// it. Only a whole list counts, and one that can be told whole:
-    /// - counted items ("1.", "b)") count from their start, and may have
-    ///   a blank line between them; of two such lists in a row, the one
-    ///   next to the question;
+    /// - counted items ("1.", "b)") count from their start (1, or 0), and
+    ///   may have a blank line between them; of two such lists in a row,
+    ///   the one next to the question;
     /// - bullets have no blank line between them (two lists can't be told
     ///   from one), and none follows them past one;
     /// - past its last item, a heading, a paragraph or the message's edge.
@@ -482,17 +488,24 @@ enum TurnEndText {
         var list = Array(nearestFirst.prefix { ($0.marker == nil) == (nearest.marker == nil) })
         if nearest.marker != nil {
             let ordinals = list.map { $0.marker.flatMap(ordinal(of:)) }
-            let count = step < 0
-                ? (ordinals.firstIndex(of: 1).map { $0 + 1 } ?? 0)
-                : ordinals.enumerated().prefix { $0.element == $0.offset + 1 }.count
+            var count: Int
+            if step < 0 {
+                // Up to its "1.", and the "0." right above it.
+                count = ordinals.firstIndex(of: 1).map { $0 + 1 } ?? 0
+                if count < ordinals.count, ordinals[count] == 0 { count += 1 }
+            } else {
+                let start = ordinals.first == 0 ? 0 : 1
+                count = ordinals.enumerated().prefix { $0.element == $0.offset + start }.count
+            }
             list = Array(list.prefix(count))
             let fromItsStart = step < 0 ? Array(ordinals.prefix(count).reversed()) : Array(ordinals.prefix(count))
-            guard fromItsStart == (1...max(count, 1)).map(Optional.some) else { return [] }
+            let start = fromItsStart.first == 0 ? 0 : 1
+            guard fromItsStart == (0..<count).map({ Optional($0 + start) }) else { return [] }
         }
         if step < 0 { list.reverse() }
         // Where the whole run stopped, when the list is all of it: what
         // lies there may hide other items. Not above a counted list: it
-        // starts at its "1.".
+        // starts at its "1." (or "0.").
         if list.count == items.count, nearest.marker == nil || step > 0 {
             var beyond = index
             while isBlank(beyond) { beyond += step }

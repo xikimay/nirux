@@ -783,8 +783,7 @@ final class SidebarWorkspaceCardRenderer {
             ])
         }
         guard question.handOff == nil else {
-            let asked = AgentText.clean(question.text, maxLength: 300) ?? "a question"
-            return NSAttributedString(string: "Needs you · \(asked)", attributes: [
+            return NSAttributedString(string: question.needsYouLine, attributes: [
                 .font: font, .foregroundColor: Theme.Color.waiting
             ])
         }

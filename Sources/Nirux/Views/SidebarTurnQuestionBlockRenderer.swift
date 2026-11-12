@@ -7,15 +7,8 @@ import AppKit
 enum SidebarQuestionText {
     typealias Metrics = SidebarExpandedMetrics
 
-    /// The agent's words without the marks around them: "**Rebase** on
-    /// `main`" reads "Rebase on main" on a card, which draws no Markdown.
-    /// Only the marks that are never words ("_" and "*" may be).
-    static func plain(_ text: String) -> String {
-        text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
-    }
-
     static func question(_ text: String) -> NSAttributedString {
-        NSAttributedString(string: plain(text), attributes: [
+        NSAttributedString(string: AgentText.withoutMarks(text), attributes: [
             .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
         ])
     }
@@ -77,7 +70,7 @@ enum SidebarQuestionText {
         let widest = markers.map { ceil(($0 as NSString).size(withAttributes: marker).width) }.max() ?? 0
         let texts = zip(markers, choices).map { mark, choice in
             let text = NSMutableAttributedString(string: mark + "\t", attributes: marker)
-            text.append(NSAttributedString(string: plain(choice.text), attributes: [
+            text.append(NSAttributedString(string: AgentText.withoutMarks(choice.text), attributes: [
                 .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
             ]))
             return text
