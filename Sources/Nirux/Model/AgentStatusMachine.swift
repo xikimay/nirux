@@ -603,11 +603,15 @@ struct AgentStatusMachine {
     /// finished turn); a dialog still open keeps its own. (A failed turn
     /// has no question: its end takes the place of the one that asked.)
     /// The turn end stays the current one: a reply still goes in.
+    /// Without `since`, whatever the turn end would still ask is put
+    /// aside too, or it would ask on the archived task's row: the verdict
+    /// it waits for, a question read as it came and not noted yet.
     @discardableResult
     mutating func dismissQuestion(askedAt since: TimeInterval? = nil) -> Bool {
-        // Whatever the last turn end asked: one read as it came, not
-        // noted yet, too.
-        if since == nil { turnEndQuestionIsBehind = true }
+        if since == nil {
+            if case .pending = quietTurnEnd { quietTurnEnd = .done }
+            turnEndQuestionIsBehind = true
+        }
         guard let asked = askedQuestion, since == nil || asked.since == since else { return false }
         askedQuestion = nil
         if state == .needsAttention, openDialogs.isEmpty { state = .idle }

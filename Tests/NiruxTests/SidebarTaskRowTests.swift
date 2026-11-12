@@ -284,10 +284,11 @@ final class SidebarTaskRowTests: XCTestCase {
         let sentence = String(repeating: "waiting for the search team to rotate the staging key ", count: 4)
         /// Twenty tasks, numbered as the store does: closing one renumbers
         /// those after it.
-        func rows(blocked: Set<Int>, closed: Int? = nil) -> [WorkspaceInfo] {
+        func rows(blocked: Set<Int>, closed: Int? = nil, archived: Set<Int> = [], renamed: String = "") -> [WorkspaceInfo] {
             (0..<20).filter { $0 != closed }.enumerated().map { index, task in
                 WorkspaceInfo(
-                    id: "ws-\(task)", index: index, title: "Task \(task)", profileID: WorkspaceProfile.defaultID, isInactive: false,
+                    id: "ws-\(task)", index: index, title: "Task \(task)\(renamed)", profileID: WorkspaceProfile.defaultID,
+                    isInactive: archived.contains(task),
                     columnCount: 1, focusedColumn: 0, gitBranch: "fix/\(task)", notification: nil, isActive: false,
                     columns: [column()], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil,
                     blocker: blocked.contains(task) ? sentence : nil, phase: .active, lastSummary: nil, lastActivityAt: nil
@@ -326,8 +327,32 @@ final class SidebarTaskRowTests: XCTestCase {
         sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15]))
         XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row below grew")
         XCTAssertGreaterThan(inView, 1)
-        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15], closed: 1))
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15, inView + 1]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "the row under it grew: the topmost row holds the list")
+        // With a row below changing height at once, or the list would
+        // hold by itself.
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0], closed: 1))
         XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a task above closed: the rows after it took new numbers")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a task above opened")
+
+        // The row that holds the list is archived, the Archived list
+        // unfolded: found again at the bottom, it doesn't take the list
+        // there. The clip stays as it is.
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15], closed: 1, archived: [19]))
+        sidebar.toggleInactiveSection()
+        clip.scroll(to: NSPoint(x: 0, y: sidebar.contentDocumentView.frame.height - clip.bounds.height - 200))
+        sidebar.contentScrollView.reflectScrolledClipView(clip)
+        let held = try XCTUnwrap(sidebar.hitAreas.compactMap { area -> (index: Int, top: CGFloat)? in
+            guard case .workspace(let index) = area.region, area.frame.intersects(clip.bounds) else { return nil }
+            return (index, area.frame.maxY)
+        }.max { $0.top < $1.top }?.index)
+        let heldTask = try XCTUnwrap(Int(try XCTUnwrap(sidebar.lastInfos.first { $0.index == held }).id.dropFirst(3)))
+        var origin = clip.bounds.origin.y
+        XCTAssertGreaterThan(origin, 100, "far from the bottom")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15], closed: 1, archived: [19, heldTask]))
+        XCTAssertTrue(try XCTUnwrap(sidebar.lastInfos.first { $0.id == "ws-\(heldTask)" }).isInactive)
+        XCTAssertEqual(clip.bounds.origin.y, origin, accuracy: 0.5, "the row that held the list moved")
 
         // Back at its top: what comes in above the first row shows.
         clip.scroll(to: NSPoint(x: 0, y: sidebar.contentDocumentView.frame.height - clip.bounds.height))
@@ -338,6 +363,22 @@ final class SidebarTaskRowTests: XCTestCase {
         )
         sidebar.update(profiles: [space], workspaces: rows(blocked: [0, 15]))
         XCTAssertEqual(hiddenAbove(), 0, accuracy: 0.5, "the space picker, not hidden above the first row")
+
+        // Past an end of the list, mid-bounce, the clip is the scroll
+        // view's: a rebuild that moves nothing leaves it alone. (A clip
+        // that takes any origin, as the scroll view's does while it
+        // bounces.)
+        let loose = UnconstrainedClipView(frame: clip.frame)
+        sidebar.contentScrollView.contentView = loose
+        sidebar.contentScrollView.documentView = sidebar.contentDocumentView
+        let top = sidebar.contentDocumentView.frame.height - loose.bounds.height
+        for (name, bounced) in [("past the top", top + 30), ("past the bottom", -30)] {
+            loose.setBoundsOrigin(NSPoint(x: 0, y: bounced))
+            XCTAssertEqual(loose.bounds.origin.y, bounced, "a clip that bounces")
+            sidebar.update(profiles: [space], workspaces: rows(blocked: [0, 15], renamed: " (\(name))"))
+            XCTAssertEqual(sidebar.contentDocumentView.frame.height - loose.bounds.height, top, accuracy: 0.01, "the same heights")
+            XCTAssertEqual(loose.bounds.origin.y, bounced, accuracy: 0.01, name)
+        }
     }
 
     /// "Clean up" is a link over its own words: a click on "Merged" or
@@ -447,4 +488,10 @@ final class SidebarTaskRowTests: XCTestCase {
             "its block ends a row's padding above its edge"
         )
     }
+}
+
+/// A clip view past an end of its document, as a scroll view's is while
+/// it bounces.
+private final class UnconstrainedClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect { proposedBounds }
 }

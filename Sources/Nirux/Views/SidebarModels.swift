@@ -166,6 +166,10 @@ struct SidebarMissionQuestion: Hashable {
         }
     }
 
+    /// What its task's row says once it waits on the user: the question
+    /// itself, on the status line and on the card's.
+    var needsYouLine: String { "Needs you · \(AgentText.clean(text, maxLength: 300) ?? "a question")" }
+
     /// The popover's line under the question.
     var explanation: String {
         switch handOff {

@@ -13,6 +13,7 @@ extension SidebarView {
             rebuildSkippedDuringDrag = true
             return
         }
+        rebuildSkippedDuringDrag = false
         // Before the rows go: what the list hangs by.
         let anchor = scrollAnchor()
         builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })
@@ -93,36 +94,71 @@ extension SidebarView {
     /// top, and a list scrolled down keeps its topmost row in view where
     /// it is, whichever row changes height above or below.
     struct ScrollAnchor {
-        /// The topmost row in view (its workspace's id: an index names
-        /// another row once one closes or moves); nil at the top, or when
-        /// no row shows.
-        var row: String?
-        /// From the visible top down to that row's top.
-        var rowOffset: CGFloat = 0
-        /// The document's height hidden above the visible top.
-        var hiddenAbove: CGFloat
+        enum Hold {
+            /// The list is at its top: the document's height then.
+            case top(documentHeight: CGFloat)
+            /// The topmost row in view (its workspace's id: an index names
+            /// another row once one closes or moves), where its top was,
+            /// how far under the visible top, and the rows above it among
+            /// all there were.
+            case row(id: String, top: CGFloat, offset: CGFloat, above: Set<String>, all: Set<String>)
+        }
+
+        /// Nil when nothing holds the list: no row in view.
+        var hold: Hold?
+    }
+
+    /// Each row's workspace id and frame, as built.
+    private func builtRows() -> [(id: String, frame: NSRect)] {
+        hitAreas.compactMap { area in
+            guard case .workspace(let index) = area.region, let id = builtRowIDs[index] else { return nil }
+            return (id, area.frame)
+        }
     }
 
     func scrollAnchor() -> ScrollAnchor {
         let visible = contentScrollView.contentView.bounds
-        let hiddenAbove = max(0, contentDocumentView.frame.height - visible.maxY)
-        guard hiddenAbove > 0.5 else { return ScrollAnchor(hiddenAbove: 0) }
-        let rows = hitAreas.compactMap { area -> (index: Int, frame: NSRect)? in
-            guard case .workspace(let index) = area.region, area.frame.intersects(visible) else { return nil }
-            return (index, area.frame)
+        let documentHeight = contentDocumentView.frame.height
+        guard documentHeight - visible.maxY > 0.5 else { return ScrollAnchor(hold: .top(documentHeight: documentHeight)) }
+        let rows = builtRows()
+        guard let top = rows.filter({ $0.frame.intersects(visible) }).max(by: { $0.frame.maxY < $1.frame.maxY }) else {
+            return ScrollAnchor()
         }
-        guard let top = rows.max(by: { $0.frame.maxY < $1.frame.maxY }) else { return ScrollAnchor(hiddenAbove: hiddenAbove) }
-        return ScrollAnchor(row: builtRowIDs[top.index], rowOffset: visible.maxY - top.frame.maxY, hiddenAbove: hiddenAbove)
+        let above = rows.filter { $0.frame.maxY > top.frame.maxY }.map(\.id)
+        return ScrollAnchor(hold: .row(
+            id: top.id, top: top.frame.maxY, offset: visible.maxY - top.frame.maxY, above: Set(above), all: Set(rows.map(\.id))
+        ))
     }
 
-    /// Scrolls back to `anchor`, taken before the rows were rebuilt. A row
-    /// that left the list gives way to the height that was hidden above.
+    /// Follows what held the list before its rows were rebuilt, when the
+    /// rebuild moved it. One that moved nothing never scrolls the clip:
+    /// past an end of the list, mid-bounce, it is the scroll view's, and
+    /// a scroll arms the row's buttons again. A row holds the list only
+    /// where it kept its place among the others: one that left, or moved
+    /// (archived, dragged, merged), would take the list with it, so the
+    /// clip stays as it is.
     func restoreScroll(to anchor: ScrollAnchor) {
         let clip = contentScrollView.contentView
         let documentHeight = contentDocumentView.frame.height
-        let row = anchor.row.flatMap { id in lastInfos.first { $0.id == id }?.index }
-        let visibleTop = row.flatMap(workspaceFrame(for:)).map { $0.maxY + anchor.rowOffset }
-            ?? documentHeight - anchor.hiddenAbove
+        let moved: CGFloat
+        let visibleTop: CGFloat
+        switch anchor.hold {
+        case .top(let before)?:
+            moved = documentHeight - before
+            visibleTop = documentHeight
+        case .row(let id, let top, let offset, let above, let all)?:
+            let rows = builtRows()
+            guard let frame = rows.first(where: { $0.id == id })?.frame else { return }
+            let nowAbove = Set(rows.filter { $0.frame.maxY > frame.maxY }.map(\.id))
+            guard nowAbove.intersection(all) == above.intersection(Set(rows.map(\.id))) else { return }
+            moved = frame.maxY - top
+            visibleTop = frame.maxY + offset
+        case nil:
+            return
+        }
+        guard abs(moved) > 0.01 else { return }
+        // (The clip may have moved by itself: a document that shrinks
+        // under it pulls it back in.)
         let highest = max(0, documentHeight - clip.bounds.height)
         let origin = min(max(0, visibleTop - clip.bounds.height), highest)
         guard abs(origin - clip.bounds.origin.y) > 0.01 else { return }
