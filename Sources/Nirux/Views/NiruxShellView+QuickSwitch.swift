@@ -119,9 +119,10 @@ extension NiruxShellView {
 
     static let noWaitingAgentHint = "No agent is waiting on you"
 
-    /// Next Waiting Agent (⌘J): to the agent blocked on the user the
-    /// longest, then on to the next one at each press (see
-    /// `WaitingAgentQueue.next`), whatever its workspace or space. With
+    /// Next Waiting Agent (⌘J): to the agent blocked on the user that
+    /// they have not seen yet, the longest wait first, then on to the next
+    /// one at each press (see `WaitingAgentQueue.next`), whatever its
+    /// workspace or space. With
     /// none, a hint says so, without a beep.
     func jumpToNextWaitingAgent() {
         let snapshot = ProcessSnapshot()

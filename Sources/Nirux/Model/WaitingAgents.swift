@@ -11,6 +11,11 @@ struct AgentWait: Equatable, Sendable {
     /// Epoch seconds the agent got blocked: the dialog opened, the turn
     /// failed, the exit was noticed.
     let since: TimeInterval
+    /// A turn's question the user saw on screen, or was asked under their
+    /// eyes: its alert is over, and it stands until answered. Next Waiting
+    /// Agent goes to it after what they have not seen. (A dialog, a
+    /// failure or an exit never stands this way.)
+    var isRead = false
 }
 
 extension AgentStatusMachine {
@@ -33,8 +38,10 @@ extension AgentStatusMachine {
             if let trust = visibleTrustPrompt(foreground: foreground) {
                 return AgentWait(reason: AgentTrustPrompt.reason, since: trust.seenAt)
             }
+            // Idle with its question: seen, or asked under the user's
+            // eyes. Nothing alerts for it any more.
             return visibleQuestion(foreground: foreground).map {
-                AgentWait(reason: .askedInReply($0.text), since: $0.since)
+                AgentWait(reason: .askedInReply($0.text), since: $0.since, isRead: state == .idle)
             }
         }
     }
@@ -48,11 +55,12 @@ struct WaitingAgent: Equatable, Sendable {
     let wait: AgentWait
 }
 
-/// The agents blocked on the user, longest wait first: what Next Waiting
-/// Agent (⌘J) walks through.
+/// The agents blocked on the user, those not seen on screen first, then
+/// those that stand, longest wait first in each: what Next Waiting Agent
+/// (⌘J) walks through.
 enum WaitingAgentQueue {
     /// The agents of `workspaces` that `wait` finds blocked (a workspace
-    /// closing is left out), longest wait first.
+    /// closing is left out), as `ordered` sorts them.
     @MainActor
     static func collect(from workspaces: [WorkspaceState], wait: (ColumnState) -> AgentWait?) -> [WaitingAgent] {
         ordered(workspaces.filter { !$0.isClosing }.flatMap { workspace in
@@ -62,28 +70,33 @@ enum WaitingAgentQueue {
         })
     }
 
-    /// Longest wait first; equal waits keep the order given.
+    /// Those the user has not seen on screen first, then those that
+    /// stand; in each, longest wait first, and equal waits keep the order
+    /// given.
     static func ordered(_ agents: [WaitingAgent]) -> [WaitingAgent] {
         agents.enumerated()
             .sorted { lhs, rhs in
-                lhs.element.wait.since != rhs.element.wait.since
-                    ? lhs.element.wait.since < rhs.element.wait.since
-                    : lhs.offset < rhs.offset
+                let (left, right) = (lhs.element.wait, rhs.element.wait)
+                if left.isRead != right.isRead { return right.isRead }
+                return left.since != right.since ? left.since < right.since : lhs.offset < rhs.offset
             }
             .map(\.element)
     }
 
     /// Where ⌘J goes in `queue` (as `ordered` sorts it) from the column on
-    /// screen (`current`). A first press goes to the longest wait — the
+    /// screen (`current`). A first press goes to the queue's first — the
     /// next one when the user is on it already. While the user stays where
     /// the last press landed (`lastJump`), each press goes on to the agent
     /// after it, then wraps around: a visited agent stays blocked until
-    /// answered, so "the longest wait" alone would never move on.
+    /// answered, so "the first" alone would never move on. Seen by then,
+    /// it stands further down the queue: one not seen yet still comes
+    /// before the agent after it.
     static func next(from current: UUID?, lastJump: UUID?, in queue: [WaitingAgent]) -> WaitingAgent? {
         guard let first = queue.first else { return nil }
         let position = current.flatMap { current in queue.firstIndex { $0.columnID == current } }
         guard let position else { return first }
         if current == lastJump || position == 0 {
+            if queue[position].wait.isRead, !first.wait.isRead { return first }
             return queue[(position + 1) % queue.count]
         }
         return first

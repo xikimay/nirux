@@ -42,7 +42,7 @@ While Nirux is in the background, it also sends a macOS notification (a click fo
 
 ## Agents that wait or stop
 
-`Cmd+J` goes through all of these, longest wait first.
+`Cmd+J` goes through all of these: first those you have not seen on screen yet, then those that still stand, the longest wait first in each.
 
 - **A question at the end of a turn.** When a Claude Code turn ends on a question, its row stays amber and shows the question whole, with **Reply…**, and **Yes** and **No** when either answers it. When the question names a choice ("which", "option") and the message lists the choices right next to it, the row shows them above the question. Clicking the row, or looking at its column afterwards, takes nothing away: it stays until you answer (on the row, in the notification or in the terminal) or the agent moves on. A turn that ends while you are already looking at its column alerts nobody; when its message ends on a question mark, its row shows the question the same way. **Dismiss**, on the row and as **Dismiss Question** in its menu, takes it off the row without answering, and so does archiving the task.
 - **A long wait.** A Claude Code permission or question left open longer than **Settings › Agents › Flag a dialog waiting after** (10 minutes by default) keeps its row amber and notifies once. On the row of the workspace on screen, `waiting 2h05m` shows next to its column.

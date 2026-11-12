@@ -844,8 +844,9 @@ final class TurnEndClassificationTests: XCTestCase {
             return request.turnEndedAt
         }
         let askedAt = try ask()
+        XCTAssertEqual(machine.blockedWait(now: t0 + 60, foreground: claude)?.isRead, false, "nobody saw it yet")
         machine.clearAttention()
-        let wait = AgentWait(reason: .askedInReply("Shall I merge?"), since: t0 + 5)
+        let wait = AgentWait(reason: .askedInReply("Shall I merge?"), since: t0 + 5, isRead: true)
         XCTAssertEqual(machine.blockedWait(now: t0 + 60, foreground: claude), wait)
         let newer = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: t0 + 30), name: "claude", arguments: ["claude"])
         XCTAssertNil(machine.visibleQuestion(foreground: newer), "another claude's")
@@ -907,6 +908,7 @@ final class TurnEndClassificationTests: XCTestCase {
         try ask()
         // Subagents working on, then Claude's idle reminder: still asked.
         _ = machine.apply(event(.preToolUse, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertEqual(machine.blockedWait(now: t0 + 7, foreground: claude)?.isRead, false, "at work, not seen")
         _ = machine.apply(event(.notification, at: 70, notificationType: "idle_prompt"), isUserFocused: false)
         XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
 
@@ -944,6 +946,7 @@ final class TurnEndClassificationTests: XCTestCase {
             ])
         )
         XCTAssertEqual(machine.state, .idle, "nothing alerts")
+        XCTAssertEqual(machine.blockedWait(now: at + 60, foreground: claude)?.isRead, true, "read as it came: after those nobody saw")
         XCTAssertFalse(note(at), "once")
 
         // Behind: an answer, Claude going on by itself, a later end.
@@ -1783,7 +1786,7 @@ final class TurnEndClassificationTests: XCTestCase {
             XCTAssertNil(outcome.turnEnd)
             let center = AgentHookCenter()
             let classifier = FakeClassifier(verdict: .done)
-            center.turnEndClassifier = optionOn ? classifier : nil
+            center.turnEndClassifier = classifier
             center.questionVerdictDelay = delay
             // Holds them: the caller keeps the centre only.
             let resolution = AgentHookCenter.Resolution(
@@ -1791,13 +1794,16 @@ final class TurnEndClassificationTests: XCTestCase {
             )
             center.resolver = { _ in resolution }
             center.settleTurnEnd(of: stop, outcome: outcome, in: resolution, waitsOnParent: waitsOnParent)
+            // Off within the wait: with it off before, no message comes.
+            if !optionOn { center.turnEndClassifier = nil }
             return (center, alerts, classifier, shown)
         }
         let unwatched = try watched(focused: false)
         let child = try watched(waitsOnParent: true)
         let off = try watched(optionOn: false)
         let later = try watched(delay: 60)
-        let asked = try watched()
+        // Last, and soon: its column's shell starts half a second on.
+        let asked = try watched(delay: 0.01)
         let deadline = Date().addingTimeInterval(10)
         while asked.shown.value == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(
@@ -1810,7 +1816,7 @@ final class TurnEndClassificationTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertNil(unwatched.shown.value, "nobody looked: not this path's")
         XCTAssertNil(child.shown.value, "it waits on its parent")
-        XCTAssertNil(off.shown.value, "final messages aren't read")
+        XCTAssertNil(off.shown.value, "final messages aren't read any more")
         XCTAssertNil(later.shown.value, "not before its moment")
         withExtendedLifetime([unwatched.center, child.center, off.center, later.center, asked.center]) {}
     }

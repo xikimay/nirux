@@ -52,6 +52,9 @@ final class WaitingAgentTests: XCTestCase {
 
         XCTAssertEqual(wait(at: 6), AgentWait(reason: .permission(tool: "Bash", summary: nil), since: t0 + 5))
         XCTAssertNil(machine.stuckState(now: t0 + 6, waitThreshold: 600, foreground: front()), "not stuck yet")
+        // Seen on screen, it blocks as before: only a turn's question stands.
+        _ = machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 7))
+        XCTAssertEqual(wait(at: 8), AgentWait(reason: .permission(tool: "Bash", summary: nil), since: t0 + 5))
     }
 
     /// A keystroke reached the dialog: answered (or denied with Esc, which
@@ -98,14 +101,38 @@ final class WaitingAgentTests: XCTestCase {
 
     private let columns = (0..<4).map { _ in UUID() }
 
-    private func agent(_ column: Int, since: TimeInterval, workspace: String = "ws") -> WaitingAgent {
-        WaitingAgent(workspaceID: workspace, columnID: columns[column], wait: AgentWait(reason: .question(nil), since: since))
+    private func agent(_ column: Int, since: TimeInterval, workspace: String = "ws", read: Bool = false) -> WaitingAgent {
+        WaitingAgent(
+            workspaceID: workspace, columnID: columns[column], wait: AgentWait(reason: .question(nil), since: since, isRead: read)
+        )
     }
 
     func testQueueStartsWithTheLongestWait() {
         let queue = WaitingAgentQueue.ordered([agent(0, since: 30), agent(1, since: 10), agent(2, since: 30), agent(3, since: 20)])
 
         XCTAssertEqual(queue.map(\.columnID), [columns[1], columns[3], columns[0], columns[2]], "equal waits keep their order")
+    }
+
+    /// Those not seen on screen yet come before those that stand, however
+    /// long these have waited.
+    func testQueueStartsWithThoseNotSeenYet() {
+        let queue = WaitingAgentQueue.ordered([
+            agent(0, since: 10, read: true), agent(1, since: 30), agent(2, since: 5, read: true), agent(3, since: 20),
+        ])
+
+        XCTAssertEqual(queue.map(\.columnID), [columns[3], columns[1], columns[2], columns[0]])
+    }
+
+    /// Seen once ⌘J landed on it, an agent stands further down the queue:
+    /// the next press still goes to one not seen yet, then walks on
+    /// through those that stand.
+    func testAPressGoesToOneNotSeenYetBeforeWalkingOn() {
+        let queue = WaitingAgentQueue.ordered([agent(0, since: 10, read: true), agent(1, since: 20), agent(2, since: 30, read: true)])
+        XCTAssertEqual(queue.map(\.columnID), [columns[1], columns[0], columns[2]])
+
+        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], lastJump: columns[0], in: queue)?.columnID, columns[1])
+        let seen = WaitingAgentQueue.ordered([agent(0, since: 10, read: true), agent(1, since: 20, read: true), agent(2, since: 30, read: true)])
+        XCTAssertEqual(WaitingAgentQueue.next(from: columns[1], lastJump: columns[1], in: seen)?.columnID, columns[2], "all seen: the next one")
     }
 
     func testFirstPressGoesToTheLongestWait() {
