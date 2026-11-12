@@ -37,7 +37,8 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
     }
 
     /// A question dialog's options reach its task's row while the dialog
-    /// is the one on screen, and leave once it is answered in the terminal.
+    /// is the one on screen, and leave once its call ran: answered in the
+    /// terminal.
     func testADialogsOptionsShowOnItsRow() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

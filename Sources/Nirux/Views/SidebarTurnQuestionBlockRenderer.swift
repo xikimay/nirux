@@ -32,6 +32,9 @@ enum SidebarQuestionText {
         let indent: CGFloat
         /// The lines each item may take.
         var maxLines = Metrics.choiceMaxLines
+        /// What each item's tooltip says, where its line doesn't say it
+        /// all.
+        var toolTips: [String]?
 
         private func height(of item: NSAttributedString, width: CGFloat) -> CGFloat {
             SidebarWrappedText.height(item, width: width, lineHeight: Metrics.questionLineHeight, maxLines: maxLines, indent: indent)
@@ -46,11 +49,11 @@ enum SidebarQuestionText {
         /// Their labels, stacked down from `top`.
         func labels(x: CGFloat, width: CGFloat, top: CGFloat) -> [NSTextField] {
             var y = top
-            return texts.map { item in
+            return texts.enumerated().map { index, item in
                 let height = height(of: item, width: width)
                 let label = SidebarWrappedText.label(item, lineHeight: Metrics.questionLineHeight, maxLines: maxLines, indent: indent)
                 label.frame = NSRect(x: x, y: y - height, width: width, height: height)
-                label.toolTip = item.string.replacingOccurrences(of: "\t", with: " ")
+                label.toolTip = toolTips?[index] ?? item.string.replacingOccurrences(of: "\t", with: " ")
                 y -= height + Metrics.choiceGap
                 return label
             }
@@ -68,20 +71,25 @@ enum SidebarQuestionText {
     }
 
     /// The options of a dialog's question, numbered as the terminal
-    /// numbers them: the label, then what the agent says it means.
-    static func options(_ question: AgentDialog.Question) -> Items {
-        var items = items(question.options.enumerated().map { index, option in
-            let text = NSMutableAttributedString(string: AgentText.withoutMarks(option.label), attributes: [
+    /// numbers them: the label, then what the agent says it means. Without
+    /// `details`, the label alone: its tooltip says the rest.
+    static func options(_ question: AgentDialog.Question, details: Bool = true) -> Items {
+        let meanings = question.options.map { option in option.detail.map { " — \(AgentText.withoutMarks($0))" } ?? "" }
+        var items = items(zip(question.options, meanings).enumerated().map { index, option in
+            let text = NSMutableAttributedString(string: AgentText.withoutMarks(option.0.label), attributes: [
                 .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
             ])
-            if let detail = option.detail {
-                text.append(NSAttributedString(string: " — \(AgentText.withoutMarks(detail))", attributes: [
+            if details {
+                text.append(NSAttributedString(string: option.1, attributes: [
                     .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
                 ]))
             }
             return ("\(index + 1).", text)
         })
         items.maxLines = Metrics.dialogMaxLines
+        items.toolTips = zip(question.options, meanings).enumerated().map { index, option in
+            "\(index + 1). \(AgentText.withoutMarks(option.0.label))\(option.1)"
+        }
         return items
     }
 
@@ -174,8 +182,10 @@ struct SidebarTurnQuestionBlockRenderer {
 
 /// The block of a card whose agent shows a question dialog (Claude's
 /// AskUserQuestion): each of its questions whole over the options it
-/// offers, then where to answer. Nothing to press: a click anywhere on it
-/// brings the dialog's column in front, as a click on its chip does.
+/// offers, then where to answer. A block that would take the sidebar
+/// (`dialogDetailsMaxHeight`) lists the options' labels alone. Nothing to
+/// press: a click anywhere on it brings the dialog's column in front, as
+/// a click on its chip does.
 @MainActor
 struct SidebarDialogBlockRenderer {
     let dialog: AgentDialog
@@ -189,6 +199,7 @@ struct SidebarDialogBlockRenderer {
     func render() -> SidebarApprovalBlockRenderer.Result {
         let metrics = SidebarExpandedMetrics.self
         let height = metrics.dialogBlockHeight(for: dialog, width: width)
+        let details = metrics.dialogShowsDetails(dialog, width: width)
         var views: [NSView] = []
         var y = top
         for (position, question) in dialog.questions.enumerated() {
@@ -199,7 +210,7 @@ struct SidebarDialogBlockRenderer {
             asked.setAccessibilityLabel("Claude asks: \(question.text)")
             views.append(asked)
             y -= askedHeight
-            let options = SidebarQuestionText.options(question)
+            let options = SidebarQuestionText.options(question, details: details)
             if !options.texts.isEmpty {
                 y -= metrics.questionGap
                 views += options.labels(x: x, width: width, top: y)

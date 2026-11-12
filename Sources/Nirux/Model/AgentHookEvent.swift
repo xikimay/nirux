@@ -554,8 +554,9 @@ enum AgentHookCLI {
     /// Append one JSON line in one `write`. O_APPEND keeps concurrent
     /// writers (several agents across columns) from interleaving mid-line:
     /// the file system serializes writes to one file (PIPE_BUF bounds
-    /// pipes, not files). Lines are small, a Stop's final message excerpt
-    /// (`TurnEndText.excerpt`, 3,000 characters) the largest.
+    /// pipes, not files). Lines are small: a Stop's final message excerpt
+    /// (`TurnEndText.excerpt`, 3,000 characters) and a question dialog at
+    /// its bounds (`AgentDialog.bounded`, a few thousand) are the largest.
     private static func append(_ event: AgentHookEvent) {
         guard var line = try? JSONEncoder().encode(event) else { return }
         line.append(0x0A) // \n
