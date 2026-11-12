@@ -153,9 +153,11 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         }
         guard result.terminationStatus == 0 else {
             // No account signed in, or a token GitHub refuses: as the merge
-            // queue tells them.
+            // queue tells them, from what gh says on its standard error
+            // alone. A failed `gh api` also prints the answer it got, and
+            // a pull request's title ("How to run gh auth login") is no reason.
             let output = GitHubCLIQueueClient.Output(
-                status: result.terminationStatus, standardOutput: result.standardOutput, standardError: result.standardError
+                status: result.terminationStatus, standardOutput: Data(), standardError: result.standardError
             )
             if case .notSignedIn(let message) = GitHubCLIQueueClient.classify(output) {
                 return .failure(.notSignedIn(message.lowercased().contains("gh auth login") ? nil : message))
@@ -168,8 +170,9 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
 
     /// gh's line of error without what only says where it came from:
     /// "gh: ", "GraphQL: ", and the field a GraphQL error names at its
-    /// end ("(repository)"). One failure then reads the same from `gh pr
-    /// list` and from `gh api`, and the header says it once.
+    /// end ("(repository)"). A GraphQL error then reads the same from
+    /// `gh pr list` and from `gh api`, and the header says it once. (An
+    /// HTTP error keeps each call's wording.)
     static func reason(_ line: String) -> String {
         var text = line
         for prefix in ["gh: ", "GraphQL: "] where text.hasPrefix(prefix) { text.removeFirst(prefix.count) }

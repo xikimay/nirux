@@ -134,7 +134,7 @@ Order:
 | --- | --- | --- |
 | Name | Workspace title, else branch. Click focuses the workspace | `WorkspaceState`, git context |
 | Agent | waiting (permission: Bash) · working · idle · none. With stuck-agent detection: waiting 12m, stopped on error, exited | `AgentStatusMachine`: state and open dialogs, #38's reasons; stuck states from #55 |
-| PR | #52, draft, open, merged or closed; conflicting | Batched `gh pr list` (section 6) |
+| PR | #52, draft, open, merged or closed; conflicting | The two batched reads (section 6) |
 | Checks | Each required check by name; the others as one summary | The batch's `statusCheckRollup`, for display only |
 | Queue | Position, current step, or why the PR can't join | Merge queue (section 3) |
 | Actions | Focus, Open, Resume, Clean Up, Add to Queue | Existing commands |
@@ -981,18 +981,21 @@ What the board adds:
   `rateLimit(dryRun: true)` on 2026-09-27). The merged pull requests, with
   their `title` and `mergedAt`, are read every 10 minutes, and as soon as a
   pull request leaves the open list: one GraphQL query through `gh api
-  graphql`, for two lists of 100 (1 GraphQL point, about 80 kB, 0.8 to 1.3 s,
-  measured on 2026-11-12).
+  graphql`, for two lists of 100 (1 GraphQL point, about 80 kB; 0.8 to 1.3 s
+  on this repository, 4 to 6 s on the largest public ones, where `gh pr list`
+  took 3 to 4; measured on 2026-11-12).
   - Those opened last, as `gh pr list --state merged` lists them.
   - Those updated last, a merge being an update: a pull request that waited
     a week is read when it merges, though it is behind every one opened
-    since. GitHub's lists have no order by merge date (`CREATED_AT`,
-    `UPDATED_AT`), and a search by `merged:` reads another index, which
+    since. GitHub's lists have no order by merge date (creation, update or
+    comments only), and a search by `merged:` reads another index, which
     lags behind the lists.
-  - A comment, a label, a lock or a deleted branch updates an old merged pull
-    request too: it then takes a place among those updated last, and a burst
-    of them (a purge of old branches) can fill that list. The first list is
-    untouched: what the board read before is always read.
+  - A comment, a review, a label, a lock or a deleted branch updates an old
+    merged pull request too: it then takes a place among those updated last,
+    and a burst of them (a purge of old branches) can fill that list. The
+    first list is untouched: what the board read before is read as long as
+    the query answers. (Both lists come in one answer: an error on either
+    fails the read, and the list read before stays until the next one.)
 
   The merged pull requests only say something of what is still at them: a
   worktree at one's head reads "merged, clean up"; and an open pull request
