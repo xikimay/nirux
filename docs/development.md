@@ -35,7 +35,7 @@ Only a Nirux running from an `.app` bundle installs the [status hooks](agent-sta
 
 ## The sidebar's log
 
-Rows of tasks that were gone have been seen to stay in the sidebar until a click or a pass over the list. To tell what was behind, Nirux writes one line to the system log when the pointer comes back to the sidebar after two seconds away, and when Nirux comes to the front. The line holds counts, `0`/`1` flags and seconds the Mac was awake: no title, no path, no text.
+Rows of tasks that were gone have been seen to stay in the sidebar until a click or a pass over the list. To tell what was behind, the installed app writes one line to the system log when the pointer comes back to the sidebar after two seconds away (a move, a press, a scroll or a right-click, before it acts), and when Nirux comes to the front. The line holds counts, `0`/`1` flags and seconds the Mac was awake: no title, no path, no text.
 
 ```sh
 log show --last 1h --predicate 'process == "Nirux" AND subsystem == "com.xikimay.nirux" AND category == "sidebar"'
@@ -44,9 +44,8 @@ log show --last 1h --predicate 'process == "Nirux" AND subsystem == "com.xikimay
 | Fields | What they say |
 | --- | --- |
 | `store`, `held`, `same` | The tasks the store lists, those the sidebar holds, and whether they are the same, in the same order, each archived or not. `same=0`: the list was behind, and `drag`, `deferred`, `refresh` and `heartbeat` say what held it |
-| `rows`, `stray`, `nolayer`, `leftover` | The rows drawn over those the list asks for, layers that back no view, views whose layer isn't attached yet (AppKit attaches it at its next display pass), views a rebuild left behind. Off: the rows were behind the list |
-| `ghosts`, `rebuild` | The pictures of rows that left stay, unseen, until the next rebuild: nothing to see once `rebuild` is over half a second |
-| `wake`, `unlock`, `session`, `front`, `uncovered` | Seconds since the display woke, the screen was unlocked (as Nirux heard it: in the background, only once it came to the front), the macOS session came back, Nirux came to the front (on a `front` line, the time before) and its window came into view (shown at launch, or uncovered); `-` for not since launch. With the rest in order, the screen was behind, or something the line doesn't count: these say after what |
+| `stray`, `nolayer`, `leftover`, `ghosts` | Layers that back no view, views whose layer isn't attached yet (AppKit attaches it at its next display pass), views a rebuild left behind, pictures of rows that left that may still show (their fold's animation is still on them, or they aren't transparent). Above 0: the rows were behind the list. A fold takes under half a second: `ghosts` with a `rebuild` older than that is a picture of a gone row still drawn |
+| `wake`, `unlock`, `session`, `front`, `uncovered` | Seconds since the display woke, the screen was unlocked, the macOS session came back, Nirux came to the front (on a `front` line, the time before) and its window was uncovered (shown again after it was covered, minimized or on a display that slept); `-` for not since launch. With the rest in order, the screen was behind, or something the line doesn't count: these say after what |
 
 ## App bundle
 

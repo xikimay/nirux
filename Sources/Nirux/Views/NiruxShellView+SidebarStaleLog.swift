@@ -6,18 +6,43 @@ import os
 final class SidebarStaleLogState {
     /// When each last happened since launch, on the sidebar's clock.
     var lastWakeAt: CFTimeInterval?
-    /// As Nirux heard it: the system holds the unlock's notification
-    /// while Nirux is in the background, until it comes to the front.
     var lastUnlockAt: CFTimeInterval?
     var lastSessionReturnAt: CFTimeInterval?
     var lastFrontAt: CFTimeInterval?
-    /// The window came into view: shown at launch, or uncovered.
+    /// The window was uncovered: shown again after it was covered,
+    /// minimized, or on a display that slept.
     var lastUncoveredAt: CFTimeInterval?
-    /// The window showed at the last change of a window's occlusion.
-    var windowShowed = false
+    /// What the window last said of its occlusion; nil: nothing yet.
+    var windowShowed: Bool?
     /// The shell follows the system (`followSystemForSidebarStaleLog`).
     var followsSystem = false
+    var unlockObserver: ImmediateDistributedObserver?
     let observers = ObserverBag()
+}
+
+/// Hears a distributed notification as it is posted. The system holds
+/// those of a block observer while the app is in the background, until
+/// it comes to the front: the screen unlocked forty minutes ago would
+/// read as unlocked just now.
+@MainActor
+final class ImmediateDistributedObserver: NSObject {
+    private let handler: @MainActor () -> Void
+
+    init(name: Notification.Name, handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        super.init()
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(heard(_:)), name: name, object: nil, suspensionBehavior: .deliverImmediately
+        )
+    }
+
+    deinit {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    @objc private func heard(_ notification: Notification) {
+        handler()
+    }
 }
 
 /// One line in the system log when the pointer comes back to the sidebar
@@ -25,8 +50,9 @@ final class SidebarStaleLogState {
 /// were gone were seen to stay, until a click or a pass over the list. It
 /// tells apart what can be behind. `same=0`: the list held isn't the
 /// store's (and `drag`, `deferred`, `refresh`, `heartbeat` say what held
-/// it). `rows`, `stray`, `nolayer` or `leftover` off: the rows aren't the
-/// list's. Nothing off: the screen, or something the line doesn't count;
+/// it). `stray`, `nolayer`, `leftover` or `ghosts` above 0: the rows
+/// aren't the list's. Nothing off: the screen, or something the line
+/// doesn't count;
 /// the seconds since the wake, the unlock, the session's return, the
 /// front and the window uncovered say after what.
 ///
@@ -35,9 +61,10 @@ final class SidebarStaleLogState {
 enum SidebarStaleLog {
     static let logger = Logger(subsystem: "com.xikimay.nirux", category: "sidebar")
 
-    /// What a line was written for.
+    /// What a line was written for: the pointer back on the sidebar (a
+    /// move, a press, a scroll, a right-click), or Nirux back in front.
     enum Trigger: String {
-        case move, press, front
+        case move, press, scroll, menu, front
     }
 
     struct Facts: Equatable {
@@ -73,7 +100,7 @@ enum SidebarStaleLog {
         let fields: [(String, String)] = [
             ("trigger", facts.trigger.rawValue), ("idle", seconds(facts.pointerIdle)),
             ("store", "\(facts.stored)"), ("held", "\(drawn.held)"), ("same", flag(facts.holdsStored)),
-            ("rows", "\(drawn.rowsDrawn)/\(drawn.rowsExpected)"), ("stray", "\(drawn.strayLayers)"),
+            ("stray", "\(drawn.strayLayers)"),
             ("nolayer", "\(drawn.viewsWithoutLayer)"), ("leftover", "\(drawn.leftoverViews)"),
             ("needsDisplay", flag(drawn.needsDisplay)), ("ghosts", "\(drawn.foldGhosts)"), ("pulls", "\(drawn.foldPulls)"),
             ("drag", flag(drawn.isDragTracked)), ("deferred", flag(drawn.hasDeferredUpdate)), ("skipped", flag(drawn.skippedRebuild)),
@@ -101,29 +128,33 @@ enum SidebarStaleLog {
 extension NiruxShellView {
     /// The sidebar tells when the pointer comes back to it.
     func wireSidebarStaleLog() {
-        sidebar.onPointerReturn = { [weak self] gesture, idle in
-            self?.logSidebarState(gesture == .move ? .move : .press, pointerIdle: idle)
-        }
+        sidebar.onPointerReturn = { [weak self] gesture, idle in self?.logSidebarState(gesture, pointerIdle: idle) }
     }
 
-    /// What may leave the screen behind, as the system says it: kept for
-    /// the next line. The app's shell only (`NiruxApp`): a test's shell
-    /// would hear what other processes do to the session and the screen.
+    /// The app's shell only (`NiruxApp`): its lines go to the system log,
+    /// at notice level, which keeps them on disk (counts and booleans, so
+    /// public), and it keeps what may leave the screen behind, as the
+    /// system says it. A test's shell would write under the app's name
+    /// and hear what other processes do to the session and the screen.
     func followSystemForSidebarStaleLog() {
         sidebarStaleLog.followsSystem = true
+        sideEffects.logSidebarState = { SidebarStaleLog.logger.notice("\($0, privacy: .public)") }
         let system = NSWorkspace.shared.notificationCenter
-        let events: [(NotificationCenter, Notification.Name, SidebarStaleLogEvent)] = [
-            (system, NSWorkspace.screensDidWakeNotification, .wake),
-            (system, NSWorkspace.sessionDidBecomeActiveNotification, .sessionReturn),
-            (DistributedNotificationCenter.default(), Notification.Name("com.apple.screenIsUnlocked"), .unlock),
-            (.default, NSWindow.didChangeOcclusionStateNotification, .occlusion)
+        var events: [(NotificationCenter, Notification.Name, NSWindow?, SidebarStaleLogEvent)] = [
+            (system, NSWorkspace.screensDidWakeNotification, nil, .wake),
+            (system, NSWorkspace.sessionDidBecomeActiveNotification, nil, .sessionReturn)
         ]
-        for (center, name, event) in events {
-            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        // This window's own: a popover's occlusion says nothing of it.
+        if let window { events.append((.default, NSWindow.didChangeOcclusionStateNotification, window, .occlusion)) }
+        for (center, name, object, event) in events {
+            let token = center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.noteSidebarStaleLogEvent(event) }
             }
             sidebarStaleLog.observers.add(token, on: center)
         }
+        sidebarStaleLog.unlockObserver = ImmediateDistributedObserver(
+            name: Notification.Name("com.apple.screenIsUnlocked")
+        ) { [weak self] in self?.noteSidebarStaleLogEvent(.unlock) }
     }
 
     /// Nirux came to the front: first thing in the shell's own handler,
@@ -147,10 +178,10 @@ extension NiruxShellView {
         case .sessionReturn: sidebarStaleLog.lastSessionReturnAt = now
         case .unlock: sidebarStaleLog.lastUnlockAt = now
         case .occlusion:
-            // Any window's: this one's is read again, and counts when it
-            // went from covered to shown.
+            // Covered, then shown: its first word (shown at launch) is
+            // no uncovering.
             let shows = sideEffects.windowShows(window)
-            if shows, !sidebarStaleLog.windowShowed { sidebarStaleLog.lastUncoveredAt = now }
+            if shows, sidebarStaleLog.windowShowed == false { sidebarStaleLog.lastUncoveredAt = now }
             sidebarStaleLog.windowShowed = shows
         case .front:
             logSidebarState(.front, pointerIdle: nil)

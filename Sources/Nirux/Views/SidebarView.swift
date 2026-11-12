@@ -225,7 +225,7 @@ final class SidebarView: NSView {
     static let accentColor: NSColor = Theme.Color.accent
 
     /// Scrollable container for the rail and the cards.
-    let contentScrollView = NSScrollView()
+    let contentScrollView = SidebarScrollView()
     let contentDocumentView = NSView()
 
     /// Add a child to the scrollable document view. Used by SidebarView+Rendering
@@ -248,6 +248,7 @@ final class SidebarView: NSView {
         addSubview(contentScrollView)
         observeScrollingForApprovalArming()
         observeRailTooltipDismissals()
+        contentScrollView.onScrollWheel = { [weak self] in self?.notePointer(.scroll) }
     }
 
     @available(*, unavailable)
@@ -322,13 +323,14 @@ final class SidebarView: NSView {
 
     /// For the stale-rows log (see SidebarView+StaleLog), on the `clock`:
     /// when the rows were last rebuilt, when an update last came, when
-    /// the pointer last moved or pressed on the sidebar.
+    /// the pointer last moved, pressed, scrolled or right-clicked on the
+    /// sidebar.
     var lastRebuildAt: CFTimeInterval?
     var lastUpdateAt: CFTimeInterval?
     var lastPointerAt: CFTimeInterval?
     /// The pointer came back to the sidebar (`notePointer`): the gesture,
     /// and how long it had left the sidebar alone.
-    var onPointerReturn: ((PointerGesture, CFTimeInterval?) -> Void)?
+    var onPointerReturn: ((SidebarStaleLog.Trigger, CFTimeInterval?) -> Void)?
 
     /// When a row began to draw its turn end's check (`clock`), by
     /// workspace: its mark draws it for
@@ -679,6 +681,7 @@ final class SidebarView: NSView {
     static let newSpaceTitle = "New Space…"
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        notePointer(.menu)
         // Right-click on the space picker (or the rail's space tile)
         // mirrors its left-click menu — every region that advertises a menu
         // answers both buttons.

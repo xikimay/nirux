@@ -45,9 +45,9 @@ final class SidebarStaleLogTests: XCTestCase {
         ))
     }
 
-    /// A move or a press on the sidebar is told when the pointer had left
-    /// it alone for two seconds, with how long that was: once, not at
-    /// every move after it.
+    /// A move, a press, a scroll or a right-click on the sidebar is told
+    /// when the pointer had left it alone for two seconds, with how long
+    /// that was: once, not at every move after it.
     func testThePointerComingBackIsToldOnce() throws {
         let clock = Clock()
         let (sidebar, window) = sidebar([row("a", index: 0, active: true)], clock: clock)
@@ -73,6 +73,22 @@ final class SidebarStaleLogTests: XCTestCase {
         clock.time += 2.5
         sidebar.mouseMoved(with: try mouse(.mouseMoved, at: empty, in: sidebar, window: window))
         XCTAssertEqual(told, ["move -", "press 2.5", "move 2.5"])
+
+        // A scroll and a right-click move the list or open a menu on it:
+        // told as well, and they count as the pointer being there.
+        clock.time += 2.5
+        let wheel = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -4, wheel2: 0, wheel3: 0))
+        sidebar.contentScrollView.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: wheel)))
+        XCTAssertEqual(told.last, "scroll 2.5")
+        clock.time += 1.5
+        _ = sidebar.menu(for: try mouse(.rightMouseDown, at: empty, in: sidebar, window: window))
+        XCTAssertEqual(told.count, 4, "the scroll was the pointer there")
+        clock.time += 2.5
+        _ = sidebar.menu(for: try mouse(.rightMouseDown, at: empty, in: sidebar, window: window))
+        XCTAssertEqual(told.last, "menu 2.5")
+        clock.time += 1.5
+        sidebar.contentScrollView.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: wheel)))
+        XCTAssertEqual(told.count, 5, "and so was the right-click")
     }
 
     /// A press is told before it acts: the line says how the sidebar was
@@ -93,10 +109,10 @@ final class SidebarStaleLogTests: XCTestCase {
         XCTAssertEqual(order, ["told", "clicked"])
     }
 
-    /// The facts count the list held and the rows drawn: a layer that
+    /// The facts count the list held and what is in it: a layer that
     /// backs no view, a view no render made and whose layer isn't in the
-    /// list, a row folding away, an archived task that asks for no row,
-    /// what waits behind a tracked press, and how long ago the rows were
+    /// list, the picture of a row that left while it may still show, what
+    /// waits behind a tracked press, and how long ago the rows were
     /// rebuilt.
     func testTheFactsCountWhatIsHeldAndDrawn() throws {
         let clock = Clock()
@@ -105,7 +121,7 @@ final class SidebarStaleLogTests: XCTestCase {
         )
         defer { window.close() }
         var facts = sidebar.drawnFacts()
-        XCTAssertEqual([facts.held, facts.rowsDrawn, facts.rowsExpected, facts.foldGhosts, facts.foldPulls], [3, 3, 3, 0, 0])
+        XCTAssertEqual([facts.held, facts.foldGhosts, facts.foldPulls], [3, 0, 0])
         XCTAssertEqual([facts.isExpanded, facts.fits, facts.animates], [true, true, true])
         XCTAssertEqual([facts.isDragTracked, facts.hasDeferredUpdate, facts.skippedRebuild], [false, false, false])
         XCTAssertEqual(facts.sinceRebuild, 0)
@@ -134,16 +150,22 @@ final class SidebarStaleLogTests: XCTestCase {
         clock.time += 5
         sidebar.update(profiles: [], workspaces: [row("a", index: 0, active: true), row("c", index: 1)])
         facts = sidebar.drawnFacts()
-        XCTAssertEqual([facts.held, facts.rowsDrawn, facts.rowsExpected, facts.foldGhosts], [2, 2, 2, 1])
+        XCTAssertEqual([facts.held, facts.foldGhosts], [2, 1], "its fold's animation is on the picture")
         XCTAssertGreaterThan(facts.foldPulls, 0)
         clock.time += 3
         facts = sidebar.drawnFacts()
         XCTAssertEqual([facts.sinceRebuild, facts.sinceUpdate], [3, 3])
 
-        // Archived, the list folded: held, and no row asked for.
-        sidebar.update(profiles: [], workspaces: [row("a", index: 0, active: true), row("c", index: 1, archived: true)])
-        facts = sidebar.drawnFacts()
-        XCTAssertEqual([facts.held, facts.rowsDrawn, facts.rowsExpected], [2, 1, 1])
+        // The fold over, the picture stays in the list, unseen, until the
+        // next rebuild: not counted. One that isn't transparent is.
+        let picture = try XCTUnwrap(
+            sidebar.expandedViews.first { $0.identifier == SidebarView.foldGhostID }?.layer?.sublayers?.first
+        )
+        picture.removeAnimation(forKey: SidebarView.foldLeaveKey)
+        XCTAssertEqual(sidebar.drawnFacts().foldGhosts, 0)
+        picture.opacity = 0.5
+        XCTAssertEqual(sidebar.drawnFacts().foldGhosts, 1, "a picture of the gone row still drawn")
+        picture.opacity = 0
 
         // A row press is tracked: the update and the rebuild wait.
         sidebar.workspaceDrag = SidebarWorkspaceDrag(
@@ -155,7 +177,7 @@ final class SidebarStaleLogTests: XCTestCase {
         facts = sidebar.drawnFacts()
         XCTAssertEqual([facts.isDragTracked, facts.hasDeferredUpdate, facts.skippedRebuild], [true, true, true])
         XCTAssertEqual(facts.held, 2, "the list held is still the one before")
-        XCTAssertEqual([facts.sinceRebuild, facts.sinceUpdate], [4, 0], "the update came; nothing was rebuilt")
+        XCTAssertEqual([facts.sinceRebuild, facts.sinceUpdate], [7, 0], "the update came; nothing was rebuilt")
 
         // A drag's own view is in the list on purpose.
         let leftover = facts.leftoverViews
@@ -172,7 +194,7 @@ final class SidebarStaleLogTests: XCTestCase {
         facts.stored = 7
         facts.holdsStored = false
         facts.drawn = SidebarView.DrawnFacts(
-            held: 8, rowsDrawn: 9, rowsExpected: 6, strayLayers: 1, viewsWithoutLayer: 2, leftoverViews: 5, needsDisplay: true,
+            held: 8, strayLayers: 1, viewsWithoutLayer: 2, leftoverViews: 5, needsDisplay: true,
             foldGhosts: 3, foldPulls: 4, isDragTracked: true, hasDeferredUpdate: false, skippedRebuild: true,
             animates: false, isExpanded: true, fits: false, sinceRebuild: 4.06, sinceUpdate: nil
         )
@@ -192,7 +214,7 @@ final class SidebarStaleLogTests: XCTestCase {
 
         XCTAssertEqual(
             SidebarStaleLog.line(facts),
-            "trigger=press idle=12.3 store=7 held=8 same=0 rows=9/6 stray=1 nolayer=2 leftover=5 needsDisplay=1 ghosts=3 "
+            "trigger=press idle=12.3 store=7 held=8 same=0 stray=1 nolayer=2 leftover=5 needsDisplay=1 ghosts=3 "
                 + "pulls=4 drag=1 deferred=0 skipped=1 animates=0 expanded=1 fits=0 rebuild=4.1 update=- refresh=6.0 heartbeat=1 "
                 + "active=0 key=1 visible=0 displayAsleep=1 sessionOut=0 wake=30.5 unlock=- session=31.0 front=3.2 uncovered=3.3"
         )
@@ -247,6 +269,16 @@ final class SidebarStaleLogTests: XCTestCase {
             XCTAssertTrue(try XCTUnwrap(lines.last).hasPrefix("trigger=press idle=3.0 store=2 held=2 same=0 "), lines.last ?? "")
             shell.updateSidebar(snapshot: idle)
 
+            // The window's first word on its occlusion, shown at launch,
+            // is no uncovering.
+            shell.sideEffects.windowShows = { _ in true }
+            shell.noteSidebarStaleLogEvent(.occlusion)
+            clock.time += 3
+            shell.sidebar.notePointer(.scroll)
+            XCTAssertTrue(try XCTUnwrap(lines.last).hasPrefix("trigger=scroll idle=3.0 "), lines.last ?? "")
+            XCTAssertTrue(try XCTUnwrap(lines.last).hasSuffix(" front=- uncovered=-"), lines.last ?? "")
+            shell.sideEffects.windowShows = { _ in false }
+
             // What may leave the screen behind, as it happens (told by
             // hand: a test's shell doesn't follow the system).
             shell.noteSidebarStaleLogEvent(.wake)
@@ -255,7 +287,7 @@ final class SidebarStaleLogTests: XCTestCase {
             clock.time += 1
             shell.noteSidebarStaleLogEvent(.unlock)
             clock.time += 1
-            // Another window's occlusion, this one still covered; then this one shows.
+            // Covered; then it shows again.
             shell.noteSidebarStaleLogEvent(.occlusion)
             shell.sideEffects.windowShows = { _ in true }
             clock.time += 1
@@ -281,11 +313,29 @@ final class SidebarStaleLogTests: XCTestCase {
             XCTAssertEqual(lines.filter { $0.contains("secret") || $0.contains(folder) }, [], "no title, no path")
             for line in lines {
                 XCTAssertNotNil(
-                    line.wholeMatch(of: /([A-Za-z]+=(move|press|front|-|[0-9]+(\.[0-9]+)?(\/[0-9]+)?))( [A-Za-z]+=(move|press|front|-|[0-9]+(\.[0-9]+)?(\/[0-9]+)?))*/),
+                    line.wholeMatch(of: /([A-Za-z]+=(move|press|scroll|menu|front|-|[0-9]+(\.[0-9]+)?))( [A-Za-z]+=(move|press|scroll|menu|front|-|[0-9]+(\.[0-9]+)?))*/),
                     "counts, booleans and seconds only: \(line)"
                 )
             }
         }
+    }
+
+    /// The unlock is heard when it happens: a distributed notification
+    /// reaches its observer while the center holds the app's others, as
+    /// it does while Nirux is in the background.
+    func testADistributedNotificationIsHeardWhileTheCenterHoldsTheOthers() {
+        let center = DistributedNotificationCenter.default()
+        let wasSuspended = center.suspended
+        center.suspended = true
+        defer { center.suspended = wasSuspended }
+        let name = Notification.Name("com.xikimay.nirux.tests.\(UUID().uuidString)")
+        let heard = Lines()
+        let observer = ImmediateDistributedObserver(name: name) { heard.written.append("heard") }
+        center.postNotificationName(name, object: nil)
+        let deadline = Date().addingTimeInterval(10)
+        while heard.written.isEmpty, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        XCTAssertEqual(heard.written, ["heard"])
+        withExtendedLifetime(observer) {}
     }
 
     /// The lines a shell wrote.
