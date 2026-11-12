@@ -1,12 +1,13 @@
 # Board Stages
 
-> **Design record:** in progress. The model (lines, units, sections) is in the app; nothing draws it yet.\
+> **Design record:** in progress. The model and the view are in the app; the Board's column doesn't show them yet.\
 > **Differs today:** the Board is still the table of [Project Board](project-board.md), one per project.\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
-Status: design validated by the user on 2026-11-11 (study D). The model is
-implemented (`BoardStages`: lines, units, sections); the view and the
-per-space Board follow.
+Status: design validated by the user on 2026-11-11 (study D). The model
+(`BoardStages`: lines, units, sections) and the view (`BoardStagesView`) are
+implemented; the Board's column still shows the table, and the per-space
+Board follows.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -156,7 +157,7 @@ Two orders, one setting for the app:
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its
 "Clean up" while its worktree is there, and amber while an agent of its task
-needs the user.
+needs the user (the view lists those first: section 5).
 
 - A pull request has one place. Its line leaves the list for this one once
   the queue is through with it (after the post-merge run), and doesn't come
@@ -165,6 +166,69 @@ needs the user.
   whole.
 - One merged before today whose task is still open is a line, "Merged · Clean
   up": at midnight, the day's merged tasks not cleaned up return to the list.
+
+## 5. The view
+
+![The Board as stages: a space's header, then per repository its lines on four stations](../images/board-stages.png)
+
+`BoardStagesView` draws what the model decided, natively, and says what was
+clicked. The sizes are the mockup's.
+
+- **The space's header** stays in place: its colour and name, what it holds,
+  its Lead's state and line, the order switch. Under it, the columns' titles,
+  each station's over its place on the rails. On a narrow Board they give way
+  in this order: the summary, the Lead's line, the order switch; the name is
+  the last to (a name longer than 160 pt keeps that much beside the switch).
+  The Lead's dot keeps its place, in its state's colour, and says its line
+  under the pointer. The order switch shows the content's order: it moves once
+  the owner shows the order asked.
+- **A section per repository** scrolls below: its name, `owner/name`, and its
+  post-merge run's pill (or what went wrong reading it).
+- **A line** is 34 pt: its state's dot and its title, its rail, its phrase
+  (amber or red when it needs a look, else grey), its pull request, its time.
+  The whole line is one target: a press and its release on it open the task.
+  A text that is cut shows whole under the pointer, and with the phrase what
+  it can't hold (why the checks look flaky, why the queue stopped).
+- **The rail**: a filled dot for a station done, a larger one in the state's
+  colour for the current one, a hollow one ahead, nothing where there is no
+  Reviews station; solid up to the current station, dotted after. The queue's
+  number sits in a ring on Merge, in the state's colour when the line is
+  there.
+- **A sub-task** sits in from its task, joined by an elbow; **a stack's** lines
+  sit on a rail numbered in merge order, under the stack's title.
+- **Pull requests without a task** start folded, each time the Board opens,
+  under a line that counts them.
+- **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
+  doesn't push the next repository off the Board. Each entry is its dot
+  (amber while its task needs the user), its title, then its number and time;
+  the title is what gives way. One whose task is still open opens it. Those
+  whose task needs the user come first, so amber is never behind the button;
+  were there more of them than two rows hold, the button says so, in amber
+  ("+12 more · 3 need you").
+- **It follows its content without building itself again.** A refresh that
+  only moves the clock touches the times that changed. A change of lines
+  updates them where they are: what is still listed keeps its view (a line,
+  a repository's header, its fold, a stack's title, a merged entry), so a
+  press in flight on a line or an entry, or the keyboard on a fold, isn't
+  lost, and the views stay in the order they are read.
+
+![The same Board at 600 pt](../images/board-stages-narrow.png)
+
+**On a narrow Board** the columns give way in this order, and never by a jump
+(from where a phrase shows, widening the Board moves no rail back and shortens
+no title):
+
+- the task's column is two fifths of the Board, 280 pt at most, so a wide
+  Board doesn't push the rails away from the titles;
+- below about 760 pt the rail tightens, its stations closer, down to 116 pt at
+  600; a tight rail names its two ends only;
+- the phrase takes the rest; the pull request shows once the phrase keeps
+  180 pt beside it (from about 830 pt), then the time (from about 900 pt): at
+  those two widths the phrase gives them 128 pt, then 64 pt;
+- under 70 pt a phrase says nothing: it goes (below about 390 pt), and the
+  title takes its place;
+- below about 300 pt there is no room for a rail beside a title: a line keeps
+  its dot and its title.
 
 ## Known limits
 
