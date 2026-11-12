@@ -117,16 +117,21 @@ final class TurnQuestionSidebarTests: XCTestCase {
     /// The choices the message lists come first, in its order, under
     /// their own markers; then the question.
     func testChoicesComeAboveTheQuestion() throws {
-        var which = open
-        which.choices = [
-            TurnEndChoice(marker: "1.", text: "Give every test its own temporary database, which is slower on CI"),
-            TurnEndChoice(marker: nil, text: "Keep the shared one"),
-        ]
+        let which = SidebarTurnQuestion(
+            text: "Which **one** of the two?", turnEndedAt: 1_005, isYesNo: false, columnID: columnID,
+            choices: [
+                TurnEndChoice(marker: "1.", text: "Give every test its own temporary database, which is slower on CI"),
+                TurnEndChoice(marker: nil, text: "**Keep** the `shared` one"),
+            ]
+        )
         let card = workspace([column(which)])
         let result = render(card)
         let first = try XCTUnwrap(labels(result).first { $0.stringValue == "1.\t\(which.choices[0].text)" })
-        let second = try XCTUnwrap(labels(result).first { $0.stringValue == "•\tKeep the shared one" })
-        let asked = try XCTUnwrap(labels(result).first { $0.stringValue == which.text })
+        let second = try XCTUnwrap(
+            labels(result).first { $0.stringValue == "•\tKeep the shared one" }, "bold and code marks are no words"
+        )
+        let asked = try XCTUnwrap(labels(result).first { $0.stringValue == "Which one of the two?" })
+        XCTAssertEqual(asked.toolTip, which.text, "as the agent wrote it")
         XCTAssertGreaterThan(first.frame.height, SidebarExpandedMetrics.questionLineHeight, "a choice wraps too")
         XCTAssertGreaterThanOrEqual(first.frame.minY, second.frame.maxY)
         XCTAssertGreaterThanOrEqual(second.frame.minY, asked.frame.maxY)
@@ -172,11 +177,25 @@ final class TurnQuestionSidebarTests: XCTestCase {
         var working = column(nil)
         working.questionAskedAt = 1_005
         working.id = columnID
-        sidebar.update(profiles: [], workspaces: [workspace([working])])
-        let menu = sidebar.workspaceActionMenu(workspaceIndex: 2, columnIndex: nil)
-        menu.performActionForItem(at: try XCTUnwrap(menu.items.firstIndex { $0.title == SidebarView.dismissQuestionTitle }))
-        XCTAssertEqual(dismissed.map(\.0), [columnID])
-        XCTAssertEqual(dismissed.map(\.1), [1_005])
+        // A second column that asks, column 3 of the task.
+        let otherID = UUID()
+        var other = ColumnInfo(
+            index: 3, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
+            webTitle: nil, terminalTitle: nil, agentStatus: .needsAttention, isEditor: false, editorFileName: nil
+        )
+        other.questionAskedAt = 2_000
+        other.id = otherID
+        sidebar.update(profiles: [], workspaces: [workspace([working, other])])
+        func dismiss(fromColumn columnIndex: Int?) throws {
+            let menu = sidebar.workspaceActionMenu(workspaceIndex: 2, columnIndex: columnIndex)
+            menu.performActionForItem(at: try XCTUnwrap(menu.items.firstIndex { $0.title == SidebarView.dismissQuestionTitle }))
+        }
+        try dismiss(fromColumn: nil)
+        XCTAssertEqual(dismissed.map(\.0), [columnID, otherID], "the row's menu: each of its questions")
+        XCTAssertEqual(dismissed.map(\.1), [1_005, 2_000])
+        dismissed = []
+        try dismiss(fromColumn: 3)
+        XCTAssertEqual(dismissed.map(\.0), [otherID], "a column's menu: its own")
     }
 
     func testOnlyASingleClickReleasedOnTheSameAnswerAnswers() {

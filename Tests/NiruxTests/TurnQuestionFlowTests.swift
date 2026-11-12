@@ -111,11 +111,13 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
             XCTAssertNil(task.notification)
             XCTAssertEqual(shell.catchUpState.workspaceIDs, [], "dealt with: off the catch-up card")
 
-            // An archived task asks nothing.
+            // An archived task asks nothing, and has nothing unseen.
             _ = try ask()
+            task.raiseNotification(.finished)
             shell.handleWorkspaceSidebarAction(.markInactive, workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }))
             XCTAssertTrue(task.isInactive)
             XCTAssertNil(pty.agentQuestion(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot())))
+            XCTAssertNil(task.notification)
         }
     }
 }

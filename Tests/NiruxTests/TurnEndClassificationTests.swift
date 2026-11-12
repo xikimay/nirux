@@ -333,17 +333,24 @@ final class TurnEndClassificationTests: XCTestCase {
         ]
         XCTAssertEqual(TurnEndText.choices(for: "Which one do you want?", in: before), listed)
         XCTAssertEqual(TurnEndText.choices(for: "Which one do…", in: before), listed, "the card's text, cut")
-        // After it: bullets, a blank line between two items, a sub-item
-        // that goes on with its item.
-        let after = "Which do you prefer?\n- **Rebase** on main\n  - keeps history linear\n\n- Merge main in\n\nI can start now."
+        // After it: bullets, a sub-item that goes on with its item.
+        let after = "Which do you prefer?\n- **Rebase** on main\n  - keeps history linear\n- Merge main in\n\nI can start now."
         XCTAssertEqual(TurnEndText.choices(for: "Which do you prefer?", in: after), [
             TurnEndChoice(marker: nil, text: "**Rebase** on main - keeps history linear"),
             TurnEndChoice(marker: nil, text: "Merge main in"),
         ])
         XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "A) Ship today\nB) Wait for the audit\nWhich?").map(\.marker), ["A)", "B)"])
         XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "(a) Ship today\n(b) Wait\n\nWhich?").map(\.marker), ["(a)", "(b)"])
-        // Of two lists in a row, the one next to the question.
+        // Counted items may have a blank line between them: their numbers
+        // tell one list from two, and the one next to the question.
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "1. Ship today\n\n2. Wait for the audit\n\nWhich?").map(\.marker), ["1.", "2."])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "1. x\n2. y\n\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "Which?\n1. A\n2. B\n\n1. x\n2. y").map(\.text), ["A", "B"])
         XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "Done:\n- x\n- y\n\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
+        // Whole whatever is above it: a counted list starts at its "1.",
+        // and bullets under a counted list end where it does.
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "```\nx\n```\n1. A\n2. B\n\nWhich?").map(\.text), ["A", "B"])
+        XCTAssertEqual(TurnEndText.choices(for: "Which?", in: "```\nx\n```\n1. x\n2. y\n- A\n- B\n\nWhich?").map(\.text), ["A", "B"])
 
         // The list before a question that names no choice is what the turn
         // did, and a line that goes on with an item is no question to it.
@@ -362,6 +369,10 @@ final class TurnEndClassificationTests: XCTestCase {
             "Head.\n[…]\nthe end of an item\n- c\n- d\n\nWhich?": "under the rest of a cut line",
             "3. C\n4. D\n\nWhich?": "a counted list that doesn't count from its start",
             "a) A\nc) C\n\nWhich?": "letters out of order",
+            "Changes:\n- x\n- y\n\n- A\n- B\n\nWhich?": "bullets past a blank line: one list or two",
+            "- Fast\n  ```\n  x\n  ```\n- Safe\n- Third\n\nWhich?": "code inside the list: its first item is out of reach",
+            "Which?\n1. A\n2. B\n```\nx\n```\n3. C": "code after a counted list: it may go on",
+            "Which?\n- A\n- B\n\n  more about B": "an indented line past the blank",
             "1. A\n2. B\n\nDone.": "no such question",
         ]
         for (message, why) in none {

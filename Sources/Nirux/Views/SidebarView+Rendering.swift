@@ -15,6 +15,7 @@ extension SidebarView {
         }
         // Before the rows go: what the list hangs by.
         let anchor = scrollAnchor()
+        builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })
         resetRenderState()
         guard isExpanded else {
             // Kept across rebuilds, put back by the next expanded one.
@@ -92,9 +93,10 @@ extension SidebarView {
     /// top, and a list scrolled down keeps its topmost row in view where
     /// it is, whichever row changes height above or below.
     struct ScrollAnchor {
-        /// The topmost row in view (its workspace's index); nil at the
-        /// top, or when no row shows.
-        var row: Int?
+        /// The topmost row in view (its workspace's id: an index names
+        /// another row once one closes or moves); nil at the top, or when
+        /// no row shows.
+        var row: String?
         /// From the visible top down to that row's top.
         var rowOffset: CGFloat = 0
         /// The document's height hidden above the visible top.
@@ -110,7 +112,7 @@ extension SidebarView {
             return (index, area.frame)
         }
         guard let top = rows.max(by: { $0.frame.maxY < $1.frame.maxY }) else { return ScrollAnchor(hiddenAbove: hiddenAbove) }
-        return ScrollAnchor(row: top.index, rowOffset: visible.maxY - top.frame.maxY, hiddenAbove: hiddenAbove)
+        return ScrollAnchor(row: builtRowIDs[top.index], rowOffset: visible.maxY - top.frame.maxY, hiddenAbove: hiddenAbove)
     }
 
     /// Scrolls back to `anchor`, taken before the rows were rebuilt. A row
@@ -118,7 +120,8 @@ extension SidebarView {
     func restoreScroll(to anchor: ScrollAnchor) {
         let clip = contentScrollView.contentView
         let documentHeight = contentDocumentView.frame.height
-        let visibleTop = anchor.row.flatMap(workspaceFrame(for:)).map { $0.maxY + anchor.rowOffset }
+        let row = anchor.row.flatMap { id in lastInfos.first { $0.id == id }?.index }
+        let visibleTop = row.flatMap(workspaceFrame(for:)).map { $0.maxY + anchor.rowOffset }
             ?? documentHeight - anchor.hiddenAbove
         let highest = max(0, documentHeight - clip.bounds.height)
         let origin = min(max(0, visibleTop - clip.bounds.height), highest)

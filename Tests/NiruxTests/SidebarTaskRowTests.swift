@@ -282,20 +282,23 @@ final class SidebarTaskRowTests: XCTestCase {
         defer { window.close() }
         sidebar.isExpanded = true
         let sentence = String(repeating: "waiting for the search team to rotate the staging key ", count: 4)
-        func rows(blocked: Set<Int>) -> [WorkspaceInfo] {
-            (0..<20).map { index in
+        /// Twenty tasks, numbered as the store does: closing one renumbers
+        /// those after it.
+        func rows(blocked: Set<Int>, closed: Int? = nil) -> [WorkspaceInfo] {
+            (0..<20).filter { $0 != closed }.enumerated().map { index, task in
                 WorkspaceInfo(
-                    id: "ws-\(index)", index: index, title: "Task \(index)", profileID: WorkspaceProfile.defaultID, isInactive: false,
-                    columnCount: 1, focusedColumn: 0, gitBranch: "fix/\(index)", notification: nil, isActive: false,
+                    id: "ws-\(task)", index: index, title: "Task \(task)", profileID: WorkspaceProfile.defaultID, isInactive: false,
+                    columnCount: 1, focusedColumn: 0, gitBranch: "fix/\(task)", notification: nil, isActive: false,
                     columns: [column()], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil,
-                    blocker: blocked.contains(index) ? sentence : nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+                    blocker: blocked.contains(task) ? sentence : nil, phase: .active, lastSummary: nil, lastActivityAt: nil
                 )
             }
         }
         let clip = sidebar.contentScrollView.contentView
         func hiddenAbove() -> CGFloat { sidebar.contentDocumentView.frame.height - clip.bounds.maxY }
-        /// From the visible top down to the row's top.
-        func place(of index: Int) throws -> CGFloat {
+        /// From the visible top down to the top of that task's row.
+        func place(of task: Int) throws -> CGFloat {
+            let index = try XCTUnwrap(sidebar.lastInfos.first { $0.id == "ws-\(task)" }?.index)
             let row = try XCTUnwrap(sidebar.hitAreas.first { if case .workspace(index) = $0.region { true } else { false } })
             return clip.bounds.maxY - row.frame.maxY
         }
@@ -322,6 +325,9 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row above grew")
         sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15]))
         XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row below grew")
+        XCTAssertGreaterThan(inView, 1)
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15], closed: 1))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a task above closed: the rows after it took new numbers")
 
         // Back at its top: what comes in above the first row shows.
         clip.scroll(to: NSPoint(x: 0, y: sidebar.contentDocumentView.frame.height - clip.bounds.height))
