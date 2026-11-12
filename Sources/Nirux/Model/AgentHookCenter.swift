@@ -323,11 +323,12 @@ final class AgentHookCenter {
         of event: AgentHookEvent, outcome: AgentHookOutcome, in resolution: Resolution,
         waitsOnParent: @autoclosure () -> Bool
     ) {
+        if ZZ("note-child"), outcome.turnEnd == nil, resolution.isUserFocused { noteQuestionReadAsItCame(event) }
         if let request = outcome.turnEnd, let agentUUID = event.agentUUID {
             classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent())
         } else if event.name == .turnComplete || event.name == .stop, !waitsOnParent() {
             reportTurnDone(endedAt: event.timestamp, in: resolution)
-            if resolution.isUserFocused { noteQuestionReadAsItCame(event) }
+            if !ZZ("no-note"), resolution.isUserFocused || ZZ("note-unwatched") { noteQuestionReadAsItCame(event) }
         }
     }
 
@@ -339,7 +340,7 @@ final class AgentHookCenter {
     /// moment's wait: a Stop hook's continuation puts that end behind
     /// first. Only with the option that reads final messages on.
     private func noteQuestionReadAsItCame(_ event: AgentHookEvent) {
-        guard turnEndClassifier != nil, event.kind == .claude, event.name == .stop, event.agentID == nil,
+        guard turnEndClassifier != nil || ZZ("note-option-off"), event.kind == .claude, event.name == .stop, event.agentID == nil,
               let agentUUID = event.agentUUID, let message = event.finalMessage,
               let line = TurnEndText.questionLine(of: message)
         else { return }

@@ -56,3 +56,11 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the class with a new timed test, several times at
+      # once next to heavy classes, then the reverts that test must catch.
+      - name: Repeat TurnEndClassificationTests
+        run: scripts/repeat-class.sh NiruxTests.TurnEndClassificationTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.LeadToolsFlowTests
+
+      - name: Reverts TurnEndClassificationTests catches
+        run: scripts/mutants-class.sh NiruxTests.TurnEndClassificationTests no-note note-unwatched note-child note-option-off
