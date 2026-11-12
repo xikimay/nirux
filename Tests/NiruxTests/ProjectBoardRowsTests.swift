@@ -218,6 +218,16 @@ final class ProjectBoardRowsTests: XCTestCase {
         XCTAssertEqual(result[2].pullRequest?.state, "MERGED", "merged, ready to clean up")
     }
 
+    func testAWorktreeStillAtAnOlderMergesHeadReadsMerged() {
+        // Every merged pull request read counts for a worktree, however many were opened since.
+        let repository = ProjectBoard.LocalRepository(worktrees: [
+            worktree("/p/widgets", branch: "main"),
+            worktree("/p/widgets.old", branch: "old", head: String(repeating: "a", count: 40))
+        ], remotes: [widgets])
+        let merged = [pullRequest(1, "old", state: "MERGED")] + (2...100).map { pullRequest($0, "done/\($0)", state: "MERGED") }
+        XCTAssertEqual(summary(rows(local: [repository], merged: merged)), ["main main", "otherWorktree old #1"])
+    }
+
     // MARK: - Other repositories
 
     func testWorkspacesInAnotherRepositoryOrOutsideAnyComeLastWithoutPullRequests() {

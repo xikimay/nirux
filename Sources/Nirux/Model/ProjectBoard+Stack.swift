@@ -51,9 +51,11 @@ extension ProjectBoard {
 
     /// The place of each open pull request that is in a stack, by number.
     /// A pull request is in one when another is based on its branch, or
-    /// its own base is the branch of a merged pull request, untouched
-    /// since: a long-lived branch merged once (`develop`) has moved on, or
-    /// soon will. Both are of the configured repository, by head branch.
+    /// its own base is the branch of a merged pull request and was at
+    /// that one's head when it was opened or last pushed (`baseOid`):
+    /// one opened on a long-lived branch (`develop`) that got commits
+    /// since its merge isn't. Both are of the configured repository, by
+    /// head branch.
     /// One on the base branch is never in a stack.
     /// Without a base branch, no merged base: nothing could tell it apart.
     static func stackPlaces(

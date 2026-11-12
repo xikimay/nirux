@@ -10,13 +10,13 @@ final class ProjectBoardStackTests: XCTestCase {
 
     private func pullRequest(
         _ number: Int, _ branch: String, base: String = "main", state: String = "OPEN", draft: Bool = false,
-        baseOid: String = String(repeating: "a", count: 40)
+        baseOid: String = String(repeating: "a", count: 40), fork: Bool = false
     ) -> ProjectBoard.PullRequest {
         // Every head is `aaa…`: a base reads untouched since its merge.
         ProjectBoard.PullRequest(
             number: number, state: state, headRefName: branch,
             headOid: String(repeating: "a", count: 40), baseRefName: base, isDraft: draft, mergeable: "MERGEABLE",
-            checks: [], url: "https://github.com/acme/widgets/pull/\(number)", isFromConfiguredRepository: true,
+            checks: [], url: "https://github.com/acme/widgets/pull/\(number)", isFromConfiguredRepository: !fork,
             baseOid: baseOid
         )
     }
@@ -102,6 +102,24 @@ final class ProjectBoardStackTests: XCTestCase {
         XCTAssertNil(loneRow.stack?.label)
         XCTAssertEqual(ProjectBoard.pullRequestText(try XCTUnwrap(loneRow.pullRequest), baseBranch: "main", stack: loneRow.stack),
                        "#53 open → stack/a")
+    }
+
+    func testAMergedBaseIsLookedForAmongTheThirtyMergedPullRequestsOpenedLast() throws {
+        // `baseRefOid` is the base's tip when the pull request was opened or last pushed, not now: a
+        // base merged long ago may have moved on since, so it isn't offered a Retarget for ever.
+        let open = [pullRequest(200, "stack/b", base: "stack/a")]
+        let base = pullRequest(70, "stack/a", state: "MERGED")
+        let others = (71...99).map { pullRequest($0, "done/\($0)", state: "MERGED") }
+        let older = (1...10).map { pullRequest($0, "done/\($0)", state: "MERGED") }
+        XCTAssertEqual(try row(200, in: rows(open: open, merged: older + others + [base])).stack?.mergedBase?.number, 70,
+                       "the thirtieth, whatever the list's order")
+        let oneMore = rows(open: open, merged: others + [pullRequest(100, "done/100", state: "MERGED"), base])
+        XCTAssertNil(try row(200, in: oneMore).stack, "the thirty-first: a pull request on another branch, as any")
+        // The thirty are counted as gh lists them: forks' pull requests among them, and each merge of one branch.
+        let forks = (71...100).map { pullRequest($0, "patch-\($0)", state: "MERGED", fork: true) }
+        XCTAssertNil(try row(200, in: rows(open: open, merged: forks + [base])).stack)
+        let releases = (71...100).map { pullRequest($0, "develop", state: "MERGED") }
+        XCTAssertNil(try row(200, in: rows(open: open, merged: releases + [base])).stack)
     }
 
     func testAPullRequestOnTheBaseBranchIsNeverRetargeted() {

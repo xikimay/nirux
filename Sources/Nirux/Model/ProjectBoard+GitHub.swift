@@ -9,7 +9,7 @@ import Foundation
 /// the network.
 protocol ProjectBoardGitHub: Sendable {
     /// `gh pr list` of `repository` (`owner/name`) as JSON: the open pull
-    /// requests with their checks, or the recently merged ones.
+    /// requests with their checks, or the merged ones opened last.
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError>
     /// `gh run list` as JSON: the last push run of `workflow` on `branch`.
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError>
@@ -21,7 +21,10 @@ extension ProjectBoard {
     enum PullRequestList: Sendable {
         /// Up to 100 open pull requests, with their checks.
         case open
-        /// The last 30 merged, for the "merged, clean up" rows.
+        /// The 100 merged pull requests opened last, with their title and
+        /// merge date: a worktree still at one's head reads "merged, clean
+        /// up", and an open pull request based on the branch of one of the
+        /// last 30 is a stack on a merged base.
         case merged
     }
 
@@ -68,10 +71,11 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
 
     static let openFields = [
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
-        "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url"
+        "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url", "title"
     ].joined(separator: ",")
     static let mergedFields = [
-        "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository", "baseRefName", "url"
+        "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository", "baseRefName", "url",
+        "title", "mergedAt"
     ].joined(separator: ",")
     static let runFields = "status,conclusion,headSha,createdAt,updatedAt,url"
 
@@ -83,7 +87,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "open", "--limit", "100",
                     "--json", openFields]
         case .merged:
-            return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "merged", "--limit", "30",
+            return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "merged", "--limit", "100",
                     "--json", mergedFields]
         }
     }
@@ -157,10 +161,11 @@ extension ProjectBoard {
     /// needs is left out; nil when the output isn't a JSON list.
     static func parsePullRequests(_ data: Data, repository: GitHubRepository) -> [PullRequest]? {
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
-        return json.compactMap { pullRequest(from: $0, repository: repository) }
+        let dates = ISO8601DateFormatter()
+        return json.compactMap { pullRequest(from: $0, repository: repository, dates: dates) }
     }
 
-    static func pullRequest(from json: [String: Any], repository: GitHubRepository) -> PullRequest? {
+    static func pullRequest(from json: [String: Any], repository: GitHubRepository, dates: ISO8601DateFormatter) -> PullRequest? {
         guard let number = json["number"] as? Int,
               let state = (json["state"] as? String)?.uppercased(),
               let headRefName = json["headRefName"] as? String, !headRefName.isEmpty,
@@ -180,7 +185,9 @@ extension ProjectBoard {
             url: url,
             // The clean-up's own test: head owner and name, on the PR's host.
             isFromConfiguredRepository: WorktreeCleanup.pullRequest(from: json, headRepository: repository) != nil,
-            baseOid: (json["baseRefOid"] as? String)?.lowercased()
+            baseOid: (json["baseRefOid"] as? String)?.lowercased(),
+            title: json["title"] as? String ?? "",
+            mergedAt: (json["mergedAt"] as? String).flatMap(dates.date(from:))
         )
     }
 

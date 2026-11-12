@@ -246,3 +246,6 @@ no title):
 - **A queue's stop stays** on its pull request until the next Start, until
   the pull request's head moves, or until it merges (unless the stop is the
   post-merge run's failure).
+- **"Merged today" lists what the Board read**: the 100 merged pull requests
+  opened last ([project-board.md](project-board.md), section 6). One opened
+  before those and merged today isn't on it.
