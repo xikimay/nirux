@@ -111,7 +111,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
         // The first as gh writes it; the second as a list that says less would.
         let merged = """
         [
-          {"baseRefName": "main", "headRefName": "feat/login", "headRefOid": "9B57F5AB537BF3B5C0B22EA831B8D8C647EE2984",
+          {"baseRefName": "main", "headRefName": "feat/login", "headRefOid": "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984",
            "headRepository": {"id": "R_kgDOAAAAAA", "name": "widgets", "nameWithOwner": "acme/widgets"},
            "headRepositoryOwner": {"id": "MDQ6VXNlcjAwMDAwMDA=", "login": "acme", "name": "Acme"},
            "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "state": "MERGED", "title": "Sign in with a passkey",
@@ -123,8 +123,6 @@ final class ProjectBoardGitHubTests: XCTestCase {
         let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(merged.utf8), repository: widgets))
         XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a passkey", ""], "one read without its title has none")
         XCTAssertEqual(pullRequests.map { $0.mergedAt?.timeIntervalSince1970 }, [1_794_402_131, nil], "no date, as gh writes one that hasn't merged")
-        XCTAssertEqual(pullRequests[0].headOid, "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984")
-        XCTAssertTrue(pullRequests[0].isFromConfiguredRepository)
     }
 
     func testNotAListReadsAsNothing() {

@@ -33,15 +33,18 @@ call.
 - A stack is a tree of open PRs from the configured repository where a PR's
   base is another open PR's head. Its root is the PR without an open parent,
   whatever its base. A PR on the configured base branch has no parent.
-- A root's base is **spent** when it is the head of a merged PR and hasn't
-  moved since (the open PR's `baseRefOid` is the merged PR's head). A
-  long-lived branch merged once, such as `develop`, gets new commits and stops
-  reading spent; right after its merge it still does, and offers Retarget.
-- `baseRefOid` is the base's tip when the open PR was opened or last pushed,
-  not now (measured 2026-11-12): a PR opened on `develop` just after its merge
-  keeps reading spent though `develop` moved on since. So the merged PR is
-  looked for among the 30 opened last only (`ProjectBoard.mergedBaseWindow`),
-  however many the board reads: the wrong offer ends 30 pull requests later.
+- A root's base is **spent** when the open PR's `baseRefOid` is the head of a
+  merged PR. `baseRefOid` is the base's tip when the open PR was opened or
+  last pushed, not now (measured 2026-11-12). So, for a long-lived branch
+  merged once, such as `develop`:
+  - a PR opened on it after it got new commits doesn't read spent;
+  - one opened right after its merge does, offers Retarget, and keeps
+    offering it though `develop` moved on since;
+  - one whose base got commits after its own last push never reads spent,
+    even in a real stack.
+- The merged PR is looked for among the 30 merged PRs gh lists first, the
+  last opened (`ProjectBoard.mergedBaseWindow`), however many the board
+  reads: the offer ends once 30 PRs opened after it have merged.
 - Pure function, `ProjectBoard.stackPlaces`, tested through `rows`.
 - `baseRefOid` needs gh 2.63.0 (2024-11) or later. An older gh refuses the
   whole open batch ("Unknown JSON field"), and the header says so.

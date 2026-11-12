@@ -9,7 +9,7 @@ import Foundation
 /// the network.
 protocol ProjectBoardGitHub: Sendable {
     /// `gh pr list` of `repository` (`owner/name`) as JSON: the open pull
-    /// requests with their checks, or the recently merged ones.
+    /// requests with their checks, or the merged ones opened last.
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError>
     /// `gh run list` as JSON: the last push run of `workflow` on `branch`.
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError>
