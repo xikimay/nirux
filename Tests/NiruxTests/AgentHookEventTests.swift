@@ -127,53 +127,72 @@ final class AgentHookEventTests: XCTestCase {
     }
 
     /// A question dialog's request carries what it asks and offers, for
-    /// its task's row: the first question, every option or none, bounded.
-    func testQuestionDialogCarriesItsQuestionAndOptions() throws {
+    /// its task's row: every question with its options, cleaned and
+    /// bounded, or nothing.
+    func testQuestionDialogCarriesItsQuestionsAndOptions() throws {
         let options: [[String: Any]] = [
             ["label": "Staging replica (Recommended)", "description": "Safe to wipe;\nrefreshed every night"],
             ["label": "Local Postgres"],
         ]
         let input: [String: Any] = ["questions": [
             ["question": "Which database should the import job write to?", "header": "DB", "multiSelect": false, "options": options],
-            ["question": "And when?", "options": []],
+            ["question": "And when?", "options": [["label": "Now"], ["label": "Tonight"]]],
         ]]
         func request(_ hook: String = "PermissionRequest", tool: String = "AskUserQuestion") -> AgentHookEvent? {
             claudeEvent(["hook_event_name": hook, "tool_name": tool, "tool_input": input])
         }
         let event = try XCTUnwrap(request())
-        let dialog = AgentDialogQuestion(
-            question: "Which database should the import job write to?",
-            options: [
+        let dialog = AgentDialog(questions: [
+            .init(text: "Which database should the import job write to?", options: [
                 .init(label: "Staging replica (Recommended)", detail: "Safe to wipe; refreshed every night"),
                 .init(label: "Local Postgres", detail: nil),
-            ],
-            questionCount: 2
-        )
-        XCTAssertEqual(event.dialogQuestion, dialog)
-        XCTAssertNil(request("PreToolUse")?.dialogQuestion, "the dialog's own request alone")
-        XCTAssertNil(request("PostToolUse")?.dialogQuestion)
-        XCTAssertNil(request(tool: "Bash")?.dialogQuestion)
+            ]),
+            .init(text: "And when?", options: [.init(label: "Now", detail: nil), .init(label: "Tonight", detail: nil)]),
+        ])
+        XCTAssertEqual(event.dialog, dialog)
+        XCTAssertNil(request("PreToolUse")?.dialog, "the dialog's own request alone")
+        XCTAssertNil(request("PostToolUse")?.dialog)
+        XCTAssertNil(request(tool: "Bash")?.dialog)
 
         // Through the queue's line, and from one written before the field.
         let line = try JSONEncoder().encode(event)
-        XCTAssertEqual(try JSONDecoder().decode(AgentHookEvent.self, from: line).dialogQuestion, dialog)
-        var older = try XCTUnwrap(JSONSerialization.jsonObject(with: line) as? [String: Any])
-        older["dialogQuestion"] = nil
-        XCTAssertNil(try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: older)).dialogQuestion)
-
-        // Every option, or none: half of them would mislead.
-        func parsed(_ listed: [[String: Any]], question: Any = "Which?") -> AgentDialogQuestion? {
-            AgentDialogQuestion(toolInput: ["questions": [["question": question, "options": listed]]])
+        XCTAssertEqual(try JSONDecoder().decode(AgentHookEvent.self, from: line).dialog, dialog)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: line) as? [String: Any])
+        object["dialog"] = nil
+        XCTAssertNil(try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: object)).dialog)
+        // A line of another shape (another build's) keeps its event: the
+        // dialog is on screen whatever the row can show of it.
+        for other in [["questions": [["text": 7]]], ["asks": "?"], "?"] as [Any] {
+            object["dialog"] = other
+            let read = try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: object))
+            XCTAssertEqual(read.name, .permissionRequest)
+            XCTAssertEqual(read.dialog?.questions, [], "\(other)")
         }
-        XCTAssertEqual(parsed(options + [["description": "no label"]])?.options, [])
-        XCTAssertEqual(parsed((1...7).map { ["label": "Option \($0)"] })?.options, [])
-        XCTAssertEqual(parsed((1...6).map { ["label": "Option \($0)"] })?.options.count, 6)
-        XCTAssertEqual(parsed([])?.questionCount, 1)
-        XCTAssertNil(parsed(options, question: 7), "no question to show")
+        // What it reads is bounded again: the reader can't count on its writer.
+        object["dialog"] = ["questions": [["text": String(repeating: "why ", count: 500), "options": (1...9).map { ["label": "Option \($0)"] }]]]
+        let unbounded = try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: object)).dialog
+        XCTAssertEqual(unbounded?.questions.first?.text.count, 300)
+        XCTAssertEqual(unbounded?.questions.first?.options, [])
+
+        // Every option of a question, or none: half of them would mislead.
+        func parsed(_ listed: [[String: Any]], question: Any = "Which?") -> AgentDialog? {
+            AgentDialog(toolInput: ["questions": [["question": question, "options": listed]]])
+        }
+        XCTAssertEqual(parsed(options + [["description": "no label"]])?.questions.first?.options, [])
+        XCTAssertEqual(parsed(options + [["label": " "]])?.questions.first?.options, [], "a label that says nothing")
+        XCTAssertEqual(parsed((1...7).map { ["label": "Option \($0)"] })?.questions.first?.options, [])
+        XCTAssertEqual(parsed((1...6).map { ["label": "Option \($0)"] })?.questions.first?.options.count, 6)
+        // Every question, or no dialog on the row.
+        for unshown in [7, " "] as [Any] {
+            XCTAssertNil(AgentDialog(toolInput: ["questions": [["question": "Which?"], ["question": unshown]]]), "one of two: \(unshown)")
+        }
+        XCTAssertNil(AgentDialog(toolInput: ["questions": [] as [Any]]))
+        XCTAssertNil(AgentDialog(toolInput: ["questions": (1...5).map { ["question": "Question \($0)?"] }]), "more than the dialog asks")
+        XCTAssertEqual(AgentDialog(toolInput: ["questions": (1...4).map { ["question": "Question \($0)?"] }])?.questions.count, 4)
         let long = try XCTUnwrap(parsed([["label": String(repeating: "label ", count: 40), "description": String(repeating: "detail ", count: 60)]]))
-        XCTAssertEqual(long.options.first?.label.count, 80)
-        XCTAssertEqual(long.options.first?.detail?.count, 200)
-        XCTAssertEqual(parsed([], question: String(repeating: "why ", count: 200))?.question.count, 300)
+        XCTAssertEqual(long.questions.first?.options.first?.label.count, 80)
+        XCTAssertEqual(long.questions.first?.options.first?.detail?.count, 160)
+        XCTAssertEqual(parsed([], question: String(repeating: "why ", count: 200))?.questions.first?.text.count, 300)
     }
 
     func testLongInputIsBoundedAndNeverStored() throws {

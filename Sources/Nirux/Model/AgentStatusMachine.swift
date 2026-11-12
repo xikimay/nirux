@@ -330,7 +330,8 @@ struct AgentStatusMachine {
                 sessionID: event.sessionID,
                 requestedAt: now
             )
-            request.dialogQuestion = event.dialogQuestion
+            // (A line this build can't read decodes to no question.)
+            request.dialog = event.dialog.flatMap { $0.questions.isEmpty ? nil : $0 }
             if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
                let text = event.approvalText {
                 request.approval = PermissionApprovalTicket(

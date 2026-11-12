@@ -53,7 +53,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// question…), and a key matching a PermissionRequest to the
     /// PostToolUse of the same call. Only the excerpt and key leave the
     /// receiver, never the input itself (but what a question dialog asks:
-    /// `dialogQuestion`).
+    /// `dialog`).
     let toolName: String?
     let toolSummary: String?
     let toolKey: String?
@@ -123,9 +123,9 @@ struct AgentHookEvent: Codable, Equatable {
     var approvalText: String?
     var approvalOutcome: PermissionApproval.Outcome?
     /// On the PermissionRequest of a question dialog (AskUserQuestion):
-    /// its first question and the options it offers, bounded, for the row
-    /// of a task the user isn't looking at. Nil from older receivers.
-    var dialogQuestion: AgentDialogQuestion?
+    /// its questions and the options each offers, bounded, for the row of
+    /// its task. Nil from older receivers.
+    var dialog: AgentDialog?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -167,7 +167,7 @@ struct AgentHookEvent: Codable, Equatable {
                 )
                 toolKey = AgentToolInput.key(toolName: toolName, input: input)
                 if name == .permissionRequest, toolName == "AskUserQuestion" {
-                    dialogQuestion = AgentDialogQuestion(toolInput: input)
+                    dialog = AgentDialog(toolInput: input)
                 }
             } else {
                 toolSummary = nil

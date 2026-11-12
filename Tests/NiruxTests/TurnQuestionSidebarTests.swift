@@ -161,17 +161,17 @@ final class TurnQuestionSidebarTests: XCTestCase {
         XCTAssertTrue(shown.contains("Needs you · Bash: npm run migrate"), "the line keeps its own sentence")
     }
 
-    /// A question dialog on its row: the question whole, each option under
-    /// its number, then where to answer. Nothing to press.
-    func testDialogShowsItsQuestionAndEveryOption() throws {
-        let dialog = AgentDialogQuestion(
-            question: "Which database should the import job write to while the migration runs?",
-            options: [
+    /// A question dialog on its row: each of its questions whole over its
+    /// options, numbered as the terminal numbers them, then where to
+    /// answer. Nothing to press: a click on it leads to the dialog.
+    func testDialogShowsEveryQuestionAndOption() throws {
+        let dialog = AgentDialog(questions: [
+            .init(text: "Which database should the import job write to while the migration runs?", options: [
                 .init(label: "Staging replica (Recommended)", detail: "Safe to wipe; refreshed from production every night"),
                 .init(label: "Local **Postgres**", detail: nil),
-            ],
-            questionCount: 2
-        )
+            ]),
+            .init(text: "And when?", options: [.init(label: "Now", detail: nil), .init(label: "Tonight", detail: "after the backup")]),
+        ])
         var asking = ColumnInfo(
             index: 1, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
             webTitle: nil, terminalTitle: nil, agentStatus: .needsAttention, isEditor: false, editorFileName: nil,
@@ -180,36 +180,56 @@ final class TurnQuestionSidebarTests: XCTestCase {
         )
         XCTAssertEqual(workspace([asking]).cardActions, [], "a dialog whose hook said nothing more")
         XCTAssertEqual(workspace([asking]).rowSummary.lineText, "Needs you · Which database should the import job write to…")
-        asking.dialogQuestion = dialog
+        let plain = asking
+        asking.dialog = dialog
+        XCTAssertNotEqual(asking, plain, "what it asks redraws the card")
         let card = workspace([asking])
-        XCTAssertEqual(card.cardActions, [.dialogQuestion(columnIndex: 1, dialog)])
+        XCTAssertEqual(card.cardActions, [.dialog(columnIndex: 1, dialog)])
         XCTAssertEqual(card.rowSummary.lineText, "Needs you · a question")
 
         let result = render(card)
-        let asked = try XCTUnwrap(labels(result).first { $0.stringValue == dialog.question })
-        let first = try XCTUnwrap(labels(result).first {
-            $0.stringValue == "1.\tStaging replica (Recommended) — Safe to wipe; refreshed from production every night"
-        })
-        let second = try XCTUnwrap(labels(result).first { $0.stringValue == "2.\tLocal Postgres" })
-        let hint = try XCTUnwrap(labels(result).first { $0.stringValue == "First of 2 questions · answer in the terminal" })
-        XCTAssertGreaterThan(asked.frame.height, SidebarExpandedMetrics.questionLineHeight, "whole, on its lines")
-        XCTAssertGreaterThanOrEqual(asked.frame.minY, first.frame.maxY)
-        XCTAssertGreaterThanOrEqual(first.frame.minY, second.frame.maxY)
-        XCTAssertGreaterThanOrEqual(second.frame.minY, hint.frame.maxY)
-        XCTAssertGreaterThanOrEqual(hint.frame.minY, result.bottomY, "inside its card")
-        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
-        // A click anywhere in it is the row's: it brings the dialog up.
-        XCTAssertTrue(result.approvalButtons.isEmpty)
-        for label in [asked, second, hint] {
-            guard case .workspace(2)? = result.hitAreas.first(where: { $0.frame.contains(NSPoint(x: label.frame.midX, y: label.frame.midY)) })?.region
-            else { return XCTFail("\(label.stringValue) selects the row") }
+        func label(_ text: String) throws -> NSTextField { try XCTUnwrap(labels(result).first { $0.stringValue == text }, text) }
+        // Top to bottom.
+        let stack = try [
+            dialog.questions[0].text,
+            "1.\tStaging replica (Recommended) — Safe to wipe; refreshed from production every night",
+            "2.\tLocal Postgres",
+            "And when?",
+            "1.\tNow",
+            "2.\tTonight — after the backup",
+            "Answer in the terminal",
+        ].map(label)
+        XCTAssertGreaterThan(stack[0].frame.height, SidebarExpandedMetrics.questionLineHeight, "whole, on its lines")
+        for (above, below) in zip(stack, stack.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(above.frame.minY, below.frame.maxY, "\(above.stringValue) over \(below.stringValue)")
         }
-        XCTAssertEqual(SidebarDialogQuestionBlockRenderer.hint(AgentDialogQuestion(question: "Sign in?", options: [])), "Answer in the terminal")
-        XCTAssertNotEqual(asking, ColumnInfo(
-            index: 1, processName: "claude", abbreviatedCwd: "~/p", isFocused: false, isWebView: false,
-            webTitle: nil, terminalTitle: nil, agentStatus: .needsAttention, isEditor: false, editorFileName: nil,
-            attentionReason: asking.attentionReason, openDialog: asking.openDialog
-        ), "its options redraw the card")
+        // As tall as what it draws: the hint's line ends the block, a row's
+        // padding above the card's edge.
+        let hint = try XCTUnwrap(stack.last)
+        XCTAssertEqual(hint.frame.minY, result.bottomY + SidebarExpandedMetrics.rowPaddingY - 1, accuracy: 0.5)
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: card, sidebarWidth: 260), accuracy: 0.5)
+        // A click anywhere on it brings the dialog's column in front,
+        // selected row or not, whichever column the row's own click picks.
+        XCTAssertTrue(result.approvalButtons.isEmpty)
+        for shown in [stack[0], stack[2], hint] {
+            let point = NSPoint(x: shown.frame.midX, y: shown.frame.midY)
+            guard case .column(workspaceIndex: 2, columnIndex: 1)? = result.hitAreas.first(where: { $0.frame.contains(point) })?.region
+            else { return XCTFail("\(shown.stringValue) leads to the dialog's column") }
+        }
+        // What its hook lets through is never cut.
+        func words(_ text: String, _ count: Int) -> String { Array(repeating: text, count: count).joined(separator: " ") }
+        let longest = AgentDialog(questions: [.init(text: words("which of the two", 17) + " databases?", options: [
+            .init(label: words("a long label", 6), detail: words("and a long detail", 8)),
+        ])])
+        XCTAssertEqual(AgentDialog.bounded(longest.questions), longest, "within its bounds")
+        let lineHeight = SidebarExpandedMetrics.questionLineHeight
+        let limit = CGFloat(SidebarExpandedMetrics.dialogMaxLines) * lineHeight
+        XCTAssertLessThan(SidebarQuestionText.questionHeight(longest.questions[0].text, width: 224, maxLines: 99), limit + 0.5)
+        let options = SidebarQuestionText.options(longest.questions[0])
+        var uncapped = options
+        uncapped.maxLines = 99
+        XCTAssertLessThan(uncapped.height(width: 224), limit + 0.5)
+        XCTAssertEqual(options.height(width: 224), uncapped.height(width: 224), "past a choice's six lines")
     }
 
     /// "Dismiss Question" in the row's menu, for each question that stands

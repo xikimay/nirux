@@ -131,7 +131,7 @@ extension WorkspaceInfo {
                 // question over its buttons.
                 if waiting.permissionApproval != nil {
                     summary.saidBelow = .request
-                } else if waiting.turnQuestion != nil || waiting.dialogQuestion != nil {
+                } else if waiting.turnQuestion != nil || waiting.dialog != nil {
                     summary.saidBelow = .question
                 }
             }

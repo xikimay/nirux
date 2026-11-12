@@ -305,11 +305,16 @@ final class AgentStatusMachineTests: XCTestCase {
     func testAskUserQuestionIsAQuestion() {
         startTurn()
         var request = event(.permissionRequest, tool: "AskUserQuestion", summary: "Which DB?", key: "q")
-        let dialog = AgentDialogQuestion(question: "Which DB?", options: [.init(label: "Postgres", detail: nil)])
-        request.dialogQuestion = dialog
+        let dialog = AgentDialog(questions: [.init(text: "Which DB?", options: [.init(label: "Postgres", detail: nil)])])
+        request.dialog = dialog
         _ = machine.apply(request, isUserFocused: false)
         XCTAssertEqual(machine.attentionReason, .question("Which DB?"))
-        XCTAssertEqual(machine.openDialogs.first?.dialogQuestion, dialog, "what it asks and offers, for its row")
+        XCTAssertEqual(machine.openDialogs.first?.dialog, dialog, "what it asks and offers, for its row")
+        // A line this build couldn't read: a dialog all the same, nothing to list.
+        request.dialog = AgentDialog(questions: [])
+        _ = machine.apply(request, isUserFocused: false)
+        XCTAssertEqual(machine.openDialogs.count, 1, "the same call asked again")
+        XCTAssertNil(machine.openDialogs.first?.dialog)
         _ = machine.apply(event(.postToolUse, tool: "AskUserQuestion", key: "q"), isUserFocused: false)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
         XCTAssertEqual(machine.state, .working)

@@ -21,16 +21,12 @@ enum SidebarQuestionText {
         ])
     }
 
-    static func questionHeight(_ text: String, width: CGFloat) -> CGFloat {
-        SidebarWrappedText.height(
-            question(text), width: width, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.questionMaxLines
-        )
+    static func questionHeight(_ text: String, width: CGFloat, maxLines: Int = Metrics.questionMaxLines) -> CGFloat {
+        SidebarWrappedText.height(question(text), width: width, lineHeight: Metrics.questionLineHeight, maxLines: maxLines)
     }
 
-    static func questionLabel(_ text: String) -> NSTextField {
-        let label = SidebarWrappedText.label(
-            question(text), lineHeight: Metrics.questionLineHeight, maxLines: Metrics.questionMaxLines
-        )
+    static func questionLabel(_ text: String, maxLines: Int = Metrics.questionMaxLines) -> NSTextField {
+        let label = SidebarWrappedText.label(question(text), lineHeight: Metrics.questionLineHeight, maxLines: maxLines)
         label.toolTip = text
         return label
     }
@@ -41,11 +37,11 @@ enum SidebarQuestionText {
     struct Items {
         let texts: [NSAttributedString]
         let indent: CGFloat
+        /// The lines each item may take.
+        var maxLines = Metrics.choiceMaxLines
 
         private func height(of item: NSAttributedString, width: CGFloat) -> CGFloat {
-            SidebarWrappedText.height(
-                item, width: width, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines, indent: indent
-            )
+            SidebarWrappedText.height(item, width: width, lineHeight: Metrics.questionLineHeight, maxLines: maxLines, indent: indent)
         }
 
         /// Stacked `choiceGap` apart; 0 without any.
@@ -59,9 +55,7 @@ enum SidebarQuestionText {
             var y = top
             return texts.map { item in
                 let height = height(of: item, width: width)
-                let label = SidebarWrappedText.label(
-                    item, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines, indent: indent
-                )
+                let label = SidebarWrappedText.label(item, lineHeight: Metrics.questionLineHeight, maxLines: maxLines, indent: indent)
                 label.frame = NSRect(x: x, y: y - height, width: width, height: height)
                 label.toolTip = item.string.replacingOccurrences(of: "\t", with: " ")
                 y -= height + Metrics.choiceGap
@@ -80,10 +74,10 @@ enum SidebarQuestionText {
         })
     }
 
-    /// A dialog's options, numbered as the terminal numbers them: the
-    /// label, then what the agent says it means.
-    static func options(_ dialog: AgentDialogQuestion) -> Items {
-        items(dialog.options.enumerated().map { index, option in
+    /// The options of a dialog's question, numbered as the terminal
+    /// numbers them: the label, then what the agent says it means.
+    static func options(_ question: AgentDialog.Question) -> Items {
+        var items = items(question.options.enumerated().map { index, option in
             let text = NSMutableAttributedString(string: plain(option.label), attributes: [
                 .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
             ])
@@ -94,6 +88,8 @@ enum SidebarQuestionText {
             }
             return ("\(index + 1).", text)
         })
+        items.maxLines = Metrics.dialogMaxLines
+        return items
     }
 
     private static func items(_ items: [(marker: String, text: NSAttributedString)]) -> Items {
@@ -184,44 +180,50 @@ struct SidebarTurnQuestionBlockRenderer {
 }
 
 /// The block of a card whose agent shows a question dialog (Claude's
-/// AskUserQuestion): the question whole, the options it offers, then where
-/// to answer. Nothing to press: a click there is the row's, which brings
-/// the dialog's column in front.
+/// AskUserQuestion): each of its questions whole over the options it
+/// offers, then where to answer. Nothing to press: a click anywhere on it
+/// brings the dialog's column in front, as a click on its chip does.
 @MainActor
-struct SidebarDialogQuestionBlockRenderer {
-    let dialog: AgentDialogQuestion
+struct SidebarDialogBlockRenderer {
+    let dialog: AgentDialog
+    let workspaceIndex: Int
+    let columnIndex: Int
     /// Left edge and width of the card's content.
     let x: CGFloat
     let width: CGFloat
     let top: CGFloat
 
-    func render() -> [NSView] {
+    func render() -> SidebarApprovalBlockRenderer.Result {
         let metrics = SidebarExpandedMetrics.self
+        let height = metrics.dialogBlockHeight(for: dialog, width: width)
         var views: [NSView] = []
         var y = top
-        let asked = SidebarQuestionText.questionLabel(dialog.question)
-        let askedHeight = SidebarQuestionText.questionHeight(dialog.question, width: width)
-        asked.frame = NSRect(x: x, y: y - askedHeight, width: width, height: askedHeight)
-        asked.setAccessibilityLabel("Claude asks: \(dialog.question)")
-        views.append(asked)
-        y -= askedHeight
-        let options = SidebarQuestionText.options(dialog)
-        if !options.texts.isEmpty {
-            y -= metrics.questionGap
-            views += options.labels(x: x, width: width, top: y)
-            y -= options.height(width: width)
+        for (position, question) in dialog.questions.enumerated() {
+            if position > 0 { y -= metrics.dialogQuestionGap }
+            let asked = SidebarQuestionText.questionLabel(question.text, maxLines: metrics.dialogMaxLines)
+            let askedHeight = SidebarQuestionText.questionHeight(question.text, width: width, maxLines: metrics.dialogMaxLines)
+            asked.frame = NSRect(x: x, y: y - askedHeight, width: width, height: askedHeight)
+            asked.setAccessibilityLabel("Claude asks: \(question.text)")
+            views.append(asked)
+            y -= askedHeight
+            let options = SidebarQuestionText.options(question)
+            if !options.texts.isEmpty {
+                y -= metrics.questionGap
+                views += options.labels(x: x, width: width, top: y)
+                y -= options.height(width: width)
+            }
         }
         y -= metrics.actionRowGap
-        let hint = NSTextField.sidebarLine(NSAttributedString(string: Self.hint(dialog), attributes: [
+        let hint = NSTextField.sidebarLine(NSAttributedString(string: "Answer in the terminal", attributes: [
             .font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary,
         ]))
         hint.frame = NSRect(x: x, y: y - metrics.actionLineHeight - 1, width: width, height: metrics.actionLineHeight + 2)
         views.append(hint)
-        return views
-    }
-
-    /// "Answer in the terminal"; the first of several questions says so.
-    static func hint(_ dialog: AgentDialogQuestion) -> String {
-        dialog.questionCount > 1 ? "First of \(dialog.questionCount) questions · answer in the terminal" : "Answer in the terminal"
+        let block = NSRect(x: x, y: top - height, width: width, height: height)
+        return SidebarApprovalBlockRenderer.Result(
+            views: views,
+            hitAreas: [SidebarHitArea(frame: block, region: .column(workspaceIndex: workspaceIndex, columnIndex: columnIndex))],
+            buttons: [:]
+        )
     }
 }

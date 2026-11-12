@@ -197,7 +197,7 @@ struct AgentPermissionRequest: Hashable, Sendable {
     /// The hook receiver waits for a sidebar decision on this request.
     var approval: PermissionApprovalTicket?
     /// What a question dialog asks and offers, when its hook said.
-    var dialogQuestion: AgentDialogQuestion?
+    var dialog: AgentDialog?
 
     init(
         toolName: String?,
@@ -229,47 +229,78 @@ struct AgentPermissionRequest: Hashable, Sendable {
 }
 
 /// What a question dialog asks (Claude's AskUserQuestion), in the agent's
-/// own words: its first question and the answers it offers. A task's row
-/// shows them; the answer is given in the terminal.
-struct AgentDialogQuestion: Codable, Hashable, Sendable {
+/// own words: each of its questions and the answers it offers. A task's
+/// row shows them all, since no hook says which one is on screen; the
+/// answers are given in the terminal.
+struct AgentDialog: Codable, Hashable, Sendable {
+    struct Question: Codable, Hashable, Sendable {
+        let text: String
+        /// Every option the question lists, or none: half of them would
+        /// mislead.
+        let options: [Option]
+    }
+
     struct Option: Codable, Hashable, Sendable {
         let label: String
         /// What the option means, when the agent said.
         let detail: String?
     }
 
-    let question: String
-    /// Every option the dialog lists, or none: half of them would mislead.
-    let options: [Option]
-    /// How many questions the dialog asks in all.
-    let questionCount: Int
+    let questions: [Question]
 
-    /// More than the dialog ever lists (four, and its own "Other").
+    /// As many questions as the dialog ever asks, and more options than
+    /// it ever lists (four, and its own "Other").
+    static let maxQuestions = 4
     static let maxOptions = 6
 
-    init(question: String, options: [Option], questionCount: Int = 1) {
-        self.question = question
-        self.options = options
-        self.questionCount = questionCount
+    init(questions: [Question]) {
+        self.questions = questions
     }
 
     /// From AskUserQuestion's input (`questions`, each a `question` and its
-    /// `options`, each a `label` and a `description`): the first question,
-    /// cleaned and bounded for an event line and a few lines of a row. Nil
-    /// without a question to show.
+    /// `options`, each a `label` and a `description`), as far as a row may
+    /// show it (`bounded`). Nil unless every question can be shown.
     init?(toolInput: [String: Any]) {
-        guard let questions = toolInput["questions"] as? [[String: Any]], let first = questions.first,
-              let question = (first["question"] as? String).flatMap({ AgentText.clean($0, maxLength: 300) })
-        else { return nil }
-        let listed = first["options"] as? [[String: Any]] ?? []
-        let options = listed.compactMap { option -> Option? in
-            guard let label = (option["label"] as? String).flatMap({ AgentText.clean($0, maxLength: 80) }) else { return nil }
-            return Option(label: label, detail: (option["description"] as? String).flatMap { AgentText.clean($0, maxLength: 200) })
+        let asked = toolInput["questions"] as? [[String: Any]] ?? []
+        let questions = asked.compactMap { question -> Question? in
+            guard let text = question["question"] as? String else { return nil }
+            let listed = question["options"] as? [[String: Any]] ?? []
+            let options = listed.compactMap { option in
+                (option["label"] as? String).map { Option(label: $0, detail: option["description"] as? String) }
+            }
+            return Question(text: text, options: options.count == listed.count ? options : [])
         }
-        self.init(
-            question: question, options: options.count == listed.count && options.count <= Self.maxOptions ? options : [],
-            questionCount: questions.count
-        )
+        guard questions.count == asked.count, let dialog = Self.bounded(questions) else { return nil }
+        self = dialog
+    }
+
+    /// Another build's line: what this one can show of it, else nothing.
+    /// Never an error, which would drop the dialog's whole event, and
+    /// bounded again: the reader can't count on its writer.
+    init(from decoder: Decoder) throws {
+        let container = try? decoder.container(keyedBy: CodingKeys.self)
+        let decoded = (try? container?.decode([Question].self, forKey: .questions)) ?? []
+        questions = Self.bounded(decoded)?.questions ?? []
+    }
+
+    /// `questions` as a row may show them: every text cleaned and cut to
+    /// the few lines it gets, no options for a question that lists more
+    /// than `maxOptions` or one without a label. Nil for no question, more
+    /// than `maxQuestions`, or one that says nothing.
+    static func bounded(_ questions: [Question]) -> AgentDialog? {
+        guard (1...maxQuestions).contains(questions.count) else { return nil }
+        var kept: [Question] = []
+        for question in questions {
+            guard let text = AgentText.clean(question.text, maxLength: 300) else { return nil }
+            let options = question.options.compactMap { option in
+                AgentText.clean(option.label, maxLength: 80).map { label in
+                    Option(label: label, detail: option.detail.flatMap { AgentText.clean($0, maxLength: 160) })
+                }
+            }
+            let whole = options.count == question.options.count && options.count <= maxOptions
+            kept.append(Question(text: text, options: whole ? options : []))
+        }
+        return AgentDialog(questions: kept)
     }
 }
 

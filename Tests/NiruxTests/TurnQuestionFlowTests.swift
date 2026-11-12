@@ -5,7 +5,7 @@ import XCTest
 /// The question a Claude turn ended on, in a real window: it stays on its
 /// card when its row is clicked, with the choices its message lists, until
 /// it is put aside from the row's menu, the card's Dismiss, or by
-/// archiving its task. And a question dialog's options on its task's row.
+/// archiving its task. And what a question dialog asks on its task's row.
 @MainActor
 final class TurnQuestionFlowTests: UIFlowTestCase {
     /// The row's menu item this class runs: `SidebarPanelFlowTests` never
@@ -46,27 +46,27 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
                 shell.updateSidebar()
                 return shell.sidebar.displayedWorkspaceInfos.first { $0.id == task.id }
             }
-            let dialog = AgentDialogQuestion(
-                question: "Which one do you want?", options: [.init(label: "Rebase", detail: "on main"), .init(label: "Merge", detail: nil)]
-            )
+            let dialog = AgentDialog(questions: [.init(
+                text: "Which one do you want?", options: [.init(label: "Rebase", detail: "on main"), .init(label: "Merge", detail: nil)]
+            )])
             func event(_ name: AgentHookEvent.Name, tool: String? = nil) -> AgentHookEvent {
                 AgentHookEvent(
-                    kind: .claude, name: name, sessionID: "s", toolName: tool, toolSummary: tool.map { _ in dialog.question },
+                    kind: .claude, name: name, sessionID: "s", toolName: tool, toolSummary: tool.map { _ in "Which one do you want?" },
                     toolKey: tool.map { _ in "q" }, timestamp: Date().timeIntervalSince1970
                 )
             }
             _ = pty.applyAgentHook(event(.userPromptSubmit), isUserFocused: false)
             var request = event(.permissionRequest, tool: "AskUserQuestion")
-            request.dialogQuestion = dialog
+            request.dialog = dialog
             _ = pty.applyAgentHook(request, isUserFocused: false)
             let asking = try XCTUnwrap(row())
-            XCTAssertEqual(asking.columns[safe: columnIndex]?.dialogQuestion, dialog)
-            XCTAssertEqual(asking.cardActions, [.dialogQuestion(columnIndex: columnIndex, dialog)])
+            XCTAssertEqual(asking.columns[safe: columnIndex]?.dialog, dialog)
+            XCTAssertEqual(asking.cardActions, [.dialog(columnIndex: columnIndex, dialog)])
             XCTAssertEqual(asking.rowSummary.lineText, "Needs you · a question")
-            XCTAssertEqual(asking.rowSummary.focusColumn, columnIndex, "a click on the row brings the dialog up")
 
             _ = pty.applyAgentHook(event(.postToolUse, tool: "AskUserQuestion"), isUserFocused: false)
-            XCTAssertNil(row()?.columns[safe: columnIndex]?.dialogQuestion, "answered")
+            XCTAssertNil(pty.pendingAgentDialog, "answered: the call ran")
+            XCTAssertNil(try XCTUnwrap(row()).columns[safe: columnIndex]?.dialog)
         }
     }
 

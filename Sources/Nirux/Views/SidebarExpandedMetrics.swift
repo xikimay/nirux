@@ -123,12 +123,25 @@ enum SidebarExpandedMetrics {
             + actionRowGap + buttonHeight
     }
 
-    /// The question, the options it offers, then where to answer.
+    /// A dialog's question, and each of its options: as long as its hook
+    /// lets them be (`AgentDialog.bounded`), so none is cut.
+    static let dialogMaxLines = 12
+    /// Between two questions of one dialog.
+    static let dialogQuestionGap: CGFloat = 10
+
+    /// One question of a dialog over the options it offers.
     @MainActor
-    static func dialogQuestionBlockHeight(for dialog: AgentDialogQuestion, width: CGFloat) -> CGFloat {
-        let options = SidebarQuestionText.options(dialog).height(width: width)
-        return SidebarQuestionText.questionHeight(dialog.question, width: width) + (options > 0 ? questionGap + options : 0)
-            + actionRowGap + actionLineHeight
+    static func dialogQuestionHeight(_ question: AgentDialog.Question, width: CGFloat) -> CGFloat {
+        let options = SidebarQuestionText.options(question).height(width: width)
+        return SidebarQuestionText.questionHeight(question.text, width: width, maxLines: dialogMaxLines)
+            + (options > 0 ? questionGap + options : 0)
+    }
+
+    /// Each question with its options, then where to answer.
+    @MainActor
+    static func dialogBlockHeight(for dialog: AgentDialog, width: CGFloat) -> CGFloat {
+        dialog.questions.reduce(CGFloat(0)) { $0 + dialogQuestionHeight($1, width: width) }
+            + CGFloat(max(dialog.questions.count - 1, 0)) * dialogQuestionGap + actionRowGap + actionLineHeight
     }
 
     /// `width`: the block's, the card's content. `textWidth`: a line's
@@ -139,7 +152,7 @@ enum SidebarExpandedMetrics {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
         case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
-        case .dialogQuestion(_, let dialog): return dialogQuestionBlockHeight(for: dialog, width: width)
+        case .dialog(_, let dialog): return dialogBlockHeight(for: dialog, width: width)
         case .next(let text):
             return SidebarWrappedText.height(
                 SidebarWorkspaceCardRenderer.nextText(text), width: textWidth, lineHeight: actionLineHeight, maxLines: nextStepMaxLines
