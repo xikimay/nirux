@@ -188,7 +188,8 @@ clicked. The sizes are the mockup's.
   post-merge run's pill (or what went wrong reading it).
 - **A line** is 34 pt: its state's dot and its title, its rail, its phrase
   (amber or red when it needs a look, else grey), its pull request, its time.
-  The whole line is one target: a press and its release on it open the task.
+  A press and its release on it open the task, but on its Merge station and
+  on the link ending its phrase, which are targets of their own (section 7).
   A text that is cut shows whole under the pointer, and with the phrase what
   it can't hold (why the checks look flaky, why the queue stopped).
 - **The rail**: a filled dot for a station done, a larger one in the state's
@@ -295,8 +296,11 @@ screen.
 ## 7. What a line offers
 
 The model says what a click does and what shows under the pointer
-(`Line.offer`, `Phrase.link`, `Line.tooltips`); the view doesn't act on them
-yet: a click on a line still opens its task, wherever it lands.
+(`Line.offer`, `Phrase.link`, `Line.tooltips`), and the line draws it and
+says what was clicked (`BoardStagesView.onOffer`, `onLink`). Nothing is wired
+to the queue yet.
+
+![A line's Merge station under the pointer: a plus in a bright ring](../images/board-stages-hover.png)
 
 - **The Merge station is the control of the queue's list**, which stays the
   user's. A pull request outside the next Start's list joins it by a click on
@@ -315,6 +319,12 @@ yet: a click on a line still opens its task, wherever it lands.
     that doesn't end with the queue.
   - **Nothing to click** without an open pull request, and in a repository
     that isn't saved in Board Settings, which has no merge queue.
+  - **In the view**, the station is a target 22 pt wide, the line's height,
+    while a click there acts; elsewhere, and where it is refused or locked,
+    it is the line's. Under the pointer it says what a click does: a plus
+    in a bright ring to join, a minus in place of its number to leave. A
+    click is a press and its release on the station, while it still offers
+    what was pressed: a list locked meanwhile changes nothing.
 - **Retarget** is the Board's own call to GitHub, not the queue's: a queue
   that runs, or that holds the pull request, changes nothing to it.
   - In a repository that isn't saved, the phrase reads "Base #52 merged",
@@ -325,7 +335,9 @@ yet: a click on a line still opens its task, wherever it lands.
     check, an agent at work) has none: Retarget will be in its menu.
 - **A link says what its click does** under the pointer: "Bases #53 on main,
   as GitHub does when a merged branch is deleted"; "Checks the worktree, then
-  asks what goes".
+  asks what goes". It is drawn apart, in the accent colour, right after the
+  words before it: on a narrow Board those give way, and the link stays
+  whole. Its target is the line's height.
 - **Under the pointer**, what the line can't hold:
   - its title: the task's branch and worktree ("feat/login ·
     /Users/me/app.feat-login"), with "main checkout", "not checked out" or
@@ -345,6 +357,14 @@ yet: a click on a line still opens its task, wherever it lands.
     it does nothing;
   - its pull request: its stack ("Stack: #52 → #53 → #54, on main") and its
     address.
+
+  Each place says its own: the title, the phrase, the link, the pull request,
+  and each station over 22 pt around it.
+- **VoiceOver** reads a line as one button, which opens the task; the Merge
+  station's click and the link are its actions, by name ("Add to Queue",
+  "Retarget to main").
+- **A hand** shows where a click does something of its own: on a station
+  that acts, on a link.
 
 ## Known limits
 
