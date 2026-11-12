@@ -27,8 +27,8 @@ what comes next. It becomes the overview of a space:
   The current one is the first not done.
 - **A commit doesn't send a line back.** Reviews is done once a code review
   ran in the task, on any commit, and its turn is over: fixes always follow a
-  review. The station's tooltip then says the review is older than HEAD; no
-  mark is drawn for it, since it would be on most lines.
+  review. The station's tooltip then says the review ran on another commit;
+  no mark is drawn for it, since it would be on most lines.
 - **Which reviews count, and whether they must be on HEAD, are two constants**
   (`BoardStages.Rules`), built to become space settings.
 - **Amber means an agent waits for the user**, and nothing else. It is never
@@ -111,7 +111,8 @@ The phrase is the state's own line of the ladder:
   what the station needs: "No code review yet", "No pull request yet".
 
 "Clean up" and "Retarget to main" are links: the one click that moves the line
-on. While an agent works the line says "Working", or the user's own summary
+on. A branch a phrase names ("Targets release", "Retarget to main") is shown
+cleaned: it is named on GitHub, by whoever pushed it. While an agent works the line says "Working", or the user's own summary
 of the task: the last turn's line is about the turn before.
 
 The pull request cell reads "#52", "#53 · 2/3" in a straight stack, "#53 · on
@@ -258,8 +259,9 @@ read. Pure; nothing is read again.
   that branch's pull request in the queue shown, once it merged (as the queue
   saw it; or as GitHub's list says, at a head the queue knew, when its merge
   went unanswered). Else it is the one the task's own detection says merged.
-  One the queue merged reads merged at once, before GitHub's list says so. A
-  project's worktree whose pull request merged offers the clean-up.
+  One the queue merged reads merged at once, before GitHub's list says so; so
+  does one the merged list has while the open list, read before it, still
+  does. A project's worktree whose pull request merged offers the clean-up.
 - **Checks are counted by the merge queue's rules**
   ([project-board.md](project-board.md), section 3.2): the latest run of each;
   every check of a required name green, and one that hasn't reported waited
@@ -269,9 +271,11 @@ read. Pure; nothing is read again.
 - **The queue.** In the queue shown while it runs, here or in another Nirux,
   a pull request's place is the queue's own ("3 of 7") and its step shows; its
   number stays through the post-merge wait, and goes once the queue is through
-  with it. Else its place is the next Start's, counted without those that
-  merged: by the queue, or as the merged list or a row says (by hand, say).
-  The list holds those until Start, whose sheet drops them.
+  with it. One that isn't in that queue has no place meanwhile: the numbers
+  are one list's. Else its place is the next Start's, counted without those
+  that merged: by the queue, or as the merged list, a row or a task's own
+  detection says (by hand, say). The list holds those until Start, whose
+  sheet drops them.
 - **A queue's stop** a push answers (its checks, a conflict, a merge or an
   update that failed, commits not pushed, a busy agent) is over once the pull
   request's head moved. The others stay until the next Start: "changed" is
@@ -307,7 +311,8 @@ yet: a click on a line still opens its task, wherever it lands.
     list, and the Start sheet checks the rest.
   - **Locked** while a queue runs, here or in another Nirux, and while the
     confirmation sheet is open: the sheet shows the list as it was when it
-    opened. The station says which.
+    opened. The station says which, after what the queue's rule refuses:
+    that doesn't end with the queue.
   - **Nothing to click** without an open pull request, and in a repository
     that isn't saved in Board Settings, which has no merge queue.
 - **Retarget** is the Board's own call to GitHub, not the queue's: a queue
@@ -317,8 +322,7 @@ yet: a click on a line still opens its task, wherever it lands.
   - In a build that can't change GitHub (a dry run), the words stay, as what
     to do, and are no link: the phrase's tooltip says why.
   - The link is the phrase's. A line that says something more pressing (a red
-    check, an agent at work) has none: its Merge station says "Can’t join
-    the queue: base #52 merged", and Retarget will be in its menu.
+    check, an agent at work) has none: Retarget will be in its menu.
 - **A link says what its click does** under the pointer: "Bases #53 on main,
   as GitHub does when a merged branch is deleted"; "Checks the worktree, then
   asks what goes".
@@ -331,12 +335,12 @@ yet: a click on a line still opens its task, wherever it lands.
     is named while HEAD isn't known), and each pass asked for that didn't,
     "No code review yet". Another commit, not an earlier one: HEAD may have
     moved back;
-  - Checks: the latest run of each check by name, with its result, in the
-    order the station counts them: those that hold the pull request (the red
-    ones, a required one that ended skipped or neutral), the required ones
-    no check reported ("nightly: no run yet"), those it waits for, then the
-    rest. Twelve, then "and 5 more"; a name is cut at 80 characters, before
-    its result;
+  - Checks: the latest run of each check by name, with its result: those that
+    hold the pull request first (the red ones, a required one that ended
+    skipped or neutral), then the required ones no check reported ("nightly:
+    no run yet"), those it waits for, then the rest. Twelve, then "and 5
+    more"; a workflow's name and a job's are each cut at 40 characters,
+    before the result;
   - Merge: what a click does, "Add to Queue" or "Remove from Queue", or why
     it does nothing;
   - its pull request: its stack ("Stack: #52 → #53 → #54, on main") and its

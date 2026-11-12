@@ -56,9 +56,10 @@ extension BoardStages {
     struct Rail: Equatable, Sendable {
         /// One per station, in order.
         var marks: [Mark]
-        /// A review that counts ran before the last commits: said in the
-        /// Reviews station's tooltip, not drawn, since fixes follow nearly
-        /// every review.
+        /// A review that counts ran on another commit than HEAD, an
+        /// earlier one unless HEAD moved back: said in the Reviews
+        /// station's tooltip, not drawn, since fixes follow nearly every
+        /// review.
         var reviewIsOlderThanHead = false
         /// The pull request's place in the queue's list, from 1: the
         /// number on the Merge station.
@@ -74,7 +75,7 @@ extension BoardStages {
 
         var title: String {
             switch self {
-            case .retarget(_, let onto): return "Retarget to \(onto)"
+            case .retarget(_, let onto): return "Retarget to \(BoardStages.branch(onto))"
             case .cleanUp: return "Clean up"
             }
         }
@@ -83,7 +84,7 @@ extension BoardStages {
         var hint: String {
             switch self {
             case .retarget(let number, let onto):
-                return "Bases #\(number) on \(BoardStages.text(onto) ?? onto), as GitHub does when a merged branch is deleted"
+                return "Bases #\(number) on \(BoardStages.branch(onto)), as GitHub does when a merged branch is deleted"
             case .cleanUp:
                 return "Checks the worktree, then asks what goes"
             }
@@ -237,6 +238,8 @@ extension BoardStages {
 
     /// A check as the Checks station's tooltip names it: "Tests / unit: ✗".
     struct CheckLine: Equatable, Sendable {
+        /// Its workflow, when one made it.
+        var workflow: String?
         /// As whoever posted the check named it.
         var name: String
         /// "✓", "✗", "●", "skipped", "no run yet".
@@ -458,13 +461,17 @@ extension BoardStages {
         return tooltips
     }
 
-    /// The first checks by name, each name cleaned and cut before its
-    /// result, so a long one still says how it ended.
+    /// The first checks by name. A workflow's name and a job's are each
+    /// cleaned and cut before the result: a long one still says which
+    /// job it is, and how it ended.
     private static func checksTooltip(_ lines: [CheckLine]) -> String? {
         guard !lines.isEmpty else { return nil }
         // "and 1 more" would take the line of the check it stands for.
         let shown = lines.count == checkLinesShown + 1 ? lines.count : checkLinesShown
-        let named = lines.prefix(shown).map { "\(AgentText.clean($0.name, maxLength: 80) ?? "unnamed check"): \($0.result)" }
+        let named = lines.prefix(shown).map { line -> String in
+            let name = [line.workflow, line.name].compactMap { $0.flatMap { AgentText.clean($0, maxLength: 40) } }
+            return "\(name.isEmpty ? "unnamed check" : name.joined(separator: " / ")): \(line.result)"
+        }
         let more = lines.count - shown
         return (named + (more > 0 ? ["and \(more) more"] : [])).joined(separator: "\n")
     }
@@ -583,7 +590,7 @@ extension BoardStages {
                 let with = { (word: String) in passed.isEmpty ? word : "\(word) · \(passed)" }
                 if let parent { return Reading(.waiting, "Lands after #\(parent)", since: last) }
                 if pullRequest.isDraft { return Reading(.idle, with("Draft"), since: last) }
-                if !pullRequest.isOnBaseBranch { return Reading(.idle, "Targets \(pullRequest.base)", since: last) }
+                if !pullRequest.isOnBaseBranch { return Reading(.idle, "Targets \(branch(pullRequest.base))", since: last) }
                 if let request = pullRequest.reviewRequest { return Reading(.idle, request.text, since: last) }
                 return Reading(.ready, with("Ready"))
             case .code, .reviews:
@@ -619,7 +626,7 @@ extension BoardStages {
     /// conflicts with its base, a check is red. Only a likely flake says
     /// more than which checks.
     private static func problem(of pullRequest: PullRequest, flakyReason: String?) -> (text: String, detail: String?)? {
-        if pullRequest.isConflicting { return ("Conflicts with \(pullRequest.base)", nil) }
+        if pullRequest.isConflicting { return ("Conflicts with \(branch(pullRequest.base))", nil) }
         guard case .failed(let failed) = pullRequest.checks else { return nil }
         if let flakyReason { return ("Checks failed · likely flaky", flakyReason) }
         let names = failed.compactMap(text)
@@ -670,5 +677,11 @@ extension BoardStages {
     /// a check's name is whatever its author posted.
     static func text(_ value: String?) -> String? {
         value.flatMap { AgentText.clean($0, maxLength: 300) }
+    }
+
+    /// A branch's name as shown: it is named on GitHub, by whoever
+    /// pushed it.
+    static func branch(_ name: String) -> String {
+        text(name) ?? name
     }
 }

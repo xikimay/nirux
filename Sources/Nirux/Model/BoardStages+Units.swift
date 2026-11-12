@@ -251,7 +251,7 @@ extension BoardStages {
         var inStack = Set<Int>()
         for members in stacks.values {
             let inOrder = members.sorted { (facts[$0].pullRequest?.stack?.order ?? 0) < (facts[$1].pullRequest?.stack?.order ?? 0) }
-            let base = facts[inOrder[0]].pullRequest?.stack?.base ?? ""
+            let base = branch(facts[inOrder[0]].pullRequest?.stack?.base ?? "")
             let title = "Stack · \(Set(inOrder.map(number)).count) pull requests on \(base)"
             inStack.formUnion(members)
             placed.append((members.min() ?? 0, place(.stack(title: title, inOrder.map { lines[$0] }), inOrder)))

@@ -357,6 +357,8 @@ final class BoardStagesLineTests: XCTestCase {
         let dryRun = "Dry run: this build doesn’t change GitHub."
         let inert = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open, dryRun: " \(dryRun)\n"))).phrase
         XCTAssertEqual(inert, BoardStages.Phrase(text: "Base #52 merged · Retarget to main", link: nil, detail: dryRun))
+        let listed = Queue(list: .open, order: 1, dryRun: dryRun)
+        XCTAssertNil(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: listed)).phrase.link, "in the list or not")
         let cleaning = line(with(facts(pullRequest(merged: true), queue: Queue(list: .open, dryRun: dryRun))) { $0.cleanUp = .offered }).phrase
         XCTAssertEqual(cleaning, cleanUp, "a clean-up changes nothing on GitHub")
         // What is wrong now comes first: the phrase has no link then, and the Merge station still says the base merged.
@@ -366,10 +368,14 @@ final class BoardStagesLineTests: XCTestCase {
         ))
         XCTAssertEqual(red.phrase, BoardStages.Phrase(text: "Checks failed: test"))
         XCTAssertEqual(red.tooltips.stations[.merge], "Can’t join the queue: base #52 merged")
-        // What a click on a link does, for its tooltip: a branch is named on GitHub.
-        XCTAssertEqual(BoardStages.Link.retarget(number: 53, onto: "ma\u{202E}in").hint,
-                       "Bases #53 on main, as GitHub does when a merged branch is deleted")
+        // What a click on a link does, for its tooltip.
+        XCTAssertEqual(onto.hint, "Bases #53 on main, as GitHub does when a merged branch is deleted")
         XCTAssertEqual(BoardStages.Link.cleanUp.hint, "Checks the worktree, then asks what goes")
+        // A branch is named on GitHub, by whoever pushed it: shown cleaned, wherever a line names one.
+        let odd = BoardStages.Link.retarget(number: 53, onto: "ma\u{202E}in")
+        XCTAssertEqual([odd.title, odd.hint], ["Retarget to main", "Bases #53 on main, as GitHub does when a merged branch is deleted"])
+        XCTAssertEqual(line(facts(pullRequest(base: "rel\u{202E}ease"))).phrase.text, "Targets release")
+        XCTAssertEqual(line(facts(pullRequest(conflicting: true, base: "rel\u{202E}ease"))).phrase.text, "Conflicts with release")
     }
 
     // MARK: - The Merge station's click
@@ -417,6 +423,8 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertNotNil(line(facts(pullRequest(), queue: Queue(list: .locked(" ")))).offer?.blocked, "locked, whatever its reason")
         let withoutTask = with(facts(pullRequest(14), reviews: nil, queue: Queue(list: .open))) { $0.hasTask = false }
         XCTAssertEqual(line(withoutTask).offer, Offer(change: .add, number: 14), "a pull request without a task can be queued too")
+        let stacked = facts(pullRequest(53, base: "stack/a", stack: child), queue: Queue(list: .open, order: 2))
+        XCTAssertEqual(line(stacked).offer, Offer(change: .remove, number: 53), "its own number, not its stack's root")
     }
 
     // MARK: - Under the pointer
@@ -427,7 +435,8 @@ final class BoardStagesLineTests: XCTestCase {
             with(pullRequest(53, checks: .failed(["test"]), base: "stack/a", stack: child)) {
                 $0.url = " https://github.com/acme/widgets/pull/53 "
                 $0.checkLines = [
-                    Check(name: "Tests / test", result: "✗"), Check(name: " \n", result: "●"), Check(name: "lint\nfast", result: "✓")
+                    Check(workflow: "Tests", name: "test", result: "✗"), Check(workflow: "", name: " \n", result: "●"),
+                    Check(workflow: " ", name: "lint\nfast", result: "✓")
                 ]
             },
             reviews: Self.reviews(fresh: [.premortem], earlier: [.codeReview, .adversarial]), queue: Queue(list: .open)
@@ -480,9 +489,15 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(said(13), lines.prefix(13).joined(separator: "\n"), "the thirteenth takes no more room than \"and 1 more\"")
         XCTAssertEqual(said(12), lines.prefix(12).joined(separator: "\n"))
         XCTAssertNil(said(0), "no check to name")
-        // A name is cut before its result: a long one still says how it ended.
-        let wordy = line(facts(with(pullRequest()) { $0.checkLines = [Check(name: String(repeating: "x", count: 200), result: "✗")] }))
-        XCTAssertEqual(wordy.tooltips.stations[.checks], String(repeating: "x", count: 79) + "…: ✗")
+        // A workflow's name and a job's are each cut, before the result: a long one still says which job, and how it ended.
+        let wordy = line(facts(with(pullRequest()) {
+            $0.checkLines = [
+                Check(workflow: String(repeating: "w", count: 90), name: "unit", result: "✗"),
+                Check(name: String(repeating: "x", count: 200), result: "●")
+            ]
+        }))
+        XCTAssertEqual(wordy.tooltips.stations[.checks],
+                       String(repeating: "w", count: 39) + "… / unit: ✗\n" + String(repeating: "x", count: 39) + "…: ●")
 
         // The pull request: its address alone outside a stack; nothing without either; both cleaned.
         let merged = line(facts(with(pullRequest(merged: true)) { $0.url = "https://github.com/acme/widgets/pull/52" })).tooltips
