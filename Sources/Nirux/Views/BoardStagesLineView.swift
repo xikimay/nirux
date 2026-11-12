@@ -2,9 +2,10 @@ import AppKit
 
 /// One line: its dot and title, its rail, its phrase, its pull request and
 /// its time. It draws the dot, the rail and what joins it to the lines
-/// around it; the words are labels. The whole line is one target.
+/// around it; the words are labels. The whole line is one target: it takes
+/// the mouse for its words, and shows their tooltips.
 @MainActor
-final class BoardStagesLineView: NSView {
+final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// What joins a line to those around it.
     enum Link: Equatable {
         case none
@@ -54,9 +55,7 @@ final class BoardStagesLineView: NSView {
         noRailLabel.textColor = Theme.Color.textDisabled
         for label in [titleLabel, noRailLabel, phraseLabel, pullRequestLabel, timeLabel] {
             label.lineBreakMode = .byTruncatingTail
-            // A cut text shows whole under the pointer; the line itself is
-            // what VoiceOver reads.
-            label.allowsExpansionToolTips = true
+            // The line itself is what VoiceOver reads.
             label.setAccessibilityElement(false)
             addSubview(label)
         }
@@ -83,10 +82,7 @@ final class BoardStagesLineView: NSView {
         titleLabel.stringValue = line.title
         phraseLabel.stringValue = line.phrase.text
         phraseLabel.textColor = Self.phraseColor(of: line.state)
-        // What the phrase can't hold: why the checks look flaky, why the queue stopped.
-        phraseLabel.toolTip = line.phrase.detail
         pullRequestLabel.stringValue = line.pullRequest
-        noRailLabel.isHidden = line.rail != nil
         setAccessibilityLabel(Self.accessibilityLabel(of: line, link: link))
     }
 
@@ -135,12 +131,40 @@ final class BoardStagesLineView: NSView {
         let titleX = dotCenter.x + Metrics.dot / 2 + 10
         titleLabel.frame = NSRect(x: titleX, y: 8, width: max(0, columns.task.maxX - titleX), height: 18)
         noRailLabel.frame = NSRect(x: columns.rail.minX, y: 10, width: columns.rail.width, height: 15)
+        noRailLabel.isHidden = line.rail != nil || columns.rail.width == 0
         phraseLabel.frame = NSRect(x: columns.phrase.minX, y: 9, width: columns.phrase.width, height: 16)
-        phraseLabel.isHidden = columns.phrase.width < 30
+        phraseLabel.isHidden = columns.phrase.width == 0
         for (label, frame) in [(pullRequestLabel, columns.pullRequest), (timeLabel, columns.time)] {
             label.isHidden = frame == nil
             label.frame = NSRect(x: frame?.minX ?? 0, y: 10, width: frame?.width ?? 0, height: 15)
         }
+        removeAllToolTips()
+        for label in told where toolTipText(of: label) != nil {
+            addToolTip(label.frame, owner: self, userData: nil)
+        }
+    }
+
+    // MARK: Tooltips
+
+    /// The words that can say more under the pointer.
+    private var told: [NSTextField] { [titleLabel, phraseLabel, pullRequestLabel] }
+
+    /// A text that is cut, whole; and with the phrase what it can't hold:
+    /// why the checks look flaky, why the queue stopped. (A column the
+    /// Board has no room for has no width: the pointer is never on it.)
+    private func toolTipText(of label: NSTextField) -> String? {
+        let whole = ColumnHeaderView.textWidth(label) > label.frame.width ? label.stringValue : nil
+        guard label === phraseLabel, let detail = line.phrase.detail else { return whole }
+        return whole.map { "\($0)\n\(detail)" } ?? detail
+    }
+
+    /// What the pointer shows at `point`, if anything.
+    func toolTipText(at point: NSPoint) -> String? {
+        told.first { $0.frame.contains(point) }.flatMap(toolTipText(of:))
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        toolTipText(at: point) ?? ""
     }
 
     // MARK: Drawing
@@ -203,7 +227,7 @@ final class BoardStagesLineView: NSView {
     /// Merge is the current station.
     static func draw(_ rail: BoardStages.Rail, state: BoardStages.State, stations: [CGFloat], y: CGFloat) {
         let current = rail.marks.firstIndex(of: .current) ?? rail.marks.count
-        for index in 0..<(stations.count - 1) {
+        for index in stations.indices.dropLast() {
             // A quarter point down: a 1.5 pt stroke fills three whole
             // pixels on a Retina display.
             let segment = NSBezierPath()
