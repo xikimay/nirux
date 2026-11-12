@@ -115,11 +115,11 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(section.lines.map(\.queue.order), [nil, nil, nil, nil, nil, 2, 1],
                        "a pull request without a task has its place in the queue too")
         XCTAssertEqual(section.parents, ["second": "first"], "a sub-task under its task, when both are lines here")
-        XCTAssertEqual(section.lines.first, BoardStages.Facts(id: "first", title: "First", location: "feat/b · /p/widgets.b"),
+        XCTAssertEqual(section.lines.first, BoardStages.Facts(id: "first", title: "First", location: ["feat/b", "/p/widgets.b"]),
                        "one the sidebar hasn't read yet is at rest")
-        XCTAssertEqual(section.lines.map(\.location), [
-            "feat/b · /p/widgets.b", "main checkout · main · /p/widgets", "feat/a · /p/widgets.x", "feat/a · /p/widgets.x",
-            "main checkout · main · /p/widgets", "cloud · not checked out", "bot · /p/widgets.bot"
+        XCTAssertEqual(section.lines.dropFirst().map(\.location), [
+            ["main checkout", "main", "/p/widgets"], ["feat/a", "/p/widgets.x"], ["feat/a", "/p/widgets.x"],
+            ["main checkout", "main", "/p/widgets"], ["cloud", "not checked out"], ["bot", "/p/widgets.bot"]
         ], "its branch and its worktree, for the title's tooltip")
         XCTAssertEqual(section.lines.map(\.activity), [.idle, .idle, .idle, .working(since: 50), .idle, .idle, .idle],
                        "a task says its own reading, not that of one sharing its worktree")
@@ -137,7 +137,7 @@ final class BoardStagesFactsTests: XCTestCase {
         reading.blocker = "Waits for the schema"
         reading.lastActivityAt = 400
         reading.flakyReason = "ImportTests timed out"
-        var expected = BoardStages.Facts(id: "task", title: "Task", location: "feat/x · /p/widgets.x")
+        var expected = BoardStages.Facts(id: "task", title: "Task", location: ["feat/x", "/p/widgets.x"])
         expected.activity = .needsYou("a question")
         expected.reviews = reading.reviews
         expected.reviewsInFlight = [.premortem]
@@ -168,16 +168,16 @@ final class BoardStagesFactsTests: XCTestCase {
         // A folder has no worktree: nothing read of git is about it.
         let notes = row(nil, workspaces: ["task"], group: .otherRepository, path: nil, folder: "/Users/me/Nirux Tasks/Notes")
         XCTAssertNil(facts([notes], reading: reading).lines[0].reviews?.head)
-        XCTAssertEqual(facts([notes]).lines[0].location, "/Users/me/Nirux Tasks/Notes")
+        XCTAssertEqual(facts([notes]).lines[0].location, ["/Users/me/Nirux Tasks/Notes"])
         var gone = notes
         gone.folderIsGone = true
-        XCTAssertEqual(facts([gone]).lines[0].location, "/Users/me/Nirux Tasks/Notes · folder is gone")
+        XCTAssertEqual(facts([gone]).lines[0].location, ["/Users/me/Nirux Tasks/Notes", "folder is gone"])
         let detached = ProjectBoard.Row(
-            group: .active, worktreePath: "/p/widgets.x", branch: nil, detachedHead: head,
+            group: .main, worktreePath: "/p/widgets", branch: nil, detachedHead: head,
             workspaces: [ProjectBoard.WorkspaceRef(id: "task", title: "Task", isInactive: false)], pullRequest: nil,
             agent: ProjectBoard.Agent(), folder: nil
         )
-        XCTAssertEqual(facts([detached]).lines[0].location, "detached HEAD (aaaaaaa) · /p/widgets.x")
+        XCTAssertEqual(facts([detached]).lines[0].location, ["main checkout", "detached HEAD (aaaaaaa)", "/p/widgets"])
 
         XCTAssertTrue(facts([row(workspaces: ["task"], inactive: true)]).lines[0].isArchived)
         // No rail where no pull request is read: a repository not on GitHub, a workspace in another repository or in none.
@@ -324,20 +324,32 @@ final class BoardStagesFactsTests: XCTestCase {
         let rerun = [check("test", .failure, startedAt: "2026-11-11T12:00:00Z"), check("test", .success, startedAt: "2026-11-11T12:30:00Z")]
         XCTAssertEqual(judge(rerun, ["test"]), .passed, "only the latest run of a check counts")
 
-        let line = facts([row(workspaces: ["task"], pullRequest: pullRequest(12, checks: [check("lint", .success)]))], required: ["test"]).lines[0]
-        XCTAssertEqual(line.pullRequest?.checks, .pending(since: nil, missing: ["test"]), "with the section's required checks")
-        XCTAssertEqual(line.pullRequest?.checkLines, ["test: no run yet", "lint: ✓"])
+        let rerunLint = [check("lint", .failure, startedAt: "2026-11-11T11:00:00Z"), check("lint", .success)]
+        let line = facts([row(workspaces: ["task"], pullRequest: pullRequest(12, checks: rerunLint))], required: ["test"]).lines[0]
+        XCTAssertEqual(line.pullRequest?.checks, .pending(since: nil, missing: ["test"]),
+                       "with the section's required checks, and the latest run of each")
+        XCTAssertEqual(line.pullRequest?.checkLines.map { "\($0.name): \($0.result)" }, ["test: no run yet", "lint: ✓"])
     }
 
     func testEachCheckIsNamedWithItsResultThoseThatHoldItFirst() {
+        let named = { (checks: [ProjectBoard.Check], required: [String]) in
+            BoardStages.checkLines(checks, required: required).map { "\($0.name): \($0.result)" }
+        }
         let checks = [
             check("build", .success), check("lint", .pending), check("test", .failure, workflow: "Tests"), check("docs", .skipped),
-            check("scan", .neutral), check("e2e", .failure), check("build", .failure, startedAt: "2026-11-11T11:00:00Z")
+            check("scan", .neutral), check("slow", .pending), check("e2e", .failure), check("pages", .skipped),
+            check("build", .failure, startedAt: "2026-11-11T11:00:00Z")
         ]
-        XCTAssertEqual(BoardStages.checkLines(checks, required: ["nightly", "build", "Tests / test"]), [
-            "Tests / test: ✗", "e2e: ✗", "nightly: no run yet", "lint: ●", "build: ✓", "scan: neutral", "docs: skipped"
-        ], "the latest run of each: the red ones, a required one no check reported, those that run, then the rest")
-        XCTAssertEqual(BoardStages.checkLines([], required: []), [])
+        // In the order `checks` counts them: what holds it, what hasn't reported, what it waits for, the rest.
+        XCTAssertEqual(named(checks, ["nightly", "build", "Tests / test", "docs", "scan", "slow"]), [
+            "Tests / test: ✗", "docs: skipped", "scan: neutral", "e2e: ✗", "nightly: no run yet", "slow: ●",
+            "build: ✓", "lint: ●", "pages: skipped"
+        ], "the latest run of each; a required one that ended skipped or neutral holds it as a red one does; one that "
+            + "isn't required may still run or be skipped")
+        XCTAssertEqual(BoardStages.checks(checks, required: ["nightly", "build", "Tests / test", "docs", "scan", "slow"]),
+                       .failed(["Tests / test", "docs", "scan", "e2e"]), "the phrase names those listed first")
+        XCTAssertEqual(named([check("docs", .skipped), check("lint", .pending), check("build", .success)], []),
+                       ["lint: ●", "docs: skipped", "build: ✓"], "without a required check, every one that runs is waited for")
     }
 
     // MARK: - Queue
@@ -435,6 +447,11 @@ final class BoardStagesFactsTests: XCTestCase {
         var elsewhereToo = queue(.elsewhere)
         elsewhereToo.isConfirming = true
         let elsewhere = BoardStages.QueueList.locked("Another Nirux runs this repository’s queue: wait until it ends.")
+        var runningToo = queue(.running(isStopping: false), [entry(12, step: .merging(head))])
+        runningToo.isConfirming = true
+        var endedToo = queue(.ended, [entry(12, step: stopped(.checks))], selection: [12])
+        endedToo.isConfirming = true
+        let sheet = BoardStages.QueueList.locked("The confirmation sheet is open: change the list once it closes.")
         let lists: [(ProjectBoard.QueueState, BoardStages.QueueList, String)] = [
             (queue(.none), .open, "no queue ran"),
             (queue(.ended, [entry(12, step: stopped(.checks))]), .open, "the last queue ended"),
@@ -442,8 +459,9 @@ final class BoardStagesFactsTests: XCTestCase {
             (queue(.running(isStopping: true)), whileRunning, "until it has stopped"),
             (queue(.elsewhere), elsewhere, "another Nirux runs it"),
             (elsewhereToo, elsewhere, "what ends last is said"),
-            (confirming, .locked("The confirmation sheet is open: change the list once it closes."),
-             "the sheet shows the list as it was when it opened")
+            (runningToo, whileRunning, "the queue outlasts its sheet"),
+            (confirming, sheet, "the sheet shows the list as it was when it opened"),
+            (endedToo, sheet, "for what the last queue stopped on too")
         ]
         for (state, list, why) in lists {
             XCTAssertEqual(BoardStages.queue(of: 12, head: head, in: state).list, list, why)
@@ -456,8 +474,12 @@ final class BoardStagesFactsTests: XCTestCase {
         dryRun.isDryRun = true
         XCTAssertEqual(BoardStages.queue(of: 12, head: head, in: dryRun).dryRun, "Dry run: this build doesn’t change GitHub.")
         dryRun.dryRunReason = "not the notarized release"
-        XCTAssertEqual(BoardStages.queue(of: 99, head: head, in: dryRun).dryRun,
-                       "Dry run: this build doesn’t change GitHub.\nThis build: not the notarized release.")
+        let why = "Dry run: this build doesn’t change GitHub. This build: not the notarized release."
+        XCTAssertEqual(BoardStages.queue(of: 99, head: head, in: dryRun).dryRun, why, "on one line: the phrase's tooltip says it")
+        dryRun.run = .running(isStopping: false)
+        dryRun.entries = [entry(12, step: .merging(head))]
+        dryRun.isConfirming = true
+        XCTAssertEqual(BoardStages.queue(of: 12, head: head, in: dryRun).dryRun, why, "whatever the queue does with it")
 
         // Why the queue's own rule keeps a pull request out of the list, as far as the Board knows without a call.
         let place = ProjectBoard.StackPlace(parent: 11, chain: [11, 12], rootBase: "main", mergedBase: nil, root: 11, order: 1)
@@ -478,6 +500,34 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertNil(onRelease.lines[0].queue.refusal, "by the section's base branch")
         let cloud = facts([row("cloud", pullRequest: pullRequest(14, "cloud", draft: true), path: nil)], queue: queue(.none, selection: [14]))
         XCTAssertEqual(cloud.lines[0].queue, BoardStages.Queue(list: .open, order: 1, refusal: "draft"), "a pull request without a task too")
+        let merged = facts([row(workspaces: ["task"], pullRequest: pullRequest(9, state: "MERGED"))], queue: queue(.none))
+        XCTAssertNil(merged.lines[0].queue.refusal, "nothing is asked of a merged one")
+    }
+
+    func testAMergedPullRequestHasNoPlaceInTheNextStart() {
+        // Merged by hand while in the list, which keeps it until Start: the others count without it.
+        let listed = queue(.none, selection: [12, 13, 14])
+        let rows = [
+            row(workspaces: ["task"], pullRequest: pullRequest(12, state: "MERGED")),
+            row("next", workspaces: ["next"], pullRequest: pullRequest(13, "next"), path: "/p/widgets.next"),
+            row("last", pullRequest: pullRequest(14, "last"), path: nil)
+        ]
+        let byHand = facts(rows, tasks: ["task", "next"], queue: listed)
+        XCTAssertEqual(byHand.lines.map(\.queue.order), [nil, 1, 2], "the row's merged pull request")
+        // Its worktree moved on, or is gone: the merged list still says so.
+        let gone = facts(Array(rows.dropFirst()), tasks: ["next"], queue: listed, merged: [pullRequest(12, state: "MERGED")])
+        XCTAssertEqual(gone.lines.map(\.queue.order), [1, 2])
+        XCTAssertEqual(BoardStages.queue(of: 13, head: head, in: listed, merged: [12]).order, 1)
+        XCTAssertEqual(BoardStages.queue(of: 13, head: head, in: listed).order, 2, "as far as the Board knows")
+        // The task's own detection found it, beyond the merged list: no place either.
+        var detected = BoardStages.TaskReading()
+        detected.mergedPullRequest = 12
+        let found = facts([row(workspaces: ["task"])], reading: detected, queue: listed).lines[0]
+        XCTAssertEqual(found.pullRequest?.number, 12)
+        XCTAssertNil(found.queue.order)
+        // While a queue runs, its own count stands.
+        let running = queue(.running(isStopping: false), [entry(12, step: .waiting), entry(13, "next")], selection: [12, 13])
+        XCTAssertEqual(BoardStages.queue(of: 13, head: head, in: running, merged: [12]).order, 2)
     }
 
     // MARK: - Merged today

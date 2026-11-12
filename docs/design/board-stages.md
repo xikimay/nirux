@@ -269,8 +269,9 @@ read. Pure; nothing is read again.
 - **The queue.** In the queue shown while it runs, here or in another Nirux,
   a pull request's place is the queue's own ("3 of 7") and its step shows; its
   number stays through the post-merge wait, and goes once the queue is through
-  with it. Else its place is the next Start's, counted without those the queue
-  merged.
+  with it. Else its place is the next Start's, counted without those that
+  merged: by the queue, or as the merged list or a row says (by hand, say).
+  The list holds those until Start, whose sheet drops them.
 - **A queue's stop** a push answers (its checks, a conflict, a merge or an
   update that failed, commits not pushed, a busy agent) is over once the pull
   request's head moved. The others stay until the next Start: "changed" is
@@ -301,27 +302,41 @@ yet: a click on a line still opens its task, wherever it lands.
   - **Refused**, in the queue's own words (`ProjectBoard.queueRefusal`):
     "Can’t join the queue: draft", another base ("after #52", "targets
     release"), a conflict, an agent at work in its worktree. One already in
-    the list can still leave it.
+    the list can still leave it. Only what the queue's rule refuses without
+    a call: a red check or a review GitHub asks for keeps nothing out of the
+    list, and the Start sheet checks the rest.
   - **Locked** while a queue runs, here or in another Nirux, and while the
     confirmation sheet is open: the sheet shows the list as it was when it
     opened. The station says which.
   - **Nothing to click** without an open pull request, and in a repository
-    without a merge queue (one not saved in Board Settings).
-- **Retarget** is the merge queue's repository's to run. Without one, the
-  phrase reads "Base #52 merged", with no link. In a build that can't change
-  GitHub (a dry run), the link is there and does nothing: the phrase's tooltip
-  says why.
+    that isn't saved in Board Settings, which has no merge queue.
+- **Retarget** is the Board's own call to GitHub, not the queue's: a queue
+  that runs, or that holds the pull request, changes nothing to it.
+  - In a repository that isn't saved, the phrase reads "Base #52 merged",
+    without what nothing here can do.
+  - In a build that can't change GitHub (a dry run), the words stay, as what
+    to do, and are no link: the phrase's tooltip says why.
+  - The link is the phrase's. A line that says something more pressing (a red
+    check, an agent at work) has none: its Merge station says "Can’t join
+    the queue: base #52 merged", and Retarget will be in its menu.
+- **A link says what its click does** under the pointer: "Bases #53 on main,
+  as GitHub does when a merged branch is deleted"; "Checks the worktree, then
+  asks what goes".
 - **Under the pointer**, what the line can't hold:
   - its title: the task's branch and worktree ("feat/login ·
     /Users/me/app.feat-login"), with "main checkout", "not checked out" or
     "folder is gone" where it applies;
-  - Reviews: each pass that ran, "Code review ran before the last commits",
+  - Reviews: each pass that ran, "Code review ran on another commit",
     "Premortem ran on this commit", "Adversarial review running" (no commit
     is named while HEAD isn't known), and each pass asked for that didn't,
-    "No code review yet";
-  - Checks: the latest run of each check by name, with its result: the red
-    ones first, then the required ones no check reported ("nightly: no run
-    yet"), those that run, then the rest; twelve, then "and 5 more";
+    "No code review yet". Another commit, not an earlier one: HEAD may have
+    moved back;
+  - Checks: the latest run of each check by name, with its result, in the
+    order the station counts them: those that hold the pull request (the red
+    ones, a required one that ended skipped or neutral), the required ones
+    no check reported ("nightly: no run yet"), those it waits for, then the
+    rest. Twelve, then "and 5 more"; a name is cut at 80 characters, before
+    its result;
   - Merge: what a click does, "Add to Queue" or "Remove from Queue", or why
     it does nothing;
   - its pull request: its stack ("Stack: #52 → #53 → #54, on main") and its

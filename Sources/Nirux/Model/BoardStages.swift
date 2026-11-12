@@ -78,14 +78,23 @@ extension BoardStages {
             case .cleanUp: return "Clean up"
             }
         }
+
+        /// What a click does, for the link's tooltip.
+        var hint: String {
+            switch self {
+            case .retarget(let number, let onto):
+                return "Bases #\(number) on \(BoardStages.text(onto) ?? onto), as GitHub does when a merged branch is deleted"
+            case .cleanUp:
+                return "Checks the worktree, then asks what goes"
+            }
+        }
     }
 
     struct Phrase: Equatable, Sendable {
         var text: String
-        /// `text` ends with its title.
+        /// `text` ends with its title. Nil where a click would do
+        /// nothing: the words stay, and `detail` says why.
         var link: Link?
-        /// Why the link does nothing in this build, for its tooltip.
-        var linkBlocked: String?
         /// What the line can't hold, for its tooltip.
         var detail: String?
     }
@@ -98,6 +107,8 @@ extension BoardStages {
         }
 
         var change: Change
+        /// The pull request it is about.
+        var number: Int
         /// Why a click changes nothing: the pull request can't join, or
         /// the list can't change for now.
         var blocked: String?
@@ -111,8 +122,8 @@ extension BoardStages {
         /// Where its work is: "feat/login · /Users/me/app.feat-login".
         var title: String?
         /// The stations that have something to add: Reviews, each pass
-        /// that ran and on which commit; Checks, each check by name;
-        /// Merge, what a click does.
+        /// that ran and whether on this commit; Checks, each check by
+        /// name; Merge, what a click does or why it does nothing.
         var stations: [Station: String] = [:]
         /// Its stack, its address.
         var pullRequest: String?
@@ -220,9 +231,16 @@ extension BoardStages {
         /// Its place in a stack (docs/design/pr-stacks.md).
         var stack: ProjectBoard.StackPlace?
         var url: String?
-        /// Each check with its result, those that hold it first:
-        /// "Tests / unit: ✗".
-        var checkLines: [String] = []
+        /// Each check with its result, those that hold it first.
+        var checkLines: [CheckLine] = []
+    }
+
+    /// A check as the Checks station's tooltip names it: "Tests / unit: ✗".
+    struct CheckLine: Equatable, Sendable {
+        /// As whoever posted the check named it.
+        var name: String
+        /// "✓", "✗", "●", "skipped", "no run yet".
+        var result: String
     }
 
     /// What the running queue does with a pull request.
@@ -251,8 +269,9 @@ extension BoardStages {
 
     /// The next Start's list, as far as the user can change it.
     enum QueueList: Equatable, Sendable {
-        /// The repository has no merge queue: nothing to join, and no
-        /// Retarget, which the queue's client runs.
+        /// The repository isn't saved in Board Settings: no merge queue
+        /// to join, and nothing here changes its pull requests (no
+        /// Retarget).
         case none
         case open
         /// A queue runs, or its confirmation sheet is open: why, in a
@@ -274,7 +293,7 @@ extension BoardStages {
         /// Why its pull request can't join the list, as the queue's own
         /// rule says it in a word or two ("draft", "after #52"). Nil: it can.
         var refusal: String?
-        /// Why this build's queue changes nothing on GitHub: no Retarget.
+        /// Why this build changes nothing on GitHub: no Retarget.
         var dryRun: String?
     }
 
@@ -284,8 +303,9 @@ extension BoardStages {
         /// when it has none.
         var id: String
         var title: String
-        /// Its branch and its folder, for the title's tooltip.
-        var location: String?
+        /// Where its work is, for the title's tooltip: its branch, its
+        /// worktree or folder, what there is to know of them.
+        var location: [String] = []
         /// False for a task without a repository: no rail.
         var hasRepository = true
         /// False for a pull request with no workspace here: no agent, and
@@ -406,11 +426,14 @@ extension BoardStages {
         switch facts.queue.list {
         case .none: return nil
         case .open: lock = nil
-        case .locked(let why): lock = why
+        case .locked(let why): lock = text(why) ?? why
         }
-        if facts.queue.order != nil { return QueueOffer(change: .remove, blocked: lock) }
-        if let refusal = text(facts.queue.refusal) { return QueueOffer(change: .add, blocked: "Can’t join the queue: \(refusal)") }
-        return QueueOffer(change: .add, blocked: lock)
+        let number = pullRequest.number
+        if facts.queue.order != nil { return QueueOffer(change: .remove, number: number, blocked: lock) }
+        if let refusal = text(facts.queue.refusal) {
+            return QueueOffer(change: .add, number: number, blocked: "Can’t join the queue: \(refusal)")
+        }
+        return QueueOffer(change: .add, number: number, blocked: lock)
     }
 
     /// This many checks under the pointer, then how many more: a tooltip
@@ -418,29 +441,38 @@ extension BoardStages {
     static let checkLinesShown = 12
 
     private static func tooltips(of facts: Facts, rail: Rail?, offer: QueueOffer?, rules: Rules) -> Tooltips {
-        var tooltips = Tooltips(title: text(facts.location))
+        // Each part cleaned alone: a long path doesn't cut what follows it.
+        let location = facts.location.compactMap { text($0) }
+        var tooltips = Tooltips(title: location.isEmpty ? nil : location.joined(separator: " · "))
         guard let rail else { return tooltips }
         if rail.marks[Station.reviews.rawValue] != .skipped {
             tooltips.stations[.reviews] = reviewsTooltip(facts, rules: rules)
         }
         if let pullRequest = facts.pullRequest {
-            let checks = pullRequest.checkLines.compactMap(text)
-            if !checks.isEmpty {
-                // "and 1 more" would take the line of the check it stands for.
-                let shown = checks.count == checkLinesShown + 1 ? checks.count : checkLinesShown
-                let more = checks.count - shown
-                tooltips.stations[.checks] = (checks.prefix(shown) + (more > 0 ? ["and \(more) more"] : [])).joined(separator: "\n")
-            }
-            let address = [pullRequest.stack?.tooltip, text(pullRequest.url)].compactMap { $0 }
+            tooltips.stations[.checks] = checksTooltip(pullRequest.checkLines)
+            // A stack's branches are named on GitHub, as its address is given there.
+            let address = [text(pullRequest.stack?.tooltip), text(pullRequest.url)].compactMap { $0 }
             tooltips.pullRequest = address.isEmpty ? nil : address.joined(separator: "\n")
         }
         tooltips.stations[.merge] = offer.map { $0.blocked ?? $0.title }
         return tooltips
     }
 
-    /// Each pass that ran, and on which commit; a required one that didn't.
-    private static func reviewsTooltip(_ facts: Facts, rules: Rules) -> String? {
-        let lines = ReviewPass.allCases.compactMap { pass -> String? in
+    /// The first checks by name, each name cleaned and cut before its
+    /// result, so a long one still says how it ended.
+    private static func checksTooltip(_ lines: [CheckLine]) -> String? {
+        guard !lines.isEmpty else { return nil }
+        // "and 1 more" would take the line of the check it stands for.
+        let shown = lines.count == checkLinesShown + 1 ? lines.count : checkLinesShown
+        let named = lines.prefix(shown).map { "\(AgentText.clean($0.name, maxLength: 80) ?? "unnamed check"): \($0.result)" }
+        let more = lines.count - shown
+        return (named + (more > 0 ? ["and \(more) more"] : [])).joined(separator: "\n")
+    }
+
+    /// Each pass that ran, and whether on this commit; a required one
+    /// that didn't. The station is drawn, so a pass is asked for.
+    private static func reviewsTooltip(_ facts: Facts, rules: Rules) -> String {
+        ReviewPass.allCases.compactMap { pass -> String? in
             let name = pass.displayName
             guard let reviews = facts.reviews, reviews.runs[pass] != nil else {
                 return rules.requiredReviews.contains(pass) ? "No \(name.lowercased()) yet" : nil
@@ -448,9 +480,9 @@ extension BoardStages {
             if facts.reviewsInFlight.contains(pass) { return "\(name) running" }
             // While HEAD isn't known, nothing says which commit it ran on.
             if reviews.head == nil { return "\(name) ran" }
-            return reviews.isFresh(pass) ? "\(name) ran on this commit" : "\(name) ran before the last commits"
-        }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+            // Another commit, not an earlier one: HEAD may have moved back.
+            return reviews.isFresh(pass) ? "\(name) ran on this commit" : "\(name) ran on another commit"
+        }.joined(separator: "\n")
     }
 
     /// "#52", "#53 · 2/3" in a straight stack, "#53 · on #52" in a fork.
@@ -469,12 +501,9 @@ extension BoardStages {
         var phrase: Phrase
         var since: TimeInterval?
 
-        init(
-            _ state: State, _ text: String, since: TimeInterval? = nil, link: Link? = nil, linkBlocked: String? = nil,
-            detail: String? = nil
-        ) {
+        init(_ state: State, _ text: String, since: TimeInterval? = nil, link: Link? = nil, detail: String? = nil) {
             self.state = state
-            phrase = Phrase(text: text, link: link, linkBlocked: linkBlocked, detail: detail)
+            phrase = Phrase(text: text, link: link, detail: detail)
             self.since = since
         }
     }
@@ -528,13 +557,13 @@ extension BoardStages {
             }
             // Whatever its station: nothing lands on a merged branch.
             if let merged = pullRequest.stack?.mergedBase {
-                // Without a merge queue, nothing here can move it.
+                // A repository that isn't saved has nothing here to move it.
                 guard facts.queue.list != .none else { return Reading(.idle, "Base #\(merged.number) merged", since: last) }
                 let link = Link.retarget(number: pullRequest.number, onto: merged.onto)
+                // A build that can't change GitHub says what to do, and why its words are no link.
+                let dryRun = text(facts.queue.dryRun)
                 return Reading(
-                    .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: link, linkBlocked: text(facts.queue.dryRun),
-                    detail: "#\(merged.number) is merged: base #\(pullRequest.number) on \(merged.onto), "
-                        + "as GitHub does when a merged branch is deleted"
+                    .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: dryRun == nil ? link : nil, detail: dryRun
                 )
             }
             let parent = pullRequest.stack?.parent

@@ -66,11 +66,15 @@ extension BoardStages {
         for row in repository.rows {
             for workspace in row.workspaces { places[workspace.id] = (row, workspace) }
         }
+        // Merged, as the list or a row says: no place in the next Start's list.
+        let merged = Set((repository.merged + repository.rows.compactMap(\.pullRequest)).filter { $0.state == "MERGED" }.map(\.number))
         var lines: [Facts] = []
         var listed = Set<String>()
         for id in tasks {
             guard let place = places[id], listed.insert(id).inserted else { continue }
-            lines.append(task(id, reading: readings[id] ?? TaskReading(), workspace: place.workspace, row: place.row, in: repository))
+            lines.append(task(
+                id, reading: readings[id] ?? TaskReading(), workspace: place.workspace, row: place.row, in: repository, merged: merged
+            ))
         }
         var shown = Set(lines.compactMap(\.pullRequest?.number))
         for row in repository.rows {
@@ -79,7 +83,7 @@ extension BoardStages {
             var facts = Facts(id: "\(repository.id)#\(pullRequest.number)", title: text(pullRequest.title) ?? row.branch ?? "")
             facts.location = location(of: row)
             facts.hasTask = false
-            facts.queue = queue(of: row, pullRequest, in: repository)
+            facts.queue = queue(of: row, pullRequest, in: repository, merged: merged)
             facts.pullRequest = self.pullRequest(pullRequest, stack: row.stack, in: repository)
             lines.append(facts)
         }
@@ -99,7 +103,7 @@ extension BoardStages {
 
     private static func task(
         _ id: String, reading: TaskReading, workspace: ProjectBoard.WorkspaceRef, row: ProjectBoard.Row,
-        in repository: RepositoryReading
+        in repository: RepositoryReading, merged: Set<Int>
     ) -> Facts {
         var facts = Facts(id: id, title: workspace.title)
         facts.location = location(of: row)
@@ -122,12 +126,12 @@ extension BoardStages {
         facts.flakyReason = isAboutRow ? reading.flakyReason : nil
         guard facts.hasRepository else { return facts }
         if let pullRequest = row.pullRequest {
-            facts.queue = queue(of: row, pullRequest, in: repository)
+            facts.queue = queue(of: row, pullRequest, in: repository, merged: merged)
             facts.pullRequest = self.pullRequest(
                 pullRequest, stack: row.stack, in: repository, reviewRequest: isAboutRow ? reading.reviewRequest : nil
             )
         } else if let number = mergedNumber(of: row, detected: isAboutRow ? reading.mergedPullRequest : nil, in: repository) {
-            facts.queue = queue(of: number, head: nil, in: repository.queue)
+            facts.queue = queue(of: number, head: nil, in: repository.queue, merged: merged.union([number]))
             let read = repository.merged.first { $0.number == number }
             facts.pullRequest = PullRequest(
                 number: number, isMerged: true, base: read?.baseRefName ?? repository.baseBranch ?? "", checks: .passed, url: read?.url
@@ -160,9 +164,9 @@ extension BoardStages {
         return detected
     }
 
-    /// "feat/login · /Users/me/app.feat-login": the row's branch and its
+    /// "feat/login", "/Users/me/app.feat-login": the row's branch and its
     /// worktree, or its folder.
-    private static func location(of row: ProjectBoard.Row) -> String {
+    private static func location(of row: ProjectBoard.Row) -> [String] {
         var parts: [String] = []
         if row.group == .main { parts.append("main checkout") }
         if let branch = row.branch {
@@ -173,7 +177,7 @@ extension BoardStages {
         if let path = row.worktreePath ?? row.folder { parts.append(path) }
         if row.folderIsGone { parts.append("folder is gone") }
         if row.worktreePath == nil, row.folder == nil { parts.append("not checked out") }
-        return parts.joined(separator: " · ")
+        return parts
     }
 
     // MARK: A pull request
@@ -188,25 +192,39 @@ extension BoardStages {
         // A base gh didn't name holds nothing back, as for the queue.
         let isOnBaseBranch = repository.baseBranch == nil || pullRequest.baseRefName == nil
             || pullRequest.baseRefName == repository.baseBranch
+        // Merged: its checks no longer hold anything, and none is named.
+        let latest = isMerged ? [] : ProjectBoard.latest(pullRequest.checks)
         return PullRequest(
             number: pullRequest.number, isMerged: isMerged, isDraft: pullRequest.isDraft, isConflicting: pullRequest.isConflicting,
             base: pullRequest.baseRefName ?? repository.baseBranch ?? "", isOnBaseBranch: isOnBaseBranch,
-            checks: isMerged ? .passed : checks(pullRequest.checks, required: repository.requiredChecks),
+            checks: isMerged ? .passed : checks(latest: latest, required: repository.requiredChecks),
             reviewRequest: reviewRequest, stack: stack, url: pullRequest.url,
-            checkLines: isMerged ? [] : checkLines(pullRequest.checks, required: repository.requiredChecks)
+            checkLines: isMerged ? [] : checkLines(latest: latest, required: repository.requiredChecks)
         )
     }
 
     /// Each check's latest run by name, with its result as the Board
-    /// writes it: the red ones first, then the required ones no check
-    /// reported, then those that run, then the rest.
-    static func checkLines(_ checks: [ProjectBoard.Check], required: [String]) -> [String] {
-        let latest = ProjectBoard.latest(checks)
-        let lines = { (result: ProjectBoard.CheckResult) in
-            latest.filter { $0.result == result }.map { "\($0.qualifiedName ?? $0.name): \(ProjectBoard.glyph($0.result))" }
+    /// writes it, in the order `checks` counts them: those that hold
+    /// the pull request (the red ones, and a required one that ended
+    /// skipped or neutral), the required ones no check reported, those
+    /// it waits for, then the rest as the rollup lists them.
+    static func checkLines(_ checks: [ProjectBoard.Check], required: [String]) -> [CheckLine] {
+        checkLines(latest: ProjectBoard.latest(checks), required: required)
+    }
+
+    private static func checkLines(latest: [ProjectBoard.Check], required: [String]) -> [CheckLine] {
+        let isRequired = { (check: ProjectBoard.Check) in required.contains { check.matches($0) } }
+        let holds = { (check: ProjectBoard.Check) in
+            check.result == .failure || (isRequired(check) && (check.result == .skipped || check.result == .neutral))
         }
-        let missing = required.filter { name in !latest.contains { $0.matches(name) } }.map { "\($0): no run yet" }
-        return lines(.failure) + missing + [.pending, .success, .neutral, .skipped].flatMap(lines)
+        // Without a required check, every one counts.
+        let isWaitedFor = { (check: ProjectBoard.Check) in check.result == .pending && (required.isEmpty || isRequired(check)) }
+        let line = { (check: ProjectBoard.Check) in
+            CheckLine(name: check.qualifiedName ?? check.name, result: ProjectBoard.glyph(check.result))
+        }
+        let missing = required.filter { name in !latest.contains { $0.matches(name) } }.map { CheckLine(name: $0, result: "no run yet") }
+        return latest.filter(holds).map(line) + missing + latest.filter(isWaitedFor).map(line)
+            + latest.filter { !holds($0) && !isWaitedFor($0) }.map(line)
     }
 
     /// The rollup's checks, by the merge queue's rules (`MergeQueue.judge`;
@@ -217,7 +235,10 @@ extension BoardStages {
     /// As far as the rollup tells: it doesn't say a commit status from a
     /// check run, nor two workflows of one name apart (Known limits).
     static func checks(_ checks: [ProjectBoard.Check], required: [String]) -> Checks {
-        let latest = ProjectBoard.latest(checks)
+        self.checks(latest: ProjectBoard.latest(checks), required: required)
+    }
+
+    private static func checks(latest: [ProjectBoard.Check], required: [String]) -> Checks {
         guard !latest.isEmpty || !required.isEmpty else { return .absent }
         let name = { (check: ProjectBoard.Check) in check.qualifiedName ?? check.name }
         var failed: [String] = []
@@ -256,8 +277,10 @@ extension BoardStages {
     /// on GitHub now, when the Board knows it.
     /// - In the queue shown while it runs, here or in another Nirux, its
     ///   place is the queue's own ("3 of 7") until the queue is through
-    ///   with it. Else its place is the next Start's, among those the
-    ///   queue hasn't merged: one it merged has none.
+    ///   with it. Else its place is the next Start's, among those that
+    ///   haven't merged: one the queue merged has none, nor one of
+    ///   `merged`, the numbers the Board reads as merged (by hand, say).
+    ///   The list still holds them until Start, whose sheet drops them.
     /// - A stop a push answers (its checks, a conflict, a merge or an
     ///   update that failed, commits not pushed, a busy agent) is over
     ///   once the head moved. The others stay until the next Start:
@@ -266,13 +289,13 @@ extension BoardStages {
     /// - The list is the user's to change unless a queue runs, here or
     ///   in another Nirux, or its confirmation sheet is open: the sheet
     ///   shows the list as it was when it opened.
-    static func queue(of number: Int, head: String?, in state: ProjectBoard.QueueState?) -> Queue {
+    static func queue(of number: Int, head: String?, in state: ProjectBoard.QueueState?, merged: Set<Int> = []) -> Queue {
         guard let state else { return Queue() }
-        let merged = Set(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
+        let merged = merged.union(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
         let proposed = state.selection.filter { !merged.contains($0) }.firstIndex(of: number).map { $0 + 1 }
         var queue = Queue(list: listLock(state).map(QueueList.locked) ?? .open, order: proposed)
         if state.isDryRun {
-            queue.dryRun = "Dry run: this build doesn’t change GitHub." + (state.dryRunReason.map { "\nThis build: \($0)." } ?? "")
+            queue.dryRun = "Dry run: this build doesn’t change GitHub." + (state.dryRunReason.map { " This build: \($0)." } ?? "")
         }
         guard let index = state.entries.firstIndex(where: { $0.number == number }) else { return queue }
         let entry = state.entries[index]
@@ -298,12 +321,14 @@ extension BoardStages {
         return queue
     }
 
-    /// What the queue says of a row's pull request, and why the queue's
-    /// rule keeps it out of the list, as far as the Board knows without
-    /// a call (`ProjectBoard.queueRefusal`).
-    private static func queue(of row: ProjectBoard.Row, _ pullRequest: ProjectBoard.PullRequest, in repository: RepositoryReading) -> Queue {
-        var queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue)
-        queue.refusal = ProjectBoard.queueRefusal(row, baseBranch: repository.baseBranch)
+    /// What the queue says of a row's pull request, and, of an open
+    /// one, why the queue's rule keeps it out of the list, as far as the
+    /// Board knows without a call (`ProjectBoard.queueRefusal`).
+    private static func queue(
+        of row: ProjectBoard.Row, _ pullRequest: ProjectBoard.PullRequest, in repository: RepositoryReading, merged: Set<Int>
+    ) -> Queue {
+        var queue = queue(of: pullRequest.number, head: pullRequest.headOid, in: repository.queue, merged: merged)
+        queue.refusal = pullRequest.isOpen ? ProjectBoard.queueRefusal(row, baseBranch: repository.baseBranch) : nil
         return queue
     }
 
