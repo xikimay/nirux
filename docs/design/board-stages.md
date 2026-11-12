@@ -312,8 +312,9 @@ screen.
 - **"Merging" also shows** while the queue waits for a run on the base before
   it merges, as in the table.
 - **"Merged today" lists what the Board read**: the 100 merged pull requests
-  opened last ([project-board.md](project-board.md), section 6). One opened
-  before those and merged today isn't on it.
+  updated last ([project-board.md](project-board.md), section 6). One merged
+  today is missing only once 100 merged pull requests were updated after it:
+  merged, commented on, or their branch deleted.
 - **Checks are read from the pull request's rollup**, which doesn't say a
   commit status from a check run, nor two workflows of one name apart. A
   required check that only a commit status reports reads green here, while the

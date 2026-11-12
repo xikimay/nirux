@@ -219,10 +219,16 @@ final class ProjectBoardGitHubTests: XCTestCase {
              "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,"
                 + "mergeable,statusCheckRollup,url,title"]
         )
+        // The merged ones by their last update, which `gh pr list` can't ask for: one GraphQL query,
+        // with the fields under the names `gh pr list` gives them.
         XCTAssertEqual(
             GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .merged),
-            ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "merged", "--limit", "100", "--json",
-             "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,url,title,mergedAt"]
+            ["api", "graphql", "--hostname", "github.com", "-f",
+             "query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { "
+                + "pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { "
+                + "number state headRefName headRefOid headRepositoryOwner { login } headRepository { name } baseRefName url "
+                + "title mergedAt } } } }",
+             "-f", "owner=acme", "-f", "name=widgets", "--jq", ".data.repository.pullRequests.nodes"]
         )
         XCTAssertEqual(
             GitHubCLIBoardClient.runArguments(repository: "acme/widgets", workflow: "nightly.yml", branch: "main"),

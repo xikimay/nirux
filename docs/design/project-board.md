@@ -979,15 +979,19 @@ What the board adds:
   headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,mergeable,
   statusCheckRollup,url,title`. It costs about 2 GraphQL points (measured with
   `rateLimit(dryRun: true)` on 2026-09-27). The 100 merged pull requests
-  opened last (`--state merged --limit 100`, with their `title` and
-  `mergedAt`; 1 GraphQL point, about 48 kB, measured on 2026-11-12) are read
-  every 10 minutes, and as soon as a pull request leaves the open list. They
-  only say something of what is still at them: a worktree at one's head reads
-  "merged, clean up"; and an open pull request based on the branch of one of
-  the 30 opened last is a stack on a merged base
-  ([stacked pull requests](pr-stacks.md)). gh lists them by creation: one
-  opened before those 100 and merged now is not read, so its worktree stays a
-  branch without a pull request.
+  updated last, with their `title` and `mergedAt`, are read every 10 minutes,
+  and as soon as a pull request leaves the open list. A merge is an update, so
+  one that waited a week is read when it merges; `gh pr list` lists by
+  creation, where it would be behind every pull request opened since. Hence
+  one GraphQL query through `gh api graphql`: `repository.pullRequests(states:
+  MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC})`, the
+  fields named as `gh pr list` names them (1 GraphQL point, about 39 kB,
+  0.85 s, measured on 2026-11-12). It is GitHub's own list, not a search: as
+  up to date as the open one, and outside the search rate limit. The merged
+  pull requests only say something of what is still at them: a worktree at
+  one's head reads "merged, clean up"; and an open pull request based on the
+  branch of one of the 30 opened last among them is a stack on a merged base
+  ([stacked pull requests](pr-stacks.md)).
 - **Its one change:** Retarget, `PATCH pulls/{n}` with a new base, on one
   click ([stacked pull requests](pr-stacks.md)).
 - **Cadence:** every 60 s while the board is on screen, 30 s while a row has

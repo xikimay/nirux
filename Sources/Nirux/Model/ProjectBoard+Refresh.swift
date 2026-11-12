@@ -8,8 +8,8 @@ extension ProjectBoard {
         case worktrees
         /// The batched `gh pr list --state open`.
         case openPullRequests
-        /// `gh pr list --state merged`, for the "merged, clean up" rows
-        /// and the stacks' merged bases.
+        /// The merged pull requests updated last, for the "merged, clean
+        /// up" rows and the stacks' merged bases.
         case mergedPullRequests
         /// The last run of the post-merge workflow on the base branch.
         case postMergeRun

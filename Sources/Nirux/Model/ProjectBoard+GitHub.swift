@@ -8,8 +8,8 @@ import Foundation
 /// inject a fake: GitHub's runners have `gh`, and a test must never reach
 /// the network.
 protocol ProjectBoardGitHub: Sendable {
-    /// `gh pr list` of `repository` (`owner/name`) as JSON: the open pull
-    /// requests with their checks, or the merged ones opened last.
+    /// The pull requests of `repository` (`owner/name`) as JSON: the open
+    /// ones with their checks, or the merged ones updated last.
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError>
     /// `gh run list` as JSON: the last push run of `workflow` on `branch`.
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError>
@@ -21,10 +21,11 @@ extension ProjectBoard {
     enum PullRequestList: Sendable {
         /// Up to 100 open pull requests, with their checks.
         case open
-        /// The 100 merged pull requests opened last, with their title and
-        /// merge date: a worktree still at one's head reads "merged, clean
-        /// up", and an open pull request based on the branch of one of the
-        /// last 30 is a stack on a merged base.
+        /// The 100 merged pull requests updated last, a merge being an
+        /// update, with their title and merge date: a worktree still at
+        /// one's head reads "merged, clean up", and an open pull request
+        /// based on the branch of one of the 30 opened last among them is
+        /// a stack on a merged base.
         case merged
     }
 
@@ -73,10 +74,15 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
         "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url", "title"
     ].joined(separator: ",")
-    static let mergedFields = [
-        "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository", "baseRefName", "url",
-        "title", "mergedAt"
-    ].joined(separator: ",")
+    /// The merged pull requests by their last update: one that waited a
+    /// week is read when it merges. (`gh pr list` lists by creation,
+    /// where it would be behind every pull request opened since.) Not a
+    /// search: the list is GitHub's own, as up to date as the open one.
+    /// The fields are named as `gh pr list` names them.
+    static let mergedQuery = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { "
+        + "pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { "
+        + "number state headRefName headRefOid headRepositoryOwner { login } headRepository { name } baseRefName url "
+        + "title mergedAt } } } }"
     static let runFields = "status,conclusion,headSha,createdAt,updatedAt,url"
 
     /// `--repo` names the host: a terminal's `GH_HOST` would otherwise
@@ -87,8 +93,11 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "open", "--limit", "100",
                     "--json", openFields]
         case .merged:
-            return ["pr", "list", "--repo", "github.com/\(repository)", "--state", "merged", "--limit", "100",
-                    "--json", mergedFields]
+            // Raw fields (`-f`): a repository named "123" stays a string.
+            let parts = repository.split(separator: "/", maxSplits: 1).map(String.init)
+            return ["api", "graphql", "--hostname", "github.com", "-f", "query=\(mergedQuery)",
+                    "-f", "owner=\(parts.first ?? "")", "-f", "name=\(parts.dropFirst().first ?? "")",
+                    "--jq", ".data.repository.pullRequests.nodes"]
         }
     }
 
