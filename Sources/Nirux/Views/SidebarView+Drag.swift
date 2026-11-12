@@ -69,7 +69,7 @@ extension SidebarView {
         workspaceDrag = drag
         var lastDragEvent: NSEvent?
 
-        while true {
+        tracking: while true {
             guard let event = window.nextEvent(
                 matching: Self.gestureEventMask,
                 until: Date(timeIntervalSinceNow: Self.eventTimeout),
@@ -77,7 +77,7 @@ extension SidebarView {
                 dequeue: true
             ) else {
                 // Timeout tick: bail if the gesture can no longer finish.
-                if !window.isVisible || NSEvent.pressedMouseButtons & 1 == 0 { break }
+                if !rowPressHolds(window) { break }
                 continue
             }
             switch event.type {
@@ -86,6 +86,20 @@ extension SidebarView {
                 dragMoved(event, drag: &drag)
                 workspaceDrag = drag
             case .periodic:
+                // A drag's own ticks keep the timeout above from ever
+                // coming. The button is up: its mouse-up is right behind
+                // this tick, or it went elsewhere (a modal, another app)
+                // and the drag would hold the sidebar's updates and the
+                // keyboard until the next click.
+                if !rowPressHolds(window) {
+                    guard window.nextEvent(
+                        matching: .leftMouseUp, until: Date(timeIntervalSinceNow: Self.eventTimeout),
+                        inMode: .eventTracking, dequeue: true
+                    ) != nil else { break tracking }
+                    finishWorkspaceDrag()
+                    deliverDrop(drag)
+                    return
+                }
                 // Keeps autoscroll running while the cursor holds still
                 // past the sidebar edge.
                 if drag.isDragging, let lastDragEvent {
@@ -221,7 +235,7 @@ extension SidebarView {
                 inMode: .eventTracking,
                 dequeue: true
             ) else {
-                if !window.isVisible || NSEvent.pressedMouseButtons & 1 == 0 { return }
+                if !rowPressHolds(window) { return }
                 continue
             }
             switch event.type {
@@ -341,8 +355,9 @@ extension SidebarView {
     }
 
     /// Tear down drag state/visuals, then repair whatever was suppressed
-    /// mid-drag: apply the deferred data update, or redo a skipped
-    /// layout()-driven rebuild.
+    /// mid-drag: apply the deferred data update, and make the rebuild
+    /// that was skipped if that update made none (the same data, under a
+    /// signature already stored: `animates`, the catch-up card).
     private func finishWorkspaceDrag() {
         let hadDragVisuals = dragDimView != nil
         workspaceDrag = nil
@@ -361,9 +376,7 @@ extension SidebarView {
             update(
                 profiles: deferred.profiles, workspaces: deferred.workspaces
             )
-        } else if rebuildSkippedDuringDrag {
-            rebuildContent()
         }
-        rebuildSkippedDuringDrag = false
+        if rebuildSkippedDuringDrag { rebuildContent() }
     }
 }
