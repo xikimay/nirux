@@ -176,25 +176,43 @@ clicked. The sizes are the mockup's.
 
 - **The space's header** stays in place: its colour and name, what it holds,
   its Lead's state and line, the order switch. Under it, the columns' titles,
-  each station's over its place on the rails.
+  each station's over its place on the rails. On a narrow Board the summary,
+  then the Lead, give way; the name is the last to.
 - **A section per repository** scrolls below: its name, `owner/name`, and its
   post-merge run's pill (or what went wrong reading it).
 - **A line** is 34 pt: its state's dot and its title, its rail, its phrase
   (amber or red when it needs a look, else grey), its pull request, its time.
-  The whole line is one target: a click opens the task.
+  The whole line is one target: a press and its release on it open the task.
+  A text that is cut shows whole under the pointer.
 - **The rail**: a filled dot for a station done, a larger one in the state's
   colour for the current one, a hollow one ahead, nothing where there is no
   Reviews station; solid up to the current station, dotted after. The queue's
-  number sits in a ring on Merge.
+  number sits in a ring on Merge, in the state's colour when the line is
+  there.
 - **A sub-task** sits in from its task, joined by an elbow; **a stack's** lines
   sit on a rail numbered in merge order, under the stack's title.
 - **Pull requests without a task** start folded, each time the Board opens,
   under a line that counts them.
-- **Merged today** wraps as the width asks. An entry whose task is still open
-  is a button that opens it.
-- **On a narrow Board** the time goes first, then the pull request, so the
-  title and the phrase keep 300 pt between them.
-- The lines are built again only when more than the clock changed.
+- **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
+  doesn't push the next repository off the Board. Each entry is its dot
+  (amber while its task needs the user), its title, then its number and time;
+  the title is what gives way. One whose task is still open opens it.
+- **It follows its content without building itself again.** A refresh that
+  only moves the clock touches the times that changed. A change of lines
+  updates them where they are: a line keeps its view as long as it is listed,
+  so a press in flight on it isn't lost.
+
+![The same Board at 600 pt](../images/board-stages-narrow.png)
+
+**On a narrow Board** the columns give way in this order, and never by a jump
+(widening the Board moves no rail back and shortens no title):
+
+- the task's column is two fifths of the Board, 280 pt at most, so a wide
+  Board doesn't push the rails away from the titles;
+- below about 760 pt the rail tightens, its stations closer, down to 116 pt at
+  600; a tight rail names its two ends only;
+- the phrase takes the rest; the pull request shows once the phrase keeps
+  180 pt beside it (from about 820 pt), then the time (from about 880 pt).
 
 ## Known limits
 

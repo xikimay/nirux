@@ -1,10 +1,10 @@
 import AppKit
 
-/// The Board as stages, drawn (docs/design/board-stages.md): the space's
-/// header with its Lead and the order switch, the stations' titles, then
-/// one section per repository: its lines, a sub-task under its task with
-/// an elbow, a stack of pull requests on a numbered rail, the pull
-/// requests without a task folded, and "Merged today".
+/// The Board as stages, drawn (docs/design/board-stages.md, section 5):
+/// the space's header with its Lead and the order switch, the stations'
+/// titles, then one section per repository: its lines, a sub-task under
+/// its task with an elbow, a stack of pull requests on a numbered rail,
+/// the pull requests without a task folded, and "Merged today".
 ///
 /// It only draws what `BoardStages.section` decided, and says what was
 /// clicked. Nothing shows it yet: the Board's column still holds the table.
@@ -52,9 +52,11 @@ final class BoardStagesView: NSView {
     private(set) var content: Content?
     /// The lines drawn, from the top, for the tests to click through.
     private(set) var lineViews: [BoardStagesLineView] = []
-    /// The sections whose pull requests without a task are unfolded. They
-    /// start folded each time the Board opens.
+    /// The sections whose pull requests without a task are unfolded, and
+    /// those whose "Merged today" shows every pull request. Both start
+    /// folded each time the Board opens.
     private(set) var unfolded: Set<String> = []
+    private(set) var unfoldedMerged: Set<String> = []
 
     let spaceDot = NSView()
     let nameLabel = NSTextField(labelWithString: "")
@@ -63,12 +65,14 @@ final class BoardStagesView: NSView {
     let leadLabel = NSTextField(labelWithString: "")
     let orderSwitch = NSSegmentedControl(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
     private let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
-    private let stationTitles = BoardStages.Station.allCases.map { NSTextField(labelWithString: BoardStagesView.title(of: $0)) }
+    let stationTitles = BoardStages.Station.allCases.map { NSTextField(labelWithString: BoardStagesView.title(of: $0)) }
     private let separator = NSView()
-    private let scrollView = NSScrollView()
-    private let documentView = FlippedView()
+    let scrollView = NSScrollView()
+    private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
+    private var sectionHeaders: [String: BoardStagesSectionHeaderView] = [:]
+    private var mergedViews: [String: BoardStagesMergedView] = [:]
 
     private enum Item {
         case sectionHeader(BoardStagesSectionHeaderView)
@@ -76,6 +80,16 @@ final class BoardStagesView: NSView {
         case caption(NSTextField)
         case fold(NSButton)
         case merged(BoardStagesMergedView)
+
+        var view: NSView {
+            switch self {
+            case .sectionHeader(let view): return view
+            case .line(let view): return view
+            case .caption(let view): return view
+            case .fold(let view): return view
+            case .merged(let view): return view
+            }
+        }
     }
 
     override var isFlipped: Bool { true }
@@ -91,11 +105,13 @@ final class BoardStagesView: NSView {
         leadDot.layer?.cornerRadius = Metrics.dot / 2
         nameLabel.font = Theme.Font.display
         nameLabel.textColor = Theme.Color.textPrimary
-        nameLabel.lineBreakMode = .byTruncatingTail
         for label in [summaryLabel, leadLabel] {
             label.font = Theme.Font.body
             label.textColor = Theme.Color.textTertiary
+        }
+        for label in [nameLabel, summaryLabel, leadLabel] {
             label.lineBreakMode = .byTruncatingTail
+            label.allowsExpansionToolTips = true
         }
         orderSwitch.controlSize = .small
         orderSwitch.font = Theme.Font.caption
@@ -112,6 +128,9 @@ final class BoardStagesView: NSView {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        // As the sidebar: a scroller that takes no width, so the lines
+        // keep the titles' columns whatever the Mac's setting.
+        scrollView.scrollerStyle = .overlay
         scrollView.documentView = documentView
         ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
             .forEach(addSubview)
@@ -122,35 +141,87 @@ final class BoardStagesView: NSView {
 
     // MARK: - Content
 
-    /// Draws `content`. The lines are built again only when more than the
-    /// clock changed.
+    /// Draws `content`. A refresh that only moves the clock touches the
+    /// times that changed and nothing else; one that changes lines updates
+    /// them where they are, so a line keeps its view (a press in flight,
+    /// its tooltip) as long as it is listed.
     func show(_ content: Content) {
         guard content != self.content else { return }
         let previous = self.content
         self.content = content
+        guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections else {
+            return showTimes()
+        }
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
-        leadDot.isHidden = content.header.lead == nil
-        leadLabel.isHidden = content.header.lead == nil
         leadDot.layer?.backgroundColor = content.header.lead.map { Self.color(of: $0.state).cgColor }
         leadLabel.stringValue = content.header.lead?.text ?? ""
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
-        if content.sections != previous?.sections {
-            buildItems()
-        }
-        lineViews.forEach { $0.showTime(now: content.now) }
+        if content.sections != previous?.sections { buildItems() }
+        showTimes()
         layoutContent()
     }
 
+    private func showTimes() {
+        guard let now = content?.now else { return }
+        lineViews.forEach { $0.showTime(now: now) }
+    }
+
+    /// The scrolling area's items for the sections shown. A line, a
+    /// repository's header and its "Merged today" keep their view from one
+    /// content to the next, by id.
     private func buildItems() {
-        documentView.subviews.forEach { $0.removeFromSuperview() }
-        items = []
-        lineViews = []
-        for section in content?.sections ?? [] {
-            let header = BoardStagesSectionHeaderView(title: section.title, detail: section.detail, status: section.status)
+        let sections = content?.sections ?? []
+        let ids = Set(sections.map(\.id))
+        unfolded.formIntersection(ids)
+        unfoldedMerged.formIntersection(ids)
+        var reusable = Dictionary(lineViews.map { ($0.line.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var items: [Item] = []
+        var lines: [BoardStagesLineView] = []
+        var headers: [String: BoardStagesSectionHeaderView] = [:]
+        var mergeds: [String: BoardStagesMergedView] = [:]
+        func add(_ line: BoardStages.Line, link: BoardStagesLineView.Link) {
+            let view: BoardStagesLineView
+            if let kept = reusable.removeValue(forKey: line.id) {
+                kept.update(line, link: link)
+                view = kept
+            } else {
+                let made = BoardStagesLineView(line, link: link)
+                made.onClick = { [weak self, weak made] in
+                    guard let self, let made else { return }
+                    self.onOpen?(made.line.id)
+                }
+                view = made
+            }
+            lines.append(view)
+            items.append(.line(view))
+        }
+        func add(_ unit: BoardStages.Unit) {
+            switch unit {
+            case .task(let task, let subtasks):
+                add(task, link: subtasks.isEmpty ? .none : .head)
+                for (index, subtask) in subtasks.enumerated() {
+                    add(subtask, link: .subtask(isLast: index == subtasks.count - 1))
+                }
+            case .stack(let title, let stacked):
+                let caption = NSTextField(labelWithString: title)
+                caption.font = Theme.Font.caption
+                caption.textColor = Theme.Color.textTertiary
+                caption.lineBreakMode = .byTruncatingTail
+                caption.allowsExpansionToolTips = true
+                items.append(.caption(caption))
+                for (index, line) in stacked.enumerated() {
+                    add(line, link: .stack(number: index + 1, isLast: index == stacked.count - 1))
+                }
+            }
+        }
+        for section in sections {
+            let header = sectionHeaders[section.id] ?? BoardStagesSectionHeaderView()
+            header.show(title: section.title, detail: section.detail, status: section.status)
+            headers[section.id] = header
             items.append(.sectionHeader(header))
-            section.lines.units.forEach(append)
+            section.lines.units.forEach(add)
             let withoutTask = section.lines.withoutTask
             if !withoutTask.isEmpty {
                 let isUnfolded = unfolded.contains(section.id)
@@ -164,48 +235,27 @@ final class BoardStagesView: NSView {
                     attributes: [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary]
                 )
                 fold.setAccessibilityLabel("Pull requests without a task, \(count)")
+                fold.setAccessibilityExpanded(isUnfolded)
                 items.append(.fold(fold))
-                if isUnfolded { withoutTask.forEach(append) }
+                if isUnfolded { withoutTask.forEach(add) }
             }
             if !section.lines.merged.isEmpty {
-                let merged = BoardStagesMergedView(section.lines.merged, now: content?.now ?? 0)
-                merged.onOpen = { [weak self] id in self?.onOpen?(id) }
+                let merged = mergedViews[section.id] ?? BoardStagesMergedView()
+                let id = section.id
+                merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id))
+                merged.onOpen = { [weak self] line in self?.onOpen?(line) }
+                merged.onUnfold = { [weak self] in self?.unfoldMerged(section: id) }
+                mergeds[id] = merged
                 items.append(.merged(merged))
             }
         }
-        for item in items {
-            switch item {
-            case .sectionHeader(let view as NSView), .line(let view as NSView), .caption(let view as NSView),
-                 .fold(let view as NSView), .merged(let view as NSView):
-                documentView.addSubview(view)
-            }
-        }
-    }
-
-    private func append(_ unit: BoardStages.Unit) {
-        switch unit {
-        case .task(let task, let subtasks):
-            add(task, link: subtasks.isEmpty ? .none : .head)
-            for (index, subtask) in subtasks.enumerated() {
-                add(subtask, link: .subtask(isLast: index == subtasks.count - 1))
-            }
-        case .stack(let title, let lines):
-            let caption = NSTextField(labelWithString: title)
-            caption.font = Theme.Font.caption
-            caption.textColor = Theme.Color.textTertiary
-            caption.lineBreakMode = .byTruncatingTail
-            items.append(.caption(caption))
-            for (index, line) in lines.enumerated() {
-                add(line, link: .stack(number: index + 1, isLast: index == lines.count - 1))
-            }
-        }
-    }
-
-    private func add(_ line: BoardStages.Line, link: BoardStagesLineView.Link) {
-        let view = BoardStagesLineView(line, link: link)
-        view.onClick = { [weak self] in self?.onOpen?(line.id) }
-        lineViews.append(view)
-        items.append(.line(view))
+        sectionHeaders = headers
+        mergedViews = mergeds
+        let kept = Set(items.map { ObjectIdentifier($0.view) })
+        for view in documentView.subviews where !kept.contains(ObjectIdentifier(view)) { view.removeFromSuperview() }
+        for item in items where item.view.superview !== documentView { documentView.addSubview(item.view) }
+        self.items = items
+        lineViews = lines
     }
 
     // MARK: - Layout
@@ -220,23 +270,34 @@ final class BoardStagesView: NSView {
         static let sectionHeaderHeight: CGFloat = 42
         static let captionHeight: CGFloat = 28
         static let dot: CGFloat = 8
+        /// The rail at ease, and tightened on a narrow Board.
         static let railWidth: CGFloat = 180
-        static let pullRequestWidth: CGFloat = 84
+        static let compactRailWidth: CGFloat = 116
+        /// A rail's first station, from its left edge; its last sits as
+        /// far from its right one (a little more: the queue's ring).
+        static let firstStation: CGFloat = 10
+        static let lastStation: CGFloat = 11
+        static let pullRequestWidth: CGFloat = 100
         static let timeWidth: CGFloat = 50
-        /// What the title and the phrase keep between them before a
-        /// column goes.
-        static let minimumText: CGFloat = 300
-        /// Where a rail's four stations sit, from its left edge.
-        static let stations: [CGFloat] = [10, 63, 116, 169]
+        /// The task's column: two fifths of the Board, between these.
+        static let minimumTask: CGFloat = 140
+        static let maximumTask: CGFloat = 280
+        /// What the phrase keeps before the pull request, then the time,
+        /// take their columns.
+        static let minimumPhrase: CGFloat = 180
         /// A sub-task's or a stack line's inset, and its connector's x.
         static let inset: CGFloat = 26
         static let connectorX: CGFloat = padding + dot / 2
     }
 
     /// A line's columns for a width: task, rail, phrase, pull request,
-    /// time. The task and the phrase share what the others leave (1.05 to
-    /// 1.2). On a narrow Board the time goes first, then the pull
-    /// request: the title and the phrase are what the line is read for.
+    /// time.
+    /// - The task's column and the rail grow with the Board, never by a
+    ///   jump: widening a column moves no rail back.
+    /// - Below about 760 pt the rail tightens, its stations closer, before
+    ///   any title is cut further.
+    /// - The phrase takes the rest. The pull request, then the time, show
+    ///   once the phrase keeps `minimumPhrase` beside them.
     struct Columns: Equatable {
         var task: NSRect
         var rail: NSRect
@@ -246,23 +307,32 @@ final class BoardStagesView: NSView {
         var time: NSRect?
 
         init(width: CGFloat, height: CGFloat = Metrics.lineHeight) {
-            var flexible = width - Metrics.railWidth - 2 * Metrics.gap - 2 * Metrics.padding
-            let showsPullRequest = flexible - Metrics.pullRequestWidth - Metrics.gap >= Metrics.minimumText
-            if showsPullRequest { flexible -= Metrics.pullRequestWidth + Metrics.gap }
-            let showsTime = showsPullRequest && flexible - Metrics.timeWidth - Metrics.gap >= Metrics.minimumText
-            if showsTime { flexible -= Metrics.timeWidth + Metrics.gap }
-            flexible = max(0, flexible)
-            let taskWidth = (flexible * 1.05 / 2.25).rounded(.down)
+            let inner = max(0, width - 2 * Metrics.padding)
+            let eased = (Metrics.compactRailWidth + 0.4 * (width - 600)).rounded(.down)
+            let railWidth = min(Metrics.railWidth, max(Metrics.compactRailWidth, eased))
+            let wanted = min(Metrics.maximumTask, max(Metrics.minimumTask, (inner * 0.4).rounded(.down)))
+            let taskWidth = min(wanted, max(0, inner - railWidth - Metrics.gap))
+            var phraseWidth = max(0, inner - taskWidth - railWidth - 2 * Metrics.gap)
+            let showsPullRequest = phraseWidth - Metrics.pullRequestWidth - Metrics.gap >= Metrics.minimumPhrase
+            if showsPullRequest { phraseWidth -= Metrics.pullRequestWidth + Metrics.gap }
+            let showsTime = showsPullRequest && phraseWidth - Metrics.timeWidth - Metrics.gap >= Metrics.minimumPhrase
+            if showsTime { phraseWidth -= Metrics.timeWidth + Metrics.gap }
             var x = Metrics.padding
             func next(_ width: CGFloat) -> NSRect {
                 defer { x += width + Metrics.gap }
                 return NSRect(x: x, y: 0, width: width, height: height)
             }
             task = next(taskWidth)
-            rail = next(Metrics.railWidth)
-            phrase = next(flexible - taskWidth)
+            rail = next(railWidth)
+            phrase = next(phraseWidth)
             pullRequest = showsPullRequest ? next(Metrics.pullRequestWidth) : nil
             time = showsTime ? next(Metrics.timeWidth) : nil
+        }
+
+        /// Where the rail's four stations sit, from the Board's left edge.
+        var stations: [CGFloat] {
+            let step = (rail.width - Metrics.firstStation - Metrics.lastStation) / CGFloat(BoardStages.Station.allCases.count - 1)
+            return BoardStages.Station.allCases.indices.map { (rail.minX + Metrics.firstStation + CGFloat($0) * step).rounded() }
         }
     }
 
@@ -274,35 +344,25 @@ final class BoardStagesView: NSView {
     private func layoutContent() {
         let width = bounds.width
         let pad = Metrics.padding
-        // The space: its colour and name, what it holds; at the right its
-        // Lead, then the order switch.
-        let midY = Metrics.headerHeight / 2
-        spaceDot.frame = NSRect(x: pad, y: midY - 5, width: 10, height: 10)
-        let switchWidth = ceil(orderSwitch.fittingSize.width)
-        orderSwitch.frame = NSRect(x: width - pad - switchWidth, y: midY - 11, width: switchWidth, height: 22)
-        var right = orderSwitch.frame.minX - 12
-        if !leadLabel.isHidden {
-            let leadWidth = min(leadLabel.fittingWidth, max(0, width * 0.3))
-            leadLabel.frame = NSRect(x: right - leadWidth, y: midY - 8, width: leadWidth, height: 16)
-            leadDot.frame = NSRect(x: leadLabel.frame.minX - 8 - Metrics.dot, y: midY - Metrics.dot / 2, width: Metrics.dot, height: Metrics.dot)
-            right = leadDot.frame.minX - 12
-        }
-        let nameX = spaceDot.frame.maxX + 8
-        let nameWidth = min(nameLabel.fittingWidth, max(0, right - nameX))
-        nameLabel.frame = NSRect(x: nameX, y: midY - 10, width: nameWidth, height: 20)
-        let summaryX = nameLabel.frame.maxX + 12
-        summaryLabel.frame = NSRect(x: summaryX, y: midY - 8, width: max(0, right - summaryX), height: 16)
+        layoutHeader(width: width)
 
         // The columns' titles, each station's over its place on the rails.
         let columns = Columns(width: width)
         let titlesY = Metrics.headerHeight + 6
         for (title, frame) in zip(columnTitles, [columns.task, columns.phrase, columns.pullRequest]) {
-            title.isHidden = frame == nil
+            title.isHidden = (frame?.width ?? 0) < 30
             title.frame = NSRect(x: frame?.minX ?? 0, y: titlesY, width: frame?.width ?? 0, height: 14)
         }
-        for (title, x) in zip(stationTitles, Metrics.stations) {
-            let titleWidth = title.fittingWidth
-            title.frame = NSRect(x: (columns.rail.minX + x - titleWidth / 2).rounded(), y: titlesY, width: titleWidth, height: 14)
+        // On a tightened rail only its two ends are named: the four
+        // titles would run into each other.
+        let stations = columns.stations
+        let isTight = stations[1] - stations[0] < 50
+        for (index, title) in stationTitles.enumerated() {
+            let titleWidth = ColumnHeaderView.textWidth(title)
+            title.isHidden = isTight && index != 0 && index != stationTitles.count - 1
+            // Inside the rail's column: "Merge" doesn't run into "Now".
+            let x = min(max(stations[index] - titleWidth / 2, columns.rail.minX - 2), columns.rail.maxX - titleWidth)
+            title.frame = NSRect(x: x.rounded(), y: titlesY, width: titleWidth, height: 14)
         }
         let top = Metrics.headerHeight + Metrics.titlesHeight
         separator.frame = NSRect(x: 0, y: top - 1, width: width, height: 1)
@@ -332,6 +392,37 @@ final class BoardStagesView: NSView {
         documentView.frame = NSRect(x: 0, y: 0, width: width, height: max(scrollView.contentSize.height, y + 12))
     }
 
+    /// The space: its colour and name first, then at the right the order
+    /// switch, before it the Lead where there is room, and what the space
+    /// holds in what is left. The name is the last to give way.
+    private func layoutHeader(width: CGFloat) {
+        let pad = Metrics.padding
+        let midY = Metrics.headerHeight / 2
+        spaceDot.frame = NSRect(x: pad, y: midY - 5, width: 10, height: 10)
+        let switchWidth = ceil(orderSwitch.fittingSize.width)
+        orderSwitch.frame = NSRect(x: width - pad - switchWidth, y: midY - 11, width: switchWidth, height: 22)
+        let nameX = spaceDot.frame.maxX + 8
+        var right = orderSwitch.frame.minX - 12
+        let nameWidth = min(ColumnHeaderView.textWidth(nameLabel), max(0, right - nameX))
+        nameLabel.frame = NSRect(x: nameX, y: midY - 10, width: nameWidth, height: 20)
+        let free = right - nameLabel.frame.maxX - 12
+        let leadWidth = min(ColumnHeaderView.textWidth(leadLabel), free - Metrics.dot - 8)
+        // (A space without a Lead has an empty line: no width.)
+        let showsLead = leadWidth >= 60
+        leadLabel.isHidden = !showsLead
+        leadDot.isHidden = !showsLead
+        if showsLead {
+            leadLabel.frame = NSRect(x: right - leadWidth, y: midY - 8, width: leadWidth, height: 16)
+            leadDot.frame = NSRect(
+                x: leadLabel.frame.minX - 8 - Metrics.dot, y: midY - Metrics.dot / 2, width: Metrics.dot, height: Metrics.dot
+            )
+            right = leadDot.frame.minX - 12
+        }
+        let summaryX = nameLabel.frame.maxX + 12
+        summaryLabel.isHidden = right - summaryX < 60
+        summaryLabel.frame = NSRect(x: summaryX, y: midY - 8, width: max(0, right - summaryX), height: 16)
+    }
+
     // MARK: - Words and colours
 
     nonisolated static func title(of station: BoardStages.Station) -> String {
@@ -357,7 +448,7 @@ final class BoardStagesView: NSView {
         }
     }
 
-    /// "now", "12 min", "3 h", "2 d".
+    /// The Board's time column: "now", "12 min", "3 h", "2 d".
     nonisolated static func duration(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds / 60)
         if minutes < 1 { return "now" }
@@ -373,9 +464,21 @@ final class BoardStagesView: NSView {
 
     @objc private func foldClicked(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
+        let hadKeyboard = window?.firstResponder === sender
         if unfolded.remove(id) == nil { unfolded.insert(id) }
+        rebuild()
+        // The button was replaced: the keyboard stays on the fold.
+        if hadKeyboard, let fold = foldButton(section: id) { window?.makeFirstResponder(fold) }
+    }
+
+    private func unfoldMerged(section id: String) {
+        unfoldedMerged.insert(id)
+        rebuild()
+    }
+
+    private func rebuild() {
         buildItems()
-        if let now = content?.now { lineViews.forEach { $0.showTime(now: now) } }
+        showTimes()
         layoutContent()
     }
 
@@ -384,269 +487,23 @@ final class BoardStagesView: NSView {
         for case .fold(let button) in items where button.identifier?.rawValue == id { return button }
         return nil
     }
+
+    /// A section's "Merged today", when it has one.
+    func mergedView(section id: String) -> BoardStagesMergedView? {
+        for case .merged(let view) in items where mergedViews[id] === view { return view }
+        return nil
+    }
+
+    /// A section's header, while the section is shown.
+    func sectionHeader(section id: String) -> BoardStagesSectionHeaderView? {
+        for case .sectionHeader(let view) in items where sectionHeaders[id] === view { return view }
+        return nil
+    }
 }
 
-private final class FlippedView: NSView {
+/// The scrolling area: its lines run from the top.
+final class BoardStagesFlippedView: NSView {
     override var isFlipped: Bool { true }
-}
-
-private extension NSControl {
-    /// The width its text needs, its cell's insets included (a label's
-    /// intrinsic width leaves them out, and truncates).
-    var fittingWidth: CGFloat { ceil(fittingSize.width) }
-}
-
-// MARK: - A line
-
-/// One line: its dot and title, its rail, its phrase, its pull request and
-/// its time. It draws the dot, the rail and what joins it to the lines
-/// around it; the words are labels.
-@MainActor
-final class BoardStagesLineView: NSView {
-    /// What joins a line to those around it.
-    enum Link: Equatable {
-        case none
-        /// A task with sub-tasks under it.
-        case head
-        case subtask(isLast: Bool)
-        /// A stack's pull request, by its place in merge order.
-        case stack(number: Int, isLast: Bool)
-
-        var isInset: Bool {
-            switch self {
-            case .none, .head: return false
-            case .subtask, .stack: return true
-            }
-        }
-    }
-
-    let line: BoardStages.Line
-    let link: Link
-    let titleLabel = NSTextField(labelWithString: "")
-    /// "no pull request", in place of the rail of a task without a repository.
-    let noRailLabel = NSTextField(labelWithString: "no pull request")
-    let phraseLabel = NSTextField(labelWithString: "")
-    let pullRequestLabel = NSTextField(labelWithString: "")
-    let timeLabel = NSTextField(labelWithString: "")
-    var onClick: (() -> Void)?
-
-    private typealias Metrics = BoardStagesView.Metrics
-
-    override var isFlipped: Bool { true }
-
-    init(_ line: BoardStages.Line, link: Link) {
-        self.line = line
-        self.link = link
-        super.init(frame: .zero)
-        titleLabel.stringValue = line.title
-        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        titleLabel.textColor = Theme.Color.textPrimary
-        titleLabel.toolTip = line.title
-        phraseLabel.stringValue = line.phrase.text
-        phraseLabel.font = Theme.Font.body
-        phraseLabel.textColor = Self.phraseColor(of: line.state)
-        phraseLabel.toolTip = line.phrase.detail ?? line.phrase.text
-        pullRequestLabel.stringValue = line.pullRequest
-        pullRequestLabel.font = Theme.Font.mono
-        pullRequestLabel.textColor = Theme.Color.textTertiary
-        timeLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        timeLabel.textColor = Theme.Color.textTertiary
-        timeLabel.alignment = .right
-        noRailLabel.font = Theme.Font.caption
-        noRailLabel.textColor = Theme.Color.textDisabled
-        noRailLabel.isHidden = line.rail != nil
-        for label in [titleLabel, noRailLabel, phraseLabel, pullRequestLabel, timeLabel] {
-            label.lineBreakMode = .byTruncatingTail
-            addSubview(label)
-        }
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        setAccessibilityLabel(Self.accessibilityLabel(of: line))
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    /// "12 min", counted to `now`; nothing for a line without a clock.
-    func showTime(now: TimeInterval) {
-        timeLabel.stringValue = line.since.map { BoardStagesView.duration(now - $0) } ?? ""
-    }
-
-    /// Amber and red say the phrase needs a look; the rest stays grey.
-    static func phraseColor(of state: BoardStages.State) -> NSColor {
-        switch state {
-        case .needsYou: return Theme.Color.waiting
-        case .failed: return Theme.Color.error
-        case .working, .blocked, .waiting, .ready, .merged, .idle: return Theme.Color.textTertiary
-        }
-    }
-
-    /// "Agent loop hint: Ready · reviews done, checks green, #308."
-    nonisolated static func accessibilityLabel(of line: BoardStages.Line) -> String {
-        let station = line.rail == nil ? nil : "at \(BoardStagesView.title(of: line.station))"
-        return ([line.title, station, line.phrase.text, line.pullRequest.isEmpty ? nil : line.pullRequest] as [String?])
-            .compactMap { $0 }.joined(separator: ", ")
-    }
-
-    // MARK: Layout
-
-    /// Where the dot's centre is: at the line's edge, or inset under a
-    /// task or on a stack's rail.
-    var dotCenter: NSPoint {
-        NSPoint(x: Metrics.connectorX + (link.isInset ? Metrics.inset : 0), y: bounds.midY)
-    }
-
-    override func layout() {
-        super.layout()
-        let columns = BoardStagesView.Columns(width: bounds.width, height: bounds.height)
-        let titleX = dotCenter.x + Metrics.dot / 2 + 10
-        titleLabel.frame = NSRect(x: titleX, y: 8, width: max(0, columns.task.maxX - titleX), height: 18)
-        noRailLabel.frame = NSRect(x: columns.rail.minX, y: 10, width: columns.rail.width, height: 15)
-        phraseLabel.frame = NSRect(x: columns.phrase.minX, y: 9, width: columns.phrase.width, height: 16)
-        for (label, frame) in [(pullRequestLabel, columns.pullRequest), (timeLabel, columns.time)] {
-            label.isHidden = frame == nil
-            label.frame = NSRect(x: frame?.minX ?? 0, y: 10, width: frame?.width ?? 0, height: 15)
-        }
-    }
-
-    // MARK: Drawing
-
-    override func draw(_ dirtyRect: NSRect) {
-        drawConnectors()
-        Self.fill(circle: dotCenter, radius: Metrics.dot / 2, BoardStagesView.color(of: line.state))
-        if let rail = line.rail {
-            let columns = BoardStagesView.Columns(width: bounds.width, height: bounds.height)
-            Self.draw(rail, state: line.state, at: NSPoint(x: columns.rail.minX, y: bounds.midY))
-        }
-    }
-
-    /// The elbow that joins a sub-task to its task, the line a task sends
-    /// down to its sub-tasks, a stack's numbered rail.
-    private func drawConnectors() {
-        let x = Metrics.connectorX
-        let midY = bounds.midY
-        let path = NSBezierPath()
-        path.lineWidth = 1
-        switch link {
-        case .none:
-            return
-        case .head:
-            path.move(to: NSPoint(x: x, y: midY + Metrics.dot))
-            path.line(to: NSPoint(x: x, y: bounds.maxY))
-        case .subtask(let isLast):
-            // Down from the task, then round the corner to the sub-task.
-            path.move(to: NSPoint(x: x, y: 0))
-            path.line(to: NSPoint(x: x, y: midY - 6))
-            path.curve(to: NSPoint(x: x + 6, y: midY), controlPoint1: NSPoint(x: x, y: midY), controlPoint2: NSPoint(x: x, y: midY))
-            path.line(to: NSPoint(x: x + 16, y: midY))
-            if !isLast {
-                path.move(to: NSPoint(x: x, y: midY - 6))
-                path.line(to: NSPoint(x: x, y: bounds.maxY))
-            }
-        case .stack(let number, let isLast):
-            if number > 1 {
-                path.move(to: NSPoint(x: x, y: 0))
-                path.line(to: NSPoint(x: x, y: midY - 8))
-            }
-            if !isLast {
-                path.move(to: NSPoint(x: x, y: midY + 8))
-                path.line(to: NSPoint(x: x, y: bounds.maxY))
-            }
-        }
-        Theme.Color.textDisabled.setStroke()
-        path.stroke()
-        if case .stack(let number, _) = link {
-            Self.draw(number: number, at: NSPoint(x: x, y: midY), radius: 8, ring: Theme.Color.textDisabled, text: Theme.Color.textSecondary)
-        }
-    }
-
-    /// A rail: its segments, solid up to the current station and dotted
-    /// after; a filled dot for a station done, a larger one in the state's
-    /// colour for the current one, a hollow one ahead, nothing where
-    /// Reviews is skipped; the queue's number on Merge.
-    static func draw(_ rail: BoardStages.Rail, state: BoardStages.State, at origin: NSPoint) {
-        let stations = Metrics.stations
-        let current = rail.marks.firstIndex(of: .current) ?? rail.marks.count
-        for index in 0..<(stations.count - 1) {
-            let segment = NSBezierPath()
-            segment.move(to: NSPoint(x: origin.x + stations[index] + 7, y: origin.y))
-            segment.line(to: NSPoint(x: origin.x + stations[index + 1] - 7, y: origin.y))
-            segment.lineWidth = 1.5
-            segment.lineCapStyle = .round
-            if index < current {
-                Theme.Color.textTertiary.setStroke()
-            } else {
-                segment.setLineDash([1, 4], count: 2, phase: 0)
-                Theme.Color.textDisabled.setStroke()
-            }
-            segment.stroke()
-        }
-        for (index, mark) in rail.marks.enumerated() where index < stations.count {
-            let center = NSPoint(x: origin.x + stations[index], y: origin.y)
-            let isMerge = index == BoardStages.Station.merge.rawValue
-            if isMerge, let order = rail.queueOrder {
-                let isCurrent = mark == .current
-                draw(number: order, at: center, radius: 7.5, ring: isCurrent ? Theme.Color.textSecondary : Theme.Color.textDisabled,
-                     text: isCurrent ? Theme.Color.textPrimary : Theme.Color.textSecondary)
-                continue
-            }
-            switch mark {
-            case .done:
-                fill(circle: center, radius: 3.5, Theme.Color.textSecondary)
-            case .current:
-                fill(circle: center, radius: 5, BoardStagesView.color(of: state))
-            case .ahead:
-                let ring = NSBezierPath(ovalIn: NSRect(x: center.x - 3.5, y: center.y - 3.5, width: 7, height: 7))
-                Theme.Color.canvas.setFill()
-                ring.fill()
-                ring.lineWidth = 1.5
-                Theme.Color.textDisabled.setStroke()
-                ring.stroke()
-            case .skipped:
-                break
-            }
-        }
-    }
-
-    private static func fill(circle center: NSPoint, radius: CGFloat, _ color: NSColor) {
-        color.setFill()
-        NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: 2 * radius, height: 2 * radius)).fill()
-    }
-
-    /// A number in a ring, on the canvas: a stack's place, the queue's order.
-    private static func draw(number: Int, at center: NSPoint, radius: CGFloat, ring: NSColor, text: NSColor) {
-        let circle = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: 2 * radius, height: 2 * radius))
-        Theme.Color.canvas.setFill()
-        circle.fill()
-        circle.lineWidth = 1
-        ring.setStroke()
-        circle.stroke()
-        let string = NSAttributedString(string: "\(number)", attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold), .foregroundColor: text
-        ])
-        let size = string.size()
-        string.draw(at: NSPoint(x: center.x - size.width / 2, y: center.y - size.height / 2))
-    }
-
-    // MARK: Clicks
-
-    /// The whole line is one target: its words don't take the mouse.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        // The click is the mouse going up on the line it went down on.
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        onClick?()
-        return true
-    }
 }
 
 // MARK: - A repository's header
@@ -661,22 +518,31 @@ final class BoardStagesSectionHeaderView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(title: String, detail: String?, status: ColumnHeaderView.Status?) {
+    init() {
         super.init(frame: .zero)
-        titleLabel.stringValue = title
         titleLabel.font = Theme.Font.bodyEmphasized
         titleLabel.textColor = Theme.Color.textPrimary
-        detailLabel.stringValue = detail ?? ""
         detailLabel.font = Theme.Font.mono
         detailLabel.textColor = Theme.Color.textTertiary
-        for label in [titleLabel, detailLabel] { label.lineBreakMode = .byTruncatingTail }
-        pill.status = status
-        pill.isHidden = status == nil
+        for label in [titleLabel, detailLabel] {
+            label.lineBreakMode = .byTruncatingTail
+            label.allowsExpansionToolTips = true
+        }
+        // The Board's text stays still: no breathing dot here.
+        pill.animates = false
         [titleLabel, detailLabel, pill].forEach(addSubview)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    func show(title: String, detail: String?, status: ColumnHeaderView.Status?) {
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail ?? ""
+        if pill.status != status { pill.status = status }
+        pill.isHidden = status == nil
+        needsLayout = true
+    }
 
     override func layout() {
         super.layout()
@@ -684,100 +550,13 @@ final class BoardStagesSectionHeaderView: NSView {
         let baseline = bounds.height - 22
         var right = bounds.width - pad
         if !pill.isHidden {
-            let width = min(pill.idealWidth, bounds.width * 0.4)
+            let width = min(pill.idealWidth, (bounds.width * 0.4).rounded(.down))
             pill.frame = NSRect(x: right - width, y: baseline - 1, width: width, height: ColumnStatusPill.height)
             right = pill.frame.minX - 10
         }
-        let titleWidth = min(titleLabel.fittingWidth, max(0, (right - pad) * 0.6))
+        let titleWidth = min(ColumnHeaderView.textWidth(titleLabel), max(0, ((right - pad) * 0.6).rounded(.down)))
         titleLabel.frame = NSRect(x: pad, y: baseline, width: titleWidth, height: 16)
         let detailX = titleLabel.frame.maxX + 10
         detailLabel.frame = NSRect(x: detailX, y: baseline + 1, width: max(0, right - detailX), height: 15)
-    }
-}
-
-// MARK: - Merged today
-
-/// The line closing a section: "MERGED TODAY", then each pull request
-/// merged since midnight, the newest first, wrapping as the width asks.
-@MainActor
-final class BoardStagesMergedView: NSView {
-    let caption = NSTextField(labelWithString: "")
-    /// One per pull request: a button while its task is open here, else
-    /// a label.
-    private(set) var entries: [NSControl] = []
-    var onOpen: ((String) -> Void)?
-    private let merged: [BoardStages.Merged]
-
-    override var isFlipped: Bool { true }
-
-    init(_ merged: [BoardStages.Merged], now: TimeInterval) {
-        self.merged = merged
-        super.init(frame: .zero)
-        caption.attributedStringValue = NSAttributedString(string: "MERGED TODAY", attributes: [
-            .font: Theme.Font.label, .foregroundColor: Theme.Color.textTertiary, .kern: Theme.Font.labelKern
-        ])
-        addSubview(caption)
-        for (index, pullRequest) in merged.enumerated() {
-            let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: pullRequest.mergedAt), now: Date(timeIntervalSince1970: now))
-            // Amber while an agent of its task needs the user, never hidden.
-            let title = NSMutableAttributedString(string: "● ", attributes: [
-                .font: NSFont.systemFont(ofSize: 8), .baselineOffset: 1.5,
-                .foregroundColor: pullRequest.needsYou ? Theme.Color.waiting : Theme.Color.done
-            ])
-            title.append(NSAttributedString(string: pullRequest.title, attributes: [
-                .font: Theme.Font.body, .foregroundColor: Theme.Color.textSecondary
-            ]))
-            title.append(NSAttributedString(string: "  #\(pullRequest.number) · \(time)", attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular), .foregroundColor: Theme.Color.textTertiary
-            ]))
-            let entry: NSControl
-            if pullRequest.lineID != nil {
-                let button = NSButton(title: "", target: self, action: #selector(entryClicked(_:)))
-                button.isBordered = false
-                button.alignment = .left
-                button.attributedTitle = title
-                (button.cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
-                entry = button
-            } else {
-                let label = NSTextField(labelWithAttributedString: title)
-                label.lineBreakMode = .byTruncatingTail
-                entry = label
-            }
-            entry.tag = index
-            entry.setAccessibilityLabel("\(pullRequest.title), #\(pullRequest.number), merged at \(time)")
-            entries.append(entry)
-            addSubview(entry)
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    /// Lays the entries out for `width` and says how tall that is.
-    func height(for width: CGFloat) -> CGFloat {
-        let pad = BoardStagesView.Metrics.padding
-        caption.frame = NSRect(x: pad, y: 14, width: caption.fittingWidth, height: 13)
-        var x = caption.frame.maxX + 18
-        var y: CGFloat = 12
-        for entry in entries {
-            let entryWidth = min(entry.fittingWidth, max(0, width - 2 * pad))
-            if x + entryWidth > width - pad, x > pad {
-                x = pad
-                y += 22
-            }
-            entry.frame = NSRect(x: x, y: y, width: entryWidth, height: 18)
-            x += entryWidth + 18
-        }
-        return y + 24
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        Theme.Color.line.setFill()
-        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
-    }
-
-    @objc private func entryClicked(_ sender: NSButton) {
-        guard let id = merged[safe: sender.tag]?.lineID else { return }
-        onOpen?(id)
     }
 }
