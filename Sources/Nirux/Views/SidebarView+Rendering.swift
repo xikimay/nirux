@@ -219,6 +219,7 @@ extension SidebarView {
     /// Tear down every view and state snapshot from the previous render
     /// pass before rebuilding.
     private func resetRenderState() {
+        lastRebuildAt = clock()
         expandedViews.forEach { $0.removeFromSuperview() }
         expandedViews.removeAll()
         hitAreas.removeAll()
