@@ -592,6 +592,7 @@ final class NiruxShellView: NSView {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.sidebarStaleLogCameToFront()
                 self.clearAllAgentAttention()
                 self.resumeGitRefresh()
                 self.stopStuckWatch()

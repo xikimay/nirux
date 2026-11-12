@@ -12,18 +12,20 @@ final class SidebarStaleLogState {
     var lastUncoveredAt: CFTimeInterval?
     /// The window showed at the last change of a window's occlusion.
     var windowShowed = false
+    /// The shell follows the system (`followSystemForSidebarStaleLog`).
+    var followsSystem = false
     let observers = ObserverBag()
 }
 
 /// One line in the system log when the pointer comes back to the sidebar
 /// or Nirux comes to the front: the moments at which rows of tasks that
 /// were gone were seen to stay, until a click or a pass over the list. It
-/// tells the three places that can be behind apart. `same=0`: the list
-/// held isn't the store's (and `drag`, `deferred`, `refresh`, `heartbeat`
-/// say what held it). `rows`, `stray`, `nolayer` or `ghosts` off: the rows
-/// drawn aren't the list's. All in order: the screen was behind, and the
-/// seconds since the wake, the unlock, the session's return, the front and
-/// the window uncovered say after what.
+/// tells apart what can be behind. `same=0`: the list held isn't the
+/// store's (and `drag`, `deferred`, `refresh`, `heartbeat` say what held
+/// it). `rows`, `stray`, `nolayer` or `leftover` off: the rows aren't the
+/// list's. Nothing off: the screen, or something the line doesn't count;
+/// the seconds since the wake, the unlock, the session's return, the
+/// front and the window uncovered say after what.
 ///
 /// Counts and booleans only: no title, no path, no text. Read with
 /// `log show --predicate 'subsystem == "com.xikimay.nirux" AND category == "sidebar"'`.
@@ -41,13 +43,14 @@ enum SidebarStaleLog {
         /// there before, or not a pointer's line.
         var pointerIdle: CFTimeInterval?
         /// The tasks the store lists in the space on screen, and whether
-        /// the sidebar holds those, in that order.
+        /// the sidebar holds those, in that order, each archived or not
+        /// as the store has it.
         var stored = 0
         var holdsStored = false
         var drawn = SidebarView.DrawnFacts()
-        /// Seconds since a refresh last read the agents, and whether the
-        /// heartbeat that asks for one runs.
-        var sinceRefresh: TimeInterval = 0
+        /// Seconds since a refresh last read the agents (nil: none yet),
+        /// and whether the heartbeat that asks for one runs.
+        var sinceRefresh: TimeInterval?
         var heartbeatRuns = false
         var isAppActive = false
         var isWindowKey = false
@@ -68,9 +71,8 @@ enum SidebarStaleLog {
             ("trigger", facts.trigger.rawValue), ("idle", seconds(facts.pointerIdle)),
             ("store", "\(facts.stored)"), ("held", "\(drawn.held)"), ("same", flag(facts.holdsStored)),
             ("rows", "\(drawn.rowsDrawn)/\(drawn.rowsExpected)"), ("stray", "\(drawn.strayLayers)"),
-            ("nolayer", "\(drawn.viewsWithoutLayer)"), ("needsDisplay", flag(drawn.needsDisplay)),
-            ("ghosts", "\(drawn.foldGhosts)"), ("ghostOpacity", String(format: "%.2f", drawn.foldGhostOpacity)),
-            ("pulls", "\(drawn.foldPulls)"),
+            ("nolayer", "\(drawn.viewsWithoutLayer)"), ("leftover", "\(drawn.leftoverViews)"),
+            ("needsDisplay", flag(drawn.needsDisplay)), ("ghosts", "\(drawn.foldGhosts)"), ("pulls", "\(drawn.foldPulls)"),
             ("drag", flag(drawn.isDragTracked)), ("deferred", flag(drawn.hasDeferredUpdate)), ("skipped", flag(drawn.skippedRebuild)),
             ("animates", flag(drawn.animates)), ("expanded", flag(drawn.isExpanded)), ("fits", flag(drawn.fits)),
             ("rebuild", seconds(drawn.sinceRebuild)), ("update", seconds(drawn.sinceUpdate)),
@@ -102,16 +104,17 @@ extension NiruxShellView {
     }
 
     /// What may leave the screen behind, as the system says it: kept for
-    /// the next line, and a line when Nirux comes to the front. The app's
-    /// shell only (`NiruxApp`): a test's shell would hear the activation
-    /// other processes take from each other.
+    /// the next line. The app's shell only (`NiruxApp`): a test's shell
+    /// would hear what other processes do to the session and the screen.
     func followSystemForSidebarStaleLog() {
+        sidebarStaleLog.followsSystem = true
+        // Covered to shown counts from now on, not the window's first show.
+        sidebarStaleLog.windowShowed = sideEffects.windowShows(window)
         let system = NSWorkspace.shared.notificationCenter
         let events: [(NotificationCenter, Notification.Name, SidebarStaleLogEvent)] = [
             (system, NSWorkspace.screensDidWakeNotification, .wake),
             (system, NSWorkspace.sessionDidBecomeActiveNotification, .sessionReturn),
             (DistributedNotificationCenter.default(), Notification.Name("com.apple.screenIsUnlocked"), .unlock),
-            (.default, NSApplication.didBecomeActiveNotification, .front),
             (.default, NSWindow.didChangeOcclusionStateNotification, .occlusion)
         ]
         for (center, name, event) in events {
@@ -122,13 +125,20 @@ extension NiruxShellView {
         }
     }
 
+    /// Nirux came to the front: first thing in the shell's own handler,
+    /// before it starts the heartbeat again or rebuilds anything, so the
+    /// line says how the sidebar was found.
+    func sidebarStaleLogCameToFront() {
+        guard sidebarStaleLog.followsSystem else { return }
+        noteSidebarStaleLogEvent(.front)
+    }
+
     enum SidebarStaleLogEvent {
         case wake, sessionReturn, unlock, front, occlusion
     }
 
     /// Keeps when it happened. Nirux coming to the front writes a line
-    /// too, before the heartbeat it starts again refreshes anything: its
-    /// `front` is the time since the front before this one.
+    /// too, whose `front` is the time since the front before this one.
     func noteSidebarStaleLogEvent(_ event: SidebarStaleLogEvent) {
         let now = sidebar.clock()
         switch event {
@@ -150,13 +160,14 @@ extension NiruxShellView {
     func sidebarStaleFacts(_ trigger: SidebarStaleLog.Trigger, pointerIdle: CFTimeInterval?) -> SidebarStaleLog.Facts {
         let now = sidebar.clock()
         let state = sidebarStaleLog
-        // What a refresh would list (see `updateSidebar`).
-        let stored = visibleWorkspaceIndices.map { workspaces[$0].id }
+        // What a refresh would list (see `updateSidebar`), and where.
+        let stored = visibleWorkspaceIndices.map { (id: workspaces[$0].id, archived: workspaces[$0].isInactive) }
+        let held = sidebar.lastInfos.map { (id: $0.id, archived: $0.isInactive) }
         return SidebarStaleLog.Facts(
             trigger: trigger, pointerIdle: pointerIdle,
-            stored: stored.count, holdsStored: stored == sidebar.lastInfos.map(\.id),
+            stored: stored.count, holdsStored: stored.count == held.count && zip(stored, held).allSatisfy { $0 == $1 },
             drawn: sidebar.drawnFacts(),
-            sinceRefresh: ProcessInfo.processInfo.systemUptime - lastMetadataRefreshAt,
+            sinceRefresh: lastMetadataRefreshAt > 0 ? ProcessInfo.processInfo.systemUptime - lastMetadataRefreshAt : nil,
             heartbeatRuns: heartbeatTimer != nil,
             isAppActive: NSApp.isActive, isWindowKey: window?.isKeyWindow ?? false,
             windowShows: sideEffects.windowShows(window),

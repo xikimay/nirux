@@ -38,14 +38,15 @@ Only a Nirux running from an `.app` bundle installs the [status hooks](agent-sta
 Rows of tasks that were gone have been seen to stay in the sidebar until a click or a pass over the list. To tell what was behind, Nirux writes one line to the system log when the pointer comes back to the sidebar after two seconds away, and when Nirux comes to the front. The line holds counts, `0`/`1` flags and seconds the Mac was awake: no title, no path, no text.
 
 ```sh
-log show --last 1h --predicate 'subsystem == "com.xikimay.nirux" AND category == "sidebar"'
+log show --last 1h --predicate 'process == "Nirux" AND subsystem == "com.xikimay.nirux" AND category == "sidebar"'
 ```
 
 | Fields | What they say |
 | --- | --- |
-| `store`, `held`, `same` | The tasks the store lists, those the sidebar holds, and whether they are the same. `same=0`: the list was behind, and `drag`, `deferred`, `refresh` and `heartbeat` say what held it |
-| `rows`, `stray`, `nolayer`, `ghosts` | The rows drawn over those the list asks for, layers that back no row, rows whose layer isn't attached yet, pictures of rows that left. Off: the rows were behind the list |
-| `wake`, `unlock`, `session`, `front`, `uncovered` | Seconds since the display woke, the screen was unlocked, the macOS session came back, Nirux came to the front and its window was uncovered; `-` for not since launch. With the rest in order the screen was behind, and these say after what |
+| `store`, `held`, `same` | The tasks the store lists, those the sidebar holds, and whether they are the same, in the same order, each archived or not. `same=0`: the list was behind, and `drag`, `deferred`, `refresh` and `heartbeat` say what held it |
+| `rows`, `stray`, `nolayer`, `leftover` | The rows drawn over those the list asks for, layers that back no view, views whose layer isn't attached yet (AppKit attaches it at its next display pass), views a rebuild left behind. Off: the rows were behind the list |
+| `ghosts`, `rebuild` | The pictures of rows that left stay, unseen, until the next rebuild: nothing to see once `rebuild` is over half a second |
+| `wake`, `unlock`, `session`, `front`, `uncovered` | Seconds since the display woke, the screen was unlocked, the macOS session came back, Nirux came to the front (on a `front` line, the time before) and its window was uncovered; `-` for not since launch. With the rest in order, the screen was behind, or something the line doesn't count: these say after what |
 
 ## App bundle
 

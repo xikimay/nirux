@@ -40,12 +40,15 @@ extension SidebarView {
         /// row's layer at its next display pass.
         var strayLayers = 0
         var viewsWithoutLayer = 0
+        /// Views in the list that this render didn't make: what a rebuild
+        /// left behind. Not the checklist card nor a drag's own views.
+        var leftoverViews = 0
         /// The window has a display pass to make.
         var needsDisplay = false
-        /// The pictures of rows that left, the most opaque one as shown,
-        /// and the views still coming up under them.
+        /// The pictures of rows that left: each stays, unseen once its
+        /// fold is over, until the next rebuild. And the views still
+        /// coming up under them.
         var foldGhosts = 0
-        var foldGhostOpacity: Float = 0
         var foldPulls = 0
         /// A row press is tracked; an update, a rebuild wait for its end.
         var isDragTracked = false
@@ -65,7 +68,8 @@ extension SidebarView {
         let now = clock()
         let list = contentDocumentView
         let viewLayers = Set(list.subviews.compactMap(\.layer).map(ObjectIdentifier.init))
-        let ghosts = expandedViews.filter { $0.identifier == Self.foldGhostID }.compactMap { $0.layer?.sublayers?.first }
+        let made = Set(expandedViews.map(ObjectIdentifier.init))
+        let kept = [onboardingCardView, dragGhostView, dragDimView, dragInsertionView].compactMap { $0 }
         let expected = isExpanded ? lastInfos.filter(listsWorkspace).count : isRailHidden ? 0 : railWorkspaceInfos.count
         return DrawnFacts(
             held: lastInfos.count,
@@ -73,9 +77,11 @@ extension SidebarView {
             rowsExpected: expected,
             strayLayers: (list.layer?.sublayers ?? []).filter { !viewLayers.contains(ObjectIdentifier($0)) }.count,
             viewsWithoutLayer: list.subviews.filter { $0.layer == nil || $0.layer?.superlayer !== list.layer }.count,
+            leftoverViews: list.subviews.filter { view in
+                !made.contains(ObjectIdentifier(view)) && !kept.contains { $0 === view }
+            }.count,
             needsDisplay: window?.viewsNeedDisplay ?? false,
-            foldGhosts: ghosts.count,
-            foldGhostOpacity: ghosts.map { $0.presentation()?.opacity ?? $0.opacity }.max() ?? 0,
+            foldGhosts: expandedViews.filter { $0.identifier == Self.foldGhostID }.count,
             foldPulls: expandedViews.filter { $0.layer?.animation(forKey: Self.foldPullKey) != nil }.count,
             isDragTracked: workspaceDrag != nil,
             hasDeferredUpdate: deferredDragUpdate != nil,

@@ -75,10 +75,29 @@ final class SidebarStaleLogTests: XCTestCase {
         XCTAssertEqual(told, ["move -", "press 2.5", "move 2.5"])
     }
 
+    /// A press is told before it acts: the line says how the sidebar was
+    /// found, not what the click made of it.
+    func testAPressIsToldBeforeItActs() throws {
+        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1)], clock: Clock())
+        defer { window.close() }
+        var order: [String] = []
+        sidebar.onPointerReturn = { _, _ in order.append("told") }
+        sidebar.onWorkspaceClicked = { _ in order.append("clicked") }
+        let rowFrame = try XCTUnwrap(sidebar.hitAreas.first { if case .workspace(1) = $0.region { true } else { false } }?.frame)
+        let point = sidebar.convert(NSPoint(x: rowFrame.midX, y: rowFrame.midY), from: sidebar.contentDocumentView)
+
+        // The press is followed by its release: the drag loop takes it as a click.
+        NSApp.postEvent(try mouse(.leftMouseUp, at: point, in: sidebar, window: window), atStart: false)
+        sidebar.mouseDown(with: try mouse(.leftMouseDown, at: point, in: sidebar, window: window))
+
+        XCTAssertEqual(order, ["told", "clicked"])
+    }
+
     /// The facts count the list held and the rows drawn: a layer that
-    /// backs no view and a view whose layer isn't in the list, a row
-    /// folding away, an archived task that asks for no row, what waits
-    /// behind a tracked press, and how long ago the rows were rebuilt.
+    /// backs no view, a view no render made and whose layer isn't in the
+    /// list, a row folding away, an archived task that asks for no row,
+    /// what waits behind a tracked press, and how long ago the rows were
+    /// rebuilt.
     func testTheFactsCountWhatIsHeldAndDrawn() throws {
         let clock = Clock()
         let (sidebar, window) = sidebar(
@@ -98,14 +117,16 @@ final class SidebarStaleLogTests: XCTestCase {
         while sidebar.drawnFacts().viewsWithoutLayer > 0, Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
-        XCTAssertEqual([sidebar.drawnFacts().strayLayers, sidebar.drawnFacts().viewsWithoutLayer], [0, 0])
+        var layers = sidebar.drawnFacts()
+        XCTAssertEqual([layers.strayLayers, layers.viewsWithoutLayer, layers.leftoverViews], [0, 0, 0])
         let strayLayer = CALayer()
         try XCTUnwrap(list.layer).addSublayer(strayLayer)
         let orphan = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
         orphan.wantsLayer = true
         list.addSubview(orphan)
         try XCTUnwrap(orphan.layer).removeFromSuperlayer()
-        XCTAssertEqual([sidebar.drawnFacts().strayLayers, sidebar.drawnFacts().viewsWithoutLayer], [1, 1])
+        layers = sidebar.drawnFacts()
+        XCTAssertEqual([layers.strayLayers, layers.viewsWithoutLayer, layers.leftoverViews], [1, 1, 1], "a view no render made")
         strayLayer.removeFromSuperlayer()
         orphan.removeFromSuperview()
 
@@ -135,6 +156,14 @@ final class SidebarStaleLogTests: XCTestCase {
         XCTAssertEqual([facts.isDragTracked, facts.hasDeferredUpdate, facts.skippedRebuild], [true, true, true])
         XCTAssertEqual(facts.held, 2, "the list held is still the one before")
         XCTAssertEqual([facts.sinceRebuild, facts.sinceUpdate], [4, 0], "the update came; nothing was rebuilt")
+
+        // A drag's own view is in the list on purpose.
+        let leftover = facts.leftoverViews
+        let dragGhost = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        list.addSubview(dragGhost)
+        XCTAssertEqual(sidebar.drawnFacts().leftoverViews, leftover + 1)
+        sidebar.dragGhostView = dragGhost
+        XCTAssertEqual(sidebar.drawnFacts().leftoverViews, leftover)
     }
 
     /// Each field under its own name, in counts, booleans and seconds.
@@ -143,11 +172,12 @@ final class SidebarStaleLogTests: XCTestCase {
         facts.stored = 7
         facts.holdsStored = false
         facts.drawn = SidebarView.DrawnFacts(
-            held: 8, rowsDrawn: 9, rowsExpected: 6, strayLayers: 1, viewsWithoutLayer: 2, needsDisplay: true, foldGhosts: 3,
-            foldGhostOpacity: 0.4, foldPulls: 4, isDragTracked: true, hasDeferredUpdate: false, skippedRebuild: true,
+            held: 8, rowsDrawn: 9, rowsExpected: 6, strayLayers: 1, viewsWithoutLayer: 2, leftoverViews: 5, needsDisplay: true,
+            foldGhosts: 3, foldPulls: 4, isDragTracked: true, hasDeferredUpdate: false, skippedRebuild: true,
             animates: false, isExpanded: true, fits: false, sinceRebuild: 4.06, sinceUpdate: nil
         )
         facts.sinceRefresh = 6
+        XCTAssertTrue(SidebarStaleLog.line(SidebarStaleLog.Facts(trigger: .front)).contains(" refresh=- "), "no refresh yet")
         facts.heartbeatRuns = true
         facts.isAppActive = false
         facts.isWindowKey = true
@@ -162,7 +192,7 @@ final class SidebarStaleLogTests: XCTestCase {
 
         XCTAssertEqual(
             SidebarStaleLog.line(facts),
-            "trigger=press idle=12.3 store=7 held=8 same=0 rows=9/6 stray=1 nolayer=2 needsDisplay=1 ghosts=3 ghostOpacity=0.40 "
+            "trigger=press idle=12.3 store=7 held=8 same=0 rows=9/6 stray=1 nolayer=2 leftover=5 needsDisplay=1 ghosts=3 "
                 + "pulls=4 drag=1 deferred=0 skipped=1 animates=0 expanded=1 fits=0 rebuild=4.1 update=- refresh=6.0 heartbeat=1 "
                 + "active=0 key=1 visible=0 displayAsleep=1 sessionOut=0 wake=30.5 unlock=- session=31.0 front=3.2 uncovered=3.3"
         )
@@ -179,26 +209,43 @@ final class SidebarStaleLogTests: XCTestCase {
             var lines: [String] { log.written }
             shell.sideEffects.logSidebarState = { log.written.append($0) }
             shell.sideEffects.windowShows = { _ in false }
+            // Not this Mac's display, which may sleep.
+            shell.agentLights.isDisplayAsleep = false
+            shell.agentLights.isSessionInactive = false
             shell.addWorkspace(title: "secret-one", cwd: folder)
             shell.addWorkspace(title: "secret-two", cwd: folder)
             let idle = ProcessSnapshot(entries: [])
             shell.updateSidebar(snapshot: idle)
 
+            // No refresh has read the agents yet.
+            shell.lastMetadataRefreshAt = 0
             shell.sidebar.notePointer(.move)
             XCTAssertEqual(lines.count, 1)
             XCTAssertTrue(try XCTUnwrap(lines.last).hasPrefix("trigger=move idle=- store=3 held=3 same=1 "), lines.last ?? "")
+            XCTAssertTrue(try XCTUnwrap(lines.last).contains(" refresh=- heartbeat=0 "), lines.last ?? "")
+            shell.refreshMetadata(snapshot: idle)
 
             // The store loses a task and nothing tells the sidebar.
             shell.workspaceStore.removeWorkspace(try XCTUnwrap(shell.workspaces.first { $0.title == "secret-one" }))
             clock.time += 3
             shell.sidebar.notePointer(.press)
             XCTAssertTrue(try XCTUnwrap(lines.last).hasPrefix("trigger=press idle=3.0 store=2 held=3 same=0 "), lines.last ?? "")
+            XCTAssertNotNil(try XCTUnwrap(lines.last).firstMatch(of: /\brefresh=[0-9]/), "a refresh came: \(lines.last ?? "")")
 
             shell.updateSidebar(snapshot: idle)
             clock.time += 3
             shell.sidebar.notePointer(.move)
             XCTAssertTrue(try XCTUnwrap(lines.last).hasPrefix("trigger=move idle=3.0 store=2 held=2 same=1 "), lines.last ?? "")
             XCTAssertTrue(try XCTUnwrap(lines.last).hasSuffix(" wake=- unlock=- session=- front=- uncovered=-"), lines.last ?? "")
+
+            // Archived in the store, the sidebar not told: the same tasks
+            // in the same order, not where the store has them.
+            let last = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "secret-two" })
+            XCTAssertTrue(shell.workspaceStore.setWorkspaceInactive(at: last, true))
+            clock.time += 3
+            shell.sidebar.notePointer(.press)
+            XCTAssertTrue(try XCTUnwrap(lines.last).hasPrefix("trigger=press idle=3.0 store=2 held=2 same=0 "), lines.last ?? "")
+            shell.updateSidebar(snapshot: idle)
 
             // What may leave the screen behind, as it happens (told by
             // hand: a test's shell doesn't follow the system).
@@ -216,9 +263,13 @@ final class SidebarStaleLogTests: XCTestCase {
             clock.time += 1
             shell.noteSidebarStaleLogEvent(.occlusion)
             clock.time += 1
-            // Nirux comes to the front: a line of its own, before anything refreshes.
+            // Nirux comes to the front: a line of its own, for a shell
+            // that follows the system.
             let before = lines.count
-            shell.noteSidebarStaleLogEvent(.front)
+            shell.sidebarStaleLogCameToFront()
+            XCTAssertEqual(lines.count, before, "a test's shell writes nothing at an activation")
+            shell.sidebarStaleLog.followsSystem = true
+            shell.sidebarStaleLogCameToFront()
             XCTAssertEqual(lines.count, before + 1)
             let front = try XCTUnwrap(lines.last)
             XCTAssertTrue(front.hasPrefix("trigger=front idle=- store=2 held=2 same=1 "), front)
