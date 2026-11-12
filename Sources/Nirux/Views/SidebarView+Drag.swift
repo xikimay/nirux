@@ -68,6 +68,8 @@ extension SidebarView {
         }
         workspaceDrag = drag
         var lastDragEvent: NSEvent?
+        // When a tick first found the press gone, its mouse-up not here.
+        var releasedAt: TimeInterval?
 
         tracking: while true {
             guard let event = window.nextEvent(
@@ -77,29 +79,21 @@ extension SidebarView {
                 dequeue: true
             ) else {
                 // Timeout tick: bail if the gesture can no longer finish.
-                if !rowPressHolds(window) { break }
+                if rowPressIsLost(in: window, since: &releasedAt) { break }
                 continue
             }
             switch event.type {
             case .leftMouseDragged:
+                // Drags still come: the press holds as far as the events
+                // say (events posted to the app move no button).
+                releasedAt = nil
                 lastDragEvent = event
                 dragMoved(event, drag: &drag)
                 workspaceDrag = drag
             case .periodic:
                 // A drag's own ticks keep the timeout above from ever
-                // coming. The button is up: its mouse-up is right behind
-                // this tick, or it went elsewhere (a modal, another app)
-                // and the drag would hold the sidebar's updates and the
-                // keyboard until the next click.
-                if !rowPressHolds(window) {
-                    guard window.nextEvent(
-                        matching: .leftMouseUp, until: Date(timeIntervalSinceNow: Self.eventTimeout),
-                        inMode: .eventTracking, dequeue: true
-                    ) != nil else { break tracking }
-                    finishWorkspaceDrag()
-                    deliverDrop(drag)
-                    return
-                }
+                // coming.
+                if rowPressIsLost(in: window, since: &releasedAt) { break tracking }
                 // Keeps autoscroll running while the cursor holds still
                 // past the sidebar edge.
                 if drag.isDragging, let lastDragEvent {
@@ -128,6 +122,29 @@ extension SidebarView {
             }
         }
         finishWorkspaceDrag()
+    }
+
+    /// At a tick of a row gesture (a timeout, a drag's periodic event):
+    /// whether its press is lost. The button up, or the window gone, the
+    /// mouse-up is on its way behind what is queued, or it went elsewhere
+    /// (a modal, another app): the gesture would then hold the sidebar's
+    /// updates, and a drag the keyboard, until the next click. It gets as
+    /// long as the timeout to come, and is never taken ahead of the drags
+    /// and keys queued before it.
+    private func rowPressIsLost(in window: NSWindow, since releasedAt: inout TimeInterval?) -> Bool {
+        guard !rowPressHolds(window) else {
+            releasedAt = nil
+            return false
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard let released = releasedAt else {
+            releasedAt = now
+            return false
+        }
+        // Queued already (the app was busy): it comes in its turn.
+        return now - released >= Self.eventTimeout && window.nextEvent(
+            matching: .leftMouseUp, until: .distantPast, inMode: .eventTracking, dequeue: false
+        ) == nil
     }
 
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {

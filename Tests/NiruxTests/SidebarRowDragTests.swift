@@ -4,7 +4,7 @@ import XCTest
 
 /// A press on a task's row is tracked until its mouse-up, and the sidebar
 /// puts its updates and rebuilds aside meanwhile: the gesture has to end,
-/// and what was put aside has to come back.
+/// in the order its events came, and what was put aside has to come back.
 @MainActor
 final class SidebarRowDragTests: XCTestCase {
     private func row(_ id: String, index: Int, pr: PRInfo? = nil, active: Bool = false) -> WorkspaceInfo {
@@ -17,7 +17,8 @@ final class SidebarRowDragTests: XCTestCase {
 
     /// An expanded sidebar in a window that is never shown.
     private func sidebar(_ rows: [WorkspaceInfo]) -> (SidebarView, NSWindow) {
-        _ = NSApplication.shared
+        // What an earlier test left in the queue isn't this one's.
+        NSApplication.shared.discardEvents(matching: .any, before: nil)
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 660))
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         host.addSubview(sidebar)
@@ -51,10 +52,25 @@ final class SidebarRowDragTests: XCTestCase {
         ))
     }
 
-    /// The button is held for a moment (the drag's ticks are running by
-    /// then), then reads up; `released` runs when the gesture first sees it.
-    private func releaseButton(of sidebar: SidebarView, after delay: TimeInterval = 0.6, released: @escaping @MainActor () -> Void = {}) {
-        let press = Press(until: Date().addingTimeInterval(delay), released: released)
+    private func post(_ type: NSEvent.EventType, at point: NSPoint, in sidebar: SidebarView, window: NSWindow) {
+        guard let event = try? mouse(type, at: point, in: sidebar, window: window) else { return XCTFail("no mouse event") }
+        NSApp.postEvent(event, atStart: false)
+    }
+
+    /// A tick of the drag's own, queued where it is posted.
+    private func postTick() {
+        guard let tick = NSEvent.otherEvent(
+            with: .periodic, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
+        ) else { return XCTFail("no periodic event") }
+        NSApp.postEvent(tick, atStart: false)
+    }
+
+    /// The button is held for `delay` (the drag's ticks are running by
+    /// then), then reads up. Each time the gesture then finds it up, the
+    /// next of `found` runs first.
+    private func releaseButton(of sidebar: SidebarView, after delay: TimeInterval, found: [@MainActor () -> Void] = []) {
+        let press = Press(until: Date().addingTimeInterval(delay), found: found)
         sidebar.rowPressHolds = { _ in press.holds() }
     }
 
@@ -63,11 +79,9 @@ final class SidebarRowDragTests: XCTestCase {
     private func laterMouseUp(at point: NSPoint, in sidebar: SidebarView, window: NSWindow) -> LaterMouseUp {
         let later = LaterMouseUp()
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self, weak sidebar, weak window] in
-            guard let self, let sidebar, let window, sidebar.workspaceDrag != nil,
-                  let mouseUp = try? self.mouse(.leftMouseUp, at: point, in: sidebar, window: window)
-            else { return }
+            guard let self, let sidebar, let window, sidebar.workspaceDrag != nil else { return }
             later.wasNeeded = true
-            NSApp.postEvent(mouseUp, atStart: false)
+            self.post(.leftMouseUp, at: point, in: sidebar, window: window)
         }
         return later
     }
@@ -83,12 +97,10 @@ final class SidebarRowDragTests: XCTestCase {
         var moved: [[Int]] = []
         sidebar.onWorkspaceClicked = { clicked.append($0) }
         sidebar.onWorkspaceReordered = { moved.append([$0, $1]) }
-        releaseButton(of: sidebar)
+        releaseButton(of: sidebar, after: 0.6)
 
         let start = try frame(ofRow: 1, in: sidebar).center
-        NSApp.postEvent(
-            try mouse(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window), atStart: false
-        )
+        post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window)
         // A task leaves while the row is held.
         DispatchQueue.main.async { sidebar.update(profiles: [], workspaces: Array(sidebar.lastInfos.dropLast())) }
         let later = laterMouseUp(at: start, in: sidebar, window: window)
@@ -103,44 +115,83 @@ final class SidebarRowDragTests: XCTestCase {
         XCTAssertEqual(moved, [], "and moves nothing")
     }
 
-    /// The button can read up a moment before its mouse-up is handed
-    /// over: that mouse-up still drops the row where it was dragged.
-    func testAMouseUpRightBehindTheButtonStillDropsTheRow() throws {
+    /// The button can read up before its mouse-up is handed over, and the
+    /// app can be busy meanwhile: the mouse-up still comes in its turn,
+    /// after the drags queued before it, and drops the row where the last
+    /// of them left it.
+    func testAMouseUpBehindWhatIsQueuedDropsTheRowWhereItWasDragged() throws {
         let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)])
         defer { window.close() }
         var moved: [[Int]] = []
         sidebar.onWorkspaceReordered = { moved.append([$0, $1]) }
 
         let start = try frame(ofRow: 0, in: sidebar).center
-        let below = NSPoint(x: start.x, y: try frame(ofRow: 2, in: sidebar).minY + 2)
-        releaseButton(of: sidebar) { [weak self, weak sidebar, weak window] in
-            guard let self, let sidebar, let window,
-                  let mouseUp = try? self.mouse(.leftMouseUp, at: below, in: sidebar, window: window)
-            else { return }
-            NSApp.postEvent(mouseUp, atStart: false)
-        }
-        NSApp.postEvent(
-            try mouse(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window), atStart: false
-        )
-        NSApp.postEvent(try mouse(.leftMouseDragged, at: below, in: sidebar, window: window), atStart: false)
-        let later = laterMouseUp(at: below, in: sidebar, window: window)
+        let underAll = NSPoint(x: start.x, y: try frame(ofRow: 2, in: sidebar).minY + 2)
+        let underTheSecond = NSPoint(x: start.x, y: try frame(ofRow: 1, in: sidebar).minY + 2)
+        releaseButton(of: sidebar, after: 0.6, found: [
+            // Up: a tick, a last drag back up a row and the mouse-up are queued…
+            { [weak self, weak sidebar, weak window] in
+                guard let self, let sidebar, let window else { return }
+                self.postTick()
+                self.post(.leftMouseDragged, at: underTheSecond, in: sidebar, window: window)
+                self.post(.leftMouseUp, at: underTheSecond, in: sidebar, window: window)
+            },
+            // …and the app is busy for longer than a mouse-up is waited for.
+            { Thread.sleep(forTimeInterval: 0.3) }
+        ])
+        post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window)
+        post(.leftMouseDragged, at: underAll, in: sidebar, window: window)
+        let later = laterMouseUp(at: underAll, in: sidebar, window: window)
         sidebar.mouseDown(with: try mouse(.leftMouseDown, at: start, in: sidebar, window: window))
 
         XCTAssertFalse(later.wasNeeded, "the gesture never saw the button up")
+        XCTAssertNil(sidebar.workspaceDrag)
+        XCTAssertEqual(moved, [[0, 1]], "under the second row, where the last drag left it")
+    }
+
+    /// Events posted to the app move no button: a drag whose button reads
+    /// up all along isn't taken for lost while it keeps moving.
+    func testADragThatKeepsMovingIsNotLost() throws {
+        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("b", index: 1), row("c", index: 2)])
+        defer { window.close() }
+        var moved: [[Int]] = []
+        sidebar.onWorkspaceReordered = { moved.append([$0, $1]) }
+
+        let start = try frame(ofRow: 0, in: sidebar).center
+        let underAll = NSPoint(x: start.x, y: try frame(ofRow: 2, in: sidebar).minY + 2)
+        releaseButton(of: sidebar, after: 0, found: [
+            // It moves on…
+            { [weak self, weak sidebar, weak window] in
+                guard let self, let sidebar, let window else { return }
+                self.post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 20), in: sidebar, window: window)
+            },
+            // …and longer than a mouse-up is waited for after the first tick…
+            { Thread.sleep(forTimeInterval: 0.3) },
+            // …it is dropped.
+            { [weak self, weak sidebar, weak window] in
+                guard let self, let sidebar, let window else { return }
+                self.post(.leftMouseDragged, at: underAll, in: sidebar, window: window)
+                self.post(.leftMouseUp, at: underAll, in: sidebar, window: window)
+            }
+        ])
+        post(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - 10), in: sidebar, window: window)
+        let later = laterMouseUp(at: underAll, in: sidebar, window: window)
+        sidebar.mouseDown(with: try mouse(.leftMouseDown, at: start, in: sidebar, window: window))
+
+        XCTAssertFalse(later.wasNeeded)
         XCTAssertNil(sidebar.workspaceDrag)
         XCTAssertEqual(moved, [[0, 2]])
     }
 
     /// Rows that may no longer move mid-drag (the window got covered) are
     /// rebuilt still when the drag ends, even when the refresh put aside
-    /// meanwhile brings the same rows.
+    /// meanwhile brings the same rows; and nothing stays owed.
     func testARebuildSkippedDuringADragIsMadeAtItsEnd() throws {
         let checksRunning = PRInfo(
             number: 39, state: "OPEN", isDraft: false, ciStatus: "PENDING", checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://example.test/pull/39", additions: nil, deletions: nil, changedFiles: nil
         )
-        let rows = [row("a", index: 0, active: true), row("pr", index: 1, pr: checksRunning)]
-        let (sidebar, window) = sidebar(rows)
+        let (sidebar, window) = sidebar([row("a", index: 0, active: true), row("pr", index: 1, pr: checksRunning)])
         defer { window.close() }
         sidebar.rowPressHolds = { _ in true }
         let ring = { () -> CAShapeLayer? in
@@ -150,20 +201,23 @@ final class SidebarRowDragTests: XCTestCase {
         XCTAssertNotNil(try XCTUnwrap(ring()).animation(forKey: SidebarWorkspaceCardRenderer.checksRingKey), "the ring turns")
 
         let start = try frame(ofRow: 0, in: sidebar).center
+        let waited = Waited()
         DispatchQueue.main.async { [weak self, weak sidebar, weak window] in
-            guard let self, let sidebar, let window,
-                  let mouseUp = try? self.mouse(.leftMouseUp, at: start, in: sidebar, window: window)
-            else { return }
+            guard let self, let sidebar, let window else { return }
             sidebar.animates = false
             sidebar.update(profiles: [], workspaces: sidebar.lastInfos)
-            NSApp.postEvent(mouseUp, atStart: false)
+            waited.rebuild = sidebar.rebuildSkippedDuringDrag
+            waited.update = sidebar.deferredDragUpdate != nil
+            self.post(.leftMouseUp, at: start, in: sidebar, window: window)
         }
         sidebar.mouseDown(with: try mouse(.leftMouseDown, at: start, in: sidebar, window: window))
 
+        XCTAssertEqual([waited.rebuild, waited.update], [true, true], "the press was tracked: both waited for its end")
         XCTAssertNil(sidebar.workspaceDrag)
         let still = try XCTUnwrap(ring())
         XCTAssertNil(still.animationKeys(), "the rows were rebuilt for what may move now")
         XCTAssertNotNil(still.lineDashPattern)
+        XCTAssertFalse(sidebar.rebuildSkippedDuringDrag, "the rebuild was made: the next press owes none")
     }
 }
 
@@ -171,20 +225,16 @@ final class SidebarRowDragTests: XCTestCase {
 @MainActor
 private final class Press {
     private let until: Date
-    private let released: @MainActor () -> Void
-    private var told = false
+    private var found: [@MainActor () -> Void]
 
-    init(until: Date, released: @escaping @MainActor () -> Void) {
+    init(until: Date, found: [@MainActor () -> Void]) {
         self.until = until
-        self.released = released
+        self.found = found
     }
 
     func holds() -> Bool {
         guard Date() >= until else { return true }
-        if !told {
-            told = true
-            released()
-        }
+        if !found.isEmpty { found.removeFirst()() }
         return false
     }
 }
@@ -192,6 +242,13 @@ private final class Press {
 @MainActor
 private final class LaterMouseUp {
     var wasNeeded = false
+}
+
+/// What waited for a tracked press to end.
+@MainActor
+private final class Waited {
+    var rebuild = false
+    var update = false
 }
 
 private extension NSRect {
