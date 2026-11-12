@@ -21,10 +21,10 @@ extension ProjectBoard {
     enum PullRequestList: Sendable {
         /// Up to 100 open pull requests, with their checks.
         case open
-        /// The 100 merged pull requests opened last: a worktree still at
-        /// one's head reads "merged, clean up", an open pull request based
-        /// on one's branch is a stack on a merged base, and those merged
-        /// today close the Board's sections.
+        /// The 100 merged pull requests opened last, with their title and
+        /// merge date: a worktree still at one's head reads "merged, clean
+        /// up", and an open pull request based on the branch of one of the
+        /// last 30 is a stack on a merged base.
         case merged
     }
 
@@ -165,9 +165,7 @@ extension ProjectBoard {
         return json.compactMap { pullRequest(from: $0, repository: repository, dates: dates) }
     }
 
-    static func pullRequest(
-        from json: [String: Any], repository: GitHubRepository, dates: ISO8601DateFormatter = ISO8601DateFormatter()
-    ) -> PullRequest? {
+    static func pullRequest(from json: [String: Any], repository: GitHubRepository, dates: ISO8601DateFormatter) -> PullRequest? {
         guard let number = json["number"] as? Int,
               let state = (json["state"] as? String)?.uppercased(),
               let headRefName = json["headRefName"] as? String, !headRefName.isEmpty,

@@ -37,6 +37,11 @@ call.
   moved since (the open PR's `baseRefOid` is the merged PR's head). A
   long-lived branch merged once, such as `develop`, gets new commits and stops
   reading spent; right after its merge it still does, and offers Retarget.
+- `baseRefOid` is the base's tip when the open PR was opened or last pushed,
+  not now (measured 2026-11-12): a PR opened on `develop` just after its merge
+  keeps reading spent though `develop` moved on since. So the merged PR is
+  looked for among the 30 opened last only (`ProjectBoard.mergedBaseWindow`),
+  however many the board reads: the wrong offer ends 30 pull requests later.
 - Pure function, `ProjectBoard.stackPlaces`, tested through `rows`.
 - `baseRefOid` needs gh 2.63.0 (2024-11) or later. An older gh refuses the
   whole open batch ("Unknown JSON field"), and the header says so.

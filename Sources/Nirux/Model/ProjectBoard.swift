@@ -160,7 +160,8 @@ extension ProjectBoard {
         let detachedHead: String?
         /// The workspaces open in the worktree (or the folder), in sidebar order.
         let workspaces: [WorkspaceRef]
-        /// Its open pull request, else one merged recently from its branch.
+        /// Its open pull request, else a merged one whose head the
+        /// worktree is still at.
         let pullRequest: PullRequest?
         /// The most urgent agent column among `workspaces`.
         var agent: Agent
@@ -224,9 +225,11 @@ extension ProjectBoard {
         let (members, outside) = assign(sources.workspaces, to: places)
         let configured = sources.repository != nil
         let open = latestByBranch(sources.openPullRequests.filter { configured && $0.isFromConfiguredRepository && $0.isOpen })
-        let merged = latestByBranch(sources.mergedPullRequests.filter {
+        let mergedRead = sources.mergedPullRequests.filter {
             configured && $0.isFromConfiguredRepository && $0.state == "MERGED"
-        })
+        }
+        let merged = latestByBranch(mergedRead)
+        let mergedBases = latestByBranch(Array(mergedRead.sorted { $0.number > $1.number }.prefix(mergedBaseWindow)))
 
         var byGroup: [RowGroup: [Row]] = [:]
         var foreign: [(order: Int, row: Row)] = []
@@ -275,7 +278,7 @@ extension ProjectBoard {
         foreign += outsideRows(outside)
 
         let byName = { (lhs: Row, rhs: Row) in lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending }
-        let stacks = stackPlaces(open: open, merged: merged, baseBranch: sources.baseBranch)
+        let stacks = stackPlaces(open: open, merged: mergedBases, baseBranch: sources.baseBranch)
         let placed = { (rows: [Row]) in
             rows.map { row in
                 var row = row
@@ -293,6 +296,15 @@ extension ProjectBoard {
             + (byGroup[.otherWorktree] ?? []).sorted(by: byName)
             + foreign.sorted { $0.order < $1.order }.map(\.row)
     }
+
+    /// A merged base is looked for among this many merged pull requests,
+    /// the last opened (docs/design/pr-stacks.md). A root's base reads
+    /// spent when the open pull request's `baseRefOid` is a merged one's
+    /// head, and that is the base's tip when the open one was opened or
+    /// last pushed, not now: a long-lived branch that moved on can still
+    /// read spent. A short window keeps that to soon after its merge,
+    /// however many merged pull requests are read.
+    static let mergedBaseWindow = 30
 
     /// One repository of a board with several (docs/design/spaces.md, S12).
     struct SectionSources {

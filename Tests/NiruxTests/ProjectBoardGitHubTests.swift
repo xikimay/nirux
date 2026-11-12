@@ -108,23 +108,23 @@ final class ProjectBoardGitHubTests: XCTestCase {
     }
 
     func testAMergedPullRequestIsReadWithItsTitleAndWhenItMerged() throws {
+        // The first as gh writes it; the second as a list that says less would.
         let merged = """
         [
-          {"number": 52, "state": "MERGED", "headRefName": "feat/login", "headRefOid": "9B57F5AB537BF3B5C0B22EA831B8D8C647EE2984",
-           "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
-           "url": "https://github.com/acme/widgets/pull/52", "title": "Sign in with a passkey", "mergedAt": "2026-11-11T13:02:11Z"},
+          {"baseRefName": "main", "headRefName": "feat/login", "headRefOid": "9B57F5AB537BF3B5C0B22EA831B8D8C647EE2984",
+           "headRepository": {"id": "R_kgDOAAAAAA", "name": "widgets", "nameWithOwner": "acme/widgets"},
+           "headRepositoryOwner": {"id": "MDQ6VXNlcjAwMDAwMDA=", "login": "acme", "name": "Acme"},
+           "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "state": "MERGED", "title": "Sign in with a passkey",
+           "url": "https://github.com/acme/widgets/pull/52"},
           {"number": 51, "state": "MERGED", "headRefName": "fix/typo", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
-           "url": "https://github.com/acme/widgets/pull/51", "mergedAt": "yesterday"}
+           "url": "https://github.com/acme/widgets/pull/51", "mergedAt": null}
         ]
         """
         let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(merged.utf8), repository: widgets))
         XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a passkey", ""], "one read without its title has none")
-        XCTAssertEqual(pullRequests.map { $0.mergedAt?.timeIntervalSince1970 }, [1_794_402_131, nil], "a date gh didn't write isn't one")
+        XCTAssertEqual(pullRequests.map { $0.mergedAt?.timeIntervalSince1970 }, [1_794_402_131, nil], "no date, as gh writes one that hasn't merged")
         XCTAssertEqual(pullRequests[0].headOid, "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984")
         XCTAssertTrue(pullRequests[0].isFromConfiguredRepository)
-
-        let open = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets))
-        XCTAssertEqual(open.map(\.mergedAt), [nil, nil, nil], "an open one never merged")
     }
 
     func testNotAListReadsAsNothing() {

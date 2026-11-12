@@ -983,8 +983,11 @@ What the board adds:
   `mergedAt`; 1 GraphQL point, about 48 kB, measured on 2026-11-12) are read
   every 10 minutes, and as soon as a pull request leaves the open list. They
   only say something of what is still at them: a worktree at one's head reads
-  "merged, clean up", and an open pull request based on one's branch,
-  untouched since, is a stack on a merged base.
+  "merged, clean up"; and an open pull request based on the branch of one of
+  the 30 opened last is a stack on a merged base
+  ([stacked pull requests](pr-stacks.md)). gh lists them by creation: one
+  opened before those 100 and merged now is not read, so its worktree stays a
+  branch without a pull request.
 - **Its one change:** Retarget, `PATCH pulls/{n}` with a new base, on one
   click ([stacked pull requests](pr-stacks.md)).
 - **Cadence:** every 60 s while the board is on screen, 30 s while a row has

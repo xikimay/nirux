@@ -104,6 +104,19 @@ final class ProjectBoardStackTests: XCTestCase {
                        "#53 open → stack/a")
     }
 
+    func testAMergedBaseIsLookedForAmongTheThirtyMergedPullRequestsOpenedLast() throws {
+        // `baseRefOid` is the base's tip when the pull request was opened or last pushed, not now: a
+        // base merged long ago may have moved on since, so it isn't offered a Retarget for ever.
+        let open = [pullRequest(200, "stack/b", base: "stack/a")]
+        let base = pullRequest(70, "stack/a", state: "MERGED")
+        let others = (71...99).map { pullRequest($0, "done/\($0)", state: "MERGED") }
+        let older = (1...10).map { pullRequest($0, "done/\($0)", state: "MERGED") }
+        XCTAssertEqual(try row(200, in: rows(open: open, merged: older + others + [base])).stack?.mergedBase?.number, 70,
+                       "the thirtieth, whatever the list's order")
+        let oneMore = rows(open: open, merged: others + [pullRequest(100, "done/100", state: "MERGED"), base])
+        XCTAssertNil(try row(200, in: oneMore).stack, "the thirty-first: a pull request on another branch, as any")
+    }
+
     func testAPullRequestOnTheBaseBranchIsNeverRetargeted() {
         // A pull request once merged from `main` into a release branch.
         let result = rows(open: [pullRequest(53, "feat/x")], merged: [pullRequest(40, "main", base: "release", state: "MERGED")])
