@@ -818,6 +818,12 @@ final class TurnEndClassificationTests: XCTestCase {
         // Its row clicked: its column in front, Nirux active.
         _ = machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 61))
         XCTAssertEqual(machine.blockedWait(now: t0 + 62, foreground: claude), wait, "reading it takes nothing off the card")
+        // Clicked with Nirux already in front: the click ends the alert
+        // itself, and still not the question.
+        try ask()
+        _ = machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: true, now: Date(timeIntervalSince1970: t0 + 61))
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertEqual(machine.blockedWait(now: t0 + 62, foreground: claude), wait)
         XCTAssertFalse(machine.dismissQuestion(askedAt: askedAt - 1), "another turn end's")
         XCTAssertNotNil(machine.visibleQuestion(foreground: claude))
         XCTAssertTrue(machine.dismissQuestion(askedAt: askedAt))
