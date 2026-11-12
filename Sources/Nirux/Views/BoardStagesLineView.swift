@@ -139,7 +139,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             label.frame = NSRect(x: frame?.minX ?? 0, y: 10, width: frame?.width ?? 0, height: 15)
         }
         removeAllToolTips()
-        for label in told where toolTipText(of: label) != nil {
+        for label in told where !label.isHidden && toolTipText(of: label) != nil {
             addToolTip(label.frame, owner: self, userData: nil)
         }
     }

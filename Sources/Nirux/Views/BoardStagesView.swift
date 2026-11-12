@@ -64,7 +64,8 @@ final class BoardStagesView: NSView {
     let leadDot = NSView()
     let leadLabel = NSTextField(labelWithString: "")
     let orderSwitch = NSSegmentedControl(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
-    private let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
+    /// "Task", "Now", "Pull request": over their columns.
+    let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
     let stationTitles = BoardStages.Station.allCases.map { NSTextField(labelWithString: BoardStagesView.title(of: $0)) }
     private let separator = NSView()
     let scrollView = NSScrollView()
@@ -296,10 +297,11 @@ final class BoardStagesView: NSView {
         /// The rail at ease, and tightened on a narrow Board.
         static let railWidth: CGFloat = 180
         static let compactRailWidth: CGFloat = 116
-        /// A rail's first station, from its left edge; its last sits as
-        /// far from its right one (a little more: the queue's ring).
+        /// A rail's first station, from its left edge; its last sits
+        /// further from its right one: the queue's ring, and its title
+        /// clear of the next column's.
         static let firstStation: CGFloat = 10
-        static let lastStation: CGFloat = 11
+        static let lastStation: CGFloat = 18
         /// "#1451 · on #1450" whole.
         static let pullRequestWidth: CGFloat = 114
         static let timeWidth: CGFloat = 50
@@ -310,8 +312,9 @@ final class BoardStagesView: NSView {
         /// take their columns; and under what it isn't worth showing.
         static let minimumPhrase: CGFloat = 180
         static let shortestPhrase: CGFloat = 70
-        /// What the name keeps before the order switch gives way.
-        static let minimumName: CGFloat = 60
+        /// The name is whole beside the order switch; a long one keeps
+        /// this much.
+        static let minimumName: CGFloat = 160
         /// A sub-task's or a stack line's inset, and its connector's x.
         static let inset: CGFloat = 26
         static let connectorX: CGFloat = padding + dot / 2
@@ -319,13 +322,15 @@ final class BoardStagesView: NSView {
 
     /// A line's columns for a width: task, rail, phrase, pull request,
     /// time.
-    /// - The task's column and the rail grow with the Board, never by a
-    ///   jump: widening a column moves no rail back.
+    /// - From where a phrase shows, the task's column and the rail grow
+    ///   with the Board, never by a jump: widening a column moves no rail
+    ///   back.
     /// - Below about 760 pt the rail tightens, its stations closer, before
     ///   any title is cut further.
-    /// - The phrase takes the rest, from `shortestPhrase`. The pull
-    ///   request, then the time, show once the phrase keeps
-    ///   `minimumPhrase` beside them.
+    /// - The phrase takes the rest. The pull request, then the time, show
+    ///   once the phrase keeps `minimumPhrase` beside them.
+    /// - A phrase under `shortestPhrase` says nothing: it goes, and the
+    ///   title takes its place (below about 390 pt).
     /// - A Board too narrow for a rail beside a title (about 300 pt) keeps
     ///   each line's dot and title.
     struct Columns: Equatable {
@@ -345,9 +350,12 @@ final class BoardStagesView: NSView {
             let showsRail = inner - wholeRail - Metrics.gap >= Metrics.minimumTask
             let railWidth = showsRail ? wholeRail : 0
             let wanted = min(Metrics.maximumTask, max(Metrics.minimumTask, (inner * 0.4).rounded(.down)))
-            let taskWidth = showsRail ? wanted : inner
+            var taskWidth = showsRail ? wanted : inner
             var phraseWidth = max(0, inner - taskWidth - railWidth - 2 * Metrics.gap)
-            if phraseWidth < Metrics.shortestPhrase { phraseWidth = 0 }
+            if phraseWidth < Metrics.shortestPhrase {
+                phraseWidth = 0
+                if showsRail { taskWidth = inner - railWidth - Metrics.gap }
+            }
             let showsPullRequest = phraseWidth - Metrics.pullRequestWidth - Metrics.gap >= Metrics.minimumPhrase
             if showsPullRequest { phraseWidth -= Metrics.pullRequestWidth + Metrics.gap }
             let showsTime = showsPullRequest && phraseWidth - Metrics.timeWidth - Metrics.gap >= Metrics.minimumPhrase
@@ -434,8 +442,9 @@ final class BoardStagesView: NSView {
     /// The space: its colour and name first, then at the right the order
     /// switch, before it the Lead, and what the space holds in what is
     /// left. On a narrow Board they give way in this order: the summary,
-    /// the Lead's line, the order switch; the name is the last to. The
-    /// Lead's dot keeps its place: its state is never hidden.
+    /// the Lead's line, the order switch; the name is the last to (a long
+    /// one keeps `minimumName` beside the switch). The Lead's dot keeps
+    /// its place: its state is never hidden.
     private func layoutHeader(width: CGFloat) {
         let pad = Metrics.padding
         let midY = Metrics.headerHeight / 2
@@ -445,19 +454,20 @@ final class BoardStagesView: NSView {
         let dotRoom = hasLead ? Metrics.dot + 12 : 0
         var right = width - pad
         let switchWidth = ceil(orderSwitch.fittingSize.width)
-        orderSwitch.isHidden = right - switchWidth - 12 - dotRoom - nameX < Metrics.minimumName
+        let wholeName = ColumnHeaderView.textWidth(nameLabel)
+        orderSwitch.isHidden = right - switchWidth - 12 - dotRoom - nameX < min(wholeName, Metrics.minimumName)
         if !orderSwitch.isHidden {
             orderSwitch.frame = NSRect(x: right - switchWidth, y: midY - 11, width: switchWidth, height: 22)
             right = orderSwitch.frame.minX - 12
         }
-        let nameWidth = min(ColumnHeaderView.textWidth(nameLabel), max(0, right - dotRoom - nameX))
+        let nameWidth = min(wholeName, max(0, right - dotRoom - nameX))
         nameLabel.frame = NSRect(x: nameX, y: midY - 10, width: nameWidth, height: 20)
 
         let free = right - nameLabel.frame.maxX - 12
         let wholeLead = ColumnHeaderView.textWidth(leadLabel)
         let leadWidth = min(wholeLead, free - Metrics.dot - 8)
-        // (A space without a Lead has an empty line: no width.)
-        let showsLeadLine = !orderSwitch.isHidden && leadWidth >= 60
+        // Whole, or 60 pt of it at least.
+        let showsLeadLine = hasLead && !orderSwitch.isHidden && leadWidth >= min(wholeLead, 60)
         leadLabel.isHidden = !showsLeadLine
         leadDot.isHidden = !hasLead
         if showsLeadLine {
@@ -511,7 +521,11 @@ final class BoardStagesView: NSView {
     // MARK: - Clicks
 
     @objc private func orderChosen() {
-        onOrder?(orderSwitch.selectedSegment == 0 ? .sidebar : .progress)
+        let asked: BoardStages.Order = orderSwitch.selectedSegment == 0 ? .sidebar : .progress
+        // The switch shows the content's order: it moves once the owner
+        // shows the order asked.
+        orderSwitch.selectedSegment = content?.order == .progress ? 1 : 0
+        onOrder?(asked)
     }
 
     @objc private func foldClicked(_ sender: NSButton) {

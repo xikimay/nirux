@@ -157,7 +157,7 @@ Two orders, one setting for the app:
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its
 "Clean up" while its worktree is there, and amber while an agent of its task
-needs the user.
+needs the user (the view lists those first: section 5).
 
 - A pull request has one place. Its line leaves the list for this one once
   the queue is through with it (after the post-merge run), and doesn't come
@@ -178,8 +178,10 @@ clicked. The sizes are the mockup's.
   its Lead's state and line, the order switch. Under it, the columns' titles,
   each station's over its place on the rails. On a narrow Board they give way
   in this order: the summary, the Lead's line, the order switch; the name is
-  the last to. The Lead's dot keeps its place, in its state's colour, and says
-  its line under the pointer.
+  the last to (a name longer than 160 pt keeps that much beside the switch).
+  The Lead's dot keeps its place, in its state's colour, and says its line
+  under the pointer. The order switch shows the content's order: it moves once
+  the owner shows the order asked.
 - **A section per repository** scrolls below: its name, `owner/name`, and its
   post-merge run's pill (or what went wrong reading it).
 - **A line** is 34 pt: its state's dot and its title, its rail, its phrase
@@ -207,22 +209,24 @@ clicked. The sizes are the mockup's.
   only moves the clock touches the times that changed. A change of lines
   updates them where they are: what is still listed keeps its view (a line,
   a repository's header, its fold, a stack's title, a merged entry), so a
-  press in flight or the keyboard on it isn't lost, and the views stay in the
-  order they are read.
+  press in flight on a line or an entry, or the keyboard on a fold, isn't
+  lost, and the views stay in the order they are read.
 
 ![The same Board at 600 pt](../images/board-stages-narrow.png)
 
 **On a narrow Board** the columns give way in this order, and never by a jump
-(from where a rail shows, widening the Board moves none back and shortens no
-title):
+(from where a phrase shows, widening the Board moves no rail back and shortens
+no title):
 
 - the task's column is two fifths of the Board, 280 pt at most, so a wide
   Board doesn't push the rails away from the titles;
 - below about 760 pt the rail tightens, its stations closer, down to 116 pt at
   600; a tight rail names its two ends only;
 - the phrase takes the rest; the pull request shows once the phrase keeps
-  180 pt beside it (from about 830 pt), then the time (from about 900 pt);
-- under 70 pt a phrase says nothing: it goes (below about 390 pt);
+  180 pt beside it (from about 830 pt), then the time (from about 900 pt): at
+  those two widths the phrase gives them 128 pt, then 64 pt;
+- under 70 pt a phrase says nothing: it goes (below about 390 pt), and the
+  title takes its place;
 - below about 300 pt there is no room for a rail beside a title: a line keeps
   its dot and its title.
 
