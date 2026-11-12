@@ -20,8 +20,6 @@ extension NiruxShellView {
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
                 let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
-                // Read on screen: the question its turn ended on is seen.
-                if isUserFocused, NSApp.isActive { col.pty?.noteAgentSeen() }
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
                 }

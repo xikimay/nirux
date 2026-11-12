@@ -61,15 +61,22 @@ extension NiruxShellView {
         guard status != .working, let pty = column.pty, pty.agentVisibleDialog(foreground: foreground) == nil,
               let asked = pty.agentQuestion(foreground: foreground), let text = asked.text
         else { return nil }
-        return SidebarTurnQuestion(text: text, turnEndedAt: asked.since, isYesNo: asked.isYesNo, columnID: column.id)
+        return SidebarTurnQuestion(
+            text: text, turnEndedAt: asked.since, isYesNo: asked.isYesNo, columnID: column.id, choices: asked.choices
+        )
     }
 
-    /// Yes, No or Reply… under a turn's question on a card, found by its
-    /// column wherever the card moved. Yes and No go in at once (or say
-    /// why not); Reply… opens a field next to the button.
+    /// Yes, No, Reply… or Dismiss under a turn's question on a card (or
+    /// "Dismiss Question" in its row's menu), found by its column wherever
+    /// the card moved. Yes and No go in at once (or say why not); Reply…
+    /// opens a field next to the button; Dismiss puts the question aside.
     func answerFromCard(_ answer: SidebarTurnAnswer, to question: SidebarTurnQuestion, button: NSView?) {
-        guard let place = liveColumn(where: { $0.id == question.columnID }), let agentUUID = place.column.agentUUID
-        else { return NSSound.beep() }
+        guard let place = liveColumn(where: { $0.id == question.columnID }) else { return NSSound.beep() }
+        if answer == .dismiss {
+            place.column.pty?.dismissAgentQuestion(askedAt: question.turnEndedAt)
+            return updateSidebar()
+        }
+        guard let agentUUID = place.column.agentUUID else { return NSSound.beep() }
         guard let text = answer.typedText else {
             return showTurnReplyPopover(for: question, in: place.workspace, agentUUID: agentUUID, anchor: button)
         }
@@ -120,7 +127,7 @@ extension NiruxShellView {
     /// Its question went (Claude moved on, the user answered at the
     /// terminal, the column closed): the Reply… popover goes, its text kept
     /// on the clipboard. Decided by the column's turn end, not by the card:
-    /// a question read on screen leaves the card, not the conversation. A
+    /// a question put aside leaves the card, not the conversation. A
     /// popover closed meanwhile is let go. The sidebar's refresh calls it.
     func closeStaleTurnReply() {
         guard let popover = turnReplyPopover, let question = turnReplyQuestion else { return }

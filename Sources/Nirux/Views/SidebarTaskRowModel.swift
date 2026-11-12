@@ -65,6 +65,17 @@ struct SidebarRowSummary: Hashable {
         }
     }
 
+    /// A block under the row that has the status whole, over what answers
+    /// it: the line itself then stays short.
+    enum Block: Hashable {
+        /// Allow / Deny, the command in its box: the line keeps to one
+        /// line.
+        case request
+        /// A turn's question over its buttons: the line says "Needs you ·
+        /// a question".
+        case question
+    }
+
     let mark: SidebarRowMark
     let status: SidebarStatusLine
     let trailing: Trailing?
@@ -72,6 +83,25 @@ struct SidebarRowSummary: Hashable {
     /// user, broke, or may be going in circles. Nil: the workspace's
     /// focused column.
     var focusColumn: Int?
+    /// The block that says the status whole, if one does.
+    var saidBelow: Block?
+
+    /// What the status line prints: the status, or less under a block that
+    /// has it whole. `status.text` stays what the row says where no block
+    /// follows (the catch-up card, a tooltip).
+    var lineText: String {
+        saidBelow == .question ? "Needs you · a question" : status.text
+    }
+
+    /// How many lines the status may take before "…". What stops a task
+    /// is read whole (four lines): it waits on the user, something broke,
+    /// a blocker; and so is the selected row's line. Any other row gets
+    /// two. A branch, a line that ends on a link ("Merged · Clean up") and
+    /// a line its block repeats keep to one.
+    func statusLineLimit(isSelected: Bool) -> Int {
+        if status.tone == .branch || status.linkText != nil || saidBelow != nil { return 1 }
+        return isSelected || [.needsYou, .error, .blocked].contains(mark) ? 4 : 2
+    }
 }
 
 @MainActor
@@ -90,9 +120,21 @@ extension WorkspaceInfo {
         }
 
         if let waiting = columns.first(where: { $0.attention == .waiting }) {
-            var summary = waiting.missionQuestion.map { $0.handOff != nil && !$0.isAnswered } == true
-                ? row(.needsYou, "Needs you · a question", .needsYou, .missionQuestion(columnIndex: waiting.index))
-                : row(.needsYou, "Needs you · \(Self.needsYouDetail(waiting))", .needsYou)
+            var summary: SidebarRowSummary
+            if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
+                // The question itself: a click on it opens the reply popover.
+                let asked = AgentText.clean(question.text, maxLength: 300) ?? "a question"
+                summary = row(.needsYou, "Needs you · \(asked)", .needsYou, .missionQuestion(columnIndex: waiting.index))
+            } else {
+                summary = row(.needsYou, "Needs you · \(Self.needsYouDetail(waiting))", .needsYou)
+                // Its block has it whole: the command in its box, the
+                // question over its buttons.
+                if waiting.permissionApproval != nil {
+                    summary.saidBelow = .request
+                } else if waiting.turnQuestion != nil {
+                    summary.saidBelow = .question
+                }
+            }
             summary.focusColumn = waiting.index
             return summary
         }

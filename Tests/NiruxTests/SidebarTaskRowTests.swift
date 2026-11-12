@@ -207,6 +207,59 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(working?.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.Color.textSecondary)
     }
 
+    /// What stops a task is read whole: its line wraps, up to four lines,
+    /// as the selected row's does; another row's takes two; a branch, a
+    /// link and a command its block repeats keep to one. The row is as
+    /// tall as its lines, and the tooltip has what "…" cuts.
+    func testStatusLineWrapsUpToItsLimit() throws {
+        let sentence = "Claude needs your permission to connect to the staging database before it runs the seed script, "
+            + "because the credentials in the environment file expired last night and the script would stop halfway"
+        func lines(_ info: WorkspaceInfo) -> Int { SidebarCardLayout(workspace: info, sidebarWidth: 260).statusLineCount }
+        let waiting = workspace([column(0, .needsAttention, reason: .message(sentence))])
+        XCTAssertEqual(lines(waiting), 4)
+        XCTAssertEqual(lines(workspace([column()], blocker: sentence)), 4, "a blocker says what the task waits on")
+        XCTAssertEqual(lines(workspace([column()], nextStep: sentence)), 2)
+        XCTAssertEqual(lines(workspace([column()], isActive: true, nextStep: sentence)), 4, "the selected row")
+        XCTAssertEqual(lines(workspace([column()], branch: "feat/" + String(repeating: "a-very-long-name-", count: 6))), 1)
+        XCTAssertEqual(workspace([column()], pr: pullRequest("MERGED"), cleanup: .available).rowSummary.statusLineLimit(isSelected: true), 1)
+
+        func render(_ info: WorkspaceInfo) -> SidebarWorkspaceCardRenderResult {
+            SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
+        }
+        let oneLine = SidebarExpandedMetrics.rowPaddingY * 2 + SidebarExpandedMetrics.titleRowHeight
+            + SidebarExpandedMetrics.statusGap + SidebarExpandedMetrics.statusRowHeight
+        let row = render(waiting)
+        let label = try XCTUnwrap(row.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Needs you · \(sentence)" })
+        XCTAssertEqual(label.frame.height, 4 * SidebarExpandedMetrics.statusRowHeight)
+        XCTAssertEqual(label.maximumNumberOfLines, 4)
+        XCTAssertEqual(label.cell?.truncatesLastVisibleLine, true, "then “…”")
+        XCTAssertTrue(label.toolTip?.contains(sentence) == true)
+        XCTAssertEqual(500 - row.bottomY, oneLine + 3 * SidebarExpandedMetrics.statusRowHeight)
+
+        // A sentence that fits is whole, on the lines it takes and no more.
+        let short = "Claude needs your permission to connect to the staging database"
+        let fitting = render(workspace([column(0, .needsAttention, reason: .message(short))]))
+        let whole = try XCTUnwrap(fitting.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Needs you · \(short)" })
+        let taken = whole.frame.height / SidebarExpandedMetrics.statusRowHeight
+        XCTAssertTrue((2...3).contains(Int(taken)), "\(taken) lines")
+        XCTAssertEqual(500 - fitting.bottomY, oneLine + (taken - 1) * SidebarExpandedMetrics.statusRowHeight)
+
+        // The command its Allow / Deny block shows whole stays on one line.
+        var approval = column(0, .needsAttention, reason: .permission(tool: "Bash", summary: sentence))
+        var request = AgentPermissionRequest(toolName: "Bash", summary: sentence, key: "k", agentID: nil, sessionID: "s", requestedAt: 0)
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: sentence)
+        approval.permissionApproval = SidebarPermissionApproval(request, now: 1)
+        XCTAssertEqual(lines(workspace([approval])), 1)
+
+        // The selected row's next step, under a line that says something
+        // else: up to three lines.
+        let next = workspace([column(0, .working)], isActive: true, nextStep: sentence)
+        let selected = render(next)
+        let step = try XCTUnwrap(selected.views.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasSuffix(sentence) })
+        XCTAssertEqual(step.frame.height, 3 * SidebarExpandedMetrics.actionLineHeight)
+        XCTAssertEqual(500 - selected.bottomY, SidebarExpandedMetrics.workspaceHeight(for: next, sidebarWidth: 260))
+    }
+
     /// "Clean up" is a link over its own words: a click on "Merged" or
     /// beside the line selects the row. An agent's state on the line keeps
     /// Clean up in a line of its own.
@@ -303,7 +356,8 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(askingLead.cardActions, [.missionQuestion(columnIndex: 1, question)])
         XCTAssertEqual(
             SidebarExpandedMetrics.workspaceHeight(for: askingLead, sidebarWidth: 260),
-            SidebarExpandedMetrics.leadRowHeight + SidebarExpandedMetrics.actionBlockHeight(askingLead.cardActions)
+            SidebarExpandedMetrics.leadRowHeight
+                + SidebarExpandedMetrics.actionBlockHeight(askingLead.cardActions, width: 224, textWidth: 208)
                 + SidebarExpandedMetrics.rowPaddingY,
             "its block ends a row's padding above its edge"
         )

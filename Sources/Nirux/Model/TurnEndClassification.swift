@@ -27,6 +27,14 @@ struct TurnEndQuestion: Equatable, Sendable {
     let isYesNo: Bool
 }
 
+/// One of the choices a final message lists next to its question
+/// (`TurnEndText.choices`), as the message writes it.
+struct TurnEndChoice: Hashable, Sendable {
+    /// "1.", "B)", "(a)"; nil for a bullet.
+    let marker: String?
+    let text: String
+}
+
 /// A Claude turn end waiting for its verdict. `turnEndedAt` (the Stop's
 /// timestamp) tells it from a later turn end of the same column.
 struct TurnEndRequest: Equatable, Sendable {
@@ -350,6 +358,132 @@ enum TurnEndText {
             if let cleaned = AgentText.clean(line.trimmed, maxLength: maxLength) { return cleaned }
         }
         return nil
+    }
+
+    /// The choices `question` asks about, when `message` lists them right
+    /// before it, else right after: that list's items, in the message's
+    /// order and words, each cleaned for a few lines of a card. Two to
+    /// `maxItems` items, with at most a blank line between the list and
+    /// the question's paragraph. Anything else gives none: a longer list
+    /// is a report, and half a list of choices would mislead.
+    static func choices(
+        for question: String, in message: String, maxItems: Int = 6, maxLength: Int = 200
+    ) -> [TurnEndChoice] {
+        let lines = Array(linesFromTheEnd(of: message).reversed())
+        let raw = message.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        guard raw.count == lines.count, let paragraph = paragraph(holding: question, in: lines) else { return [] }
+        for (first, step) in [(paragraph.lowerBound - 1, -1), (paragraph.upperBound, 1)] {
+            let found = listItems(from: first, step: step, lines: lines, raw: raw, maxLength: maxLength)
+            if (2...maxItems).contains(found.count) { return found }
+        }
+        return []
+    }
+
+    /// The lines of the last paragraph of prose that holds `question` (the
+    /// card's text: cleaned for one line, "…" where it was cut). A list
+    /// item is no such paragraph: a question among items has no choices
+    /// around it.
+    private static func paragraph(
+        holding question: String, in lines: [(trimmed: String, kind: LineKind)]
+    ) -> Range<Int>? {
+        guard let needle = AgentText.clean(question.hasSuffix("…") ? String(question.dropLast()) : question, maxLength: 10_000)
+        else { return nil }
+        var end = lines.count
+        while end > 0 {
+            guard lines[end - 1].kind == .prose, choiceItem(lines[end - 1].trimmed) == nil else {
+                end -= 1
+                continue
+            }
+            var start = end - 1
+            while start > 0, lines[start - 1].kind == .prose, choiceItem(lines[start - 1].trimmed) == nil { start -= 1 }
+            let text = lines[start..<end].map(\.trimmed).joined(separator: " ")
+            if AgentText.clean(text, maxLength: 10_000)?.contains(needle) == true { return start..<end }
+            end = start
+        }
+        return nil
+    }
+
+    /// The items of the list that starts at line `first` (past one blank
+    /// line) and goes on in `step`'s direction, in the message's order:
+    /// lines that start an item, the indented lines that go on with one,
+    /// and a single blank line between two of them. An item deeper than
+    /// the list's own goes on with the one above it.
+    private static func listItems(
+        from first: Int, step: Int, lines: [(trimmed: String, kind: LineKind)], raw: [Substring], maxLength: Int
+    ) -> [TurnEndChoice] {
+        func belongs(_ index: Int) -> Bool {
+            lines.indices.contains(index) && lines[index].kind == .prose
+                && (choiceItem(lines[index].trimmed) != nil || indent(of: raw[index]) >= 2)
+        }
+        var index = first
+        if lines.indices.contains(index), lines[index].kind == .blank { index += step }
+        var block: [Int] = []
+        while lines.indices.contains(index) {
+            if belongs(index) {
+                block.append(index)
+                index += step
+            } else if lines[index].kind == .blank, !block.isEmpty, belongs(index + step) {
+                index += step
+            } else {
+                break
+            }
+        }
+        block.sort()
+        let depths = block.filter { choiceItem(lines[$0].trimmed) != nil }.map { indent(of: raw[$0]) }
+        guard let depth = depths.min() else { return [] }
+        var items: [(marker: String?, parts: [String])] = []
+        for index in block {
+            if indent(of: raw[index]) == depth, let item = choiceItem(lines[index].trimmed) {
+                items.append((item.marker, [item.text]))
+            } else if !items.isEmpty {
+                items[items.count - 1].parts.append(lines[index].trimmed)
+            } else {
+                // Lines of an item that isn't there.
+                return []
+            }
+        }
+        let choices = items.compactMap { item in
+            AgentText.clean(item.parts.joined(separator: " "), maxLength: maxLength).map { TurnEndChoice(marker: item.marker, text: $0) }
+        }
+        return choices.count == items.count ? choices : []
+    }
+
+    /// A list item's marker and text: a bullet (no marker to show), or a
+    /// number or a letter before "." or ")", or in brackets ("2.", "B)",
+    /// "(a)").
+    static func choiceItem(_ line: String) -> (marker: String?, text: String)? {
+        if let bullet = ["- ", "* ", "+ ", "• "].first(where: line.hasPrefix) {
+            let text = line.dropFirst(bullet.count).trimmingCharacters(in: .whitespaces)
+            return text.isEmpty ? nil : (nil, text)
+        }
+        var rest = Substring(line)
+        let bracketed = rest.hasPrefix("(")
+        if bracketed { rest = rest.dropFirst() }
+        let digits = rest.prefix { ("0"..."9").contains($0) }
+        let label: Substring
+        if (1...3).contains(digits.count) {
+            label = digits
+        } else if let first = rest.first, first.isASCII, first.isLetter {
+            label = rest.prefix(1)
+        } else {
+            return nil
+        }
+        rest = rest.dropFirst(label.count)
+        let closing: String
+        if rest.hasPrefix(") ") {
+            closing = ")"
+        } else if !bracketed, rest.hasPrefix(". ") {
+            closing = "."
+        } else {
+            return nil
+        }
+        let text = rest.dropFirst(2).trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? nil : ((bracketed ? "(" : "") + label + closing, text)
+    }
+
+    /// Spaces in front of a line, a tab as four.
+    private static func indent(of line: Substring) -> Int {
+        line.prefix { $0 == " " || $0 == "\t" }.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
     }
 
     /// A prose paragraph (a list item is one of its own, its marker left

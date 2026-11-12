@@ -683,7 +683,8 @@ final class SidebarView: NSView {
 
     /// Per-workspace action menu, shared by right-click and the "⋯" button:
     /// what the workspace's state offers first (Review Branch, failed CI,
-    /// Clean Up once merged), then New Sub-task… and Organize, then Rename,
+    /// Dismiss Question, Clean Up once merged), then New Sub-task… and
+    /// Organize, then Rename,
     /// its context and Close (with Clean Up before it, not merged yet).
     /// `columnIndex` non-nil when invoked from a column row — adds the
     /// column-level actions on top.
@@ -729,6 +730,13 @@ final class SidebarView: NSView {
         let cleanup = worktreeCleanupOffer?(workspaceIndex)
         menu.addClosureItem(title: "Review Branch") { act(.reviewBranch) }
         addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, flakyReason: workspace?.ciFlakyReason, act: act)
+        // The card's own Dismiss, for each question its blocks show.
+        let questions = workspace?.columns.compactMap(\.turnQuestion) ?? []
+        if !questions.isEmpty {
+            menu.addClosureItem(title: Self.dismissQuestionTitle) { [weak self] in
+                for question in questions { self?.onTurnAnswer?(question, .dismiss, nil) }
+            }
+        }
         if cleanup == .suggested { addWorktreeCleanupItem(to: menu, act: act) }
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
@@ -758,6 +766,7 @@ final class SidebarView: NSView {
 
     static let newSubtaskTitle = "New Sub-task…"
     static let addRuleTitle = "Add a Rule to the Brief…"
+    static let dismissQuestionTitle = "Dismiss Question"
 
     /// "Move Out of “<task>”": a sub-task becomes a task of its own.
     static func moveOutTitle(parentTitle: String) -> String {

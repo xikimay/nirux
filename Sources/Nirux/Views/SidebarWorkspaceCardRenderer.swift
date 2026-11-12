@@ -108,7 +108,7 @@ final class SidebarWorkspaceCardRenderer {
         buildTitleRow(top: top)
         top -= Metrics.titleRowHeight + Metrics.statusGap
         let statusLink = buildStatusLine(top: top)
-        top -= Metrics.statusRowHeight
+        top -= CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
         let lineCount = max(layout.chipRows.count, layout.links.isEmpty ? 0 : 1)
         var chipAreas: [SidebarHitArea] = []
         if lineCount > 0 { top -= Metrics.columnsGap }
@@ -465,14 +465,19 @@ final class SidebarWorkspaceCardRenderer {
 
     /// "Needs you · npm run migrate" in amber, "Stopped on an API error"
     /// in red, "Working", "Asking web-main", "#39 · checks passed", "Ready
-    /// to merge", "Merged · Clean up", else the branch. A line that does
-    /// something (the Mission question popover, the pull request, Clean
-    /// up) is a link as wide as its text.
+    /// to merge", "Merged · Clean up", else the branch. It wraps, up to
+    /// the lines the layout gives it (`SidebarRowSummary.statusLineLimit`),
+    /// then ends on "…". A line that does something (the Mission question
+    /// popover, the pull request, Clean up) is a link as wide as its text.
     private func buildStatusLine(top: CGFloat) -> SidebarHitArea? {
         let status = layout.summary.status
-        let label = NSTextField.sidebarLine(Self.statusText(status))
+        let text = Self.statusText(layout.summary)
+        let label = layout.statusLineLimit > 1
+            ? SidebarWrappedText.label(text, lineHeight: Metrics.statusRowHeight, maxLines: layout.statusLineLimit)
+            : NSTextField.sidebarLine(text)
         let x = layout.indentX
-        label.frame = NSRect(x: x, y: top - Metrics.statusRowHeight, width: layout.contentMaxX - x, height: Metrics.statusRowHeight)
+        let height = CGFloat(layout.statusLineCount) * Metrics.statusRowHeight
+        label.frame = NSRect(x: x, y: top - height, width: layout.contentMaxX - x, height: height)
         label.toolTip = statusToolTip(status)
         // The grey check says it on screen.
         if layout.summary.mark == .finished { label.setAccessibilityLabel("Done: \(status.text)") }
@@ -487,6 +492,10 @@ final class SidebarWorkspaceCardRenderer {
             url = SidebarView.cleanupActionURL(workspaceIndex: workspace.index)
         case let .resume(columnIndex, columnID):
             url = SidebarView.resumeActionURL(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: columnID)
+        }
+        // Several lines: all of them.
+        guard layout.statusLineCount == 1 else {
+            return SidebarHitArea(frame: label.frame.insetBy(dx: -2, dy: -2), region: .link(url: url, label: label))
         }
         // Over the link's words only ("Clean up"), else the whole text.
         let full = ceil(label.attributedStringValue.size().width)
@@ -504,18 +513,21 @@ final class SidebarWorkspaceCardRenderer {
         )
     }
 
-    static func statusText(_ status: SidebarStatusLine) -> NSAttributedString {
+    /// The status line as the row prints it (`SidebarRowSummary.lineText`).
+    static func statusText(_ summary: SidebarRowSummary) -> NSAttributedString {
+        let status = summary.status
         let font = status.tone == .branch ? Theme.Font.mono : Theme.Font.body
         let color: NSColor = switch status.tone {
         case .needsYou: Theme.Color.waiting
         case .error: Theme.Color.error
         case .neutral, .branch: Theme.Color.textSecondary
         }
-        let text = NSMutableAttributedString(string: status.text, attributes: [.font: font, .foregroundColor: color])
-        if let link = status.linkText, status.text.hasSuffix(link) {
+        let shown = summary.lineText
+        let text = NSMutableAttributedString(string: shown, attributes: [.font: font, .foregroundColor: color])
+        if let link = status.linkText, shown.hasSuffix(link) {
             text.addAttribute(
                 .foregroundColor, value: Theme.Color.accent,
-                range: NSRange(location: (status.text as NSString).length - (link as NSString).length, length: (link as NSString).length)
+                range: NSRange(location: (shown as NSString).length - (link as NSString).length, length: (link as NSString).length)
             )
         }
         return text
@@ -666,7 +678,9 @@ final class SidebarWorkspaceCardRenderer {
         for (position, action) in actions.enumerated() {
             if position > 0 { top -= Metrics.actionRowGap }
             buildAction(action, top: top)
-            top -= Metrics.height(of: action)
+            top -= Metrics.height(
+                of: action, width: layout.contentMaxX - layout.contentX, textWidth: layout.contentMaxX - layout.indentX
+            )
         }
     }
 
@@ -684,10 +698,9 @@ final class SidebarWorkspaceCardRenderer {
                 kind: kind, detail: detail, failedAt: failedAt, resume: resume,
                 workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
-        case let .turnQuestion(columnIndex, question, showsQuestion):
+        case let .turnQuestion(columnIndex, question):
             add(SidebarTurnQuestionBlockRenderer(
-                question: question, showsQuestion: showsQuestion, workspaceIndex: workspace.index, columnIndex: columnIndex,
-                x: x, width: width, top: top
+                question: question, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
         case .reviewBadges(let badges):
             let indent = layout.indentX
@@ -701,11 +714,7 @@ final class SidebarWorkspaceCardRenderer {
         case let .cleanup(offer, number):
             buildCleanup(offer, pullRequest: number, top: top)
         case let .missionQuestion(columnIndex, question):
-            let label = NSTextField.sidebarLine(Self.missionQuestionText(question))
-            label.frame = NSRect(
-                x: layout.indentX, y: top - Metrics.actionLineHeight,
-                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
-            )
+            let label = wrappedActionLine(Self.missionQuestionText(question), maxLines: Metrics.missionQuestionMaxLines, top: top)
             append(label)
             Self.describe(label, question: question)
             guard !question.isAnswered else { return }
@@ -717,12 +726,8 @@ final class SidebarWorkspaceCardRenderer {
                 )
             ))
         case .next(let text):
-            let label = NSTextField.sidebarLine(Self.nextText(text))
+            let label = wrappedActionLine(Self.nextText(text), maxLines: Metrics.nextStepMaxLines, top: top)
             label.toolTip = "Next: \(text)"
-            label.frame = NSRect(
-                x: layout.indentX, y: top - Metrics.actionLineHeight,
-                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
-            )
             append(label)
         case .ruleProposals(let count):
             let label = NSTextField.sidebarLine(Self.ruleProposalsText(count: count))
@@ -742,6 +747,16 @@ final class SidebarWorkspaceCardRenderer {
         }
     }
 
+    /// A line of the action block that wraps, under the title: as tall as
+    /// `SidebarExpandedMetrics.height(of:width:textWidth:)` counts it.
+    private func wrappedActionLine(_ text: NSAttributedString, maxLines: Int, top: CGFloat) -> NSTextField {
+        let width = layout.contentMaxX - layout.indentX
+        let height = SidebarWrappedText.height(text, width: width, lineHeight: Metrics.actionLineHeight, maxLines: maxLines)
+        let label = SidebarWrappedText.label(text, lineHeight: Metrics.actionLineHeight, maxLines: maxLines)
+        label.frame = NSRect(x: layout.indentX, y: top - height, width: width, height: height)
+        return label
+    }
+
     /// "Rule proposed", "2 rules proposed".
     static func ruleProposalsTitle(count: Int) -> String {
         count == 1 ? "Rule proposed" : "\(count) rules proposed"
@@ -758,8 +773,8 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// "Asking web-main · <question>" in grey while the parent may answer,
-    /// "Needs you · a question" in amber once it waits on the user.
-    private static func missionQuestionText(_ question: SidebarMissionQuestion) -> NSAttributedString {
+    /// "Needs you · <question>" in amber once it waits on the user.
+    static func missionQuestionText(_ question: SidebarMissionQuestion) -> NSAttributedString {
         let font = Theme.Font.caption
         guard !question.isAnswered else {
             return NSAttributedString(string: answeredText(question), attributes: [
@@ -767,7 +782,8 @@ final class SidebarWorkspaceCardRenderer {
             ])
         }
         guard question.handOff == nil else {
-            return NSAttributedString(string: "Needs you · a question", attributes: [
+            let asked = AgentText.clean(question.text, maxLength: 300) ?? "a question"
+            return NSAttributedString(string: "Needs you · \(asked)", attributes: [
                 .font: font, .foregroundColor: Theme.Color.waiting
             ])
         }
@@ -803,7 +819,7 @@ final class SidebarWorkspaceCardRenderer {
         }
     }
 
-    private static func nextText(_ text: String) -> NSAttributedString {
+    static func nextText(_ text: String) -> NSAttributedString {
         let font = Theme.Font.caption
         let result = NSMutableAttributedString(string: "Next", attributes: [
             .font: font, .foregroundColor: Theme.Color.textTertiary
@@ -1017,6 +1033,16 @@ enum SidebarActionButton {
         button.symbolName = symbol
         button.borderColor = Theme.Color.lineStrong
         button.hoverFillColor = Theme.Color.fillPressed
+        return configured(button, label: label)
+    }
+
+    /// Dismiss: a grey word without a frame, lit under the pointer.
+    static func quiet(_ title: String, label: String) -> SidebarBadgeView {
+        let button = SidebarBadgeView(
+            text: title, textColor: Theme.Color.textTertiary, fillColor: .clear, font: Theme.Font.caption
+        )
+        button.hoverTextColor = Theme.Color.textPrimary
+        button.hoverFillColor = Theme.Color.fillHover
         return configured(button, label: label)
     }
 

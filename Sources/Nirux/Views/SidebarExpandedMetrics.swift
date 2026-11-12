@@ -98,20 +98,56 @@ enum SidebarExpandedMetrics {
         resume.status == nil ? buttonHeight : actionLineHeight + actionRowGap + actionLineHeight
     }
 
-    static func height(of action: SidebarCardAction) -> CGFloat {
+    // A question on a card: what the agent wrote, whole, over what
+    // answers it. Lines of text wrap (`SidebarWrappedText`).
+    static var questionFont: NSFont { Theme.Font.body }
+    static let questionLineHeight: CGFloat = 15
+    static let questionMaxLines = 8
+    /// A choice the message lists, under its marker.
+    static let choiceMaxLines = 6
+    static let choiceIndent: CGFloat = 18
+    static let choiceGap: CGFloat = 2
+    /// Between the choices and the question.
+    static let questionGap: CGFloat = 5
+    /// The selected row's next step, a Mission question's line.
+    static let nextStepMaxLines = 3
+    static let missionQuestionMaxLines = 2
+
+    /// The choices the message lists, the question, then the buttons.
+    @MainActor
+    static func turnQuestionBlockHeight(for question: SidebarTurnQuestion, width: CGFloat) -> CGFloat {
+        let choices = SidebarQuestionText.height(of: question.choices.map(SidebarQuestionText.choice), width: width)
+        return (choices > 0 ? choices + questionGap : 0) + SidebarQuestionText.questionHeight(question.text, width: width)
+            + actionRowGap + buttonHeight
+    }
+
+    /// `width`: the block's, the card's content. `textWidth`: a line's
+    /// that starts under the title.
+    @MainActor
+    static func height(of action: SidebarCardAction, width: CGFloat, textWidth: CGFloat) -> CGFloat {
         switch action {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
-        case .turnQuestion: return buttonHeight
-        case .cleanup, .reviewBadges, .next, .missionQuestion, .ruleProposals: return actionLineHeight
+        case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
+        case .next(let text):
+            return SidebarWrappedText.height(
+                SidebarWorkspaceCardRenderer.nextText(text), width: textWidth, lineHeight: actionLineHeight, maxLines: nextStepMaxLines
+            )
+        case .missionQuestion(_, let question):
+            return SidebarWrappedText.height(
+                SidebarWorkspaceCardRenderer.missionQuestionText(question), width: textWidth, lineHeight: actionLineHeight,
+                maxLines: missionQuestionMaxLines
+            )
+        case .cleanup, .reviewBadges, .ruleProposals: return actionLineHeight
         }
     }
 
     /// The block under line 3, gap included; 0 without actions.
-    static func actionBlockHeight(_ actions: [SidebarCardAction]) -> CGFloat {
+    @MainActor
+    static func actionBlockHeight(_ actions: [SidebarCardAction], width: CGFloat, textWidth: CGFloat) -> CGFloat {
         guard !actions.isEmpty else { return 0 }
         let top = actions.allSatisfy(\.isQuiet) ? quietBlockGap : actionBlockGap + 1 + actionBlockGap
-        let rows = actions.reduce(CGFloat(0)) { $0 + height(of: $1) }
+        let rows = actions.reduce(CGFloat(0)) { $0 + height(of: $1, width: width, textWidth: textWidth) }
         return top + rows + CGFloat(actions.count - 1) * actionRowGap
     }
 

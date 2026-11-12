@@ -1,14 +1,87 @@
 import AppKit
 
+/// The texts of a question's block, as its renderer draws them and
+/// `SidebarExpandedMetrics` measures them: the question whole, and under
+/// their markers the choices the message lists.
+@MainActor
+enum SidebarQuestionText {
+    typealias Metrics = SidebarExpandedMetrics
+
+    static func question(_ text: String) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [
+            .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
+        ])
+    }
+
+    static func questionHeight(_ text: String, width: CGFloat) -> CGFloat {
+        SidebarWrappedText.height(
+            question(text), width: width, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.questionMaxLines
+        )
+    }
+
+    static func questionLabel(_ text: String) -> NSTextField {
+        let label = SidebarWrappedText.label(
+            question(text), lineHeight: Metrics.questionLineHeight, maxLines: Metrics.questionMaxLines
+        )
+        label.toolTip = text
+        return label
+    }
+
+    /// A choice as the message lists it, under its own marker ("1.",
+    /// "B)"), a dot for a bullet.
+    static func choice(_ choice: TurnEndChoice) -> NSAttributedString {
+        item(marker: choice.marker ?? "•", NSAttributedString(string: choice.text, attributes: [
+            .font: Metrics.questionFont, .foregroundColor: Theme.Color.textSecondary,
+        ]))
+    }
+
+    private static func item(marker: String, _ text: NSAttributedString) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: marker + "\t", attributes: [
+            .font: Metrics.questionFont, .foregroundColor: Theme.Color.textTertiary,
+        ])
+        result.append(text)
+        return result
+    }
+
+    private static func height(of item: NSAttributedString, width: CGFloat) -> CGFloat {
+        SidebarWrappedText.height(
+            item, width: width, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines,
+            indent: Metrics.choiceIndent
+        )
+    }
+
+    /// The height of items stacked `choiceGap` apart; 0 without any.
+    static func height(of items: [NSAttributedString], width: CGFloat) -> CGFloat {
+        guard !items.isEmpty else { return 0 }
+        return items.reduce(CGFloat(0)) { $0 + height(of: $1, width: width) } + CGFloat(items.count - 1) * Metrics.choiceGap
+    }
+
+    /// The items' labels, stacked down from `top`.
+    static func itemLabels(_ items: [NSAttributedString], x: CGFloat, width: CGFloat, top: CGFloat) -> [NSTextField] {
+        var y = top
+        return items.map { item in
+            let height = height(of: item, width: width)
+            let label = SidebarWrappedText.label(
+                item, lineHeight: Metrics.questionLineHeight, maxLines: Metrics.choiceMaxLines, indent: Metrics.choiceIndent
+            )
+            label.frame = NSRect(x: x, y: y - height, width: width, height: height)
+            label.toolTip = item.string.replacingOccurrences(of: "\t", with: " ")
+            y -= height + Metrics.choiceGap
+            return label
+        }
+    }
+}
+
 /// The block of a card whose Claude ended its turn on a question: the
-/// question (unless the status line above says it), then Reply…, and No
-/// and Yes when a plain yes or no answers it (macOS order, the yes last at
-/// the right edge). The buttons arm like Allow / Deny: "yes" can start a
-/// merge or a push.
+/// choices the message lists next to it, the question whole, then on a
+/// line of their own Reply…, and No and Yes when a plain yes or no answers
+/// it (macOS order, the yes last at the right edge). At the left of that
+/// line, a quiet Dismiss puts the question aside: it stays on the card
+/// until answered otherwise, and not every turn that asks needs an answer.
+/// The buttons arm like Allow / Deny: "yes" can start a merge or a push.
 @MainActor
 struct SidebarTurnQuestionBlockRenderer {
     let question: SidebarTurnQuestion
-    let showsQuestion: Bool
     let workspaceIndex: Int
     let columnIndex: Int
     /// Left edge and width of the card's content.
@@ -18,11 +91,23 @@ struct SidebarTurnQuestionBlockRenderer {
 
     func render() -> SidebarApprovalBlockRenderer.Result {
         let metrics = SidebarExpandedMetrics.self
-        let height = metrics.buttonHeight
+        let height = metrics.turnQuestionBlockHeight(for: question, width: width)
         let blockFrame = NSRect(x: x, y: top - height, width: width, height: height)
         var views: [NSView] = []
         var hitAreas: [SidebarHitArea] = []
         var buttons: [String: SidebarBadgeView] = [:]
+
+        var y = top
+        let choices = question.choices.map(SidebarQuestionText.choice)
+        if !choices.isEmpty {
+            views += SidebarQuestionText.itemLabels(choices, x: x, width: width, top: y)
+            y -= SidebarQuestionText.height(of: choices, width: width) + metrics.questionGap
+        }
+        let asked = SidebarQuestionText.questionLabel(question.text)
+        let askedHeight = SidebarQuestionText.questionHeight(question.text, width: width)
+        asked.frame = NSRect(x: x, y: y - askedHeight, width: width, height: askedHeight)
+        asked.setAccessibilityLabel("Claude asks: \(question.text)")
+        views.append(asked)
 
         var answers: [(SidebarTurnAnswer, SidebarBadgeView)] = [
             (.reply, SidebarActionButton.secondary("Reply…", label: "Reply to: \(question.text)")),
@@ -43,22 +128,19 @@ struct SidebarTurnQuestionBlockRenderer {
             if let key = SidebarView.armedButtonKey(for: region) { buttons[key] = button }
             hitAreas.append(SidebarHitArea(frame: button.frame.insetBy(dx: -3, dy: -3), region: region))
         }
-        if showsQuestion {
-            views.append(questionLine(y: top - (height + metrics.actionLineHeight) / 2, width: right - x))
-        }
+        // Its word starts where the question's lines do.
+        let dismiss = SidebarActionButton.quiet("Dismiss", label: "Dismiss this question without answering it")
+        dismiss.toolTip = "Take this question off the row without answering it. Claude still waits at its prompt."
+        dismiss.frame = NSRect(
+            x: x + 2 - metrics.buttonPaddingX, y: top - height, width: dismiss.fittingWidth, height: metrics.buttonHeight
+        )
+        views.append(dismiss)
+        let region = SidebarHitRegion.turnAnswer(
+            workspaceIndex: workspaceIndex, columnIndex: columnIndex, question: question, answer: .dismiss
+        )
+        if let key = SidebarView.armedButtonKey(for: region) { buttons[key] = dismiss }
+        hitAreas.append(SidebarHitArea(frame: dismiss.frame.insetBy(dx: 0, dy: -3), region: region))
         hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
         return SidebarApprovalBlockRenderer.Result(views: views, hitAreas: hitAreas, buttons: buttons)
-    }
-
-    /// The question, clipped to what's left of the line; whole in the
-    /// tooltip.
-    private func questionLine(y: CGFloat, width: CGFloat) -> NSTextField {
-        let label = NSTextField.sidebarLine(NSAttributedString(string: question.text, attributes: [
-            .font: Theme.Font.caption, .foregroundColor: Theme.Color.waiting,
-        ]))
-        label.frame = NSRect(x: x, y: y - 1, width: max(0, width), height: SidebarExpandedMetrics.actionLineHeight + 2)
-        label.toolTip = question.text
-        label.setAccessibilityLabel("Claude asks: \(question.text)")
-        return label
     }
 }

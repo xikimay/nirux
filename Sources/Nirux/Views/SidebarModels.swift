@@ -517,18 +517,22 @@ struct SidebarTurnQuestion: Hashable {
     /// Its column (`ColumnState.id`): a click finds it there, wherever a
     /// rebuild moved the card.
     let columnID: UUID
+    /// What it chooses between, when the message lists it right next to
+    /// the question (`TurnEndText.choices`): the message's own lines.
+    var choices: [TurnEndChoice] = []
 }
 
-/// A quick answer's button under a turn's question.
+/// A button under a turn's question: a quick answer, or Dismiss, which
+/// answers nothing and takes the question off the card.
 enum SidebarTurnAnswer: String, Hashable {
-    case yes, no, reply
+    case yes, no, reply, dismiss
 
     /// What Yes and No type into the agent's prompt.
     var typedText: String? {
         switch self {
         case .yes: return "yes"
         case .no: return "no"
-        case .reply: return nil
+        case .reply, .dismiss: return nil
         }
     }
 }
