@@ -8,8 +8,9 @@ import Foundation
 /// inject a fake: GitHub's runners have `gh`, and a test must never reach
 /// the network.
 protocol ProjectBoardGitHub: Sendable {
-    /// The pull requests of `repository` (`owner/name`) as JSON: the open
-    /// ones with their checks, or the merged ones opened or updated last.
+    /// The pull requests of `repository` (`owner/name`) as a JSON list:
+    /// the open ones with their checks, or the merged ones opened or
+    /// updated last.
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError>
     /// `gh run list` as JSON: the last push run of `workflow` on `branch`.
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError>
@@ -25,7 +26,8 @@ extension ProjectBoard {
         /// last, a merge being an update, with their title and merge
         /// date: a worktree still at one's head reads "merged, clean up",
         /// and an open pull request based on the branch of one of the 30
-        /// opened last is a stack on a merged base.
+        /// opened last is a stack on a merged base. When that read
+        /// fails, the 100 opened last alone.
         case merged
     }
 
@@ -52,6 +54,25 @@ extension ProjectBoard {
             }
         }
     }
+
+    /// What a repository's failed reads say, each thing once, sorted. A
+    /// gh that is signed out fails every read, and each call words it
+    /// its own way ("HTTP 401: Bad credentials (https://…)", "Bad
+    /// credentials"): said once, as the first read in `Source`'s order
+    /// says it.
+    static func messages(of errors: [Source: FetchError]) -> [String] {
+        var messages = Set<String>()
+        var isSignedOut = false
+        for source in Source.allCases {
+            guard let error = errors[source] else { continue }
+            if case .notSignedIn = error {
+                guard !isSignedOut else { continue }
+                isSignedOut = true
+            }
+            messages.insert(error.message)
+        }
+        return messages.sorted()
+    }
 }
 
 /// The real client: the GitHub CLI where `PRDetect` finds it (looked up at
@@ -74,6 +95,11 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
         "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url", "title"
     ].joined(separator: ",")
+    /// What `gh pr list` gives of a merged pull request.
+    static let mergedFields = [
+        "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository", "baseRefName", "url",
+        "title", "mergedAt"
+    ].joined(separator: ",")
     /// Two lists of merged pull requests in one query, the fields named
     /// as `gh pr list` names them.
     /// - Those opened last, as `gh pr list` lists them: what the Board
@@ -88,8 +114,6 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         + "updated: pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...merged } } } } "
         + "fragment merged on PullRequest { number state headRefName headRefOid headRepositoryOwner { login } "
         + "headRepository { name } baseRefName url title mergedAt }"
-    /// Both lists, one after the other: the parser keeps each pull request once.
-    static let mergedFilter = "[.data.repository | .opened.nodes[]?, .updated.nodes[]?]"
     static let runFields = "status,conclusion,headSha,createdAt,updatedAt,url"
 
     /// Both name the host (`--repo`, `--hostname`): a terminal's
@@ -101,8 +125,26 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
                     "--json", openFields]
         case .merged:
             return GitHubCLIQueueClient.graphQL(mergedQuery, strings: GitHubCLIQueueClient.ownerAndName(repository))
-                + ["--jq", mergedFilter]
         }
+    }
+
+    /// The merged pull requests opened last alone, as the Board read
+    /// them before the query: what it falls back to.
+    static func openedLastArguments(repository: String) -> [String] {
+        ["pr", "list", "--repo", "github.com/\(repository)", "--state", "merged", "--limit", "100", "--json", mergedFields]
+    }
+
+    /// The query's two lists as one JSON list, those opened last first:
+    /// the parser keeps each pull request once. Nil when the answer
+    /// lacks either list: a read that failed, not an empty list, which
+    /// would take the place of the one read before.
+    static func mergedList(_ answer: Data) -> Data? {
+        guard let json = (try? JSONSerialization.jsonObject(with: answer)) as? [String: Any],
+              let repository = (json["data"] as? [String: Any])?["repository"] as? [String: Any],
+              let opened = (repository["opened"] as? [String: Any])?["nodes"] as? [Any],
+              let updated = (repository["updated"] as? [String: Any])?["nodes"] as? [Any]
+        else { return nil }
+        return try? JSONSerialization.data(withJSONObject: opened + updated)
     }
 
     static func runArguments(repository: String, workflow: String, branch: String) -> [String] {
@@ -121,8 +163,20 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         run(Self.retargetArguments(repository: repository, number: number, base: base))
     }
 
+    /// The merged read is never less than the list opened last: when
+    /// the query fails or answers without its lists (the list updated
+    /// last is the slow one), `gh pr list` is asked as before, and its
+    /// answer or its failure stands: a failure then reads as the open
+    /// pull requests' does. Not for a gh that is missing or signed out,
+    /// which fails every call.
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
-        run(Self.pullRequestArguments(repository: repository, state: state))
+        let read = run(Self.pullRequestArguments(repository: repository, state: state))
+        guard state == .merged else { return read }
+        let both = read.flatMap { Self.mergedList($0).map(Result.success) ?? .failure(.unreadable) }
+        switch both {
+        case .success, .failure(.ghMissing), .failure(.notSignedIn): return both
+        case .failure(.failed), .failure(.unreadable): return run(Self.openedLastArguments(repository: repository))
+        }
     }
 
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError> {
@@ -163,21 +217,9 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
                 return .failure(.notSignedIn(message.lowercased().contains("gh auth login") ? nil : message))
             }
             let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
-            return .failure(.failed(WorktreeCleanup.firstLine(stderr).map(Self.reason) ?? "exit status \(result.terminationStatus)"))
+            return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
         }
         return .success(result.standardOutput)
-    }
-
-    /// gh's line of error without what only says where it came from:
-    /// "gh: ", "GraphQL: ", and the field a GraphQL error names at its
-    /// end ("(repository)"). A GraphQL error then reads the same from
-    /// `gh pr list` and from `gh api`, and the header says it once. (An
-    /// HTTP error keeps each call's wording.)
-    static func reason(_ line: String) -> String {
-        var text = line
-        for prefix in ["gh: ", "GraphQL: "] where text.hasPrefix(prefix) { text.removeFirst(prefix.count) }
-        if let path = text.range(of: #" \([A-Za-z0-9_.]+\)$"#, options: .regularExpression) { text.removeSubrange(path) }
-        return text
     }
 }
 

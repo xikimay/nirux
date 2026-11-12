@@ -4,8 +4,8 @@ import XCTest
 /// The board's `gh` calls and what it reads from them. The open list and
 /// the runs are real `gh` 2.100.0 output (2026-09-27), anonymized: owner,
 /// repository, ids and URLs changed; PR 13's rerun and PR 14's fork added
-/// by hand. The merged list is written by hand in the shape the query's
-/// nodes have (checked against GitHub on 2026-11-12).
+/// by hand. The merged answer is written by hand in the shape the query's
+/// answer has (checked against GitHub on 2026-11-12).
 final class ProjectBoardGitHubTests: XCTestCase {
     private let widgets = GitHubRepository(owner: "acme", name: "widgets")
 
@@ -110,38 +110,57 @@ final class ProjectBoardGitHubTests: XCTestCase {
     }
 
     func testTheMergedPullRequestsAreReadFromTheQuerysTwoLists() throws {
-        // As the query's nodes come, one list after the other: #52 is in both; #49 is an earlier merge
-        // of the same branch at the same commit; #51 came from a fork deleted since; #50 says less
-        // than was asked; and one entry is no pull request.
+        // The query's answer: #52 is in both lists; #49 is an earlier merge of the same branch at the
+        // same commit; #51 came from a fork deleted since; #50 says less than was asked; and one
+        // node is no pull request.
         let login = """
         "baseRefName": "main", "headRefName": "feat/login", "headRefOid": "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984",
         "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "state": "MERGED"
         """
-        let merged = """
-        [
-          {\(login), "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "title": "Sign in with a passkey",
-           "url": "https://github.com/acme/widgets/pull/52"},
-          null,
-          {"baseRefName": "main", "headRefName": "patch-1", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
-           "headRepository": null, "headRepositoryOwner": {"login": "someone"},
-           "mergedAt": "2026-11-10T08:00:00Z", "number": 51, "state": "MERGED", "title": "A typo",
-           "url": "https://github.com/acme/widgets/pull/51"},
-          {"number": 50, "state": "MERGED", "headRefName": "fix/crash", "headRefOid": "a1b58d96ada210a3592b1d1c13e07130b7c425f0",
-           "url": "https://github.com/acme/widgets/pull/50", "mergedAt": null},
-          {\(login), "mergedAt": "2026-11-09T09:00:00Z", "number": 49, "title": "Sign in, first part",
-           "url": "https://github.com/acme/widgets/pull/49"},
-          {\(login), "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "title": "Sign in with a passkey, renamed since",
-           "url": "https://github.com/acme/widgets/pull/52"}
-        ]
+        let answer = """
+        {"data": {"repository": {
+          "opened": {"nodes": [
+            {\(login), "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "title": "Sign in with a passkey",
+             "url": "https://github.com/acme/widgets/pull/52"},
+            null,
+            {"baseRefName": "main", "headRefName": "patch-1", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+             "headRepository": null, "headRepositoryOwner": {"login": "someone"},
+             "mergedAt": "2026-11-10T08:00:00Z", "number": 51, "state": "MERGED", "title": "A typo",
+             "url": "https://github.com/acme/widgets/pull/51"},
+            {"number": 50, "state": "MERGED", "headRefName": "fix/crash", "headRefOid": "a1b58d96ada210a3592b1d1c13e07130b7c425f0",
+             "url": "https://github.com/acme/widgets/pull/50", "mergedAt": null}
+          ]},
+          "updated": {"nodes": [
+            {\(login), "mergedAt": "2026-11-09T09:00:00Z", "number": 49, "title": "Sign in, first part",
+             "url": "https://github.com/acme/widgets/pull/49"},
+            {\(login), "mergedAt": "2026-11-11T13:02:11Z", "number": 52, "title": "Sign in with a passkey, renamed since",
+             "url": "https://github.com/acme/widgets/pull/52"}
+          ]}
+        }}}
         """
-        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(merged.utf8), repository: widgets))
+        let list = try XCTUnwrap(GitHubCLIBoardClient.mergedList(Data(answer.utf8)))
+        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(list, repository: widgets))
         XCTAssertEqual(pullRequests.map(\.number), [52, 51, 50, 49],
-                       "each pull request once, by its number; an entry that isn't one is left out, not the list")
+                       "those opened last, then those updated last; each once, by its number; a node that isn't one is left out")
         XCTAssertEqual(pullRequests.map(\.isFromConfiguredRepository), [true, false, false, true], "by its head repository's owner and name")
         XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a passkey", "A typo", "", "Sign in, first part"],
                        "the first list's copy is kept; one read without its title has none")
         XCTAssertEqual(pullRequests.map { $0.mergedAt?.timeIntervalSince1970 }, [1_794_402_131, 1_794_297_600, nil, 1_794_214_800],
                        "no date, as gh writes one that hasn't merged")
+
+        // A repository without a merged pull request is an empty list; an answer without one of the
+        // lists is no list at all, so the one read before isn't replaced by nothing.
+        let none = #"{"data": {"repository": {"opened": {"nodes": []}, "updated": {"nodes": []}}}}"#
+        XCTAssertEqual(GitHubCLIBoardClient.mergedList(Data(none.utf8)).map { String(decoding: $0, as: UTF8.self) }, "[]")
+        for incomplete in [
+            #"{"data": {"repository": null}}"#,
+            #"{"data": {"repository": {"opened": {"nodes": []}}}}"#,
+            #"{"data": {"repository": {"updated": {"nodes": []}}}}"#,
+            #"{"data": {"repository": {"opened": {"nodes": []}, "updated": {"nodes": null}}}}"#,
+            "[]"
+        ] {
+            XCTAssertNil(GitHubCLIBoardClient.mergedList(Data(incomplete.utf8)), incomplete)
+        }
     }
 
     func testNotAListReadsAsNothing() {
@@ -248,7 +267,13 @@ final class ProjectBoardGitHubTests: XCTestCase {
                 + "updated: pullRequests(states: MERGED, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...merged } } } } "
                 + "fragment merged on PullRequest { number state headRefName headRefOid headRepositoryOwner { login } "
                 + "headRepository { name } baseRefName url title mergedAt }",
-             "-f", "owner=acme", "-f", "name=widgets", "--jq", "[.data.repository | .opened.nodes[]?, .updated.nodes[]?]"]
+             "-f", "owner=acme", "-f", "name=widgets"]
+        )
+        // What it falls back to: the call the Board made before.
+        XCTAssertEqual(
+            GitHubCLIBoardClient.openedLastArguments(repository: "acme/widgets"),
+            ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "merged", "--limit", "100", "--json",
+             "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,url,title,mergedAt"]
         )
         XCTAssertEqual(
             GitHubCLIBoardClient.runArguments(repository: "acme/widgets", workflow: "nightly.yml", branch: "main"),
@@ -263,49 +288,118 @@ final class ProjectBoardGitHubTests: XCTestCase {
         )
     }
 
-    /// gh signed out (its status 4), or with a token GitHub refuses, is
-    /// said in plain words.
-    func testGhSignedOutSaysSo() throws {
+    /// What a fake gh answers to one kind of call.
+    private struct Answer {
+        var output = ""
+        var error = ""
+        var status = 0
+    }
+
+    /// A gh in a folder of its own that answers the merged query (`gh api
+    /// graphql`), `gh pr list --state merged` and the other calls apart,
+    /// and writes down which it was asked. The folder goes with the test.
+    private func fakeGH(query: Answer = Answer(), openedLast: Answer = Answer(), others: Answer = Answer()) throws
+        -> (client: GitHubCLIBoardClient, calls: () -> [String]) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-fake-gh-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let fakeGH = { (name: String, stderr: String, status: Int) throws -> GitHubCLIBoardClient in
-            // "name|what it prints": that on its standard output first, as a failed `gh api` prints the answer it got.
-            let parts = name.split(separator: "|", maxSplits: 1).map(String.init)
-            let path = folder.appendingPathComponent(parts[0]).path
-            let printed = parts.count > 1 ? "printf '%s' '\(parts[1])'\n" : ""
-            try Data("#!/bin/sh\n\(printed)echo '\(stderr)' >&2\nexit \(status)\n".utf8).write(to: URL(fileURLWithPath: path))
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
-            return GitHubCLIBoardClient(findGH: { path })
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("gh").path
+        for (kind, answer) in [("query", query), ("openedLast", openedLast), ("others", others)] {
+            try Data(answer.output.utf8).write(to: URL(fileURLWithPath: "\(path).\(kind).out"))
+            try Data("\(answer.error)\n\(answer.status)".utf8).write(to: URL(fileURLWithPath: "\(path).\(kind).err"))
         }
-        let signedOut = try fakeGH("signed-out", "To get started with GitHub CLI, please run:  gh auth login", 4)
-        XCTAssertEqual(signedOut.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(nil)))
-        let revoked = try fakeGH("revoked", "HTTP 401: Bad credentials (https://api.github.com/graphql)", 1)
+        // The last line of ".err" is the status to exit with.
+        let script = """
+        #!/bin/sh
+        case "$*" in
+          "api graphql"*) kind=query ;;
+          *"--state merged"*) kind=openedLast ;;
+          *) kind=others ;;
+        esac
+        echo "$kind" >> "$0.calls"
+        cat "$0.$kind.out"
+        sed '$d' "$0.$kind.err" >&2
+        exit "$(tail -n 1 "$0.$kind.err")"
+
+        """
+        try Data(script.utf8).write(to: URL(fileURLWithPath: path))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        let calls = { (try? String(contentsOfFile: "\(path).calls", encoding: .utf8))?.split(separator: "\n").map(String.init) ?? [] }
+        return (GitHubCLIBoardClient(findGH: { path }), calls)
+    }
+
+    /// gh signed out (its status 4), or with a token GitHub refuses, is
+    /// said in plain words, once.
+    func testGhSignedOutSaysSoOnce() throws {
+        let toSignIn = Answer(error: "To get started with GitHub CLI, please run:  gh auth login", status: 4)
+        let signedOut = try fakeGH(query: toSignIn, openedLast: toSignIn, others: toSignIn)
+        XCTAssertEqual(signedOut.client.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(nil)))
+        XCTAssertEqual(signedOut.client.pullRequests(repository: "acme/widgets", state: .merged), .failure(.notSignedIn(nil)))
+        XCTAssertEqual(signedOut.calls(), ["others", "query"], "signed out fails every call: the list opened last isn't asked for")
+
+        // A revoked token, as each call words it.
         let refusal = "HTTP 401: Bad credentials (https://api.github.com/graphql)"
-        XCTAssertEqual(revoked.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(refusal)))
-        // One failure reads the same from `gh pr list` and from `gh api`: the header says it once.
-        let unresolved = "Could not resolve to a Repository with the name acme/widgets."
-        let listing = try fakeGH("listing", "GraphQL: \(unresolved) (repository)", 1)
-        XCTAssertEqual(listing.pullRequests(repository: "acme/widgets", state: .open), .failure(.failed(unresolved)))
-        let querying = try fakeGH("querying", "gh: \(unresolved)", 1)
-        XCTAssertEqual(querying.pullRequests(repository: "acme/widgets", state: .merged), .failure(.failed(unresolved)))
-        XCTAssertEqual(ProjectBoard.FetchError.failed(unresolved).message, "gh: \(unresolved)")
-        XCTAssertEqual(GitHubCLIBoardClient.reason("could not connect (see the proxy settings)"), "could not connect (see the proxy settings)",
-                       "only a GraphQL error's field is taken off its end")
-        XCTAssertEqual(GitHubCLIBoardClient.reason("GraphQL: Resource not accessible (repository.pullRequests.nodes.0.projectCards)"),
-                       "Resource not accessible", "a field deep in the answer too")
+        let revoked = try fakeGH(
+            query: Answer(output: #"{"message": "Bad credentials", "status": "401"}"#, error: "gh: Bad credentials (HTTP 401)", status: 1),
+            openedLast: Answer(output: "[]"), others: Answer(error: refusal, status: 1)
+        )
+        XCTAssertEqual(revoked.client.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn(refusal)))
+        XCTAssertEqual(revoked.client.pullRequests(repository: "acme/widgets", state: .merged), .failure(.notSignedIn("Bad credentials")))
+        XCTAssertEqual(revoked.calls(), ["others", "query"])
+        let signIn = "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+        XCTAssertEqual(ProjectBoard.FetchError.notSignedIn(nil).message, signIn)
+        XCTAssertEqual(ProjectBoard.FetchError.notSignedIn(refusal).message, "\(signIn) (gh: \(refusal))")
+
+        // The header says it once, as the first read does, beside what else went wrong.
+        XCTAssertEqual(
+            ProjectBoard.messages(of: [
+                .mergedPullRequests: .notSignedIn("Bad credentials"), .openPullRequests: .notSignedIn(refusal),
+                .postMergeRun: .failed("HTTP 502: Bad Gateway")
+            ]),
+            ["\(signIn) (gh: \(refusal))", "gh: HTTP 502: Bad Gateway"]
+        )
+        XCTAssertEqual(ProjectBoard.messages(of: [.mergedPullRequests: .notSignedIn("Bad credentials")]), ["\(signIn) (gh: Bad credentials)"])
+        XCTAssertEqual(
+            ProjectBoard.messages(of: [.openPullRequests: .failed("timeout"), .mergedPullRequests: .failed("timeout"), .postMergeRun: .unreadable]),
+            ["gh answered with something Nirux can’t read.", "gh: timeout"], "two reads that fail alike say it once"
+        )
+        XCTAssertEqual(ProjectBoard.messages(of: [:]), [])
+    }
+
+    /// The merged read is never less than the list opened last: when the
+    /// query for both lists fails, the Board asks for that one as before.
+    func testAFailedQueryFallsBackToTheListOpenedLast() throws {
+        let merged = { (client: GitHubCLIBoardClient) in
+            client.pullRequests(repository: "acme/widgets", state: .merged).map { String(decoding: $0, as: UTF8.self) }
+        }
+        let openedLast = Answer(output: #"[{"number": 7}]"#)
+        let both = #"{"data": {"repository": {"opened": {"nodes": [{"number": 7}]}, "updated": {"nodes": [{"number": 3}]}}}}"#
+
+        let answered = try fakeGH(query: Answer(output: both), openedLast: openedLast)
+        XCTAssertEqual(merged(answered.client), .success(#"[{"number":7},{"number":3}]"#))
+        XCTAssertEqual(answered.calls(), ["query"], "one call while the query answers")
+
         // A failed `gh api` prints the answer it got: a pull request's title in it isn't the reason.
-        let body = #"{"data":{"repository":{"opened":{"nodes":[{"number":7,"title":"How to run gh auth login"}]}}},"errors":[{"message":"Timeout"}]}"#
-        let partial = try fakeGH("partial|\(body)", "gh: Timeout", 1)
-        XCTAssertEqual(partial.pullRequests(repository: "acme/widgets", state: .merged), .failure(.failed("Timeout")))
-        XCTAssertEqual(
-            ProjectBoard.FetchError.notSignedIn(nil).message,
-            "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+        let partial = #"{"data": {"repository": {"opened": {"nodes": [{"number": 7, "title": "How to run gh auth login"}]}}}, "#
+            + #""errors": [{"message": "Timeout"}]}"#
+        let timedOut = try fakeGH(query: Answer(output: partial, error: "gh: Timeout", status: 1), openedLast: openedLast)
+        XCTAssertEqual(merged(timedOut.client), .success(#"[{"number": 7}]"#))
+        XCTAssertEqual(timedOut.calls(), ["query", "openedLast"])
+
+        let withoutAList = try fakeGH(query: Answer(output: #"{"data": {"repository": {"opened": {"nodes": []}}}}"#), openedLast: openedLast)
+        XCTAssertEqual(merged(withoutAList.client), .success(#"[{"number": 7}]"#), "an answer without one of its lists is a failed read")
+        XCTAssertEqual(withoutAList.calls(), ["query", "openedLast"])
+
+        // Both fail: the list's failure stands, worded as the open pull requests' is.
+        let unresolved = "GraphQL: Could not resolve to a Repository with the name acme/widgets. (repository)"
+        let missing = try fakeGH(
+            query: Answer(error: "gh: Could not resolve to a Repository with the name acme/widgets.", status: 1),
+            openedLast: Answer(error: unresolved, status: 1), others: Answer(error: unresolved, status: 1)
         )
-        XCTAssertEqual(
-            ProjectBoard.FetchError.notSignedIn(refusal).message,
-            "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh. (gh: \(refusal))"
-        )
+        XCTAssertEqual(merged(missing.client), .failure(.failed(unresolved)))
+        XCTAssertEqual(missing.client.pullRequests(repository: "acme/widgets", state: .open), .failure(.failed(unresolved)))
+        XCTAssertEqual(missing.calls(), ["query", "openedLast", "others"], "the open pull requests are asked for once, whatever the answer")
+        XCTAssertEqual(ProjectBoard.FetchError.failed(unresolved).message, "gh: \(unresolved)")
     }
 
     func testWithoutGhNothingRuns() {

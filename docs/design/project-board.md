@@ -251,7 +251,9 @@ documented in B1's pull request:
   any error before a section's first answer. A failure after a good read
   stays in its pill, as a failed merged read or Retarget does, and errors
   stay through Refresh until the next answer: the rows don't move for a
-  blip. Board Settings… shows only where settings can help: not for a
+  blip. The pill says each thing once: gh signed out fails every read, each
+  in its call's own words, and is said as the open pull requests' read says
+  it. Board Settings… shows only where settings can help: not for a
   checkout gone, nor for a repository another section reads.
 - **Known limits** of the read-only sections (written down on 2026-11-09,
   not solved): the one-repository case (origin only) is what they are for.
@@ -993,9 +995,13 @@ What the board adds:
   - A comment, a review, a label, a lock or a deleted branch updates an old
     merged pull request too: it then takes a place among those updated last,
     and a burst of them (a purge of old branches) can fill that list. The
-    first list is untouched: what the board read before is read as long as
-    the query answers. (Both lists come in one answer: an error on either
-    fails the read, and the list read before stays until the next one.)
+    first list is untouched: what the board read before is still read.
+  - Both lists come in one answer. When the query fails, or answers without
+    one of its lists, the board asks `gh pr list --state merged --limit 100`
+    as it did before: the merged read is never less than the list opened
+    last, and a failure reads as the open pull requests' does. Not when gh
+    is missing or signed out, which fails every call. An answer that can't
+    be read never counts as an empty list: the list read before stays.
 
   The merged pull requests only say something of what is still at them: a
   worktree at one's head reads "merged, clean up"; and an open pull request
