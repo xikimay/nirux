@@ -35,6 +35,7 @@ final class NiruxShellView: NSView {
     /// What the columns' lights and the edge glows show (see
     /// NiruxShellView+AgentLights).
     let agentLights = AgentLightState()
+    let sidebarStaleLog = SidebarStaleLogState()
     let workspaceSwitch = WorkspaceSwitchState()
     let workspaceNameCard = WorkspaceNameCard()
     /// Settings › General › "Animate the interface": off, states show
@@ -320,6 +321,7 @@ final class NiruxShellView: NSView {
         }
         wireDeferredAgentResume()
         wireAgentLights()
+        wireSidebarStaleLog()
         sidebar.onCatchUpAction = { [weak self] action in self?.handleCatchUpAction(action) }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }

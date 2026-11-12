@@ -70,6 +70,11 @@ struct ShellSideEffects {
     /// covered, its display not asleep.
     var windowShows: @MainActor (NSWindow?) -> Bool = { $0?.occlusionState.contains(.visible) ?? false }
 
+    /// Writes a line of the stale-rows log (see `SidebarStaleLog`): at
+    /// notice level, which the system log keeps on disk. The line is
+    /// counts and booleans, so public.
+    var logSidebarState: @MainActor (String) -> Void = { SidebarStaleLog.logger.notice("\($0, privacy: .public)") }
+
     /// Calls back at each click or scroll the app receives, until stopped;
     /// the events go on as they were. Keys come through the app's key
     /// interceptor, which consumes the terminals' own. Tests watch

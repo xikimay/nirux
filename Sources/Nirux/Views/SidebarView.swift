@@ -261,6 +261,7 @@ final class SidebarView: NSView {
     }
 
     func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo]) {
+        lastUpdateAt = clock()
         guard workspaceDrag == nil else {
             deferredDragUpdate = SidebarUpdatePayload(profiles: profiles, workspaces: workspaces)
             return
@@ -314,6 +315,16 @@ final class SidebarView: NSView {
 
     /// The clock the rows' movements are timed from; tests set it.
     var clock: () -> CFTimeInterval = { CACurrentMediaTime() }
+
+    /// For the stale-rows log (see SidebarView+StaleLog), on the `clock`:
+    /// when the rows were last rebuilt, when an update last came, when
+    /// the pointer last moved or pressed on the sidebar.
+    var lastRebuildAt: CFTimeInterval?
+    var lastUpdateAt: CFTimeInterval?
+    var lastPointerAt: CFTimeInterval?
+    /// The pointer came back to the sidebar (`notePointer`): the gesture,
+    /// and how long it had left the sidebar alone.
+    var onPointerReturn: ((PointerGesture, CFTimeInterval?) -> Void)?
 
     /// When a row began to draw its turn end's check (`clock`), by
     /// workspace: its mark draws it for
@@ -458,6 +469,7 @@ final class SidebarView: NSView {
     // MARK: - Click handling
 
     override func mouseDown(with event: NSEvent) {
+        notePointer(.press)
         // Click areas are registered in the scrollable document view's
         // coordinate space, so we hit-test there (which automatically
         // accounts for the current scroll offset).
@@ -521,6 +533,7 @@ final class SidebarView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        notePointer(.move)
         isRailTooltipSuppressed = false
         defer { if !isExpanded { updateRailTooltip() } }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
