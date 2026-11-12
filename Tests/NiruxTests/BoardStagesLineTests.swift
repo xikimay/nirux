@@ -313,10 +313,13 @@ final class BoardStagesLineTests: XCTestCase {
             (facts(pullRequest(merged: true), activity: .asking("Lead")), .waiting, "Asking Lead", "asked after the merge"),
             (facts(pullRequest(merged: true)), .merged, "Merged", "merged"),
             (with(facts(pullRequest(merged: true))) { $0.cleanUp = .running }, .merged, "Merged · cleaning up…", "its clean-up runs"),
-            (facts(pullRequest(53, checks: pending, base: "stack/a", stack: onMergedBase)), .idle,
+            (facts(pullRequest(53, checks: pending, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open)), .idle,
              "Base #52 merged · Retarget to main", "whatever its station: nothing lands on a merged branch, the user moves it"),
-            (with(facts(pullRequest(53, draft: true, base: "stack/a", stack: onMergedBase), reviews: nil)) { $0.nextStep = "rebase" },
-             .idle, "Base #52 merged · Retarget to main", "at Code too, before the next step"),
+            (with(facts(pullRequest(53, draft: true, base: "stack/a", stack: onMergedBase), reviews: nil, queue: Queue(list: .open))) {
+                $0.nextStep = "rebase"
+            }, .idle, "Base #52 merged · Retarget to main", "at Code too, before the next step"),
+            (facts(pullRequest(53, base: "stack/a", stack: onMergedBase)), .idle, "Base #52 merged",
+             "a repository without a merge queue: nothing here can retarget it"),
             (facts(pullRequest(checks: pending)), .waiting, "Checks running", "checks run"),
             (facts(pullRequest(checks: .pending(since: nil, missing: ["test", "lint"]))), .waiting, "No test, lint run yet",
              "a required check that hasn't reported isn't running"),
@@ -342,9 +345,170 @@ final class BoardStagesLineTests: XCTestCase {
         }
         let cleanUp = line(with(facts(pullRequest(merged: true))) { $0.cleanUp = .offered }).phrase
         XCTAssertEqual(cleanUp, BoardStages.Phrase(text: "Merged · Clean up", link: .cleanUp))
-        let retarget = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase))).phrase
-        XCTAssertEqual(retarget.link, .retarget(number: 53, onto: "main"))
-        XCTAssertTrue(retarget.text.hasSuffix(BoardStages.Link.retarget(number: 53, onto: "main").title), "the link ends the phrase")
+        let onto = BoardStages.Link.retarget(number: 53, onto: "main")
+        let retarget = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open))).phrase
+        XCTAssertEqual(retarget, BoardStages.Phrase(text: "Base #52 merged · Retarget to main", link: onto))
+        XCTAssertTrue(retarget.text.hasSuffix(onto.title), "the link ends the phrase")
+        XCTAssertNil(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase))).phrase.link, "no merge queue: no link")
+        // Retargeting is the Board's own call, not the queue's: a queue that runs, or that holds it, changes nothing.
+        let held = Queue(list: .locked("The queue is running."), order: 2)
+        XCTAssertEqual(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: held)).phrase.link, onto)
+        // A build that can't change GitHub: the words stay, as what to do, and say why they are no link.
+        let dryRun = "Dry run: this build doesn’t change GitHub."
+        let inert = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open, dryRun: " \(dryRun)\n"))).phrase
+        XCTAssertEqual(inert, BoardStages.Phrase(text: "Base #52 merged · Retarget to main", link: nil, detail: dryRun))
+        let listed = Queue(list: .open, order: 1, dryRun: dryRun)
+        XCTAssertNil(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: listed)).phrase.link, "in the list or not")
+        let cleaning = line(with(facts(pullRequest(merged: true), queue: Queue(list: .open, dryRun: dryRun))) { $0.cleanUp = .offered }).phrase
+        XCTAssertEqual(cleaning, cleanUp, "a clean-up changes nothing on GitHub")
+        // What is wrong now comes first: the phrase has no link then, and the Merge station still says the base merged.
+        let red = line(facts(
+            pullRequest(53, checks: .failed(["test"]), base: "stack/a", stack: onMergedBase),
+            queue: Queue(list: .open, refusal: "base #52 merged")
+        ))
+        XCTAssertEqual(red.phrase, BoardStages.Phrase(text: "Checks failed: test"))
+        XCTAssertEqual(red.tooltips.stations[.merge], "Can’t join the queue: base #52 merged")
+        // What a click on a link does, for its tooltip.
+        XCTAssertEqual(onto.hint, "Bases #53 on main, as GitHub does when a merged branch is deleted")
+        XCTAssertEqual(BoardStages.Link.cleanUp.hint, "Checks the worktree, then asks what goes")
+        // A branch is named on GitHub, by whoever pushed it: shown cleaned, wherever a line names one.
+        let odd = BoardStages.Link.retarget(number: 53, onto: "ma\u{202E}in")
+        XCTAssertEqual([odd.title, odd.hint], ["Retarget to main", "Bases #53 on main, as GitHub does when a merged branch is deleted"])
+        XCTAssertEqual(line(facts(pullRequest(base: "rel\u{202E}ease"))).phrase.text, "Targets release")
+        XCTAssertEqual(line(facts(pullRequest(conflicting: true, base: "rel\u{202E}ease"))).phrase.text, "Conflicts with release")
+    }
+
+    // MARK: - The Merge station's click
+
+    func testTheMergeStationIsTheListsControl() {
+        typealias Offer = BoardStages.QueueOffer
+        let running = "The queue is running: change the list once it stops."
+        let pending = BoardStages.Checks.pending(since: nil)
+        let stop = BoardStages.QueueStop(label: "checks", message: "test failed.", isProblem: true)
+        let add = Offer(change: .add, number: 52)
+        let remove = Offer(change: .remove, number: 52)
+        let refused = Offer(change: .add, number: 52, blocked: "Can’t join the queue: draft")
+        // The offer, and what the station says under the pointer.
+        let cases: [(Facts, Offer?, String?, String)] = [
+            (facts(pullRequest(), queue: Queue(list: .open)), add, "Add to Queue", "ready, outside the list: a click adds it"),
+            (facts(pullRequest(checks: pending), reviews: nil, queue: Queue(list: .open)), add, "Add to Queue",
+             "at any station: the queue asks for no review, and waits for the checks itself"),
+            (facts(pullRequest(), queue: Queue(list: .open, order: 2)), remove, "Remove from Queue", "in the list: a click takes it out"),
+            (facts(pullRequest(), queue: Queue(list: .open, order: 2, refusal: "draft")), remove, "Remove from Queue",
+             "one the queue would refuse now can still leave the list"),
+            (facts(pullRequest(), queue: Queue(list: .open, order: 1, stop: stop)), remove, "Remove from Queue",
+             "the last queue stopped on it: still in the next Start's list"),
+            (facts(pullRequest(), queue: Queue(list: .open, stop: stop)), add, "Add to Queue", "or out of it"),
+            (facts(pullRequest(draft: true), queue: Queue(list: .open, refusal: " draft\n")), refused, "Can’t join the queue: draft",
+             "refused, and why, as the queue's rule says it"),
+            (facts(pullRequest(), queue: Queue(list: .open, refusal: " ")), add, "Add to Queue", "an empty refusal is none"),
+            (facts(pullRequest(), queue: Queue(list: .locked(running))), Offer(change: .add, number: 52, blocked: running), running,
+             "the list can't change while a queue runs"),
+            (facts(pullRequest(), queue: Queue(list: .locked(running), order: 1, step: .merge("Merging"))),
+             Offer(change: .remove, number: 52, blocked: running), running, "nor lose the pull request the queue works on"),
+            (facts(pullRequest(draft: true), queue: Queue(list: .locked(running), refusal: "draft")), refused,
+             "Can’t join the queue: draft", "what won't change when the queue ends comes first"),
+            (facts(pullRequest(), queue: Queue(list: .locked(" The sheet\nis open. "))),
+             Offer(change: .add, number: 52, blocked: "The sheet is open."), "The sheet is open.", "why, cleaned"),
+            (facts(pullRequest(), queue: Queue(order: 1)), nil, nil, "a repository without a merge queue has no list"),
+            (facts(pullRequest(merged: true), queue: Queue(list: .locked(running), order: 1, step: .merge("Waiting for nightly"))), nil, nil,
+             "merged, though the queue still waits for its post-merge run: nothing left to queue"),
+            (facts(queue: Queue(list: .open)), nil, nil, "no pull request yet"),
+            (with(facts(pullRequest(), queue: Queue(list: .open))) { $0.hasRepository = false }, nil, nil, "no rail, no station to click")
+        ]
+        for (facts, offer, tooltip, why) in cases {
+            XCTAssertEqual(line(facts).offer, offer, why)
+            XCTAssertEqual(line(facts).tooltips.stations[.merge], tooltip, why)
+        }
+        XCTAssertNotNil(line(facts(pullRequest(), queue: Queue(list: .locked(" ")))).offer?.blocked, "locked, whatever its reason")
+        let withoutTask = with(facts(pullRequest(14), reviews: nil, queue: Queue(list: .open))) { $0.hasTask = false }
+        XCTAssertEqual(line(withoutTask).offer, Offer(change: .add, number: 14), "a pull request without a task can be queued too")
+        let stacked = facts(pullRequest(53, base: "stack/a", stack: child), queue: Queue(list: .open, order: 2))
+        XCTAssertEqual(line(stacked).offer, Offer(change: .remove, number: 53), "its own number, not its stack's root")
+    }
+
+    // MARK: - Under the pointer
+
+    func testALineSaysUnderThePointerWhatItCantHold() {
+        typealias Check = BoardStages.CheckLine
+        var busy = facts(
+            with(pullRequest(53, checks: .failed(["test"]), base: "stack/a", stack: child)) {
+                $0.url = " https://github.com/acme/widgets/pull/53 "
+                $0.checkLines = [
+                    Check(workflow: "Tests", name: "test", result: "✗"), Check(workflow: "", name: " \n", result: "●"),
+                    Check(workflow: " ", name: "lint\nfast", result: "✓")
+                ]
+            },
+            reviews: Self.reviews(fresh: [.premortem], earlier: [.codeReview, .adversarial]), queue: Queue(list: .open)
+        )
+        busy.location = [" feat/hint\n", " ", "/p/app.hint"]
+        busy.reviewsInFlight = [.adversarial]
+        XCTAssertEqual(line(busy).tooltips, BoardStages.Tooltips(
+            title: "feat/hint · /p/app.hint",
+            stations: [
+                .reviews: "Code review ran on another commit\nPremortem ran on this commit\nAdversarial review running",
+                .checks: "Tests / test: ✗\nunnamed check: ●\nlint fast: ✓",
+                .merge: "Add to Queue"
+            ],
+            pullRequest: "Stack: #52 → #53 → #54, on main\nhttps://github.com/acme/widgets/pull/53"
+        ), "each text cleaned, on its own line; a pass that never ran and isn't asked for says nothing")
+        // Each part of the title's is cut alone: what follows a long path stays.
+        let long = with(busy) { $0.location = ["feat/hint", String(repeating: "/deep", count: 80), "folder is gone"] }
+        XCTAssertEqual(line(long).tooltips.title?.hasSuffix("… · folder is gone"), true)
+        XCTAssertNil(line(with(busy) { $0.location = [] }).tooltips.title)
+
+        // Reviews: what is asked for and didn't run; no commit is named while HEAD isn't known.
+        let reviewsSay = { (facts: Facts, rules: BoardStages.Rules) in self.line(facts, rules: rules).tooltips.stations[.reviews] }
+        XCTAssertEqual(reviewsSay(facts(pullRequest(), reviews: nil), BoardStages.Rules()), "No code review yet")
+        XCTAssertEqual(reviewsSay(facts(pullRequest(), reviews: Self.reviews(fresh: [.premortem])), BoardStages.Rules()),
+                       "No code review yet\nPremortem ran on this commit")
+        let unknownHead = facts(pullRequest(), reviews: Self.reviews(fresh: [.premortem], earlier: [.codeReview], head: nil))
+        XCTAssertEqual(reviewsSay(unknownHead, BoardStages.Rules()), "Code review ran\nPremortem ran")
+        XCTAssertEqual(reviewsSay(with(unknownHead) { $0.reviewsInFlight = [.codeReview] }, BoardStages.Rules()),
+                       "Code review running\nPremortem ran", "running, whatever its commit")
+        XCTAssertEqual(reviewsSay(with(facts(reviews: nil)) { $0.reviewsInFlight = [.codeReview] }, BoardStages.Rules()),
+                       "No code review yet", "a pass in flight is recorded as it starts: without a run, it didn't")
+        var both = BoardStages.Rules()
+        both.requiredReviews = [.codeReview, .codeStyleReview]
+        XCTAssertEqual(reviewsSay(facts(), both), "Code review ran on this commit\nNo code style review yet")
+        // No Reviews station, nothing under it: a pull request without a task, one merged that nobody
+        // reviewed, rules that ask for none.
+        XCTAssertNil(reviewsSay(with(facts(pullRequest())) { $0.hasTask = false }, BoardStages.Rules()))
+        XCTAssertNil(reviewsSay(facts(pullRequest(merged: true), reviews: nil), BoardStages.Rules()))
+        var none = BoardStages.Rules()
+        none.requiredReviews = []
+        XCTAssertNil(reviewsSay(facts(pullRequest()), none))
+
+        // Checks: twelve as given, then how many more; a thirteenth takes that line's place.
+        let many = (1...14).map { Check(name: "job \($0)", result: "✓") }
+        let said = { (count: Int) in
+            self.line(self.facts(self.with(self.pullRequest()) { $0.checkLines = Array(many.prefix(count)) })).tooltips.stations[.checks]
+        }
+        let lines = many.map { "\($0.name): ✓" }
+        XCTAssertEqual(said(14), (lines.prefix(12) + ["and 2 more"]).joined(separator: "\n"))
+        XCTAssertEqual(said(13), lines.prefix(13).joined(separator: "\n"), "the thirteenth takes no more room than \"and 1 more\"")
+        XCTAssertEqual(said(12), lines.prefix(12).joined(separator: "\n"))
+        XCTAssertNil(said(0), "no check to name")
+        // A workflow's name and a job's are each cut, before the result: a long one still says which job, and how it ended.
+        let wordy = line(facts(with(pullRequest()) {
+            $0.checkLines = [
+                Check(workflow: String(repeating: "w", count: 90), name: "unit", result: "✗"),
+                Check(name: String(repeating: "x", count: 200), result: "●")
+            ]
+        }))
+        XCTAssertEqual(wordy.tooltips.stations[.checks],
+                       String(repeating: "w", count: 39) + "… / unit: ✗\n" + String(repeating: "x", count: 39) + "…: ●")
+
+        // The pull request: its address alone outside a stack; nothing without either; both cleaned.
+        let merged = line(facts(with(pullRequest(merged: true)) { $0.url = "https://github.com/acme/widgets/pull/52" })).tooltips
+        XCTAssertEqual(merged.pullRequest, "https://github.com/acme/widgets/pull/52", "a merged one too")
+        XCTAssertEqual(merged.stations, [.reviews: "Code review ran on this commit"], "as what its reviews were")
+        XCTAssertNil(line(facts(pullRequest())).tooltips.pullRequest)
+        let renamed = ProjectBoard.StackPlace(parent: 52, chain: [52, 53], rootBase: "ma\u{202E}in", mergedBase: nil, root: 52, order: 1)
+        XCTAssertEqual(line(facts(pullRequest(53, base: "stack/a", stack: renamed))).tooltips.pullRequest, "Stack: #52 → #53, on main")
+        XCTAssertEqual(line(facts()).tooltips, BoardStages.Tooltips(stations: [.reviews: "Code review ran on this commit"]))
+        // Without a rail, its title alone says more.
+        XCTAssertEqual(line(with(busy) { $0.hasRepository = false }).tooltips, BoardStages.Tooltips(title: "feat/hint · /p/app.hint"))
     }
 
     private func with(_ pullRequest: BoardStages.PullRequest, _ change: (inout BoardStages.PullRequest) -> Void)
@@ -392,7 +556,10 @@ final class BoardStagesLineTests: XCTestCase {
             (facts(pullRequest(), activity: .failed("Stopped")), "an agent that stopped"),
             (facts(pullRequest(), activity: .asking("Lead")), "asking"),
             (facts(pullRequest(), queue: Queue(stop: stop)), "a queue's stop"),
-            (facts(pullRequest(53, base: "stack/a", stack: onMergedBase)), "a base to retarget"),
+            (facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open)), "a base to retarget"),
+            (facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open, dryRun: "Dry run.")),
+             "one this build can't retarget"),
+            (facts(pullRequest(53, base: "stack/a", stack: onMergedBase)), "one nothing here can retarget"),
             (facts(pullRequest(draft: true)), "a draft"),
             (facts(pullRequest(base: "release")), "another base"),
             (facts(with(pullRequest()) { $0.reviewRequest = .reviewRequired }), "a review required")

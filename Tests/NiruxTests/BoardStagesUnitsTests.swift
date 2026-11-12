@@ -112,6 +112,12 @@ final class BoardStagesUnitsTests: XCTestCase {
         XCTAssertEqual(shape(section(clones).units), ["clone1", "clone2"], "nor is one held by two checkouts")
         let twice = section(clones + [task("second", 53, stack: place(1, of: [52, 53]))])
         XCTAssertEqual(stackTitles(twice.units), ["Stack · 2 pull requests on main"], "a stack counts pull requests, not lines")
+        // A branch is named on GitHub, by whoever pushed it: shown cleaned.
+        let odd = { (order: Int) in
+            ProjectBoard.StackPlace(parent: order == 0 ? nil : 52, chain: [52, 53], rootBase: "ma\u{202E}in", mergedBase: nil, root: 52, order: order)
+        }
+        let renamed = section([task("first", 52, stack: odd(0)), task("second", 53, stack: odd(1))])
+        XCTAssertEqual(stackTitles(renamed.units), ["Stack · 2 pull requests on main"])
     }
 
     func testAForkIsNoStackOfItsOwn() {

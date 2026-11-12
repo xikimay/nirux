@@ -13,6 +13,7 @@ extension SidebarView {
             rebuildSkippedDuringDrag = true
             return
         }
+        rebuildSkippedDuringDrag = false
         // Before the rows go: what the list hangs by.
         let anchor = scrollAnchor()
         builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })

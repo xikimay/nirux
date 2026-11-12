@@ -115,7 +115,7 @@ final class ProjectBoardStackTests: XCTestCase {
                        "the thirtieth, whatever the list's order")
         let oneMore = rows(open: open, merged: others + [pullRequest(100, "done/100", state: "MERGED"), base])
         XCTAssertNil(try row(200, in: oneMore).stack, "the thirty-first: a pull request on another branch, as any")
-        // The thirty are counted as gh lists them: forks' pull requests among them, and each merge of one branch.
+        // The thirty count every merged pull request opened last: forks' among them, and each merge of one branch.
         let forks = (71...100).map { pullRequest($0, "patch-\($0)", state: "MERGED", fork: true) }
         XCTAssertNil(try row(200, in: rows(open: open, merged: forks + [base])).stack)
         let releases = (71...100).map { pullRequest($0, "develop", state: "MERGED") }

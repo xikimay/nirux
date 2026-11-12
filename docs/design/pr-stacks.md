@@ -42,9 +42,11 @@ call.
     offering it though `develop` moved on since;
   - one whose base got commits after its own last push never reads spent,
     even in a real stack.
-- The merged PR is looked for among the 30 merged PRs gh lists first, the
-  last opened (`ProjectBoard.mergedBaseWindow`), however many the board
-  reads: the offer ends once 30 PRs opened after it have merged.
+- The merged PR is looked for among the 30 merged PRs opened last
+  (`ProjectBoard.mergedBaseWindow`), however many the board reads and in
+  whatever order: the offer ends once 30 PRs opened after it have merged. So
+  a base that stayed open while 30 opened after it merged is outside the
+  window the day it merges: no Retarget is offered.
 - Pure function, `ProjectBoard.stackPlaces`, tested through `rows`.
 - `baseRefOid` needs gh 2.63.0 (2024-11) or later. An older gh refuses the
   whole open batch ("Unknown JSON field"), and the header says so.
