@@ -327,6 +327,31 @@ final class AgentHookCenter {
             classifyTurnEnd(request, agentUUID: agentUUID, waitsOnParent: waitsOnParent())
         } else if event.name == .turnComplete || event.name == .stop, !waitsOnParent() {
             reportTurnDone(endedAt: event.timestamp, in: resolution)
+            if resolution.isUserFocused { noteQuestionReadAsItCame(event) }
+        }
+    }
+
+    /// A Claude turn that ended under the user's eyes waits for no verdict:
+    /// nobody to alert, no model to ask. When its final message ends on a
+    /// question, it asks all the same: its column keeps saying so once the
+    /// user looks elsewhere (`AgentStatusMachine.noteQuestion`). The
+    /// message's own line, as for a turn nobody watched, after the same
+    /// moment's wait: a Stop hook's continuation puts that end behind
+    /// first. Only with the option that reads final messages on.
+    private func noteQuestionReadAsItCame(_ event: AgentHookEvent) {
+        guard turnEndClassifier != nil, event.kind == .claude, event.name == .stop, event.agentID == nil,
+              let agentUUID = event.agentUUID, let message = event.finalMessage,
+              let line = TurnEndText.questionLine(of: message)
+        else { return }
+        let question = TurnEndQuestion(text: line, isYesNo: TurnEndText.isYesNoQuestion(line))
+        let delay = questionVerdictDelay
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let resolution = self?.resolver?(agentUUID),
+                  resolution.column.pty?.noteAgentQuestion(question, in: message, endingTurnAt: event.timestamp) == true
+            else { return }
+            // No alert refreshes the sidebar for it.
+            resolution.workspace.onMetadataChanged?()
         }
     }
 

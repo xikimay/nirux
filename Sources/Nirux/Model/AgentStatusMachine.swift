@@ -102,6 +102,10 @@ struct AgentStatusMachine {
     /// said it asks. Whoever looks at the column reads it there and gets
     /// no alert, but the turn isn't done.
     private var mainTurnEndAsks = false
+    /// Claude's main thread did something since its last turn end (a tool
+    /// call: a Stop hook's continuation, a wakeup): that end's question,
+    /// if any, is behind it.
+    private var mainThreadMovedSinceTurnEnd = false
     /// The last new conversation in this process, or its end: a quick
     /// answer never crosses one (`acceptsQuickAnswer`).
     private var conversationChangedAt: TimeInterval = 0
@@ -460,6 +464,7 @@ struct AgentStatusMachine {
         }
         askedQuestion = nil
         mainTurnEndedAt = now
+        mainThreadMovedSinceTurnEnd = false
         mainTurnEndIsLast = event.stopHookActive == true || !stopHooksKeepGoing
         mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
         turnFailure = event.name == .stopFailure
@@ -555,6 +560,26 @@ struct AgentStatusMachine {
         return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
     }
 
+    /// The turn that ended at `turnEndedAt` under the user's eyes got no
+    /// verdict: nobody to alert, no model to ask. Its final message ends
+    /// on `question`, the message's own line: the agent waits on an answer
+    /// all the same, and its column says so once the user looks elsewhere.
+    /// Nothing alerts, and the status stays as it is. False, and nothing
+    /// kept, when that turn end is behind (a prompt, a later end, another
+    /// conversation, Claude going on by itself), was not the turn's last
+    /// Stop, failed, waits behind a dialog, or has its verdict coming.
+    @discardableResult
+    mutating func noteQuestion(_ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        guard isCurrentTurnEnd(turnEndedAt), !mainThreadMovedSinceTurnEnd, mainTurnEndIsLast, turnFailure == nil,
+              openDialogs.isEmpty, quietTurnEnd == nil, askedQuestion == nil
+        else { return false }
+        askedQuestion = AskedQuestion(
+            text: question.text, since: turnEndedAt, isYesNo: question.isYesNo,
+            choices: TurnEndText.choices(for: question.text, in: message)
+        )
+        return true
+    }
+
     /// The question the foreground `claude` asked at its last turn end, if
     /// any: as `visibleDialog`, this very `claude`'s.
     func visibleQuestion(foreground: ForegroundProcess?) -> AskedQuestion? {
@@ -634,6 +659,7 @@ struct AgentStatusMachine {
     /// A main-thread tool event: the failed turn is behind.
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
+        mainThreadMovedSinceTurnEnd = true
         turnFailure = nil
         // Went on by itself (a Stop hook blocked its end, a background
         // task, a wakeup): a verdict would land on an agent at work, and
@@ -1167,6 +1193,7 @@ struct AgentStatusMachine {
         stopHooksKeepGoing = false
         mainTurnEndIsLast = true
         mainTurnEndAsks = false
+        mainThreadMovedSinceTurnEnd = false
         conversationChangedAt = 0
         turnStartedAt = nil
         lastReadAt = 0

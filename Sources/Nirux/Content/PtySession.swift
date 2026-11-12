@@ -381,6 +381,12 @@ final class PtySession: @unchecked Sendable {
         state.machine.visibleQuestion(foreground: foreground)
     }
 
+    /// See `AgentStatusMachine.noteQuestion`.
+    @discardableResult
+    func noteAgentQuestion(_ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+        state.machine.noteQuestion(question, in: message, endingTurnAt: turnEndedAt)
+    }
+
     /// See `AgentStatusMachine.dismissQuestion`.
     @discardableResult
     func dismissAgentQuestion(askedAt since: TimeInterval? = nil) -> Bool {
