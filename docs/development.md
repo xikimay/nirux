@@ -46,7 +46,7 @@ log show --last 1h --predicate 'process == "Nirux" AND subsystem == "com.xikimay
 | `store`, `held`, `same` | The tasks the store lists, those the sidebar holds, and whether they are the same, in the same order, each archived or not. `same=0`: the list was behind, and `drag`, `deferred`, `refresh` and `heartbeat` say what held it |
 | `rows`, `stray`, `nolayer`, `leftover` | The rows drawn over those the list asks for, layers that back no view, views whose layer isn't attached yet (AppKit attaches it at its next display pass), views a rebuild left behind. Off: the rows were behind the list |
 | `ghosts`, `rebuild` | The pictures of rows that left stay, unseen, until the next rebuild: nothing to see once `rebuild` is over half a second |
-| `wake`, `unlock`, `session`, `front`, `uncovered` | Seconds since the display woke, the screen was unlocked, the macOS session came back, Nirux came to the front (on a `front` line, the time before) and its window was uncovered; `-` for not since launch. With the rest in order, the screen was behind, or something the line doesn't count: these say after what |
+| `wake`, `unlock`, `session`, `front`, `uncovered` | Seconds since the display woke, the screen was unlocked (as Nirux heard it: in the background, only once it came to the front), the macOS session came back, Nirux came to the front (on a `front` line, the time before) and its window came into view (shown at launch, or uncovered); `-` for not since launch. With the rest in order, the screen was behind, or something the line doesn't count: these say after what |
 
 ## App bundle
 

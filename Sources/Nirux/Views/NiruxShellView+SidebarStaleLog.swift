@@ -6,9 +6,12 @@ import os
 final class SidebarStaleLogState {
     /// When each last happened since launch, on the sidebar's clock.
     var lastWakeAt: CFTimeInterval?
+    /// As Nirux heard it: the system holds the unlock's notification
+    /// while Nirux is in the background, until it comes to the front.
     var lastUnlockAt: CFTimeInterval?
     var lastSessionReturnAt: CFTimeInterval?
     var lastFrontAt: CFTimeInterval?
+    /// The window came into view: shown at launch, or uncovered.
     var lastUncoveredAt: CFTimeInterval?
     /// The window showed at the last change of a window's occlusion.
     var windowShowed = false
@@ -108,8 +111,6 @@ extension NiruxShellView {
     /// would hear what other processes do to the session and the screen.
     func followSystemForSidebarStaleLog() {
         sidebarStaleLog.followsSystem = true
-        // Covered to shown counts from now on, not the window's first show.
-        sidebarStaleLog.windowShowed = sideEffects.windowShows(window)
         let system = NSWorkspace.shared.notificationCenter
         let events: [(NotificationCenter, Notification.Name, SidebarStaleLogEvent)] = [
             (system, NSWorkspace.screensDidWakeNotification, .wake),
