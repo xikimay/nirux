@@ -71,6 +71,10 @@ extension ProjectBoard {
         /// The commit its base branch points to: a merged pull request's
         /// branch untouched since its merge is a stack's spent base.
         var baseOid: String?
+        /// Empty when gh wasn't asked for it.
+        var title = ""
+        /// When it merged; nil for one that hasn't.
+        var mergedAt: Date?
 
         var isOpen: Bool { state == "OPEN" }
         var isConflicting: Bool { mergeable == "CONFLICTING" }

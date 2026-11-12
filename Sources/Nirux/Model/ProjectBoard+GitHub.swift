@@ -68,10 +68,11 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
 
     static let openFields = [
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
-        "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url"
+        "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url", "title"
     ].joined(separator: ",")
     static let mergedFields = [
-        "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository", "baseRefName", "url"
+        "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository", "baseRefName", "url",
+        "title", "mergedAt"
     ].joined(separator: ",")
     static let runFields = "status,conclusion,headSha,createdAt,updatedAt,url"
 
@@ -157,10 +158,13 @@ extension ProjectBoard {
     /// needs is left out; nil when the output isn't a JSON list.
     static func parsePullRequests(_ data: Data, repository: GitHubRepository) -> [PullRequest]? {
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
-        return json.compactMap { pullRequest(from: $0, repository: repository) }
+        let dates = ISO8601DateFormatter()
+        return json.compactMap { pullRequest(from: $0, repository: repository, dates: dates) }
     }
 
-    static func pullRequest(from json: [String: Any], repository: GitHubRepository) -> PullRequest? {
+    static func pullRequest(
+        from json: [String: Any], repository: GitHubRepository, dates: ISO8601DateFormatter = ISO8601DateFormatter()
+    ) -> PullRequest? {
         guard let number = json["number"] as? Int,
               let state = (json["state"] as? String)?.uppercased(),
               let headRefName = json["headRefName"] as? String, !headRefName.isEmpty,
@@ -180,7 +184,9 @@ extension ProjectBoard {
             url: url,
             // The clean-up's own test: head owner and name, on the PR's host.
             isFromConfiguredRepository: WorktreeCleanup.pullRequest(from: json, headRepository: repository) != nil,
-            baseOid: (json["baseRefOid"] as? String)?.lowercased()
+            baseOid: (json["baseRefOid"] as? String)?.lowercased(),
+            title: json["title"] as? String ?? "",
+            mergedAt: (json["mergedAt"] as? String).flatMap(dates.date(from:))
         )
     }
 

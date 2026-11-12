@@ -19,6 +19,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
         "mergeable": "MERGEABLE",
         "number": 12,
         "state": "OPEN",
+        "title": "Sign in with a password",
         "statusCheckRollup": [
           {"__typename": "CheckRun", "completedAt": "2026-09-27T23:05:43Z", "conclusion": "SUCCESS",
            "detailsUrl": "https://github.com/acme/widgets/actions/runs/1/job/11", "name": "Analyze (actions)",
@@ -90,6 +91,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
 
         let login = pullRequests[0]
         XCTAssertEqual(login.headRefName, "feat/login")
+        XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a password", "", ""])
         XCTAssertEqual(login.headOid, "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984")
         XCTAssertTrue(login.isOpen)
         XCTAssertFalse(login.isDraft)
@@ -103,6 +105,26 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertTrue(pullRequests[1].isDraft)
         XCTAssertTrue(pullRequests[1].isConflicting)
         XCTAssertFalse(pullRequests[2].isFromConfiguredRepository, "a fork's")
+    }
+
+    func testAMergedPullRequestIsReadWithItsTitleAndWhenItMerged() throws {
+        let merged = """
+        [
+          {"number": 52, "state": "MERGED", "headRefName": "feat/login", "headRefOid": "9B57F5AB537BF3B5C0B22EA831B8D8C647EE2984",
+           "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
+           "url": "https://github.com/acme/widgets/pull/52", "title": "Sign in with a passkey", "mergedAt": "2026-11-11T13:02:11Z"},
+          {"number": 51, "state": "MERGED", "headRefName": "fix/typo", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+           "url": "https://github.com/acme/widgets/pull/51", "mergedAt": "yesterday"}
+        ]
+        """
+        let pullRequests = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(merged.utf8), repository: widgets))
+        XCTAssertEqual(pullRequests.map(\.title), ["Sign in with a passkey", ""], "one read without its title has none")
+        XCTAssertEqual(pullRequests.map { $0.mergedAt?.timeIntervalSince1970 }, [1_794_402_131, nil], "a date gh didn't write isn't one")
+        XCTAssertEqual(pullRequests[0].headOid, "9b57f5ab537bf3b5c0b22ea831b8d8c647ee2984")
+        XCTAssertTrue(pullRequests[0].isFromConfiguredRepository)
+
+        let open = try XCTUnwrap(ProjectBoard.parsePullRequests(Data(Self.openPullRequests.utf8), repository: widgets))
+        XCTAssertEqual(open.map(\.mergedAt), [nil, nil, nil], "an open one never merged")
     }
 
     func testNotAListReadsAsNothing() {
@@ -197,11 +219,12 @@ final class ProjectBoardGitHubTests: XCTestCase {
             GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .open),
             ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "open", "--limit", "100", "--json",
              "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,"
-                + "mergeable,statusCheckRollup,url"]
+                + "mergeable,statusCheckRollup,url,title"]
         )
         XCTAssertEqual(
-            Array(GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .merged).prefix(8)),
-            ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "merged", "--limit", "30"]
+            GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .merged),
+            ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "merged", "--limit", "30", "--json",
+             "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,url,title,mergedAt"]
         )
         XCTAssertEqual(
             GitHubCLIBoardClient.runArguments(repository: "acme/widgets", workflow: "nightly.yml", branch: "main"),

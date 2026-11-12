@@ -977,7 +977,7 @@ What the board adds:
 - **One batched call per repository:** `gh pr list --repo <owner/name>
   --state open --limit 100 --json number,state,headRefName,headRefOid,
   headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,mergeable,
-  statusCheckRollup,url`. It costs about 2 GraphQL points (measured with
+  statusCheckRollup,url,title`. It costs about 2 GraphQL points (measured with
   `rateLimit(dryRun: true)` on 2026-09-27). Recently merged PRs
   (`--state merged --limit 30`) are read every 10 minutes, for the "merged,
   clean up" rows.
