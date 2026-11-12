@@ -161,11 +161,10 @@ extension ProjectBoard {
     /// needs is left out; nil when the output isn't a JSON list.
     static func parsePullRequests(_ data: Data, repository: GitHubRepository) -> [PullRequest]? {
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
-        let dates = ISO8601DateFormatter()
-        return json.compactMap { pullRequest(from: $0, repository: repository, dates: dates) }
+        return json.compactMap { pullRequest(from: $0, repository: repository) }
     }
 
-    static func pullRequest(from json: [String: Any], repository: GitHubRepository, dates: ISO8601DateFormatter) -> PullRequest? {
+    static func pullRequest(from json: [String: Any], repository: GitHubRepository) -> PullRequest? {
         guard let number = json["number"] as? Int,
               let state = (json["state"] as? String)?.uppercased(),
               let headRefName = json["headRefName"] as? String, !headRefName.isEmpty,
@@ -187,7 +186,7 @@ extension ProjectBoard {
             isFromConfiguredRepository: WorktreeCleanup.pullRequest(from: json, headRepository: repository) != nil,
             baseOid: (json["baseRefOid"] as? String)?.lowercased(),
             title: json["title"] as? String ?? "",
-            mergedAt: (json["mergedAt"] as? String).flatMap(dates.date(from:))
+            mergedAt: (json["mergedAt"] as? String).flatMap { try? Date($0, strategy: .iso8601) }
         )
     }
 
