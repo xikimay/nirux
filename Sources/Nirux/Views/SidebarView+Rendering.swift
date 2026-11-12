@@ -13,6 +13,7 @@ extension SidebarView {
             rebuildSkippedDuringDrag = true
             return
         }
+        rebuildSkippedDuringDrag = false
         resetRenderState()
         guard isExpanded else {
             // Kept across rebuilds, put back by the next expanded one.

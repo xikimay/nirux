@@ -167,9 +167,13 @@ final class SidebarView: NSView {
     /// Sidebar data that arrived mid-drag; applied when the drag ends so
     /// rebuilds don't tear down rows under the captured drag geometry.
     var deferredDragUpdate: SidebarUpdatePayload?
-    /// A layout()-driven rebuild was suppressed mid-drag; recover with an
-    /// unconditional rebuild when the drag ends.
+    /// A rebuild was suppressed mid-drag (a layout, the rows' motion, the
+    /// catch-up card): the drag's end makes it, unless the update it
+    /// applies already rebuilt.
     var rebuildSkippedDuringDrag = false
+    /// Whether the press a row gesture tracks still holds: its window
+    /// shows and the button is down. Tests say.
+    var rowPressHolds: @MainActor (NSWindow) -> Bool = { $0.isVisible && NSEvent.pressedMouseButtons & 1 != 0 }
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it
