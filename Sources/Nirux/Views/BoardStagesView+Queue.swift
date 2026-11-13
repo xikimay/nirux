@@ -48,13 +48,13 @@ extension BoardStagesView {
     /// in another Nirux; nil otherwise.
     nonisolated static func runningQueue(id: String, title: String, tooltip: String? = nil, state: ProjectBoard.QueueState) -> RunningQueue? {
         switch state.run {
-        case .running(let isStopping):
+        // Green, as its header says it (the table's rules).
+        case .running:
             return RunningQueue(
-                id: id, title: title, tooltip: tooltip, status: state.status ?? "Running", tone: isStopping ? .normal : .working,
-                stop: ProjectBoardView.queueHeader(state).stop.map(button)
+                id: id, title: title, tooltip: tooltip, status: state.status ?? "Running", stop: ProjectBoardView.queueHeader(state).stop.map(button)
             )
         case .elsewhere:
-            return RunningQueue(id: id, title: title, tooltip: tooltip, status: elsewhere(state), tone: .normal)
+            return RunningQueue(id: id, title: title, tooltip: tooltip, status: elsewhere(state))
         case .none, .ended:
             return nil
         }

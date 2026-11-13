@@ -284,20 +284,17 @@ final class BoardStagesView: NSView {
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
-        // A queue's line that ends stays, inert, while the pointer is over the Board: the list doesn't move.
+        // While the pointer is over the Board, a queue's line that ends stays, inert, and one that starts waits:
+        // neither the foot nor the list moves.
         if pointerIsOver(pointerLocation()), previous != nil {
-            // It settles once the pointer leaves, though no event said it came.
-            isPointerInside = true
             let current = Set(content.runningQueues.map(\.id))
             let gone = runningQueueViews.map(\.queue).filter { !current.contains($0.id) }.map { queue in
                 RunningQueue(id: queue.id, title: queue.title, tooltip: queue.tooltip, status: queue.status, tone: .normal)
             }
             departedQueues = Set(gone.map(\.id))
-            let shownIDs = Set(runningQueueViews.map(\.queue.id))
-            let kept = runningQueueViews.map(\.queue).compactMap { shown in
+            showRunningQueues(runningQueueViews.map(\.queue).compactMap { shown in
                 content.runningQueues.first { $0.id == shown.id } ?? gone.first { $0.id == shown.id }
-            }
-            showRunningQueues(kept + content.runningQueues.filter { !shownIDs.contains($0.id) })
+            })
         } else {
             departedQueues = []
             showRunningQueues(content.runningQueues)
@@ -837,7 +834,7 @@ final class BoardStagesView: NSView {
     /// What changed while the pointer was over the Board takes its place.
     private func settle() {
         guard !isPointerInside, let content else { return }
-        if !departedQueues.isEmpty {
+        if runningQueueViews.map(\.queue) != content.runningQueues {
             departedQueues = []
             showRunningQueues(content.runningQueues)
             layoutContent()
@@ -1022,26 +1019,38 @@ final class BoardStagesSectionHeaderView: NSView {
         if !button.isHidden {
             let width = ceil(button.fittingSize.width)
             button.frame = NSRect(x: right - width, y: baseline - 3, width: width, height: 22)
-            right = button.frame.minX - 8
+            // Start and Stop take one place, the wider's: what is left of them doesn't move when one becomes the other.
+            right -= max(ceil(startButton.fittingSize.width), ceil(stopButton.fittingSize.width)) + 8
         }
         // Then the name, 80 pt of it at least; then, while there is room, in
         // this order: DRY RUN, the queue's words (whole, or cut down to
-        // 60 pt), the run's pill, `owner/name`.
+        // 60 pt), the run's pill, `owner/name`. Once one doesn't fit, none
+        // after it shows.
         var room = right - pad - min(ColumnHeaderView.textWidth(titleLabel), 80)
-        func fits(_ width: CGFloat, gap: CGFloat) -> Bool {
-            guard width > 0, room >= width + gap else { return false }
+        var isFull = false
+        /// The width given to a part that needs `least` and asks for `most`; nil once there is no room.
+        func take(_ least: CGFloat, upTo most: CGFloat, gap: CGFloat) -> CGFloat? {
+            guard !isFull, room - gap >= least else {
+                isFull = true
+                return nil
+            }
+            let width = min(most, room - gap)
             room -= width + gap
-            return true
+            return width
         }
         let badgeWidth = ColumnHeaderView.textWidth(dryRunBadge) + 8
-        dryRunBadge.isHidden = queue?.dryRun == nil || !fits(badgeWidth, gap: 8)
+        dryRunBadge.isHidden = queue?.dryRun == nil || take(badgeWidth, upTo: badgeWidth, gap: 8) == nil
         let words = queueLabel.stringValue.isEmpty ? 0 : ColumnHeaderView.textWidth(queueLabel)
-        let wordsWidth = min(words, room - 10)
-        queueLabel.isHidden = words == 0 || wordsWidth < min(words, 60) || !fits(wordsWidth, gap: 10)
+        let wordsWidth = words == 0 ? nil : take(min(words, 60), upTo: words, gap: 10)
+        queueLabel.isHidden = wordsWidth == nil
         let pillWidth = min(pill.idealWidth, (bounds.width * 0.4).rounded(.down))
-        pill.isHidden = pill.status == nil || !fits(pillWidth, gap: 10)
-        // Hidden words are still said under the pointer.
-        toolTip = queueLabel.isHidden ? queue?.status : nil
+        pill.isHidden = pill.status == nil || take(pillWidth, upTo: pillWidth, gap: 10) == nil
+        // What went is still said under the pointer.
+        let unsaid = [
+            dryRunBadge.isHidden && queue?.dryRun != nil ? "DRY RUN" : nil, queueLabel.isHidden ? queue?.status : nil,
+            pill.isHidden ? pill.status?.text : nil
+        ].compactMap { $0 }
+        toolTip = unsaid.isEmpty ? nil : unsaid.joined(separator: "\n")
         queueLabel.toolTip = queue?.status
         // Right to left: DRY RUN, the pill, the words; the name, then `owner/name`, at the left.
         if !dryRunBadge.isHidden {
@@ -1052,7 +1061,7 @@ final class BoardStagesSectionHeaderView: NSView {
             pill.frame = NSRect(x: right - pillWidth, y: baseline - 1, width: pillWidth, height: ColumnStatusPill.height)
             right = pill.frame.minX - 10
         }
-        if !queueLabel.isHidden {
+        if let wordsWidth {
             queueLabel.frame = NSRect(x: right - wordsWidth, y: baseline + 1, width: wordsWidth, height: 15)
             right = queueLabel.frame.minX - 10
         }
@@ -1060,7 +1069,7 @@ final class BoardStagesSectionHeaderView: NSView {
         titleLabel.frame = NSRect(x: pad, y: baseline, width: titleWidth, height: 16)
         let detailX = titleLabel.frame.maxX + 10
         detailLabel.frame = NSRect(x: detailX, y: baseline + 1, width: max(0, right - detailX), height: 15)
-        detailLabel.isHidden = detailLabel.frame.width < 30
+        detailLabel.isHidden = isFull || detailLabel.frame.width < 30
     }
 
     // MARK: Clicks

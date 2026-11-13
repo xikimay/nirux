@@ -673,18 +673,18 @@ final class BoardStagesFactsTests: XCTestCase {
         other.selection = [20, 21, 22]
         XCTAssertEqual(start(other, 3).start?.title, "Start… · 3", "Start keeps its width when the other's queue ends")
 
-        // The Board's foot: a queue that runs, here with Stop and green, elsewhere without and grey; stopping, grey;
-        // none at rest. An orphan's says why under the pointer.
+        // The Board's foot: a queue that runs, here with Stop, elsewhere without, green as its header; none at rest.
+        // An orphan's says why under the pointer.
         let stopping = BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: running)
         XCTAssertEqual(stopping?.stop?.title, "Stopping…")
-        XCTAssertEqual(stopping?.tone, .normal)
+        XCTAssertEqual([stopping?.tone, start(running, 0).tone], [.working, .working])
         running.run = .running(isStopping: false)
         XCTAssertEqual(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: running),
                        BoardStagesView.RunningQueue(id: "widgets", title: "widgets", status: "#12 merging, 1 of 1", stop: busy.stop))
         let orphan = "old isn’t one of this board’s repositories now"
         XCTAssertEqual(BoardStagesView.runningQueue(id: "old", title: "old", tooltip: orphan, state: other),
-                       BoardStagesView.RunningQueue(id: "old", title: "old", tooltip: orphan, status: "Running in another Nirux · #12 merging",
-                                                    tone: .normal))
+                       BoardStagesView.RunningQueue(id: "old", title: "old", tooltip: orphan, status: "Running in another Nirux · #12 merging"))
+        XCTAssertEqual(far.tone, .working, "its header says it green too")
         XCTAssertEqual(BoardStagesView.runningQueue(id: "widgets", title: "widgets", tooltip: "t", state: running)?.tooltip, "t")
         XCTAssertNil(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: ended))
         XCTAssertNil(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: rest))

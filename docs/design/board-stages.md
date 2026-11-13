@@ -169,7 +169,7 @@ sidebar move others):
   lines so, under a header that does nothing (no queue, no Start, no menu);
 - a running queue's line at the Board's foot that ends stays there too,
   faded, without Stop: the list above would grow and, scrolled to its end,
-  move; a queue that starts takes a line below;
+  move; a queue that starts waits for its line, as its header says it runs;
 - what comes waits: a line, a sub-task, a repository, a merge; "Merged
   today" keeps its entries in their order, in their new state, amber
   included (amber comes first again once the Board settles).
@@ -222,16 +222,17 @@ clicked. The sizes are the mockup's.
   shows a place for: merged ones count for none, so only merged ones left
   means nothing to start) or Stop while it runs here, and "⋯", its menu
   (Board Settings…, Open Main Checkout), also on a right click. On a narrow
-  Board what can be done stays ("⋯", Start or Stop), then the name, 80 pt of
-  it at least; then, while there is room, in this order: DRY RUN, the queue's
-  words (whole, or cut down to 60 pt), the pill (two fifths of the header at
-  most), `owner/name` (from 30 pt). Words that went are said under the
-  pointer on the header. (`BoardStagesView.sectionQueue` says it by the
-  table's rules: a problem's words alone in red, what is queued then on
-  Start.)
+  Board what can be done stays ("⋯", Start or Stop, in one place the wider
+  of the two takes, so that nothing left of it moves when one becomes the
+  other), then the name, 80 pt of it at least; then, while there is room, in
+  this order: DRY RUN, the queue's words (whole, or cut down to 60 pt), the
+  pill (two fifths of the header at most), `owner/name` (from 30 pt); once
+  one doesn't fit, none after it shows. What went is said under the pointer
+  on the header. (`BoardStagesView.sectionQueue` says it by the table's
+  rules: a problem's words alone in red, what is queued then on Start.)
 - **A queue that runs**, here or in another Nirux, keeps a line at the
-  Board's foot (its repository, what it does, in green while it works here,
-  grey while it stops or runs elsewhere, Stop where it runs here), orphans
+  Board's foot (its repository, what it does, in green as its header says
+  it, Stop where it runs here), orphans
   included (their repository says why under the pointer): Stop stays in
   sight while the list scrolls, and since it takes the foot, nothing above
   moves when it comes or goes. A Board too short for them all shows as many
@@ -527,3 +528,7 @@ to the queue yet.
 - **Between two reads**, a pull request that just left the open list isn't in
   the merged one yet: its task reads "No pull request yet" until the merged
   list is read again.
+- **A Board too short for its running queues' lines** shows those that fit,
+  in their order: one ended under the pointer, faded, can take the place of
+  one that still runs. A Board narrower than a header's buttons (about
+  130 pt) lets Start go past its left edge.
