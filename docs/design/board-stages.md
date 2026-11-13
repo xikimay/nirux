@@ -166,7 +166,10 @@ sidebar move others):
 - a line gone stays there too, faded and inert (no click, a press already
   under way included, no station, no link, no hand, no menu, nothing for
   VoiceOver), so that nothing below it moves up; a repository gone leaves its
-  lines so;
+  lines so, under a header that does nothing (no queue, no Start, no menu);
+- a running queue's line at the Board's foot that ends stays there too,
+  faded, without Stop: the list above would grow and, scrolled to its end,
+  move; a queue that starts takes a line below;
 - what comes waits: a line, a sub-task, a repository, a merge; "Merged
   today" keeps its entries in their order, in their new state, amber
   included (amber comes first again once the Board settles).
@@ -219,13 +222,20 @@ clicked. The sizes are the mockup's.
   shows a place for: merged ones count for none, so only merged ones left
   means nothing to start) or Stop while it runs here, and "⋯", its menu
   (Board Settings…, Open Main Checkout), also on a right click. On a narrow
-  Board the queue's words are cut, then give way before the name; its
-  buttons stay. (`BoardStagesView.sectionQueue` says it by the table's
-  rules.)
+  Board what can be done stays ("⋯", Start or Stop), then the name, 80 pt of
+  it at least; then, while there is room, in this order: DRY RUN, the queue's
+  words (whole, or cut down to 60 pt), the pill (two fifths of the header at
+  most), `owner/name` (from 30 pt). Words that went are said under the
+  pointer on the header. (`BoardStagesView.sectionQueue` says it by the
+  table's rules: a problem's words alone in red, what is queued then on
+  Start.)
 - **A queue that runs**, here or in another Nirux, keeps a line at the
-  Board's foot (its repository, what it does, Stop where it runs here),
-  orphans included: Stop stays in sight while the list scrolls, and since
-  it takes the foot, nothing above moves when it comes or goes.
+  Board's foot (its repository, what it does, in green while it works here,
+  grey while it stops or runs elsewhere, Stop where it runs here), orphans
+  included (their repository says why under the pointer): Stop stays in
+  sight while the list scrolls, and since it takes the foot, nothing above
+  moves when it comes or goes. A Board too short for them all shows as many
+  as there is room for under its header.
 - **A line** is 34 pt: its state's dot and its title, its rail, its phrase
   (amber or red when it needs a look, else grey), its pull request, its time.
   A press and its release on it open the task, but on its Merge station and

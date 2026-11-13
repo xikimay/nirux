@@ -8,6 +8,8 @@ extension BoardStagesView {
     /// of the next Start's list the Board shows a place for: one merged
     /// counts for none (`BoardStages.queue(of:head:in:merged:)`).
     nonisolated static func sectionQueue(_ state: ProjectBoard.QueueState, proposed: Int) -> SectionQueue {
+        // The Board shows a place for some of the list, never more.
+        let proposed = min(proposed, state.selection.count)
         let header = ProjectBoardView.queueHeader(state)
         var queue = SectionQueue(
             tone: tone(of: header.tone), dryRun: state.isDryRun ? ProjectBoardView.dryRunTooltip(reason: state.dryRunReason) : nil
@@ -21,9 +23,12 @@ extension BoardStagesView {
         case .elsewhere:
             queue.status = elsewhere(state)
             queue.start = header.start.map(button)
+            if proposed > 0 { queue.start?.title += " · \(proposed)" }
             return queue
         case .ended:
-            queue.status = ([state.status ?? "Ended"] + (proposed > 0 ? [queued] : [])).joined(separator: " · ")
+            // A problem's words alone in red: what is queued is on Start.
+            let said = state.statusIsFailure ? [] : (proposed > 0 ? [queued] : [])
+            queue.status = ([state.status ?? "Ended"] + said).joined(separator: " · ")
         case .none:
             queue.status = proposed > 0 ? queued : nil
         }
@@ -41,12 +46,15 @@ extension BoardStagesView {
 
     /// The line a queue keeps at the Board's foot while it runs, here or
     /// in another Nirux; nil otherwise.
-    nonisolated static func runningQueue(id: String, title: String, state: ProjectBoard.QueueState) -> RunningQueue? {
+    nonisolated static func runningQueue(id: String, title: String, tooltip: String? = nil, state: ProjectBoard.QueueState) -> RunningQueue? {
         switch state.run {
-        case .running:
-            return RunningQueue(id: id, title: title, status: state.status ?? "Running", stop: ProjectBoardView.queueHeader(state).stop.map(button))
+        case .running(let isStopping):
+            return RunningQueue(
+                id: id, title: title, tooltip: tooltip, status: state.status ?? "Running", tone: isStopping ? .normal : .working,
+                stop: ProjectBoardView.queueHeader(state).stop.map(button)
+            )
         case .elsewhere:
-            return RunningQueue(id: id, title: title, status: elsewhere(state))
+            return RunningQueue(id: id, title: title, tooltip: tooltip, status: elsewhere(state), tone: .normal)
         case .none, .ended:
             return nil
         }

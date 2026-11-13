@@ -90,7 +90,10 @@ final class BoardStagesView: NSView {
         /// longer has.
         let id: String
         var title: String
+        /// Under the pointer: an orphan's repository, as the table says it.
+        var tooltip: String?
         var status: String
+        var tone = QueueTone.working
         /// Nil where another Nirux runs it.
         var stop: QueueButton?
     }
@@ -184,6 +187,9 @@ final class BoardStagesView: NSView {
     private var captions: [NSTextField] = []
     /// The running queues' lines, at the Board's foot.
     private(set) var runningQueueViews: [BoardStagesRunningQueueView] = []
+    /// Queues ended while the pointer was over the Board: their lines stay,
+    /// inert, until it leaves.
+    private(set) var departedQueues: Set<String> = []
 
     private enum Item {
         case sectionHeader(BoardStagesSectionHeaderView)
@@ -278,7 +284,24 @@ final class BoardStagesView: NSView {
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
-        showRunningQueues(content.runningQueues)
+        // A queue's line that ends stays, inert, while the pointer is over the Board: the list doesn't move.
+        if pointerIsOver(pointerLocation()), previous != nil {
+            // It settles once the pointer leaves, though no event said it came.
+            isPointerInside = true
+            let current = Set(content.runningQueues.map(\.id))
+            let gone = runningQueueViews.map(\.queue).filter { !current.contains($0.id) }.map { queue in
+                RunningQueue(id: queue.id, title: queue.title, tooltip: queue.tooltip, status: queue.status, tone: .normal)
+            }
+            departedQueues = Set(gone.map(\.id))
+            let shownIDs = Set(runningQueueViews.map(\.queue.id))
+            let kept = runningQueueViews.map(\.queue).compactMap { shown in
+                content.runningQueues.first { $0.id == shown.id } ?? gone.first { $0.id == shown.id }
+            }
+            showRunningQueues(kept + content.runningQueues.filter { !shownIDs.contains($0.id) })
+        } else {
+            departedQueues = []
+            showRunningQueues(content.runningQueues)
+        }
         if content.sections != previous?.sections || content.order != previous?.order {
             // Nothing moves under the pointer: what changed is drawn where it
             // was, and settles once the pointer leaves. An order the switch
@@ -330,7 +353,13 @@ final class BoardStagesView: NSView {
                 kept.lines.withoutTask = section.lines.withoutTask
                 kept.lines.merged = keepingOrder(of: section.lines.merged, in: now.lines.merged)
                 return kept
-            } ?? section
+            } ?? {
+                // A repository gone: its header says nothing it could do.
+                var gone = section
+                gone.queue = nil
+                gone.menu = []
+                return gone
+            }()
             section.lines.units = section.lines.units.map(held)
             section.lines.withoutTask = section.lines.withoutTask.map(held)
             return section
@@ -352,6 +381,7 @@ final class BoardStagesView: NSView {
         runningQueueViews = queues.map { queue in
             let view = kept.removeValue(forKey: queue.id) ?? BoardStagesRunningQueueView(queue)
             view.show(queue)
+            view.alphaValue = departedQueues.contains(queue.id) ? 0.4 : 1
             view.onStop = { [weak self] in self?.onStop?(queue.id) }
             if view.superview !== self { addSubview(view) }
             return view
@@ -625,10 +655,13 @@ final class BoardStagesView: NSView {
         }
         let top = Metrics.headerHeight + Metrics.titlesHeight
         separator.frame = NSRect(x: 0, y: top - 1, width: width, height: 1)
-        // The running queues take the foot: the lines above them don't move.
-        let foot = CGFloat(runningQueueViews.count) * Metrics.queueLineHeight
+        // The running queues take the foot, as many as there is room for
+        // under the header: the lines above them don't move.
+        let fitting = min(runningQueueViews.count, Int(max(0, bounds.height - top) / Metrics.queueLineHeight))
+        let foot = CGFloat(fitting) * Metrics.queueLineHeight
         scrollView.frame = NSRect(x: 0, y: top, width: width, height: max(0, bounds.height - top - foot))
         for (index, view) in runningQueueViews.enumerated() {
+            view.isHidden = index >= fitting
             let y = bounds.height - foot + CGFloat(index) * Metrics.queueLineHeight
             view.frame = NSRect(x: 0, y: y, width: width, height: Metrics.queueLineHeight)
         }
@@ -803,8 +836,14 @@ final class BoardStagesView: NSView {
 
     /// What changed while the pointer was over the Board takes its place.
     private func settle() {
-        guard !isPointerInside, let sections = content?.sections, sections != shownSections || !departed.isEmpty else { return }
-        (shownSections, departed) = (sections, [])
+        guard !isPointerInside, let content else { return }
+        if !departedQueues.isEmpty {
+            departedQueues = []
+            showRunningQueues(content.runningQueues)
+            layoutContent()
+        }
+        guard content.sections != shownSections || !departed.isEmpty else { return }
+        (shownSections, departed) = (content.sections, [])
         rebuild()
     }
 
@@ -925,7 +964,7 @@ final class BoardStagesSectionHeaderView: NSView {
         moreButton.contentTintColor = Theme.Color.textTertiary
         moreButton.target = self
         moreButton.action = #selector(moreClicked)
-        moreButton.setAccessibilityLabel("Repository menu")
+        moreButton.toolTip = "Repository menu"
         // The Board's text stays still: no breathing dot here.
         pill.animates = false
         [titleLabel, detailLabel, pill, queueLabel, dryRunBadge, startButton, stopButton, moreButton].forEach(addSubview)
@@ -944,6 +983,7 @@ final class BoardStagesSectionHeaderView: NSView {
         pill.isHidden = status == nil
         self.queue = queue
         menuItems = menu
+        moreButton.setAccessibilityLabel("\(title) menu")
         queueLabel.stringValue = queue?.status ?? ""
         queueLabel.textColor = Self.color(of: queue?.tone ?? .normal)
         dryRunBadge.toolTip = queue?.dryRun
@@ -970,41 +1010,54 @@ final class BoardStagesSectionHeaderView: NSView {
         let pad = BoardStagesView.Metrics.padding
         let baseline = bounds.height - 22
         var right = bounds.width - pad
+        // What can be done stays: its menu, Start or Stop.
         moreButton.isHidden = menuItems.isEmpty
         if !moreButton.isHidden {
             moreButton.frame = NSRect(x: right - 20, y: baseline - 2, width: 20, height: 20)
             right = moreButton.frame.minX - 6
         }
-        // Stop while it runs here; else Start, when there is a queue.
         let button = queue?.stop != nil ? stopButton : startButton
-        let other = button === stopButton ? startButton : stopButton
-        other.isHidden = true
+        (button === stopButton ? startButton : stopButton).isHidden = true
         button.isHidden = queue?.stop == nil && queue?.start == nil
         if !button.isHidden {
             let width = ceil(button.fittingSize.width)
             button.frame = NSRect(x: right - width, y: baseline - 3, width: width, height: 22)
             right = button.frame.minX - 8
         }
-        dryRunBadge.isHidden = queue?.dryRun == nil
+        // Then the name, 80 pt of it at least; then, while there is room, in
+        // this order: DRY RUN, the queue's words (whole, or cut down to
+        // 60 pt), the run's pill, `owner/name`.
+        var room = right - pad - min(ColumnHeaderView.textWidth(titleLabel), 80)
+        func fits(_ width: CGFloat, gap: CGFloat) -> Bool {
+            guard width > 0, room >= width + gap else { return false }
+            room -= width + gap
+            return true
+        }
+        let badgeWidth = ColumnHeaderView.textWidth(dryRunBadge) + 8
+        dryRunBadge.isHidden = queue?.dryRun == nil || !fits(badgeWidth, gap: 8)
+        let words = queueLabel.stringValue.isEmpty ? 0 : ColumnHeaderView.textWidth(queueLabel)
+        let wordsWidth = min(words, room - 10)
+        queueLabel.isHidden = words == 0 || wordsWidth < min(words, 60) || !fits(wordsWidth, gap: 10)
+        let pillWidth = min(pill.idealWidth, (bounds.width * 0.4).rounded(.down))
+        pill.isHidden = pill.status == nil || !fits(pillWidth, gap: 10)
+        // Hidden words are still said under the pointer.
+        toolTip = queueLabel.isHidden ? queue?.status : nil
+        queueLabel.toolTip = queue?.status
+        // Right to left: DRY RUN, the pill, the words; the name, then `owner/name`, at the left.
         if !dryRunBadge.isHidden {
-            let width = ColumnHeaderView.textWidth(dryRunBadge) + 8
-            dryRunBadge.frame = NSRect(x: right - width, y: baseline + 1, width: width, height: 14)
+            dryRunBadge.frame = NSRect(x: right - badgeWidth, y: baseline + 1, width: badgeWidth, height: 14)
             right = dryRunBadge.frame.minX - 8
         }
         if !pill.isHidden {
-            let width = min(pill.idealWidth, (bounds.width * 0.4).rounded(.down))
-            pill.frame = NSRect(x: right - width, y: baseline - 1, width: width, height: ColumnStatusPill.height)
+            pill.frame = NSRect(x: right - pillWidth, y: baseline - 1, width: pillWidth, height: ColumnStatusPill.height)
             right = pill.frame.minX - 10
         }
-        // The queue's words take what is left after the name, down to 60 pt.
-        let titleWidth = min(ColumnHeaderView.textWidth(titleLabel), max(0, ((right - pad) * 0.6).rounded(.down)))
-        titleLabel.frame = NSRect(x: pad, y: baseline, width: titleWidth, height: 16)
-        let queueWidth = min(ColumnHeaderView.textWidth(queueLabel), max(0, right - titleLabel.frame.maxX - 10))
-        queueLabel.isHidden = queueWidth < 60
         if !queueLabel.isHidden {
-            queueLabel.frame = NSRect(x: right - queueWidth, y: baseline + 1, width: queueWidth, height: 15)
+            queueLabel.frame = NSRect(x: right - wordsWidth, y: baseline + 1, width: wordsWidth, height: 15)
             right = queueLabel.frame.minX - 10
         }
+        let titleWidth = min(ColumnHeaderView.textWidth(titleLabel), max(0, right - pad))
+        titleLabel.frame = NSRect(x: pad, y: baseline, width: titleWidth, height: 16)
         let detailX = titleLabel.frame.maxX + 10
         detailLabel.frame = NSRect(x: detailX, y: baseline + 1, width: max(0, right - detailX), height: 15)
         detailLabel.isHidden = detailLabel.frame.width < 30
@@ -1060,7 +1113,6 @@ final class BoardStagesRunningQueueView: NSView {
         titleLabel.font = Theme.Font.bodyEmphasized
         titleLabel.textColor = Theme.Color.textPrimary
         statusLabel.font = Theme.Font.caption
-        statusLabel.textColor = Theme.Color.working
         for label in [titleLabel, statusLabel] {
             label.lineBreakMode = .byTruncatingTail
             label.allowsExpansionToolTips = true
@@ -1080,7 +1132,9 @@ final class BoardStagesRunningQueueView: NSView {
     func show(_ queue: BoardStagesView.RunningQueue) {
         self.queue = queue
         titleLabel.stringValue = queue.title
+        titleLabel.toolTip = queue.tooltip
         statusLabel.stringValue = queue.status
+        statusLabel.textColor = BoardStagesSectionHeaderView.color(of: queue.tone)
         stopButton.isHidden = queue.stop == nil
         stopButton.title = queue.stop?.title ?? "Stop"
         stopButton.isEnabled = queue.stop?.isEnabled ?? false
