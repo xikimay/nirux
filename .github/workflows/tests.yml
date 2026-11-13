@@ -56,3 +56,18 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the class with the rewritten timed test, several times
+      # at once next to heavy classes, then the shell reverts the flow tests
+      # must catch.
+      - name: Repeat TurnEndClassificationTests
+        if: always()
+        run: scripts/repeat-class.sh NiruxTests.TurnEndClassificationTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.LeadToolsFlowTests
+
+      - name: Reverts TurnQuestionFlowTests catches
+        if: always()
+        run: scripts/mutants-class.sh NiruxTests.TurnQuestionFlowTests no-seen-mark seen-without-user
+
+      - name: Reverts QuickSwitcherFlowTests catches
+        if: always()
+        run: scripts/mutants-class.sh NiruxTests.QuickSwitcherFlowTests walk-starts-empty walk-never-continues

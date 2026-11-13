@@ -132,7 +132,8 @@ extension NiruxShellView {
         if commandPalette?.isVisible == true { commandPalette?.dismiss() }
         // The walk goes on while the user stays where its last press
         // landed; else it starts where they are.
-        let walk = current != nil && current == quickSwitch.walk.last ? quickSwitch.walk : current.map { [$0] } ?? []
+        let walk = current != nil && current == quickSwitch.walk.last && !ZZ("walk-never-continues") ? quickSwitch.walk
+            : ZZ("walk-starts-empty") ? [] : current.map { [$0] } ?? []
         guard let (next, walked) = WaitingAgentQueue.next(from: current, walk: walk, in: queue),
               let workspace = workspaces.first(where: { $0.id == next.workspaceID }),
               let columnIndex = workspace.columns.firstIndex(where: { $0.id == next.columnID }) else {

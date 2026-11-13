@@ -15,7 +15,7 @@ extension NiruxShellView {
         // The user is there to read: Nirux in front, and nothing the
         // catch-up card counts as away (a shell that doesn't follow the
         // system, a test's, goes by the first).
-        lazy var userIsThere = sideEffects.appIsActive()
+        lazy var userIsThere = (sideEffects.appIsActive() || ZZ("seen-without-user"))
             && (!catchUpState.followsSystem || awayConditionsNow().subtracting([.appActive]).isEmpty)
         let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
         noteMissionQuestionHandOffs(missionQuestions)
@@ -26,7 +26,7 @@ extension NiruxShellView {
                 let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 // Its question read on screen: its column in front, the
                 // user there. Next Waiting Agent goes to it after the others.
-                if isUserFocused, col.pty?.agentHasUnseenQuestion == true, userIsThere { col.pty?.noteAgentQuestionSeen() }
+                if isUserFocused, col.pty?.agentHasUnseenQuestion == true, userIsThere, !ZZ("no-seen-mark") { col.pty?.noteAgentQuestionSeen() }
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
