@@ -163,18 +163,22 @@ progress; a pull request lands and leaves the list; a turn, a check, the
 sidebar move others):
 
 - a line still there stays where it was, in its new state;
-- a line gone stays there too, faded and inert (no click, no station, no
-  menu), so that nothing below it moves up;
-- a line that comes waits, a sub-task too; "Merged today" keeps its entries'
-  order, a new merge after them; a repository that comes goes after the
-  others.
+- a line gone stays there too, faded and inert (no click, a press already
+  under way included, no station, no link, no hand, no menu, nothing for
+  VoiceOver), so that nothing below it moves up; a repository gone leaves its
+  lines so;
+- what comes waits: a line, a sub-task, a repository, a merge; "Merged
+  today" keeps its entries in their order, in their new state, amber
+  included (amber comes first again once the Board settles).
 
 Once the pointer leaves the Board, or the Board hides, or the app isn't the
 active one any more (its windows don't hear the pointer leave), it settles,
 once the event that said so is over. The order switch is the user's own
-click: what it asks applies at once; an order that changes otherwise (another
-Board's switch) is held. Left for the Lead: a pointer resting on the Board
-while the user types elsewhere holds it as long, new tasks waiting.
+click: what it asks applies at once, for the change that brings it only; an
+order that changes otherwise (another Board's switch) is held. Left for the
+Lead: a pointer resting on the Board while the user types elsewhere holds it as
+long, new tasks waiting; and the Board knows the pointer by where it is, not by
+what covers it (a window over it).
 
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its
@@ -229,8 +233,10 @@ clicked. The sizes are the mockup's.
   the pointer). The title gives way first, down to 40 pt, then the link goes
   whole; the number and the time last. A title that is cut is whole under
   the pointer anywhere on the entry but on "Clean up". When a clean-up
-  ends, its words go and the entries after it close up. One whose task is still open opens it. Those whose task needs the
-  user come first, so amber is never behind the button; were there more of
+  ends, its words go and the entries after it close up. One whose task is
+  still open opens it. Those whose task needs the user come first (but while
+  the pointer is over the Board: section 4), so amber is never behind the
+  button; were there more of
   them than two rows hold, the button says so, in amber ("+12 more · 3 need
   you").
 - **It follows its content without building itself again.** A refresh that

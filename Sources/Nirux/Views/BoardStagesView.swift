@@ -78,6 +78,8 @@ final class BoardStagesView: NSView {
     private(set) var departed: Set<String> = []
     /// The order the switch asked for: the user's own click applies at once.
     private var askedOrder: BoardStages.Order?
+    /// What is drawn is held for the pointer, not the content as it is.
+    private var isHolding: Bool { shownSections != content?.sections || !departed.isEmpty }
     /// Settles the Board once the pointer left, after the event that said
     /// so. (The tests run it at once.)
     var settleLater: (@escaping @MainActor () -> Void) -> Void = { work in
@@ -213,8 +215,9 @@ final class BoardStagesView: NSView {
             // was, and settles once the pointer leaves. An order the switch
             // asked for is the user's own click: it applies at once.
             isPointerInside = pointerIsOver(pointerLocation())
-            let isAsked = askedOrder == content.order
-            if isAsked { askedOrder = nil }
+            // The order the switch asked for, now shown; a request is good for this change only.
+            let isAsked = askedOrder == content.order && content.order != previous?.order
+            askedOrder = nil
             if isPointerInside, !isAsked, previous != nil {
                 (shownSections, departed) = Self.holding(shownSections, in: content.sections)
             } else {
@@ -228,9 +231,9 @@ final class BoardStagesView: NSView {
 
     /// `sections` drawn as `shown` were: each line shown keeps its place,
     /// in its new state, or stays there, departed, when the content has it
-    /// no more; a line that comes waits. A section that comes goes after the
-    /// others. "Merged today" keeps the order of its entries, those that
-    /// come after them.
+    /// no more, its repository's included; what comes waits: a line, a
+    /// repository, a merge. "Merged today" keeps its entries, in their
+    /// order, in their new state.
     nonisolated static func holding(_ shown: [Section], in sections: [Section]) -> (sections: [Section], departed: Set<String>) {
         var lines: [String: BoardStages.Line] = [:]
         for section in sections {
@@ -251,8 +254,7 @@ final class BoardStagesView: NSView {
             }
         }
         let current = Dictionary(sections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shownIDs = Set(shown.map(\.id))
-        var result: [Section] = shown.map { section in
+        let result: [Section] = shown.map { section in
             var section = current[section.id].map { now in
                 var kept = now
                 kept.lines.units = section.lines.units
@@ -264,16 +266,14 @@ final class BoardStagesView: NSView {
             section.lines.withoutTask = section.lines.withoutTask.map(held)
             return section
         }
-        result += sections.filter { !shownIDs.contains($0.id) }
         return (result, departed)
     }
 
-    /// `merged` in the order of `shown`, by number; those that weren't
-    /// shown after them.
+    /// The entries of `shown` still in `merged`, in their order and their
+    /// new state.
     private nonisolated static func keepingOrder(of shown: [BoardStages.Merged], in merged: [BoardStages.Merged]) -> [BoardStages.Merged] {
-        var byNumber = Dictionary(merged.map { ($0.number, $0) }, uniquingKeysWith: { first, _ in first })
-        let kept = shown.compactMap { byNumber.removeValue(forKey: $0.number) }
-        return kept + merged.filter { byNumber[$0.number] != nil }
+        let byNumber = Dictionary(merged.map { ($0.number, $0) }, uniquingKeysWith: { first, _ in first })
+        return shown.compactMap { byNumber[$0.number] }
     }
 
     private func showTimes() {
@@ -375,7 +375,7 @@ final class BoardStagesView: NSView {
             }
             if !section.lines.merged.isEmpty {
                 let merged = keptMerged.removeValue(forKey: id) ?? BoardStagesMergedView()
-                merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id))
+                merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id), keepsOrder: isHolding)
                 merged.onOpen = { [weak self] line in self?.onOpen?(line) }
                 merged.onCleanUp = { [weak self] line in self?.onLink?(id, line, .cleanUp) }
                 merged.onUnfold = { [weak self] in self?.unfoldMerged(section: id) }

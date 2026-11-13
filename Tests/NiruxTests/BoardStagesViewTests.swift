@@ -875,8 +875,7 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertFalse(b.isAccessibilityElement())
         XCTAssertFalse(c.isDeparted)
         XCTAssertEqual(c.alphaValue, 1)
-        XCTAssertEqual(try XCTUnwrap(view.mergedView(section: "nirux")).entries.map(\.pullRequest.number), [7, 8],
-                       "a new merge after the others")
+        XCTAssertEqual(try XCTUnwrap(view.mergedView(section: "nirux")).entries.map(\.pullRequest.number), [7], "a new merge waits")
         let frames = view.lineViews.map(\.frame)
         // A fold keeps all of that.
         view.foldButton(section: "nirux")?.performClick(nil)
@@ -885,7 +884,7 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(view.lineViews.map(\.frame), frames)
 
         // The pointer leaves: the Board settles, once the event is over.
-        var later: [() -> Void] = []
+        var later: [@MainActor () -> Void] = []
         view.settleLater = { later.append($0) }
         pointer = outside
         view.mouseExited(with: try moved(to: outside, in: view))
@@ -928,15 +927,97 @@ final class BoardStagesViewTests: XCTestCase {
         _ = (view.orderSwitch.target as? NSObject)?.perform(view.orderSwitch.action, with: view.orderSwitch)
         view.show(content([section(units: units(["a", "c", "d"]), withoutTask: units(["x", "y"]))], order: .progress))
         XCTAssertEqual(ids(), ["a", "c", "d", "x", "y"])
-        // A section that comes goes after the others.
+        // A request is good for one change: one that comes next, in that order, is held; so is the other order,
+        // and the asked one coming later.
+        view.orderSwitch.selectedSegment = 1
+        _ = (view.orderSwitch.target as? NSObject)?.perform(view.orderSwitch.action, with: view.orderSwitch)
+        view.show(content([section(units: units(["d", "c", "a"]), withoutTask: units(["x", "y"]))], order: .progress))
+        XCTAssertEqual(ids(), ["a", "c", "d", "x", "y"], "the order asked was already shown: held")
+        _ = (view.orderSwitch.target as? NSObject)?.perform(view.orderSwitch.action, with: view.orderSwitch)
+        view.show(content([section(units: units(["c", "d", "a"]), withoutTask: units(["x", "y"]))], order: .sidebar))
+        XCTAssertEqual(ids(), ["a", "c", "d", "x", "y"], "the other order, from elsewhere: held")
+        view.show(content([section(units: units(["d", "a", "c"]), withoutTask: units(["x", "y"]))], order: .progress))
+        XCTAssertEqual(ids(), ["a", "c", "d", "x", "y"], "the order asked before, coming later from elsewhere: held")
+        // A repository that comes waits.
         view.show(content([
             section("site", units: units(["s1"])), section(units: units(["a", "c", "d"]), withoutTask: units(["x", "y"]))
         ], order: .progress))
-        XCTAssertEqual(ids(), ["a", "c", "d", "x", "y", "s1"])
+        XCTAssertEqual(ids(), ["a", "c", "d", "x", "y"])
         // Hidden, the Board hears no pointer: it settles.
         view.isHidden = true
         XCTAssertFalse(view.isPointerInside)
         XCTAssertEqual(ids(), ["s1", "a", "c", "d", "x", "y"])
+    }
+
+    func testWhatGoesOrComesWhileTheBoardIsHeld() throws {
+        let retarget = BoardStages.Link.retarget(number: 53, onto: "main")
+        let based = with(line("based", state: .idle, phrase: "Base #52 merged · Retarget to main")) {
+            $0.phrase.link = retarget
+            $0.offer = BoardStages.QueueOffer(change: .add, number: 53)
+        }
+        let stack: BoardStages.Unit = .stack(title: "Stack · 2 pull requests on main", [line("s1"), line("s2")])
+        let merged = { (numbers: [Int], amber: Int?) in
+            numbers.map { BoardStages.Merged(lineID: "t\($0)", title: "Fix \($0)", number: $0, mergedAt: self.now - 60, needsYou: $0 == amber) }
+        }
+        let first = content([
+            section(units: [.task(based, subtasks: []), stack], withoutTask: tasks([line("x")]), merged: merged([8, 7], nil)),
+            section("site", units: tasks([line("t")]))
+        ])
+        let view = board(first)
+        view.settleLater = { $0() }
+        view.foldButton(section: "nirux")?.performClick(nil)
+        let shown = view.lineViews[0]
+        let onLink = shown.convert(NSPoint(x: shown.linkLabel.frame.midX, y: 17), to: nil)
+        var pointer = onLink
+        view.pointerLocation = { pointer }
+        view.mouseMoved(with: try moved(to: onLink, in: view))
+        var opened: [String] = []
+        var linked = 0
+        view.onOpen = { opened.append($0) }
+        view.onLink = { _, _, _ in linked += 1 }
+        let site = try XCTUnwrap(view.sectionHeader(section: "site")).frame
+
+        // Pressed on its link, and the stack's first line on its title; then both go, with the pull request without a
+        // task and the other repository; a merge turns amber; a repository with no merge today gets one.
+        shown.mouseDown(with: try mouse(.leftMouseDown, at: onLink, in: view.window))
+        let s1 = view.lineViews[1]
+        let onTitle = s1.convert(NSPoint(x: s1.titleLabel.frame.midX, y: 17), to: nil)
+        s1.mouseDown(with: try mouse(.leftMouseDown, at: onTitle, in: view.window))
+        view.show(content([
+            section(units: [.stack(title: "Stack · 1 pull request on main", [line("s2", state: .failed)])], merged: merged([8, 7], 7)),
+            section("site", units: tasks([line("t")]), merged: merged([9], nil))
+        ]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["based", "s1", "s2", "x", "t"])
+        XCTAssertEqual(view.departed, ["based", "s1", "x"])
+        XCTAssertEqual(view.lineViews[2].line.state, .failed, "a stack's line in its new state, where it was")
+        shown.mouseUp(with: try mouse(.leftMouseUp, at: onLink, in: view.window))
+        s1.mouseUp(with: try mouse(.leftMouseUp, at: onTitle, in: view.window))
+        XCTAssertEqual([opened.count, linked], [0, 0], "a press in flight does nothing on a line gone")
+        // A line gone: its link, its hand, its tooltips and its actions go with it.
+        XCTAssertEqual(shown.linkLabel.stringValue, "")
+        XCTAssertEqual(shown.handRects, [])
+        XCTAssertNil(shown.toolTipText(at: NSPoint(x: shown.linkLabel.frame.midX, y: 17)))
+        XCTAssertNil(shown.accessibilityCustomActions())
+        XCTAssertFalse(shown.accessibilityPerformPress())
+        XCTAssertEqual(opened, [])
+        // "Merged today" keeps its order, amber included; a first merge in a repository waits: nothing below moves.
+        let held = try XCTUnwrap(view.mergedView(section: "nirux"))
+        XCTAssertEqual(held.entries.map(\.pullRequest.number), [8, 7])
+        XCTAssertEqual(held.entries.map(\.pullRequest.needsYou), [false, true], "in their new state: amber where it is")
+        XCTAssertNil(view.mergedView(section: "site"))
+        XCTAssertEqual(try XCTUnwrap(view.sectionHeader(section: "site")).frame, site)
+        // A repository that goes: its lines stay, departed.
+        view.show(content([section(units: [.stack(title: "Stack · 1 pull request on main", [line("s2")])], merged: merged([8, 7], 7))]))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["based", "s1", "s2", "x", "t"])
+        XCTAssertTrue(view.lineViews[4].isDeparted)
+
+        // The pointer leaves: everything takes its place, amber first.
+        pointer = NSPoint(x: -10, y: -10)
+        view.mouseExited(with: try moved(to: pointer, in: view))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["s2"])
+        XCTAssertEqual(try XCTUnwrap(view.mergedView(section: "nirux")).entries.map(\.pullRequest.number), [7, 8])
+        XCTAssertNil(view.sectionHeader(section: "site"))
     }
 
     func testTheStationUnderThePointerAfterTheBoardSettles() throws {

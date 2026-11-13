@@ -128,8 +128,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         setAccessibilityHelp(line.offer?.blocked)
     }
 
-    /// The link drawn apart: the phrase's, when the phrase ends with it.
-    private var shownLink: BoardStages.Link? { line.phrase.wordsBeforeLink == nil ? nil : line.phrase.link }
+    /// The link drawn apart: the phrase's, when the phrase ends with it,
+    /// on a line still on the Board.
+    private var shownLink: BoardStages.Link? { line.phrase.wordsBeforeLink == nil || isDeparted ? nil : line.phrase.link }
 
     /// What a click on the Merge station does; nil where it does nothing
     /// more than anywhere on the line.
@@ -144,6 +145,8 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             guard isDeparted != oldValue else { return }
             alphaValue = isDeparted ? 0.4 : 1
             setAccessibilityElement(!isDeparted)
+            // Its link, its hand and its tooltips go with it.
+            apply()
             needsLayout = true
             needsDisplay = true
         }
@@ -500,7 +503,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             onPointer?(event.locationInWindow)
         }
         let point = convert(event.locationInWindow, from: nil)
-        guard let pressed, rectInSight.contains(point), target(at: point) == pressed else { return }
+        guard let pressed, !isDeparted, rectInSight.contains(point), target(at: point) == pressed else { return }
         switch pressed {
         case .line: onClick?()
         case .offer(let offer): onOffer?(offer)
@@ -509,6 +512,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     }
 
     override func accessibilityPerformPress() -> Bool {
+        guard !isDeparted else { return false }
         onClick?()
         return true
     }
