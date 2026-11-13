@@ -47,6 +47,8 @@ extension BoardStages {
         var merged: [ProjectBoard.PullRequest] = []
         /// Each worktree's HEAD as last listed, by its path.
         var heads: [String: String] = [:]
+        /// The worktrees and folders a clean-up of which runs, by path.
+        var cleaningUp: Set<String> = []
     }
 
     /// The facts of a section's lines.
@@ -92,7 +94,7 @@ extension BoardStages {
             var facts = Facts(id: "\(repository.id)#\(pullRequest.number)", title: text(pullRequest.title) ?? row.branch ?? "")
             facts.location = location(of: row)
             facts.hasTask = false
-            facts.hasWorktree = row.canCleanUp
+            facts.folder = folder(of: row, in: repository)
             facts.queue = queue(of: row, pullRequest, in: repository, merged: merged.known)
             facts.pullRequest = self.pullRequest(pullRequest, stack: row.stack, in: repository, merged: merged.read)
             lines.append(facts)
@@ -144,7 +146,7 @@ extension BoardStages {
         facts.flakyReason = isAboutRow ? reading.flakyReason : nil
         // What its agent and its folder offer, with a repository or without.
         facts.resume = reading.resume
-        facts.hasWorktree = row.canCleanUp
+        facts.folder = folder(of: row, in: repository)
         guard facts.hasRepository else { return facts }
         if let pullRequest = row.pullRequest {
             facts.queue = queue(of: row, pullRequest, in: repository, merged: merged.known)
@@ -185,6 +187,17 @@ extension BoardStages {
             return entry.number
         }
         return reading.gitRoot == nil || reading.gitRoot == row.worktreePath ? reading.mergedPullRequest : nil
+    }
+
+    /// Where a row's work is on disk, as the table's buttons use it
+    /// (`ProjectBoardView.actions`): Clean Up… where the row can be
+    /// cleaned up, Open where no workspace is open in its worktree.
+    private static func folder(of row: ProjectBoard.Row, in repository: RepositoryReading) -> Folder? {
+        guard let path = row.worktreePath ?? row.folder else { return nil }
+        return Folder(
+            path: path, title: row.branch ?? (path as NSString).lastPathComponent, canCleanUp: row.canCleanUp,
+            canOpen: row.workspaces.isEmpty, isCleaningUp: repository.cleaningUp.contains(path)
+        )
     }
 
     /// "feat/login", "/Users/me/app.feat-login": the row's branch and its

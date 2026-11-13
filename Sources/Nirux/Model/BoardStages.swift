@@ -124,28 +124,54 @@ extension BoardStages {
         var title: String { change == .add ? "Add to Queue" : "Remove from Queue" }
     }
 
-    /// How a stopped agent of a task can go on.
-    enum Resume: Equatable, Sendable {
-        /// Its turn stopped on an error: "continue" is typed into it.
-        case afterError
-        /// It exited in the middle of a turn: its conversation is opened
-        /// again.
-        case afterExit
+    /// How a stopped agent of a task can go on, as the sidebar offers it.
+    struct Resume: Equatable, Sendable {
+        enum Kind: Equatable, Sendable {
+            /// Its turn stopped on an error: "continue" is typed into it.
+            case afterError
+            /// It exited in the middle of a turn: its conversation is
+            /// opened again.
+            case afterExit
+        }
+
+        var kind: Kind
+        /// The agent's column, in the task's workspace.
+        var column: UUID
+        /// The failed turn a Resume after an error answers: whoever acts
+        /// sends "continue" only while it is still that one.
+        var failedAt: TimeInterval?
+        /// Why it does nothing for now: "Resuming…", a key typed since.
+        var blocked: String?
+    }
+
+    /// Where a line's work is on disk, for Clean Up Worktree… and Open.
+    struct Folder: Equatable, Sendable {
+        /// The worktree's top level, or a folder already gone.
+        var path: String
+        /// What a shell opened there is called: its branch, else the
+        /// folder's name.
+        var title: String
+        /// Clean Up Worktree… applies: a linked worktree of the project,
+        /// or a folder already gone (`ProjectBoard.Row.canCleanUp`).
+        var canCleanUp = false
+        /// No workspace is open there: Open makes one.
+        var canOpen = false
+        /// A clean-up of it runs.
+        var isCleaningUp = false
     }
 
     /// One item of a line's menu (docs/design/board-stages.md, section 7),
     /// whatever its phrase says. One that does nothing for now says why.
     enum MenuItem: Equatable, Sendable {
-        /// Its address on GitHub, as GitHub gave it: whoever opens it
-        /// checks it is GitHub's.
+        /// Its address on GitHub: offered only for one of github.com.
         case openPullRequest(url: String)
         case queue(QueueOffer)
         case retarget(Link, blocked: String?)
         case resume(Resume)
-        /// Clean Up Worktree…: checks the worktree, then asks what goes.
-        case cleanUp(blocked: String?)
-        /// A shell in the worktree of a pull request without a task here.
-        case openWorktree
+        /// Clean Up Worktree… of `path`: checks it, then asks what goes.
+        case cleanUp(path: String, blocked: String?)
+        /// A shell in a worktree where no workspace is open.
+        case openWorktree(path: String, title: String)
 
         var title: String {
             switch self {
@@ -162,8 +188,9 @@ extension BoardStages {
         var blocked: String? {
             switch self {
             case .queue(let offer): return offer.blocked
-            case .retarget(_, let blocked), .cleanUp(let blocked): return blocked
-            case .openPullRequest, .resume, .openWorktree: return nil
+            case .retarget(_, let blocked), .cleanUp(_, let blocked): return blocked
+            case .resume(let resume): return resume.blocked
+            case .openPullRequest, .openWorktree: return nil
             }
         }
     }
@@ -255,6 +282,8 @@ extension BoardStages {
 
         /// What a line or an entry says while one runs.
         static let runningWords = "cleaning up…"
+        /// Why Clean Up does nothing meanwhile.
+        static let runningReason = "A clean-up of this worktree is running."
     }
 
     /// What GitHub still asks of a green pull request, as the sidebar's
@@ -392,9 +421,9 @@ extension BoardStages {
         var lastActivityAt: TimeInterval?
         /// Its merged pull request's worktree is still there.
         var cleanUp: CleanUp?
-        /// Clean Up Worktree… applies where it is: a linked worktree of
-        /// the project, or a folder already gone (`ProjectBoard.Row.canCleanUp`).
-        var hasWorktree = false
+        /// Where its work is on disk; nil for a pull request checked out
+        /// nowhere here.
+        var folder: Folder?
         /// How its stopped agent can go on, when it can.
         var resume: Resume?
     }
@@ -503,21 +532,37 @@ extension BoardStages {
 
     /// The line's menu: Open Pull Request, Add to or Remove from Queue,
     /// Retarget, Resume, Clean Up…, Open. What a link of its phrase does
-    /// is there whatever the phrase says (a red check, an agent at work).
+    /// is there whatever the phrase says (a red check, an agent at work),
+    /// as are its stopped agent's Resume and its folder's Clean Up.
     private static func menu(of facts: Facts, rail: Rail?, offer: QueueOffer?) -> [MenuItem] {
         var items: [MenuItem] = []
         let pullRequest = rail == nil ? nil : facts.pullRequest
-        if let url = pullRequest?.url, !url.isEmpty { items.append(.openPullRequest(url: url)) }
+        if let url = pullRequest?.url, isGitHubAddress(url) { items.append(.openPullRequest(url: url)) }
         if let offer { items.append(.queue(offer)) }
-        if let pullRequest, !pullRequest.isMerged, let merged = pullRequest.stack?.mergedBase, facts.queue.list != .none {
+        // Not while the queue's list holds it, nor while the queue works on it.
+        if let pullRequest, !pullRequest.isMerged, let merged = pullRequest.stack?.mergedBase, facts.queue.list != .none,
+           facts.queue.order == nil, facts.queue.step == nil {
             items.append(.retarget(.retarget(number: pullRequest.number, onto: merged.onto), blocked: text(facts.queue.dryRun)))
         }
-        if facts.hasTask, case .failed = facts.activity, let resume = facts.resume { items.append(.resume(resume)) }
-        if facts.hasWorktree {
-            items.append(.cleanUp(blocked: facts.cleanUp == .running ? "A clean-up of this worktree is running." : nil))
-            if !facts.hasTask { items.append(.openWorktree) }
+        if facts.hasTask, var resume = facts.resume {
+            resume.blocked = text(resume.blocked)
+            items.append(.resume(resume))
+        }
+        if let folder = facts.folder {
+            if folder.canCleanUp {
+                let isRunning = folder.isCleaningUp || facts.cleanUp == .running
+                items.append(.cleanUp(path: folder.path, blocked: isRunning ? CleanUp.runningReason : nil))
+            }
+            if folder.canOpen { items.append(.openWorktree(path: folder.path, title: folder.title)) }
         }
         return items
+    }
+
+    /// A pull request's address on github.com, which the Board reads:
+    /// whoever posted it can't send a click elsewhere.
+    static func isGitHubAddress(_ url: String) -> Bool {
+        guard let parsed = URL(string: url) else { return false }
+        return parsed.scheme == "https" && parsed.host?.lowercased() == "github.com"
     }
 
     /// This many checks under the pointer, then how many more: a tooltip

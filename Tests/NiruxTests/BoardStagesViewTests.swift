@@ -637,13 +637,18 @@ final class BoardStagesViewTests: XCTestCase {
         let url = "https://github.com/acme/widgets/pull/53"
         let menu: [BoardStages.MenuItem] = [
             .openPullRequest(url: url), .queue(BoardStages.QueueOffer(change: .add, number: 53, blocked: "Can’t join the queue: draft")),
-            .retarget(.retarget(number: 53, onto: "main"), blocked: nil), .resume(.afterError), .cleanUp(blocked: nil)
+            .retarget(.retarget(number: 53, onto: "main"), blocked: nil),
+            .resume(BoardStages.Resume(kind: .afterError, column: UUID(), failedAt: 700)), .cleanUp(path: "/p/x", blocked: nil)
         ]
         let offering = with(line("offering")) { $0.menu = menu }
-        let view = board(content([
-            section("nirux", units: [.task(offering, subtasks: []), .task(line("bare"), subtasks: [])]),
-            section("site", units: [.task(with(line("other")) { $0.menu = [.openWorktree] }, subtasks: [])])
-        ]))
+        let units = { (first: BoardStages.Line) -> [BoardStagesView.Section] in
+            [
+                self.section("nirux", units: [.task(first, subtasks: []), .task(self.line("bare"), subtasks: [])]),
+                self.section("site", units: [.task(self.with(self.line("other")) { $0.menu = [.openWorktree(path: "/p/y", title: "y")] },
+                                                   subtasks: [])])
+            ]
+        }
+        let view = board(content(units(offering)))
         var chosen: [String] = []
         view.onMenu = { section, line, item in chosen.append("\(section) \(line) \(item.title)") }
         let shown = view.lineViews[0]
@@ -658,26 +663,43 @@ final class BoardStagesViewTests: XCTestCase {
         contextMenu.performActionForItem(at: 2)
         contextMenu.performActionForItem(at: 0)
         XCTAssertEqual(chosen, ["nirux offering Retarget to main", "nirux offering Open Pull Request"])
-        contextMenu.performActionForItem(at: 1)
-        XCTAssertEqual(chosen.count, 2, "a disabled item does nothing")
+        // A disabled item does nothing, however it is sent.
+        let refused = contextMenu.items[1]
+        _ = (refused.target as? NSObject)?.perform(refused.action, with: refused)
+        XCTAssertEqual(chosen.count, 2)
         let other = try XCTUnwrap(view.lineViews[2].contextMenu())
         other.performActionForItem(at: 0)
         XCTAssertEqual(chosen.last, "site other Open", "in its own section")
 
-        // The line changes while its menu is open: an item it no longer offers, or no longer acts on, does nothing.
-        view.show(content([
-            section("nirux", units: [.task(with(offering) {
-                $0.menu = [.openPullRequest(url: url), .cleanUp(blocked: "A clean-up of this worktree is running.")]
-            }, subtasks: []), .task(line("bare"), subtasks: [])]),
-            section("site", units: [.task(with(line("other")) { $0.menu = [.openWorktree] }, subtasks: [])])
-        ]))
+        // The line changes while its menu is open, and a menu is shown again: each item of the first still is what it was,
+        // and acts only as the line still offers it.
+        view.show(content(units(with(offering) { $0.menu = [.cleanUp(path: "/p/x", blocked: nil), .openPullRequest(url: url)] })))
         XCTAssertTrue(view.lineViews[0] === shown)
+        _ = shown.contextMenu()
         contextMenu.performActionForItem(at: 2)
-        contextMenu.performActionForItem(at: 4)
-        XCTAssertEqual(chosen.count, 3)
+        XCTAssertEqual(chosen.count, 3, "Retarget, no longer offered: nothing")
         contextMenu.performActionForItem(at: 0)
-        XCTAssertEqual(chosen.last, "nirux offering Open Pull Request", "what it still offers acts")
-        XCTAssertFalse(view.lineViews[1].accessibilityPerformShowMenu(), "VoiceOver: no menu where there is nothing to offer")
+        XCTAssertEqual(chosen.last, "nirux offering Open Pull Request", "what it still offers acts, as it was")
+        // The line leaves the Board while its menu is open: nothing.
+        view.show(content(units(line("someone else"))))
+        XCTAssertNil(shown.window)
+        contextMenu.performActionForItem(at: 4)
+        XCTAssertEqual(chosen.count, 4)
+
+        // VoiceOver's "show menu": the same menu, under the line's title; none where nothing is offered.
+        let listed = view.lineViews[0]
+        listed.update(offering, link: .none)
+        listed.layoutSubtreeIfNeeded()
+        var popped: (titles: [String], location: NSPoint, view: NSView)?
+        listed.popUp = { menu, location, view in popped = (menu.items.map(\.title), location, view) }
+        XCTAssertTrue(listed.accessibilityPerformShowMenu())
+        XCTAssertEqual(popped?.titles, contextMenu.items.map(\.title))
+        XCTAssertEqual(popped?.location, NSPoint(x: listed.titleLabel.frame.minX, y: listed.bounds.maxY))
+        XCTAssertTrue(popped?.view === listed)
+        popped = nil
+        view.lineViews[1].popUp = { menu, location, view in popped = (menu.items.map(\.title), location, view) }
+        XCTAssertFalse(view.lineViews[1].accessibilityPerformShowMenu())
+        XCTAssertNil(popped)
     }
 
     // MARK: - The pointer

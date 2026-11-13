@@ -393,16 +393,29 @@ to the queue yet.
   caption, the entry shows none. `onLink` then names the entry's task's
   line, which has left the list by then.
 - **The line's menu** (a right click, or VoiceOver's "show menu") offers
-  what its phrase may not say, in this order: Open Pull Request, Add to or
-  Remove from Queue, Retarget to main, Resume (its agent stopped on an
-  error, or exited mid-turn, as the sidebar offers it), Clean Up… (a linked
-  worktree of the project, or a folder already gone), and Open, a shell in
-  the worktree of a pull request without a task. What does nothing for now
-  is there, disabled, and says why under the pointer: refused or locked, a
-  dry run, a clean-up that runs. A menu shown before the line changed acts
-  only as the line still offers. The address of a pull request is as GitHub
-  gave it: whoever opens it checks it is GitHub's (`BoardStagesView.onMenu`
-  has no owner yet).
+  what its phrase may not say, in this order, each item carrying what acting
+  needs (`MenuItem`):
+  - Open Pull Request, for an address of github.com only (whoever posted the
+    pull request can't send a click elsewhere);
+  - Add to or Remove from Queue, as the Merge station;
+  - Retarget to main, while the pull request is outside the queue's list
+    and the queue doesn't work on it;
+  - Resume, as the sidebar offers it for a stopped agent of the task, whatever
+    another agent of it does: its column, and the failed turn it answers, so
+    that only that one is resumed;
+  - Clean Up… of the line's worktree, or of a folder already gone, as the
+    table offers it, with its path;
+  - Open, a shell where no workspace is open in the worktree (the main
+    checkout included), with its path and its branch for a title.
+
+  What does nothing for now is there, disabled, and says why under the
+  pointer: refused or locked, a dry run, a Resume the sidebar holds back
+  ("Resuming…"), a clean-up of that worktree that runs (known by its path,
+  for every line in it). A menu shown before the line changed acts only as
+  the line, still on the Board, still offers; each of its items stays what
+  it was. A worktree no line holds (a merged task closed since) gets its
+  menu with "Other worktrees" (2b-4). `BoardStagesView.onMenu` has no owner
+  yet.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
