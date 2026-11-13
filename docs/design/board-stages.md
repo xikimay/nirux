@@ -171,6 +171,8 @@ sidebar move others):
   today" keeps its entries in their order, in their new state, amber
   included (amber comes first again once the Board settles).
 
+![By progress, the pointer on "Catch-up card fixes" while its checks pass, a task closes and another starts: the line keeps its place in its new state, the closed task stays faded, the new one waits](../images/board-stages-held.png)
+
 Once the pointer leaves the Board, or the Board hides, or the app isn't the
 active one any more (its windows don't hear the pointer leave), it settles,
 once the event that said so is over. The order switch is the user's own
