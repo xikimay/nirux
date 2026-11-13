@@ -23,6 +23,8 @@ Click the line, grey or amber, to read the whole question and answer it in a pop
 
 Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. Otherwise the message waits for the end of that agent's next turn.
 
+A `claude` that Nirux resumed when it relaunched takes messages as soon as its conversation is back. A `claude` started with a new conversation takes them only after its first prompt: before that, Claude Code may be showing a startup question (trust, MCP servers) that Nirux can't see.
+
 ## Limits
 
 - A Mission ends only when the child reports that it is done, not when its turn stops.

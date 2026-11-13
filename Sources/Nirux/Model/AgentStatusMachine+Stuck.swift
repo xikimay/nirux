@@ -67,20 +67,32 @@ extension AgentStatusMachine {
 
     /// Whether a Mission message may be typed now, into an empty prompt of
     /// `foreground`: the column's interactive `claude`, already running at
-    /// `time`, that took a prompt since it started (Claude Code shows some
-    /// dialogs, such as trust or MCP servers, before any hook could list
-    /// them), whose turn is over and didn't fail (a usage limit would fail
-    /// every message typed, one after the other), with no dialog listed and
-    /// nothing typed since its last prompt went in (a draft, or text typed
-    /// by Nirux that Claude has not submitted yet), and no turn end waiting
-    /// for its verdict (`awaitsAnyVerdict`).
+    /// `time`, past its startup dialogs (`promptEmptySince`), whose turn is
+    /// over and didn't fail (a usage limit would fail every message typed,
+    /// one after the other), with no dialog listed and nothing typed since
+    /// its prompt was last empty (a draft, or text typed by Nirux that
+    /// Claude has not submitted yet), and no turn end waiting for its
+    /// verdict (`awaitsAnyVerdict`).
     func isPromptFree(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> Bool {
         guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
               foreground.instance.startedAt <= time,
-              let lastPromptAt, lastPromptAt >= foreground.instance.startedAt
+              let emptySince = promptEmptySince(startedAt: foreground.instance.startedAt)
         else { return false }
         return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && turnFailure == nil
-            && lastDraftInputAt <= lastPromptAt && !awaitsAnyVerdict
+            && lastDraftInputAt <= emptySince && !awaitsAnyVerdict
+    }
+
+    /// Since when the prompt of a `claude` started at `startedAt` is known
+    /// empty, past the dialogs Claude Code shows at startup before any hook
+    /// could list them (trust, MCP servers): since a prompt went in, or,
+    /// once it resumed a conversation (a relaunch restores every agent so),
+    /// since it started, as keys typed while it loaded may sit in its
+    /// prompt. A new conversation's SessionStart may come before those
+    /// dialogs: nil until its first prompt.
+    private func promptEmptySince(startedAt: TimeInterval) -> TimeInterval? {
+        if let lastPromptAt, lastPromptAt >= startedAt { return lastPromptAt }
+        if let conversationResumedAt, conversationResumedAt >= startedAt { return startedAt }
+        return nil
     }
 
     /// Whether a message typed at `typedAt` went in and the turn that took

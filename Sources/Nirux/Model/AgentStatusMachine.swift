@@ -170,6 +170,11 @@ struct AgentStatusMachine {
     private(set) var lastPromptAt: TimeInterval?
     private var turnPromptID: String?
     private var recentPromptIDs: [String] = []
+    /// When the agent last resumed a conversation (SessionStart "resume",
+    /// as `claude --resume` at a Nirux relaunch): Claude Code sends it once
+    /// its startup dialogs are behind it, unlike a new conversation's
+    /// "startup", which may come before them (see `isPromptFree`).
+    private(set) var conversationResumedAt: TimeInterval?
     /// The main agent's tool calls of the turn in flight, for the hint
     /// that it may be going in circles (`circlingHint`).
     private var circling = AgentCirclingWatch()
@@ -420,6 +425,7 @@ struct AgentStatusMachine {
         stopHooksKeepGoing = false
         conversationChangedAt = event.timestamp
         if event.source == "clear" { lastPromptAt = event.timestamp }
+        if event.source == "resume" { conversationResumedAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
         turnFailure = nil
@@ -1184,6 +1190,7 @@ struct AgentStatusMachine {
         lastPromptAt = nil
         turnPromptID = nil
         recentPromptIDs = []
+        conversationResumedAt = nil
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
