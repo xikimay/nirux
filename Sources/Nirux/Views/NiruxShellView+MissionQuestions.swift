@@ -12,32 +12,38 @@ extension NiruxShellView {
 
     /// What Nirux saw of a question's parent across refreshes.
     struct MissionParentWatch: Equatable {
-        /// Since when its column runs no Claude, or one that took no prompt
-        /// (`absentAs` says which: a `claude` coming to the front gets a
-        /// grace of its own).
+        /// Since when its column can't take the question: no Claude, one
+        /// that took no prompt, or one restarted since it took it.
         var absentSince: TimeInterval?
-        var absentAs: SidebarMissionQuestion.Parent?
         /// Since when it sits idle after it took the question.
         var stoppedSince: TimeInterval?
         /// It took the question and stopped without `reply`: the question
         /// stays with the user, whatever the parent does next.
         var skipped = false
+        /// What the last refresh that knew the parent's foreground settled.
+        var settled: SidebarMissionQuestion.Parent?
+        /// The hand-off shown last, and when the question was typed into the
+        /// parent by then (nil: not yet).
+        var handOff: SidebarMissionQuestion.HandOff?
+        var handOffTypedAt: TimeInterval?
 
         /// The parent state the hand-off goes by, from what a refresh
-        /// observed: no Claude, one that took no prompt yet (a first prompt
-        /// may be on its way), or idle after taking the question, counts
+        /// observed: a parent that can't take the question (whatever the
+        /// reason, one wait for all), or one idle after taking it, counts
         /// only past the grace; once it stopped without answering, it stays
-        /// so. `foregroundKnown` false (a process-table miss) proves nothing.
+        /// so. `foregroundKnown` false (a process-table miss) proves
+        /// nothing: what the last refresh found stands.
         mutating func settle(
             _ observed: SidebarMissionQuestion.Parent, foregroundKnown: Bool, now: TimeInterval
         ) -> SidebarMissionQuestion.Parent {
+            guard foregroundKnown else { return settled ?? .claude }
             var state = observed
             switch observed {
-            case .notClaude, .notAtPrompt:
-                if absentAs != observed { (absentSince, absentAs) = (now, observed) }
+            case .notClaude, .notAtPrompt, .restartedSinceTyped:
+                absentSince = absentSince ?? now
                 if now - (absentSince ?? now) < NiruxShellView.missionParentGrace { state = .claude }
             case .claude, .stoppedWithoutAnswer:
-                if foregroundKnown { (absentSince, absentAs) = (nil, nil) }
+                absentSince = nil
             case .closed:
                 break
             }
@@ -47,16 +53,31 @@ extension NiruxShellView {
             } else if state == .claude, !skipped {
                 stoppedSince = nil
             }
-            if skipped, state == .claude || state == .stoppedWithoutAnswer { return .stoppedWithoutAnswer }
-            return state == .stoppedWithoutAnswer ? .claude : state
+            if skipped, state == .claude || state == .stoppedWithoutAnswer { state = .stoppedWithoutAnswer }
+            else if state == .stoppedWithoutAnswer { state = .claude }
+            settled = state
+            return state
+        }
+
+        /// Once a question came to the user, it stays with them until
+        /// someone answers it (it no longer waits, and its watch goes) or
+        /// Nirux types it into the parent's prompt: a parent that takes a
+        /// prompt, or wobbles back for a refresh, hasn't got it. A new
+        /// reason only changes the words, so the hand-off alerts once.
+        mutating func hold(
+            _ handOff: SidebarMissionQuestion.HandOff?, typedAt: TimeInterval?
+        ) -> SidebarMissionQuestion.HandOff? {
+            if handOff == nil, self.handOff != nil, typedAt == handOffTypedAt { return self.handOff }
+            (self.handOff, handOffTypedAt) = (handOff, typedAt)
+            return handOff
         }
     }
 
     /// The question each Mission child column waits on, keyed by the
     /// column, with why it now waits on the user if it does: its parent
-    /// was closed, doesn't run Claude Code or runs one that took no prompt
-    /// yet (`missionParent`), or nobody answered within the stuck-agent
-    /// threshold (an hour with the check off). Else the answer
+    /// was closed, can't take it (`missionParent`), or nobody answered
+    /// within the stuck-agent threshold (an hour with the check off); once
+    /// handed over, until answered or typed (`MissionParentWatch.hold`). Else the answer
     /// still waiting to be typed into the child's prompt. `foreground` gives
     /// a column's foreground process.
     func missionQuestions(
@@ -108,40 +129,47 @@ extension NiruxShellView {
             }
             var watch = missionParentWatch[question.id] ?? MissionParentWatch()
             parentState = watch.settle(parentState, foregroundKnown: foregroundKnown, now: now)
-            missionParentWatch[question.id] = watch
-            result[ObjectIdentifier(column)] = SidebarMissionQuestion(
-                questionID: question.id,
-                parentTitle: parentTitle,
-                text: question.message,
-                handOff: question.handedToUserBecause.map { .lead(why: $0) } ?? SidebarMissionQuestion.handOff(
+            let handOff = watch.hold(
+                question.handedToUserBecause.map { .lead(why: $0) } ?? SidebarMissionQuestion.handOff(
                     parent: parentState, askedAt: question.timestamp,
                     threshold: stuckAgentWaitThreshold ?? MissionEventCLI.parentMessageLifetime, now: now
-                )
+                ),
+                typedAt: question.parentTypedAt
+            )
+            missionParentWatch[question.id] = watch
+            result[ObjectIdentifier(column)] = SidebarMissionQuestion(
+                questionID: question.id, parentTitle: parentTitle, text: question.message, handOff: handOff
             )
         }
         return result
     }
 
     /// What a parent whose terminal runs can do with a question, from its
-    /// foreground process (nil: unknown, a process-table miss) and when
-    /// Nirux typed the question into it, if it did. Not typed yet, a
-    /// `claude` that took no prompt since it started can't take it: Nirux
-    /// types nothing into one before that. Typed already, it went to a
-    /// `claude` that could, and one restarted since never gets it again.
+    /// foreground process (nil: a process-table miss, which `settle` reads
+    /// as nothing new) and when Nirux typed the question into it, if it
+    /// did. Typed already, it went to a `claude` that could take it: one
+    /// started since never gets it (a question is typed once). Not typed
+    /// yet, a `claude` that took no prompt since it started can't take it:
+    /// Nirux types nothing into one before that. `tookPrompt` is nil while
+    /// its hooks never reported: nothing tells, and it may take it.
     static func missionParent(
         foreground: ForegroundProcess?, typedAt: TimeInterval?,
-        finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool
+        finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?
     ) -> SidebarMissionQuestion.Parent {
-        if foreground.map({ $0.name == "claude" && !AgentHookCenter.isHeadlessClaude($0) }) == false { return .notClaude }
-        if let typedAt { return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude }
-        if let foreground, !tookPrompt(foreground) { return .notAtPrompt }
-        return .claude
+        guard let foreground else { return .claude }
+        guard foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground) else { return .notClaude }
+        if let typedAt {
+            if foreground.instance.startedAt > typedAt { return .restartedSinceTyped }
+            return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude
+        }
+        return tookPrompt(foreground) == false ? .notAtPrompt : .claude
     }
 
     /// A question that just came to the user lights its workspace (the
     /// ring, the Dock badge) and, with Nirux in the background, bounces the
     /// Dock icon and posts a notification: once per hand-off. A hand-off
-    /// that ended (answered, retired, the parent back) puts that out.
+    /// that ended (answered, retired, typed into the parent's prompt) puts
+    /// that out.
     func noteMissionQuestionHandOffs(_ questions: [ObjectIdentifier: SidebarMissionQuestion]) {
         var handedOff: [String: String] = [:]
         for workspace in workspaces {

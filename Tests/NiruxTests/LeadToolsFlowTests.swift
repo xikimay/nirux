@@ -193,8 +193,9 @@ final class LeadToolsFlowTests: XCTestCase {
     /// A relaunch resumes the Lead's `claude`, which then takes no prompt
     /// until someone writes to it and may show a resume screen no hook
     /// reports: Nirux types nothing into it. A task's question comes to the
-    /// user once the short grace is over, not after the stuck threshold, and
-    /// still goes to the Lead after it has taken a prompt.
+    /// user once the short grace is over, not after the stuck threshold,
+    /// stays with them while the Lead works on the prompt it took, and goes
+    /// to the Lead once that turn is over.
     func testATasksQuestionComesToTheUserWhileTheLeadTookNoPrompt() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -213,8 +214,6 @@ final class LeadToolsFlowTests: XCTestCase {
                     source: source, timestamp: Date().timeIntervalSince1970
                 ), isUserFocused: false)
             }
-            hook(.sessionStart, source: "resume")
-
             let workspaceID = UUID().uuidString
             let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
                 id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: agentUUID,
@@ -235,20 +234,25 @@ final class LeadToolsFlowTests: XCTestCase {
             @MainActor func typedAt() -> TimeInterval? {
                 MissionStore.shared.missions.first { $0.id == mission.id }?.events.first { $0.id == question.id }?.parentTypedAt
             }
+            let grace = NiruxShellView.missionParentGrace
+            XCTAssertNil(handOff(at: Date().timeIntervalSince1970 + grace), "no word from its hooks: nothing tells")
+
+            // Its conversation is back, as a relaunch resumes it.
+            hook(.sessionStart, source: "resume")
             let now = Date().timeIntervalSince1970
             XCTAssertNil(handOff(at: now), "a first prompt may be on its way")
-            let grace = NiruxShellView.missionParentGrace
             XCTAssertEqual(handOff(at: now + grace), .parentNotAtPrompt)
             shell.typeMissionMessages()
             XCTAssertNil(typedAt(), "nothing typed into it")
 
             // Someone wrote to it: once that turn is over, the question goes in.
             hook(.userPromptSubmit)
+            XCTAssertEqual(handOff(at: now + grace + 1), .parentNotAtPrompt, "it hasn't got the question")
             hook(.stop)
-            XCTAssertNil(handOff(at: now + grace + 1), "it takes the question itself")
             shell.typeMissionMessages()
             harness.waitUntil("the question in its prompt") { resumed.input.contains("Keep the old date= parameter?") }
             XCTAssertNotNil(typedAt())
+            XCTAssertNil(handOff(at: now + grace + 2), "it has it now")
         }
     }
 

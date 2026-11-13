@@ -771,9 +771,12 @@ final class PtySession: @unchecked Sendable {
     }
 
     /// Whether `foreground`, the column's `claude`, took a prompt since it
-    /// started (see `AgentStatusMachine.tookPrompt(since:)`).
-    func agentTookPrompt(since foreground: ForegroundProcess) -> Bool {
-        state.machine.tookPrompt(since: foreground.instance.startedAt)
+    /// started (see `AgentStatusMachine.prompt(since:)`); nil while no hook
+    /// of it reached the column, as for a `claude` without Nirux's hooks:
+    /// nothing tells.
+    func agentTookPrompt(since foreground: ForegroundProcess) -> Bool? {
+        guard state.machine.hookKind == "claude" else { return nil }
+        return state.machine.prompt(since: foreground.instance.startedAt) != nil
     }
 
     /// The user's login shell ($SHELL) when it's a mainstream
