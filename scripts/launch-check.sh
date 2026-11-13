@@ -14,12 +14,18 @@ BINARY="$APP/Contents/MacOS/Nirux"
 WORK="$(mktemp -d)"
 LOG="$WORK/launch.log"
 PID=""
-cleanup() {
-    if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
-        for child in $(pgrep -P "$PID" || true); do kill "$child" 2>/dev/null || true; done
-        kill "$PID" 2>/dev/null || true
-        wait "$PID" 2>/dev/null || true
+SECOND=""
+# A Nirux and the shells it started.
+stop() {
+    if [[ -n "$1" ]] && kill -0 "$1" 2>/dev/null; then
+        for child in $(pgrep -P "$1" || true); do kill "$child" 2>/dev/null || true; done
+        kill "$1" 2>/dev/null || true
+        wait "$1" 2>/dev/null || true
     fi
+}
+cleanup() {
+    stop "$SECOND"
+    stop "$PID"
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -48,16 +54,30 @@ sleep 5
 kill -0 "$PID" 2>/dev/null || fail "Nirux exited after its first terminal started"
 echo "launch check: ok (a terminal's shell runs)"
 
-# One Nirux per state folder: a second one on it says so and quits (after
-# waiting a few seconds for the first to quit), the first still running. A
-# second UI would still run when the alarm stops it (status 142).
+# One Nirux per state folder: a second one on it says so and quits at once
+# (status 0 once it brought the first to the front, 1 when it couldn't), the
+# first still running. A second one that opens after all is stopped with its
+# shells.
 SECOND_LOG="$WORK/second.log"
-second=0
-NIRUX_STATE_DIR="$WORK/state" NIRUX_SKIP_HOOK_INSTALL=1 SHELL=/bin/zsh perl -e 'alarm 30; exec @ARGV' "$BINARY" > "$SECOND_LOG" 2>&1 || second=$?
-if [[ $second -ne 0 ]] || ! grep -q "already open on this state folder" "$SECOND_LOG"; then
+NIRUX_STATE_DIR="$WORK/state" NIRUX_SKIP_HOOK_INSTALL=1 SHELL=/bin/zsh "$BINARY" > "$SECOND_LOG" 2>&1 &
+SECOND=$!
+for _ in $(seq 60); do
+    kill -0 "$SECOND" 2>/dev/null || break
+    sleep 0.5
+done
+if kill -0 "$SECOND" 2>/dev/null; then
+    stop "$SECOND"
     echo "--- the second Nirux's output ---"
     cat "$SECOND_LOG"
-    fail "a second Nirux on the same state folder didn't quit (status $second)"
+    fail "a second Nirux on the same state folder still ran after 30 s"
+fi
+second=0
+wait "$SECOND" || second=$?
+SECOND=""
+if [[ $second -gt 1 ]] || ! grep -q "already open on this state folder" "$SECOND_LOG"; then
+    echo "--- the second Nirux's output ---"
+    cat "$SECOND_LOG"
+    fail "a second Nirux on the same state folder didn't say why it quit (status $second)"
 fi
 kill -0 "$PID" 2>/dev/null || fail "the first Nirux quit when a second one started"
-echo "launch check: ok (a second Nirux on the same state folder quits)"
+echo "launch check: ok (a second Nirux on the same state folder quits: $(head -1 "$SECOND_LOG"))"

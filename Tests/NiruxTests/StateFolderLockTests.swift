@@ -25,31 +25,61 @@ final class StateFolderLockTests: XCTestCase {
         return lock
     }
 
-    /// The first takes it and says who it is; a second on the same folder
-    /// is told who holds it; once the first lets go, the next one takes it.
+    private func holder(_ outcome: StateFolderLock.Outcome, file: StaticString = #filePath, line: UInt = #line) -> StateFolderLock.Holder? {
+        guard case .held(let holder) = outcome else {
+            XCTFail("not held by another: \(outcome)", file: file, line: line)
+            return nil
+        }
+        return holder
+    }
+
+    private var lockText: String? {
+        try? String(contentsOf: folder.appendingPathComponent(StateFolderLock.fileName), encoding: .utf8)
+    }
+
+    /// The first takes it and says who it is. A second on the same folder is
+    /// told at once who holds it, while that one runs; once it lets go, the
+    /// next one takes it and writes over a longer line.
     func testOneHolderPerFolder() throws {
         let first = try XCTUnwrap(acquired(StateFolderLock.acquire(in: folder, wait: 0, pid: 4242)))
-        guard case .held(let holder) = StateFolderLock.acquire(in: folder, wait: 0, pid: 99) else {
-            return XCTFail("a second one got the lock")
-        }
-        XCTAssertEqual(holder, 4242)
+        XCTAssertEqual(lockText, "4242\n")
+        let started = Date()
+        XCTAssertEqual(holder(StateFolderLock.acquire(in: folder, wait: 5, pid: 99) { _ in true }), .init(pid: 4242, isQuitting: false))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2, "a Nirux that runs is no reason to wait")
         // Another folder has its own.
         let other = folder.appendingPathComponent("other")
         try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
         acquired(StateFolderLock.acquire(in: other, wait: 0))?.release()
+        first.markQuitting()
+        XCTAssertEqual(lockText, "4242 quitting\n")
         first.release()
         let next = try XCTUnwrap(acquired(StateFolderLock.acquire(in: folder, wait: 0, pid: 99)))
-        XCTAssertEqual(try String(contentsOf: folder.appendingPathComponent(StateFolderLock.fileName), encoding: .utf8), "99\n")
+        XCTAssertEqual(lockText, "99\n", "nothing left of the longer line")
         next.release()
     }
 
-    /// A Nirux that is quitting (Sparkle relaunches the app once it is
-    /// gone) lets go within the wait: the new one takes over.
+    /// A Nirux that is quitting (a quick reopen; Sparkle relaunches the app
+    /// once it is gone) is waited for: the new one takes over when it lets
+    /// go, or is told who holds it at the end of the wait.
     func testItWaitsForAHolderThatIsQuitting() throws {
-        let quitting = try XCTUnwrap(acquired(StateFolderLock.acquire(in: folder, wait: 0)))
+        let quitting = try XCTUnwrap(acquired(StateFolderLock.acquire(in: folder, wait: 0, pid: 4242)))
+        quitting.markQuitting()
+        let started = Date()
+        XCTAssertEqual(holder(StateFolderLock.acquire(in: folder, wait: 0.4) { _ in true }), .init(pid: 4242, isQuitting: true))
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 0.4)
         let descriptor = quitting.descriptor
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { close(descriptor) }
-        acquired(StateFolderLock.acquire(in: folder, wait: 5))?.release()
+        acquired(StateFolderLock.acquire(in: folder, wait: 5) { _ in true })?.release()
+    }
+
+    /// A holder whose pid doesn't run, or that wrote nothing readable, is
+    /// waited for too: it may be on its way out.
+    func testItWaitsForAnUnknownHolder() throws {
+        let first = try XCTUnwrap(acquired(StateFolderLock.acquire(in: folder, wait: 0, pid: 4242)))
+        let started = Date()
+        XCTAssertEqual(holder(StateFolderLock.acquire(in: folder, wait: 0.4) { _ in false }), .init(pid: 4242, isQuitting: false))
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 0.4)
+        first.release()
     }
 
     /// The processes Nirux starts (its terminals' shells, forked and
