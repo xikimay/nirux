@@ -18,7 +18,15 @@ enum NiruxMCPServer {
     static let instructions = """
         Nirux keeps this project's past Claude conversations, across all its worktrees and sessions. \
         Before starting a task, and before asking the user about a past decision, search them with \
-        history_search: a feature or branch name, a PR number, a distinctive word.
+        history_search: a feature or branch name, a PR number, a distinctive word. \
+        Nirux's binary ($NIRUX_CLI_PATH) starts no task: run it only for the --mission commands Nirux \
+        gives you, and never launch the app itself (open -a Nirux, open -n) to start work: that can open a \
+        second Nirux.
+        """
+
+    /// For any agent but a space's Lead, which starts tasks with its tools.
+    static let taskInstructions = """
+        To start a task, or a sub-task of yours, in its own worktree, use the nirux-worktree skill.
         """
 
     /// The Lead's role (docs/design/spaces.md, "The Lead"), for the Claude of a
@@ -44,9 +52,10 @@ enum NiruxMCPServer {
         """
 
     /// The instructions for whoever launched the server: the Lead's role
-    /// comes first in its workspace (`NIRUX_LEAD=1`).
+    /// comes first in its workspace (`NIRUX_LEAD=1`); any other agent
+    /// learns how to start a task.
     static func instructions(for context: Context) -> String {
-        context.isLead ? leadInstructions + "\n\n" + instructions : instructions
+        context.isLead ? leadInstructions + "\n\n" + instructions : instructions + "\n\n" + taskInstructions
     }
 
     /// `--mcp-config=<this server>` and `--allowedTools=<its tools>` for
