@@ -40,16 +40,17 @@ final class CatchUpTests: XCTestCase {
     }
 
     /// Waits on state, never on time: the card comes in after the
-    /// activation's own work, and CI runs several classes at once.
+    /// activation's own work, and CI runs several classes at once. The
+    /// description is read at the timeout: it can say what the test saw.
     @discardableResult
     private func waitFor(
-        _ description: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line,
-        _ condition: () -> Bool
+        _ description: @autoclosure () -> String, timeout: TimeInterval = 15, file: StaticString = #filePath,
+        line: UInt = #line, _ condition: () -> Bool
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         let met = condition()
-        XCTAssertTrue(met, "timed out waiting for \(description)", file: file, line: line)
+        XCTAssertTrue(met, "timed out waiting for \(description())", file: file, line: line)
         return met
     }
 
@@ -256,7 +257,13 @@ final class CatchUpTests: XCTestCase {
     }
 
     /// A list taller than the sidebar: the card comes into view, not above
-    /// the visible part.
+    /// the visible part. Checked in height, what the reveal scrolls: AppKit
+    /// settles which scroller style it prefers a moment after a process's
+    /// first scroll view, and a scroll view alive then takes it whatever
+    /// style it was given. On CI's runners (a virtual mouse) the sidebar's
+    /// scroller turns legacy mid-test and covers the last 15 pt of the
+    /// visible width, part of the card's ×. That layout is the app's to
+    /// settle, not what this test proves.
     func testTheCardComesIntoView() throws {
         let rows = (0..<30).map { index in
             WorkspaceInfo(
@@ -285,13 +292,26 @@ final class CatchUpTests: XCTestCase {
             otherSpaces: []
         )
         sidebar.refreshCatchUpCard(reveal: true)
-        let dismiss = try XCTUnwrap(sidebar.hitAreas.first { area in
-            guard case .catchUp(.dismiss) = area.region else { return false }
-            return true
-        })
-        waitFor("the card in view (visible was \(visibleBefore))") {
-            sidebar.contentScrollView.documentVisibleRect.contains(dismiss.frame)
+        let scroll = sidebar.contentScrollView
+        // Read each time: a rebuild lays the card out again.
+        let dismissFrame = {
+            sidebar.hitAreas.first { area in
+                guard case .catchUp(.dismiss) = area.region else { return false }
+                return true
+            }?.frame
         }
+        let dismiss = try XCTUnwrap(dismissFrame())
+        // The rebuild leaves it above the visible part: the reveal brings it in.
+        XCTAssertGreaterThan(dismiss.minY, scroll.documentVisibleRect.maxY, "the card comes in above the visible part")
+        waitFor("""
+            the card in view: visible was \(visibleBefore), is \(scroll.documentVisibleRect), \
+            its × at \(dismissFrame().map { "\($0)" } ?? "-"), scroller style \(scroll.scrollerStyle.rawValue)
+            """) {
+            guard let dismiss = dismissFrame() else { return false }
+            let visible = scroll.documentVisibleRect
+            return visible.minY <= dismiss.minY && dismiss.maxY <= visible.maxY
+        }
+        XCTAssertEqual(scroll.documentVisibleRect.minX, 0, "the list never scrolls sideways")
     }
 
     /// A row says what its task's row says: what it asks, what broke, that
