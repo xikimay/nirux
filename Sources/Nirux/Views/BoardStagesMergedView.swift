@@ -65,10 +65,9 @@ final class BoardStagesMergedView: NSView {
         let pad = BoardStagesView.Metrics.padding
         caption.frame = NSRect(x: pad, y: 14, width: ColumnHeaderView.textWidth(caption), height: 13)
         // A Board too narrow for the caption and an entry side by side
-        // starts the entries under it: an entry needs some of its title,
-        // and its link when it has one.
-        let linkRoom = entries.contains(where: \.hasLink) ? BoardStagesMergedEntryView.linkRoom : 0
-        let isWide = width - 2 * pad - caption.frame.width - 18 >= 160 + linkRoom
+        // starts the entries under it. Whatever their links: a clean-up
+        // that ends doesn't move the block, nor what comes under it.
+        let isWide = width - 2 * pad - caption.frame.width - 18 >= 160
         let left = isWide ? caption.frame.maxX + 18 : pad
         let limit = width - pad
         let firstRow = isWide ? 0 : 1
@@ -151,8 +150,8 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
     /// What the entry says under the pointer, by where.
     private var toolTips = BoardStagesToolTips()
     var hints: [(rect: NSRect, text: String)] { toolTips.places }
-    /// Where a hand showed at the last layout.
-    private var shownHandRects: [NSRect] = []
+    /// Where a hand was last given to AppKit.
+    private var registeredHandRects: [NSRect] = []
 
     private static let dot: CGFloat = 6
     /// Under this, a title that is cut gives the link's room back.
@@ -248,24 +247,23 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
         // not at all, and only while the title keeps some of itself.
         let detailWidth = min(ColumnHeaderView.textWidth(detailLabel), max(0, bounds.width - titleX - 4))
         let room = max(0, bounds.width - titleX - 4 - detailWidth)
-        let link = hasLink && room - Self.linkRoom >= min(whole, Self.fewestTitle) ? Self.linkRoom : 0
-        let titleWidth = min(whole, room - link)
+        let linkWidth = hasLink && room - Self.linkRoom >= min(whole, Self.fewestTitle) ? Self.linkRoom : 0
+        let titleWidth = min(whole, room - linkWidth)
         titleLabel.frame = NSRect(x: titleX, y: 1, width: titleWidth, height: 16)
         detailLabel.frame = NSRect(x: titleLabel.frame.maxX + 4, y: 2, width: detailWidth, height: 15)
-        linkLabel.frame = NSRect(x: detailLabel.frame.maxX, y: 1, width: link, height: 16)
-        linkLabel.isHidden = link == 0
+        linkLabel.frame = NSRect(x: detailLabel.frame.maxX, y: 1, width: linkWidth, height: 16)
+        linkLabel.isHidden = linkWidth == 0
         // The entry takes the mouse for its words. A title that is cut
-        // shows whole under the pointer, wherever on the entry up to its
-        // link (which says what its click does), or to its end: the
-        // number and the time end it once the title gives way.
+        // shows whole under the pointer, wherever on the entry but on a
+        // link, which says what its click does.
         var hints: [(rect: NSRect, text: String)] = []
-        if titleWidth < whole { hints.append((NSRect(x: 0, y: 0, width: linkLabel.frame.minX, height: bounds.height), pullRequest.title)) }
-        if offersCleanUp, let rect = linkRect { hints.append((rect, BoardStages.Link.cleanUp.hint)) }
-        toolTips.show(hints, on: self)
-        if handRects != shownHandRects {
-            shownHandRects = handRects
-            window?.invalidateCursorRects(for: self)
+        let link = offersCleanUp ? linkRect : nil
+        if titleWidth < whole {
+            hints.append((NSRect(x: 0, y: 0, width: link?.minX ?? bounds.width, height: bounds.height), pullRequest.title))
         }
+        if let link { hints.append((link, BoardStages.Link.cleanUp.hint)) }
+        toolTips.show(hints, on: self)
+        if handRects != registeredHandRects { window?.invalidateCursorRects(for: self) }
     }
 
     /// The link's place, the entry's height; nil where it has no room.
@@ -289,12 +287,13 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
 
     /// A hand on the link, as far as the entry is in sight.
     var handRects: [NSRect] {
-        guard offersCleanUp, !isHiddenOrHasHiddenAncestor, let rect = linkRect?.intersection(rectInSight), !rect.isEmpty else { return [] }
+        guard offersCleanUp, let rect = linkRect?.intersection(rectInSight), !rect.isEmpty else { return [] }
         return [rect]
     }
 
     override func resetCursorRects() {
-        for rect in handRects { addCursorRect(rect, cursor: .pointingHand) }
+        registeredHandRects = handRects
+        for rect in registeredHandRects { addCursorRect(rect, cursor: .pointingHand) }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -310,24 +309,27 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
         pressed = event.clickCount == 1 ? target(at: convert(event.locationInWindow, from: nil)) : nil
     }
 
-    /// The entry is listed, and shows: not one gone behind "+12 more",
-    /// nor one that left the list.
+    /// The entry is listed, and shows, where VoiceOver may reach it
+    /// scrolled away: not one gone behind "+12 more", nor one that left
+    /// the list.
     private var isShown: Bool { window != nil && !isHiddenOrHasHiddenAncestor }
 
     /// The click is the mouse going up on what it went down on, as that
-    /// still is, where the entry is in sight.
+    /// still is, where the entry is in sight: not one gone behind "+12
+    /// more", nor one that left the list.
     override func mouseUp(with event: NSEvent) {
         defer { pressed = nil }
         let point = convert(event.locationInWindow, from: nil)
-        guard let pressed, isShown, rectInSight.contains(point), target(at: point) == pressed else { return }
+        guard let pressed, rectInSight.contains(point), target(at: point) == pressed else { return }
         switch pressed {
         case .entry: onClick?()
         case .cleanUp: onCleanUp?()
         }
     }
 
+    /// As a click: only on an entry that shows.
     override func accessibilityPerformPress() -> Bool {
-        guard pullRequest.lineID != nil else { return false }
+        guard pullRequest.lineID != nil, isShown else { return false }
         onClick?()
         return true
     }

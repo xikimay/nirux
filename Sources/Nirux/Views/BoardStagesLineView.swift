@@ -63,8 +63,8 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// What the words and the stations say under the pointer, by where.
     private var toolTips = BoardStagesToolTips()
     var hints: [(rect: NSRect, text: String)] { toolTips.places }
-    /// Where a hand showed at the last layout.
-    private var shownHandRects: [NSRect] = []
+    /// Where a hand was last given to AppKit.
+    private var registeredHandRects: [NSRect] = []
 
     private typealias Metrics = BoardStagesView.Metrics
 
@@ -201,10 +201,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             label.frame = NSRect(x: frame?.minX ?? 0, y: 10, width: frame?.width ?? 0, height: 15)
         }
         layoutHints(stations: columns.stations)
-        if handRects != shownHandRects {
-            shownHandRects = handRects
-            window?.invalidateCursorRects(for: self)
-        }
+        if handRects != registeredHandRects { window?.invalidateCursorRects(for: self) }
     }
 
     /// Under this, the words before a link aren't worth their place.
@@ -519,7 +516,8 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     // MARK: Under the pointer
 
     override func resetCursorRects() {
-        for rect in handRects { addCursorRect(rect, cursor: .pointingHand) }
+        registeredHandRects = handRects
+        for rect in registeredHandRects { addCursorRect(rect, cursor: .pointingHand) }
     }
 }
 

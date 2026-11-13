@@ -208,7 +208,8 @@ clicked. The sizes are the mockup's.
   while one runs, in the same room: the entries after it don't move under
   the pointer). The title gives way first, down to 40 pt, then the link goes
   whole; the number and the time last. A title that is cut is whole under
-  the pointer anywhere on the entry but its link. One whose task is still open opens it. Those whose task needs the
+  the pointer anywhere on the entry but on "Clean up". When a clean-up
+  ends, its words go and the entries after it close up. One whose task is still open opens it. Those whose task needs the
   user come first, so amber is never behind the button; were there more of
   them than two rows hold, the button says so, in amber ("+12 more · 3 need
   you").
@@ -386,16 +387,19 @@ to the queue yet.
   target of its own, the entry's height, with its hint, its hand and its
   VoiceOver action; the rest of the entry opens the task. An entry that went
   behind "+12 more", or left the list, between a press and its release opens
-  nothing, nor does its VoiceOver action. Entries with a link start under
-  the caption on a Board where they would keep less than 40 pt of their
-  title beside it. `onLink` then names the entry's task's line, which has
-  left the list by then.
+  nothing, nor do VoiceOver's press and action. Where the entries go (beside
+  the caption or under it) doesn't depend on their links: a clean-up that
+  ends moves nothing below. On a Board too narrow for a link beside the
+  caption, the entry shows none. `onLink` then names the entry's task's
+  line, which has left the list by then.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
   refuses, the line's help says why.
 - **A hand** shows where a click does something of its own: on a station
-  that acts, on a link, as far as the line is in sight.
+  that acts, on a link, as far as the line is in sight. A line or an entry
+  asks AppKit for its places again whenever they are no longer those it
+  gave.
 
 ## Known limits
 

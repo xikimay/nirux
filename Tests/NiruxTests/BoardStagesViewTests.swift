@@ -1283,19 +1283,71 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(widths(16 + short + whole[1] + room), [short, whole[1], room])
         XCTAssertEqual(widths(16 + short + whole[1] + room - 1), [short, whole[1], 0])
 
-        // On the Board: entries with a link start under the caption sooner, each keeping some of its title.
+        // On a narrow Board the entries stay where they are whatever their links: a clean-up that ends
+        // moves neither the block nor what comes under it. A link with no room beside the caption isn't shown.
         let day = { (cleanUp: BoardStages.CleanUp?) in
             (0..<3).map { BoardStages.Merged(lineID: "t\($0)", title: long, number: 400 + $0, mergedAt: self.now - 60, cleanUp: cleanUp) }
         }
-        let plain = board(content([section(units: [], merged: day(nil))]), width: 320)
-        let linked = board(content([section(units: [], merged: day(.offered))]), width: 320)
-        let beside = try XCTUnwrap(plain.mergedView(section: "nirux"))
-        let under = try XCTUnwrap(linked.mergedView(section: "nirux"))
-        XCTAssertLessThan(try XCTUnwrap(beside.entries.first).frame.minY, beside.caption.frame.maxY, "beside the caption")
-        let first = try XCTUnwrap(under.entries.first)
-        XCTAssertGreaterThanOrEqual(first.frame.minY, under.caption.frame.maxY, "under it")
+        let view = board(content([section(units: [], merged: day(.offered)), section("site", units: [.task(line("next"), subtasks: [])])]),
+                         width: 320)
+        let merged = try XCTUnwrap(view.mergedView(section: "nirux"))
+        let first = try XCTUnwrap(merged.entries.first)
+        XCTAssertLessThan(first.frame.minY, merged.caption.frame.maxY, "beside the caption")
+        XCTAssertTrue(first.linkLabel.isHidden, "no room for the link there")
         XCTAssertGreaterThanOrEqual(first.titleLabel.frame.width, 40)
+        let next = try XCTUnwrap(view.sectionHeader(section: "site")).frame
+        for state in [BoardStages.CleanUp.running, nil] {
+            view.show(content([section(units: [], merged: day(state)), section("site", units: [.task(line("next"), subtasks: [])])]))
+            view.layoutSubtreeIfNeeded()
+            XCTAssertEqual(try XCTUnwrap(view.sectionHeader(section: "site")).frame, next, "\(String(describing: state))")
+        }
+        // Wide enough, the link shows beside the caption.
+        view.setFrameSize(NSSize(width: 700, height: 600))
+        view.show(content([section(units: [], merged: day(.offered)), section("site", units: [.task(line("next"), subtasks: [])])]))
+        view.layoutSubtreeIfNeeded()
         XCTAssertFalse(first.linkLabel.isHidden)
+        XCTAssertLessThan(first.frame.minY, merged.caption.frame.maxY)
+    }
+
+    /// Counts what asks AppKit for a view's cursor places again.
+    private final class CursorWindow: NSWindow {
+        var asked: [NSView] = []
+        override func invalidateCursorRects(for view: NSView) {
+            asked.append(view)
+            super.invalidateCursorRects(for: view)
+        }
+    }
+
+    func testAHandIsAskedForAgainWhereItNoLongerIsWhatAppKitHolds() throws {
+        let window = CursorWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 100), styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        windows.append(window)
+        let holder = NSView(frame: window.contentLayoutRect)
+        window.contentView = holder
+        let entry = BoardStagesMergedEntryView(
+            BoardStages.Merged(lineID: "left", title: "Fix 287", number: 287, mergedAt: now - 3600, cleanUp: .offered), now: now
+        )
+        let line = BoardStagesLineView(offering("joining", .add, 52), link: .none)
+        holder.addSubview(entry)
+        holder.addSubview(line)
+        entry.frame = NSRect(x: 0, y: 0, width: entry.fittingWidth, height: 18)
+        line.frame = NSRect(x: 0, y: 40, width: 940, height: 34)
+        for view in [entry, line] as [NSView] { view.layoutSubtreeIfNeeded() }
+        // AppKit takes the places a view gives it, as it does once the window shows.
+        entry.resetCursorRects()
+        line.resetCursorRects()
+        XCTAssertEqual([entry.handRects.count, line.handRects.count], [1, 1])
+        window.asked = []
+        entry.needsLayout = true
+        line.needsLayout = true
+        for view in [entry, line] as [NSView] { view.layoutSubtreeIfNeeded() }
+        XCTAssertTrue(window.asked.isEmpty, "nothing changed: AppKit holds what they would give")
+        // The clean-up starts; the list locks: no hand left, where AppKit still holds one.
+        entry.show(BoardStages.Merged(lineID: "left", title: "Fix 287", number: 287, mergedAt: now - 3600, cleanUp: .running), now: now)
+        line.update(offering("joining", .add, 52, blocked: "The queue is running."), link: .none)
+        for view in [entry, line] as [NSView] { view.layoutSubtreeIfNeeded() }
+        XCTAssertEqual([entry.handRects.count, line.handRects.count], [0, 0])
+        XCTAssertTrue(window.asked.contains { $0 === entry } && window.asked.contains { $0 === line }, "each asks for its places again")
     }
 
     func testAnEntrysPlacesAndItsHandFollowWhatShows() throws {
@@ -1322,19 +1374,19 @@ final class BoardStagesViewTests: XCTestCase {
         try click(entry.linkLabel)
         XCTAssertEqual(linked, 1)
 
-        // The clean-up starts: the link's place goes, the title's stays as it was registered.
-        let title = try XCTUnwrap(entry.trackingAreas.first { $0.rect.minX == 0 })
+        // The clean-up starts: the link's place goes, and the title's covers the whole entry, "cleaning up…" included.
         XCTAssertEqual(entry.trackingAreas.count, 2)
         view.show(content([section(units: lines, merged: day(.running, long))]))
         view.layoutSubtreeIfNeeded()
         XCTAssertTrue(merged.entries.first === entry)
+        XCTAssertEqual(entry.hints.map(\.rect), [entry.bounds])
+        XCTAssertEqual(entry.toolTipText(at: NSPoint(x: entry.linkLabel.frame.midX, y: 9)), long)
+        let title = try XCTUnwrap(entry.trackingAreas.first)
         XCTAssertEqual(entry.trackingAreas.count, 1)
-        XCTAssertTrue(entry.trackingAreas.first === title, "a tooltip being read stays up")
-        XCTAssertEqual(entry.toolTipText(at: NSPoint(x: 20, y: 9)), long)
-        // Other words in the same place: asked for when shown.
+        // Other words in the same place: asked for when shown, the place kept as it was registered.
         view.show(content([section(units: lines, merged: day(.running, long + ", again"))]))
         view.layoutSubtreeIfNeeded()
-        XCTAssertTrue(entry.trackingAreas.first === title)
+        XCTAssertTrue(entry.trackingAreas.first === title, "a tooltip being read stays up")
         XCTAssertEqual(entry.toolTipText(at: NSPoint(x: 20, y: 9)), long + ", again")
     }
 
@@ -1394,6 +1446,9 @@ final class BoardStagesViewTests: XCTestCase {
         view.layoutSubtreeIfNeeded()
         XCTAssertTrue(merged.entries.last === first && first.isHidden)
         XCTAssertEqual(action.handler?(), false)
+        var opened: [String] = []
+        view.onOpen = { opened.append($0) }
+        XCTAssertFalse(first.accessibilityPerformPress(), "nor does a press open its task")
         // Shown again, then out of the list altogether: nothing either.
         view.show(content([section(units: [], merged: day)]))
         view.layoutSubtreeIfNeeded()
@@ -1403,7 +1458,11 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(first.window)
         XCTAssertFalse(first.isHidden)
         XCTAssertEqual(action.handler?(), false)
+        XCTAssertFalse(first.accessibilityPerformPress())
         XCTAssertEqual(linked, ["t0"])
+        XCTAssertEqual(opened, [])
+        XCTAssertTrue(merged.entries[0].accessibilityPerformPress(), "one that shows opens its task")
+        XCTAssertEqual(opened, ["t1"])
     }
 
     func testAMergedEntryTooLongForItsRowGivesItsTitleAway() throws {
