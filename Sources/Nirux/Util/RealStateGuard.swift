@@ -136,10 +136,8 @@ enum RealStateGuard {
 
             """.utf8))
         // A terminal, a script or an agent's tool started it: stderr says it
-        // all, and an alert would steal the focus and wait for a click. Apps
-        // that LaunchServices starts are children of launchd in its session;
-        // one detached from a shell (`&`, nohup) keeps the shell's session.
-        guard getppid() == 1, getsid(0) == 1 else { exit(EXIT_FAILURE) }
+        // all, and an alert would steal the focus and wait for a click.
+        guard LaunchArguments.startedByLaunchServices else { exit(EXIT_FAILURE) }
         let app = NSApplication.shared
         let delegate = RefusedLaunchDelegate(copy: copy, installed: installedBundlePath, command: command)
         app.delegate = delegate

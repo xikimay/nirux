@@ -1,16 +1,32 @@
 import XCTest
 @testable import Nirux
 
-/// Which arguments still open the app once every command-line mode passed
-/// on them (see LaunchArguments).
+/// What `Nirux` does with its arguments: `NiruxApp.main` runs exactly this
+/// decision (see LaunchArguments).
 final class LaunchArgumentsTests: XCTestCase {
     private let executable = "/Applications/Nirux.app/Contents/MacOS/Nirux"
+    private let workspaceID = "2119EDC0-EC10-4717-929F-C7DBBB882717"
 
     private func decision(_ arguments: String...) -> LaunchArguments.Decision {
         LaunchArguments.decision(for: [executable] + arguments)
     }
 
-    func testOnlyALaunchWithoutArgumentsOpensTheApp() {
+    /// Every command line Nirux writes, or the nightly runs, reaches its mode.
+    func testTheCommandLineModesComeFirst() {
+        XCTAssertEqual(decision("--hook", "claude", "--statusline"), .mode(.statusLine))
+        XCTAssertEqual(decision("--hook", "claude", "--mcp"), .mode(.toolsServer))
+        XCTAssertEqual(decision("--hook", "codex", SetupFailureSignal.flag, workspaceID), .mode(.setupFailure(workspaceID: workspaceID)))
+        XCTAssertEqual(decision("--hook", "claude"), .mode(.hook(.claude, payload: nil)))
+        XCTAssertEqual(decision("--hook", "codex", "{}"), .mode(.hook(.codex, payload: "{}")))
+        // The payload is the last argument, after any flag a newer build adds.
+        XCTAssertEqual(decision("--hook", "codex", "--newer-flag", "{}"), .mode(.hook(.codex, payload: "{}")))
+        XCTAssertEqual(decision("--mission", "ask", "--message", "x"), .mode(.mission(["ask", "--message", "x"])))
+        XCTAssertEqual(decision("--mission"), .mode(.mission([])))
+        XCTAssertEqual(decision("--check-terminal-runtime"), .mode(.checkTerminalRuntime))
+        XCTAssertEqual(decision("--check-release-signature", "/tmp/Nirux.app"), .mode(.checkReleaseSignature(["/tmp/Nirux.app"])))
+    }
+
+    func testALaunchWithoutArgumentsOpensTheApp() {
         XCTAssertEqual(decision(), .launchApp)
     }
 
@@ -32,17 +48,19 @@ final class LaunchArgumentsTests: XCTestCase {
         XCTAssertEqual(decision("open", "--help"), .unknown("open"))
     }
 
-    /// The process serial number older macOS passed, and Cocoa's
-    /// argument-domain defaults, still open the app.
-    func testArgumentsMacOSAndCocoaAddStillOpenTheApp() {
-        XCTAssertEqual(decision("-psn_0_12345"), .launchApp)
+    /// macOS reads any `-Key value` pair as a user default for the launch,
+    /// Nirux's own escape hatch among them; older macOS added a process
+    /// serial number.
+    func testDefaultsPairsAndTheProcessSerialNumberStillOpenTheApp() {
+        XCTAssertEqual(decision("-IgnoreGhosttyConfig", "YES"), .launchApp)
         XCTAssertEqual(decision("-AppleLanguages", "(fr)"), .launchApp)
-        XCTAssertEqual(decision("-NSShowAllViews", "YES", "-psn_0_1"), .launchApp)
+        XCTAssertEqual(decision("-com.apple.CoreData.SQLDebug", "1", "-psn_0_1"), .launchApp)
+        XCTAssertEqual(decision("-psn_0_12345"), .launchApp)
     }
 
-    func testACocoaDefaultNeedsItsValueAndAKnownPrefix() {
-        XCTAssertEqual(decision("-ApplePersistenceIgnoreState"), .unknown("-ApplePersistenceIgnoreState"))
-        XCTAssertEqual(decision("-task", "x"), .unknown("-task"))
+    func testADefaultNeedsOneDashAKeyAndAValue() {
+        XCTAssertEqual(decision("-IgnoreGhosttyConfig"), .unknown("-IgnoreGhosttyConfig"))
+        XCTAssertEqual(decision("-", "YES"), .unknown("-"))
         XCTAssertEqual(decision("--NSShowAllViews", "YES"), .unknown("--NSShowAllViews"))
         // Its value can't smuggle an argument through: it is skipped, and
         // what follows is judged again.
@@ -50,9 +68,11 @@ final class LaunchArgumentsTests: XCTestCase {
     }
 
     /// A hook a newer build installed, run by this build: it exits quietly
-    /// instead of opening the app on every event.
+    /// instead of opening the app on every event, after reading the payload
+    /// Claude Code writes, unless it is a stdio server.
     func testAHookThisBuildDoesntKnowIsIgnored() {
-        XCTAssertEqual(decision("--hook"), .ignoredHook)
-        XCTAssertEqual(decision("--hook", "gemini", "{}"), .ignoredHook)
+        XCTAssertEqual(decision("--hook"), .ignoredHook(readsInput: true))
+        XCTAssertEqual(decision("--hook", "gemini", "{}"), .ignoredHook(readsInput: true))
+        XCTAssertEqual(decision("--hook", "gemini", "--mcp"), .ignoredHook(readsInput: false))
     }
 }
