@@ -432,7 +432,9 @@ final class BoardStagesView: NSView {
         layoutContent()
     }
 
-    private func layoutContent() {
+    /// `again`: once more if the document's height showed or hid a legacy
+    /// scroller. Once is enough: narrower, the lines are no shorter.
+    private func layoutContent(again: Bool = true) {
         isLayingOutContent = true
         defer { isLayingOutContent = false }
         let width = bounds.width
@@ -488,10 +490,8 @@ final class BoardStagesView: NSView {
             }
         }
         documentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: max(scrollView.contentSize.height, y + 12))
-        // The document's height shows or hides a legacy scroller.
-        if scrollView.contentSize.width != listWidth {
-            isLayingOutContent = false
-            return layoutContent()
+        if again, scrollView.contentSize.width != listWidth {
+            return layoutContent(again: false)
         }
         refreshHover()
     }
