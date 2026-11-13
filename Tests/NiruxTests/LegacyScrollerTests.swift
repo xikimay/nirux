@@ -21,13 +21,8 @@ final class LegacyScrollerTests: XCTestCase {
         windows.append(window)
     }
 
-    private func sidebar(rows count: Int, style: NSScroller.Style, expanded: Bool = true) -> SidebarView {
-        let width = expanded ? 260 : SidebarRailMetrics.width
-        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: width, height: 300))
-        show(sidebar)
-        sidebar.contentScrollView.scrollerStyle = style
-        sidebar.isExpanded = expanded
-        sidebar.update(profiles: [], workspaces: (0..<count).map { index in
+    private func rows(_ count: Int) -> [WorkspaceInfo] {
+        (0..<count).map { index in
             WorkspaceInfo(
                 id: "ws\(index)", index: index, title: "task \(index)", profileID: WorkspaceProfile.defaultID,
                 isInactive: false, columnCount: 1, focusedColumn: 0, gitBranch: "feat/\(index)", notification: nil,
@@ -38,7 +33,16 @@ final class LegacyScrollerTests: XCTestCase {
                 prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
                 lastSummary: nil, lastActivityAt: nil
             )
-        })
+        }
+    }
+
+    /// `width`: the rail's or the list's, as `expanded` says, unless given.
+    private func sidebar(rows count: Int, style: NSScroller.Style, expanded: Bool = true, width: CGFloat? = nil) -> SidebarView {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: width ?? (expanded ? 260 : SidebarRailMetrics.width), height: 300))
+        show(sidebar)
+        sidebar.contentScrollView.scrollerStyle = style
+        sidebar.isExpanded = expanded
+        sidebar.update(profiles: [], workspaces: rows(count))
         sidebar.catchUp = SidebarCatchUp(
             since: "since 12:40",
             rows: [SidebarCatchUp.Row(workspaceID: "ws1", title: "task 1", kind: .done, text: "Done")],
@@ -95,35 +99,103 @@ final class LegacyScrollerTests: XCTestCase {
         XCTAssertEqual(sidebar.contentDocumentView.frame.width, 260, "the list takes the whole width")
     }
 
-    func testTheRailScrollsWithoutAScroller() throws {
-        // 52 pt: a legacy scroller would cover the tiles' right edge.
-        let rail = sidebar(rows: 30, style: .legacy, expanded: false)
-        XCTAssertGreaterThan(rail.contentDocumentView.frame.height, 300, "the rail is longer than it is tall")
-        XCTAssertEqual(rail.contentScrollView.contentView.frame.width, SidebarRailMetrics.width, "no scroller takes its width")
+    func testRowsThatMakeTheListOverflowComeBesideTheScrollerAtOnce() throws {
+        let sidebar = sidebar(rows: 2, style: .legacy)
+        XCTAssertEqual(sidebar.contentDocumentView.frame.width, 260, "two rows fit whole")
+        // No layout pass after: the rows never show under the scroller.
+        sidebar.update(profiles: [], workspaces: rows(30))
+        let beside = sidebar.contentScrollView.contentView.frame.width
+        XCTAssertLessThan(beside, 260, "thirty rows show a legacy scroller")
+        XCTAssertEqual(sidebar.contentDocumentView.frame.width, beside, "and come beside it")
+        sidebar.update(profiles: [], workspaces: rows(2))
+        XCTAssertEqual(sidebar.contentScrollView.contentView.frame.width, 260, "two again: no scroller")
+        XCTAssertEqual(sidebar.contentDocumentView.frame.width, 260, "and the whole width")
     }
 
-    private func board(style: NSScroller.Style) -> BoardStagesView {
+    func testOpeningAndClosingTheListUnderALegacyScrollerRebuildsItOnce() throws {
+        // The rail, in a sidebar already as wide as the list.
+        let sidebar = sidebar(rows: 30, style: .legacy, expanded: false, width: 260)
+        XCTAssertFalse(sidebar.needsLayout)
+        sidebar.isExpanded = true
+        XCTAssertFalse(sidebar.needsLayout, "opened: no second rebuild waits for the next layout pass")
+        let beside = sidebar.contentScrollView.contentView.frame.width
+        XCTAssertLessThan(beside, 260, "the list shows a legacy scroller")
+        XCTAssertEqual(sidebar.contentDocumentView.frame.width, beside, "and the rows come beside it")
+        sidebar.isExpanded = false
+        XCTAssertFalse(sidebar.needsLayout, "closed: none either")
+        XCTAssertFalse(sidebar.contentScrollView.hasVerticalScroller, "the rail shows no legacy scroller")
+    }
+
+    func testTheRailShowsAnOverlayScrollerButNoLegacyOne() throws {
+        // 52 pt: a legacy scroller would cover the tiles' right edge and
+        // their badges.
+        let rail = sidebar(rows: 30, style: .legacy, expanded: false)
+        let scroll = rail.contentScrollView
+        XCTAssertGreaterThan(rail.contentDocumentView.frame.height, 300, "the rail is longer than it is tall")
+        XCTAssertFalse(scroll.hasVerticalScroller, "no legacy scroller")
+        XCTAssertEqual(scroll.contentView.frame.width, SidebarRailMetrics.width, "nothing takes its width")
+        // As AppKit sets it when the Mac's preferred style changes.
+        scroll.scrollerStyle = .overlay
+        XCTAssertTrue(scroll.hasVerticalScroller, "an overlay one tells how far the rail goes")
+        XCTAssertEqual(scroll.contentView.frame.width, SidebarRailMetrics.width, "and takes no width")
+        scroll.scrollerStyle = .legacy
+        XCTAssertFalse(scroll.hasVerticalScroller, "legacy again: none")
+    }
+
+    func testADocumentIsLaidOutWholeWhenItFitsWhole() throws {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 260, height: 300))
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .legacy
+        // A legacy scroller shows now, beside a taller document.
+        scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 245, height: 900))
+        scroll.tile()
+        let beside = scroll.contentView.frame.width
+        XCTAssertLessThan(beside, 260)
+        func width(_ height: @escaping (CGFloat) -> CGFloat) -> (width: CGFloat, measures: Int) {
+            var measures = 0
+            let width = scroll.documentWidth(frameSize: scroll.frame.size) { width in
+                measures += 1
+                return (height(width), ())
+            }.width
+            return (width, measures)
+        }
+        XCTAssertEqual(width { _ in 100 }.width, 260, "a short document: whole")
+        XCTAssertEqual(width { _ in 100 }.measures, 1, "measured once")
+        XCTAssertEqual(width { $0 < 260 ? 310 : 290 }.width, 260, "one that overflows only beside the scroller: whole, without it")
+        XCTAssertEqual(width { _ in 900 }.width, beside, "a tall one: beside the scroller")
+        XCTAssertEqual(width { _ in 900 }.measures, 2, "measured whole, then beside it")
+        scroll.scrollerStyle = .overlay
+        XCTAssertEqual(width { _ in 900 }.width, 260, "an overlay scroller takes no width")
+        XCTAssertEqual(width { _ in 900 }.measures, 1, "measured once")
+    }
+
+    private func board(style: NSScroller.Style, lines count: Int = 20) -> BoardStagesView {
         let board = BoardStagesView(frame: NSRect(x: 0, y: 0, width: 940, height: 300))
         show(board)
         board.scrollView.scrollerStyle = style
-        let lines = (0..<20).map { index in
+        board.show(content(lines: count))
+        board.layoutSubtreeIfNeeded()
+        return board
+    }
+
+    private func content(lines count: Int) -> BoardStagesView.Content {
+        let lines = (0..<count).map { index in
             BoardStages.Line(
                 id: "task\(index)", title: "Task \(index)", station: .checks, state: .waiting,
                 rail: BoardStages.Rail(marks: [.done, .done, .current, .ahead]),
                 phrase: BoardStages.Phrase(text: "Checks running", detail: nil), pullRequest: "#\(index)", since: nil
             )
         }
-        board.show(BoardStagesView.Content(
-            header: BoardStagesView.Header(name: "nirux-public", color: Theme.Color.accent, summary: "20 tasks", lead: nil),
+        return BoardStagesView.Content(
+            header: BoardStagesView.Header(name: "nirux-public", color: Theme.Color.accent, summary: "\(count) tasks", lead: nil),
             order: .sidebar,
             sections: [BoardStagesView.Section(
                 id: "nirux", title: "nirux", detail: nil, status: nil,
                 lines: BoardStages.Section(id: "nirux", units: lines.map { .task($0, subtasks: []) }, withoutTask: [], merged: [])
             )],
             now: 1_794_405_600
-        ))
-        board.layoutSubtreeIfNeeded()
-        return board
+        )
     }
 
     /// The list, each line and the "Pull request" title at `width`.
@@ -144,6 +216,16 @@ final class LegacyScrollerTests: XCTestCase {
         let beside = board.scrollView.contentView.frame.width
         XCTAssertLessThan(beside, 940, "a list taller than the Board shows a legacy scroller, which takes width")
         try assertBoard(board, at: beside, "legacy")
+    }
+
+    func testLinesThatMakeTheBoardOverflowComeBesideTheScrollerAtOnce() throws {
+        let board = board(style: .legacy, lines: 2)
+        try assertBoard(board, at: 940, "two lines fit whole")
+        // No layout pass after: the lines never show under the scroller.
+        board.show(content(lines: 20))
+        let beside = board.scrollView.contentView.frame.width
+        XCTAssertLessThan(beside, 940, "twenty lines show a legacy scroller")
+        try assertBoard(board, at: beside, "twenty lines")
     }
 
     func testTheBoardFollowsTheScrollerStyle() throws {

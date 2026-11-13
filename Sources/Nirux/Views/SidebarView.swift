@@ -99,6 +99,8 @@ final class SidebarView: NSView {
             // The rail shows none of the rows' moments: none replays when
             // the list opens again.
             if !isExpanded { forgetRowMoments() }
+            // Before the rebuild: it lays the rows out at the width left.
+            updateScrollerVisibility()
             rebuildContent()
         }
     }
@@ -240,9 +242,12 @@ final class SidebarView: NSView {
     /// legacy scroller (the Mac's "Show scroll bars: Always", or a mouse)
     /// sits beside them, as in Finder's sidebar; an overlay one takes none.
     var listWidth: CGFloat = 0
-    /// The scroll view takes the sidebar's size: the rebuild that follows
-    /// lays the rows out at the width it leaves.
-    private var isResizingScrollView = false
+    /// The sidebar resizes its scroll view or shows its scroller itself:
+    /// the rebuild that follows lays the rows out at the width left.
+    private var isTilingScrollView = false
+    /// Measures the Getting Started card at a width without touching the
+    /// one shown; never on screen.
+    let onboardingCardMeasure = OnboardingChecklistView()
 
     /// Add a child to the scrollable document view. Used by SidebarView+Rendering
     /// so that rebuilt content scrolls when the workspace list overflows.
@@ -256,7 +261,6 @@ final class SidebarView: NSView {
         layer?.backgroundColor = Theme.Color.base.cgColor
 
         contentScrollView.drawsBackground = false
-        contentScrollView.hasVerticalScroller = true
         contentScrollView.hasHorizontalScroller = false
         contentScrollView.autohidesScrollers = true
         contentScrollView.documentView = contentDocumentView
@@ -264,6 +268,8 @@ final class SidebarView: NSView {
         NotificationCenter.default.addObserver(
             self, selector: #selector(clipResized), name: NSView.frameDidChangeNotification, object: contentScrollView.contentView
         )
+        contentScrollView.onScrollerStyleChange = { [weak self] in self?.updateScrollerVisibility() }
+        updateScrollerVisibility()
         addSubview(contentScrollView)
         observeScrollingForApprovalArming()
         observeRailTooltipDismissals()
@@ -275,28 +281,28 @@ final class SidebarView: NSView {
 
     override func layout() {
         super.layout()
-        isResizingScrollView = true
+        isTilingScrollView = true
         contentScrollView.frame = bounds
-        isResizingScrollView = false
+        isTilingScrollView = false
         rebuildContent()
     }
 
-    /// The width a legacy scroller leaves beside a list taller than the
-    /// sidebar; the sidebar's own with overlay scrollers.
-    var widthBesideScroller: CGFloat {
-        NSScrollView.contentSize(
-            forFrameSize: bounds.size, horizontalScrollerClass: nil,
-            verticalScrollerClass: contentScrollView.hasVerticalScroller ? contentScrollView.verticalScroller.map { type(of: $0) } : nil,
-            borderType: contentScrollView.borderType, controlSize: contentScrollView.verticalScroller?.controlSize ?? .regular,
-            scrollerStyle: contentScrollView.scrollerStyle
-        ).width
+    /// The cards show the Mac's scroller. The rail (52 pt) shows an overlay
+    /// one, which takes no width, but no legacy one: it would cover the
+    /// tiles' right edge and their badges. It scrolls all the same.
+    func updateScrollerVisibility() {
+        let shows = isExpanded || contentScrollView.scrollerStyle == .overlay
+        guard contentScrollView.hasVerticalScroller != shows else { return }
+        isTilingScrollView = true
+        contentScrollView.hasVerticalScroller = shows
+        isTilingScrollView = false
     }
 
     /// A legacy scroller came or went under rows already laid out (the
     /// Mac's "Show scroll bars" setting changed, or a mouse came): they
     /// take the width it leaves.
     @objc private func clipResized() {
-        guard !isResizingScrollView, contentScrollView.frame.size == bounds.size,
+        guard !isTilingScrollView, contentScrollView.frame.size == bounds.size,
               contentScrollView.contentSize.width != listWidth else { return }
         needsLayout = true
     }

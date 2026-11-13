@@ -109,6 +109,9 @@ final class BoardStagesView: NSView {
     let scrollView = NSScrollView()
     /// The width the lines were last laid out at: the clip's.
     private var listWidth: CGFloat = 0
+    /// The Board resizes its scroll view itself, right before laying the
+    /// lines out.
+    private var isResizingScrollView = false
     private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
@@ -511,12 +514,12 @@ final class BoardStagesView: NSView {
         layoutContent()
     }
 
-    /// A legacy scroller came or went (the Mac's "Show scroll bars"
-    /// setting, a mouse, or a list that now overflows): the lines and their
-    /// titles take the width it leaves.
-    /// At the next layout pass: the clip resizes while AppKit tiles.
+    /// A legacy scroller came or went under lines already laid out (the
+    /// Mac's "Show scroll bars" setting changed, or a mouse came): they and
+    /// their titles take the width it leaves, at the next layout pass (the
+    /// clip resizes while AppKit tiles).
     @objc private func clipResized() {
-        if scrollView.contentSize.width != listWidth { needsLayout = true }
+        if !isResizingScrollView, scrollView.contentSize.width != listWidth { needsLayout = true }
     }
 
     override func layout() {
@@ -530,10 +533,15 @@ final class BoardStagesView: NSView {
         layoutHeader(width: width)
         let top = Metrics.headerHeight + Metrics.titlesHeight
         separator.frame = NSRect(x: 0, y: top - 1, width: width, height: 1)
-        scrollView.frame = NSRect(x: 0, y: top, width: width, height: max(0, bounds.height - top))
-        // What the clip shows: a legacy scroller sits beside the lines, as
-        // in Finder, and the titles keep over their columns.
-        listWidth = scrollView.contentSize.width
+        let scrollFrame = NSRect(x: 0, y: top, width: width, height: max(0, bounds.height - top))
+        isResizingScrollView = true
+        scrollView.frame = scrollFrame
+        isResizingScrollView = false
+        // What the clip shows for the lines' height: a legacy scroller sits
+        // beside them, as in Finder, and the titles keep over their columns.
+        listWidth = scrollView.documentWidth(frameSize: scrollFrame.size) { width in
+            (items.reduce(12) { $0 + advance(of: $1, width: width) }, ())
+        }.width
 
         // The columns' titles, each station's over its place on the rails.
         let columns = Columns(width: listWidth)
@@ -561,24 +569,29 @@ final class BoardStagesView: NSView {
             switch item {
             case .sectionHeader(let header):
                 header.frame = NSRect(x: 0, y: y, width: listWidth, height: Metrics.sectionHeaderHeight)
-                y += Metrics.sectionHeaderHeight
             case .line(let line):
                 line.frame = NSRect(x: 0, y: y, width: listWidth, height: Metrics.lineHeight)
-                y += Metrics.lineHeight
             case .caption(let caption):
                 caption.frame = NSRect(x: pad, y: y + 9, width: max(0, listWidth - 2 * pad), height: 15)
-                y += Metrics.captionHeight
             case .fold(let fold):
                 fold.frame = NSRect(x: pad, y: y + 7, width: max(0, listWidth - 2 * pad), height: 18)
-                y += Metrics.captionHeight
             case .merged(let merged):
-                let height = merged.height(for: listWidth)
-                merged.frame = NSRect(x: 0, y: y + 10, width: listWidth, height: height)
-                y += height + 10
+                merged.frame = NSRect(x: 0, y: y + 10, width: listWidth, height: merged.height(for: listWidth))
             }
+            y += advance(of: item, width: listWidth)
         }
         documentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: max(scrollView.contentSize.height, y + 12))
         refreshHover()
+    }
+
+    /// How far down `item` takes the next one, at `width`.
+    private func advance(of item: Item, width: CGFloat) -> CGFloat {
+        switch item {
+        case .sectionHeader: Metrics.sectionHeaderHeight
+        case .line: Metrics.lineHeight
+        case .caption, .fold: Metrics.captionHeight
+        case .merged(let merged): merged.height(for: width) + 10
+        }
     }
 
     /// The space: its colour and name first, then at the right the order

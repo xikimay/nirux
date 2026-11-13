@@ -18,9 +18,6 @@ extension SidebarView {
         let anchor = scrollAnchor()
         builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })
         resetRenderState()
-        // The rail (52 pt) scrolls without a scroller: a legacy one would
-        // cover its tiles' right edge and their badges.
-        contentScrollView.hasVerticalScroller = isExpanded
         guard isExpanded else {
             // Kept across rebuilds, put back by the next expanded one.
             onboardingCardView?.removeFromSuperview()
@@ -39,29 +36,23 @@ extension SidebarView {
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
         let activeProfile = lastProfiles.first(where: { $0.isActive })
-        func measure() -> (archivedListHeight: CGFloat, onboardingCard: OnboardingChecklistView?, contentH: CGFloat) {
-            let archived = archivedListHeight(listedInactiveInfos)
-            let card = preparedOnboardingCard()
+        let catchUpHeight = catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0
+        // At the width the clip shows for the list's height.
+        let fitted = contentScrollView.documentWidth(frameSize: bounds.size) { width in
+            let archived = archivedListHeight(listedInactiveInfos, width: width)
             let height = expandedContentHeight(
                 hasPicker: activeProfile != nil,
                 leadInfos: leadInfos,
                 activeInfos: activeInfos,
                 archivedHeight: inactiveInfos.isEmpty ? nil : archived,
-                onboardingHeight: card?.height
-            ) + (catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0)
-            return (archived, card, height)
+                onboardingHeight: onboardingCardHeight(listWidth: width),
+                width: width
+            ) + catchUpHeight
+            return (height, (archived: archived, contentH: height))
         }
-        // At the width the clip shows, unless the list's height shows or
-        // hides a legacy scroller: then at the width that leaves. Narrower,
-        // the list is no shorter, so once is enough.
-        listWidth = contentScrollView.frame.size == bounds.size ? contentScrollView.contentSize.width : bounds.width
-        var measured = measure()
-        let fitting = measured.contentH > bounds.height ? widthBesideScroller : bounds.width
-        if fitting != listWidth {
-            listWidth = fitting
-            measured = measure()
-        }
-        let (archivedHeight, onboardingCard, contentH) = measured
+        listWidth = fitted.width
+        let (archivedHeight, contentH) = fitted.measured
+        let onboardingCard = preparedOnboardingCard()
 
         let docHeight = max(bounds.height, contentH)
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: docHeight)
@@ -209,13 +200,13 @@ extension SidebarView {
     /// without an Archived row.
     private func expandedContentHeight(
         hasPicker: Bool, leadInfos: [WorkspaceInfo], activeInfos: [WorkspaceInfo], archivedHeight: CGFloat?,
-        onboardingHeight: CGFloat?
+        onboardingHeight: CGFloat?, width: CGFloat
     ) -> CGFloat {
         typealias Metrics = SidebarExpandedMetrics
         var height = Metrics.topPadding + Metrics.tasksHeaderHeight
-            + Metrics.groupHeight(for: activeInfos, sidebarWidth: listWidth)
+            + Metrics.groupHeight(for: activeInfos, sidebarWidth: width)
         if !leadInfos.isEmpty {
-            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: listWidth) - Metrics.workspaceGap + Metrics.leadGap
+            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: width) - Metrics.workspaceGap + Metrics.leadGap
         }
         if hasPicker { height += Metrics.pickerHeight + Metrics.pickerBottomGap }
         if let onboardingHeight { height += Metrics.onboardingCardGap + onboardingHeight }
@@ -225,10 +216,10 @@ extension SidebarView {
 
     /// The archived workspaces listed above the Archived row, with the line
     /// above them and the gap under them; 0 when none is listed.
-    private func archivedListHeight(_ listed: [WorkspaceInfo]) -> CGFloat {
+    private func archivedListHeight(_ listed: [WorkspaceInfo], width: CGFloat) -> CGFloat {
         guard !listed.isEmpty else { return 0 }
         return 1 + SidebarExpandedMetrics.workspaceGap
-            + SidebarExpandedMetrics.groupHeight(for: listed, sidebarWidth: listWidth)
+            + SidebarExpandedMetrics.groupHeight(for: listed, sidebarWidth: width)
             - SidebarExpandedMetrics.workspaceGap + SidebarExpandedMetrics.archivedListGap
     }
 
@@ -499,7 +490,22 @@ extension SidebarView {
 
     // MARK: - Getting Started checklist
 
-    /// The checklist card laid out for the current width, added to the
+    /// The checklist card's width in a list `listWidth` wide; nil when it
+    /// doesn't fit: mid-expansion the sidebar can still be collapsed-width.
+    private func onboardingCardWidth(listWidth: CGFloat) -> CGFloat? {
+        let width = listWidth - SidebarExpandedMetrics.workspaceInsetX * 2
+        return width >= 160 ? width : nil
+    }
+
+    /// The checklist card's height in a list `listWidth` wide, measured
+    /// without touching the card shown; nil when it isn't shown.
+    private func onboardingCardHeight(listWidth: CGFloat) -> CGFloat? {
+        guard let checklist = onboardingChecklist, let width = onboardingCardWidth(listWidth: listWidth) else { return nil }
+        onboardingCardMeasure.update(checklist: checklist, width: width)
+        return onboardingCardMeasure.height
+    }
+
+    /// The checklist card laid out for the list's width, added to the
     /// document view; nil (and the card dropped) when there is no checklist.
     private func preparedOnboardingCard() -> OnboardingChecklistView? {
         guard let checklist = onboardingChecklist else {
@@ -507,9 +513,7 @@ extension SidebarView {
             onboardingCardView = nil
             return nil
         }
-        let width = listWidth - SidebarExpandedMetrics.workspaceInsetX * 2
-        // Mid-expansion the sidebar can still be collapsed-width.
-        guard width >= 160 else {
+        guard let width = onboardingCardWidth(listWidth: listWidth) else {
             onboardingCardView?.removeFromSuperview()
             return nil
         }
