@@ -22,6 +22,17 @@ extension NiruxShellView {
             taskStartSubtask(arguments, from: caller, subtasks: subtasks, parent: parent, answer: answer)
         case LeadTools.listTasks:
             answer(taskSubtaskList(of: caller, subtasks: subtasks), false)
+        case LeadTools.tell, LeadTools.askUser:
+            let name = LeadTools.string(arguments, "task") ?? ""
+            guard let (subtask, mission) = taskSubtask(name, of: caller, among: subtasks) else {
+                return answer("No sub-task of yours is named “\(name)”, or several share that title: use its branch or title "
+                    + "from list_tasks (its folder, for a sub-task without a repository).", true)
+            }
+            if request.tool == LeadTools.tell {
+                sendInstruction(LeadTools.string(arguments, "message") ?? "", to: subtask, in: mission, answer: answer)
+            } else {
+                handQuestionToUser(of: subtask, in: mission, because: LeadTools.string(arguments, "why") ?? "", answer: answer)
+            }
         case LeadTools.reply:
             taskReply(arguments, from: caller, answer: answer)
         default:
@@ -202,7 +213,19 @@ extension NiruxShellView {
         return ([header] + lines).joined(separator: "\n")
     }
 
-    // MARK: reply
+    // MARK: tell, reply, ask_user
+
+    /// The sub-task of `caller` named `name`, and its latest Mission from
+    /// `caller`: one the user started under it reports to nobody.
+    private func taskSubtask(
+        _ name: String, of caller: WorkspaceState, among subtasks: [WorkspaceState]
+    ) -> (workspace: WorkspaceState, mission: Mission)? {
+        _ = MissionStore.shared.ensureLoaded()
+        let missions = MissionStore.shared.missions.filter { $0.parentWorkspaceID == caller.id }
+        return namedTask(name, among: subtasks) { subtask in
+            missions.filter { $0.childWorkspaceID == subtask.id }.max { $0.createdAt < $1.createdAt }
+        }
+    }
 
     private func taskReply(_ arguments: [String: Any], from caller: WorkspaceState, answer: @escaping LeadAnswer) {
         let questionID = LeadTools.string(arguments, "question") ?? ""

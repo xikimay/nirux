@@ -104,7 +104,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/add-a-date-filter", "why": why], lead: lead, in: harness).isError)
             let column = try XCTUnwrap(task.columns.first { $0.agentUUID == mission.childAgentUUID })
             let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
-            XCTAssertEqual(row?.handOff, .lead(why: why))
+            XCTAssertEqual(row?.handOff, .handedOver(why: why))
             XCTAssertTrue(shell.answerMissionQuestion(second.id, text: "Yes, until v3"))
             XCTAssertEqual(shell.pendingLeadNotices.map(\.text), ["[Nirux Mission] The user answered “Add a date filter”: Yes, until v3"])
 
@@ -772,7 +772,8 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(
                 MissionPromptText.text(for: accepted, childTitle: subtask.title, parentTitle: task.title),
                 "[Nirux Mission] Question from \"Write the API docs\" (branch feat/write-the-api-docs):\nDocument the old date= parameter?\n"
-                    + "Answer with the reply tool, question \(question.id) (if you can't tell, don't guess: ask the user)"
+                    + "Answer with the reply tool, question \(question.id); if neither the code nor the user's words settle it, "
+                    + "don't guess: hand it to the user with ask_user."
             )
             XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("question \(question.id)"))
             XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], lead: lead, in: harness).isError,
@@ -782,6 +783,26 @@ final class LeadToolsFlowTests: XCTestCase {
                 .isError, "nor another task's")
             XCTAssertFalse(try call(LeadTools.reply, ["question": question.id, "message": "No"], from: task, agentUUID: agent, in: harness).isError)
             XCTAssertEqual(MissionStore.shared.response(to: question.id)?.message, "No")
+
+            // More work, by its title; a question handed to the user, named
+            // by its branch, whose answer comes back to the task's agent.
+            XCTAssertFalse(try call(LeadTools.tell, ["task": "Write the API docs", "message": "/code-review"], from: task, agentUUID: agent,
+                                    in: harness).isError)
+            let told = MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }
+            XCTAssertEqual(told?.map(\.message), ["/code-review"])
+            XCTAssertTrue(try call(LeadTools.tell, ["task": "Add a date filter", "message": "hi"], from: task, agentUUID: agent, in: harness)
+                .isError, "only its own sub-tasks")
+            let handed = try ask("Keep the v1 examples?", from: mission)
+            let why = "Only the user knows who reads them."
+            XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/write-the-api-docs", "why": why], from: task, agentUUID: agent,
+                                    in: harness).isError)
+            let column = try XCTUnwrap(subtask.columns.first { $0.agentUUID == mission.childAgentUUID })
+            let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
+            XCTAssertEqual(row?.handOff, .handedOver(why: why))
+            XCTAssertEqual(row?.explanation, "“Add a date filter” passed this one to you: \(why)")
+            XCTAssertTrue(shell.answerMissionQuestion(handed.id, text: "Yes"))
+            XCTAssertEqual(shell.pendingLeadNotices.last.map { [$0.workspaceID, $0.agentUUID, $0.text] },
+                           [task.id, agent, "[Nirux Mission] The user answered “Write the API docs”: Yes"])
 
             // Two levels: the sub-task has none of its own.
             let subAgent = mission.childAgentUUID
