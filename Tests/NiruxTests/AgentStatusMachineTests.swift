@@ -304,13 +304,31 @@ final class AgentStatusMachineTests: XCTestCase {
 
     func testAskUserQuestionIsAQuestion() {
         startTurn()
-        _ = machine.apply(
-            event(.permissionRequest, tool: "AskUserQuestion", summary: "Which DB?", key: "q"), isUserFocused: false
-        )
+        var request = event(.permissionRequest, tool: "AskUserQuestion", summary: "Which DB?", key: "q")
+        let dialog = AgentDialog(questions: [.init(text: "Which DB?", options: [.init(label: "Postgres", detail: nil)])])
+        request.dialog = dialog
+        _ = machine.apply(request, isUserFocused: false)
         XCTAssertEqual(machine.attentionReason, .question("Which DB?"))
+        XCTAssertEqual(machine.openDialogs.first?.dialog, dialog, "what it asks and offers, for its row")
         _ = machine.apply(event(.postToolUse, tool: "AskUserQuestion", key: "q"), isUserFocused: false)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
         XCTAssertEqual(machine.state, .working)
+
+        // Declined with Esc (no hook), then a dialog no hook tells of (a
+        // sandboxed command's network prompt) sends Claude's reminder: the
+        // question comes back as the dialog that waits, its line only.
+        _ = machine.apply(request, isUserFocused: false)
+        _ = machine.apply(event(.preToolUse, at: 5, tool: "Bash", key: "b"), isUserFocused: false)
+        XCTAssertTrue(machine.openDialogs.isEmpty, "a call ran past it: answered, it seems")
+        _ = machine.apply(event(.notification, at: 12, type: "permission_prompt"), isUserFocused: false)
+        XCTAssertEqual(machine.openDialogs.first?.reason, .question("Which DB?"))
+        XCTAssertNil(machine.openDialogs.first?.dialog, "not options the terminal may no longer show")
+        // Open all along, its reminder leaves it as it was.
+        machine = AgentStatusMachine()
+        startTurn()
+        _ = machine.apply(request, isUserFocused: false)
+        _ = machine.apply(event(.notification, at: 7, type: "permission_prompt"), isUserFocused: false)
+        XCTAssertEqual(machine.openDialogs.first?.dialog, dialog)
     }
 
     /// "Keep planning" fires no hook; the next proposal of the same plan

@@ -52,7 +52,8 @@ struct AgentHookEvent: Codable, Equatable {
     /// the tool, a short cleaned excerpt of its input (the command, file,
     /// question…), and a key matching a PermissionRequest to the
     /// PostToolUse of the same call. Only the excerpt and key leave the
-    /// receiver, never the input itself.
+    /// receiver, never the input itself (but what a question dialog asks:
+    /// `dialog`).
     let toolName: String?
     let toolSummary: String?
     let toolKey: String?
@@ -121,6 +122,11 @@ struct AgentHookEvent: Codable, Equatable {
     /// The call's exact text, as the receiver checked it.
     var approvalText: String?
     var approvalOutcome: PermissionApproval.Outcome?
+    /// On the PermissionRequest of a question dialog (AskUserQuestion):
+    /// its questions and the options each offers, bounded, for the row of
+    /// its task. Nil from older receivers, and from a line this build
+    /// can't read: its event is kept.
+    @ReadOrNil var dialog: AgentDialog? = nil
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -161,6 +167,9 @@ struct AgentHookEvent: Codable, Equatable {
                     toolName: toolName, input: input, cwd: cwd, home: env["HOME"]
                 )
                 toolKey = AgentToolInput.key(toolName: toolName, input: input)
+                if name == .permissionRequest, toolName == "AskUserQuestion" {
+                    dialog = AgentDialog(toolInput: input)
+                }
             } else {
                 toolSummary = nil
                 toolKey = nil
@@ -546,8 +555,9 @@ enum AgentHookCLI {
     /// Append one JSON line in one `write`. O_APPEND keeps concurrent
     /// writers (several agents across columns) from interleaving mid-line:
     /// the file system serializes writes to one file (PIPE_BUF bounds
-    /// pipes, not files). Lines are small, a Stop's final message excerpt
-    /// (`TurnEndText.excerpt`, 3,000 characters) the largest.
+    /// pipes, not files). Lines are small: a Stop's final message excerpt
+    /// (`TurnEndText.excerpt`, 3,000 characters) and a question dialog at
+    /// its bounds (`AgentDialog.bounded`, a few thousand) are the largest.
     private static func append(_ event: AgentHookEvent) {
         guard var line = try? JSONEncoder().encode(event) else { return }
         line.append(0x0A) // \n

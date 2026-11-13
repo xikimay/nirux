@@ -59,6 +59,11 @@ struct AgentStatusMachine {
         /// What it chooses between, when the message lists it right next
         /// to the question (`TurnEndText.choices`).
         var choices: [TurnEndChoice] = []
+        /// The user read it on screen, or it was asked under their eyes
+        /// (`noteQuestionSeen`). Nothing else changes it: the column's
+        /// state says other things (Nirux coming back idles every column,
+        /// a subagent's call sets it working).
+        var isSeen = false
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
@@ -102,6 +107,12 @@ struct AgentStatusMachine {
     /// said it asks. Whoever looks at the column reads it there and gets
     /// no alert, but the turn isn't done.
     private var mainTurnEndAsks = false
+    /// What the last turn end asked, if anything, is behind: Claude's main
+    /// thread did something since (a tool call: a Stop hook's
+    /// continuation, a wakeup), the user's click typed a prompt or
+    /// archived the task, or `claude` left the front. A question read as
+    /// it came is not noted after that (`noteQuestion`).
+    private var turnEndQuestionIsBehind = false
     /// The last new conversation in this process, or its end: a quick
     /// answer never crosses one (`acceptsQuickAnswer`).
     private var conversationChangedAt: TimeInterval = 0
@@ -335,6 +346,7 @@ struct AgentStatusMachine {
                 sessionID: event.sessionID,
                 requestedAt: now
             )
+            request.dialog = event.dialog
             if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
                let text = event.approvalText {
                 request.approval = PermissionApprovalTicket(
@@ -466,6 +478,7 @@ struct AgentStatusMachine {
         }
         askedQuestion = nil
         mainTurnEndedAt = now
+        turnEndQuestionIsBehind = false
         mainTurnEndIsLast = event.stopHookActive == true || !stopHooksKeepGoing
         mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
         turnFailure = event.name == .stopFailure
@@ -548,10 +561,7 @@ struct AgentStatusMachine {
             mainTurnEndAsks = true
             // It stands until it is answered, whoever looks at the column
             // meanwhile: only its alert is theirs to miss.
-            askedQuestion = AskedQuestion(
-                text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true,
-                choices: line.map { TurnEndText.choices(for: $0, in: request.message) } ?? []
-            )
+            ask(line, isYesNo: question?.isYesNo == true, endingTurnAt: request.turnEndedAt, in: request.message, seen: isUserFocused)
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
             attentionAlerted = false
@@ -559,6 +569,47 @@ struct AgentStatusMachine {
             reason = .turnFinished
         }
         return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
+    }
+
+    /// The turn that ended at `turnEndedAt` got no verdict: nobody to
+    /// alert (the user looked at its column, `seen`), or a dialog still
+    /// open waits on the user first. Its final message ends on `question`,
+    /// the message's own line: the agent waits on an answer all the same,
+    /// and its column says so. Nothing alerts, and the status stays as it
+    /// is. False, and nothing
+    /// kept, when that turn end is behind (a prompt, a later end, another
+    /// conversation, Claude going on by itself, the task archived,
+    /// `claude` gone from the front), failed, or has its verdict coming.
+    /// As a verdict's, it stands behind a subagent's dialog, which shows
+    /// first, and where a Stop hook may still keep the turn going: the
+    /// continuation's first tool call takes it back.
+    @discardableResult
+    mutating func noteQuestion(
+        _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
+    ) -> Bool {
+        guard isCurrentTurnEnd(turnEndedAt), !turnEndQuestionIsBehind, turnFailure == nil,
+              quietTurnEnd == nil, askedQuestion == nil
+        else { return false }
+        ask(question.text, isYesNo: question.isYesNo, endingTurnAt: turnEndedAt, in: message, seen: seen)
+        return true
+    }
+
+    /// The question asked at `turnEndedAt`, with the choices `message`
+    /// lists next to it.
+    private mutating func ask(
+        _ line: String?, isYesNo: Bool, endingTurnAt turnEndedAt: TimeInterval, in message: String, seen: Bool
+    ) {
+        askedQuestion = AskedQuestion(
+            text: line, since: turnEndedAt, isYesNo: isYesNo,
+            choices: line.map { TurnEndText.choices(for: $0, in: message) } ?? [], isSeen: seen
+        )
+    }
+
+    /// The user reads the question on screen: its column in front, they
+    /// are there. Next Waiting Agent then goes to it after what they
+    /// haven't seen.
+    mutating func noteQuestionSeen() {
+        askedQuestion?.isSeen = true
     }
 
     /// The question the foreground `claude` asked at its last turn end, if
@@ -579,11 +630,15 @@ struct AgentStatusMachine {
     /// finished turn); a dialog still open keeps its own. (A failed turn
     /// has no question: its end takes the place of the one that asked.)
     /// The turn end stays the current one: a reply still goes in.
-    /// Without `since`, the verdict a turn end still waits for is put
-    /// aside too: it would ask on the archived task's row.
+    /// Without `since`, whatever the turn end would still ask is put
+    /// aside too, or it would ask on the archived task's row: the verdict
+    /// it waits for, a question read as it came and not noted yet.
     @discardableResult
     mutating func dismissQuestion(askedAt since: TimeInterval? = nil) -> Bool {
-        if since == nil, case .pending = quietTurnEnd { quietTurnEnd = .done }
+        if since == nil {
+            if case .pending = quietTurnEnd { quietTurnEnd = .done }
+            turnEndQuestionIsBehind = true
+        }
         guard let asked = askedQuestion, since == nil || asked.since == since else { return false }
         askedQuestion = nil
         if state == .needsAttention, openDialogs.isEmpty { state = .idle }
@@ -629,6 +684,7 @@ struct AgentStatusMachine {
     mutating func notePromptFromUser() {
         if quietTurnEnd != nil { quietTurnEnd = .done }
         askedQuestion = nil
+        turnEndQuestionIsBehind = true
     }
 
     /// A turn end waits for its verdict: Nirux types nothing of its own
@@ -643,6 +699,7 @@ struct AgentStatusMachine {
     /// A main-thread tool event: the failed turn is behind.
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
+        turnEndQuestionIsBehind = true
         turnFailure = nil
         // Went on by itself (a Stop hook blocked its end, a background
         // task, a wakeup): a verdict would land on an agent at work, and
@@ -762,7 +819,11 @@ struct AgentStatusMachine {
             } else if !pendingDialogs.isEmpty {
                 // Every entry looked answered, yet one waits: the newest
                 // (older ones were likely denied, which fires no hook).
+                // It may be a question dialog declined with Esc while a
+                // dialog no hook told of waits: its line, not options
+                // the terminal may no longer show.
                 pendingDialogs[pendingDialogs.count - 1].mayBeAnswered = false
+                pendingDialogs[pendingDialogs.count - 1].dialog = nil
                 reason = pendingDialogs[pendingDialogs.count - 1].reason
             } else if now - lastDialogClosedAt < Self.reminderRaceWindow,
                       now - lastClosedDialogRequestedAt >= Self.reminderDelay {
@@ -1062,6 +1123,7 @@ struct AgentStatusMachine {
         if fgName != "claude" {
             if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
+            turnEndQuestionIsBehind = true
         }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
@@ -1176,6 +1238,7 @@ struct AgentStatusMachine {
         stopHooksKeepGoing = false
         mainTurnEndIsLast = true
         mainTurnEndAsks = false
+        turnEndQuestionIsBehind = false
         conversationChangedAt = 0
         turnStartedAt = nil
         lastReadAt = 0

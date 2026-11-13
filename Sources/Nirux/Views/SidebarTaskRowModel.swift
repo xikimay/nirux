@@ -71,8 +71,8 @@ struct SidebarRowSummary: Hashable {
         /// Allow / Deny, the command in its box: the line keeps to one
         /// line.
         case request
-        /// A turn's question over its buttons: the line says "Needs you ·
-        /// a question".
+        /// A turn's question over its buttons, a dialog's over its
+        /// options: the line says "Needs you · a question".
         case question
     }
 
@@ -130,7 +130,7 @@ extension WorkspaceInfo {
                 // question over its buttons.
                 if waiting.permissionApproval != nil {
                     summary.saidBelow = .request
-                } else if waiting.turnQuestion != nil {
+                } else if waiting.turnQuestion != nil || waiting.dialog != nil {
                     summary.saidBelow = .question
                 }
             }
