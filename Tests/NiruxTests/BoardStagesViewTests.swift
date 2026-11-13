@@ -719,6 +719,129 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(popped)
     }
 
+    // MARK: - A repository's header
+
+    func testARepositorysHeaderSaysWhatItsQueueDoesAndStartsIt() throws {
+        let start = BoardStagesView.QueueButton(title: "Start… · 2", tooltip: "Read the queued pull requests on GitHub")
+        let queue = BoardStagesView.SectionQueue(status: "2 pull requests queued", dryRun: "This build can’t change GitHub.", start: start)
+        var nirux = section(units: tasks([line("a")]))
+        nirux.queue = queue
+        nirux.menu = [.boardSettings, .openMainCheckout(path: "/p/widgets")]
+        let view = board(content([nirux, section("site", units: tasks([line("s")]))]))
+        var said: [String] = []
+        view.onStart = { said.append("start \($0)") }
+        view.onStop = { said.append("stop \($0)") }
+        view.onSectionMenu = { section, item in said.append("\(section) \(item.title)") }
+        let header = try XCTUnwrap(view.sectionHeader(section: "nirux"))
+        XCTAssertEqual(header.queueLabel.stringValue, "2 pull requests queued")
+        XCTAssertEqual(header.queueLabel.textColor, Theme.Color.textTertiary)
+        XCTAssertFalse(header.dryRunBadge.isHidden)
+        XCTAssertEqual(header.dryRunBadge.toolTip, "This build can’t change GitHub.")
+        XCTAssertEqual([header.startButton.isHidden, header.stopButton.isHidden], [false, true])
+        XCTAssertEqual(header.startButton.title, "Start… · 2")
+        XCTAssertEqual(header.startButton.toolTip, "Read the queued pull requests on GitHub")
+        XCTAssertEqual(header.startButton.accessibilityLabel(), "Start… · 2 nirux", "named for VoiceOver")
+        // From the right: its menu, Start, DRY RUN, the queue's words; the name first at the left.
+        XCTAssertLessThan(header.queueLabel.frame.maxX, header.dryRunBadge.frame.minX)
+        XCTAssertLessThan(header.dryRunBadge.frame.maxX, header.startButton.frame.minX)
+        XCTAssertLessThan(header.startButton.frame.maxX, header.moreButton.frame.minX)
+        XCTAssertEqual(header.moreButton.frame.maxX, 940 - BoardStagesView.Metrics.padding)
+        XCTAssertLessThan(header.titleLabel.frame.maxX, header.queueLabel.frame.minX)
+        try click(header.startButton)
+        XCTAssertEqual(said, ["start nirux"])
+
+        // A repository without a queue says nothing of one, and has no menu.
+        let site = try XCTUnwrap(view.sectionHeader(section: "site"))
+        XCTAssertEqual([site.startButton.isHidden, site.stopButton.isHidden, site.dryRunBadge.isHidden, site.queueLabel.isHidden,
+                        site.moreButton.isHidden], [true, true, true, true, true])
+        XCTAssertNil(site.contextMenu())
+
+        // Its menu, under "⋯" or on a right click; chosen, it names its repository.
+        var popped: [String] = []
+        header.popUp = { menu, _, _ in popped = menu.items.map(\.title) }
+        try click(header.moreButton)
+        XCTAssertEqual(popped, ["Board Settings…", "Open Main Checkout"])
+        let menu = try XCTUnwrap(header.menu(for: try mouse(.rightMouseDown, at: try target(at: header).location, in: view.window)))
+        menu.performActionForItem(at: 1)
+        XCTAssertEqual(said.last, "nirux Open Main Checkout")
+        // A menu shown before the header changed acts only as it still offers.
+        nirux.menu = [.boardSettings]
+        view.show(content([nirux, section("site", units: tasks([line("s")]))]))
+        menu.performActionForItem(at: 1)
+        XCTAssertEqual(said.count, 2)
+        menu.performActionForItem(at: 0)
+        XCTAssertEqual(said.last, "nirux Board Settings…")
+
+        // It runs: Stop, in its place; green words; Start can't be pressed while it does nothing.
+        nirux.queue = BoardStagesView.SectionQueue(
+            status: "Merging #52, 1 of 2", tone: .working, stop: BoardStagesView.QueueButton(title: "Stop", tooltip: "Stop before the next command")
+        )
+        view.show(content([nirux, section("site", units: tasks([line("s")]))]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(view.sectionHeader(section: "nirux") === header)
+        XCTAssertEqual([header.startButton.isHidden, header.stopButton.isHidden, header.dryRunBadge.isHidden], [true, false, true])
+        XCTAssertEqual(header.queueLabel.textColor, Theme.Color.working)
+        try click(header.stopButton)
+        XCTAssertEqual(said.last, "stop nirux")
+        // Stopped on a problem: red. A button that does nothing says why.
+        nirux.queue = BoardStagesView.SectionQueue(status: "Stopped: checks failed", tone: .failed, start: BoardStagesView.QueueButton(
+            title: "Start…", isEnabled: false, tooltip: "Add pull requests to the queue first."
+        ))
+        view.show(content([nirux, section("site", units: tasks([line("s")]))]))
+        XCTAssertEqual(header.queueLabel.textColor, Theme.Color.error)
+        XCTAssertFalse(header.startButton.isEnabled)
+        XCTAssertEqual(header.startButton.toolTip, "Add pull requests to the queue first.")
+        // On a narrow Board the queue's words are cut, then give way before the name; its buttons stay.
+        view.setFrameSize(NSSize(width: 260, height: 600))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(header.queueLabel.isHidden)
+        XCTAssertLessThan(header.queueLabel.frame.width, ColumnHeaderView.textWidth(header.queueLabel))
+        view.setFrameSize(NSSize(width: 220, height: 600))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(header.queueLabel.isHidden)
+        XCTAssertFalse(header.startButton.isHidden)
+        XCTAssertGreaterThan(header.titleLabel.frame.width, 0)
+    }
+
+    func testARunningQueueKeepsItsLineAtTheBoardsFoot() throws {
+        let lines = (1...20).map { line("t\($0)") }
+        let view = board(content([section(units: tasks(lines))]))
+        var stopped: [String] = []
+        view.onStop = { stopped.append($0) }
+        let frames = view.lineViews.map(\.frame)
+        let height = view.scrollView.frame.height
+        let here = BoardStagesView.RunningQueue(id: "nirux", title: "nirux", status: "Merging #52, 1 of 2", stop: .init(title: "Stop"))
+        let elsewhere = BoardStagesView.RunningQueue(id: "old", title: "old-repo", status: "Running in another Nirux")
+        var running = content([section(units: tasks(lines))])
+        running.runningQueues = [here, elsewhere]
+        view.show(running)
+        view.layoutSubtreeIfNeeded()
+        // At the foot, one line each: nothing above moves; the list is shorter by as much.
+        XCTAssertEqual(view.runningQueueViews.map(\.queue.id), ["nirux", "old"])
+        XCTAssertEqual(view.lineViews.map(\.frame), frames)
+        XCTAssertEqual(view.scrollView.frame.height, height - 2 * BoardStagesView.Metrics.queueLineHeight)
+        XCTAssertEqual(view.runningQueueViews.last?.frame.maxY, view.bounds.maxY)
+        XCTAssertEqual(view.runningQueueViews.first?.frame.minY, view.scrollView.frame.maxY)
+        let line = try XCTUnwrap(view.runningQueueViews.first)
+        XCTAssertEqual([line.titleLabel.stringValue, line.statusLabel.stringValue], ["nirux", "Merging #52, 1 of 2"])
+        XCTAssertEqual(line.stopButton.accessibilityLabel(), "Stop nirux")
+        try click(line.stopButton)
+        XCTAssertEqual(stopped, ["nirux"])
+        XCTAssertTrue(try XCTUnwrap(view.runningQueueViews.last).stopButton.isHidden, "another Nirux's: no Stop here")
+        // It goes on: the same line, its new words. It ends: its line goes, the list takes the room back.
+        running.runningQueues = [BoardStagesView.RunningQueue(id: "nirux", title: "nirux", status: "Waiting for nightly", stop: .init(title: "Stop"))]
+        view.show(running)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(view.runningQueueViews.first === line)
+        XCTAssertEqual(line.statusLabel.stringValue, "Waiting for nightly")
+        XCTAssertNil(view.subviews.first { ($0 as? BoardStagesRunningQueueView)?.queue.id == "old" })
+        running.runningQueues = []
+        view.show(running)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertNil(line.superview)
+        XCTAssertEqual(view.scrollView.frame.height, height)
+    }
+
     // MARK: - The pointer
 
     /// The place of `x` on `line`'s middle row, in its window.

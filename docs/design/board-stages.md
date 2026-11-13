@@ -210,8 +210,22 @@ clicked. The sizes are the mockup's.
   The Lead's dot keeps its place, in its state's colour, and says its line
   under the pointer. The order switch shows the content's order: it moves once
   the owner shows the order asked.
-- **A section per repository** scrolls below: its name, `owner/name`, and its
-  post-merge run's pill (or what went wrong reading it).
+- **A section per repository** scrolls below: its name, `owner/name`, its
+  post-merge run's pill (or what went wrong reading it), then at its right
+  what its merge queue does ("Merging #52, 1 of 2", "2 pull requests
+  queued", "Stopped: …", in green while it works, red when a problem
+  stopped it, never amber), a DRY RUN badge (an outline, not a colour) in a
+  build that can't change GitHub, Start… · N (N the pull requests the Board
+  shows a place for: merged ones count for none, so only merged ones left
+  means nothing to start) or Stop while it runs here, and "⋯", its menu
+  (Board Settings…, Open Main Checkout), also on a right click. On a narrow
+  Board the queue's words are cut, then give way before the name; its
+  buttons stay. (`BoardStagesView.sectionQueue` says it by the table's
+  rules.)
+- **A queue that runs**, here or in another Nirux, keeps a line at the
+  Board's foot (its repository, what it does, Stop where it runs here),
+  orphans included: Stop stays in sight while the list scrolls, and since
+  it takes the foot, nothing above moves when it comes or goes.
 - **A line** is 34 pt: its state's dot and its title, its rail, its phrase
   (amber or red when it needs a look, else grey), its pull request, its time.
   A press and its release on it open the task, but on its Merge station and

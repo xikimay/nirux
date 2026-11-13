@@ -34,6 +34,65 @@ final class BoardStagesView: NSView {
         /// The post-merge run, or what went wrong reading the repository.
         var status: ColumnHeaderView.Status?
         var lines: BoardStages.Section
+        /// Its merge queue, as its header says it; nil without one.
+        var queue: SectionQueue?
+        /// Its header's menu.
+        var menu: [SectionMenuItem] = []
+    }
+
+    /// A button of the queue, or why it does nothing.
+    struct QueueButton: Equatable {
+        var title: String
+        var isEnabled = true
+        var tooltip: String?
+    }
+
+    /// What a queue's words say by their colour: green while it works,
+    /// red when it stopped on a problem; never amber.
+    enum QueueTone: Equatable {
+        case normal, working, failed
+    }
+
+    /// What a repository's header says of its merge queue, at its right.
+    struct SectionQueue: Equatable {
+        /// "Merging #52, 2 of 3", "3 pull requests queued"; nil at rest
+        /// with nothing queued.
+        var status: String?
+        var tone = QueueTone.normal
+        /// Why this build can't change GitHub, for the DRY RUN badge's
+        /// tooltip; nil for a real queue.
+        var dryRun: String?
+        /// "Start… · 3", or why it can't start.
+        var start: QueueButton?
+        /// While the queue runs here.
+        var stop: QueueButton?
+    }
+
+    /// An item of a repository header's menu.
+    enum SectionMenuItem: Equatable {
+        case boardSettings
+        /// Focuses the main checkout's workspace, or opens a shell there.
+        case openMainCheckout(path: String)
+
+        var title: String {
+            switch self {
+            case .boardSettings: return "Board Settings…"
+            case .openMainCheckout: return "Open Main Checkout"
+            }
+        }
+    }
+
+    /// A queue that runs, here or in another Nirux, pinned at the Board's
+    /// foot: Stop stays in sight while the list scrolls, and nothing above
+    /// moves when it comes or goes.
+    struct RunningQueue: Equatable {
+        /// Its section's id, or the orphan's: a repository the Board no
+        /// longer has.
+        let id: String
+        var title: String
+        var status: String
+        /// Nil where another Nirux runs it.
+        var stop: QueueButton?
     }
 
     struct Content: Equatable {
@@ -42,10 +101,18 @@ final class BoardStagesView: NSView {
         var sections: [Section]
         /// The wall clock the lines' times count to.
         var now: TimeInterval
+        var runningQueues: [RunningQueue] = []
     }
 
     /// The order switch was pressed.
     var onOrder: ((BoardStages.Order) -> Void)?
+    /// A repository's Start… was pressed: its section's id.
+    var onStart: ((String) -> Void)?
+    /// Stop was pressed, in a repository's header or on its running
+    /// queue's line: its id.
+    var onStop: ((String) -> Void)?
+    /// An item of a repository header's menu was chosen.
+    var onSectionMenu: ((_ section: String, SectionMenuItem) -> Void)?
     /// A line was clicked, or a "Merged today" entry with a task: its id.
     var onOpen: ((String) -> Void)?
     /// A line's Merge station was clicked where that changes the queue's
@@ -115,6 +182,8 @@ final class BoardStagesView: NSView {
     private var mergedViews: [String: BoardStagesMergedView] = [:]
     /// The stacks' titles, from the top.
     private var captions: [NSTextField] = []
+    /// The running queues' lines, at the Board's foot.
+    private(set) var runningQueueViews: [BoardStagesRunningQueueView] = []
 
     private enum Item {
         case sectionHeader(BoardStagesSectionHeaderView)
@@ -199,9 +268,8 @@ final class BoardStagesView: NSView {
         guard content != self.content else { return }
         let previous = self.content
         self.content = content
-        guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections else {
-            return showTimes()
-        }
+        guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
+            || content.runningQueues != previous?.runningQueues else { return showTimes() }
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
@@ -210,6 +278,7 @@ final class BoardStagesView: NSView {
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
+        showRunningQueues(content.runningQueues)
         if content.sections != previous?.sections || content.order != previous?.order {
             // Nothing moves under the pointer: what changed is drawn where it
             // was, and settles once the pointer leaves. An order the switch
@@ -274,6 +343,20 @@ final class BoardStagesView: NSView {
     private nonisolated static func keepingOrder(of shown: [BoardStages.Merged], in merged: [BoardStages.Merged]) -> [BoardStages.Merged] {
         let byNumber = Dictionary(merged.map { ($0.number, $0) }, uniquingKeysWith: { first, _ in first })
         return shown.compactMap { byNumber[$0.number] }
+    }
+
+    /// Each running queue keeps its line, by its id; one that comes or goes
+    /// changes the Board's foot only.
+    private func showRunningQueues(_ queues: [RunningQueue]) {
+        var kept = Dictionary(runningQueueViews.map { ($0.queue.id, $0) }, uniquingKeysWith: { first, _ in first })
+        runningQueueViews = queues.map { queue in
+            let view = kept.removeValue(forKey: queue.id) ?? BoardStagesRunningQueueView(queue)
+            view.show(queue)
+            view.onStop = { [weak self] in self?.onStop?(queue.id) }
+            if view.superview !== self { addSubview(view) }
+            return view
+        }
+        kept.values.forEach { $0.removeFromSuperview() }
     }
 
     private func showTimes() {
@@ -354,7 +437,10 @@ final class BoardStagesView: NSView {
             let id = section.id
             sectionID = id
             let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
-            header.show(title: section.title, detail: section.detail, status: section.status)
+            header.show(title: section.title, detail: section.detail, status: section.status, queue: section.queue, menu: section.menu)
+            header.onStart = { [weak self] in self?.onStart?(id) }
+            header.onStop = { [weak self] in self?.onStop?(id) }
+            header.onMenu = { [weak self] item in self?.onSectionMenu?(id, item) }
             sectionHeaders[id] = header
             items.append(.sectionHeader(header))
             section.lines.units.forEach(add)
@@ -416,6 +502,8 @@ final class BoardStagesView: NSView {
         static let headerHeight: CGFloat = 44
         static let titlesHeight: CGFloat = 28
         static let sectionHeaderHeight: CGFloat = 42
+        /// A running queue's line, at the Board's foot.
+        static let queueLineHeight: CGFloat = 30
         static let captionHeight: CGFloat = 28
         static let dot: CGFloat = 8
         /// The rail at ease, and tightened on a narrow Board.
@@ -537,7 +625,13 @@ final class BoardStagesView: NSView {
         }
         let top = Metrics.headerHeight + Metrics.titlesHeight
         separator.frame = NSRect(x: 0, y: top - 1, width: width, height: 1)
-        scrollView.frame = NSRect(x: 0, y: top, width: width, height: max(0, bounds.height - top))
+        // The running queues take the foot: the lines above them don't move.
+        let foot = CGFloat(runningQueueViews.count) * Metrics.queueLineHeight
+        scrollView.frame = NSRect(x: 0, y: top, width: width, height: max(0, bounds.height - top - foot))
+        for (index, view) in runningQueueViews.enumerated() {
+            let y = bounds.height - foot + CGFloat(index) * Metrics.queueLineHeight
+            view.frame = NSRect(x: 0, y: y, width: width, height: Metrics.queueLineHeight)
+        }
 
         var y: CGFloat = 0
         for item in items {
@@ -771,13 +865,31 @@ final class BoardStagesFlippedView: NSView {
 
 // MARK: - A repository's header
 
-/// A section's header: the repository's name, `owner/name`, and its
-/// post-merge run's pill at the right.
+/// A repository's header: its name and `owner/name`, its post-merge run's
+/// pill, then at its right what its merge queue does, DRY RUN, Start… · N
+/// or Stop, and its menu.
 @MainActor
 final class BoardStagesSectionHeaderView: NSView {
     let titleLabel = NSTextField(labelWithString: "")
     let detailLabel = NSTextField(labelWithString: "")
     let pill = ColumnStatusPill()
+    /// What its merge queue does: "Merging #52, 2 of 3".
+    let queueLabel = NSTextField(labelWithString: "")
+    /// This build can't change GitHub: every queue is a dry run.
+    let dryRunBadge = NSTextField(labelWithString: "DRY RUN")
+    let startButton = NSButton(title: "Start…", target: nil, action: nil)
+    let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+    /// "⋯": the repository's menu.
+    let moreButton = NSButton(title: "", target: nil, action: nil)
+    var onStart: (() -> Void)?
+    var onStop: (() -> Void)?
+    var onMenu: ((BoardStagesView.SectionMenuItem) -> Void)?
+    /// Shows the menu under "⋯". (The tests give their own.)
+    var popUp: (NSMenu, NSPoint, NSView) -> Void = { menu, location, view in
+        menu.popUp(positioning: nil, at: location, in: view)
+    }
+    private(set) var queue: BoardStagesView.SectionQueue?
+    private(set) var menuItems: [BoardStagesView.SectionMenuItem] = []
 
     override var isFlipped: Bool { true }
 
@@ -787,24 +899,70 @@ final class BoardStagesSectionHeaderView: NSView {
         titleLabel.textColor = Theme.Color.textPrimary
         detailLabel.font = Theme.Font.mono
         detailLabel.textColor = Theme.Color.textTertiary
-        for label in [titleLabel, detailLabel] {
+        queueLabel.font = Theme.Font.caption
+        for label in [titleLabel, detailLabel, queueLabel] {
             label.lineBreakMode = .byTruncatingTail
             label.allowsExpansionToolTips = true
         }
+        // A badge, not a colour: amber is an agent waiting for the user.
+        dryRunBadge.font = .systemFont(ofSize: 9, weight: .bold)
+        dryRunBadge.textColor = Theme.Color.textSecondary
+        dryRunBadge.alignment = .center
+        dryRunBadge.wantsLayer = true
+        dryRunBadge.layer?.borderWidth = 1
+        dryRunBadge.layer?.borderColor = Theme.Color.textTertiary.cgColor
+        dryRunBadge.layer?.cornerRadius = 3
+        for button in [startButton, stopButton] {
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.font = Theme.Font.caption
+            button.target = self
+        }
+        startButton.action = #selector(startClicked)
+        stopButton.action = #selector(stopClicked)
+        moreButton.isBordered = false
+        moreButton.image = NSImage(systemSymbolName: Theme.Symbol.more, accessibilityDescription: nil)
+        moreButton.contentTintColor = Theme.Color.textTertiary
+        moreButton.target = self
+        moreButton.action = #selector(moreClicked)
+        moreButton.setAccessibilityLabel("Repository menu")
         // The Board's text stays still: no breathing dot here.
         pill.animates = false
-        [titleLabel, detailLabel, pill].forEach(addSubview)
+        [titleLabel, detailLabel, pill, queueLabel, dryRunBadge, startButton, stopButton, moreButton].forEach(addSubview)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(title: String, detail: String?, status: ColumnHeaderView.Status?) {
+    func show(
+        title: String, detail: String?, status: ColumnHeaderView.Status?, queue: BoardStagesView.SectionQueue? = nil,
+        menu: [BoardStagesView.SectionMenuItem] = []
+    ) {
         titleLabel.stringValue = title
         detailLabel.stringValue = detail ?? ""
         if pill.status != status { pill.status = status }
         pill.isHidden = status == nil
+        self.queue = queue
+        menuItems = menu
+        queueLabel.stringValue = queue?.status ?? ""
+        queueLabel.textColor = Self.color(of: queue?.tone ?? .normal)
+        dryRunBadge.toolTip = queue?.dryRun
+        for (button, state) in [(startButton, queue?.start), (stopButton, queue?.stop)] {
+            button.title = state?.title ?? button.title
+            button.isEnabled = state?.isEnabled ?? false
+            button.toolTip = state?.tooltip
+            button.setAccessibilityLabel(state.map { "\($0.title) \(title)" })
+        }
         needsLayout = true
+    }
+
+    /// The queue's words in their tone's colour.
+    static func color(of tone: BoardStagesView.QueueTone) -> NSColor {
+        switch tone {
+        case .normal: return Theme.Color.textTertiary
+        case .working: return Theme.Color.working
+        case .failed: return Theme.Color.error
+        }
     }
 
     override func layout() {
@@ -812,14 +970,144 @@ final class BoardStagesSectionHeaderView: NSView {
         let pad = BoardStagesView.Metrics.padding
         let baseline = bounds.height - 22
         var right = bounds.width - pad
+        moreButton.isHidden = menuItems.isEmpty
+        if !moreButton.isHidden {
+            moreButton.frame = NSRect(x: right - 20, y: baseline - 2, width: 20, height: 20)
+            right = moreButton.frame.minX - 6
+        }
+        // Stop while it runs here; else Start, when there is a queue.
+        let button = queue?.stop != nil ? stopButton : startButton
+        let other = button === stopButton ? startButton : stopButton
+        other.isHidden = true
+        button.isHidden = queue?.stop == nil && queue?.start == nil
+        if !button.isHidden {
+            let width = ceil(button.fittingSize.width)
+            button.frame = NSRect(x: right - width, y: baseline - 3, width: width, height: 22)
+            right = button.frame.minX - 8
+        }
+        dryRunBadge.isHidden = queue?.dryRun == nil
+        if !dryRunBadge.isHidden {
+            let width = ColumnHeaderView.textWidth(dryRunBadge) + 8
+            dryRunBadge.frame = NSRect(x: right - width, y: baseline + 1, width: width, height: 14)
+            right = dryRunBadge.frame.minX - 8
+        }
         if !pill.isHidden {
             let width = min(pill.idealWidth, (bounds.width * 0.4).rounded(.down))
             pill.frame = NSRect(x: right - width, y: baseline - 1, width: width, height: ColumnStatusPill.height)
             right = pill.frame.minX - 10
         }
+        // The queue's words take what is left after the name, down to 60 pt.
         let titleWidth = min(ColumnHeaderView.textWidth(titleLabel), max(0, ((right - pad) * 0.6).rounded(.down)))
         titleLabel.frame = NSRect(x: pad, y: baseline, width: titleWidth, height: 16)
+        let queueWidth = min(ColumnHeaderView.textWidth(queueLabel), max(0, right - titleLabel.frame.maxX - 10))
+        queueLabel.isHidden = queueWidth < 60
+        if !queueLabel.isHidden {
+            queueLabel.frame = NSRect(x: right - queueWidth, y: baseline + 1, width: queueWidth, height: 15)
+            right = queueLabel.frame.minX - 10
+        }
         let detailX = titleLabel.frame.maxX + 10
         detailLabel.frame = NSRect(x: detailX, y: baseline + 1, width: max(0, right - detailX), height: 15)
+        detailLabel.isHidden = detailLabel.frame.width < 30
     }
+
+    // MARK: Clicks
+
+    @objc private func startClicked() { onStart?() }
+    @objc private func stopClicked() { onStop?() }
+    @objc private func moreClicked() {
+        guard let menu = contextMenu() else { return }
+        popUp(menu, NSPoint(x: moreButton.frame.minX, y: moreButton.frame.maxY), self)
+    }
+
+    /// The repository's menu; the same on a right click.
+    override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
+
+    func contextMenu() -> NSMenu? {
+        guard !menuItems.isEmpty else { return nil }
+        let menu = NSMenu()
+        for item in menuItems {
+            let menuItem = NSMenuItem(title: item.title, action: #selector(menuItemChosen(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.representedObject = item
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    /// Chosen in a menu shown before the header changed: only as it
+    /// still offers it.
+    @objc private func menuItemChosen(_ sender: NSMenuItem) {
+        guard let item = sender.representedObject as? BoardStagesView.SectionMenuItem, window != nil, menuItems.contains(item) else { return }
+        onMenu?(item)
+    }
+}
+
+/// A queue that runs, pinned at the Board's foot: its repository, what it
+/// does, Stop.
+@MainActor
+final class BoardStagesRunningQueueView: NSView {
+    let titleLabel = NSTextField(labelWithString: "")
+    let statusLabel = NSTextField(labelWithString: "")
+    let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+    var onStop: (() -> Void)?
+    private(set) var queue: BoardStagesView.RunningQueue
+
+    override var isFlipped: Bool { true }
+
+    init(_ queue: BoardStagesView.RunningQueue) {
+        self.queue = queue
+        super.init(frame: .zero)
+        titleLabel.font = Theme.Font.bodyEmphasized
+        titleLabel.textColor = Theme.Color.textPrimary
+        statusLabel.font = Theme.Font.caption
+        statusLabel.textColor = Theme.Color.working
+        for label in [titleLabel, statusLabel] {
+            label.lineBreakMode = .byTruncatingTail
+            label.allowsExpansionToolTips = true
+        }
+        stopButton.bezelStyle = .rounded
+        stopButton.controlSize = .small
+        stopButton.font = Theme.Font.caption
+        stopButton.target = self
+        stopButton.action = #selector(stopClicked)
+        [titleLabel, statusLabel, stopButton].forEach(addSubview)
+        show(queue)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ queue: BoardStagesView.RunningQueue) {
+        self.queue = queue
+        titleLabel.stringValue = queue.title
+        statusLabel.stringValue = queue.status
+        stopButton.isHidden = queue.stop == nil
+        stopButton.title = queue.stop?.title ?? "Stop"
+        stopButton.isEnabled = queue.stop?.isEnabled ?? false
+        stopButton.toolTip = queue.stop?.tooltip
+        stopButton.setAccessibilityLabel("\(stopButton.title) \(queue.title)")
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let pad = BoardStagesView.Metrics.padding
+        var right = bounds.width - pad
+        if !stopButton.isHidden {
+            let width = ceil(stopButton.fittingSize.width)
+            stopButton.frame = NSRect(x: right - width, y: (bounds.height - 22) / 2, width: width, height: 22)
+            right = stopButton.frame.minX - 10
+        }
+        let titleWidth = min(ColumnHeaderView.textWidth(titleLabel), max(0, ((right - pad) * 0.4).rounded(.down)))
+        titleLabel.frame = NSRect(x: pad, y: (bounds.height - 16) / 2, width: titleWidth, height: 16)
+        let statusX = titleLabel.frame.maxX + 10
+        statusLabel.frame = NSRect(x: statusX, y: (bounds.height - 15) / 2 + 1, width: max(0, right - statusX), height: 15)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.Color.line.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+    }
+
+    @objc private func stopClicked() { onStop?() }
 }
