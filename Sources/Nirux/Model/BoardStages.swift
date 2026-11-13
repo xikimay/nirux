@@ -206,6 +206,9 @@ extension BoardStages {
         case offered
         /// A clean-up is being checked, confirmed or run.
         case running
+
+        /// What a line or an entry says while one runs.
+        static let runningWords = "cleaning up…"
     }
 
     /// What GitHub still asks of a green pull request, as the sidebar's
@@ -565,7 +568,7 @@ extension BoardStages {
             if pullRequest.isMerged {
                 switch facts.cleanUp {
                 case .offered?: return Reading(.merged, "Merged · \(Link.cleanUp.title)", link: .cleanUp)
-                case .running?: return Reading(.merged, "Merged · cleaning up…")
+                case .running?: return Reading(.merged, "Merged · \(CleanUp.runningWords)")
                 case nil: return Reading(.merged, "Merged")
                 }
             }
