@@ -20,6 +20,8 @@ swift build --build-tests && scripts/run-tests.sh
 
 Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a download run from elsewhere) quits unless `NIRUX_STATE_DIR` is set. It says why on stderr, and in an alert when Finder, the Dock, `open` or a `nirux://` link started it.
 
+Any copy, the installed app included, opens with no argument, or with `-Key value` defaults only (such as `-IgnoreGhosttyConfig YES`). Any other argument that none of its command-line modes (`--hook`, `--mission`, the release checks) takes prints the usage and exits with status 2: on stderr, or in an alert when Finder, the Dock or `open` started it. `--help` prints the usage. An agent guessing a command can't start a second Nirux this way.
+
 Delete old `Nirux.app` bundles left in checkouts. macOS may still hand them `nirux://` links, and a bundle built before this check existed doesn't have it.
 
 ## Environment variables
