@@ -128,12 +128,29 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         setAccessibilityHelp(line.offer?.blocked)
     }
 
-    /// The link drawn apart: the phrase's, when the phrase ends with it.
-    private var shownLink: BoardStages.Link? { line.phrase.wordsBeforeLink == nil ? nil : line.phrase.link }
+    /// The link drawn apart: the phrase's, when the phrase ends with it,
+    /// on a line still on the Board.
+    private var shownLink: BoardStages.Link? { line.phrase.wordsBeforeLink == nil || isDeparted ? nil : line.phrase.link }
 
     /// What a click on the Merge station does; nil where it does nothing
     /// more than anywhere on the line.
-    private var actingOffer: BoardStages.QueueOffer? { line.offer.flatMap { $0.blocked == nil ? $0 : nil } }
+    private var actingOffer: BoardStages.QueueOffer? {
+        isDeparted ? nil : line.offer.flatMap { $0.blocked == nil ? $0 : nil }
+    }
+
+    /// The Board no longer has this line: it stays where it was, faded and
+    /// inert, while the pointer is over the Board.
+    var isDeparted = false {
+        didSet {
+            guard isDeparted != oldValue else { return }
+            alphaValue = isDeparted ? 0.4 : 1
+            setAccessibilityElement(!isDeparted)
+            // Its link, its hand and its tooltips go with it.
+            apply()
+            needsLayout = true
+            needsDisplay = true
+        }
+    }
 
     /// "12 min", counted to `now`; nothing for a line without a clock.
     func showTime(now: TimeInterval) {
@@ -456,9 +473,10 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     // MARK: Clicks
 
-    /// The line takes the mouse for all it holds: its words don't.
+    /// The line takes the mouse for all it holds: its words don't. A
+    /// departed one takes none.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
+        isDeparted || super.hitTest(point) == nil ? nil : self
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -485,7 +503,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             onPointer?(event.locationInWindow)
         }
         let point = convert(event.locationInWindow, from: nil)
-        guard let pressed, rectInSight.contains(point), target(at: point) == pressed else { return }
+        guard let pressed, !isDeparted, rectInSight.contains(point), target(at: point) == pressed else { return }
         switch pressed {
         case .line: onClick?()
         case .offer(let offer): onOffer?(offer)
@@ -494,6 +512,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     }
 
     override func accessibilityPerformPress() -> Bool {
+        guard !isDeparted else { return false }
         onClick?()
         return true
     }
@@ -527,7 +546,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
 
     func contextMenu() -> NSMenu? {
-        guard !line.menu.isEmpty else { return nil }
+        guard !line.menu.isEmpty, !isDeparted else { return nil }
         let menu = NSMenu()
         menu.autoenablesItems = false
         for item in line.menu {
@@ -545,7 +564,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// Chosen in a menu shown before the line changed: it acts only as
     /// the line, still on the Board, still offers it, the same and acting.
     @objc private func menuItemChosen(_ sender: NSMenuItem) {
-        guard let item = sender.representedObject as? BoardStages.MenuItem, item.blocked == nil, window != nil,
+        guard let item = sender.representedObject as? BoardStages.MenuItem, item.blocked == nil, window != nil, !isDeparted,
               line.menu.contains(item) else { return }
         onMenu?(item)
     }

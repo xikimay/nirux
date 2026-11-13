@@ -36,11 +36,12 @@ final class BoardStagesMergedView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    /// A pull request still listed keeps its entry, by its number.
-    func show(_ merged: [BoardStages.Merged], now: TimeInterval, isUnfolded: Bool) {
+    /// A pull request still listed keeps its entry, by its number. Held
+    /// for the pointer (`keepsOrder`), the entries keep the order given.
+    func show(_ merged: [BoardStages.Merged], now: TimeInterval, isUnfolded: Bool, keepsOrder: Bool = false) {
         self.isUnfolded = isUnfolded
-        // Amber is never behind "+12 more".
-        let inOrder = merged.filter(\.needsYou) + merged.filter { !$0.needsYou }
+        // Amber is never behind "+12 more", but for the pointer.
+        let inOrder = keepsOrder ? merged : merged.filter(\.needsYou) + merged.filter { !$0.needsYou }
         var kept = Dictionary(entries.map { ($0.pullRequest.number, $0) }, uniquingKeysWith: { first, _ in first })
         entries = inOrder.map { pullRequest in
             if let entry = kept.removeValue(forKey: pullRequest.number) {
