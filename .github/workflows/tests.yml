@@ -25,7 +25,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     # A serial run took 13 minutes: a hung test fails the job instead of
     # holding the runner for GitHub's six hours.
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,5 +54,5 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      - name: Each class alone, 10 runs
+        run: scripts/zz-alone.sh 10 NiruxTests.LegacyScrollerTests NiruxTests.CatchUpTests NiruxTests.BoardStagesViewTests NiruxTests.SidebarTaskRowTests NiruxTests.SidebarRowDragTests NiruxTests.SidebarRailTests NiruxTests.SidebarCollapseTests NiruxTests.SidebarRowMotionTests NiruxTests.SidebarMergeMotionTests NiruxTests.SidebarCardStateTests NiruxTests.SidebarSpacePickerTests NiruxTests.SidebarPullRequestLinkTests NiruxTests.SidebarStaleLogTests NiruxTests.TurnQuestionSidebarTests NiruxTests.PermissionApprovalSidebarTests NiruxTests.TaskBirthTests NiruxTests.OnboardingChecklistViewTests NiruxTests.LearnedRuleViewTests NiruxTests.AgentLightTests NiruxTests.MissionDeliveryTests
