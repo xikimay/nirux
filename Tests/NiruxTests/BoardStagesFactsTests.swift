@@ -602,6 +602,94 @@ final class BoardStagesFactsTests: XCTestCase {
                        "this Nirux's own list waits for the other's queue to end")
     }
 
+    // MARK: - A repository's queue, as its header says it
+
+    func testARepositorysHeaderSaysItsQueueByTheTablesRules() {
+        let start = { (state: ProjectBoard.QueueState, proposed: Int) in BoardStagesView.sectionQueue(state, proposed: proposed) }
+        var rest = queue(.none, selection: [12, 13])
+        // At rest: as many as the Board shows a place for, merged ones counting for none.
+        XCTAssertEqual(start(rest, 2), BoardStagesView.SectionQueue(
+            status: "2 pull requests queued",
+            start: BoardStagesView.QueueButton(
+                title: "Start… · 2", tooltip: "Read the queued pull requests on GitHub, then confirm what the queue will do"
+            )
+        ))
+        XCTAssertEqual(start(rest, 1).status, "1 pull request queued")
+        XCTAssertEqual(start(rest, 5).start?.title, "Start… · 2", "never more than the list holds")
+        XCTAssertEqual(start(rest, 5).status, "2 pull requests queued")
+        let none = start(rest, 0)
+        XCTAssertNil(none.status, "nothing queued: nothing to say")
+        XCTAssertEqual(none.start, BoardStagesView.QueueButton(title: "Start…", isEnabled: false, tooltip: "Add pull requests to the queue first."),
+                       "only merged ones left in the list: nothing to start")
+        // What the table says holds Start back, as it says it.
+        rest.startProblems = ["board.json names no base branch."]
+        XCTAssertEqual(start(rest, 2).start,
+                       BoardStagesView.QueueButton(title: "Start… · 2", isEnabled: false, tooltip: "board.json names no base branch."))
+        XCTAssertEqual(start(rest, 0).start?.tooltip, "board.json names no base branch.", "what holds it back is said first")
+        rest.startProblems = []
+        rest.isConfirming = true
+        XCTAssertEqual(start(rest, 2).start?.isEnabled, false)
+        XCTAssertEqual(start(rest, 0).start?.tooltip, "The confirmation sheet is open.", "the sheet open says why first")
+        // A dry run: the badge, with why.
+        var dry = queue(.none, selection: [12])
+        dry.isDryRun = true
+        dry.dryRunReason = "not the notarized release"
+        XCTAssertEqual(start(dry, 1).start?.title, "Start Dry Run… · 1")
+        XCTAssertEqual(start(dry, 1).dryRun, ProjectBoardView.dryRunTooltip(reason: "not the notarized release"))
+        XCTAssertNil(start(rest, 1).dryRun)
+        // Ended: what it did, then what is queued; red when a problem stopped it.
+        var ended = queue(.ended, [entry(12, step: stopped(.checks))], selection: [13])
+        ended.status = "Stopped: test failed on #12"
+        ended.statusIsFailure = true
+        XCTAssertEqual(start(ended, 1).status, "Stopped: test failed on #12", "a problem's words alone: what is queued is on Start")
+        XCTAssertEqual(start(ended, 1).start?.title, "Start… · 1")
+        XCTAssertEqual(start(ended, 1).tone, .failed)
+        ended.statusIsFailure = false
+        ended.status = "Merged 2 pull requests"
+        XCTAssertEqual(start(ended, 1).status, "Merged 2 pull requests · 1 pull request queued")
+        ended.status = nil
+        ended.statusIsFailure = false
+        XCTAssertEqual(start(ended, 0).status, "Ended")
+        XCTAssertEqual(start(ended, 0).tone, .normal)
+        // Running here: its step, green, Stop and no Start; stopping, Stop says so.
+        var running = queue(.running(isStopping: false), [entry(12, step: .merging(head))])
+        running.status = "#12 merging, 1 of 1"
+        let busy = start(running, 0)
+        XCTAssertEqual([busy.status, busy.start?.title], ["#12 merging, 1 of 1", nil])
+        XCTAssertEqual(busy.tone, .working)
+        XCTAssertEqual(busy.stop?.title, "Stop")
+        XCTAssertEqual(busy.stop?.isEnabled, true)
+        running.run = .running(isStopping: true)
+        XCTAssertEqual(start(running, 0).stop, BoardStagesView.QueueButton(
+            title: "Stopping…", isEnabled: false, tooltip: "Stop before the next command; a call already sent to GitHub finishes"
+        ))
+        // Run by another Nirux: said, Start disabled with why, no Stop.
+        var other = queue(.elsewhere, [entry(12, step: .merging(head))])
+        other.status = "#12 merging"
+        let far = start(other, 0)
+        XCTAssertEqual(far.status, "Running in another Nirux · #12 merging")
+        XCTAssertNil(far.stop)
+        XCTAssertEqual(far.start?.isEnabled, false)
+        other.selection = [20, 21, 22]
+        XCTAssertEqual(start(other, 3).start?.title, "Start… · 3", "Start keeps its width when the other's queue ends")
+
+        // The Board's foot: a queue that runs, here with Stop, elsewhere without, green as its header; none at rest.
+        // An orphan's says why under the pointer.
+        let stopping = BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: running)
+        XCTAssertEqual(stopping?.stop?.title, "Stopping…")
+        XCTAssertEqual([stopping?.tone, start(running, 0).tone], [.working, .working])
+        running.run = .running(isStopping: false)
+        XCTAssertEqual(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: running),
+                       BoardStagesView.RunningQueue(id: "widgets", title: "widgets", status: "#12 merging, 1 of 1", stop: busy.stop))
+        let orphan = "old isn’t one of this board’s repositories now"
+        XCTAssertEqual(BoardStagesView.runningQueue(id: "old", title: "old", tooltip: orphan, state: other),
+                       BoardStagesView.RunningQueue(id: "old", title: "old", tooltip: orphan, status: "Running in another Nirux · #12 merging"))
+        XCTAssertEqual(far.tone, .working, "its header says it green too")
+        XCTAssertEqual(BoardStagesView.runningQueue(id: "widgets", title: "widgets", tooltip: "t", state: running)?.tooltip, "t")
+        XCTAssertNil(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: ended))
+        XCTAssertNil(BoardStagesView.runningQueue(id: "widgets", title: "widgets", state: rest))
+    }
+
     // MARK: - Merged today
 
     func testTheMergedListGivesTheDaysMergesTheirTitleAndTime() {
