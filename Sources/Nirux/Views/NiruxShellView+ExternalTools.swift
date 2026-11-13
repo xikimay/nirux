@@ -227,9 +227,10 @@ extension NiruxShellView {
           "new worktree", "start a new feature", "start working on X", "work on X in a separate
           workspace", "branch off for X", "spin up a workspace", "open a workspace for X",
           "work on this in parallel", "fix X separately", "isolate this change",
-          "commencer une nouvelle feature", "travailler sur X en parallèle", or describes any
-          task that should happen in isolation from the current branch. Not intended for simple
-          branch switching in-place or questions about what worktrees are.
+          "commencer une nouvelle feature", "travailler sur X en parallèle", "start a task",
+          "start a sub-task", "hand X to another agent", "lance une tâche", "lance une sous-tâche",
+          or describes any task that should happen in isolation from the current branch. Not
+          intended for simple branch switching in-place or questions about what worktrees are.
         metadata:
           author: nirux
         ---
@@ -238,8 +239,11 @@ extension NiruxShellView {
 
         Spawn a new Nirux workspace backed by a git worktree, with a session handover so the new
         workspace inherits context from the current session. The user does not need to say "worktree"
-        explicitly — phrases like "start working on X", "create a branch for Y", or "fix this
-        separately" all qualify.
+        explicitly — phrases like "start working on X", "create a branch for Y", "start a task for
+        Z" or "fix this separately" all qualify. Started from a task's workspace, the new one is
+        that task's sub-task: Nirux lists it under the task.
+
+        If Nirux's tools include `start_task`, use that tool instead of this skill.
 
         ## Steps
 
@@ -310,8 +314,14 @@ extension NiruxShellView {
            For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
            the handover file into the worktree on launch; no manual cleanup is needed.
 
-        When Mission handoffs are on (`NIRUX_MISSION_HANDOFFS=1`), Nirux also records the
-        parent/child Mission and starts the child with Mission instructions. Nirux types the
+        Nirux links the two agents with a Mission only when Settings › Agents › Mission handoffs
+        is on, or when you are a space's Lead, and only for a terminal started with
+        `NIRUX_MISSION_HANDOFFS=1`. That variable alone doesn't prove it: a Lead's tasks have it
+        with the setting off. Without a Mission the new agent works alone: it can't ask you
+        anything or report back, and you can't send it more work. Unless you know the setting is
+        on, tell the user that the new task may not report back to you.
+
+        With a Mission, Nirux starts the child with Mission instructions. Nirux types the
         messages between the two agents into their Claude Code prompts, once the agent's turn is
         over and nobody is typing there:
 
@@ -371,6 +381,12 @@ extension NiruxShellView {
         delegated task is genuinely complete; use `ask` only when parent input is needed.
 
         Do NOT run git worktree commands directly — Nirux handles worktree creation natively.
+
+        Do NOT run the Nirux app's binary (`$NIRUX_CLI_PATH`, `/Applications/Nirux.app/...`) with
+        anything but the `--mission` commands above, and don't launch the app itself (`open -a
+        Nirux`, `open -n`, `open` on the binary): no command of the binary starts a task, and
+        launched without one it can open a second Nirux on the user's workspaces. Only the
+        `nirux://` URL above starts a task.
         """
 
     // MARK: - Show-Code Skill

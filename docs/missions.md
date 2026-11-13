@@ -32,6 +32,7 @@ Nirux types a message only when the agent's `claude` is in front, its turn is ov
 - The parent can send more work after the child reported its result, which makes the Mission active again.
 - A Codex child can ask and report, but can't be sent work: Codex reports no dialogs, so Nirux can't know that its prompt is free. A Codex child waits for each answer in its terminal, and a Codex parent polls for its child's messages.
 - A worktree opened without a Mission keeps the plain handover file. The child reads it and works alone.
+- The tasks a Lead starts always have Missions with it, but a sub-task one of them starts gets a Mission only while Mission handoffs is on. Otherwise it works alone.
 
 ## Commands
 

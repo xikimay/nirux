@@ -129,17 +129,16 @@ enum RealStateGuard {
         let copy = enclosingBundle(ofExecutable: executablePath) ?? executablePath
         let command = isolatedLaunchCommand(executablePath: executablePath)
         let installed = installedBundlePath ?? "\(systemBundlePath) (not found)"
+        // NIRUX_ALLOW_REAL_STATE=1 stays out of this message: an agent reading
+        // it would take it as the way through (docs/development.md has it).
         FileHandle.standardError.write(Data("""
             Nirux: not starting. Only the installed app, \(installed), opens your workspaces; this copy is \(copy).
             Run it on a state of its own: \(command)
-            NIRUX_ALLOW_REAL_STATE=1 lets it use the real state instead.
 
             """.utf8))
         // A terminal, a script or an agent's tool started it: stderr says it
-        // all, and an alert would steal the focus and wait for a click. Apps
-        // that LaunchServices starts are children of launchd in its session;
-        // one detached from a shell (`&`, nohup) keeps the shell's session.
-        guard getppid() == 1, getsid(0) == 1 else { exit(EXIT_FAILURE) }
+        // all, and an alert would steal the focus and wait for a click.
+        guard LaunchArguments.startedByLaunchServices else { exit(EXIT_FAILURE) }
         let app = NSApplication.shared
         let delegate = RefusedLaunchDelegate(copy: copy, installed: installedBundlePath, command: command)
         app.delegate = delegate

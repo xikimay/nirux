@@ -26,15 +26,14 @@ extension AgentStatusMachine {
 
     /// The dialog the foreground `claude` is showing, if any: open, raised
     /// by this very `claude` (not one before it: events queued while Nirux
-    /// was closed replay at launch), and not reached by a keystroke since.
-    /// A keystroke went to it: it was answered (the tool may then run long,
-    /// silently) or denied with Esc, which fires no hook. Claude's reminder
-    /// clears the keystroke once a dialog sits unanswered.
+    /// was closed replay at launch), and not reached by a keystroke since
+    /// (`waitsForKeys`): it was answered (the tool may then run long,
+    /// silently) or denied with Esc, which fires no hook. A question dialog
+    /// waits until its submit's PostToolUse, or an Esc or Ctrl-C. Claude's
+    /// reminder clears the keystroke once a dialog sits unanswered.
     func visibleDialog(foreground: ForegroundProcess?) -> AgentPermissionRequest? {
         guard let foreground, foreground.name == "claude" else { return nil }
-        return openDialogs.first {
-            $0.requestedAt >= foreground.instance.startedAt && $0.requestedAt >= lastKeystrokeAt
-        }
+        return openDialogs.first { $0.requestedAt >= foreground.instance.startedAt && waitsForKeys($0) }
     }
 
     /// Whether Resume may type `continue`: a failed turn with nothing

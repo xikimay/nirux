@@ -124,6 +124,77 @@ extension BoardStages {
         var title: String { change == .add ? "Add to Queue" : "Remove from Queue" }
     }
 
+    /// How a stopped agent of a task can go on, as the sidebar offers it.
+    struct Resume: Equatable, Sendable {
+        enum Kind: Equatable, Sendable {
+            /// Its turn stopped on an error: "continue" is typed into it.
+            case afterError
+            /// It exited in the middle of a turn: its conversation is
+            /// opened again.
+            case afterExit
+        }
+
+        var kind: Kind
+        /// The agent's column, in the task's workspace.
+        var column: UUID
+        /// The failed turn a Resume after an error answers: whoever acts
+        /// sends "continue" only while it is still that one.
+        var failedAt: TimeInterval?
+        /// Why it does nothing for now: "Resuming…", a key typed since.
+        var blocked: String?
+    }
+
+    /// Where a line's work is on disk, for Clean Up Worktree… and Open.
+    struct Folder: Equatable, Sendable {
+        /// The worktree's top level, or a folder already gone.
+        var path: String
+        /// What a shell opened there is called: its branch, else the
+        /// folder's name.
+        var title: String
+        /// Clean Up Worktree… applies: a linked worktree of the project,
+        /// or a folder already gone (`ProjectBoard.Row.canCleanUp`).
+        var canCleanUp = false
+        /// No workspace is open there: Open makes one.
+        var canOpen = false
+        /// A clean-up of it runs.
+        var isCleaningUp = false
+    }
+
+    /// One item of a line's menu (docs/design/board-stages.md, section 7),
+    /// whatever its phrase says. One that does nothing for now says why.
+    enum MenuItem: Equatable, Sendable {
+        /// Its address on GitHub: offered only for one of github.com.
+        case openPullRequest(url: String)
+        case queue(QueueOffer)
+        case retarget(Link, blocked: String?)
+        case resume(Resume)
+        /// Clean Up Worktree… of `path`: checks it, then asks what goes.
+        case cleanUp(path: String, blocked: String?)
+        /// A shell in a worktree where no workspace is open.
+        case openWorktree(path: String, title: String)
+
+        var title: String {
+            switch self {
+            case .openPullRequest: return "Open Pull Request"
+            case .queue(let offer): return offer.title
+            case .retarget(let link, _): return link.title
+            case .resume: return "Resume"
+            case .cleanUp: return "Clean Up…"
+            case .openWorktree: return "Open"
+            }
+        }
+
+        /// Why it does nothing for now; nil when it acts.
+        var blocked: String? {
+            switch self {
+            case .queue(let offer): return offer.blocked
+            case .retarget(_, let blocked), .cleanUp(_, let blocked): return blocked
+            case .resume(let resume): return resume.blocked
+            case .openPullRequest, .openWorktree: return nil
+            }
+        }
+    }
+
     /// What a line says under the pointer, beside its words when they
     /// are cut.
     struct Tooltips: Equatable, Sendable {
@@ -157,6 +228,8 @@ extension BoardStages {
         /// pull request, no merge queue.
         var offer: QueueOffer?
         var tooltips = Tooltips()
+        /// Its menu, in order; empty where it offers nothing.
+        var menu: [MenuItem] = []
     }
 }
 
@@ -209,6 +282,8 @@ extension BoardStages {
 
         /// What a line or an entry says while one runs.
         static let runningWords = "cleaning up…"
+        /// Why Clean Up does nothing meanwhile.
+        static let runningReason = "A clean-up of this worktree is running."
     }
 
     /// What GitHub still asks of a green pull request, as the sidebar's
@@ -294,6 +369,17 @@ extension BoardStages {
 
     struct Queue: Equatable, Sendable {
         var list = QueueList.none
+        /// The queue's list holds it, or the queue works on it: not one
+        /// to retarget.
+        var holds: Bool { order != nil || step != nil }
+
+        /// Why Retarget does nothing for now: the list is locked (it
+        /// waits for the queue, as adding and removing do), or this build
+        /// can't change GitHub.
+        var retargetBlocked: String? {
+            if case .locked(let why) = list { return BoardStages.text(why) ?? why }
+            return BoardStages.text(dryRun)
+        }
         /// Its place in the queue's list, from 1: in the running queue's
         /// as the queue counts it ("3 of 7"), else in the next Start's.
         var order: Int?
@@ -346,6 +432,11 @@ extension BoardStages {
         var lastActivityAt: TimeInterval?
         /// Its merged pull request's worktree is still there.
         var cleanUp: CleanUp?
+        /// Where its work is on disk; nil for a pull request checked out
+        /// nowhere here.
+        var folder: Folder?
+        /// How its stopped agent can go on, when it can.
+        var resume: Resume?
     }
 
     /// What the Board asks of a task before it moves on. Constants today;
@@ -379,7 +470,8 @@ extension BoardStages {
             pullRequest: pullRequestText(facts),
             since: reading.since,
             offer: offer,
-            tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules)
+            tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
+            menu: menu(of: facts, rail: rail, offer: offer)
         )
     }
 
@@ -447,6 +539,43 @@ extension BoardStages {
             return QueueOffer(change: .add, number: number, blocked: "Can’t join the queue: \(refusal)")
         }
         return QueueOffer(change: .add, number: number, blocked: lock)
+    }
+
+    /// The line's menu: Open Pull Request, Add to or Remove from Queue,
+    /// Retarget, Resume, Clean Up…, Open. What a link of its phrase does
+    /// is there whatever the phrase says (a red check, an agent at work),
+    /// as are its stopped agent's Resume and its folder's Clean Up.
+    private static func menu(of facts: Facts, rail: Rail?, offer: QueueOffer?) -> [MenuItem] {
+        var items: [MenuItem] = []
+        let pullRequest = rail == nil ? nil : facts.pullRequest
+        if let url = pullRequest?.url, isGitHubAddress(url) { items.append(.openPullRequest(url: url)) }
+        if let offer { items.append(.queue(offer)) }
+        // Not while the queue's list holds it, nor while the queue works on it.
+        if let pullRequest, !pullRequest.isMerged, let merged = pullRequest.stack?.mergedBase, facts.queue.list != .none,
+           !facts.queue.holds {
+            items.append(.retarget(.retarget(number: pullRequest.number, onto: merged.onto), blocked: facts.queue.retargetBlocked))
+        }
+        if facts.hasTask, var resume = facts.resume {
+            // Without the failed turn it answers, it can't make sure to resume that one.
+            let unknown = resume.kind == .afterError && resume.failedAt == nil ? "The failed turn isn't known." : nil
+            resume.blocked = resume.blocked.map { text($0) ?? "Resume isn't offered." } ?? unknown
+            items.append(.resume(resume))
+        }
+        if let folder = facts.folder {
+            if folder.canCleanUp {
+                let isRunning = folder.isCleaningUp || facts.cleanUp == .running
+                items.append(.cleanUp(path: folder.path, blocked: isRunning ? CleanUp.runningReason : nil))
+            }
+            if folder.canOpen { items.append(.openWorktree(path: folder.path, title: folder.title)) }
+        }
+        return items
+    }
+
+    /// A pull request's address on github.com, which the Board reads:
+    /// whoever posted it can't send a click elsewhere.
+    static func isGitHubAddress(_ url: String) -> Bool {
+        guard let parsed = URL(string: url) else { return false }
+        return parsed.scheme == "https" && parsed.host?.lowercased() == "github.com"
     }
 
     /// This many checks under the pointer, then how many more: a tooltip
@@ -574,13 +703,14 @@ extension BoardStages {
             }
             // Whatever its station: nothing lands on a merged branch.
             if let merged = pullRequest.stack?.mergedBase {
-                // A repository that isn't saved has nothing here to move it.
-                guard facts.queue.list != .none else { return Reading(.idle, "Base #\(merged.number) merged", since: last) }
+                // A repository that isn't saved has nothing here to move it;
+                // one the queue's list holds leaves it first (its Merge station).
+                guard facts.queue.list != .none, !facts.queue.holds else { return Reading(.idle, "Base #\(merged.number) merged", since: last) }
                 let link = Link.retarget(number: pullRequest.number, onto: merged.onto)
-                // A build that can't change GitHub says what to do, and why its words are no link.
-                let dryRun = text(facts.queue.dryRun)
+                // Locked, or a build that can't change GitHub: the words say what to do, and why they are no link.
+                let blocked = facts.queue.retargetBlocked
                 return Reading(
-                    .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: dryRun == nil ? link : nil, detail: dryRun
+                    .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: blocked == nil ? link : nil, detail: blocked
                 )
             }
             let parent = pullRequest.stack?.parent
