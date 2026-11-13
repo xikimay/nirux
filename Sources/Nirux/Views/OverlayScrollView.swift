@@ -10,7 +10,7 @@ import AppKit
 class OverlayScrollView: NSScrollView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        scrollerStyle = .overlay
+        super.scrollerStyle = .overlay
     }
 
     @available(*, unavailable)
