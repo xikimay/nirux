@@ -12,9 +12,9 @@ struct AgentWait: Equatable, Sendable {
     /// failed, the exit was noticed.
     let since: TimeInterval
     /// A turn's question the user saw on screen, or was asked under their
-    /// eyes: its alert is over, and it stands until answered. Next Waiting
-    /// Agent goes to it after what they have not seen. (A dialog, a
-    /// failure or an exit never stands this way.)
+    /// eyes (`AgentStatusMachine.AskedQuestion.isSeen`): it stands until
+    /// answered. Next Waiting Agent goes to it after what they have not
+    /// seen. (A dialog, a failure or an exit never stands this way.)
     var isRead = false
 }
 
@@ -38,10 +38,8 @@ extension AgentStatusMachine {
             if let trust = visibleTrustPrompt(foreground: foreground) {
                 return AgentWait(reason: AgentTrustPrompt.reason, since: trust.seenAt)
             }
-            // Idle with its question: seen, or asked under the user's
-            // eyes. Nothing alerts for it any more.
             return visibleQuestion(foreground: foreground).map {
-                AgentWait(reason: .askedInReply($0.text), since: $0.since, isRead: state == .idle)
+                AgentWait(reason: .askedInReply($0.text), since: $0.since, isRead: $0.isSeen)
             }
         }
     }
@@ -84,21 +82,20 @@ enum WaitingAgentQueue {
     }
 
     /// Where ⌘J goes in `queue` (as `ordered` sorts it) from the column on
-    /// screen (`current`). A first press goes to the queue's first — the
-    /// next one when the user is on it already. While the user stays where
-    /// the last press landed (`lastJump`), each press goes on to the agent
-    /// after it, then wraps around: a visited agent stays blocked until
-    /// answered, so "the first" alone would never move on. Seen by then,
-    /// it stands further down the queue: one not seen yet still comes
-    /// before the agent after it.
-    static func next(from current: UUID?, lastJump: UUID?, in queue: [WaitingAgent]) -> WaitingAgent? {
-        guard let first = queue.first else { return nil }
-        let position = current.flatMap { current in queue.firstIndex { $0.columnID == current } }
-        guard let position else { return first }
-        if current == lastJump || position == 0 {
-            if queue[position].wait.isRead, !first.wait.isRead { return first }
-            return queue[(position + 1) % queue.count]
+    /// screen (`current`), and the walk once there: to the first agent the
+    /// walk hasn't visited (`walk`: the column the user last moved to,
+    /// then where each press since landed), never the one on screen. Each
+    /// wait once, in the queue's order as it is at each press (a question
+    /// seen once visited stands further down), then a new round: a visited
+    /// agent stays blocked until answered, so "the first" alone would
+    /// never move on.
+    static func next(from current: UUID?, walk: [UUID], in queue: [WaitingAgent]) -> (agent: WaitingAgent, walk: [UUID])? {
+        func unvisited(_ walk: [UUID]) -> WaitingAgent? {
+            let visited = Set(walk)
+            return queue.first { $0.columnID != current && !visited.contains($0.columnID) }
         }
-        return first
+        if let agent = unvisited(walk) { return (agent, walk + [agent.columnID]) }
+        // Every wait visited: a new round, the one on screen at its end.
+        return (unvisited([]) ?? queue.first).map { ($0, [$0.columnID]) }
     }
 }

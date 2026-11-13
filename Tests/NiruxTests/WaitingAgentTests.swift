@@ -123,50 +123,75 @@ final class WaitingAgentTests: XCTestCase {
         XCTAssertEqual(queue.map(\.columnID), [columns[3], columns[1], columns[2], columns[0]])
     }
 
-    /// Seen once ⌘J landed on it, an agent stands further down the queue:
-    /// the next press still goes to one not seen yet, then walks on
-    /// through those that stand.
-    func testAPressGoesToOneNotSeenYetBeforeWalkingOn() {
-        let queue = WaitingAgentQueue.ordered([agent(0, since: 10, read: true), agent(1, since: 20), agent(2, since: 30, read: true)])
-        XCTAssertEqual(queue.map(\.columnID), [columns[1], columns[0], columns[2]])
+    /// The presses since the user last moved, from `start`: the queue as
+    /// `queue` gives it at each press (what ⌘J's visits make seen).
+    private func presses(_ count: Int, from start: UUID? = nil, queue: ([UUID]) -> [WaitingAgent]) -> [UUID] {
+        var walk = start.map { [$0] } ?? []
+        var visited: Set<UUID> = []
+        var landed: [UUID] = []
+        var current = start
+        for _ in 0..<count {
+            guard let (next, walked) = WaitingAgentQueue.next(from: current, walk: walk, in: queue(Array(visited))) else { break }
+            walk = walked
+            visited.insert(next.columnID)
+            landed.append(next.columnID)
+            current = next.columnID
+        }
+        return landed
+    }
 
-        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], lastJump: columns[0], in: queue)?.columnID, columns[1])
-        let seen = WaitingAgentQueue.ordered([agent(0, since: 10, read: true), agent(1, since: 20, read: true), agent(2, since: 30, read: true)])
-        XCTAssertEqual(WaitingAgentQueue.next(from: columns[1], lastJump: columns[1], in: seen)?.columnID, columns[2], "all seen: the next one")
+    /// A dialog left open, or a failed turn, is never seen: the presses
+    /// still go through every question that stands before coming back.
+    func testEachPressReachesEveryWaitOnce() {
+        let queue = WaitingAgentQueue.ordered([agent(0, since: 30), agent(1, since: 10, read: true), agent(2, since: 20, read: true)])
+        XCTAssertEqual(presses(4) { _ in queue }, [columns[0], columns[1], columns[2], columns[0]])
+    }
+
+    /// Seen once ⌘J landed on it, a question stands further down the queue:
+    /// the next press goes to one not seen yet, then on through those that
+    /// stand, none twice.
+    func testAPressGoesToOneNotSeenYetBeforeWalkingOn() {
+        let walked = presses(4) { visited in
+            WaitingAgentQueue.ordered([
+                agent(0, since: 10, read: visited.contains(columns[0])),
+                agent(1, since: 20, read: visited.contains(columns[1])),
+                agent(2, since: 15, read: true),
+            ])
+        }
+        // Once the first is seen, the one after it in the queue is the
+        // standing third: not before the second, never seen yet.
+        XCTAssertEqual(walked, [columns[0], columns[1], columns[2], columns[0]])
     }
 
     func testFirstPressGoesToTheLongestWait() {
         let queue = [agent(0, since: 10), agent(1, since: 20), agent(2, since: 30)]
 
-        XCTAssertEqual(WaitingAgentQueue.next(from: nil, lastJump: nil, in: queue), queue[0])
-        XCTAssertEqual(WaitingAgentQueue.next(from: UUID(), lastJump: nil, in: queue), queue[0], "from a column that doesn't wait")
+        XCTAssertEqual(WaitingAgentQueue.next(from: nil, walk: [], in: queue)?.agent, queue[0])
+        XCTAssertEqual(WaitingAgentQueue.next(from: UUID(), walk: [], in: queue)?.agent, queue[0], "from a column that doesn't wait")
         XCTAssertEqual(
-            WaitingAgentQueue.next(from: columns[2], lastJump: nil, in: queue), queue[0],
+            WaitingAgentQueue.next(from: columns[2], walk: [columns[2]], in: queue)?.agent, queue[0],
             "from a waiting column the user went to by hand"
         )
-        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], lastJump: nil, in: queue), queue[1], "already on it: the next one")
-        XCTAssertNil(WaitingAgentQueue.next(from: columns[0], lastJump: columns[0], in: []))
+        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], walk: [columns[0]], in: queue)?.agent, queue[1], "already on it: the next one")
+        XCTAssertNil(WaitingAgentQueue.next(from: columns[0], walk: [columns[0]], in: []))
+        XCTAssertEqual(
+            WaitingAgentQueue.next(from: columns[0], walk: [columns[1], columns[0]], in: Array(queue.prefix(2)))?.agent, queue[1],
+            "a new round: never the one on screen"
+        )
     }
 
     /// A visited agent stays blocked until answered: each press goes on to
     /// the next one, then wraps around.
     func testEachPressGoesOnToTheNextAgent() {
         let queue = [agent(0, since: 10), agent(1, since: 20), agent(2, since: 30)]
-        var current: UUID?
-        var visited: [UUID] = []
-        for _ in 0..<4 {
-            let next = WaitingAgentQueue.next(from: current, lastJump: current, in: queue)
-            current = next?.columnID
-            visited.append(next?.columnID ?? UUID())
-        }
-
-        XCTAssertEqual(visited, [columns[0], columns[1], columns[2], columns[0]])
+        XCTAssertEqual(presses(7) { _ in queue }, [columns[0], columns[1], columns[2], columns[0], columns[1], columns[2], columns[0]])
+        XCTAssertEqual(presses(3, from: columns[0]) { _ in queue }, [columns[1], columns[2], columns[0]], "from the first: back to it last")
+        XCTAssertEqual(presses(3, from: columns[1]) { _ in queue }, [columns[0], columns[2], columns[0]], "from the second: on past it")
     }
 
     func testOnlyAgentWaitingIsTheOneOnScreen() {
         let queue = [agent(0, since: 10)]
 
-        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], lastJump: nil, in: queue), queue[0])
-        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], lastJump: columns[0], in: queue), queue[0])
+        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], walk: [columns[0]], in: queue)?.agent, queue[0])
     }
 }

@@ -225,6 +225,13 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed, "landing on an inactive workspace kept the section folded")
             XCTAssertFalse(shell.quickSwitch.hint?.isShowing ?? false)
 
+            // From a waiting column reached by hand: the walk starts there,
+            // and goes through the others before it comes back.
+            shell.focusWorkspace(id: second.id, column: 0)
+            landed = []
+            for _ in 0..<3 { try press() }
+            XCTAssertEqual(landed, ["acme#0", "parked#0", "acme#0"])
+
             // Answered at the terminal: the next press starts over at the
             // longest wait left.
             waits[ObjectIdentifier(acme.columns[0])] = nil

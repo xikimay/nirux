@@ -59,6 +59,11 @@ struct AgentStatusMachine {
         /// What it chooses between, when the message lists it right next
         /// to the question (`TurnEndText.choices`).
         var choices: [TurnEndChoice] = []
+        /// The user read it on screen, or it was asked under their eyes
+        /// (`noteQuestionSeen`). Nothing else changes it: the column's
+        /// state says other things (Nirux coming back idles every column,
+        /// a subagent's call sets it working).
+        var isSeen = false
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
@@ -549,10 +554,7 @@ struct AgentStatusMachine {
             mainTurnEndAsks = true
             // It stands until it is answered, whoever looks at the column
             // meanwhile: only its alert is theirs to miss.
-            askedQuestion = AskedQuestion(
-                text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true,
-                choices: line.map { TurnEndText.choices(for: $0, in: request.message) } ?? []
-            )
+            ask(line, isYesNo: question?.isYesNo == true, endingTurnAt: request.turnEndedAt, in: request.message, seen: isUserFocused)
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
             attentionAlerted = false
@@ -562,11 +564,12 @@ struct AgentStatusMachine {
         return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
     }
 
-    /// The turn that ended at `turnEndedAt` under the user's eyes got no
-    /// verdict: nobody to alert, no model to ask. Its final message ends
-    /// on `question`, the message's own line: the agent waits on an answer
-    /// all the same, and its column says so once the user looks elsewhere.
-    /// Nothing alerts, and the status stays as it is. False, and nothing
+    /// The turn that ended at `turnEndedAt` got no verdict: nobody to
+    /// alert (the user looked at its column, `seen`), or a dialog still
+    /// open waits on the user first. Its final message ends on `question`,
+    /// the message's own line: the agent waits on an answer all the same,
+    /// and its column says so. Nothing alerts, and the status stays as it
+    /// is. False, and nothing
     /// kept, when that turn end is behind (a prompt, a later end, another
     /// conversation, Claude going on by itself, the task archived,
     /// `claude` gone from the front), failed, or has its verdict coming.
@@ -574,15 +577,32 @@ struct AgentStatusMachine {
     /// first, and where a Stop hook may still keep the turn going: the
     /// continuation's first tool call takes it back.
     @discardableResult
-    mutating func noteQuestion(_ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval) -> Bool {
+    mutating func noteQuestion(
+        _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
+    ) -> Bool {
         guard isCurrentTurnEnd(turnEndedAt), !turnEndQuestionIsBehind, turnFailure == nil,
               quietTurnEnd == nil, askedQuestion == nil
         else { return false }
-        askedQuestion = AskedQuestion(
-            text: question.text, since: turnEndedAt, isYesNo: question.isYesNo,
-            choices: TurnEndText.choices(for: question.text, in: message)
-        )
+        ask(question.text, isYesNo: question.isYesNo, endingTurnAt: turnEndedAt, in: message, seen: seen)
         return true
+    }
+
+    /// The question asked at `turnEndedAt`, with the choices `message`
+    /// lists next to it.
+    private mutating func ask(
+        _ line: String?, isYesNo: Bool, endingTurnAt turnEndedAt: TimeInterval, in message: String, seen: Bool
+    ) {
+        askedQuestion = AskedQuestion(
+            text: line, since: turnEndedAt, isYesNo: isYesNo,
+            choices: line.map { TurnEndText.choices(for: $0, in: message) } ?? [], isSeen: seen
+        )
+    }
+
+    /// The user reads the question on screen: its column in front, they
+    /// are there. Next Waiting Agent then goes to it after what they
+    /// haven't seen.
+    mutating func noteQuestionSeen() {
+        askedQuestion?.isSeen = true
     }
 
     /// The question the foreground `claude` asked at its last turn end, if

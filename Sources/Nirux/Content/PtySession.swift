@@ -383,9 +383,19 @@ final class PtySession: @unchecked Sendable {
 
     /// See `AgentStatusMachine.noteQuestion`.
     @discardableResult
-    func noteAgentQuestion(_ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval) -> Bool {
-        state.machine.noteQuestion(question, in: message, endingTurnAt: turnEndedAt)
+    func noteAgentQuestion(
+        _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
+    ) -> Bool {
+        state.machine.noteQuestion(question, in: message, endingTurnAt: turnEndedAt, seen: seen)
     }
+
+    /// See `AgentStatusMachine.noteQuestionSeen`.
+    func noteAgentQuestionSeen() {
+        state.machine.noteQuestionSeen()
+    }
+
+    /// A question its last turn end asked that the user hasn't read yet.
+    var agentHasUnseenQuestion: Bool { state.machine.askedQuestion.map { !$0.isSeen } ?? false }
 
     /// See `AgentStatusMachine.dismissQuestion`.
     @discardableResult
