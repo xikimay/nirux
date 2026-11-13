@@ -256,7 +256,8 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         let plain = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(nil)]), sidebarWidth: 260)
         let held = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(block)]), sidebarWidth: 260)
         XCTAssertEqual(
-            held - plain, SidebarExpandedMetrics.actionBlockHeight([.approval(columnIndex: 1, agent: "claude", block)])
+            held - plain,
+            SidebarExpandedMetrics.actionBlockHeight([.approval(columnIndex: 1, agent: "claude", block)], width: 224, textWidth: 208)
         )
         XCTAssertGreaterThan(
             SidebarExpandedMetrics.approvalBlockHeight(for: block),

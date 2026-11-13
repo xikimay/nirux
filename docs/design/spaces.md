@@ -217,7 +217,7 @@ New flow, built on the guarded typing `tell` already uses
   same way. `completed` is typed into the parent's prompt as a one-line notice.
 - **Fallback to the user.** When the parent is gone, is not Claude, or hasn't
   taken the question within the stuck-agent threshold, the child turns amber
-  ("Needs you · a question"). A popover shows the whole question with a
+  ("Needs you · " and the question). A popover shows the whole question with a
   multi-line reply field (⌘↩ sends). It replaces the `NSAlert`.
 - **Codex children** keep today's blocking `ask` (Codex reports no dialogs, so
   Nirux can't tell its prompt is free).
@@ -396,7 +396,10 @@ Mockups were validated in the design session. What changes:
 - **Sidebar:** a space picker at the top (name, task count, amber when an agent
   waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
-  "Working", "#39 · checks passed"). A working Claude that may be going in
+  "Working", "#39 · checks passed"). The status wraps instead of being cut:
+  up to four lines when the task waits on the user, broke or is blocked, and
+  on the selected row; two on any other row; then "…" and the tooltip. A
+  working Claude that may be going in
   circles says so in the same grey, in place of "Working" ("Stuck? · 3
   timeouts", "Stuck? · swift build failed 5×"): 3 commands past their
   time limit close together, or 5 failures in a row of one command, counted

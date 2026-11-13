@@ -357,8 +357,7 @@ extension ProjectMemory {
     /// else its first line. A code fence isn't a title.
     static func headline(of text: String) -> (title: String, detail: String) {
         func plain(_ line: String) -> String {
-            line.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
-                .trimmingCharacters(in: .whitespaces)
+            AgentText.withoutMarks(line).trimmingCharacters(in: .whitespaces)
         }
         var lines = text.components(separatedBy: "\n").filter {
             let trimmed = $0.trimmingCharacters(in: .whitespaces)

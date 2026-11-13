@@ -381,9 +381,10 @@ final class PtySession: @unchecked Sendable {
         state.machine.visibleQuestion(foreground: foreground)
     }
 
-    /// The user looks at this column: see `AgentStatusMachine.noteSeen`.
-    func noteAgentSeen() {
-        state.machine.noteSeen()
+    /// See `AgentStatusMachine.dismissQuestion`.
+    @discardableResult
+    func dismissAgentQuestion(askedAt since: TimeInterval? = nil) -> Bool {
+        state.machine.dismissQuestion(askedAt: since)
     }
 
     /// See `AgentStatusMachine.lastTurnEndedAt`.

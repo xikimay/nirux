@@ -463,7 +463,9 @@ extension NiruxShellView {
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, false)
             if didChange { workspaceStore.selectWorkspace(id: restored.id) }
         case .markInactive:
+            let archived = workspaces[workspaceIndex]
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
+            if didChange { dismissTurnQuestions(in: archived) }
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return

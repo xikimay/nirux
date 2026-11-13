@@ -196,6 +196,8 @@ struct AgentPermissionRequest: Hashable, Sendable {
     var mayBeAnswered = false
     /// The hook receiver waits for a sidebar decision on this request.
     var approval: PermissionApprovalTicket?
+    /// What a question dialog asks and offers, when its hook said.
+    var dialog: AgentDialog?
 
     init(
         toolName: String?,
@@ -226,6 +228,84 @@ struct AgentPermissionRequest: Hashable, Sendable {
     }
 }
 
+/// What a question dialog asks (Claude's AskUserQuestion), in the agent's
+/// own words: each of its questions and the answers it offers. A task's
+/// row shows them all, since no hook says which one is on screen; the
+/// answers are given in the terminal.
+struct AgentDialog: Codable, Hashable, Sendable {
+    struct Question: Codable, Hashable, Sendable {
+        let text: String
+        /// Every option the question lists, or none: half of them would
+        /// mislead.
+        let options: [Option]
+    }
+
+    struct Option: Codable, Hashable, Sendable {
+        let label: String
+        /// What the option means, when the agent said.
+        let detail: String?
+    }
+
+    let questions: [Question]
+
+    /// As many questions as the dialog ever asks, and more options than
+    /// it ever lists (four, and its own "Other").
+    static let maxQuestions = 4
+    static let maxOptions = 6
+
+    init(questions: [Question]) {
+        self.questions = questions
+    }
+
+    /// From AskUserQuestion's input (`questions`, each a `question` and its
+    /// `options`, each a `label` and a `description`), as far as a row may
+    /// show it (`bounded`). Nil unless every question can be shown.
+    init?(toolInput: [String: Any]) {
+        let asked = toolInput["questions"] as? [[String: Any]] ?? []
+        let questions = asked.compactMap { question -> Question? in
+            guard let text = question["question"] as? String else { return nil }
+            let listed = question["options"] as? [[String: Any]] ?? []
+            let options = listed.compactMap { option in
+                (option["label"] as? String).map { Option(label: $0, detail: option["description"] as? String) }
+            }
+            return Question(text: text, options: options.count == listed.count ? options : [])
+        }
+        guard questions.count == asked.count, let dialog = Self.bounded(questions) else { return nil }
+        self = dialog
+    }
+
+    /// Bounded again: the reader can't count on its writer. An error for a
+    /// line with no question this build can show, which its event reads
+    /// as no dialog (`ReadOrNil`).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let dialog = Self.bounded(try container.decode([Question].self, forKey: .questions)) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "no question to show"))
+        }
+        self = dialog
+    }
+
+    /// `questions` as a row may show them: every text cleaned and cut to
+    /// the few lines it gets, no options for a question that lists more
+    /// than `maxOptions` or one without a label. Nil for no question, more
+    /// than `maxQuestions`, or one that says nothing.
+    static func bounded(_ questions: [Question]) -> AgentDialog? {
+        guard (1...maxQuestions).contains(questions.count) else { return nil }
+        var kept: [Question] = []
+        for question in questions {
+            guard let text = AgentText.clean(question.text, maxLength: 300) else { return nil }
+            let options = question.options.compactMap { option in
+                AgentText.clean(option.label, maxLength: 80).map { label in
+                    Option(label: label, detail: option.detail.flatMap { AgentText.clean($0, maxLength: 160) })
+                }
+            }
+            let whole = options.count == question.options.count && options.count <= maxOptions
+            kept.append(Question(text: text, options: whole ? options : []))
+        }
+        return AgentDialog(questions: kept)
+    }
+}
+
 /// What applying one hook event meant, for the surfaces that report it.
 struct AgentHookOutcome: Equatable {
     /// The column flipped into needsAttention: alert (dock, notification).
@@ -244,10 +324,51 @@ struct AgentHookOutcome: Equatable {
     var abandonedApprovals: [AgentPermissionRequest] = []
 }
 
+/// A field another build may have written in another shape: read as
+/// nil then, never an error that would drop the whole line it is on.
+/// Left out of the line when nil.
+@propertyWrapper
+struct ReadOrNil<Value: Codable & Hashable & Sendable>: Codable, Hashable, Sendable {
+    var wrappedValue: Value?
+
+    init(wrappedValue: Value?) {
+        self.wrappedValue = wrappedValue
+    }
+
+    init(from decoder: Decoder) throws {
+        wrappedValue = try? decoder.singleValueContainer().decode(Value.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wrappedValue)
+    }
+}
+
+extension KeyedDecodingContainer {
+    /// A line written before the field: nil.
+    func decode<Value>(_ type: ReadOrNil<Value>.Type, forKey key: Key) throws -> ReadOrNil<Value> {
+        try decodeIfPresent(type, forKey: key) ?? ReadOrNil(wrappedValue: nil)
+    }
+}
+
+extension KeyedEncodingContainer {
+    mutating func encode<Value>(_ value: ReadOrNil<Value>, forKey key: Key) throws {
+        try encodeIfPresent(value.wrappedValue, forKey: key)
+    }
+}
+
 /// Display-safe text from agent payloads (notification messages, tool
 /// inputs): no control or invisible formatting characters (terminal
 /// escapes, bidi overrides), whitespace runs folded to one space, bounded.
 enum AgentText {
+    /// The agent's words without the marks around them: "**Rebase** on
+    /// `main`" reads "Rebase on main" where no Markdown is drawn. Only
+    /// the marks that are never words ("_" and "*" may be).
+    static func withoutMarks(_ text: String) -> String {
+        text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+    }
+
     static func clean(_ text: String, maxLength: Int) -> String? {
         guard maxLength > 0 else { return nil }
         var scalars = String.UnicodeScalarView()

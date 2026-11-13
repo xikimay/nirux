@@ -98,20 +98,80 @@ enum SidebarExpandedMetrics {
         resume.status == nil ? buttonHeight : actionLineHeight + actionRowGap + actionLineHeight
     }
 
-    static func height(of action: SidebarCardAction) -> CGFloat {
+    // A question on a card: what the agent wrote, whole, over what
+    // answers it. Lines of text wrap (`SidebarWrappedText`).
+    static var questionFont: NSFont { Theme.Font.body }
+    static let questionLineHeight: CGFloat = 15
+    static let questionMaxLines = 8
+    /// A choice the message lists, a dialog's option, under its marker:
+    /// 18 points in, or past a marker wider than "1.".
+    static let choiceMaxLines = 6
+    static let choiceIndent: CGFloat = 18
+    static let choiceMarkerGap: CGFloat = 6
+    static let choiceGap: CGFloat = 2
+    /// Between the choices and the question, the question and its options.
+    static let questionGap: CGFloat = 5
+    /// The selected row's next step, a Mission question's line.
+    static let nextStepMaxLines = 3
+    static let missionQuestionMaxLines = 2
+
+    /// The choices the message lists, the question, then the buttons.
+    @MainActor
+    static func turnQuestionBlockHeight(for question: SidebarTurnQuestion, width: CGFloat) -> CGFloat {
+        let choices = SidebarQuestionText.choices(question.choices).height(width: width)
+        return (choices > 0 ? choices + questionGap : 0) + SidebarQuestionText.questionHeight(question.text, width: width)
+            + actionRowGap + buttonHeight
+    }
+
+    /// A dialog's question, and each of its options: as long as its hook
+    /// lets them be (`AgentDialog.bounded`), in Latin or wide letters.
+    /// (Emoji at those bounds take more: their tooltip has the rest.)
+    static let dialogMaxLines = 18
+    /// Between two questions of one dialog.
+    static let dialogQuestionGap: CGFloat = 10
+    /// The tallest a dialog's block gets: several questions with all they
+    /// offer would take the sidebar from the other rows. Past it, the
+    /// block gives way by steps (`SidebarDialogLayout`).
+    static let dialogMaxHeight: CGFloat = 420
+    /// The first step: what each option means, two lines past its label.
+    static let dialogShortDetailLines = 2
+    /// The last: the first question's first lines, and two of each label.
+    static let dialogTightQuestionLines = 4
+    static let dialogTightOptionLines = 2
+
+    @MainActor
+    static func dialogBlockHeight(for dialog: AgentDialog, width: CGFloat) -> CGFloat {
+        SidebarDialogLayout.make(dialog, width: width).height
+    }
+
+    /// `width`: the block's, the card's content. `textWidth`: a line's
+    /// that starts under the title.
+    @MainActor
+    static func height(of action: SidebarCardAction, width: CGFloat, textWidth: CGFloat) -> CGFloat {
         switch action {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
-        case .turnQuestion: return buttonHeight
-        case .cleanup, .reviewBadges, .next, .missionQuestion, .ruleProposals: return actionLineHeight
+        case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
+        case .dialog(_, let dialog): return dialogBlockHeight(for: dialog, width: width)
+        case .next(let text):
+            return SidebarWrappedText.height(
+                SidebarWorkspaceCardRenderer.nextText(text), width: textWidth, lineHeight: actionLineHeight, maxLines: nextStepMaxLines
+            )
+        case .missionQuestion(_, let question):
+            return SidebarWrappedText.height(
+                SidebarWorkspaceCardRenderer.missionQuestionText(question), width: textWidth, lineHeight: actionLineHeight,
+                maxLines: missionQuestionMaxLines
+            )
+        case .cleanup, .reviewBadges, .ruleProposals: return actionLineHeight
         }
     }
 
     /// The block under line 3, gap included; 0 without actions.
-    static func actionBlockHeight(_ actions: [SidebarCardAction]) -> CGFloat {
+    @MainActor
+    static func actionBlockHeight(_ actions: [SidebarCardAction], width: CGFloat, textWidth: CGFloat) -> CGFloat {
         guard !actions.isEmpty else { return 0 }
         let top = actions.allSatisfy(\.isQuiet) ? quietBlockGap : actionBlockGap + 1 + actionBlockGap
-        let rows = actions.reduce(CGFloat(0)) { $0 + height(of: $1) }
+        let rows = actions.reduce(CGFloat(0)) { $0 + height(of: $1, width: width, textWidth: textWidth) }
         return top + rows + CGFloat(actions.count - 1) * actionRowGap
     }
 

@@ -271,3 +271,65 @@ extension NSTextField {
         return label
     }
 }
+
+/// Sidebar text that wraps: lines of one height, at most `maxLines` of
+/// them, the last one cut with "…". `lineCount` says how many a width
+/// takes before any view exists (`SidebarCardLayout` sizes rows with it),
+/// `label` draws them.
+@MainActor
+enum SidebarWrappedText {
+    /// `text` wrapping by words, every line `lineHeight` tall. `indent`
+    /// hangs the lines after the first (a list item under its marker,
+    /// which a tab follows).
+    static func wrapping(_ text: NSAttributedString, lineHeight: CGFloat, indent: CGFloat = 0) -> NSAttributedString {
+        let result = NSMutableAttributedString(attributedString: text)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.minimumLineHeight = lineHeight
+        paragraph.maximumLineHeight = lineHeight
+        if indent > 0 {
+            paragraph.headIndent = indent
+            paragraph.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+            paragraph.defaultTabInterval = indent
+        }
+        result.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: result.length))
+        return result
+    }
+
+    /// One cell measures every text: what a label of that width lays out.
+    private static let measuringCell: NSTextFieldCell = {
+        let cell = NSTextFieldCell(textCell: "")
+        cell.wraps = true
+        cell.isScrollable = false
+        cell.lineBreakMode = .byWordWrapping
+        return cell
+    }()
+
+    /// How many lines `text` takes in a label `width` wide, `maxLines` at
+    /// most.
+    static func lineCount(
+        _ text: NSAttributedString, width: CGFloat, lineHeight: CGFloat, maxLines: Int, indent: CGFloat = 0
+    ) -> Int {
+        guard maxLines > 1, width > 0, text.length > 0 else { return 1 }
+        measuringCell.attributedStringValue = wrapping(text, lineHeight: lineHeight, indent: indent)
+        let height = measuringCell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 100_000)).height
+        return min(maxLines, max(1, Int((height / lineHeight).rounded())))
+    }
+
+    /// The height of those lines.
+    static func height(
+        _ text: NSAttributedString, width: CGFloat, lineHeight: CGFloat, maxLines: Int, indent: CGFloat = 0
+    ) -> CGFloat {
+        CGFloat(lineCount(text, width: width, lineHeight: lineHeight, maxLines: maxLines, indent: indent)) * lineHeight
+    }
+
+    static func label(_ text: NSAttributedString, lineHeight: CGFloat, maxLines: Int, indent: CGFloat = 0) -> NSTextField {
+        let label = NSTextField(labelWithAttributedString: wrapping(text, lineHeight: lineHeight, indent: indent))
+        label.maximumNumberOfLines = maxLines
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
+        label.cell?.truncatesLastVisibleLine = true
+        label.lineBreakMode = .byWordWrapping
+        return label
+    }
+}

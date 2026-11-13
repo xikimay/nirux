@@ -40,6 +40,13 @@ struct ColumnInfo: Hashable {
     /// The question this column's Claude ended its turn on, while it waits
     /// at a quiet prompt: Yes / No / Reply… answer it from the card.
     var turnQuestion: SidebarTurnQuestion?
+    /// When the question that stands in this column was asked, whether or
+    /// not its card can take an answer now (subagents at work hide the
+    /// buttons): what "Dismiss Question" puts aside.
+    var questionAskedAt: TimeInterval?
+    /// What the question dialog on screen asks and offers (Claude's
+    /// AskUserQuestion): the row shows it, the terminal takes the answers.
+    var dialog: AgentDialog?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
 
@@ -78,6 +85,8 @@ struct ColumnInfo: Hashable {
             && lhs.deferredAgent == rhs.deferredAgent
             && lhs.missionQuestion == rhs.missionQuestion
             && lhs.turnQuestion == rhs.turnQuestion
+            && lhs.questionAskedAt == rhs.questionAskedAt
+            && lhs.dialog == rhs.dialog
             && lhs.circling == rhs.circling
     }
 
@@ -102,6 +111,8 @@ struct ColumnInfo: Hashable {
         hasher.combine(deferredAgent)
         hasher.combine(missionQuestion)
         hasher.combine(turnQuestion)
+        hasher.combine(questionAskedAt)
+        hasher.combine(dialog)
         hasher.combine(circling)
     }
 }
@@ -159,6 +170,10 @@ struct SidebarMissionQuestion: Hashable {
             return .unanswered(minutes: Int(threshold / 60))
         }
     }
+
+    /// What its task's row says once it waits on the user: the question
+    /// itself, on the status line and on the card's.
+    var needsYouLine: String { "Needs you · \(AgentText.clean(text, maxLength: 300) ?? "a question")" }
 
     /// The popover's line under the question.
     var explanation: String {
@@ -351,15 +366,15 @@ struct WorkspaceInfo: Hashable {
         "Sub-task of “\(parentTitle)”"
     }
 
-    /// The blocker and the next step (the user's, or the Lead's), trimmed;
-    /// nil when empty.
+    /// The blocker and the next step (the user's, or the Lead's), on one
+    /// run of text: a row wraps them itself, and a line break in one
+    /// would spend its lines on blanks. Nil when empty.
     var blockerText: String? { normalizedContextText(blocker) }
     var nextStepText: String? { normalizedContextText(nextStep) }
 
     private func normalizedContextText(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else { return nil }
-        return value
+        let words = (value ?? "").split(whereSeparator: \.isWhitespace)
+        return words.isEmpty ? nil : words.joined(separator: " ")
     }
 }
 
@@ -517,18 +532,22 @@ struct SidebarTurnQuestion: Hashable {
     /// Its column (`ColumnState.id`): a click finds it there, wherever a
     /// rebuild moved the card.
     let columnID: UUID
+    /// What it chooses between, when the message lists it right next to
+    /// the question (`TurnEndText.choices`): the message's own lines.
+    var choices: [TurnEndChoice] = []
 }
 
-/// A quick answer's button under a turn's question.
+/// A button under a turn's question: a quick answer, or Dismiss, which
+/// answers nothing and takes the question off the card.
 enum SidebarTurnAnswer: String, Hashable {
-    case yes, no, reply
+    case yes, no, reply, dismiss
 
     /// What Yes and No type into the agent's prompt.
     var typedText: String? {
         switch self {
         case .yes: return "yes"
         case .no: return "no"
-        case .reply: return nil
+        case .reply, .dismiss: return nil
         }
     }
 }
