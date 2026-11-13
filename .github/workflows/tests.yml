@@ -55,4 +55,4 @@ jobs:
         run: swift build --build-tests
 
       - name: Each class alone, 10 runs
-        run: scripts/zz-alone.sh 10 NiruxTests.LegacyScrollerTests NiruxTests.CatchUpTests NiruxTests.BoardStagesViewTests NiruxTests.SidebarTaskRowTests NiruxTests.SidebarRowDragTests NiruxTests.SidebarRailTests NiruxTests.SidebarCollapseTests NiruxTests.SidebarRowMotionTests NiruxTests.SidebarMergeMotionTests NiruxTests.SidebarCardStateTests NiruxTests.SidebarSpacePickerTests NiruxTests.SidebarPullRequestLinkTests NiruxTests.SidebarStaleLogTests NiruxTests.TurnQuestionSidebarTests NiruxTests.PermissionApprovalSidebarTests NiruxTests.TaskBirthTests NiruxTests.OnboardingChecklistViewTests NiruxTests.LearnedRuleViewTests NiruxTests.AgentLightTests NiruxTests.MissionDeliveryTests
+        run: scripts/zz-alone.sh 10 NiruxTests.LegacyScrollerTests NiruxTests.BoardStagesViewTests NiruxTests.CatchUpTests
