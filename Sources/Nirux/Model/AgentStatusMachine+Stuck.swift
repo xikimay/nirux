@@ -77,10 +77,18 @@ extension AgentStatusMachine {
     func isPromptFree(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> Bool {
         guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
               foreground.instance.startedAt <= time,
-              let lastPromptAt, lastPromptAt >= foreground.instance.startedAt
+              tookPrompt(since: foreground.instance.startedAt), let lastPromptAt
         else { return false }
         return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && turnFailure == nil
             && lastDraftInputAt <= lastPromptAt && !awaitsAnyVerdict
+    }
+
+    /// Whether a prompt went in since `startedAt`, the start of the
+    /// `claude` in front (`/clear` counts): before one, it may still show a
+    /// screen no hook reports, a startup dialog or, once resumed, an offer
+    /// to resume from a summary.
+    func tookPrompt(since startedAt: TimeInterval) -> Bool {
+        lastPromptAt.map { $0 >= startedAt } ?? false
     }
 
     /// Whether a message typed at `typedAt` went in and the turn that took

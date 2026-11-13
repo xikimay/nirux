@@ -225,13 +225,14 @@ final class MissionDeliveryTests: XCTestCase {
         typealias Question = SidebarMissionQuestion
         XCTAssertEqual(Question.handOff(parent: .closed, askedAt: 100, threshold: 600, now: 101), .parentClosed)
         XCTAssertEqual(Question.handOff(parent: .notClaude, askedAt: 100, threshold: 600, now: 101), .parentNotClaude)
+        XCTAssertEqual(Question.handOff(parent: .notAtPrompt, askedAt: 100, threshold: 600, now: 101), .parentNotAtPrompt)
         XCTAssertNil(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 699))
         XCTAssertEqual(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 700), .unanswered(minutes: 10))
         XCTAssertEqual(Question.handOff(parent: .stoppedWithoutAnswer, askedAt: 100, threshold: 600, now: 101), .parentDidNotAnswer)
     }
 
-    /// No Claude in the parent's column, or a parent idle after it took
-    /// the question, counts only past a grace; a parent that stopped
+    /// No Claude in the parent's column, one that took no prompt yet, or a
+    /// parent idle after it took the question, counts only past a grace; a parent that stopped
     /// without answering keeps the question with the user, turn after turn.
     func testTheParentWatchWaitsOutTheGraceThenSticks() {
         let grace = NiruxShellView.missionParentGrace
@@ -242,6 +243,11 @@ final class MissionDeliveryTests: XCTestCase {
                        "a process-table miss doesn't restart the clock")
         XCTAssertEqual(watch.settle(.claude, foregroundKnown: true, now: 200), .claude, "back")
         XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 201), .claude, "a new absence, a new grace")
+        XCTAssertEqual(watch.settle(.notAtPrompt, foregroundKnown: true, now: 210), .claude,
+                       "a claude that started, its first prompt maybe on its way")
+        XCTAssertEqual(watch.settle(.notAtPrompt, foregroundKnown: true, now: 201 + grace), .notAtPrompt,
+                       "one wait from its shell to its claude")
+        XCTAssertEqual(watch.settle(.claude, foregroundKnown: true, now: 230), .claude, "it took a prompt")
 
         var stopped = NiruxShellView.MissionParentWatch()
         XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300), .claude, "a reply may be queued")

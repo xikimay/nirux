@@ -770,6 +770,12 @@ final class PtySession: @unchecked Sendable {
         state.machine.finishedTurn(afterTypingAt: typedAt)
     }
 
+    /// Whether `foreground`, the column's `claude`, took a prompt since it
+    /// started (see `AgentStatusMachine.tookPrompt(since:)`).
+    func agentTookPrompt(since foreground: ForegroundProcess) -> Bool {
+        state.machine.tookPrompt(since: foreground.instance.startedAt)
+    }
+
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
     /// command-backed columns launch it with zsh-style `-i -l -c` flags

@@ -12,6 +12,7 @@ The question comes to you instead when:
 
 - the parent's workspace was closed;
 - the parent's terminal doesn't run Claude Code;
+- the parent's Claude Code hasn't taken a prompt since it started, as after Nirux relaunches and resumes it: until then it may show a startup or resume screen that Nirux can't see, so Nirux doesn't type into it. If you don't answer, Nirux types the question into it after its next turn, within an hour of the question;
 - the parent read the question and ended its turn without answering;
 - nobody answered within the time set by **Settings › Agents › Flag a dialog waiting after** (10 minutes by default; an hour when it is set to Never).
 

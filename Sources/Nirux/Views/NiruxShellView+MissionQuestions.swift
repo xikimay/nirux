@@ -11,7 +11,7 @@ extension NiruxShellView {
 
     /// What Nirux saw of a question's parent across refreshes.
     struct MissionParentWatch: Equatable {
-        /// Since when its column runs no Claude.
+        /// Since when its column runs no Claude, or one that took no prompt.
         var absentSince: TimeInterval?
         /// Since when it sits idle after it took the question.
         var stoppedSince: TimeInterval?
@@ -20,7 +20,8 @@ extension NiruxShellView {
         var skipped = false
 
         /// The parent state the hand-off goes by, from what a refresh
-        /// observed: no Claude, or idle after taking the question, counts
+        /// observed: no Claude, one that took no prompt yet (a first prompt
+        /// may be on its way), or idle after taking the question, counts
         /// only past the grace; once it stopped without answering, it stays
         /// so. `foregroundKnown` false (a process-table miss) proves nothing.
         mutating func settle(
@@ -28,7 +29,7 @@ extension NiruxShellView {
         ) -> SidebarMissionQuestion.Parent {
             var state = observed
             switch observed {
-            case .notClaude:
+            case .notClaude, .notAtPrompt:
                 absentSince = absentSince ?? now
                 if now - (absentSince ?? now) < NiruxShellView.missionParentGrace { state = .claude }
             case .claude, .stoppedWithoutAnswer:
@@ -94,6 +95,8 @@ extension NiruxShellView {
                         parentState = .notClaude
                     } else if let typedAt = question.parentTypedAt, pty.finishedTurn(afterTypingAt: typedAt) {
                         parentState = .stoppedWithoutAnswer
+                    } else if let process, !pty.agentTookPrompt(since: process) {
+                        parentState = .notAtPrompt
                     } else {
                         parentState = .claude
                     }

@@ -125,6 +125,8 @@ struct SidebarMissionQuestion: Hashable {
     enum HandOff: Hashable {
         case parentClosed
         case parentNotClaude
+        /// The parent's `claude` took no prompt since it started.
+        case parentNotAtPrompt
         /// The parent took the question and ended its turn without `reply`.
         case parentDidNotAnswer
         /// Nobody answered within the stuck-agent threshold.
@@ -140,6 +142,10 @@ struct SidebarMissionQuestion: Hashable {
         /// Anything but an interactive `claude` in front, or no terminal yet
         /// (a restored agent that hasn't resumed).
         case notClaude
+        /// Its `claude` took no prompt since it started (resumed at a
+        /// relaunch, or on a startup screen), so Nirux types nothing into it:
+        /// a screen no hook reports may be up (see `isPromptFree`).
+        case notAtPrompt
         /// Its `claude` took the question and ended its turn, no answer.
         case stoppedWithoutAnswer
         case claude
@@ -164,6 +170,7 @@ struct SidebarMissionQuestion: Hashable {
         switch parent {
         case .closed: return .parentClosed
         case .notClaude: return .parentNotClaude
+        case .notAtPrompt: return .parentNotAtPrompt
         case .stoppedWithoutAnswer: return .parentDidNotAnswer
         case .claude:
             guard now - askedAt >= threshold else { return nil }
@@ -180,6 +187,9 @@ struct SidebarMissionQuestion: Hashable {
         switch handOff {
         case .parentClosed: return "“\(parentTitle)” was closed, so the question comes to you."
         case .parentNotClaude: return "“\(parentTitle)” isn’t running Claude Code, so the question comes to you."
+        case .parentNotAtPrompt:
+            return "“\(parentTitle)” hasn’t taken a prompt since it started, so the question comes to you. "
+                + "If you don’t answer, it gets the question once it has taken one."
         case .parentDidNotAnswer: return "“\(parentTitle)” ended its turn without answering, so the question comes to you."
         case .unanswered(let minutes):
             return "“\(parentTitle)” hasn’t answered in \(minutes) minutes. You can answer instead."
