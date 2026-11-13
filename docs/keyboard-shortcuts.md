@@ -9,7 +9,7 @@ Standard macOS shortcuts (copy, paste, quit) work as usual and are not listed. M
 | `Cmd+P` | Command palette and workspace switcher. In the editor, the file picker |
 | `Shift+Cmd+P` | Command palette, also from the editor |
 | `Cmd+N` | New…: a task, or a shell when nothing is typed |
-| `Cmd+J` | Next waiting agent: the one that has waited for you longest, then the next at each press |
+| `Cmd+J` | Next waiting agent: the one that has waited for you longest, those you have not seen yet first, then the next at each press |
 | `Ctrl+Cmd+B` | Board of the current space |
 | `Ctrl+Cmd+L` | The space's Lead |
 | `Ctrl+Cmd+S` | Collapse or expand the sidebar |

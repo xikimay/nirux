@@ -32,7 +32,7 @@ To start agents, Nirux needs `claude` or `codex` installed. Pull request and CI 
 2. Choose **Space › New Space…**, name the space and add your repository. A space groups the work on one product.
 3. Press `Cmd+N`, describe a task and press Return. Nirux fetches the base branch, creates a worktree on a new branch and starts the agent there with your description.
 
-A task's sidebar row turns amber when its agent needs you, and `Cmd+J` goes to the agent that has waited longest. `Cmd+P` opens the command palette, which also switches workspaces.
+A task's sidebar row turns amber when its agent needs you, and `Cmd+J` goes to the agent that has waited longest, those you have not seen yet first. `Cmd+P` opens the command palette, which also switches workspaces.
 
 ## Agent status hooks
 
