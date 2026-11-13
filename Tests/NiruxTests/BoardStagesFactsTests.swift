@@ -115,7 +115,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(section.lines.map(\.queue.order), [nil, nil, nil, nil, nil, 2, 1],
                        "a pull request without a task has its place in the queue too")
         XCTAssertEqual(section.parents, ["second": "first"], "a sub-task under its task, when both are lines here")
-        XCTAssertEqual(section.lines.first, BoardStages.Facts(id: "first", title: "First", location: ["feat/b", "/p/widgets.b"]),
+        XCTAssertEqual(section.lines.first, BoardStages.Facts(id: "first", title: "First", location: ["feat/b", "/p/widgets.b"], hasWorktree: true),
                        "one the sidebar hasn't read yet is at rest")
         XCTAssertEqual(section.lines.dropFirst().map(\.location), [
             ["main checkout", "main", "/p/widgets"], ["feat/a", "/p/widgets.x"], ["feat/a", "/p/widgets.x"],
@@ -137,7 +137,7 @@ final class BoardStagesFactsTests: XCTestCase {
         reading.blocker = "Waits for the schema"
         reading.lastActivityAt = 400
         reading.flakyReason = "ImportTests timed out"
-        var expected = BoardStages.Facts(id: "task", title: "Task", location: ["feat/x", "/p/widgets.x"])
+        var expected = BoardStages.Facts(id: "task", title: "Task", location: ["feat/x", "/p/widgets.x"], hasWorktree: true)
         expected.activity = .needsYou("a question")
         expected.reviews = reading.reviews
         expected.reviewsInFlight = [.premortem]
@@ -184,6 +184,26 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(facts([row(workspaces: ["task"])], readsPullRequests: false).lines.map(\.hasRepository), [false])
         let folder = row(nil, workspaces: ["notes"], group: .otherRepository, path: nil, folder: "/Users/me/Nirux Tasks/Notes")
         XCTAssertEqual(facts([row(workspaces: ["task"]), folder], tasks: ["task", "notes"]).lines.map(\.hasRepository), [true, false])
+    }
+
+    func testATaskSaysWhereItsWorktreeCanBeCleanedUpAndHowItsAgentGoesOn() {
+        var reading = BoardStages.TaskReading(activity: .failed("Stopped on an API error"))
+        reading.resume = .afterError
+        let rows = [
+            row(workspaces: ["task"]),
+            row("main", workspaces: ["lead"], group: .main, path: "/p/widgets"),
+            row(nil, workspaces: ["notes"], group: .otherRepository, path: nil, folder: "/Users/me/Nirux Tasks/Notes"),
+            row("cloud", pullRequest: pullRequest(14, "cloud"), path: nil),
+            row("bot", pullRequest: pullRequest(15, "bot"), path: "/p/widgets.bot")
+        ]
+        let section = facts(rows, tasks: ["task", "lead", "notes"], readings: ["task": reading, "notes": reading])
+        XCTAssertEqual(section.lines.map(\.id), ["task", "lead", "notes", "widgets#14", "widgets#15"])
+        XCTAssertEqual(section.lines.map(\.hasWorktree), [true, false, false, false, true],
+                       "a linked worktree; not a main checkout, a folder, nor a pull request checked out nowhere")
+        XCTAssertEqual(section.lines.map(\.resume), [.afterError, nil, .afterError, nil, nil], "as the sidebar offers it, repository or not")
+        var gone = row(nil, workspaces: ["task"], group: .otherRepository, path: nil, folder: "/Users/me/old")
+        gone.folderIsGone = true
+        XCTAssertEqual(facts([gone]).lines.map(\.hasWorktree), [true], "a folder gone: Clean Up closes its workspaces")
     }
 
     // MARK: - Pull request

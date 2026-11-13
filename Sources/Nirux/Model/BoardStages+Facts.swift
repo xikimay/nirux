@@ -23,6 +23,8 @@ extension BoardStages {
         var reviewRequest: ReviewRequest?
         var flakyReason: String?
         var cleanUp: CleanUp?
+        /// How its stopped agent can go on, as the sidebar offers it.
+        var resume: Resume?
         /// The pull request of this repository its own detection says
         /// merged, at the HEAD it merged at: known before the Board's
         /// merged list is read again, and for one that list doesn't reach.
@@ -90,6 +92,7 @@ extension BoardStages {
             var facts = Facts(id: "\(repository.id)#\(pullRequest.number)", title: text(pullRequest.title) ?? row.branch ?? "")
             facts.location = location(of: row)
             facts.hasTask = false
+            facts.hasWorktree = row.canCleanUp
             facts.queue = queue(of: row, pullRequest, in: repository, merged: merged.known)
             facts.pullRequest = self.pullRequest(pullRequest, stack: row.stack, in: repository, merged: merged.read)
             lines.append(facts)
@@ -139,6 +142,9 @@ extension BoardStages {
         let isAboutRow = reading.gitRoot == nil || reading.gitRoot == row.worktreePath
         facts.reviews = isAboutRow ? reading.reviews : reading.reviews.map { ReviewBadges(runs: $0.runs, head: nil) }
         facts.flakyReason = isAboutRow ? reading.flakyReason : nil
+        // What its agent and its folder offer, with a repository or without.
+        facts.resume = reading.resume
+        facts.hasWorktree = row.canCleanUp
         guard facts.hasRepository else { return facts }
         if let pullRequest = row.pullRequest {
             facts.queue = queue(of: row, pullRequest, in: repository, merged: merged.known)

@@ -55,6 +55,9 @@ final class BoardStagesView: NSView {
     /// "Merged today" entry: its section's id, its task's line's (which
     /// an entry's has left the list by then), and the link.
     var onLink: ((_ section: String, _ line: String, BoardStages.Link) -> Void)?
+    /// An item of a line's menu was chosen: its section's id, the line's,
+    /// and the item.
+    var onMenu: ((_ section: String, _ line: String, BoardStages.MenuItem) -> Void)?
 
     /// Where the pointer is, in the window; nil where the Board doesn't
     /// hear it move: off screen, or in an app that isn't active, whose
@@ -243,6 +246,10 @@ final class BoardStagesView: NSView {
             view.onLink = { [weak self, weak view] link in
                 guard let self, let view else { return }
                 self.onLink?(section, view.line.id, link)
+            }
+            view.onMenu = { [weak self, weak view] item in
+                guard let self, let view else { return }
+                self.onMenu?(section, view.line.id, item)
             }
             lineViews.append(view)
             items.append(.line(view))

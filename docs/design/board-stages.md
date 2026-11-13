@@ -348,7 +348,7 @@ to the queue yet.
   - In a build that can't change GitHub (a dry run), the words stay, as what
     to do, and are no link: the phrase's tooltip says why.
   - The link is the phrase's. A line that says something more pressing (a red
-    check, an agent at work) has none: Retarget will be in its menu.
+    check, an agent at work) has none: Retarget is in its menu.
 - **A link says what its click does** under the pointer: "Bases #53 on main,
   as GitHub does when a merged branch is deleted"; "Checks the worktree, then
   asks what goes". It is drawn apart, in the accent colour, right after the
@@ -392,6 +392,17 @@ to the queue yet.
   ends moves nothing below. On a Board too narrow for a link beside the
   caption, the entry shows none. `onLink` then names the entry's task's
   line, which has left the list by then.
+- **The line's menu** (a right click, or VoiceOver's "show menu") offers
+  what its phrase may not say, in this order: Open Pull Request, Add to or
+  Remove from Queue, Retarget to main, Resume (its agent stopped on an
+  error, or exited mid-turn, as the sidebar offers it), Clean Up… (a linked
+  worktree of the project, or a folder already gone), and Open, a shell in
+  the worktree of a pull request without a task. What does nothing for now
+  is there, disabled, and says why under the pointer: refused or locked, a
+  dry run, a clean-up that runs. A menu shown before the line changed acts
+  only as the line still offers. The address of a pull request is as GitHub
+  gave it: whoever opens it checks it is GitHub's (`BoardStagesView.onMenu`
+  has no owner yet).
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station

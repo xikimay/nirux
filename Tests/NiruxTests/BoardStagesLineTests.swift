@@ -431,6 +431,58 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(line(stacked).offer, Offer(change: .remove, number: 53), "its own number, not its stack's root")
     }
 
+    // MARK: - The menu
+
+    func testALinesMenuOffersWhatItsPhraseMayNotSay() {
+        typealias Item = BoardStages.MenuItem
+        let url = "https://github.com/acme/widgets/pull/53"
+        let retarget = BoardStages.Link.retarget(number: 53, onto: "main")
+        let based = with(pullRequest(53, checks: .failed(["test"]), base: "stack/a", stack: onMergedBase)) { $0.url = url }
+        // A red check holds the phrase; Retarget and Clean Up are in the menu all the same.
+        var red = facts(based, activity: .failed("Stopped on an API error"), queue: Queue(list: .open, refusal: "base #52 merged"))
+        red.hasWorktree = true
+        red.resume = .afterError
+        XCTAssertEqual(line(red).phrase.text, "Stopped on an API error")
+        XCTAssertEqual(line(red).menu, [
+            .openPullRequest(url: url), .queue(BoardStages.QueueOffer(change: .add, number: 53, blocked: "Can’t join the queue: base #52 merged")),
+            .retarget(retarget, blocked: nil), .resume(.afterError), .cleanUp(blocked: nil)
+        ])
+        XCTAssertEqual(line(red).menu.map(\.title), ["Open Pull Request", "Add to Queue", "Retarget to main", "Resume", "Clean Up…"])
+        XCTAssertEqual(line(red).menu.map(\.blocked), [nil, "Can’t join the queue: base #52 merged", nil, nil, nil])
+        // In a dry run Retarget says why it does nothing; a running clean-up, why Clean Up does nothing.
+        var dry = with(red) { $0.queue.dryRun = " Dry run.\n" }
+        dry.cleanUp = .running
+        XCTAssertEqual(line(dry).menu.filter { $0.blocked != nil }.map(\.blocked), [
+            "Can’t join the queue: base #52 merged", "Dry run.", "A clean-up of this worktree is running."
+        ])
+        // Without a merge queue: no list, no Retarget.
+        XCTAssertEqual(line(with(red) { $0.queue = Queue() }).menu.map(\.title), ["Open Pull Request", "Resume", "Clean Up…"])
+        // Resume only while its agent stopped; nothing of a pull request merged but its address.
+        XCTAssertFalse(line(with(red) { $0.activity = .working(since: nil) }).menu.contains(.resume(.afterError)))
+        let merged = with(facts(with(pullRequest(merged: true)) { $0.url = url }, queue: Queue(list: .open))) { $0.hasWorktree = true }
+        XCTAssertEqual(line(merged).menu, [.openPullRequest(url: url), .cleanUp(blocked: nil)])
+        // A pull request without a task, checked out here: Open is a shell in its worktree.
+        let alone = with(facts(with(pullRequest()) { $0.url = url }, reviews: nil, queue: Queue(list: .open))) {
+            $0.hasTask = false
+            $0.hasWorktree = true
+        }
+        XCTAssertEqual(line(alone).menu.map(\.title), ["Open Pull Request", "Add to Queue", "Clean Up…", "Open"])
+        // A task in no repository: what its agent and its folder offer.
+        let folder = with(facts(activity: .failed("Exited mid-turn"))) {
+            $0.hasRepository = false
+            $0.resume = .afterExit
+            $0.hasWorktree = true
+        }
+        XCTAssertEqual(line(folder).menu, [.resume(.afterExit), .cleanUp(blocked: nil)])
+        XCTAssertEqual(line(with(folder) { $0.pullRequest = based }).menu, [.resume(.afterExit), .cleanUp(blocked: nil)],
+                       "no rail: no pull request of its own to open or move")
+        XCTAssertEqual(line(facts()).menu, [], "nothing to offer")
+        XCTAssertEqual(line(facts(with(pullRequest()) { $0.url = "" })).menu, [], "an address gh didn't give")
+        // Merged on its merged base: nothing left to retarget.
+        let landed = with(pullRequest(53, merged: true, base: "stack/a", stack: onMergedBase)) { $0.url = url }
+        XCTAssertEqual(line(facts(landed, queue: Queue(list: .open))).menu, [.openPullRequest(url: url)])
+    }
+
     // MARK: - Under the pointer
 
     func testALineSaysUnderThePointerWhatItCantHold() {

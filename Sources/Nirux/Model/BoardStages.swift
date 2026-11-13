@@ -124,6 +124,50 @@ extension BoardStages {
         var title: String { change == .add ? "Add to Queue" : "Remove from Queue" }
     }
 
+    /// How a stopped agent of a task can go on.
+    enum Resume: Equatable, Sendable {
+        /// Its turn stopped on an error: "continue" is typed into it.
+        case afterError
+        /// It exited in the middle of a turn: its conversation is opened
+        /// again.
+        case afterExit
+    }
+
+    /// One item of a line's menu (docs/design/board-stages.md, section 7),
+    /// whatever its phrase says. One that does nothing for now says why.
+    enum MenuItem: Equatable, Sendable {
+        /// Its address on GitHub, as GitHub gave it: whoever opens it
+        /// checks it is GitHub's.
+        case openPullRequest(url: String)
+        case queue(QueueOffer)
+        case retarget(Link, blocked: String?)
+        case resume(Resume)
+        /// Clean Up Worktree…: checks the worktree, then asks what goes.
+        case cleanUp(blocked: String?)
+        /// A shell in the worktree of a pull request without a task here.
+        case openWorktree
+
+        var title: String {
+            switch self {
+            case .openPullRequest: return "Open Pull Request"
+            case .queue(let offer): return offer.title
+            case .retarget(let link, _): return link.title
+            case .resume: return "Resume"
+            case .cleanUp: return "Clean Up…"
+            case .openWorktree: return "Open"
+            }
+        }
+
+        /// Why it does nothing for now; nil when it acts.
+        var blocked: String? {
+            switch self {
+            case .queue(let offer): return offer.blocked
+            case .retarget(_, let blocked), .cleanUp(let blocked): return blocked
+            case .openPullRequest, .resume, .openWorktree: return nil
+            }
+        }
+    }
+
     /// What a line says under the pointer, beside its words when they
     /// are cut.
     struct Tooltips: Equatable, Sendable {
@@ -157,6 +201,8 @@ extension BoardStages {
         /// pull request, no merge queue.
         var offer: QueueOffer?
         var tooltips = Tooltips()
+        /// Its menu, in order; empty where it offers nothing.
+        var menu: [MenuItem] = []
     }
 }
 
@@ -346,6 +392,11 @@ extension BoardStages {
         var lastActivityAt: TimeInterval?
         /// Its merged pull request's worktree is still there.
         var cleanUp: CleanUp?
+        /// Clean Up Worktree… applies where it is: a linked worktree of
+        /// the project, or a folder already gone (`ProjectBoard.Row.canCleanUp`).
+        var hasWorktree = false
+        /// How its stopped agent can go on, when it can.
+        var resume: Resume?
     }
 
     /// What the Board asks of a task before it moves on. Constants today;
@@ -379,7 +430,8 @@ extension BoardStages {
             pullRequest: pullRequestText(facts),
             since: reading.since,
             offer: offer,
-            tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules)
+            tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
+            menu: menu(of: facts, rail: rail, offer: offer)
         )
     }
 
@@ -447,6 +499,25 @@ extension BoardStages {
             return QueueOffer(change: .add, number: number, blocked: "Can’t join the queue: \(refusal)")
         }
         return QueueOffer(change: .add, number: number, blocked: lock)
+    }
+
+    /// The line's menu: Open Pull Request, Add to or Remove from Queue,
+    /// Retarget, Resume, Clean Up…, Open. What a link of its phrase does
+    /// is there whatever the phrase says (a red check, an agent at work).
+    private static func menu(of facts: Facts, rail: Rail?, offer: QueueOffer?) -> [MenuItem] {
+        var items: [MenuItem] = []
+        let pullRequest = rail == nil ? nil : facts.pullRequest
+        if let url = pullRequest?.url, !url.isEmpty { items.append(.openPullRequest(url: url)) }
+        if let offer { items.append(.queue(offer)) }
+        if let pullRequest, !pullRequest.isMerged, let merged = pullRequest.stack?.mergedBase, facts.queue.list != .none {
+            items.append(.retarget(.retarget(number: pullRequest.number, onto: merged.onto), blocked: text(facts.queue.dryRun)))
+        }
+        if facts.hasTask, case .failed = facts.activity, let resume = facts.resume { items.append(.resume(resume)) }
+        if facts.hasWorktree {
+            items.append(.cleanUp(blocked: facts.cleanUp == .running ? "A clean-up of this worktree is running." : nil))
+            if !facts.hasTask { items.append(.openWorktree) }
+        }
+        return items
     }
 
     /// This many checks under the pointer, then how many more: a tooltip

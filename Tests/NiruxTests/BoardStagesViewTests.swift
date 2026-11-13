@@ -631,6 +631,55 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertFalse(shown.trackingAreas.contains { $0.rect == station }, "the earlier place is gone")
     }
 
+    // MARK: - The menu
+
+    func testALinesMenuIsWhatItsModelOffers() throws {
+        let url = "https://github.com/acme/widgets/pull/53"
+        let menu: [BoardStages.MenuItem] = [
+            .openPullRequest(url: url), .queue(BoardStages.QueueOffer(change: .add, number: 53, blocked: "Can’t join the queue: draft")),
+            .retarget(.retarget(number: 53, onto: "main"), blocked: nil), .resume(.afterError), .cleanUp(blocked: nil)
+        ]
+        let offering = with(line("offering")) { $0.menu = menu }
+        let view = board(content([
+            section("nirux", units: [.task(offering, subtasks: []), .task(line("bare"), subtasks: [])]),
+            section("site", units: [.task(with(line("other")) { $0.menu = [.openWorktree] }, subtasks: [])])
+        ]))
+        var chosen: [String] = []
+        view.onMenu = { section, line, item in chosen.append("\(section) \(line) \(item.title)") }
+        let shown = view.lineViews[0]
+        let event = try mouse(.rightMouseDown, at: try target(at: shown).location, in: view.window)
+        let contextMenu = try XCTUnwrap(shown.menu(for: event))
+        XCTAssertEqual(contextMenu.items.map(\.title), ["Open Pull Request", "Add to Queue", "Retarget to main", "Resume", "Clean Up…"])
+        XCTAssertEqual(contextMenu.items.map(\.isEnabled), [true, false, true, true, true], "what does nothing for now is there, disabled")
+        XCTAssertEqual(contextMenu.items[1].toolTip, "Can’t join the queue: draft", "and says why")
+        XCTAssertFalse(contextMenu.autoenablesItems)
+        XCTAssertNil(view.lineViews[1].menu(for: event), "nothing to offer, no menu")
+
+        contextMenu.performActionForItem(at: 2)
+        contextMenu.performActionForItem(at: 0)
+        XCTAssertEqual(chosen, ["nirux offering Retarget to main", "nirux offering Open Pull Request"])
+        contextMenu.performActionForItem(at: 1)
+        XCTAssertEqual(chosen.count, 2, "a disabled item does nothing")
+        let other = try XCTUnwrap(view.lineViews[2].contextMenu())
+        other.performActionForItem(at: 0)
+        XCTAssertEqual(chosen.last, "site other Open", "in its own section")
+
+        // The line changes while its menu is open: an item it no longer offers, or no longer acts on, does nothing.
+        view.show(content([
+            section("nirux", units: [.task(with(offering) {
+                $0.menu = [.openPullRequest(url: url), .cleanUp(blocked: "A clean-up of this worktree is running.")]
+            }, subtasks: []), .task(line("bare"), subtasks: [])]),
+            section("site", units: [.task(with(line("other")) { $0.menu = [.openWorktree] }, subtasks: [])])
+        ]))
+        XCTAssertTrue(view.lineViews[0] === shown)
+        contextMenu.performActionForItem(at: 2)
+        contextMenu.performActionForItem(at: 4)
+        XCTAssertEqual(chosen.count, 3)
+        contextMenu.performActionForItem(at: 0)
+        XCTAssertEqual(chosen.last, "nirux offering Open Pull Request", "what it still offers acts")
+        XCTAssertFalse(view.lineViews[1].accessibilityPerformShowMenu(), "VoiceOver: no menu where there is nothing to offer")
+    }
+
     // MARK: - The pointer
 
     /// The place of `x` on `line`'s middle row, in its window.
