@@ -257,12 +257,13 @@ final class CatchUpTests: XCTestCase {
     }
 
     /// A list taller than the sidebar: the card comes into view, not above
-    /// the visible part. In height, which is what scrolling gives: the
-    /// width in view is the scrollers' business. AppKit settles which
-    /// style it prefers a moment after a process's first scroll view, and
-    /// a scroll view alive then takes it, whatever style it was given: on
-    /// a Mac with a mouse (CI's runners) the sidebar's scroller turns
-    /// legacy and takes 15 pt of the visible width, the card's × with it.
+    /// the visible part. Checked in height, what the reveal scrolls: AppKit
+    /// settles which scroller style it prefers a moment after a process's
+    /// first scroll view, and a scroll view alive then takes it whatever
+    /// style it was given. On CI's runners (a virtual mouse) the sidebar's
+    /// scroller turns legacy mid-test and covers the last 15 pt of the
+    /// visible width, part of the card's ×. That layout is the app's to
+    /// settle, not what this test proves.
     func testTheCardComesIntoView() throws {
         let rows = (0..<30).map { index in
             WorkspaceInfo(
@@ -291,19 +292,26 @@ final class CatchUpTests: XCTestCase {
             otherSpaces: []
         )
         sidebar.refreshCatchUpCard(reveal: true)
-        let dismiss = try XCTUnwrap(sidebar.hitAreas.first { area in
-            guard case .catchUp(.dismiss) = area.region else { return false }
-            return true
-        })
         let scroll = sidebar.contentScrollView
-        XCTAssertGreaterThan(dismiss.frame.minY, visibleBefore.maxY, "the card comes in above the visible part")
+        // Read each time: a rebuild lays the card out again.
+        let dismissFrame = {
+            sidebar.hitAreas.first { area in
+                guard case .catchUp(.dismiss) = area.region else { return false }
+                return true
+            }?.frame
+        }
+        let dismiss = try XCTUnwrap(dismissFrame())
+        // The rebuild leaves it above the visible part: the reveal brings it in.
+        XCTAssertGreaterThan(dismiss.minY, scroll.documentVisibleRect.maxY, "the card comes in above the visible part")
         waitFor("""
             the card in view: visible was \(visibleBefore), is \(scroll.documentVisibleRect), \
-            its × at \(dismiss.frame), scroller style \(scroll.scrollerStyle.rawValue)
+            its × at \(dismissFrame().map { "\($0)" } ?? "-"), scroller style \(scroll.scrollerStyle.rawValue)
             """) {
+            guard let dismiss = dismissFrame() else { return false }
             let visible = scroll.documentVisibleRect
-            return visible.minY <= dismiss.frame.minY && dismiss.frame.maxY <= visible.maxY
+            return visible.minY <= dismiss.minY && dismiss.maxY <= visible.maxY
         }
+        XCTAssertEqual(scroll.documentVisibleRect.minX, 0, "the list never scrolls sideways")
     }
 
     /// A row says what its task's row says: what it asks, what broke, that
