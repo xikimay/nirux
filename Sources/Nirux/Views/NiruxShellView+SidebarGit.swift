@@ -65,7 +65,7 @@ extension NiruxShellView {
                     questionAskedAt: asked?.since,
                     // The dialog the user is looking at needs no copy on
                     // its row: its one line, as for any dialog.
-                    dialog: isUserFocused && appIsActive ? nil : dialog?.dialog,
+                    dialog: ZZ("no-dialog") ? nil : isUserFocused && (appIsActive || ZZ("watched-ignores-app")) && !ZZ("watched-dialog") ? nil : dialog?.dialog,
                     id: col.id
                 )
             }

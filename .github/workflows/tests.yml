@@ -56,3 +56,7 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the shell reverts the dialog flow test must catch.
+      - name: Reverts TurnQuestionFlowTests catches
+        run: scripts/mutants-class.sh NiruxTests.TurnQuestionFlowTests no-dialog watched-dialog watched-ignores-app
