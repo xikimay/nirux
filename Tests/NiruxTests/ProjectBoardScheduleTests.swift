@@ -81,7 +81,10 @@ final class ProjectBoardScheduleTests: XCTestCase {
     }
 
     func testTheClockKeepsCountingWhileTheMacSleeps() {
-        // CLOCK_MONOTONIC counts sleep; systemUptime doesn't.
-        XCTAssertGreaterThanOrEqual(ProjectBoard.clock(), ProcessInfo.processInfo.systemUptime - 1)
+        // CLOCK_MONOTONIC counts sleep; systemUptime doesn't. The two are
+        // read apart, and on a virtual machine they don't start together:
+        // a GitHub runner had them 1.1 s apart. A clock that starts with
+        // the process would be minutes behind.
+        XCTAssertGreaterThanOrEqual(ProjectBoard.clock(), ProcessInfo.processInfo.systemUptime - 60)
     }
 }

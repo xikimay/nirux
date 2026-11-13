@@ -103,13 +103,13 @@ enum SidebarExpandedMetrics {
     static var questionFont: NSFont { Theme.Font.body }
     static let questionLineHeight: CGFloat = 15
     static let questionMaxLines = 8
-    /// A choice the message lists, under its marker: 18 points in, or
-    /// past a marker wider than "1.".
+    /// A choice the message lists, a dialog's option, under its marker:
+    /// 18 points in, or past a marker wider than "1.".
     static let choiceMaxLines = 6
     static let choiceIndent: CGFloat = 18
     static let choiceMarkerGap: CGFloat = 6
     static let choiceGap: CGFloat = 2
-    /// Between the choices and the question.
+    /// Between the choices and the question, the question and its options.
     static let questionGap: CGFloat = 5
     /// The selected row's next step, a Mission question's line.
     static let nextStepMaxLines = 3
@@ -123,6 +123,27 @@ enum SidebarExpandedMetrics {
             + actionRowGap + buttonHeight
     }
 
+    /// A dialog's question, and each of its options: as long as its hook
+    /// lets them be (`AgentDialog.bounded`), in Latin or wide letters.
+    /// (Emoji at those bounds take more: their tooltip has the rest.)
+    static let dialogMaxLines = 18
+    /// Between two questions of one dialog.
+    static let dialogQuestionGap: CGFloat = 10
+    /// The tallest a dialog's block gets: several questions with all they
+    /// offer would take the sidebar from the other rows. Past it, the
+    /// block gives way by steps (`SidebarDialogLayout`).
+    static let dialogMaxHeight: CGFloat = 420
+    /// The first step: what each option means, two lines past its label.
+    static let dialogShortDetailLines = 2
+    /// The last: the first question's first lines, and two of each label.
+    static let dialogTightQuestionLines = 4
+    static let dialogTightOptionLines = 2
+
+    @MainActor
+    static func dialogBlockHeight(for dialog: AgentDialog, width: CGFloat) -> CGFloat {
+        SidebarDialogLayout.make(dialog, width: width).height
+    }
+
     /// `width`: the block's, the card's content. `textWidth`: a line's
     /// that starts under the title.
     @MainActor
@@ -131,6 +152,7 @@ enum SidebarExpandedMetrics {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
         case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
+        case .dialog(_, let dialog): return dialogBlockHeight(for: dialog, width: width)
         case .next(let text):
             return SidebarWrappedText.height(
                 SidebarWorkspaceCardRenderer.nextText(text), width: textWidth, lineHeight: actionLineHeight, maxLines: nextStepMaxLines

@@ -44,6 +44,9 @@ struct ColumnInfo: Hashable {
     /// not its card can take an answer now (subagents at work hide the
     /// buttons): what "Dismiss Question" puts aside.
     var questionAskedAt: TimeInterval?
+    /// What the question dialog on screen asks and offers (Claude's
+    /// AskUserQuestion): the row shows it, the terminal takes the answers.
+    var dialog: AgentDialog?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
 
@@ -83,6 +86,7 @@ struct ColumnInfo: Hashable {
             && lhs.missionQuestion == rhs.missionQuestion
             && lhs.turnQuestion == rhs.turnQuestion
             && lhs.questionAskedAt == rhs.questionAskedAt
+            && lhs.dialog == rhs.dialog
             && lhs.circling == rhs.circling
     }
 
@@ -108,6 +112,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(missionQuestion)
         hasher.combine(turnQuestion)
         hasher.combine(questionAskedAt)
+        hasher.combine(dialog)
         hasher.combine(circling)
     }
 }
