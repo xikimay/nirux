@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      - name: OverlayScrollViewTests alone, 10 runs
+        run: scripts/zz-alone.sh NiruxTests.OverlayScrollViewTests 10
+      - name: CatchUp card (full-width check, as on main) alone, 30 runs
+        run: scripts/zz-alone.sh NiruxTests.CatchUpTests/testTheCardComesIntoView 30
+      - name: "Revert: OverlayScrollViewTests, 5 runs"
+        run: NIRUX_ZZ_MUTANT=noPin scripts/zz-alone.sh NiruxTests.OverlayScrollViewTests 5
+      - name: "Revert: CatchUp card alone, 10 runs"
+        run: NIRUX_ZZ_MUTANT=noPin scripts/zz-alone.sh NiruxTests.CatchUpTests/testTheCardComesIntoView 10

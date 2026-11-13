@@ -18,6 +18,7 @@ class OverlayScrollView: NSScrollView {
 
     override var scrollerStyle: NSScroller.Style {
         get { super.scrollerStyle }
-        set { super.scrollerStyle = .overlay }
+        // DO NOT MERGE: the flake gate's revert.
+        set { super.scrollerStyle = ProcessInfo.processInfo.environment["NIRUX_ZZ_MUTANT"] == "noPin" ? newValue : .overlay }
     }
 }
