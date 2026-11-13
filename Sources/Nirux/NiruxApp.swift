@@ -90,6 +90,21 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 2, args[1] == "--check-release-signature" {
             exit(MergeQueue.checkReleaseSignatureCommand(Array(args.dropFirst(2))))
         }
+        // Any other argument opened the app too, so `"$NIRUX_CLI_PATH"
+        // --help`, or a command an agent guessed, started a second Nirux on
+        // the real state. See LaunchArguments.
+        switch LaunchArguments.decision(for: args) {
+        case .launchApp:
+            break
+        case .help:
+            FileHandle.standardOutput.write(Data(LaunchArguments.usage.utf8))
+            exit(EXIT_SUCCESS)
+        case .ignoredHook:
+            exit(EXIT_SUCCESS)
+        case .unknown(let argument):
+            FileHandle.standardError.write(Data(LaunchArguments.unknownArgumentMessage(argument).utf8))
+            exit(2)
+        }
         // Only the installed app opens the real state; any other copy needs
         // a state of its own (see RealStateGuard). Command-line modes stay
         // above this: they run from any copy and any parent (agent hooks,
