@@ -190,47 +190,6 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A relaunch restores the Lead with `claude --resume`, which takes no
-    /// prompt until someone writes to it. A task's question asked before
-    /// its conversation is back waits (a startup dialog may be up), and is
-    /// typed into its prompt as soon as the hooks report it back.
-    func testATasksQuestionReachesALeadResumedAtRelaunch() throws {
-        try UIFlowHarness.run { harness in
-            let shell = harness.shell
-            let lead = try makeLead(harness)
-            // The Lead's `claude`, keeping what it is sent.
-            let resumed = AgentStandIn()
-            defer { resumed.remove() }
-            let agentUUID = UUID().uuidString
-            lead.workspace.addColumn(command: resumed.command(), agentUUID: agentUUID, cwd: harness.repo)
-            let pty = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == agentUUID }?.pty)
-            harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
-            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
-            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
-                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: agentUUID,
-                childWorkspaceID: UUID().uuidString, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
-                branch: "feat/export", reportsToLead: true
-            ), enabled: true))
-            let question = try ask("Keep the old date= parameter?", from: mission)
-            @MainActor func typedAt() -> TimeInterval? {
-                MissionStore.shared.missions.first { $0.id == mission.id }?.events.first { $0.id == question.id }?.parentTypedAt
-            }
-            shell.typeMissionMessages()
-            XCTAssertNil(typedAt(), "no word from it yet")
-
-            let resolver = AgentHookCenter.shared.resolver
-            AgentHookCenter.shared.resolver = { [weak shell] in shell?.resolveAgentColumn(uuid: $0) }
-            defer { AgentHookCenter.shared.resolver = resolver }
-            let resume = try XCTUnwrap(AgentHookCenter.shared.dispatch(AgentHookEvent(
-                kind: .claude, name: .sessionStart, agentUUID: agentUUID, sessionID: "lead", emitterProcess: claude,
-                source: "resume", timestamp: Date().timeIntervalSince1970
-            )))
-            shell.applyAgentHookEvents([resume])
-            harness.waitUntil("the question in its prompt") { resumed.input.contains("Keep the old date= parameter?") }
-            XCTAssertNotNil(typedAt())
-        }
-    }
-
     /// Clicks the question row on `task`'s card, as the user does: the
     /// popover it opens.
     private func openReply(

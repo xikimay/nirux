@@ -30,13 +30,10 @@ child's prompt.
   into the child's prompt, like the Resume button, only when
   `AgentStatusMachine.isPromptFree` holds: the column's interactive `claude`
   is in front, it was already running when the parent sent the message, it
-  took a prompt since it started or resumed a conversation (Claude Code shows
-  some dialogs before any hook could list them, and sends a resumed
-  conversation's SessionStart only after them, a new one's possibly before),
-  its turn is over, no dialog is listed, and nothing was typed since its last
-  prompt went in (since it started, for a resumed one). Otherwise the message
-  waits in the ledger, and Nirux tries again when a turn ends (Stop or
-  StopFailure) or a conversation resumes. Nirux
+  took a prompt since it started (Claude Code shows some dialogs before any
+  hook could list them), its turn is over, no dialog is listed, and nothing
+  was typed since its last prompt went in. Otherwise the message waits in the
+  ledger, and Nirux tries again when a turn ends (Stop or StopFailure). Nirux
   records the message as typed before typing it, so a failed save never types
   it twice. Typing, unlike a Stop hook's `block` reason, also works for slash
   commands and for a child that is already idle (a Stop hook never fires

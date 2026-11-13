@@ -378,39 +378,12 @@ final class MissionTellTests: XCTestCase {
     }
 
     /// Claude Code shows some dialogs (trust, MCP servers) before any hook
-    /// that would list them, and may send a new conversation's SessionStart
-    /// before them: a session that took no prompt yet is not free.
+    /// that would list them: a session that took no prompt yet is not free.
     func testASessionThatTookNoPromptIsNotFree() {
         var machine = AgentStatusMachine()
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
         XCTAssertFalse(isFree(machine), "no hook yet")
-        _ = machine.apply(hook(.sessionStart, at: 0, source: "startup"), isUserFocused: false)
+        _ = machine.apply(hook(.sessionStart, at: 0), isUserFocused: false)
         XCTAssertFalse(isFree(machine), "SessionStart alone")
-    }
-
-    /// A relaunch restores each agent with `claude --resume`, which then
-    /// takes no prompt until someone writes to it. Claude Code sends the
-    /// resumed conversation's SessionStart only past its startup dialogs:
-    /// its prompt is free from then on, unless keys reached it since it
-    /// started (typed while it loaded, they may sit there). A resume an
-    /// earlier `claude` reported, replayed at launch, proves nothing.
-    func testAResumedConversationIsFreeWithoutAPrompt() {
-        var machine = AgentStatusMachine()
-        _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
-        _ = machine.apply(hook(.sessionStart, at: claudeProcess.startedAt - t0 - 1, source: "resume"), isUserFocused: false)
-        XCTAssertFalse(isFree(machine), "an earlier claude's resume")
-        _ = machine.apply(hook(.sessionStart, at: 0, source: "resume"), isUserFocused: false)
-        XCTAssertTrue(isFree(machine))
-        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7))
-        XCTAssertFalse(isFree(machine), "a draft, or a message typed and not submitted yet")
-        _ = machine.apply(hook(.userPromptSubmit, at: 8), isUserFocused: false)
-        _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
-        XCTAssertTrue(isFree(machine))
-
-        var loading = AgentStatusMachine()
-        _ = loading.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
-        loading.noteKeystroke(now: Date(timeIntervalSince1970: claudeProcess.startedAt + 1))
-        _ = loading.apply(hook(.sessionStart, at: 0, source: "resume"), isUserFocused: false)
-        XCTAssertFalse(isFree(loading), "keys typed while it loaded")
     }
 }
