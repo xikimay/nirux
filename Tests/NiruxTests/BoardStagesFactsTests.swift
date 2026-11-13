@@ -72,12 +72,12 @@ final class BoardStagesFactsTests: XCTestCase {
         _ rows: [ProjectBoard.Row], tasks: [String] = ["task"], reading: BoardStages.TaskReading? = nil,
         readings: [String: BoardStages.TaskReading] = [:], parents: [String: String] = [:], required: [String] = [],
         queue: ProjectBoard.QueueState? = nil, merged: [ProjectBoard.PullRequest] = [], heads: [String: String] = [:],
-        readsPullRequests: Bool = true, baseBranch: String? = "main"
+        readsPullRequests: Bool = true, baseBranch: String? = "main", cleaningUp: Set<String> = []
     ) -> BoardStages.SectionFacts {
         BoardStages.sectionFacts(
             BoardStages.RepositoryReading(
                 id: "widgets", rows: rows, readsPullRequests: readsPullRequests, requiredChecks: required, baseBranch: baseBranch,
-                queue: queue, merged: merged, heads: heads
+                queue: queue, merged: merged, heads: heads, cleaningUp: cleaningUp
             ),
             tasks: tasks, readings: reading.map { ["task": $0] } ?? readings, parents: parents
         )
@@ -115,7 +115,8 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(section.lines.map(\.queue.order), [nil, nil, nil, nil, nil, 2, 1],
                        "a pull request without a task has its place in the queue too")
         XCTAssertEqual(section.parents, ["second": "first"], "a sub-task under its task, when both are lines here")
-        XCTAssertEqual(section.lines.first, BoardStages.Facts(id: "first", title: "First", location: ["feat/b", "/p/widgets.b"]),
+        let first = BoardStages.Folder(path: "/p/widgets.b", title: "feat/b", canCleanUp: true)
+        XCTAssertEqual(section.lines.first, BoardStages.Facts(id: "first", title: "First", location: ["feat/b", "/p/widgets.b"], folder: first),
                        "one the sidebar hasn't read yet is at rest")
         XCTAssertEqual(section.lines.dropFirst().map(\.location), [
             ["main checkout", "main", "/p/widgets"], ["feat/a", "/p/widgets.x"], ["feat/a", "/p/widgets.x"],
@@ -138,6 +139,7 @@ final class BoardStagesFactsTests: XCTestCase {
         reading.lastActivityAt = 400
         reading.flakyReason = "ImportTests timed out"
         var expected = BoardStages.Facts(id: "task", title: "Task", location: ["feat/x", "/p/widgets.x"])
+        expected.folder = BoardStages.Folder(path: "/p/widgets.x", title: "feat/x", canCleanUp: true)
         expected.activity = .needsYou("a question")
         expected.reviews = reading.reviews
         expected.reviewsInFlight = [.premortem]
@@ -184,6 +186,43 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(facts([row(workspaces: ["task"])], readsPullRequests: false).lines.map(\.hasRepository), [false])
         let folder = row(nil, workspaces: ["notes"], group: .otherRepository, path: nil, folder: "/Users/me/Nirux Tasks/Notes")
         XCTAssertEqual(facts([row(workspaces: ["task"]), folder], tasks: ["task", "notes"]).lines.map(\.hasRepository), [true, false])
+    }
+
+    func testALineSaysWhereItsWorkIsOnDiskAndHowItsAgentGoesOn() {
+        let stopped = BoardStages.Resume(kind: .afterError, column: UUID(), failedAt: 700, blocked: "Resuming…")
+        var reading = BoardStages.TaskReading(activity: .failed("Stopped on an API error"))
+        reading.resume = stopped
+        let rows = [
+            row(workspaces: ["task"]),
+            row("main", workspaces: ["lead"], group: .main, path: "/p/widgets"),
+            row(nil, workspaces: ["notes"], group: .otherRepository, path: nil, folder: "/Users/me/Nirux Tasks/Notes"),
+            row("cloud", pullRequest: pullRequest(14, "cloud"), path: nil),
+            row("bot", pullRequest: pullRequest(15, "bot"), path: "/p/widgets.bot"),
+            row("main", pullRequest: pullRequest(16, "main"), group: .main, path: "/p/copy"),
+            row("shared", workspaces: ["lead2"], pullRequest: pullRequest(17, "shared"), path: "/p/widgets.shared")
+        ]
+        let section = facts(rows, tasks: ["task", "lead", "notes"], readings: ["task": reading, "notes": reading], cleaningUp: ["/p/widgets.bot"])
+        XCTAssertEqual(section.lines.map(\.id), ["task", "lead", "notes", "widgets#14", "widgets#15", "widgets#16", "widgets#17"])
+        XCTAssertEqual(section.lines.map(\.folder), [
+            BoardStages.Folder(path: "/p/widgets.x", title: "feat/x", canCleanUp: true),
+            BoardStages.Folder(path: "/p/widgets", title: "main"),
+            BoardStages.Folder(path: "/Users/me/Nirux Tasks/Notes", title: "Notes"),
+            nil,
+            BoardStages.Folder(path: "/p/widgets.bot", title: "bot", canCleanUp: true, canOpen: true, isCleaningUp: true),
+            BoardStages.Folder(path: "/p/copy", title: "main", canOpen: true),
+            BoardStages.Folder(path: "/p/widgets.shared", title: "shared", canCleanUp: true)
+        ], "as the table's buttons: Clean Up where a row can be cleaned up, Open where no workspace is open (the Lead's is one); "
+            + "a clean-up that runs, by path")
+        XCTAssertEqual(section.lines.map(\.resume), [stopped, nil, stopped, nil, nil, nil, nil], "as the sidebar offers it, repository or not")
+        var gone = row(nil, workspaces: ["task"], group: .otherRepository, path: nil, folder: "/Users/me/old")
+        gone.folderIsGone = true
+        XCTAssertEqual(facts([gone]).lines.map(\.folder?.canCleanUp), [true], "a folder gone: Clean Up closes its workspaces")
+        // A merged task's clean-up runs, as its path says: its line says so, and so would "Merged today".
+        let merged = [row(workspaces: ["task"], pullRequest: pullRequest(9, state: "MERGED"))]
+        XCTAssertEqual(facts(merged).lines.map(\.cleanUp), [.offered])
+        XCTAssertEqual(facts(merged, cleaningUp: ["/p/widgets.x"]).lines.map(\.cleanUp), [.running])
+        XCTAssertEqual(facts(merged, cleaningUp: ["/p/widgets.other"]).lines.map(\.cleanUp), [.offered])
+        XCTAssertEqual(facts([row(workspaces: ["task"])], cleaningUp: ["/p/widgets.x"]).lines.map(\.cleanUp), [nil], "nothing merged to say")
     }
 
     // MARK: - Pull request

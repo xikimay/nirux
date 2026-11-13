@@ -51,9 +51,13 @@ final class BoardStagesView: NSView {
     /// A line's Merge station was clicked where that changes the queue's
     /// list: its section's id, and what the click does.
     var onOffer: ((_ section: String, BoardStages.QueueOffer) -> Void)?
-    /// The link ending a line's phrase was clicked: its section's id, the
-    /// line's, and the link.
+    /// The link ending a line's phrase was clicked, or "Clean up" on a
+    /// "Merged today" entry: its section's id, its task's line's (which
+    /// an entry's has left the list by then), and the link.
     var onLink: ((_ section: String, _ line: String, BoardStages.Link) -> Void)?
+    /// An item of a line's menu was chosen: its section's id, the line's,
+    /// and the item.
+    var onMenu: ((_ section: String, _ line: String, BoardStages.MenuItem) -> Void)?
 
     /// Where the pointer is, in the window; nil where the Board doesn't
     /// hear it move: off screen, or in an app that isn't active, whose
@@ -64,6 +68,23 @@ final class BoardStagesView: NSView {
     }
     /// The line whose Merge station the pointer is on, where a click acts.
     private weak var hoveredLine: BoardStagesLineView?
+    /// The pointer is over the Board: nothing on it moves.
+    private(set) var isPointerInside = false
+    /// The sections as drawn: the content's, or, while the pointer is
+    /// over the Board, its lines where they were (`holding`).
+    private var shownSections: [Section] = []
+    /// Lines drawn where they were though the content has them no more:
+    /// inert until the pointer leaves.
+    private(set) var departed: Set<String> = []
+    /// The order the switch asked for: the user's own click applies at once.
+    private var askedOrder: BoardStages.Order?
+    /// What is drawn is held for the pointer, not the content as it is.
+    private var isHolding: Bool { shownSections != content?.sections || !departed.isEmpty }
+    /// Settles the Board once the pointer left, after the event that said
+    /// so. (The tests run it at once.)
+    var settleLater: (@escaping @MainActor () -> Void) -> Void = { work in
+        DispatchQueue.main.async { MainActor.assumeIsolated(work) }
+    }
     private var pointerArea: NSTrackingArea?
 
     private(set) var content: Content?
@@ -189,9 +210,70 @@ final class BoardStagesView: NSView {
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
-        if content.sections != previous?.sections { buildItems() }
+        if content.sections != previous?.sections || content.order != previous?.order {
+            // Nothing moves under the pointer: what changed is drawn where it
+            // was, and settles once the pointer leaves. An order the switch
+            // asked for is the user's own click: it applies at once.
+            isPointerInside = pointerIsOver(pointerLocation())
+            // The order the switch asked for, now shown; a request is good for this change only.
+            let isAsked = askedOrder == content.order && content.order != previous?.order
+            askedOrder = nil
+            if isPointerInside, !isAsked, previous != nil {
+                (shownSections, departed) = Self.holding(shownSections, in: content.sections)
+            } else {
+                (shownSections, departed) = (content.sections, [])
+            }
+            buildItems()
+        }
         showTimes()
         layoutContent()
+    }
+
+    /// `sections` drawn as `shown` were: each line shown keeps its place,
+    /// in its new state, or stays there, departed, when the content has it
+    /// no more, its repository's included; what comes waits: a line, a
+    /// repository, a merge. "Merged today" keeps its entries, in their
+    /// order, in their new state.
+    nonisolated static func holding(_ shown: [Section], in sections: [Section]) -> (sections: [Section], departed: Set<String>) {
+        var lines: [String: BoardStages.Line] = [:]
+        for section in sections {
+            for line in (section.lines.units + section.lines.withoutTask).flatMap(\.lines) where lines[line.id] == nil {
+                lines[line.id] = line
+            }
+        }
+        var departed = Set<String>()
+        func held(_ line: BoardStages.Line) -> BoardStages.Line {
+            if let now = lines[line.id] { return now }
+            departed.insert(line.id)
+            return line
+        }
+        func held(_ unit: BoardStages.Unit) -> BoardStages.Unit {
+            switch unit {
+            case .task(let task, let subtasks): return .task(held(task), subtasks: subtasks.map(held))
+            case .stack(let title, let stacked): return .stack(title: title, stacked.map(held))
+            }
+        }
+        let current = Dictionary(sections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let result: [Section] = shown.map { section in
+            var section = current[section.id].map { now in
+                var kept = now
+                kept.lines.units = section.lines.units
+                kept.lines.withoutTask = section.lines.withoutTask
+                kept.lines.merged = keepingOrder(of: section.lines.merged, in: now.lines.merged)
+                return kept
+            } ?? section
+            section.lines.units = section.lines.units.map(held)
+            section.lines.withoutTask = section.lines.withoutTask.map(held)
+            return section
+        }
+        return (result, departed)
+    }
+
+    /// The entries of `shown` still in `merged`, in their order and their
+    /// new state.
+    private nonisolated static func keepingOrder(of shown: [BoardStages.Merged], in merged: [BoardStages.Merged]) -> [BoardStages.Merged] {
+        let byNumber = Dictionary(merged.map { ($0.number, $0) }, uniquingKeysWith: { first, _ in first })
+        return shown.compactMap { byNumber[$0.number] }
     }
 
     private func showTimes() {
@@ -204,7 +286,7 @@ final class BoardStagesView: NSView {
     /// id, a repository's header, fold and "Merged today" by its section's,
     /// a stack's title by its place.
     private func buildItems() {
-        let sections = content?.sections ?? []
+        let sections = shownSections
         let ids = Set(sections.map(\.id))
         unfolded.formIntersection(ids)
         unfoldedMerged.formIntersection(ids)
@@ -243,6 +325,11 @@ final class BoardStagesView: NSView {
                 guard let self, let view else { return }
                 self.onLink?(section, view.line.id, link)
             }
+            view.onMenu = { [weak self, weak view] item in
+                guard let self, let view else { return }
+                self.onMenu?(section, view.line.id, item)
+            }
+            view.isDeparted = departed.contains(line.id)
             lineViews.append(view)
             items.append(.line(view))
         }
@@ -288,8 +375,9 @@ final class BoardStagesView: NSView {
             }
             if !section.lines.merged.isEmpty {
                 let merged = keptMerged.removeValue(forKey: id) ?? BoardStagesMergedView()
-                merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id))
+                merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id), keepsOrder: isHolding)
                 merged.onOpen = { [weak self] line in self?.onOpen?(line) }
+                merged.onCleanUp = { [weak self] line in self?.onLink?(id, line, .cleanUp) }
                 merged.onUnfold = { [weak self] in self?.unfoldMerged(section: id) }
                 mergedViews[id] = merged
                 items.append(.merged(merged))
@@ -589,10 +677,21 @@ final class BoardStagesView: NSView {
         refreshHover()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshHover()
+    }
+
     /// The pointer is at `location` in the window, or nowhere the Board
     /// hears: the one Merge station under it is lit, among the lines in
     /// sight.
     func hover(at location: NSPoint?) {
+        let inside = pointerIsOver(location)
+        if inside != isPointerInside {
+            isPointerInside = inside
+            // The pointer left: the Board settles, once the event that said so is over.
+            if !inside { settleLater { [weak self] in self?.settle() } }
+        }
         var line: BoardStagesLineView?
         if let location, scrollView.frame.contains(convert(location, from: nil)) {
             line = lineViews.first { $0.actsOnStation(at: $0.convert(location, from: nil)) }
@@ -601,6 +700,18 @@ final class BoardStagesView: NSView {
         hoveredLine?.isStationHovered = false
         line?.isStationHovered = true
         hoveredLine = line
+    }
+
+    /// The pointer is over the part of the Board that shows (none, hidden).
+    private func pointerIsOver(_ location: NSPoint?) -> Bool {
+        location.map { rectInSight.contains(convert($0, from: nil)) } ?? false
+    }
+
+    /// What changed while the pointer was over the Board takes its place.
+    private func settle() {
+        guard !isPointerInside, let sections = content?.sections, sections != shownSections || !departed.isEmpty else { return }
+        (shownSections, departed) = (sections, [])
+        rebuild()
     }
 
     /// The hover, from where the pointer is now; none on a Board that
@@ -622,6 +733,7 @@ final class BoardStagesView: NSView {
         // The switch shows the content's order: it moves once the owner
         // shows the order asked.
         orderSwitch.selectedSegment = content?.order == .progress ? 1 : 0
+        askedOrder = asked
         onOrder?(asked)
     }
 

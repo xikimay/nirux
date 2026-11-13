@@ -50,6 +50,12 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     var onClick: (() -> Void)?
     var onOffer: ((BoardStages.QueueOffer) -> Void)?
     var onLink: ((BoardStages.Link) -> Void)?
+    /// An item of its menu was chosen, while the line still offered it.
+    var onMenu: ((BoardStages.MenuItem) -> Void)?
+    /// Shows a menu where VoiceOver asked for it. (The tests give their own.)
+    var popUp: (NSMenu, NSPoint, NSView) -> Void = { menu, location, view in
+        menu.popUp(positioning: nil, at: location, in: view)
+    }
     /// The mouse moved with its button down, or came up, at this place in
     /// the window: no other event says where the pointer is meanwhile.
     var onPointer: ((NSPoint) -> Void)?
@@ -61,9 +67,10 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         didSet { if isStationHovered != oldValue { needsDisplay = true } }
     }
     /// What the words and the stations say under the pointer, by where.
-    private(set) var hints: [(rect: NSRect, text: String)] = []
-    /// The places registered as tooltips', each with AppKit's tag for it.
-    private var toolTips: [(rect: NSRect, tag: NSView.ToolTipTag)] = []
+    private var toolTips = BoardStagesToolTips()
+    var hints: [(rect: NSRect, text: String)] { toolTips.places }
+    /// Where a hand was last given to AppKit.
+    private var registeredHandRects: [NSRect] = []
 
     private typealias Metrics = BoardStagesView.Metrics
 
@@ -121,12 +128,29 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         setAccessibilityHelp(line.offer?.blocked)
     }
 
-    /// The link drawn apart: the phrase's, when the phrase ends with it.
-    private var shownLink: BoardStages.Link? { line.phrase.wordsBeforeLink == nil ? nil : line.phrase.link }
+    /// The link drawn apart: the phrase's, when the phrase ends with it,
+    /// on a line still on the Board.
+    private var shownLink: BoardStages.Link? { line.phrase.wordsBeforeLink == nil || isDeparted ? nil : line.phrase.link }
 
     /// What a click on the Merge station does; nil where it does nothing
     /// more than anywhere on the line.
-    private var actingOffer: BoardStages.QueueOffer? { line.offer.flatMap { $0.blocked == nil ? $0 : nil } }
+    private var actingOffer: BoardStages.QueueOffer? {
+        isDeparted ? nil : line.offer.flatMap { $0.blocked == nil ? $0 : nil }
+    }
+
+    /// The Board no longer has this line: it stays where it was, faded and
+    /// inert, while the pointer is over the Board.
+    var isDeparted = false {
+        didSet {
+            guard isDeparted != oldValue else { return }
+            alphaValue = isDeparted ? 0.4 : 1
+            setAccessibilityElement(!isDeparted)
+            // Its link, its hand and its tooltips go with it.
+            apply()
+            needsLayout = true
+            needsDisplay = true
+        }
+    }
 
     /// "12 min", counted to `now`; nothing for a line without a clock.
     func showTime(now: TimeInterval) {
@@ -200,7 +224,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             label.frame = NSRect(x: frame?.minX ?? 0, y: 10, width: frame?.width ?? 0, height: 15)
         }
         layoutHints(stations: columns.stations)
-        window?.invalidateCursorRects(for: self)
+        if handRects != registeredHandRects { window?.invalidateCursorRects(for: self) }
     }
 
     /// Under this, the words before a link aren't worth their place.
@@ -242,11 +266,6 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         return .line
     }
 
-    /// The part of the line in sight: what the views it is in show of
-    /// it. (`visibleRect` alone isn't held to the line's own bounds in a
-    /// window that was never shown.)
-    private var rectInSight: NSRect { bounds.intersection(visibleRect) }
-
     /// Where a hand shows: what a click does something of its own on, as
     /// far as it is in sight (a cursor's place isn't clipped by what
     /// scrolls the line).
@@ -263,10 +282,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// column the Board has no room for has no width: the pointer is
     /// never on it.)
     private func layoutHints(stations: [CGFloat]) {
-        hints = []
+        var hints: [(rect: NSRect, text: String)] = []
         func add(_ rect: NSRect?, _ parts: [String?]) {
-            let text = parts.compactMap { $0 }.joined(separator: "\n")
-            if let rect, rect.width > 0, !text.isEmpty { hints.append((rect, text)) }
+            if let rect { hints.append((rect, parts.compactMap { $0 }.joined(separator: "\n"))) }
         }
         func whole(_ label: NSTextField, _ text: String) -> String? {
             ColumnHeaderView.textWidth(label) > label.frame.width ? text : nil
@@ -285,16 +303,12 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
                 add(stationRect(at: x), [line.tooltips.stations[station]])
             }
         }
-        // Their words are asked for when shown: a place that stays keeps
-        // its registration, so a tooltip being read stays up.
-        let rects = hints.map(\.rect)
-        for gone in toolTips where !rects.contains(gone.rect) { removeToolTip(gone.tag) }
-        toolTips = rects.map { rect in toolTips.first { $0.rect == rect } ?? (rect, addToolTip(rect, owner: self, userData: nil)) }
+        toolTips.show(hints, on: self)
     }
 
     /// What the pointer shows at `point`, if anything.
     func toolTipText(at point: NSPoint) -> String? {
-        hints.first { $0.rect.contains(point) }?.text
+        toolTips.text(at: point)
     }
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
@@ -459,9 +473,10 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     // MARK: Clicks
 
-    /// The line takes the mouse for all it holds: its words don't.
+    /// The line takes the mouse for all it holds: its words don't. A
+    /// departed one takes none.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
+        isDeparted || super.hitTest(point) == nil ? nil : self
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -488,7 +503,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             onPointer?(event.locationInWindow)
         }
         let point = convert(event.locationInWindow, from: nil)
-        guard let pressed, rectInSight.contains(point), target(at: point) == pressed else { return }
+        guard let pressed, !isDeparted, rectInSight.contains(point), target(at: point) == pressed else { return }
         switch pressed {
         case .line: onClick?()
         case .offer(let offer): onOffer?(offer)
@@ -497,6 +512,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     }
 
     override func accessibilityPerformPress() -> Bool {
+        guard !isDeparted else { return false }
         onClick?()
         return true
     }
@@ -522,9 +538,80 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         return actions.isEmpty ? nil : actions
     }
 
+    // MARK: The menu
+
+    /// The line's menu, as its model gives it, whatever its phrase says:
+    /// an item that does nothing for now is there, disabled, and says why
+    /// under the pointer. Nil where it offers nothing.
+    override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
+
+    func contextMenu() -> NSMenu? {
+        guard !line.menu.isEmpty, !isDeparted else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for item in line.menu {
+            let menuItem = NSMenuItem(title: item.title, action: #selector(menuItemChosen(_:)), keyEquivalent: "")
+            menuItem.target = self
+            // Each item says what it is: menus shown since don't change it.
+            menuItem.representedObject = item
+            menuItem.isEnabled = item.blocked == nil
+            menuItem.toolTip = item.blocked
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    /// Chosen in a menu shown before the line changed: it acts only as
+    /// the line, still on the Board, still offers it, the same and acting.
+    @objc private func menuItemChosen(_ sender: NSMenuItem) {
+        guard let item = sender.representedObject as? BoardStages.MenuItem, item.blocked == nil, window != nil, !isDeparted,
+              line.menu.contains(item) else { return }
+        onMenu?(item)
+    }
+
+    /// VoiceOver's "show menu": the same menu, under the line's title.
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let menu = contextMenu() else { return false }
+        popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
+        return true
+    }
+
     // MARK: Under the pointer
 
     override func resetCursorRects() {
-        for rect in handRects { addCursorRect(rect, cursor: .pointingHand) }
+        registeredHandRects = handRects
+        for rect in registeredHandRects { addCursorRect(rect, cursor: .pointingHand) }
     }
+}
+
+/// What a view says under the pointer, by place. Its words are asked for
+/// when shown, and a place that stays keeps its registration with AppKit:
+/// a tooltip being read stays up while its words change, or another place
+/// comes, goes or moves.
+@MainActor
+struct BoardStagesToolTips {
+    private(set) var places: [(rect: NSRect, text: String)] = []
+    private var registered: [(rect: NSRect, tag: NSView.ToolTipTag)] = []
+
+    /// The places `view` answers for from now on: those with some width,
+    /// and something to say.
+    mutating func show(_ places: [(rect: NSRect, text: String)], on view: NSView & NSViewToolTipOwner) {
+        self.places = places.filter { $0.rect.width > 0 && !$0.text.isEmpty }
+        let rects = self.places.map(\.rect)
+        for gone in registered where !rects.contains(gone.rect) { view.removeToolTip(gone.tag) }
+        registered = rects.map { rect in
+            registered.first { $0.rect == rect } ?? (rect, view.addToolTip(rect, owner: view, userData: nil))
+        }
+    }
+
+    func text(at point: NSPoint) -> String? {
+        places.first { $0.rect.contains(point) }?.text
+    }
+}
+
+extension NSView {
+    /// The part of the view in sight: what the views it is in show of it.
+    /// (`visibleRect` alone isn't held to the view's own bounds in a
+    /// window that was never shown.)
+    var rectInSight: NSRect { bounds.intersection(visibleRect) }
 }

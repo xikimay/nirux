@@ -156,6 +156,32 @@ Two orders, one setting for the app:
   nothing is left to follow for: a pull request merged and through the queue,
   then an archived task.
 
+**Nothing moves under the pointer** (the Lead's rule, 2026-11-13). While the
+pointer is over the Board, header included, what it shows keeps its place,
+whatever the content brings (a click on a Merge station sends a line up By
+progress; a pull request lands and leaves the list; a turn, a check, the
+sidebar move others):
+
+- a line still there stays where it was, in its new state;
+- a line gone stays there too, faded and inert (no click, a press already
+  under way included, no station, no link, no hand, no menu, nothing for
+  VoiceOver), so that nothing below it moves up; a repository gone leaves its
+  lines so;
+- what comes waits: a line, a sub-task, a repository, a merge; "Merged
+  today" keeps its entries in their order, in their new state, amber
+  included (amber comes first again once the Board settles).
+
+![By progress, the pointer on "Catch-up card fixes" while its checks pass, a task closes and another starts: the line keeps its place in its new state, the closed task stays faded, the new one waits](../images/board-stages-held.png)
+
+Once the pointer leaves the Board, or the Board hides, or the app isn't the
+active one any more (its windows don't hear the pointer leave), it settles,
+once the event that said so is over. The order switch is the user's own
+click: what it asks applies at once, for the change that brings it only; an
+order that changes otherwise (another Board's switch) is held. Left for the
+Lead: a pointer resting on the Board while the user types elsewhere holds it as
+long, new tasks waiting; and the Board knows the pointer by where it is, not by
+what covers it (a window over it).
+
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its
 "Clean up" while its worktree is there, and amber while an agent of its task
@@ -203,11 +229,18 @@ clicked. The sizes are the mockup's.
   under a line that counts them.
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
-  (amber while its task needs the user), its title, then its number and time;
-  the title is what gives way. One whose task is still open opens it. Those
-  whose task needs the user come first, so amber is never behind the button;
-  were there more of them than two rows hold, the button says so, in amber
-  ("+12 more · 3 need you").
+  (amber while its task needs the user), its title, then its number and time,
+  and "· Clean up" while its task's worktree is there ("· cleaning up…"
+  while one runs, in the same room: the entries after it don't move under
+  the pointer). The title gives way first, down to 40 pt, then the link goes
+  whole; the number and the time last. A title that is cut is whole under
+  the pointer anywhere on the entry but on "Clean up". When a clean-up
+  ends, its words go and the entries after it close up. One whose task is
+  still open opens it. Those whose task needs the user come first (but while
+  the pointer is over the Board: section 4), so amber is never behind the
+  button; were there more of
+  them than two rows hold, the button says so, in amber ("+12 more · 3 need
+  you").
 - **It follows its content without building itself again.** A refresh that
   only moves the clock touches the times that changed. A change of lines
   updates them where they are: what is still listed keeps its view (a line,
@@ -336,14 +369,17 @@ to the queue yet.
     lights the one station under it; none while the Board is hidden, nor
     while the app isn't the active one, whose windows don't hear the
     pointer leave.
-- **Retarget** is the Board's own call to GitHub, not the queue's: a queue
-  that runs, or that holds the pull request, changes nothing to it.
+- **Retarget** bases a pull request on its merged base's base, on GitHub.
   - In a repository that isn't saved, the phrase reads "Base #52 merged",
-    without what nothing here can do.
-  - In a build that can't change GitHub (a dry run), the words stay, as what
-    to do, and are no link: the phrase's tooltip says why.
+    without what nothing here can do; so does one the queue's list holds, or
+    the queue works on: it leaves the list first, by its Merge station.
+  - While the list is locked (a queue runs, here or in another Nirux, or the
+    Start sheet is open), it waits as adding and removing do; in a build that
+    can't change GitHub (a dry run), it does nothing. Either way the words
+    stay, as what to do, and are no link: the phrase's tooltip says why, as
+    the menu's item does.
   - The link is the phrase's. A line that says something more pressing (a red
-    check, an agent at work) has none: Retarget will be in its menu.
+    check, an agent at work) has none: Retarget is in its menu.
 - **A link says what its click does** under the pointer: "Bases #53 on main,
   as GitHub does when a merged branch is deleted"; "Checks the worktree, then
   asks what goes". It is drawn apart, in the accent colour, right after the
@@ -378,12 +414,49 @@ to the queue yet.
   and each station over 22 pt around it. A place that stays keeps its
   registration: a tooltip being read stays up while its words change, or
   another place comes or goes.
+- **"Merged today"** offers the same link on an entry: "Clean up" is a
+  target of its own, the entry's height, with its hint, its hand and its
+  VoiceOver action; the rest of the entry opens the task. An entry that went
+  behind "+12 more", or left the list, between a press and its release opens
+  nothing, nor do VoiceOver's press and action. Where the entries go (beside
+  the caption or under it) doesn't depend on their links: a clean-up that
+  ends moves nothing below. On a Board too narrow for a link beside the
+  caption, the entry shows none. `onLink` then names the entry's task's
+  line, which has left the list by then.
+- **The line's menu** (a right click, or VoiceOver's "show menu") offers
+  what its phrase may not say, in this order, each item carrying what acting
+  needs (`MenuItem`):
+  - Open Pull Request, for an address of github.com only (whoever posted the
+    pull request can't send a click elsewhere);
+  - Add to or Remove from Queue, as the Merge station;
+  - Retarget to main, while the pull request is outside the queue's list
+    and the queue doesn't work on it;
+  - Resume, as the sidebar offers it for a stopped agent of the task, whatever
+    another agent of it does: its column, and after an error the failed turn
+    it answers, so that only that one is resumed (without it, Resume does
+    nothing);
+  - Clean Up… of the line's worktree, or of a folder already gone, as the
+    table offers it, with its path;
+  - Open, a shell where no workspace is open in the worktree (the main
+    checkout included), with its path and its branch for a title.
+
+  What does nothing for now is there, disabled, and says why under the
+  pointer: refused or locked, a dry run, a Resume the sidebar holds back
+  ("Resuming…"), a clean-up of that worktree that runs (known by its path,
+  for every line in it; the phrase and "Merged today" then say "cleaning
+  up…", with no link). A menu shown before the line changed acts only as
+  the line, still on the Board, still offers; each of its items stays what
+  it was. A worktree no line holds (a merged task closed since) gets its
+  menu with "Other worktrees" (2b-4). `BoardStagesView.onMenu` has no owner
+  yet.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
   refuses, the line's help says why.
 - **A hand** shows where a click does something of its own: on a station
-  that acts, on a link, as far as the line is in sight.
+  that acts, on a link, as far as the line is in sight. A line or an entry
+  asks AppKit for its places again whenever they are no longer those it
+  gave.
 
 ## Known limits
 
