@@ -25,7 +25,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     # A serial run took 13 minutes: a hung test fails the job instead of
     # holding the runner for GitHub's six hours.
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
         with:
@@ -56,3 +56,26 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the flake gate of the reworked LeadToolsFlowTests,
+      # several at once next to heavy classes, then the reverts the tests
+      # must catch (ZZMutant.swift).
+      - name: Repeat LeadToolsFlowTests
+        if: always()
+        run: scripts/repeat-class.sh NiruxTests.LeadToolsFlowTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.ProjectBoardFlowTests
+
+      - name: Reverts the task tools' flows catch
+        if: always()
+        run: scripts/mutants-class.sh NiruxTests.LeadToolsFlowTests/testATaskStartsFollowsAndAnswersItsSubtasks,NiruxTests.LeadToolsFlowTests/testATasksProposedSubtaskWaitsForTheUser,NiruxTests.LeadToolsFlowTests/testAFolderTasksSubtaskGoesInItsFolder carried-ignores-task shell-no-task-variables prompt-cli-wording opens-in-front not-persisted no-task-routing lead-tools-open-to-tasks completed-counts no-two-levels no-pending-count no-cap folder-in-tasks-folder reply-any-parent mission-needs-handoffs user-started-counts-as-agent panel-checkbox-stays-hidden panel-ignores-agent
+
+      - name: Reverts MissionTests catches
+        if: always()
+        run: scripts/mutants-class.sh NiruxTests.MissionTests carried-ignores-task cli-gate-lead-only
+
+      - name: Reverts LeadChannelTests catches
+        if: always()
+        run: scripts/mutants-class.sh NiruxTests.LeadChannelTests server-no-task-tools
+
+      - name: Reverts NiruxMCPServerTests catches
+        if: always()
+        run: scripts/mutants-class.sh NiruxTests.NiruxMCPServerTests server-no-task-instructions

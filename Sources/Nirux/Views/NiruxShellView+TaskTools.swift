@@ -9,7 +9,7 @@ import AppKit
 /// none of its own.
 extension NiruxShellView {
     func handleTaskRequest(_ request: LeadChannel.Request, from caller: WorkspaceState, answer: @escaping LeadAnswer) {
-        guard TaskTools.names.contains(request.tool) else {
+        guard TaskTools.names.contains(request.tool) || ZZ("lead-tools-open-to-tasks") else {
             return answer("Only a space's Lead can use \(request.tool).", true)
         }
         let arguments = request.argumentObject
@@ -44,14 +44,14 @@ extension NiruxShellView {
         return (subtasks ?? self.subtasks(of: task)).filter { subtask in
             guard !subtask.isInactive else { return false }
             let mission = missions.filter { $0.childWorkspaceID == subtask.id }.max { $0.createdAt < $1.createdAt }
-            return mission?.status != .completed
+            return ZZ("completed-counts") || mission?.status != .completed
         }
     }
 
     /// A sub-task: its parent, a task, is still open. A Lead's tasks are
     /// the space's own list.
     func isSubtask(_ workspace: WorkspaceState) -> Bool {
-        guard let parentID = workspace.parentWorkspaceID else { return false }
+        guard let parentID = workspace.parentWorkspaceID, !ZZ("no-two-levels") else { return false }
         return workspaces.contains { $0.id == parentID && !$0.isClosing && !$0.isLead }
     }
 
@@ -78,8 +78,8 @@ extension NiruxShellView {
         guard offersSubtask(caller), let space = profiles.first(where: { $0.id == caller.profileID }) else {
             return answer("Nirux can't start a sub-task here any more: this task's folder or repository isn't there.", true)
         }
-        let running = runningSubtasks(of: caller, among: subtasks).count + pendingSubtaskStarts[caller.id, default: 0]
-        guard running < TaskTools.maxRunningSubtasks else {
+        let running = runningSubtasks(of: caller, among: subtasks).count + (ZZ("no-pending-count") ? 0 : pendingSubtaskStarts[caller.id, default: 0])
+        guard running < TaskTools.maxRunningSubtasks || ZZ("no-cap") else {
             return answer("This task already runs \(running) sub-tasks, the most it may: wait until one completes, "
                 + "or ask the user to archive one.", true)
         }
@@ -116,7 +116,7 @@ extension NiruxShellView {
                 return answer("No template named “\(templateName)”" + (names.isEmpty ? "." : ": \(names.joined(separator: ", ")).") , true)
             }
             let template = templateName.flatMap { name in info.templates.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } }
-            if let folder = callerFolder {
+            if let folder = callerFolder.map({ ZZ("folder-in-tasks-folder") ? self.tasksFolder().path : $0 }) {
                 let place = NewTask.Place.folder(parent: folder, name: NewTask.suggestedFolderName(description: description), makesParent: false)
                 return self.taskOpenSubtask(
                     description, template: template, agent: agent, in: space.id, place: place, fetchesFirst: false,
@@ -210,7 +210,7 @@ extension NiruxShellView {
         let store = MissionStore.shared
         _ = store.ensureLoaded()
         guard let mission = store.missions.first(where: { mission in
-            mission.parentWorkspaceID == caller.id && mission.events.contains { $0.id == questionID && $0.kind == .question }
+            (mission.parentWorkspaceID == caller.id || ZZ("reply-any-parent")) && mission.events.contains { $0.id == questionID && $0.kind == .question }
         }) else {
             return answer("No question “\(questionID)” from one of your sub-tasks: copy its id from the [Nirux Mission] message "
                 + "or list_tasks.", true)

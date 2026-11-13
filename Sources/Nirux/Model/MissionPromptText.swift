@@ -22,7 +22,7 @@ enum MissionPromptText {
             return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"
                 + "Answer with the reply tool, question \(event.id); if neither the brief, the code nor the user's "
                 + "words settle it, don't guess: hand it to the user with ask_user."
-        case .question where delivery.mission.reportsToTask == true:
+        case .question where delivery.mission.reportsToTask == true && !ZZ("prompt-cli-wording"):
             // A task's agent that started it with start_task answers with
             // its tools too (see TaskTools).
             return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"

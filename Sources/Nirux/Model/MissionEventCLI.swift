@@ -95,6 +95,7 @@ enum MissionEventCLI {
         guard let missionID = environment["NIRUX_MISSION_ID"] else { return false }
         var ledger = MissionLedgerReader(url: missionsURL)
         ledger.refresh()
+        if ZZ("cli-gate-lead-only") { return ledger.missions.first { $0.id == missionID }?.reportsToLead == true }
         return ledger.missions.first { $0.id == missionID }?.isAlwaysCarried == true
     }
 

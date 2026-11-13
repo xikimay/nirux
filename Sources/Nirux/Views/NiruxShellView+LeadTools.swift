@@ -12,7 +12,7 @@ extension NiruxShellView {
     typealias LeadAnswer = @MainActor (_ text: String, _ isError: Bool) -> Void
 
     func handleLeadRequest(_ request: LeadChannel.Request, answer: @escaping LeadAnswer) {
-        if let caller = workspaces.first(where: { $0.id == request.workspaceID && !$0.isLead && !$0.isClosing }),
+        if !ZZ("no-task-routing"), let caller = workspaces.first(where: { $0.id == request.workspaceID && !$0.isLead && !$0.isClosing }),
            caller.columns.contains(where: { $0.agentUUID == request.agentUUID }) {
             return handleTaskRequest(request, from: caller, answer: answer)
         }

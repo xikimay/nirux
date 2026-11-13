@@ -73,7 +73,7 @@ final class WorkspaceState {
     /// whatever the setting, as a Lead's task's do.
     let reportsToTask: Bool
     /// Whether new shells get the Mission variables.
-    var carriesMissions: Bool { missionHandoffsEnabled || isLead || reportsToLead || reportsToTask }
+    var carriesMissions: Bool { missionHandoffsEnabled || isLead || reportsToLead || (reportsToTask && !ZZ("shell-no-task-variables")) }
     /// Opened by a `nirux://` request from outside Nirux (one the user
     /// confirmed, with no launch ID): its shells never get the space's
     /// environment, nor its first agent the setup script (docs/design/projects.md,

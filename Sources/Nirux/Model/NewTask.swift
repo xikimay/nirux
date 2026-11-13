@@ -66,7 +66,7 @@ enum NewTask {
         /// A task's agent started it by itself (`start_task`): it opens
         /// behind what the user is doing, as a Lead's task does.
         var startedByTaskAgent = false
-        var opensInFront: Bool { !startedByLead && !startedByTaskAgent }
+        var opensInFront: Bool { !startedByLead && (!startedByTaskAgent || ZZ("opens-in-front")) }
 
         /// The repository it branches from; nil for a folder.
         var target: Target? {

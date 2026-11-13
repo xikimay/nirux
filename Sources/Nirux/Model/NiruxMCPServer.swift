@@ -67,7 +67,7 @@ enum NiruxMCPServer {
     /// learns how to start a task, with its tools in a Nirux workspace.
     static func instructions(for context: Context) -> String {
         if context.isLead { return leadInstructions + "\n\n" + instructions }
-        return instructions + "\n\n" + (context.isWorkspaceAgent ? taskInstructions : skillInstructions)
+        return instructions + "\n\n" + (context.isWorkspaceAgent && !ZZ("server-no-task-instructions") ? taskInstructions : skillInstructions)
     }
 
     /// `--mcp-config=<this server>` and `--allowedTools=<its tools>` for
@@ -113,13 +113,13 @@ enum NiruxMCPServer {
         /// The tools the app answers for this agent: the Lead's, or a task's.
         var appToolNames: [String] {
             if isLead { return LeadTools.names }
-            return isWorkspaceAgent ? TaskTools.names : []
+            return isWorkspaceAgent && !ZZ("server-no-task-tools") ? TaskTools.names : []
         }
 
         /// Their definitions, for `tools/list`.
         var appToolDefinitions: [[String: Any]] {
             if isLead { return LeadTools.definitions }
-            return isWorkspaceAgent ? TaskTools.definitions : []
+            return isWorkspaceAgent && !ZZ("server-no-task-tools") ? TaskTools.definitions : []
         }
         /// Tests shorten the Lead's calls' wait for the app.
         var leadTimeout: TimeInterval?

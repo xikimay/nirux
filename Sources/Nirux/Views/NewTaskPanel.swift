@@ -137,7 +137,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// "Report to the Lead" shows with a Lead, unless the sub-task a task's
     /// agent proposed is checked: that one reports to the agent.
     private func updateReportCheckbox() {
-        let hidden = lead == nil || (reportsToTaskAgent != nil && subtaskParentID != nil)
+        let hidden = lead == nil || (reportsToTaskAgent != nil && (subtaskParentID != nil || ZZ("panel-checkbox-stays-hidden")))
         reportCheckbox.isHidden = hidden
         reportHint.isHidden = hidden
     }
@@ -589,7 +589,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             place = .folder(parent: parent, name: name, makesParent: makesParentFolder)
         }
         // A task's agent proposed it: it reports there, as a sub-task only.
-        let agentParent = subtaskParentID == nil ? nil : reportsToTaskAgent
+        let agentParent = subtaskParentID == nil || ZZ("panel-ignores-agent") ? nil : reportsToTaskAgent
         var request = NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
             projectID: space.id, place: place, fetchesFirst: !startsWithoutFetch,
