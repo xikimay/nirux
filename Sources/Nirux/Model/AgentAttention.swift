@@ -190,10 +190,14 @@ struct AgentPermissionRequest: Hashable, Sendable {
     /// A question (AskUserQuestion, an MCP elicitation form) rather than an
     /// approval.
     let isQuestion: Bool
-    /// Claude's question dialog: its keys move among its options and answer
-    /// its questions one by one, so a key isn't its answer as it is an
-    /// approval's (`AgentStatusMachine.waitsForKeys`).
-    var waitsPastKeys: Bool { toolName == "AskUserQuestion" }
+    /// Claude's question dialog, or an MCP elicitation form: its keys move
+    /// among its options or fill its fields, so a key isn't its answer as
+    /// it is an approval's (`AgentStatusMachine.waitsForKeys`). A hook
+    /// ends it (its tool's PostToolUse, `elicitation_response`), or an
+    /// Esc or Ctrl-C. Not ExitPlanMode's plan dialog: "Keep planning"
+    /// fires no hook, so its first key stays its answer. Nor a teammate's
+    /// `agent_needs_input`: no hook closes it either.
+    let waitsPastKeys: Bool
     /// A later tool event from the same agent suggests the dialog was
     /// answered (a denial fires no hook). Only the column's status trusts
     /// that; the gate on prompts Nirux types waits for proof.
@@ -210,7 +214,8 @@ struct AgentPermissionRequest: Hashable, Sendable {
         agentID: String?,
         sessionID: String?,
         requestedAt: TimeInterval,
-        isQuestion: Bool? = nil
+        isQuestion: Bool? = nil,
+        waitsPastKeys: Bool? = nil
     ) {
         self.toolName = toolName
         self.summary = summary
@@ -219,6 +224,7 @@ struct AgentPermissionRequest: Hashable, Sendable {
         self.sessionID = sessionID
         self.requestedAt = requestedAt
         self.isQuestion = isQuestion ?? (toolName == "AskUserQuestion")
+        self.waitsPastKeys = waitsPastKeys ?? (toolName == "AskUserQuestion")
     }
 
     var reason: AgentAttentionReason {

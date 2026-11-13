@@ -71,7 +71,8 @@ final class WaitingAgentTests: XCTestCase {
     /// questions one by one: it waits until its answers are sent (its
     /// tool's PostToolUse), or an Esc or Ctrl-C closes it, which fire no
     /// hook. The forms Claude Code reads them in: plain, kitty keyboard
-    /// protocol, xterm's modifyOtherKeys.
+    /// protocol (Caps Lock and Num Lock don't change the key), xterm's
+    /// modifyOtherKeys. None of them is a draft at the prompt.
     func testQuestionDialogWaitsThroughItsKeys() {
         let question = AgentWait(reason: .question(nil), since: t0 + 5)
         func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
@@ -80,20 +81,30 @@ final class WaitingAgentTests: XCTestCase {
             startTurn()
             apply(event(.permissionRequest, at: 5, tool: "AskUserQuestion", key: "q"))
         }
+        let esc = "\u{1B}"
         let cancels = [
-            Data([0x1B]), Data("\u{1B}[27u".utf8), Data("\u{1B}[27;1u".utf8),
-            Data([0x03]), Data("\u{1B}[99;5u".utf8), Data("\u{1B}[27;5;99~".utf8),
+            esc, esc + "[27u", esc + "[27;1u", esc + "[27;65u", esc + "[27;129u", esc + "[27;1:1u",
+            "\u{03}", esc + "[99;5u", esc + "[99;69u", esc + "[99;133u", esc + "[27;5;99~",
         ]
+        // Moving, answering one of its questions, keys like a cancel key's.
+        let moves = [esc + "[B", "2", "\r", "\t", "a", esc + "[99;6u", esc + "[27;3u", esc + "[27;1:3u", esc + "[27;5;98~"]
         for cancel in cancels {
             asks()
-            for keys in ["\u{1B}[B", "2", "\r", "\t", "a"] { machine.noteKeystroke(now: at(6), keys: Data(keys.utf8)) }
-            XCTAssertEqual(wait(at: 8), question, "moving, answering one of its questions")
-            XCTAssertFalse(machine.hasDraft, "keys into the dialog, not the prompt")
+            for keys in moves { machine.noteKeystroke(now: at(6), keys: Data(keys.utf8)) }
+            XCTAssertEqual(wait(at: 8), question, "still asks before \(cancel.debugDescription)")
             // Claude redraws the dialog at each key: no work for that.
             machine.noteRead(now: at(8))
             XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: at(8.5)), .needsAttention)
-            machine.noteKeystroke(now: at(9), keys: cancel)
-            XCTAssertNil(wait(at: 10), "closed by \(Array(cancel))")
+            machine.noteKeystroke(now: at(9), keys: Data(cancel.utf8))
+            XCTAssertNil(wait(at: 10), "closed by \(cancel.debugDescription)")
+            XCTAssertFalse(machine.hasDraft, "keys into the dialog, not the prompt")
+            // Closed: Claude prints the refusal, then sits at its prompt,
+            // where a key is a draft.
+            machine.noteRead(now: at(9.2))
+            XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: at(9.5)), .working)
+            XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: at(30)), .idle)
+            machine.noteKeystroke(now: at(31), keys: Data("x".utf8))
+            XCTAssertTrue(machine.hasDraft)
         }
         // Its answers sent: its tool's end.
         asks()
@@ -101,17 +112,57 @@ final class WaitingAgentTests: XCTestCase {
         apply(event(.postToolUse, at: 7, tool: "AskUserQuestion", key: "q"))
         XCTAssertNil(wait(at: 8))
         // An Esc that a field of it took (its "Type something"): Claude's
-        // reminder brings it back.
+        // reminder brings it back. One that crossed the reminder (the hook
+        // is async) still closed it.
         asks()
         machine.noteKeystroke(now: at(6), keys: Data([0x1B]))
         XCTAssertNil(wait(at: 7))
         apply(event(.notification, at: 12, type: "permission_prompt"))
         XCTAssertEqual(wait(at: 13), question)
+        machine.noteKeystroke(now: at(13.1), keys: Data([0x1B]))
+        apply(event(.notification, at: 13, type: "permission_prompt"))
+        XCTAssertNil(wait(at: 14), "a reminder sent before the Esc")
         // An approval's first key is its answer, as before.
         machine = AgentStatusMachine()
         startTurn()
         apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
-        machine.noteKeystroke(now: at(6), keys: Data("\u{1B}[B".utf8))
+        machine.noteKeystroke(now: at(6), keys: Data((esc + "[B").utf8))
+        XCTAssertNil(wait(at: 7))
+    }
+
+    /// The question dialog in front takes the keys: they don't answer a
+    /// subagent's approval queued behind it, which shows once the
+    /// questions are sent.
+    func testKeysOfAQuestionDialogLeaveTheApprovalBehindIt() {
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        startTurn()
+        apply(event(.permissionRequest, at: 4, tool: "AskUserQuestion", key: "q"))
+        apply(AgentHookEvent(
+            kind: .claude, name: .permissionRequest, sessionID: "lead", detail: "Bash", toolName: "Bash", toolKey: "b",
+            agentID: "sub", timestamp: t0 + 5
+        ))
+        for offset in stride(from: 6.0, through: 20, by: 2) { machine.noteKeystroke(now: at(offset), keys: Data("\r".utf8)) }
+        apply(event(.postToolUse, at: 21, tool: "AskUserQuestion", key: "q"))
+        XCTAssertEqual(wait(at: 22), AgentWait(reason: .permission(tool: "Bash", summary: nil), since: t0 + 5))
+        machine.noteKeystroke(now: at(23), keys: Data("1".utf8))
+        XCTAssertNil(wait(at: 24), "its own first key answers it")
+    }
+
+    /// An MCP server's form takes keys too: its `elicitation_response`
+    /// comes whatever its end. A teammate's "needs your input" gets no
+    /// hook: its first key is its answer.
+    func testAFormWaitsThroughItsKeys() {
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        startTurn()
+        apply(event(.notification, at: 5, type: "elicitation_dialog"))
+        for keys in ["a", "\t", "b"] { machine.noteKeystroke(now: at(6), keys: Data(keys.utf8)) }
+        XCTAssertEqual(wait(at: 7)?.since, t0 + 5)
+        apply(event(.notification, at: 8, type: "elicitation_response"))
+        XCTAssertNil(wait(at: 9))
+        machine = AgentStatusMachine()
+        startTurn()
+        apply(event(.notification, at: 5, type: "agent_needs_input"))
+        machine.noteKeystroke(now: at(6), keys: Data("\r".utf8))
         XCTAssertNil(wait(at: 7))
     }
 
