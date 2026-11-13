@@ -139,6 +139,9 @@ struct AgentStatusMachine {
     /// Epoch seconds of the last keystroke Nirux sent (`PtySession.sendRaw`)
     /// — unlike `lastInteractionAt`, never terminal replies or resizes.
     private(set) var lastKeystrokeAt: TimeInterval = 0
+    /// The last Esc or Ctrl-C Nirux sent: what closes a question dialog
+    /// without a hook (`AgentPermissionRequest.waitsPastKeys`).
+    private(set) var lastCancelKeyAt: TimeInterval = 0
     /// Every keystroke or paste, never reset by Claude's reminders: input
     /// that may have reached a shell an agent just left.
     private(set) var lastInputAt: TimeInterval = 0
@@ -808,6 +811,7 @@ struct AgentStatusMachine {
             // request fires no PermissionRequest). Either way a dialog is
             // on screen and no keystroke answered it.
             lastKeystrokeAt = 0
+            lastCancelKeyAt = 0
             if let open = openDialogs.first {
                 reason = open.reason
             } else if !pendingDialogs.isEmpty {
@@ -833,6 +837,7 @@ struct AgentStatusMachine {
             }
         case "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input":
             lastKeystrokeAt = 0
+            lastCancelKeyAt = 0
             reason = .question(event.detail)
             pendingDialogs.append(AgentPermissionRequest(
                 toolName: nil, summary: event.detail, key: nil,
@@ -971,6 +976,25 @@ struct AgentStatusMachine {
 
     private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
 
+    /// Esc or Ctrl-C, as Claude Code reads them: the plain byte, the kitty
+    /// keyboard protocol's form, or (Ctrl-C) xterm's modifyOtherKeys'.
+    static func isCancelKey(_ keys: Data) -> Bool {
+        cancelKeys.contains(keys)
+    }
+
+    private static let cancelKeys: Set<Data> = [
+        Data([0x1B]), Data("\u{1B}[27u".utf8), Data("\u{1B}[27;1u".utf8),
+        Data([0x03]), Data("\u{1B}[99;5u".utf8), Data("\u{1B}[27;5;99~".utf8),
+    ]
+
+    /// Whether `dialog` waits for a key yet: none reached it since it
+    /// opened. A question dialog's keys move among its options and answer
+    /// its questions one by one: it ends with its tool's PostToolUse, or
+    /// at Esc or Ctrl-C, which fire no hook.
+    func waitsForKeys(_ dialog: AgentPermissionRequest) -> Bool {
+        dialog.requestedAt >= (dialog.waitsPastKeys ? lastCancelKeyAt : lastKeystrokeAt)
+    }
+
     /// Arrows reached the agent without a key pressed (ghostty turns a
     /// wheel scroll into them on the alternate screen): an old prompt may be
     /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
@@ -992,8 +1016,10 @@ struct AgentStatusMachine {
         let time = now.timeIntervalSince1970
         // A key answers a dialog only while none reached it yet: answered, it stays
         // listed until its tool ends (no hook between); later keys reach the prompt.
-        let answersDialog = openDialogs.contains { $0.requestedAt >= lastKeystrokeAt }
+        // A question dialog takes keys until Esc or Ctrl-C (`waitsForKeys`).
+        let answersDialog = openDialogs.contains(where: waitsForKeys)
         lastKeystrokeAt = time
+        if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
         lastInputAt = time
         // A mode switch (Shift-Tab) leaves the prompt as it was; any other
         // key may leave text there, or open a screen no hook tells of (Esc
@@ -1150,7 +1176,7 @@ struct AgentStatusMachine {
     /// answered one while another still waits.
     private func isRunningAnsweredDialog(now: Date) -> Bool {
         let open = openDialogs
-        guard open.count == 1, lastKeystrokeAt > open[0].requestedAt else { return false }
+        guard open.count == 1, !waitsForKeys(open[0]) else { return false }
         return lastReadAt > lastKeystrokeAt
             && now.timeIntervalSince1970 - lastReadAt < Self.activityWindow
     }
@@ -1238,6 +1264,7 @@ struct AgentStatusMachine {
         lastReadAt = 0
         lastInteractionAt = 0
         lastKeystrokeAt = 0
+        lastCancelKeyAt = 0
         hasUserInput = false
         lastForegroundName = nil
         foregroundSince = nil

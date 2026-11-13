@@ -67,6 +67,54 @@ final class WaitingAgentTests: XCTestCase {
         XCTAssertNil(wait(at: 8))
     }
 
+    /// A question dialog's keys move among its options and answer its
+    /// questions one by one: it waits until its answers are sent (its
+    /// tool's PostToolUse), or an Esc or Ctrl-C closes it, which fire no
+    /// hook. The forms Claude Code reads them in: plain, kitty keyboard
+    /// protocol, xterm's modifyOtherKeys.
+    func testQuestionDialogWaitsThroughItsKeys() {
+        let question = AgentWait(reason: .question(nil), since: t0 + 5)
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        func asks() {
+            machine = AgentStatusMachine()
+            startTurn()
+            apply(event(.permissionRequest, at: 5, tool: "AskUserQuestion", key: "q"))
+        }
+        let cancels = [
+            Data([0x1B]), Data("\u{1B}[27u".utf8), Data("\u{1B}[27;1u".utf8),
+            Data([0x03]), Data("\u{1B}[99;5u".utf8), Data("\u{1B}[27;5;99~".utf8),
+        ]
+        for cancel in cancels {
+            asks()
+            for keys in ["\u{1B}[B", "2", "\r", "\t", "a"] { machine.noteKeystroke(now: at(6), keys: Data(keys.utf8)) }
+            XCTAssertEqual(wait(at: 8), question, "moving, answering one of its questions")
+            XCTAssertFalse(machine.hasDraft, "keys into the dialog, not the prompt")
+            // Claude redraws the dialog at each key: no work for that.
+            machine.noteRead(now: at(8))
+            XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: at(8.5)), .needsAttention)
+            machine.noteKeystroke(now: at(9), keys: cancel)
+            XCTAssertNil(wait(at: 10), "closed by \(Array(cancel))")
+        }
+        // Its answers sent: its tool's end.
+        asks()
+        machine.noteKeystroke(now: at(6), keys: Data("\r".utf8))
+        apply(event(.postToolUse, at: 7, tool: "AskUserQuestion", key: "q"))
+        XCTAssertNil(wait(at: 8))
+        // An Esc that a field of it took (its "Type something"): Claude's
+        // reminder brings it back.
+        asks()
+        machine.noteKeystroke(now: at(6), keys: Data([0x1B]))
+        XCTAssertNil(wait(at: 7))
+        apply(event(.notification, at: 12, type: "permission_prompt"))
+        XCTAssertEqual(wait(at: 13), question)
+        // An approval's first key is its answer, as before.
+        machine = AgentStatusMachine()
+        startTurn()
+        apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
+        machine.noteKeystroke(now: at(6), keys: Data("\u{1B}[B".utf8))
+        XCTAssertNil(wait(at: 7))
+    }
+
     func testFailedTurnBlocksUntilTheAgentMovesAgain() {
         startTurn()
         apply(event(.stopFailure, at: 10, errorKind: "overloaded"))

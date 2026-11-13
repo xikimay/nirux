@@ -190,6 +190,10 @@ struct AgentPermissionRequest: Hashable, Sendable {
     /// A question (AskUserQuestion, an MCP elicitation form) rather than an
     /// approval.
     let isQuestion: Bool
+    /// Claude's question dialog: its keys move among its options and answer
+    /// its questions one by one, so a key isn't its answer as it is an
+    /// approval's (`AgentStatusMachine.waitsForKeys`).
+    var waitsPastKeys: Bool { toolName == "AskUserQuestion" }
     /// A later tool event from the same agent suggests the dialog was
     /// answered (a denial fires no hook). Only the column's status trusts
     /// that; the gate on prompts Nirux types waits for proof.
