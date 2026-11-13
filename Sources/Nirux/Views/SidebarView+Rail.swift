@@ -33,8 +33,7 @@ extension SidebarView {
         let contentHeight = Metrics.topPadding + items.map(\.advance).reduce(0, +)
             + Metrics.tileSize + Metrics.bottomPadding
         let docHeight = max(bounds.height, contentHeight)
-        // The tiles stay put; a legacy scroller takes the rail's right edge.
-        listWidth = contentHeight > bounds.height ? widthBesideScroller : bounds.width
+        listWidth = bounds.width
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: docHeight)
 
         var top = docHeight - Metrics.topPadding

@@ -18,6 +18,9 @@ extension SidebarView {
         let anchor = scrollAnchor()
         builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })
         resetRenderState()
+        // The rail (52 pt) scrolls without a scroller: a legacy one would
+        // cover its tiles' right edge and their badges.
+        contentScrollView.hasVerticalScroller = isExpanded
         guard isExpanded else {
             // Kept across rebuilds, put back by the next expanded one.
             onboardingCardView?.removeFromSuperview()
@@ -48,12 +51,14 @@ extension SidebarView {
             ) + (catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0)
             return (archived, card, height)
         }
-        // At the sidebar's width; at the width a legacy scroller leaves when
-        // the list is taller than the sidebar (narrower, it is no shorter).
-        listWidth = bounds.width
+        // At the width the clip shows, unless the list's height shows or
+        // hides a legacy scroller: then at the width that leaves. Narrower,
+        // the list is no shorter, so once is enough.
+        listWidth = contentScrollView.frame.size == bounds.size ? contentScrollView.contentSize.width : bounds.width
         var measured = measure()
-        if measured.contentH > bounds.height, widthBesideScroller < listWidth {
-            listWidth = widthBesideScroller
+        let fitting = measured.contentH > bounds.height ? widthBesideScroller : bounds.width
+        if fitting != listWidth {
+            listWidth = fitting
             measured = measure()
         }
         let (archivedHeight, onboardingCard, contentH) = measured

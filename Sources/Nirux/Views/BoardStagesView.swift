@@ -88,7 +88,6 @@ final class BoardStagesView: NSView {
     let scrollView = NSScrollView()
     /// The width the lines were last laid out at: the clip's.
     private var listWidth: CGFloat = 0
-    private var isLayingOutContent = false
     private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
@@ -427,16 +426,17 @@ final class BoardStagesView: NSView {
     /// A legacy scroller came or went (the Mac's "Show scroll bars"
     /// setting, a mouse, or a list that now overflows): the lines and their
     /// titles take the width it leaves.
+    /// At the next layout pass: the clip resizes while AppKit tiles.
     @objc private func clipResized() {
-        guard !isLayingOutContent, scrollView.contentSize.width != listWidth else { return }
-        layoutContent()
+        if scrollView.contentSize.width != listWidth { needsLayout = true }
     }
 
-    /// `again`: once more if the document's height showed or hid a legacy
-    /// scroller. Once is enough: narrower, the lines are no shorter.
-    private func layoutContent(again: Bool = true) {
-        isLayingOutContent = true
-        defer { isLayingOutContent = false }
+    override func layout() {
+        super.layout()
+        if scrollView.contentSize.width != listWidth { layoutContent() }
+    }
+
+    private func layoutContent() {
         let width = bounds.width
         let pad = Metrics.padding
         layoutHeader(width: width)
@@ -490,9 +490,6 @@ final class BoardStagesView: NSView {
             }
         }
         documentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: max(scrollView.contentSize.height, y + 12))
-        if again, scrollView.contentSize.width != listWidth {
-            return layoutContent(again: false)
-        }
         refreshHover()
     }
 
