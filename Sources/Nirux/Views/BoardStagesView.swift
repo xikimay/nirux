@@ -68,6 +68,11 @@ final class BoardStagesView: NSView {
     }
     /// The line whose Merge station the pointer is on, where a click acts.
     private weak var hoveredLine: BoardStagesLineView?
+    /// The pointer is over the Board: its lines keep their order.
+    private(set) var isPointerInside = false
+    /// The sections as drawn: the content's, in the order the lines had
+    /// while the pointer was over the Board.
+    private var shownSections: [Section] = []
     private var pointerArea: NSTrackingArea?
 
     private(set) var content: Content?
@@ -193,9 +198,36 @@ final class BoardStagesView: NSView {
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
-        if content.sections != previous?.sections { buildItems() }
+        if content.sections != previous?.sections || content.order != previous?.order {
+            // A line never moves under the pointer: what changed is drawn where
+            // it was, and sorts once the pointer leaves. An order asked for is
+            // the user's own click: it applies at once.
+            let holds = isPointerInside && content.order == previous?.order
+            shownSections = holds ? Self.keepingOrder(of: shownSections, in: content.sections) : content.sections
+            buildItems()
+        }
         showTimes()
         layoutContent()
+    }
+
+    /// `sections`, each one's units in the order they have in `shown`,
+    /// those that weren't shown after them in their own order.
+    nonisolated static func keepingOrder(of shown: [Section], in sections: [Section]) -> [Section] {
+        let before = Dictionary(shown.map { ($0.id, $0.lines) }, uniquingKeysWith: { first, _ in first })
+        return sections.map { section in
+            var held = section
+            held.lines.units = keepingOrder(of: before[section.id]?.units ?? [], in: section.lines.units)
+            held.lines.withoutTask = keepingOrder(of: before[section.id]?.withoutTask ?? [], in: section.lines.withoutTask)
+            return held
+        }
+    }
+
+    private nonisolated static func keepingOrder(of shown: [BoardStages.Unit], in units: [BoardStages.Unit]) -> [BoardStages.Unit] {
+        // A unit is its lines, whatever their states.
+        let key = { (unit: BoardStages.Unit) in unit.lines.map(\.id) }
+        var byKey = Dictionary(units.map { (key($0), $0) }, uniquingKeysWith: { first, _ in first })
+        let kept = shown.compactMap { byKey.removeValue(forKey: key($0)) }
+        return kept + units.filter { byKey[key($0)] != nil }
     }
 
     private func showTimes() {
@@ -208,7 +240,7 @@ final class BoardStagesView: NSView {
     /// id, a repository's header, fold and "Merged today" by its section's,
     /// a stack's title by its place.
     private func buildItems() {
-        let sections = content?.sections ?? []
+        let sections = shownSections
         let ids = Set(sections.map(\.id))
         unfolded.formIntersection(ids)
         unfoldedMerged.formIntersection(ids)
@@ -602,6 +634,15 @@ final class BoardStagesView: NSView {
     /// hears: the one Merge station under it is lit, among the lines in
     /// sight.
     func hover(at location: NSPoint?) {
+        let inside = location.map { bounds.contains(convert($0, from: nil)) } ?? false
+        if inside != isPointerInside {
+            isPointerInside = inside
+            // The pointer left: the lines take the content's order.
+            if !inside, let sections = content?.sections, sections != shownSections {
+                shownSections = sections
+                rebuild()
+            }
+        }
         var line: BoardStagesLineView?
         if let location, scrollView.frame.contains(convert(location, from: nil)) {
             line = lineViews.first { $0.actsOnStation(at: $0.convert(location, from: nil)) }

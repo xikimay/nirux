@@ -787,13 +787,9 @@ final class BoardStagesViewTests: XCTestCase {
         joining.mouseUp(with: try mouse(.leftMouseUp, at: place(merge, on: joining), in: view.window))
         XCTAssertEqual(lit(), [true, false, false, false], "released back on it")
 
-        // The lines move under a still pointer: the Board asks where it is, at each change.
+        // What it offers changes under a still pointer: the Board asks where it is, at each change.
         let still = place(merge, on: joining)
         view.pointerLocation = { still }
-        view.show(content([section(units: tasks(Array(lines(nil).reversed())))]))
-        view.layoutSubtreeIfNeeded()
-        XCTAssertEqual(view.lineViews.map(\.line.id), ["plain", "listed", "refused", "joining"])
-        XCTAssertEqual(lit(), [false, false, false, false], "the line now under the pointer offers nothing; the one that left is dark")
         view.show(content([section(units: tasks(lines("The queue is running.")))]))
         XCTAssertEqual(lit(), [false, false, false, false], "locked under the pointer")
         view.show(content([section(units: tasks(lines(nil)))]))
@@ -833,6 +829,72 @@ final class BoardStagesViewTests: XCTestCase {
         view.mouseMoved(with: try moved(to: place(BoardStagesView.Columns(width: 940).stations[3], on: shown), in: view))
         XCTAssertTrue(shown.isStationHovered)
         XCTAssertNil(view.pointerLocation(), "a Board that isn't on screen doesn't hear the pointer: it asks for none")
+    }
+
+    func testALineNeverMovesUnderThePointer() throws {
+        let units = { (ids: [String]) in self.tasks(ids.map { self.line($0) }) }
+        let view = board(content([section(units: units(["a", "b", "c"]), withoutTask: units(["x", "y"]))], order: .progress))
+        let ids = { view.lineViews.map(\.line.id) }
+        let inside = view.convert(NSPoint(x: 400, y: 300), to: nil)
+        let outside = NSPoint(x: -10, y: -10)
+        view.foldButton(section: "nirux")?.performClick(nil)
+        XCTAssertEqual(ids(), ["a", "b", "c", "x", "y"])
+        // Where the pointer is, as the window would say it after each change. Elsewhere, an order comes as it is.
+        var pointer = outside
+        view.pointerLocation = { pointer }
+        view.show(content([section(units: units(["c", "b", "a"]), withoutTask: units(["x", "y"]))], order: .progress))
+        XCTAssertEqual(ids(), ["c", "b", "a", "x", "y"])
+        view.show(content([section(units: units(["a", "b", "c"]), withoutTask: units(["x", "y"]))], order: .progress))
+        pointer = inside
+        view.mouseMoved(with: try moved(to: inside, in: view))
+        XCTAssertTrue(view.isPointerInside)
+
+        // Another order comes while the pointer is over the Board: the lines stay where they are, their states drawn there.
+        let b = view.lineViews[1]
+        view.show(content([section(
+            units: tasks([line("c"), line("a"), line("b", state: .failed, phrase: "Checks failed")]), withoutTask: units(["y", "x"])
+        )], order: .progress))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(ids(), ["a", "b", "c", "x", "y"])
+        XCTAssertTrue(view.lineViews[1] === b)
+        XCTAssertEqual(b.phraseLabel.stringValue, "Checks failed")
+        // A line that comes goes after the others; one that goes is gone. A fold keeps the order held.
+        view.show(content([section(units: units(["d", "c", "b"]), withoutTask: units(["y", "x"]))], order: .progress))
+        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y"])
+        view.foldButton(section: "nirux")?.performClick(nil)
+        view.foldButton(section: "nirux")?.performClick(nil)
+        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y"])
+        // The pointer leaves: the lines take the content's order.
+        pointer = outside
+        view.mouseExited(with: try moved(to: outside, in: view))
+        XCTAssertFalse(view.isPointerInside)
+        XCTAssertEqual(ids(), ["d", "c", "b", "y", "x"])
+        pointer = inside
+        view.mouseMoved(with: try moved(to: inside, in: view))
+        XCTAssertEqual(ids(), ["d", "c", "b", "y", "x"], "coming back changes nothing")
+
+        // The order switch is the user's own click: it applies at once, the pointer on it, even where the lines it
+        // gives are those of the order before.
+        view.show(content([section(units: units(["b", "c", "d"]), withoutTask: units(["x", "y"]))], order: .progress))
+        XCTAssertEqual(ids(), ["d", "c", "b", "y", "x"], "held")
+        view.show(content([section(units: units(["b", "c", "d"]), withoutTask: units(["x", "y"]))], order: .sidebar))
+        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y"])
+        // In another section, or in a new one, nothing to hold: drawn as it comes.
+        view.show(content([
+            section(units: units(["c", "b", "d"]), withoutTask: units(["x", "y"])), section("site", units: units(["s2", "s1"]))
+        ], order: .sidebar))
+        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y", "s2", "s1"])
+        // A unit is its lines: a task gaining a sub-task is another one, and goes after the others.
+        view.show(content([
+            section(units: [.task(line("b"), subtasks: [line("b1")]), .task(line("c"), subtasks: []), .task(line("d"), subtasks: [])],
+                    withoutTask: units(["x", "y"])),
+            section("site", units: units(["s1", "s2"]))
+        ], order: .sidebar))
+        XCTAssertEqual(ids(), ["c", "d", "b", "b1", "x", "y", "s2", "s1"])
+        // Hidden, the Board hears no pointer: it sorts.
+        view.isHidden = true
+        XCTAssertFalse(view.isPointerInside)
+        XCTAssertEqual(ids(), ["b", "b1", "c", "d", "x", "y", "s1", "s2"])
     }
 
     func testTheListScrollsUnderAStillPointer() throws {

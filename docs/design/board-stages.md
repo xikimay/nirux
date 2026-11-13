@@ -156,6 +156,15 @@ Two orders, one setting for the app:
   nothing is left to follow for: a pull request merged and through the queue,
   then an archived task.
 
+**A line never moves under the pointer** (the Lead's rule, 2026-11-13). While
+the pointer is over the Board, the lines keep the order they have, whatever
+the content's new order (a click on a Merge station sends a line up By
+progress; a turn, a check, the sidebar move others): each is drawn where it
+was, in its new state. A line that comes goes after the others of its
+section; one that goes is gone. Once the pointer leaves the Board, or the
+Board hides, the lines take the content's order. The order switch is the
+user's own click: what it asks applies at once.
+
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its
 "Clean up" while its worktree is there, and amber while an agent of its task
