@@ -15,9 +15,11 @@ final class BoardStagesMergedView: NSView {
     /// "Clean up" was clicked on an entry: its task's line.
     var onCleanUp: ((String) -> Void)?
     var onUnfold: (() -> Void)?
-    /// The pointer moved since entries moved under it: their "Clean up"
-    /// acts. (The Board says.)
-    var isAimed: () -> Bool = { true }
+    /// Its entries' "Clean up" acts only where the pointer aimed. (The
+    /// Board says, after each `show`.)
+    var aim = BoardStagesAim() {
+        didSet { entries.forEach { $0.aim = aim } }
+    }
     private var isUnfolded = false
 
     private static let rowHeight: CGFloat = 22
@@ -58,7 +60,6 @@ final class BoardStagesMergedView: NSView {
             entry.onCleanUp = { [weak self, weak entry] in
                 if let line = entry?.pullRequest.lineID { self?.onCleanUp?(line) }
             }
-            entry.isAimed = { [weak self] in self?.isAimed() ?? true }
             return entry
         }
         subviews = [caption] + entries + [moreButton]
@@ -150,8 +151,8 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
     let linkLabel = NSTextField(labelWithString: "")
     var onClick: (() -> Void)?
     var onCleanUp: (() -> Void)?
-    /// Its "Clean up" acts: the pointer moved since entries moved under it.
-    var isAimed: () -> Bool = { true }
+    /// Its "Clean up" acts only where the pointer aimed.
+    var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
     /// What the entry says under the pointer, by where.
@@ -270,6 +271,11 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
         }
         if let link { hints.append((link, BoardStages.Link.cleanUp.hint)) }
         toolTips.show(hints, on: self)
+        handsChanged()
+    }
+
+    /// Hands are asked for again where they no longer are what AppKit holds.
+    func handsChanged() {
         if handRects != registeredHandRects { window?.invalidateCursorRects(for: self) }
     }
 
@@ -294,7 +300,7 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
 
     /// A hand on the link, as far as the entry is in sight.
     var handRects: [NSRect] {
-        guard offersCleanUp, let rect = linkRect?.intersection(rectInSight), !rect.isEmpty else { return [] }
+        guard offersCleanUp, !aim.isStale, let rect = linkRect?.intersection(rectInSight), !rect.isEmpty else { return [] }
         return [rect]
     }
 
@@ -313,9 +319,10 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
     }
 
     override func mouseDown(with event: NSEvent) {
+        aim.onUse()
         let target = target(at: convert(event.locationInWindow, from: nil))
         // A link that came under a still pointer isn't what it aimed at.
-        pressed = event.clickCount == 1 && (target != .cleanUp || isAimed()) ? target : nil
+        pressed = event.clickCount == 1 && (target != .cleanUp || !aim.isStale) ? target : nil
     }
 
     /// The entry is listed, and shows, where VoiceOver may reach it

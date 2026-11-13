@@ -59,9 +59,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// The mouse moved with its button down, or came up, at this place in
     /// the window: no other event says where the pointer is meanwhile.
     var onPointer: ((NSPoint) -> Void)?
-    /// The pointer moved since lines moved under it: its station and its
-    /// link act. (The Board says.)
-    var isAimed: () -> Bool = { true }
+    /// Its station, its link and its menu act only where the pointer
+    /// aimed. (The Board says.)
+    var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
     /// The pointer is on the Merge station, as the Board follows it. The
@@ -227,6 +227,11 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             label.frame = NSRect(x: frame?.minX ?? 0, y: 10, width: frame?.width ?? 0, height: 15)
         }
         layoutHints(stations: columns.stations)
+        handsChanged()
+    }
+
+    /// Hands are asked for again where they no longer are what AppKit holds.
+    func handsChanged() {
         if handRects != registeredHandRects { window?.invalidateCursorRects(for: self) }
     }
 
@@ -273,7 +278,8 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// far as it is in sight (a cursor's place isn't clipped by what
     /// scrolls the line).
     var handRects: [NSRect] {
-        [actingOffer == nil ? nil : mergeStationRect, linkRect].compactMap { $0?.intersection(rectInSight) }.filter { !$0.isEmpty }
+        guard !aim.isStale else { return [] }
+        return [actingOffer == nil ? nil : mergeStationRect, linkRect].compactMap { $0?.intersection(rectInSight) }.filter { !$0.isEmpty }
     }
 
     // MARK: Tooltips
@@ -483,9 +489,10 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     }
 
     override func mouseDown(with event: NSEvent) {
+        aim.onUse()
         let target = target(at: convert(event.locationInWindow, from: nil))
         // A station or a link that came under a still pointer isn't what it aimed at.
-        if target != .line, !isAimed() {
+        if target != .line, aim.isStale {
             pressed = nil
             return
         }
@@ -499,6 +506,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        aim.onUse()
         onPointer?(event.locationInWindow)
     }
 
@@ -551,7 +559,11 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// The line's menu, as its model gives it, whatever its phrase says:
     /// an item that does nothing for now is there, disabled, and says why
     /// under the pointer. Nil where it offers nothing.
-    override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        aim.onUse()
+        // A line that came under a still pointer isn't the one it aimed at.
+        return aim.isStale ? nil : contextMenu()
+    }
 
     func contextMenu() -> NSMenu? {
         guard !line.menu.isEmpty, !isDeparted else { return nil }
@@ -622,4 +634,30 @@ extension NSView {
     /// (`visibleRect` alone isn't held to the view's own bounds in a
     /// window that was never shown.)
     var rectInSight: NSRect { bounds.intersection(visibleRect) }
+}
+
+/// Whether what is under the pointer is what it aimed at: not once it
+/// changed while the pointer rested, until the pointer moves (the Lead's
+/// rule, 2026-11-14). The Board keeps one; what a click acts on asks it.
+@MainActor
+final class BoardStagesAim {
+    /// What is under the pointer came there while it rested.
+    var isStale = false
+    /// A press or a drag: the pointer is in use, though it may not move.
+    var onUse: () -> Void = {}
+}
+
+/// A button that acts only where the pointer aimed: the keyboard and
+/// VoiceOver press it as any.
+@MainActor
+final class BoardStagesButton: NSButton {
+    var aim = BoardStagesAim()
+    /// Follows the press to its release. (The tests give their own.)
+    var track: ((NSEvent) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        aim.onUse()
+        guard !aim.isStale else { return }
+        if let track { track(event) } else { super.mouseDown(with: event) }
+    }
 }

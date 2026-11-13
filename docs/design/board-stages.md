@@ -183,14 +183,19 @@ click: what it asks applies at once, for the change that brings it only; an
 order that changes otherwise (another Board's switch) is held.
 
 **A pointer that rests isn't aiming** (the Lead, 2026-11-14): once it has been
-still over the Board for 10 s, what waited takes its place under it, and a
-change that comes while it rests isn't held. The lines may then have moved
-under it: until it moves again, no Merge station lights or acts, nor does a
-link (a phrase's or "Merged today"'s "Clean up"), so that someone who read a
-line for 12 s and clicks doesn't hit the pull request that came there; a
-click elsewhere on a line opens its task. The Board knows the pointer by where
-it is, not by what covers it: a window over it still holds it, as the sidebar
-does (accepted).
+still over the Board for 10 s, what waited takes its place under it, the
+foot's lines included, and a change that comes while it rests isn't held. A
+press, a drag or a scroll is the pointer at work: the 10 s count from it. If
+what is under the pointer then changed (another line, another click on the same
+station, another entry, another queue's line at the foot, a header's Start
+become Stop), nothing there acts until the pointer moves 3 pt or more, or
+scrolls: no Merge station lights or acts, no link (a phrase's, or "Merged
+today"'s "Clean up"), no line's menu, no Start or Stop, and no hand shows, so
+that someone who read a line for 12 s and clicks doesn't hit what came there.
+A click elsewhere on a line still opens its task, and the keyboard and
+VoiceOver act as ever. The Board knows the pointer by where it is, not by what
+covers it: a window over it holds it no longer than a resting pointer
+(accepted, as for the sidebar).
 
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its

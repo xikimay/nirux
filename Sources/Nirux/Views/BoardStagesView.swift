@@ -160,12 +160,18 @@ final class BoardStagesView: NSView {
     var after: (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated(work) }
     }
-    /// When the pointer last moved over the Board, or was first seen there.
+    /// When the pointer last moved over the Board, or was first seen
+    /// there, or pressed, dragged or scrolled.
     private var pointerMovedAt = -TimeInterval.infinity
     private var isAiming: Bool { clock() - pointerMovedAt < Self.stillDelay }
-    /// Lines moved under a still pointer: no station or link lights or
-    /// acts until the pointer moves.
-    private(set) var isPointerStale = false
+    /// What a click acts on asks it whether what is under the pointer is
+    /// what the pointer aimed at.
+    let aim = BoardStagesAim()
+    /// What is under the pointer changed while it rested: nothing there
+    /// lights or acts until it moves (3 pt or more from where it rested).
+    var isPointerStale: Bool { aim.isStale }
+    /// Where the pointer rested when what was under it changed.
+    private var staleAt: NSPoint?
     private var isStillCheckPending = false
     /// Settles the Board once the pointer left, after the event that said
     /// so. (The tests run it at once.)
@@ -193,7 +199,7 @@ final class BoardStagesView: NSView {
     let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
     let stationTitles = BoardStages.Station.allCases.map { NSTextField(labelWithString: BoardStagesView.title(of: $0)) }
     private let separator = NSView()
-    let scrollView = NSScrollView()
+    let scrollView = BoardStagesScrollView()
     private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
@@ -266,6 +272,9 @@ final class BoardStagesView: NSView {
         // keep the titles' columns whatever the Mac's setting.
         scrollView.scrollerStyle = .overlay
         scrollView.documentView = documentView
+        // Scrolled, the pointer aims at what comes under it.
+        scrollView.onScroll = { [weak self] in self?.pointerMoved(to: nil) }
+        aim.onUse = { [weak self] in self?.pointerUsed() }
         // The lines move under a still pointer when the list scrolls, and
         // an app that isn't active doesn't hear the pointer leave.
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -301,6 +310,7 @@ final class BoardStagesView: NSView {
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
+        let aimedBefore = aimed()
         let isOver = pointerIsOver(pointerLocation())
         // A pointer first seen counts as one that moved.
         if isOver, !isPointerInside { pointerMovedAt = clock() }
@@ -330,14 +340,14 @@ final class BoardStagesView: NSView {
             if isPointerInside, isAiming, !isAsked, previous != nil {
                 (shownSections, departed) = Self.holding(shownSections, in: content.sections)
             } else {
-                // Under a pointer that rests, the lines move: what is under it waits for it to move.
-                if isPointerInside, !isAsked, previous != nil { isPointerStale = true }
                 (shownSections, departed) = (content.sections, [])
             }
             buildItems()
         }
         showTimes()
         layoutContent()
+        // Under a pointer that rests, what is under it may have changed: it waits for the pointer to move.
+        if isPointerInside, !isAiming { goStale(ifChangedFrom: aimedBefore) }
         if isHeld { settleOnceStill() }
     }
 
@@ -402,6 +412,7 @@ final class BoardStagesView: NSView {
             let view = kept.removeValue(forKey: queue.id) ?? BoardStagesRunningQueueView(queue)
             view.show(queue)
             view.alphaValue = departedQueues.contains(queue.id) ? 0.4 : 1
+            view.aim = aim
             view.onStop = { [weak self] in self?.onStop?(queue.id) }
             if view.superview !== self { addSubview(view) }
             return view
@@ -453,7 +464,7 @@ final class BoardStagesView: NSView {
             // The line's section may be another one than when its view was made.
             let section = sectionID
             view.onPointer = { [weak self] location in self?.hover(at: location) }
-            view.isAimed = { [weak self] in self?.isPointerStale != true }
+            view.aim = aim
             view.onOffer = { [weak self] offer in self?.onOffer?(section, offer) }
             view.onLink = { [weak self, weak view] link in
                 guard let self, let view else { return }
@@ -492,6 +503,7 @@ final class BoardStagesView: NSView {
             header.onStart = { [weak self] in self?.onStart?(id) }
             header.onStop = { [weak self] in self?.onStop?(id) }
             header.onMenu = { [weak self] item in self?.onSectionMenu?(id, item) }
+            header.aim = aim
             sectionHeaders[id] = header
             items.append(.sectionHeader(header))
             section.lines.units.forEach(add)
@@ -516,7 +528,7 @@ final class BoardStagesView: NSView {
                 merged.onOpen = { [weak self] line in self?.onOpen?(line) }
                 merged.onCleanUp = { [weak self] line in self?.onLink?(id, line, .cleanUp) }
                 merged.onUnfold = { [weak self] in self?.unfoldMerged(section: id) }
-                merged.isAimed = { [weak self] in self?.isPointerStale != true }
+                merged.aim = aim
                 mergedViews[id] = merged
                 items.append(.merged(merged))
             }
@@ -810,14 +822,68 @@ final class BoardStagesView: NSView {
         refreshHover()
     }
 
-    override func mouseEntered(with event: NSEvent) { pointerMoved(to: event.locationInWindow) }
+    override func mouseEntered(with event: NSEvent) {
+        staleAt = nil
+        pointerMoved(to: event.locationInWindow)
+    }
     override func mouseMoved(with event: NSEvent) { pointerMoved(to: event.locationInWindow) }
 
-    /// The pointer moved: it aims again.
-    private func pointerMoved(to location: NSPoint) {
+    /// The pointer moved, or the list scrolled under it (no place): it
+    /// aims again, unless it only shook where it rested.
+    private func pointerMoved(to location: NSPoint?) {
         pointerMovedAt = clock()
-        isPointerStale = false
-        hover(at: location)
+        if let location, let staleAt, hypot(location.x - staleAt.x, location.y - staleAt.y) < 3 {
+            // A hand on the mouse: still resting.
+        } else {
+            setStale(false)
+        }
+        if let location { hover(at: location) } else { refreshHover() }
+    }
+
+    /// A press or a drag: the pointer is in use, though it may not move.
+    private func pointerUsed() {
+        pointerMovedAt = clock()
+    }
+
+    private func setStale(_ isStale: Bool) {
+        guard aim.isStale != isStale else { return }
+        aim.isStale = isStale
+        staleAt = isStale ? pointerLocation() : nil
+        // Hands, and a lit station, only where a click acts.
+        lineViews.forEach { $0.handsChanged() }
+        mergedViews.values.forEach { $0.entries.forEach { $0.handsChanged() } }
+        refreshHover()
+    }
+
+    /// What is under the pointer isn't what it was when it came to rest: nothing there acts until it moves.
+    private func goStale(ifChangedFrom before: String?) {
+        if let now = aimed(), now != before { setStale(true) }
+    }
+
+    /// What a click where the pointer is would act on, in words to compare:
+    /// a line's target, an entry's, a repository's queue, a foot line's
+    /// Stop; nil where there is nothing.
+    private func aimed() -> String? {
+        guard !isHiddenOrHasHiddenAncestor, let location = pointerLocation(), pointerIsOver(location) else { return nil }
+        let point = convert(location, from: nil)
+        if let foot = runningQueueViews.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
+            return "queue \(foot.queue.id) \(String(describing: foot.queue.stop))"
+        }
+        guard scrollView.frame.contains(point) else { return nil }
+        func under(_ view: NSView) -> NSPoint? {
+            let local = view.convert(location, from: nil)
+            return view.bounds.contains(local) && !view.isHiddenOrHasHiddenAncestor ? local : nil
+        }
+        if let line = lineViews.first(where: { under($0) != nil }), let local = under(line) {
+            return "line \(line.line.id) \(line.target(at: local))"
+        }
+        if let (id, header) = sectionHeaders.first(where: { under($0.value) != nil }) {
+            return "header \(id) \(String(describing: header.queue))"
+        }
+        for entry in mergedViews.values.flatMap(\.entries) {
+            if let local = under(entry) { return "merged \(entry.pullRequest.number) \(entry.target(at: local))" }
+        }
+        return nil
     }
     /// Whoever's area the pointer left, the Board's or one inside it,
     /// which passed the event on: where it is now says what is lit.
@@ -865,7 +931,8 @@ final class BoardStagesView: NSView {
 
     /// What changed while the pointer was over the Board takes its place.
     private func settle() {
-        guard !isPointerInside else { return }
+        // Back before the Board settled: it waits for the pointer again.
+        guard !isPointerInside else { return isHeld ? settleOnceStill() : () }
         showContent()
     }
 
@@ -880,8 +947,9 @@ final class BoardStagesView: NSView {
             self.isStillCheckPending = false
             guard self.isPointerInside, self.isHeld else { return }
             if self.isAiming { return self.settleOnceStill() }
-            self.isPointerStale = true
+            let before = self.aimed()
             self.showContent()
+            self.goStale(ifChangedFrom: before)
         }
     }
 
@@ -967,8 +1035,12 @@ final class BoardStagesSectionHeaderView: NSView {
     let queueLabel = NSTextField(labelWithString: "")
     /// This build can't change GitHub: every queue is a dry run.
     let dryRunBadge = NSTextField(labelWithString: "DRY RUN")
-    let startButton = NSButton(title: "Start…", target: nil, action: nil)
-    let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+    let startButton = BoardStagesButton(title: "Start…", target: nil, action: nil)
+    let stopButton = BoardStagesButton(title: "Stop", target: nil, action: nil)
+    /// Start and Stop act only where the pointer aimed. (The Board says.)
+    var aim = BoardStagesAim() {
+        didSet { [startButton, stopButton].forEach { $0.aim = aim } }
+    }
     /// "⋯": the repository's menu.
     let moreButton = NSButton(title: "", target: nil, action: nil)
     var onStart: (() -> Void)?
@@ -1164,8 +1236,12 @@ final class BoardStagesSectionHeaderView: NSView {
 final class BoardStagesRunningQueueView: NSView {
     let titleLabel = NSTextField(labelWithString: "")
     let statusLabel = NSTextField(labelWithString: "")
-    let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+    let stopButton = BoardStagesButton(title: "Stop", target: nil, action: nil)
     var onStop: (() -> Void)?
+    /// Stop acts only where the pointer aimed. (The Board says.)
+    var aim = BoardStagesAim() {
+        didSet { stopButton.aim = aim }
+    }
     private(set) var queue: BoardStagesView.RunningQueue
 
     override var isFlipped: Bool { true }
@@ -1227,4 +1303,16 @@ final class BoardStagesRunningQueueView: NSView {
     }
 
     @objc private func stopClicked() { onStop?() }
+}
+
+/// The Board's list: a scroll is the pointer at work, though it may not
+/// move.
+@MainActor
+final class BoardStagesScrollView: NSScrollView {
+    var onScroll: () -> Void = {}
+
+    override func scrollWheel(with event: NSEvent) {
+        onScroll()
+        super.scrollWheel(with: event)
+    }
 }
