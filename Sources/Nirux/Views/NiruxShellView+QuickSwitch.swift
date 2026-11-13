@@ -10,18 +10,17 @@ final class QuickSwitchState {
     var agentWait: @MainActor (ColumnState, ProcessSnapshot, TimeInterval) -> AgentWait? = { column, snapshot, now in
         column.pty?.agentBlockedWait(now: now, foreground: column.pty?.foregroundProcess(snapshot: snapshot))
     }
-    /// The column the last ⌘J landed on, until the focus moves: a press
-    /// from there goes on to the next agent.
-    private(set) var lastJump: UUID?
+    /// The column the user last moved to, then each one ⌘J landed on
+    /// since, in order: a press goes on to one the walk hasn't visited.
+    private(set) var walk: [UUID] = []
     /// "No agent is waiting on you" (see `showTransientHint`).
     var hint: TransientHintView?
 
     /// The user moved the focus (or ⌘J did, which then notes where it
-    /// landed): back on that column by hand, a press starts over at the
-    /// longest wait.
-    func focusMoved() { lastJump = nil }
+    /// landed): a press starts a new walk.
+    func focusMoved() { walk = [] }
 
-    func noteJump(to column: UUID?) { lastJump = column }
+    func noteWalk(_ columns: [UUID]) { walk = columns }
 }
 
 // MARK: - Quick switcher (⌘P workspaces) and Next Waiting Agent (⌘J)
@@ -119,9 +118,10 @@ extension NiruxShellView {
 
     static let noWaitingAgentHint = "No agent is waiting on you"
 
-    /// Next Waiting Agent (⌘J): to the agent blocked on the user the
-    /// longest, then on to the next one at each press (see
-    /// `WaitingAgentQueue.next`), whatever its workspace or space. With
+    /// Next Waiting Agent (⌘J): to the agent blocked on the user that
+    /// they have not seen yet, the longest wait first, then on through
+    /// every other one at each press (see `WaitingAgentQueue.next`),
+    /// whatever its workspace or space. With
     /// none, a hint says so, without a beep.
     func jumpToNextWaitingAgent() {
         let snapshot = ProcessSnapshot()
@@ -130,16 +130,19 @@ extension NiruxShellView {
         let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
         // ⌘J with the palette open: the hint would show under it.
         if commandPalette?.isVisible == true { commandPalette?.dismiss() }
-        guard let next = WaitingAgentQueue.next(from: current, lastJump: quickSwitch.lastJump, in: queue),
+        // The walk goes on while the user stays where its last press
+        // landed; else it starts where they are.
+        let walk = current != nil && current == quickSwitch.walk.last ? quickSwitch.walk : current.map { [$0] } ?? []
+        guard let (next, walked) = WaitingAgentQueue.next(from: current, walk: walk, in: queue),
               let workspace = workspaces.first(where: { $0.id == next.workspaceID }),
               let columnIndex = workspace.columns.firstIndex(where: { $0.id == next.columnID }) else {
-            quickSwitch.noteJump(to: nil)
+            quickSwitch.noteWalk([])
             showTransientHint(Self.noWaitingAgentHint)
             return
         }
         focusWorkspace(id: workspace.id, column: columnIndex)
         // After: going there moved the focus.
-        quickSwitch.noteJump(to: next.columnID)
+        quickSwitch.noteWalk(walked)
     }
 
     /// A line at the top of the columns that fades by itself.
