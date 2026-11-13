@@ -3,16 +3,20 @@ import AppKit
 // MARK: - Mission questions: the child's card, the hand-off to the user, the reply popover
 
 extension NiruxShellView {
-    /// How long a parent may show no Claude, or sit idle after it took the
-    /// question, before the question comes to the user: a `claude`
-    /// restarted, a `reply` Nirux hasn't drained yet. In the background the
-    /// stuck watch samples every 30 s, so it takes up to a minute there.
+    /// How long a parent may show no Claude, a Claude that took no prompt
+    /// yet, or sit idle after it took the question, before the question
+    /// comes to the user: a `claude` restarted, its first prompt on its way,
+    /// a `reply` Nirux hasn't drained yet. In the background the stuck watch
+    /// samples every 30 s, so it takes up to a minute there.
     nonisolated static let missionParentGrace: TimeInterval = 20
 
     /// What Nirux saw of a question's parent across refreshes.
     struct MissionParentWatch: Equatable {
-        /// Since when its column runs no Claude, or one that took no prompt.
+        /// Since when its column runs no Claude, or one that took no prompt
+        /// (`absentAs` says which: a `claude` coming to the front gets a
+        /// grace of its own).
         var absentSince: TimeInterval?
+        var absentAs: SidebarMissionQuestion.Parent?
         /// Since when it sits idle after it took the question.
         var stoppedSince: TimeInterval?
         /// It took the question and stopped without `reply`: the question
@@ -30,10 +34,10 @@ extension NiruxShellView {
             var state = observed
             switch observed {
             case .notClaude, .notAtPrompt:
-                absentSince = absentSince ?? now
+                if absentAs != observed { (absentSince, absentAs) = (now, observed) }
                 if now - (absentSince ?? now) < NiruxShellView.missionParentGrace { state = .claude }
             case .claude, .stoppedWithoutAnswer:
-                if foregroundKnown { absentSince = nil }
+                if foregroundKnown { (absentSince, absentAs) = (nil, nil) }
             case .closed:
                 break
             }
@@ -50,8 +54,9 @@ extension NiruxShellView {
 
     /// The question each Mission child column waits on, keyed by the
     /// column, with why it now waits on the user if it does: its parent
-    /// was closed or doesn't run Claude Code, or nobody answered within the
-    /// stuck-agent threshold (an hour with the check off). Else the answer
+    /// was closed, doesn't run Claude Code or runs one that took no prompt
+    /// yet (`missionParent`), or nobody answered within the stuck-agent
+    /// threshold (an hour with the check off). Else the answer
     /// still waiting to be typed into the child's prompt. `foreground` gives
     /// a column's foreground process.
     func missionQuestions(
@@ -91,15 +96,10 @@ extension NiruxShellView {
                 if let pty = parent.pty, !pty.hasExited {
                     let process = foreground(parent)
                     foregroundKnown = process != nil
-                    if process.map({ $0.name == "claude" && !AgentHookCenter.isHeadlessClaude($0) }) == false {
-                        parentState = .notClaude
-                    } else if let typedAt = question.parentTypedAt, pty.finishedTurn(afterTypingAt: typedAt) {
-                        parentState = .stoppedWithoutAnswer
-                    } else if let process, !pty.agentTookPrompt(since: process) {
-                        parentState = .notAtPrompt
-                    } else {
-                        parentState = .claude
-                    }
+                    parentState = Self.missionParent(
+                        foreground: process, typedAt: question.parentTypedAt,
+                        finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:), tookPrompt: pty.agentTookPrompt(since:)
+                    )
                 } else {
                     parentState = .notClaude
                 }
@@ -120,6 +120,22 @@ extension NiruxShellView {
             )
         }
         return result
+    }
+
+    /// What a parent whose terminal runs can do with a question, from its
+    /// foreground process (nil: unknown, a process-table miss) and when
+    /// Nirux typed the question into it, if it did. Not typed yet, a
+    /// `claude` that took no prompt since it started can't take it: Nirux
+    /// types nothing into one before that. Typed already, it went to a
+    /// `claude` that could, and one restarted since never gets it again.
+    static func missionParent(
+        foreground: ForegroundProcess?, typedAt: TimeInterval?,
+        finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool
+    ) -> SidebarMissionQuestion.Parent {
+        if foreground.map({ $0.name == "claude" && !AgentHookCenter.isHeadlessClaude($0) }) == false { return .notClaude }
+        if let typedAt { return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude }
+        if let foreground, !tookPrompt(foreground) { return .notAtPrompt }
+        return .claude
     }
 
     /// A question that just came to the user lights its workspace (the
