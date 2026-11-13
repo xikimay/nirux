@@ -45,6 +45,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var launchURLBacklog: [URL] = []
     var lastExternalApp: NSRunningApplication?
     var niruxActivatedAt: TimeInterval = 0
+    /// Held until Nirux quits (see StateFolderLock).
+    static var stateFolderLock: StateFolderLock?
 
     static func main() {
         // A command-line mode never launches the app UI (see
@@ -96,6 +98,17 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // NIRUX_CLI_PATH, the nightly's checks), which this would stop.
         if let refused = RealStateGuard.refusedExecutable() {
             RealStateGuard.refuseLaunch(executablePath: refused)
+        }
+        // One Nirux per state folder: a second one (the binary run from a
+        // terminal, `open -n`) brings the first to the front and quits,
+        // before reading anything. See StateFolderLock.
+        switch StateFolderLock.acquire(in: Persistence.stateDirectory) {
+        case .acquired(let lock):
+            stateFolderLock = lock
+        case .unavailable(let problem):
+            NSLog("[Nirux] Opening without the state folder's lock: %@", problem)
+        case .held(let holder):
+            StateFolderLock.yield(to: holder)
         }
 
         let app = NSApplication.shared

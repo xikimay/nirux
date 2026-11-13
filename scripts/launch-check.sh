@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Launches a packaged Nirux.app on a fresh state folder, waits until its
 # first terminal's shell runs, checks it is still alive a few seconds later,
-# then quits it. The nightly runs it before notarizing: an app that traps at
+# checks that a second Nirux on the same folder quits and leaves it be, then
+# quits it. The nightly runs it before notarizing: an app that traps at
 # launch fails the nightly instead of reaching every install through Sparkle.
 # Works on any build (a downloaded nightly too): it looks only at processes.
 set -euo pipefail
@@ -46,3 +47,17 @@ shell_runs || fail "no terminal's shell within 60 s"
 sleep 5
 kill -0 "$PID" 2>/dev/null || fail "Nirux exited after its first terminal started"
 echo "launch check: ok (a terminal's shell runs)"
+
+# One Nirux per state folder: a second one on it says so and quits (after
+# waiting a few seconds for the first to quit), the first still running. A
+# second UI would still run when the alarm stops it (status 142).
+SECOND_LOG="$WORK/second.log"
+second=0
+NIRUX_STATE_DIR="$WORK/state" NIRUX_SKIP_HOOK_INSTALL=1 SHELL=/bin/zsh perl -e 'alarm 30; exec @ARGV' "$BINARY" > "$SECOND_LOG" 2>&1 || second=$?
+if [[ $second -ne 0 ]] || ! grep -q "already open on this state folder" "$SECOND_LOG"; then
+    echo "--- the second Nirux's output ---"
+    cat "$SECOND_LOG"
+    fail "a second Nirux on the same state folder didn't quit (status $second)"
+fi
+kill -0 "$PID" 2>/dev/null || fail "the first Nirux quit when a second one started"
+echo "launch check: ok (a second Nirux on the same state folder quits)"

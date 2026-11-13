@@ -55,3 +55,8 @@ jobs:
 
       - name: Check the packaged app's terminal runtime
         run: Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime
+
+      # As the nightly does before notarizing: it opens, its first terminal
+      # runs, and a second Nirux on the same state folder quits.
+      - name: Launch check
+        run: scripts/launch-check.sh Nirux.app
