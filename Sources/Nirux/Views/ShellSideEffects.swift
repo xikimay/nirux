@@ -66,6 +66,9 @@ struct ShellSideEffects {
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
     var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
+    /// Nirux is the app in front. Tests set it: an xctest never is.
+    var appIsActive: @MainActor () -> Bool = { NSApp.isActive }
+
     /// Whether any of the window shows on screen: not minimized, not
     /// covered, its display not asleep.
     var windowShows: @MainActor (NSWindow?) -> Bool = { $0?.occlusionState.contains(.visible) ?? false }

@@ -349,6 +349,10 @@ final class BoardStagesLineTests: XCTestCase {
         let retarget = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open))).phrase
         XCTAssertEqual(retarget, BoardStages.Phrase(text: "Base #52 merged · Retarget to main", link: onto))
         XCTAssertTrue(retarget.text.hasSuffix(onto.title), "the link ends the phrase")
+        // For whoever draws the link apart: the words before it.
+        XCTAssertEqual([retarget.wordsBeforeLink, cleanUp.wordsBeforeLink], ["Base #52 merged ·", "Merged ·"])
+        XCTAssertNil(BoardStages.Phrase(text: "Base #52 merged · Retarget to main").wordsBeforeLink, "no link")
+        XCTAssertNil(BoardStages.Phrase(text: "Retarget to main, then merge", link: onto).wordsBeforeLink, "a text that doesn't end with it")
         XCTAssertNil(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase))).phrase.link, "no merge queue: no link")
         // Retargeting is the Board's own call, not the queue's: a queue that runs, or that holds it, changes nothing.
         let held = Queue(list: .locked("The queue is running."), order: 2)

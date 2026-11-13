@@ -48,6 +48,23 @@ final class BoardStagesView: NSView {
     var onOrder: ((BoardStages.Order) -> Void)?
     /// A line was clicked, or a "Merged today" entry with a task: its id.
     var onOpen: ((String) -> Void)?
+    /// A line's Merge station was clicked where that changes the queue's
+    /// list: its section's id, and what the click does.
+    var onOffer: ((_ section: String, BoardStages.QueueOffer) -> Void)?
+    /// The link ending a line's phrase was clicked: its section's id, the
+    /// line's, and the link.
+    var onLink: ((_ section: String, _ line: String, BoardStages.Link) -> Void)?
+
+    /// Where the pointer is, in the window; nil where the Board doesn't
+    /// hear it move: off screen, or in an app that isn't active, whose
+    /// windows don't hear the pointer leave. (The tests give their own.)
+    lazy var pointerLocation: () -> NSPoint? = { [weak self] in
+        guard let window = self?.window, window.isVisible, NSApp.isActive else { return nil }
+        return window.mouseLocationOutsideOfEventStream
+    }
+    /// The line whose Merge station the pointer is on, where a click acts.
+    private weak var hoveredLine: BoardStagesLineView?
+    private var pointerArea: NSTrackingArea?
 
     private(set) var content: Content?
     /// The lines drawn, from the top, for the tests to click through.
@@ -135,6 +152,14 @@ final class BoardStagesView: NSView {
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.documentView = documentView
+        // The lines move under a still pointer when the list scrolls, and
+        // an app that isn't active doesn't hear the pointer leave.
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(listScrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification] {
+            center.addObserver(self, selector: #selector(refreshHover), name: name, object: nil)
+        }
         ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
             .forEach(addSubview)
     }
@@ -194,6 +219,8 @@ final class BoardStagesView: NSView {
         foldButtons = [:]
         mergedViews = [:]
         captions = []
+        // The section being listed.
+        var sectionID = ""
         func add(_ line: BoardStages.Line, link: BoardStagesLineView.Link) {
             let view: BoardStagesLineView
             if let kept = keptLines.removeValue(forKey: line.id) {
@@ -206,6 +233,14 @@ final class BoardStagesView: NSView {
                     self.onOpen?(made.line.id)
                 }
                 view = made
+            }
+            // The line's section may be another one than when its view was made.
+            let section = sectionID
+            view.onPointer = { [weak self] location in self?.hover(at: location) }
+            view.onOffer = { [weak self] offer in self?.onOffer?(section, offer) }
+            view.onLink = { [weak self, weak view] link in
+                guard let self, let view else { return }
+                self.onLink?(section, view.line.id, link)
             }
             lineViews.append(view)
             items.append(.line(view))
@@ -229,6 +264,7 @@ final class BoardStagesView: NSView {
         }
         for section in sections {
             let id = section.id
+            sectionID = id
             let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
             header.show(title: section.title, detail: section.detail, status: section.status)
             sectionHeaders[id] = header
@@ -436,6 +472,7 @@ final class BoardStagesView: NSView {
             }
         }
         documentView.frame = NSRect(x: 0, y: 0, width: width, height: max(scrollView.contentSize.height, y + 12))
+        refreshHover()
     }
 
     /// The space: its colour and name first, then at the right the order
@@ -515,6 +552,66 @@ final class BoardStagesView: NSView {
         if minutes < 1 { return "now" }
         if minutes < 60 { return "\(minutes) min" }
         return minutes < 24 * 60 ? "\(minutes / 60) h" : "\(minutes / (24 * 60)) d"
+    }
+
+    // MARK: - The pointer
+
+    /// One area for the Board, not one a line: a line moves under a
+    /// still pointer (a new order, a scroll, a resize), which no event of
+    /// its own says. The Merge station under the pointer says what a
+    /// click does, where one acts.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if pointerArea == nil {
+            let area = NSTrackingArea(
+                rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self
+            )
+            addTrackingArea(area)
+            pointerArea = area
+        }
+        refreshHover()
+    }
+
+    override func mouseEntered(with event: NSEvent) { hover(at: event.locationInWindow) }
+    override func mouseMoved(with event: NSEvent) { hover(at: event.locationInWindow) }
+    /// Whoever's area the pointer left, the Board's or one inside it,
+    /// which passed the event on: where it is now says what is lit.
+    override func mouseExited(with event: NSEvent) { hover(at: event.locationInWindow) }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        refreshHover()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        refreshHover()
+    }
+
+    /// The pointer is at `location` in the window, or nowhere the Board
+    /// hears: the one Merge station under it is lit, among the lines in
+    /// sight.
+    func hover(at location: NSPoint?) {
+        var line: BoardStagesLineView?
+        if let location, scrollView.frame.contains(convert(location, from: nil)) {
+            line = lineViews.first { $0.actsOnStation(at: $0.convert(location, from: nil)) }
+        }
+        guard line !== hoveredLine else { return }
+        hoveredLine?.isStationHovered = false
+        line?.isStationHovered = true
+        hoveredLine = line
+    }
+
+    /// The hover, from where the pointer is now; none on a Board that
+    /// doesn't show.
+    @objc private func refreshHover() {
+        hover(at: isHiddenOrHasHiddenAncestor ? nil : pointerLocation())
+    }
+
+    /// The lines moved under the pointer, and under their hands.
+    @objc private func listScrolled() {
+        window?.invalidateCursorRects(for: documentView)
+        refreshHover()
     }
 
     // MARK: - Clicks

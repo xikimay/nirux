@@ -14,6 +14,7 @@ extension NiruxShellView {
         let approvalHolds = releaseApprovalsNotHeld()
         let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
         noteMissionQuestionHandOffs(missionQuestions)
+        let appIsActive = sideEffects.appIsActive()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
@@ -34,7 +35,7 @@ extension NiruxShellView {
                 // while its tool runs, the column working. A question
                 // waits even while subagents work, as the header and ⌘J
                 // say; behind a dialog, the dialog is what waits.
-                let dialog = agentStatus == .working ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason
+                let dialog = agentStatus == .working ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)
                 let asked = dialog == nil ? col.pty?.agentQuestion(foreground: foregroundProcess) : nil
                 return ColumnInfo(
                     index: colIndex,
@@ -54,7 +55,7 @@ extension NiruxShellView {
                         .map { Date().timeIntervalSince($0) },
                     attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
                     permissionApproval: permissionApproval,
-                    openDialog: dialog ?? asked.map { .askedInReply($0.text) }
+                    openDialog: dialog?.reason ?? asked.map { .askedInReply($0.text) }
                         ?? col.pty?.agentTrustPrompt(foreground: foregroundProcess).map { _ in AgentTrustPrompt.reason },
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
@@ -62,6 +63,9 @@ extension NiruxShellView {
                     circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
                     turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
                     questionAskedAt: asked?.since,
+                    // The dialog the user is looking at needs no copy on
+                    // its row: its one line, as for any dialog.
+                    dialog: isUserFocused && appIsActive ? nil : dialog?.dialog,
                     id: col.id
                 )
             }
