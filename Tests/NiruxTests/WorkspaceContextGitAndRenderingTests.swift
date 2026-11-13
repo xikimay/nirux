@@ -606,7 +606,7 @@ extension WorkspaceContextTests {
         XCTAssertTrue(labels.contains { $0.stringValue.hasPrefix("Next") && $0.stringValue.hasSuffix("Retry the deployment") })
         XCTAssertEqual(
             height(workspace) - height(makeWorkspaceInfo()),
-            SidebarExpandedMetrics.actionBlockHeight([.next("Retry the deployment")])
+            SidebarExpandedMetrics.actionBlockHeight([.next("Retry the deployment")], width: 224, textWidth: 208)
         )
         let title = try XCTUnwrap(labels.first { $0.stringValue == "context" })
         XCTAssertTrue(title.toolTip?.contains("Blocker: Waiting for API access\nNext: Retry the deployment") == true)

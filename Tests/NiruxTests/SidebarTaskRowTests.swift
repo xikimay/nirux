@@ -207,6 +207,180 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(working?.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.Color.textSecondary)
     }
 
+    /// What stops a task is read whole: its line wraps, up to four lines,
+    /// as the selected row's does; another row's takes two; a branch, a
+    /// link and a command its block repeats keep to one. The row is as
+    /// tall as its lines, and the tooltip has what "…" cuts.
+    func testStatusLineWrapsUpToItsLimit() throws {
+        let sentence = "Claude needs your permission to connect to the staging database before it runs the seed script, "
+            + "because the credentials in the environment file expired last night and the script would stop halfway"
+        func lines(_ info: WorkspaceInfo) -> Int { SidebarCardLayout(workspace: info, sidebarWidth: 260).statusLineCount }
+        let waiting = workspace([column(0, .needsAttention, reason: .message(sentence))])
+        XCTAssertEqual(lines(waiting), 4)
+        XCTAssertEqual(lines(workspace([column()], blocker: sentence)), 4, "a blocker says what the task waits on")
+        XCTAssertEqual(lines(workspace([column()], nextStep: sentence)), 2)
+        XCTAssertEqual(lines(workspace([column()], isActive: true, nextStep: sentence)), 4, "the selected row")
+        XCTAssertEqual(lines(workspace([column()], branch: "feat/" + String(repeating: "a-very-long-name-", count: 6))), 1)
+        XCTAssertEqual(workspace([column()], pr: pullRequest("MERGED"), cleanup: .available).rowSummary.statusLineLimit(isSelected: true), 1)
+        let broken = SidebarRowSummary(mark: .error, status: SidebarStatusLine(text: sentence, tone: .error), trailing: nil)
+        XCTAssertEqual(broken.statusLineLimit(isSelected: false), 4, "what broke stops the task too")
+        // Its own line breaks would spend those lines on blanks.
+        XCTAssertEqual(status(workspace([column()], nextStep: "Write the importer\n\n then the export side ")), "Next · Write the importer then the export side")
+
+        func render(_ info: WorkspaceInfo) -> SidebarWorkspaceCardRenderResult {
+            SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
+        }
+        let oneLine = SidebarExpandedMetrics.rowPaddingY * 2 + SidebarExpandedMetrics.titleRowHeight
+            + SidebarExpandedMetrics.statusGap + SidebarExpandedMetrics.statusRowHeight
+        let row = render(waiting)
+        let label = try XCTUnwrap(row.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Needs you · \(sentence)" })
+        XCTAssertEqual(label.frame.height, 4 * SidebarExpandedMetrics.statusRowHeight)
+        XCTAssertEqual(label.maximumNumberOfLines, 4)
+        XCTAssertEqual(label.cell?.truncatesLastVisibleLine, true, "then “…”")
+        XCTAssertTrue(label.toolTip?.contains(sentence) == true)
+        XCTAssertEqual(500 - row.bottomY, oneLine + 3 * SidebarExpandedMetrics.statusRowHeight)
+
+        // A sentence that fits is whole, on the lines it takes and no more.
+        let short = "Claude needs your permission to connect to the staging database"
+        let fitting = render(workspace([column(0, .needsAttention, reason: .message(short))]))
+        let whole = try XCTUnwrap(fitting.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Needs you · \(short)" })
+        let taken = whole.frame.height / SidebarExpandedMetrics.statusRowHeight
+        XCTAssertTrue((2...3).contains(Int(taken)), "\(taken) lines")
+        XCTAssertEqual(500 - fitting.bottomY, oneLine + (taken - 1) * SidebarExpandedMetrics.statusRowHeight)
+
+        // The command its Allow / Deny block shows whole stays on one line.
+        var approval = column(0, .needsAttention, reason: .permission(tool: "Bash", summary: sentence))
+        var request = AgentPermissionRequest(toolName: "Bash", summary: sentence, key: "k", agentID: nil, sessionID: "s", requestedAt: 0)
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: sentence)
+        approval.permissionApproval = SidebarPermissionApproval(request, now: 1)
+        XCTAssertEqual(lines(workspace([approval])), 1)
+
+        // The selected row's next step, under a line that says something
+        // else: up to three lines, inside its row.
+        let next = workspace([column(0, .working)], isActive: true, nextStep: sentence)
+        let selected = render(next)
+        let step = try XCTUnwrap(selected.views.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasSuffix(sentence) })
+        XCTAssertEqual(step.frame.height, 3 * SidebarExpandedMetrics.actionLineHeight)
+        XCTAssertEqual(step.frame.minY, selected.bottomY + SidebarExpandedMetrics.rowPaddingY, accuracy: 0.5)
+
+        // What follows a status of several lines starts under it.
+        let tall = render(workspace([column()], isActive: true, nextStep: sentence))
+        let status = try XCTUnwrap(tall.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Next · \(sentence)" })
+        let chip = try XCTUnwrap(tall.hitAreas.first { if case .column = $0.region { true } else { false } })
+        XCTAssertLessThanOrEqual(chip.frame.maxY, status.frame.minY)
+    }
+
+    /// Rows change height as their text does. A list at its top stays at
+    /// its top, and a list scrolled down keeps its topmost row in view
+    /// where it is, whether a row above or below takes more lines.
+    func testListKeepsItsPlaceWhenARowChangesHeight() throws {
+        _ = NSApplication.shared
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 300))
+        let window = NSWindow(contentRect: sidebar.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = sidebar
+        defer { window.close() }
+        sidebar.isExpanded = true
+        let sentence = String(repeating: "waiting for the search team to rotate the staging key ", count: 4)
+        /// Twenty tasks, numbered as the store does: closing one renumbers
+        /// those after it.
+        func rows(blocked: Set<Int>, closed: Int? = nil, archived: Set<Int> = [], renamed: String = "") -> [WorkspaceInfo] {
+            (0..<20).filter { $0 != closed }.enumerated().map { index, task in
+                WorkspaceInfo(
+                    id: "ws-\(task)", index: index, title: "Task \(task)\(renamed)", profileID: WorkspaceProfile.defaultID,
+                    isInactive: archived.contains(task),
+                    columnCount: 1, focusedColumn: 0, gitBranch: "fix/\(task)", notification: nil, isActive: false,
+                    columns: [column()], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil,
+                    blocker: blocked.contains(task) ? sentence : nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+                )
+            }
+        }
+        let clip = sidebar.contentScrollView.contentView
+        func hiddenAbove() -> CGFloat { sidebar.contentDocumentView.frame.height - clip.bounds.maxY }
+        /// From the visible top down to the top of that task's row.
+        func place(of task: Int) throws -> CGFloat {
+            let index = try XCTUnwrap(sidebar.lastInfos.first { $0.id == "ws-\(task)" }?.index)
+            let row = try XCTUnwrap(sidebar.hitAreas.first { if case .workspace(index) = $0.region { true } else { false } })
+            return clip.bounds.maxY - row.frame.maxY
+        }
+        sidebar.update(profiles: [], workspaces: rows(blocked: []))
+        sidebar.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(sidebar.contentDocumentView.frame.height, 600, "a list taller than the sidebar")
+        XCTAssertEqual(hiddenAbove(), 0, accuracy: 0.5)
+        let short = sidebar.contentDocumentView.frame.height
+        sidebar.update(profiles: [], workspaces: rows(blocked: [15]))
+        XCTAssertGreaterThan(sidebar.contentDocumentView.frame.height, short, "a row out of view grew")
+        XCTAssertEqual(hiddenAbove(), 0, accuracy: 0.5, "the top stays")
+
+        clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y - 200))
+        sidebar.contentScrollView.reflectScrolledClipView(clip)
+        XCTAssertEqual(hiddenAbove(), 200, accuracy: 0.5)
+        let inView = try XCTUnwrap(sidebar.hitAreas.compactMap { area -> Int? in
+            guard case .workspace(let index) = area.region, clip.bounds.contains(area.frame) else { return nil }
+            return index
+        }.min())
+        let before = try place(of: inView)
+        sidebar.update(profiles: [], workspaces: rows(blocked: []))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row below shrank")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row above grew")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a row below grew")
+        XCTAssertGreaterThan(inView, 1)
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15, inView + 1]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "the row under it grew: the topmost row holds the list")
+        // With a row below changing height at once, or the list would
+        // hold by itself.
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0], closed: 1))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a task above closed: the rows after it took new numbers")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15]))
+        XCTAssertEqual(try place(of: inView), before, accuracy: 0.5, "a task above opened")
+
+        // The row that holds the list is archived, the Archived list
+        // unfolded: found again at the bottom, it doesn't take the list
+        // there. The clip stays as it is.
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15], closed: 1, archived: [19]))
+        sidebar.toggleInactiveSection()
+        clip.scroll(to: NSPoint(x: 0, y: sidebar.contentDocumentView.frame.height - clip.bounds.height - 200))
+        sidebar.contentScrollView.reflectScrolledClipView(clip)
+        let held = try XCTUnwrap(sidebar.hitAreas.compactMap { area -> (index: Int, top: CGFloat)? in
+            guard case .workspace(let index) = area.region, area.frame.intersects(clip.bounds) else { return nil }
+            return (index, area.frame.maxY)
+        }.max { $0.top < $1.top }?.index)
+        let heldTask = try XCTUnwrap(Int(try XCTUnwrap(sidebar.lastInfos.first { $0.index == held }).id.dropFirst(3)))
+        var origin = clip.bounds.origin.y
+        XCTAssertGreaterThan(origin, 100, "far from the bottom")
+        sidebar.update(profiles: [], workspaces: rows(blocked: [0, 15], closed: 1, archived: [19, heldTask]))
+        XCTAssertTrue(try XCTUnwrap(sidebar.lastInfos.first { $0.id == "ws-\(heldTask)" }).isInactive)
+        XCTAssertEqual(clip.bounds.origin.y, origin, accuracy: 0.5, "the row that held the list moved")
+
+        // Back at its top: what comes in above the first row shows.
+        clip.scroll(to: NSPoint(x: 0, y: sidebar.contentDocumentView.frame.height - clip.bounds.height))
+        sidebar.contentScrollView.reflectScrolledClipView(clip)
+        let space = ProfileInfo(
+            id: WorkspaceProfile.defaultID, name: "Acme", colorHex: "#78A3F7", isActive: true, workspaceCount: 20,
+            taskCount: 20, attention: nil
+        )
+        sidebar.update(profiles: [space], workspaces: rows(blocked: [0, 15]))
+        XCTAssertEqual(hiddenAbove(), 0, accuracy: 0.5, "the space picker, not hidden above the first row")
+
+        // Past an end of the list, mid-bounce, the clip is the scroll
+        // view's: a rebuild that moves nothing leaves it alone. (A clip
+        // that takes any origin, as the scroll view's does while it
+        // bounces.)
+        let loose = UnconstrainedClipView(frame: clip.frame)
+        sidebar.contentScrollView.contentView = loose
+        sidebar.contentScrollView.documentView = sidebar.contentDocumentView
+        let top = sidebar.contentDocumentView.frame.height - loose.bounds.height
+        for (name, bounced) in [("past the top", top + 30), ("past the bottom", -30)] {
+            loose.setBoundsOrigin(NSPoint(x: 0, y: bounced))
+            XCTAssertEqual(loose.bounds.origin.y, bounced, "a clip that bounces")
+            sidebar.update(profiles: [space], workspaces: rows(blocked: [0, 15], renamed: " (\(name))"))
+            XCTAssertEqual(sidebar.contentDocumentView.frame.height - loose.bounds.height, top, accuracy: 0.01, "the same heights")
+            XCTAssertEqual(loose.bounds.origin.y, bounced, accuracy: 0.01, name)
+        }
+    }
+
     /// "Clean up" is a link over its own words: a click on "Merged" or
     /// beside the line selects the row. An agent's state on the line keeps
     /// Clean up in a line of its own.
@@ -301,11 +475,23 @@ final class SidebarTaskRowTests: XCTestCase {
         )
         askingLead.isLead = true
         XCTAssertEqual(askingLead.cardActions, [.missionQuestion(columnIndex: 1, question)])
+        XCTAssertTrue(
+            SidebarWorkspaceCardRenderer(workspace: askingLead, sidebarWidth: 260, yOffset: 500).render().views
+                .contains { ($0 as? NSTextField)?.stringValue == "Needs you · Ship it?" },
+            "the question itself"
+        )
         XCTAssertEqual(
             SidebarExpandedMetrics.workspaceHeight(for: askingLead, sidebarWidth: 260),
-            SidebarExpandedMetrics.leadRowHeight + SidebarExpandedMetrics.actionBlockHeight(askingLead.cardActions)
+            SidebarExpandedMetrics.leadRowHeight
+                + SidebarExpandedMetrics.actionBlockHeight(askingLead.cardActions, width: 224, textWidth: 208)
                 + SidebarExpandedMetrics.rowPaddingY,
             "its block ends a row's padding above its edge"
         )
     }
+}
+
+/// A clip view past an end of its document, as a scroll view's is while
+/// it bounces.
+private final class UnconstrainedClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect { proposedBounds }
 }

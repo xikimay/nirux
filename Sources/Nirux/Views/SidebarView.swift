@@ -43,6 +43,9 @@ final class SidebarView: NSView {
     /// (question, answer, the button): Yes, No or Reply… under a turn's
     /// question.
     var onTurnAnswer: ((SidebarTurnQuestion, SidebarTurnAnswer, NSView?) -> Void)?
+    /// "Dismiss Question" in a row's menu: (column id, when the question
+    /// was asked).
+    var onQuestionDismissed: ((UUID, TimeInterval) -> Void)?
     /// Resume on the row of a restored agent that hasn't resumed yet:
     /// (workspaceIndex, columnIndex, column id).
     var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
@@ -102,6 +105,10 @@ final class SidebarView: NSView {
 
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
+    /// The workspace each row of the last build stands for, by the index
+    /// its hit area carries: `lastInfos` is already the next build's when
+    /// a rebuild reads where the list was (`scrollAnchor`).
+    var builtRowIDs: [Int: String] = [:]
 
     /// First-launch checklist, shown below the workspaces while set; nil
     /// hides it. Owned by NiruxShellView.
@@ -705,7 +712,8 @@ final class SidebarView: NSView {
 
     /// Per-workspace action menu, shared by right-click and the "⋯" button:
     /// what the workspace's state offers first (Review Branch, failed CI,
-    /// Clean Up once merged), then New Sub-task… and Organize, then Rename,
+    /// Dismiss Question, Clean Up once merged), then New Sub-task… and
+    /// Organize, then Rename,
     /// its context and Close (with Clean Up before it, not merged yet).
     /// `columnIndex` non-nil when invoked from a column row — adds the
     /// column-level actions on top.
@@ -751,6 +759,19 @@ final class SidebarView: NSView {
         let cleanup = worktreeCleanupOffer?(workspaceIndex)
         menu.addClosureItem(title: "Review Branch") { act(.reviewBranch) }
         addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, flakyReason: workspace?.ciFlakyReason, act: act)
+        // The card's own Dismiss, for each question the row says: also
+        // while its card has no buttons to put it next to.
+        // From a column's own menu, that column's alone.
+        let asked = (workspace?.columns ?? []).compactMap { column -> (column: UUID, at: TimeInterval)? in
+            guard columnIndex == nil || column.index == columnIndex, let id = column.id, let at = column.questionAskedAt
+            else { return nil }
+            return (id, at)
+        }
+        if !asked.isEmpty {
+            menu.addClosureItem(title: Self.dismissQuestionTitle) { [weak self] in
+                for question in asked { self?.onQuestionDismissed?(question.column, question.at) }
+            }
+        }
         if cleanup == .suggested { addWorktreeCleanupItem(to: menu, act: act) }
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
@@ -780,6 +801,7 @@ final class SidebarView: NSView {
 
     static let newSubtaskTitle = "New Sub-task…"
     static let addRuleTitle = "Add a Rule to the Brief…"
+    static let dismissQuestionTitle = "Dismiss Question"
 
     /// "Move Out of “<task>”": a sub-task becomes a task of its own.
     static func moveOutTitle(parentTitle: String) -> String {
@@ -994,18 +1016,19 @@ extension SidebarView {
             return
         }
         // Keep the toggle under the pointer for the next click. The
-        // document view isn't flipped, so a rebuild keeps the distance to
-        // the bottom: right for the Archived row, at the bottom with its
-        // list growing above it. The rail's tile has its list below it:
-        // keep the distance to the top.
+        // Archived row sits at the bottom with its list growing above it:
+        // it keeps its distance to the bottom, which the rebuild's own
+        // anchor (the top, or the topmost row) would give up. The rail's
+        // tile has its list below it: it keeps its distance to the top.
         let clip = contentScrollView.contentView
         let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
+        let originFromBottom = clip.bounds.origin.y
         rebuildContent()
-        if !isExpanded {
-            let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
-            let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
-            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
-        }
+        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
+        let originY = isExpanded
+            ? originFromBottom
+            : contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
         contentScrollView.reflectScrolledClipView(clip)
         // From the menu or ⌘P the header may be out of view.
         if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }
