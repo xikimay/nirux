@@ -396,7 +396,7 @@ extension SidebarView {
             y = (rows[slot - 1].minY + rows[slot].maxY) / 2
         }
         let inset = isExpanded ? SidebarExpandedMetrics.workspaceInsetX : SidebarRailMetrics.tileX
-        let width = isExpanded ? bounds.width - inset * 2 : SidebarRailMetrics.tileSize
+        let width = isExpanded ? listWidth - inset * 2 : SidebarRailMetrics.tileSize
         indicator.frame = NSRect(x: inset, y: y - 1, width: width, height: 2)
         indicator.isHidden = false
     }

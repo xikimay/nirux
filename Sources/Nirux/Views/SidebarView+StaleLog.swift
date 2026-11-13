@@ -89,7 +89,7 @@ extension SidebarView {
 }
 
 /// The sidebar's scroll view: it tells a scroll before the list moves.
-final class SidebarScrollView: OverlayScrollView {
+final class SidebarScrollView: NSScrollView {
     var onScrollWheel: (() -> Void)?
 
     /// Overriding `scrollWheel` alone would turn responsive scrolling off.

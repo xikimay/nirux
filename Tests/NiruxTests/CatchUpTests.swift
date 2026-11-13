@@ -258,7 +258,7 @@ final class CatchUpTests: XCTestCase {
 
     /// A list taller than the sidebar: the card comes into view, not above
     /// the visible part. Checked in height, what the reveal scrolls: the
-    /// width a scroller leaves is OverlayScrollViewTests' to check.
+    /// width a scroller leaves is LegacyScrollerTests' to check.
     func testTheCardComesIntoView() throws {
         let rows = (0..<30).map { index in
             WorkspaceInfo(

@@ -33,7 +33,9 @@ extension SidebarView {
         let contentHeight = Metrics.topPadding + items.map(\.advance).reduce(0, +)
             + Metrics.tileSize + Metrics.bottomPadding
         let docHeight = max(bounds.height, contentHeight)
-        contentDocumentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: docHeight)
+        // The tiles stay put; a legacy scroller takes the rail's right edge.
+        listWidth = contentHeight > bounds.height ? widthBesideScroller : bounds.width
+        contentDocumentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: docHeight)
 
         var top = docHeight - Metrics.topPadding
         for item in items {
@@ -126,7 +128,7 @@ extension SidebarView {
         addRailView(tile)
         railTileViews[target] = tile
         hitAreas.append(SidebarHitArea(
-            frame: NSRect(x: 0, y: top - Metrics.tileSize - Metrics.tileGap / 2, width: bounds.width, height: Metrics.tileSize + Metrics.tileGap),
+            frame: NSRect(x: 0, y: top - Metrics.tileSize - Metrics.tileGap / 2, width: listWidth, height: Metrics.tileSize + Metrics.tileGap),
             region: region
         ))
     }

@@ -35,20 +35,31 @@ extension SidebarView {
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive && !$0.isLead }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
-        let archivedListHeight = archivedListHeight(listedInactiveInfos)
         let activeProfile = lastProfiles.first(where: { $0.isActive })
-        let onboardingCard = preparedOnboardingCard()
-
-        let contentH = expandedContentHeight(
-            hasPicker: activeProfile != nil,
-            leadInfos: leadInfos,
-            activeInfos: activeInfos,
-            archivedHeight: inactiveInfos.isEmpty ? nil : archivedListHeight,
-            onboardingHeight: onboardingCard?.height
-        ) + (catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0)
+        func measure() -> (archivedListHeight: CGFloat, onboardingCard: OnboardingChecklistView?, contentH: CGFloat) {
+            let archived = archivedListHeight(listedInactiveInfos)
+            let card = preparedOnboardingCard()
+            let height = expandedContentHeight(
+                hasPicker: activeProfile != nil,
+                leadInfos: leadInfos,
+                activeInfos: activeInfos,
+                archivedHeight: inactiveInfos.isEmpty ? nil : archived,
+                onboardingHeight: card?.height
+            ) + (catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0)
+            return (archived, card, height)
+        }
+        // At the sidebar's width; at the width a legacy scroller leaves when
+        // the list is taller than the sidebar (narrower, it is no shorter).
+        listWidth = bounds.width
+        var measured = measure()
+        if measured.contentH > bounds.height, widthBesideScroller < listWidth {
+            listWidth = widthBesideScroller
+            measured = measure()
+        }
+        let (archivedHeight, onboardingCard, contentH) = measured
 
         let docHeight = max(bounds.height, contentH)
-        contentDocumentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: docHeight)
+        contentDocumentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: docHeight)
 
         var yOffset = docHeight - SidebarExpandedMetrics.topPadding
         if let activeProfile {
@@ -72,7 +83,7 @@ extension SidebarView {
             )
         }
         if !inactiveInfos.isEmpty {
-            buildArchivedBlock(count: inactiveInfos.count, listed: listedInactiveInfos, listHeight: archivedListHeight)
+            buildArchivedBlock(count: inactiveInfos.count, listed: listedInactiveInfos, listHeight: archivedHeight)
         }
 
         restoreScroll(to: anchor)
@@ -197,9 +208,9 @@ extension SidebarView {
     ) -> CGFloat {
         typealias Metrics = SidebarExpandedMetrics
         var height = Metrics.topPadding + Metrics.tasksHeaderHeight
-            + Metrics.groupHeight(for: activeInfos, sidebarWidth: bounds.width)
+            + Metrics.groupHeight(for: activeInfos, sidebarWidth: listWidth)
         if !leadInfos.isEmpty {
-            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: bounds.width) - Metrics.workspaceGap + Metrics.leadGap
+            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: listWidth) - Metrics.workspaceGap + Metrics.leadGap
         }
         if hasPicker { height += Metrics.pickerHeight + Metrics.pickerBottomGap }
         if let onboardingHeight { height += Metrics.onboardingCardGap + onboardingHeight }
@@ -212,7 +223,7 @@ extension SidebarView {
     private func archivedListHeight(_ listed: [WorkspaceInfo]) -> CGFloat {
         guard !listed.isEmpty else { return 0 }
         return 1 + SidebarExpandedMetrics.workspaceGap
-            + SidebarExpandedMetrics.groupHeight(for: listed, sidebarWidth: bounds.width)
+            + SidebarExpandedMetrics.groupHeight(for: listed, sidebarWidth: listWidth)
             - SidebarExpandedMetrics.workspaceGap + SidebarExpandedMetrics.archivedListGap
     }
 
@@ -331,7 +342,7 @@ extension SidebarView {
         let inset = SidebarExpandedMetrics.workspaceInsetX
         return NSRect(
             x: inset, y: top - SidebarExpandedMetrics.pickerHeight,
-            width: bounds.width - inset * 2, height: SidebarExpandedMetrics.pickerHeight
+            width: listWidth - inset * 2, height: SidebarExpandedMetrics.pickerHeight
         )
     }
 
@@ -359,7 +370,7 @@ extension SidebarView {
 
         let size = Metrics.headerButtonSize
         let buttonFrame = NSRect(
-            x: bounds.width - Metrics.workspaceInsetX - Metrics.cardPaddingX + (Theme.Space.xs + 2) - size,
+            x: listWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX + (Theme.Space.xs + 2) - size,
             y: rowY + (Metrics.tasksHeaderHeight - size) / 2, width: size, height: size
         )
         let button = SidebarBadgeView(text: "", textColor: Theme.Color.textSecondary, fillColor: .clear, font: Theme.Font.caption)
@@ -382,7 +393,7 @@ extension SidebarView {
     /// start under it.
     private func buildCatchUpCard(_ catchUp: SidebarCatchUp, top: CGFloat) -> CGFloat {
         let card = SidebarCatchUpCardRenderer(
-            catchUp: catchUp, sidebarWidth: bounds.width, top: top,
+            catchUp: catchUp, sidebarWidth: listWidth, top: top,
             press: { [weak self] action in self?.onCatchUpAction?(action) }
         ).render()
         card.views.forEach(addExpandedView)
@@ -392,7 +403,7 @@ extension SidebarView {
         // would come in above the visible part.
         if revealsCatchUpOnNextBuild {
             revealsCatchUpOnNextBuild = false
-            let frame = NSRect(x: 0, y: top - height, width: bounds.width, height: height)
+            let frame = NSRect(x: 0, y: top - height, width: listWidth, height: height)
             DispatchQueue.main.async { [weak self] in
                 self?.contentDocumentView.scrollToVisible(frame.insetBy(dx: 0, dy: -SidebarExpandedMetrics.tasksHeaderHeight))
             }
@@ -422,7 +433,7 @@ extension SidebarView {
         typealias Metrics = SidebarExpandedMetrics
         let inset = Metrics.workspaceInsetX
         let rowFrame = NSRect(
-            x: inset, y: Metrics.bottomPadding, width: bounds.width - inset * 2, height: Metrics.archivedRowHeight
+            x: inset, y: Metrics.bottomPadding, width: listWidth - inset * 2, height: Metrics.archivedRowHeight
         )
         buildArchivedRow(count: count, frame: rowFrame)
         guard !listed.isEmpty else { return }
@@ -491,7 +502,7 @@ extension SidebarView {
             onboardingCardView = nil
             return nil
         }
-        let width = bounds.width - SidebarExpandedMetrics.workspaceInsetX * 2
+        let width = listWidth - SidebarExpandedMetrics.workspaceInsetX * 2
         // Mid-expansion the sidebar can still be collapsed-width.
         guard width >= 160 else {
             onboardingCardView?.removeFromSuperview()
@@ -536,7 +547,7 @@ extension SidebarView {
     private func buildWorkspaceSection(workspace: WorkspaceInfo, yOffset: CGFloat) -> CGFloat {
         let result = SidebarWorkspaceCardRenderer(
             workspace: workspace,
-            sidebarWidth: bounds.width,
+            sidebarWidth: listWidth,
             yOffset: yOffset,
             animates: animates,
             turnEndedAt: turnEndNotedAt[workspace.id],
