@@ -6,7 +6,9 @@ import XCTest
 /// the sidebar's rows and the Board's lines take the width the scroller
 /// leaves, as in Finder's sidebar; with overlay ones, the whole width. The
 /// style is set as AppKit sets it on a live scroll view when the preferred
-/// one changes: through its setter. Nothing is put on screen.
+/// one changes: through its setter. No test spins the run loop, so AppKit's
+/// own switch (on CI, a moment into the process) can't land mid-test.
+/// Nothing is put on screen.
 @MainActor
 final class LegacyScrollerTests: XCTestCase {
     /// Never shown; kept for as long as the test runs.
@@ -19,11 +21,12 @@ final class LegacyScrollerTests: XCTestCase {
         windows.append(window)
     }
 
-    private func sidebar(rows count: Int, style: NSScroller.Style) -> SidebarView {
-        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 300))
+    private func sidebar(rows count: Int, style: NSScroller.Style, expanded: Bool = true) -> SidebarView {
+        let width = expanded ? 260 : SidebarRailMetrics.width
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: width, height: 300))
         show(sidebar)
         sidebar.contentScrollView.scrollerStyle = style
-        sidebar.isExpanded = true
+        sidebar.isExpanded = expanded
         sidebar.update(profiles: [], workspaces: (0..<count).map { index in
             WorkspaceInfo(
                 id: "ws\(index)", index: index, title: "task \(index)", profileID: WorkspaceProfile.defaultID,
@@ -92,9 +95,17 @@ final class LegacyScrollerTests: XCTestCase {
         XCTAssertEqual(sidebar.contentDocumentView.frame.width, 260, "the list takes the whole width")
     }
 
-    func testTheBoardsLinesAndTitlesSitBesideALegacyScroller() throws {
+    func testTheRailScrollsWithoutAScroller() throws {
+        // 52 pt: a legacy scroller would cover the tiles' right edge.
+        let rail = sidebar(rows: 30, style: .legacy, expanded: false)
+        XCTAssertGreaterThan(rail.contentDocumentView.frame.height, 300, "the rail is longer than it is tall")
+        XCTAssertEqual(rail.contentScrollView.contentView.frame.width, SidebarRailMetrics.width, "no scroller takes its width")
+    }
+
+    private func board(style: NSScroller.Style) -> BoardStagesView {
         let board = BoardStagesView(frame: NSRect(x: 0, y: 0, width: 940, height: 300))
         show(board)
+        board.scrollView.scrollerStyle = style
         let lines = (0..<20).map { index in
             BoardStages.Line(
                 id: "task\(index)", title: "Task \(index)", station: .checks, state: .waiting,
@@ -102,7 +113,6 @@ final class LegacyScrollerTests: XCTestCase {
                 phrase: BoardStages.Phrase(text: "Checks running", detail: nil), pullRequest: "#\(index)", since: nil
             )
         }
-        board.scrollView.scrollerStyle = .overlay
         board.show(BoardStagesView.Content(
             header: BoardStagesView.Header(name: "nirux-public", color: Theme.Color.accent, summary: "20 tasks", lead: nil),
             order: .sidebar,
@@ -113,25 +123,40 @@ final class LegacyScrollerTests: XCTestCase {
             now: 1_794_405_600
         ))
         board.layoutSubtreeIfNeeded()
-        let scroll = board.scrollView
-        let document = try XCTUnwrap(scroll.documentView)
-        func lineWidths() -> Set<CGFloat> {
-            Set(document.subviews.compactMap { $0 as? BoardStagesLineView }.map(\.frame.width))
-        }
-        func pullRequestTitle() -> CGFloat { board.columnTitles[2].frame.minX }
-        XCTAssertEqual(lineWidths(), [940], "overlay: the lines take the whole width")
-        XCTAssertEqual(pullRequestTitle(), try XCTUnwrap(BoardStagesView.Columns(width: 940).pullRequest).minX)
+        return board
+    }
 
-        // As AppKit sets it on a Mac with a mouse.
-        scroll.scrollerStyle = .legacy
-        board.layoutSubtreeIfNeeded()
-        let beside = scroll.contentView.frame.width
-        XCTAssertLessThan(beside, 940, "a legacy scroller takes width")
-        XCTAssertEqual(document.frame.width, beside, "the list is as wide as the clip")
-        XCTAssertEqual(lineWidths(), [beside], "and so is each line")
+    /// The list, each line and the "Pull request" title at `width`.
+    private func assertBoard(_ board: BoardStagesView, at width: CGFloat, _ when: String, line: UInt = #line) throws {
+        let document = try XCTUnwrap(board.scrollView.documentView)
+        let lines = Set(document.subviews.compactMap { $0 as? BoardStagesLineView }.map(\.frame.width))
+        XCTAssertEqual(document.frame.width, width, "\(when): the list", line: line)
+        XCTAssertEqual(lines, [width], "\(when): each line", line: line)
         XCTAssertEqual(
-            pullRequestTitle(), try XCTUnwrap(BoardStagesView.Columns(width: beside).pullRequest).minX,
-            "the titles keep over their columns"
+            board.columnTitles[2].frame.minX, try XCTUnwrap(BoardStagesView.Columns(width: width).pullRequest).minX,
+            "\(when): the titles keep over their columns", line: line
         )
+    }
+
+    func testTheBoardsLinesAndTitlesSitBesideALegacyScroller() throws {
+        // As on a Mac set to show scroll bars always, from the start.
+        let board = board(style: .legacy)
+        let beside = board.scrollView.contentView.frame.width
+        XCTAssertLessThan(beside, 940, "a list taller than the Board shows a legacy scroller, which takes width")
+        try assertBoard(board, at: beside, "legacy")
+    }
+
+    func testTheBoardFollowsTheScrollerStyle() throws {
+        let board = board(style: .overlay)
+        try assertBoard(board, at: 940, "overlay")
+        // As AppKit sets it on a Mac with a mouse.
+        board.scrollView.scrollerStyle = .legacy
+        board.layoutSubtreeIfNeeded()
+        let beside = board.scrollView.contentView.frame.width
+        XCTAssertLessThan(beside, 940, "a legacy scroller takes width")
+        try assertBoard(board, at: beside, "switched to legacy")
+        board.scrollView.scrollerStyle = .overlay
+        board.layoutSubtreeIfNeeded()
+        try assertBoard(board, at: 940, "overlay again")
     }
 }

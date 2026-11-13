@@ -286,8 +286,9 @@ final class SidebarView: NSView {
     var widthBesideScroller: CGFloat {
         NSScrollView.contentSize(
             forFrameSize: bounds.size, horizontalScrollerClass: nil,
-            verticalScrollerClass: contentScrollView.hasVerticalScroller ? NSScroller.self : nil,
-            borderType: contentScrollView.borderType, controlSize: .regular, scrollerStyle: contentScrollView.scrollerStyle
+            verticalScrollerClass: contentScrollView.hasVerticalScroller ? contentScrollView.verticalScroller.map { type(of: $0) } : nil,
+            borderType: contentScrollView.borderType, controlSize: contentScrollView.verticalScroller?.controlSize ?? .regular,
+            scrollerStyle: contentScrollView.scrollerStyle
         ).width
     }
 
