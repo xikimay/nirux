@@ -293,7 +293,7 @@ extension NiruxShellView {
             // session too (see `SessionName`).
             worktreeBranch: created.checkedOutBranch ?? created.folderName,
             // The Lead's list_tasks says another agent started it.
-            startedByAgent: request.reportsToTask,
+            startedByAgent: request.startedByTaskAgent,
             setupScript: setupScript(for: decision),
             taskFolder: created.folderName == nil ? nil : created.path,
             activate: request.opensInFront,

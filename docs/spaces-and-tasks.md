@@ -59,7 +59,7 @@ With the description empty, **Start** opens a plain workspace instead: a shell i
 
 A task's Claude Code agent can start sub-tasks itself, with the `start_task` tool Nirux gives it, when you ask it to split the work. A sub-task it starts opens behind what you are doing. It reports to that agent even with Mission handoffs off: its questions and its result are typed into the agent's prompt (see [Missions](missions.md)). The agent lists its sub-tasks and answers their questions with its tools.
 
-- There are two levels at most: a sub-task's agent can't start sub-tasks of its own.
+- There are two levels at most: `start_task` refuses to start a sub-task from a sub-task.
 - A task runs at most six sub-tasks at once. Archived sub-tasks and those that reported their result don't count.
 - When **Starts tasks without asking** is off in Space Settings › Lead, the agent's sub-task opens in the sheet, filled in, for you to start.
 

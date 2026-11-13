@@ -14,13 +14,14 @@ extension NiruxShellView {
         }
         let arguments = request.argumentObject
         if let problem = LeadTools.problem(tool: request.tool, arguments: arguments) { return answer(problem, true) }
-        if let refusal = subtaskRefusal(for: caller) { return answer(refusal, true) }
+        let subtasks = subtasks(of: caller)
+        if let refusal = subtaskRefusal(for: caller, subtasks: subtasks) { return answer(refusal, true) }
         switch request.tool {
         case LeadTools.startTask:
             let parent = NewTask.MissionParent(workspaceID: caller.id, agentUUID: request.agentUUID)
-            taskStartSubtask(arguments, from: caller, parent: parent, answer: answer)
+            taskStartSubtask(arguments, from: caller, subtasks: subtasks, parent: parent, answer: answer)
         case LeadTools.listTasks:
-            answer(taskSubtaskList(of: caller), false)
+            answer(taskSubtaskList(of: caller, subtasks: subtasks), false)
         case LeadTools.reply:
             taskReply(arguments, from: caller, answer: answer)
         default:
@@ -34,35 +35,36 @@ extension NiruxShellView {
             .filter { $0.parentWorkspaceID == task.id && !$0.isClosing }
     }
 
-    /// Those that count against `TaskTools.maxRunningSubtasks`: not
-    /// archived, and not done (their latest Mission from `task` completed).
-    func runningSubtasks(of task: WorkspaceState) -> [WorkspaceState] {
+    /// Those of `subtasks` (`task`'s) that count against
+    /// `TaskTools.maxRunningSubtasks`: not archived, and not done (their
+    /// latest Mission from `task` completed).
+    func runningSubtasks(of task: WorkspaceState, among subtasks: [WorkspaceState]? = nil) -> [WorkspaceState] {
         _ = MissionStore.shared.ensureLoaded()
-        return subtasks(of: task).filter { subtask in
+        let missions = MissionStore.shared.missions.filter { $0.parentWorkspaceID == task.id }
+        return (subtasks ?? self.subtasks(of: task)).filter { subtask in
             guard !subtask.isInactive else { return false }
-            let mission = MissionStore.shared.missions
-                .filter { $0.childWorkspaceID == subtask.id && $0.parentWorkspaceID == task.id }
-                .max { $0.createdAt < $1.createdAt }
+            let mission = missions.filter { $0.childWorkspaceID == subtask.id }.max { $0.createdAt < $1.createdAt }
             return mission?.status != .completed
         }
     }
 
-    /// A sub-task: its parent is still open.
+    /// A sub-task: its parent, a task, is still open. A Lead's tasks are
+    /// the space's own list.
     func isSubtask(_ workspace: WorkspaceState) -> Bool {
         guard let parentID = workspace.parentWorkspaceID else { return false }
-        return workspaces.contains { $0.id == parentID && !$0.isClosing }
+        return workspaces.contains { $0.id == parentID && !$0.isClosing && !$0.isLead }
     }
 
     /// Why `caller` can't have sub-tasks; nil when it can (a task, or one
     /// that still has some, its folder gone).
-    func subtaskRefusal(for caller: WorkspaceState) -> String? {
+    func subtaskRefusal(for caller: WorkspaceState, subtasks: [WorkspaceState]) -> String? {
         if isSubtask(caller) {
             return "This is a sub-task: it can't have sub-tasks of its own (two levels at most). Do the work here, "
                 + "or tell the agent that started it what else is needed."
         }
-        guard offersSubtask(caller) || !subtasks(of: caller).isEmpty else {
+        guard offersSubtask(caller) || !subtasks.isEmpty else {
             return "This workspace isn't a task (a worktree of one of its space's repositories, or a task's folder), "
-                + "so it can't have sub-tasks. The user starts tasks with ⌘N."
+                + "so it has no sub-tasks: to start a task from here, use the nirux-worktree skill."
         }
         return nil
     }
@@ -70,12 +72,13 @@ extension NiruxShellView {
     // MARK: start_task
 
     private func taskStartSubtask(
-        _ arguments: [String: Any], from caller: WorkspaceState, parent: NewTask.MissionParent, answer: @escaping LeadAnswer
+        _ arguments: [String: Any], from caller: WorkspaceState, subtasks: [WorkspaceState], parent: NewTask.MissionParent,
+        answer: @escaping LeadAnswer
     ) {
         guard offersSubtask(caller), let space = profiles.first(where: { $0.id == caller.profileID }) else {
             return answer("Nirux can't start a sub-task here any more: this task's folder or repository isn't there.", true)
         }
-        let running = runningSubtasks(of: caller).count
+        let running = runningSubtasks(of: caller, among: subtasks).count + pendingSubtaskStarts[caller.id, default: 0]
         guard running < TaskTools.maxRunningSubtasks else {
             return answer("This task already runs \(running) sub-tasks, the most it may: wait until one completes, "
                 + "or ask the user to archive one.", true)
@@ -94,6 +97,16 @@ extension NiruxShellView {
         let agent = defaultTaskAgent(forSpace: space.id)
         let callerID = caller.id
         let callerFolder = caller.taskFolder
+        // Counted until it answers: by then its workspace exists, or
+        // nothing was made.
+        pendingSubtaskStarts[callerID, default: 0] += 1
+        let answerOnce = answer
+        let answer: LeadAnswer = { [weak self] text, isError in
+            if let self, let pending = self.pendingSubtaskStarts[callerID] {
+                self.pendingSubtaskStarts[callerID] = pending > 1 ? pending - 1 : nil
+            }
+            answerOnce(text, isError)
+        }
         Self.readNewTaskInfo(
             spaceID: space.id, folder: repository?.folder, anchors: space.anchors, stateDirectory: Persistence.stateDirectory
         ) { [weak self] info in
@@ -163,12 +176,11 @@ extension NiruxShellView {
     // MARK: list_tasks
 
     /// The task's sub-tasks, as the Lead's list gives its tasks.
-    func taskSubtaskList(of caller: WorkspaceState) -> String {
+    func taskSubtaskList(of caller: WorkspaceState, subtasks: [WorkspaceState]) -> String {
         guard let space = profiles.first(where: { $0.id == caller.profileID }) else { return "This task's space is gone." }
         let snapshot = ProcessSnapshot()
         let store = MissionStore.shared
         _ = store.ensureLoaded()
-        let subtasks = subtasks(of: caller)
         var lines: [String] = []
         for subtask in subtasks {
             var line = taskListHead(subtask, in: space, parentTitle: nil, snapshot: snapshot)
@@ -181,7 +193,7 @@ extension NiruxShellView {
             line += taskListStatusLine(subtask)
             lines.append(line)
         }
-        let running = runningSubtasks(of: caller).count
+        let running = runningSubtasks(of: caller, among: subtasks).count
         let title = MissionPromptText.quoted(caller.title)
         let header = subtasks.isEmpty
             ? "“\(title)” has no sub-task."

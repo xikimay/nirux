@@ -117,8 +117,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// "One door: ⌘N"). Nil: no Lead, no checkbox.
     var lead: NewTask.MissionParent? {
         didSet {
-            reportCheckbox.isHidden = lead == nil
-            reportHint.isHidden = lead == nil
+            updateReportCheckbox()
             if lead != nil, oldValue == nil { reportCheckbox.state = .on }
             layout()
         }
@@ -126,9 +125,21 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
     /// The task's agent that proposed this sub-task (`start_task` with
     /// "Starts tasks without asking" off): it reports to that agent while
-    /// "Sub-task of" stays checked, and "Report to the Lead" hides.
+    /// "Sub-task of" stays checked, and "Report to the Lead" hides
+    /// meanwhile.
     var reportsToTaskAgent: NewTask.MissionParent? {
-        didSet { if reportsToTaskAgent != nil { lead = nil } }
+        didSet {
+            updateReportCheckbox()
+            layout()
+        }
+    }
+
+    /// "Report to the Lead" shows with a Lead, unless the sub-task a task's
+    /// agent proposed is checked: that one reports to the agent.
+    private func updateReportCheckbox() {
+        let hidden = lead == nil || (reportsToTaskAgent != nil && subtaskParentID != nil)
+        reportCheckbox.isHidden = hidden
+        reportHint.isHidden = hidden
     }
 
     /// A task the new one goes under in the sidebar, and where it works:
@@ -473,6 +484,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     @objc func subtaskToggled(_ sender: Any?) {
         restoreReturnKey()
         updateForSubtask()
+        updateReportCheckbox()
+        layout()
         // Checked again: back in the task's repository.
         if subtaskParentID != nil, let key = parentTask?.repositoryKey, key != selectedRepositoryKey,
            repositories.contains(where: { $0.key == key }) {
@@ -1056,8 +1069,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         reportHint.isSelectable = false
         reportHint.setAccessibilityElement(false)
         reportCheckbox.setAccessibilityHelp(reportHint.stringValue)
-        reportCheckbox.isHidden = lead == nil
-        reportHint.isHidden = lead == nil
+        updateReportCheckbox()
         subtaskCheckbox.target = self
         subtaskCheckbox.action = #selector(subtaskToggled(_:))
         subtaskCheckbox.lineBreakMode = .byTruncatingMiddle

@@ -697,6 +697,24 @@ final class LeadToolsFlowTests: XCTestCase {
 
     // MARK: - A task's tools
 
+    /// The answers to `tool` called with each of `argumentsList` at once,
+    /// none waiting for another's answer, in that order.
+    private func callAtOnce(
+        _ tool: String, _ argumentsList: [[String: Any]], from workspace: WorkspaceState, agentUUID: String, in harness: UIFlowHarness
+    ) throws -> [(text: String, isError: Bool)] {
+        var answers: [Int: (text: String, isError: Bool)] = [:]
+        for (index, arguments) in argumentsList.enumerated() {
+            let json = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: arguments), encoding: .utf8))
+            let request = LeadChannel.Request(
+                id: UUID().uuidString, tool: tool, arguments: json,
+                workspaceID: workspace.id, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
+            )
+            harness.shell.handleLeadRequest(request) { text, isError in answers[index] = (text, isError) }
+        }
+        harness.waitUntil("the answers to \(tool)") { answers.count == argumentsList.count }
+        return argumentsList.indices.compactMap { answers[$0] }
+    }
+
     /// A task the Lead started, and its agent's column.
     private func startTask(_ description: String, lead: Lead, in harness: UIFlowHarness) throws -> (WorkspaceState, String) {
         let started = try call(LeadTools.startTask, ["description": description], lead: lead, in: harness)
@@ -727,6 +745,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Write the API docs" })
             XCTAssertEqual(subtask.parentWorkspaceID, task.id)
             XCTAssertEqual(subtask.profileID, lead.space)
+            XCTAssertTrue(subtask.startedByAgent)
             XCTAssertTrue(shell.activeWorkspace === lead.workspace, "it opens behind what the user is doing")
             let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id })
             XCTAssertEqual(mission.parentWorkspaceID, task.id)
@@ -758,6 +777,9 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("question \(question.id)"))
             XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], lead: lead, in: harness).isError,
                           "not the Lead's to answer")
+            let (second, secondAgent) = try startTask("Sort the orders", lead: lead, in: harness)
+            XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], from: second, agentUUID: secondAgent, in: harness)
+                .isError, "nor another task's")
             XCTAssertFalse(try call(LeadTools.reply, ["question": question.id, "message": "No"], from: task, agentUUID: agent, in: harness).isError)
             XCTAssertEqual(MissionStore.shared.response(to: question.id)?.message, "No")
 
@@ -773,14 +795,20 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(merge.text.contains("Only a space's Lead"), merge.text)
             XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: UUID().uuidString, in: harness).isError)
 
-            // Six running at most; one that completed doesn't count.
-            for index in 2...TaskTools.maxRunningSubtasks {
+            // Six running at most, counted before a sub-task's workspace
+            // exists: with five running, two calls at once start one. One
+            // that completed doesn't count.
+            for index in 2..<TaskTools.maxRunningSubtasks {
                 shell.addWorkspace(title: "sub \(index)", cwd: harness.repo, profileID: lead.space, parentWorkspaceID: task.id)
             }
+            XCTAssertEqual(shell.runningSubtasks(of: task).count, TaskTools.maxRunningSubtasks - 1)
+            let both = try callAtOnce(
+                LeadTools.startTask, [["description": "One more"], ["description": "And another"]], from: task, agentUUID: agent, in: harness
+            )
+            XCTAssertEqual(both.filter(\.isError).count, 1, both.map(\.text).joined(separator: " / "))
+            XCTAssertTrue(both.contains { $0.isError && $0.text.contains("already runs 6 sub-tasks") }, both.map(\.text).joined(separator: " / "))
             XCTAssertEqual(shell.runningSubtasks(of: task).count, TaskTools.maxRunningSubtasks)
-            let full = try call(LeadTools.startTask, ["description": "One more"], from: task, agentUUID: agent, in: harness)
-            XCTAssertTrue(full.isError)
-            XCTAssertTrue(full.text.contains("already runs 6 sub-tasks"), full.text)
+            XCTAssertTrue(shell.pendingSubtaskStarts.isEmpty)
             let completed = MissionEvent(
                 id: UUID().uuidString, missionID: mission.id,
                 childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
@@ -808,11 +836,17 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(sheet.headingLabel.stringValue, "Proposed by “Add a date filter” · Tools")
             XCTAssertEqual(sheet.subtaskParentID, task.id)
             XCTAssertTrue(sheet.reportCheckbox.isHidden, "it reports to the task's agent, not the Lead")
+            // Not a sub-task any more: the space's Lead is offered again.
+            sheet.subtaskCheckbox.performClick(nil)
+            XCTAssertFalse(sheet.reportCheckbox.isHidden)
+            sheet.subtaskCheckbox.performClick(nil)
+            XCTAssertTrue(sheet.reportCheckbox.isHidden)
             harness.waitUntil("the repository's info") { sheet.info?.target != nil }
             sheet.startButton.performClick(nil)
             harness.waitUntil("the sub-task to open") { shell.workspaces.contains { $0.title == "Write the API docs" } }
             let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Write the API docs" })
             XCTAssertEqual(subtask.parentWorkspaceID, task.id)
+            XCTAssertFalse(subtask.startedByAgent, "the user started it")
             let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id })
             XCTAssertEqual(mission.parentWorkspaceID, task.id)
             XCTAssertEqual(mission.reportsToTask, true)

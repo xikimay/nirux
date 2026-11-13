@@ -31,7 +31,8 @@ enum NiruxMCPServer {
         own worktree; list_tasks shows your sub-tasks; reply answers their questions. Their questions and \
         results are typed into your prompt as [Nirux Mission] messages, only once your turn is over: after \
         starting sub-tasks, go on with your own work or end your turn; don't poll or sleep. Report your own \
-        result only once the sub-tasks you need are done. A sub-task can't start sub-tasks of its own.
+        result only once the sub-tasks you need are done. A sub-task can't start sub-tasks of its own. Where \
+        start_task answers that the workspace isn't a task, use the nirux-worktree skill.
         """
 
     /// For an agent outside a Nirux workspace, which has no task tools.
@@ -110,9 +111,15 @@ enum NiruxMCPServer {
         /// app can tell who calls.
         var isWorkspaceAgent: Bool { nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil }
         /// The tools the app answers for this agent: the Lead's, or a task's.
-        var appTools: (names: [String], definitions: [[String: Any]]) {
-            if isLead { return (LeadTools.names, LeadTools.definitions) }
-            return isWorkspaceAgent ? (TaskTools.names, TaskTools.definitions) : ([], [])
+        var appToolNames: [String] {
+            if isLead { return LeadTools.names }
+            return isWorkspaceAgent ? TaskTools.names : []
+        }
+
+        /// Their definitions, for `tools/list`.
+        var appToolDefinitions: [[String: Any]] {
+            if isLead { return LeadTools.definitions }
+            return isWorkspaceAgent ? TaskTools.definitions : []
         }
         /// Tests shorten the Lead's calls' wait for the app.
         var leadTimeout: TimeInterval?
@@ -160,12 +167,12 @@ enum NiruxMCPServer {
 
     /// A `tools/call` of one of the tools the app answers for this agent.
     static func isAppToolCall(_ line: Data, context: Context) -> Bool {
-        guard !context.appTools.names.isEmpty, line.count <= maxLineBytes,
+        guard !context.appToolNames.isEmpty, line.count <= maxLineBytes,
               let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
               object["method"] as? String == "tools/call",
               let name = (object["params"] as? [String: Any])?["name"] as? String
         else { return false }
-        return context.appTools.names.contains(name)
+        return context.appToolNames.contains(name)
     }
 
     /// The answer to one message, without its newline; nil for a
@@ -196,10 +203,10 @@ enum NiruxMCPServer {
         case "ping":
             return response(id: id, result: [:])
         case "tools/list":
-            return response(id: id, result: ["tools": [HistorySearchTool.definition] + context.appTools.definitions])
+            return response(id: id, result: ["tools": [HistorySearchTool.definition] + context.appToolDefinitions])
         case "tools/call":
             let name = params["name"] as? String
-            guard let name, name == HistorySearchTool.name || context.appTools.names.contains(name) else {
+            guard let name, name == HistorySearchTool.name || context.appToolNames.contains(name) else {
                 return response(id: id, error: (-32602, "Unknown tool: \(name ?? "none")"))
             }
             guard let arguments = params["arguments"] as? [String: Any] ?? (params["arguments"] == nil ? [:] : nil) else {
