@@ -156,14 +156,25 @@ Two orders, one setting for the app:
   nothing is left to follow for: a pull request merged and through the queue,
   then an archived task.
 
-**A line never moves under the pointer** (the Lead's rule, 2026-11-13). While
-the pointer is over the Board, the lines keep the order they have, whatever
-the content's new order (a click on a Merge station sends a line up By
-progress; a turn, a check, the sidebar move others): each is drawn where it
-was, in its new state. A line that comes goes after the others of its
-section; one that goes is gone. Once the pointer leaves the Board, or the
-Board hides, the lines take the content's order. The order switch is the
-user's own click: what it asks applies at once.
+**Nothing moves under the pointer** (the Lead's rule, 2026-11-13). While the
+pointer is over the Board, header included, what it shows keeps its place,
+whatever the content brings (a click on a Merge station sends a line up By
+progress; a pull request lands and leaves the list; a turn, a check, the
+sidebar move others):
+
+- a line still there stays where it was, in its new state;
+- a line gone stays there too, faded and inert (no click, no station, no
+  menu), so that nothing below it moves up;
+- a line that comes waits, a sub-task too; "Merged today" keeps its entries'
+  order, a new merge after them; a repository that comes goes after the
+  others.
+
+Once the pointer leaves the Board, or the Board hides, or the app isn't the
+active one any more (its windows don't hear the pointer leave), it settles,
+once the event that said so is over. The order switch is the user's own
+click: what it asks applies at once; an order that changes otherwise (another
+Board's switch) is held. Left for the Lead: a pointer resting on the Board
+while the user types elsewhere holds it as long, new tasks waiting.
 
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its

@@ -831,11 +831,17 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(view.pointerLocation(), "a Board that isn't on screen doesn't hear the pointer: it asks for none")
     }
 
-    func testALineNeverMovesUnderThePointer() throws {
+    func testNothingMovesUnderThePointer() throws {
         let units = { (ids: [String]) in self.tasks(ids.map { self.line($0) }) }
-        let view = board(content([section(units: units(["a", "b", "c"]), withoutTask: units(["x", "y"]))], order: .progress))
+        let merged = { (numbers: [Int]) in
+            numbers.map { BoardStages.Merged(lineID: nil, title: "Fix \($0)", number: $0, mergedAt: self.now - 60) }
+        }
+        let view = board(content([section(units: units(["a", "b", "c"]), withoutTask: units(["x", "y"]), merged: merged([7]))],
+                                 order: .progress))
+        view.settleLater = { $0() }
         let ids = { view.lineViews.map(\.line.id) }
         let inside = view.convert(NSPoint(x: 400, y: 300), to: nil)
+        let header = view.convert(NSPoint(x: 400, y: 20), to: nil)
         let outside = NSPoint(x: -10, y: -10)
         view.foldButton(section: "nirux")?.performClick(nil)
         XCTAssertEqual(ids(), ["a", "b", "c", "x", "y"])
@@ -844,57 +850,118 @@ final class BoardStagesViewTests: XCTestCase {
         view.pointerLocation = { pointer }
         view.show(content([section(units: units(["c", "b", "a"]), withoutTask: units(["x", "y"]))], order: .progress))
         XCTAssertEqual(ids(), ["c", "b", "a", "x", "y"])
-        view.show(content([section(units: units(["a", "b", "c"]), withoutTask: units(["x", "y"]))], order: .progress))
+        view.show(content([section(units: units(["a", "b", "c"]), withoutTask: units(["x", "y"]), merged: merged([7]))], order: .progress))
+        pointer = header
+        view.mouseMoved(with: try moved(to: header, in: view))
+        XCTAssertTrue(view.isPointerInside, "over the header too")
         pointer = inside
-        view.mouseMoved(with: try moved(to: inside, in: view))
-        XCTAssertTrue(view.isPointerInside)
 
-        // Another order comes while the pointer is over the Board: the lines stay where they are, their states drawn there.
+        // Another order, a line gone, a line come, a sub-task come, a day's new merge: each line stays where it was,
+        // in its new state; the one gone stays there, faded and inert; what comes waits.
         let b = view.lineViews[1]
+        let c = view.lineViews[2]
         view.show(content([section(
-            units: tasks([line("c"), line("a"), line("b", state: .failed, phrase: "Checks failed")]), withoutTask: units(["y", "x"])
+            units: [.task(line("d"), subtasks: []), .task(line("c"), subtasks: [line("c1")]),
+                    .task(line("a", state: .failed, phrase: "Checks failed"), subtasks: [])],
+            withoutTask: units(["y", "x"]), merged: merged([8, 7])
         )], order: .progress))
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(ids(), ["a", "b", "c", "x", "y"])
-        XCTAssertTrue(view.lineViews[1] === b)
-        XCTAssertEqual(b.phraseLabel.stringValue, "Checks failed")
-        // A line that comes goes after the others; one that goes is gone. A fold keeps the order held.
-        view.show(content([section(units: units(["d", "c", "b"]), withoutTask: units(["y", "x"]))], order: .progress))
-        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y"])
+        XCTAssertEqual(view.lineViews[0].phraseLabel.stringValue, "Checks failed")
+        XCTAssertEqual(view.departed, ["b"])
+        XCTAssertTrue(view.lineViews[1] === b && b.isDeparted)
+        XCTAssertEqual(b.alphaValue, 0.4, accuracy: 0.01)
+        XCTAssertNil(b.hitTest(NSPoint(x: b.frame.midX, y: b.frame.midY)), "a departed line takes no click")
+        XCTAssertFalse(b.isAccessibilityElement())
+        XCTAssertFalse(c.isDeparted)
+        XCTAssertEqual(c.alphaValue, 1)
+        XCTAssertEqual(try XCTUnwrap(view.mergedView(section: "nirux")).entries.map(\.pullRequest.number), [7, 8],
+                       "a new merge after the others")
+        let frames = view.lineViews.map(\.frame)
+        // A fold keeps all of that.
         view.foldButton(section: "nirux")?.performClick(nil)
         view.foldButton(section: "nirux")?.performClick(nil)
-        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y"])
-        // The pointer leaves: the lines take the content's order.
+        XCTAssertEqual(ids(), ["a", "b", "c", "x", "y"])
+        XCTAssertEqual(view.lineViews.map(\.frame), frames)
+
+        // The pointer leaves: the Board settles, once the event is over.
+        var later: [() -> Void] = []
+        view.settleLater = { later.append($0) }
         pointer = outside
         view.mouseExited(with: try moved(to: outside, in: view))
         XCTAssertFalse(view.isPointerInside)
-        XCTAssertEqual(ids(), ["d", "c", "b", "y", "x"])
+        XCTAssertEqual(ids(), ["a", "b", "c", "x", "y"], "not within the event")
+        later.forEach { $0() }
+        XCTAssertEqual(ids(), ["d", "c", "c1", "a", "y", "x"])
+        XCTAssertEqual(view.departed, [])
+        XCTAssertTrue(view.lineViews.allSatisfy { !$0.isDeparted && $0.alphaValue == 1 })
+        XCTAssertEqual(try XCTUnwrap(view.mergedView(section: "nirux")).entries.map(\.pullRequest.number), [8, 7])
+        // Back in: nothing to settle. Out and back in before the Board settles: it doesn't.
+        view.settleLater = { $0() }
         pointer = inside
         view.mouseMoved(with: try moved(to: inside, in: view))
-        XCTAssertEqual(ids(), ["d", "c", "b", "y", "x"], "coming back changes nothing")
+        XCTAssertEqual(ids(), ["d", "c", "c1", "a", "y", "x"], "coming back changes nothing")
+        view.show(content([section(units: units(["a", "d"]), withoutTask: units(["x", "y"]))], order: .progress))
+        XCTAssertEqual(ids(), ["d", "c", "c1", "a", "y", "x"])
+        later = []
+        view.settleLater = { later.append($0) }
+        pointer = outside
+        view.mouseExited(with: try moved(to: outside, in: view))
+        pointer = inside
+        view.mouseMoved(with: try moved(to: inside, in: view))
+        later.forEach { $0() }
+        XCTAssertEqual(ids(), ["d", "c", "c1", "a", "y", "x"], "the pointer is over the Board again")
+        XCTAssertEqual(view.departed, ["c", "c1"])
+        view.settleLater = { $0() }
+        // A sub-task held in its place: its new state there, or departed.
+        view.show(content([section(units: [.task(line("c", state: .failed, phrase: "Checks failed"), subtasks: [line("c1", state: .needsYou)])],
+                                   withoutTask: units(["x", "y"]))], order: .progress))
+        XCTAssertEqual(view.lineViews.first { $0.line.id == "c1" }?.line.state, .needsYou)
+        XCTAssertEqual(view.departed, ["d", "a"])
 
-        // The order switch is the user's own click: it applies at once, the pointer on it, even where the lines it
-        // gives are those of the order before.
-        view.show(content([section(units: units(["b", "c", "d"]), withoutTask: units(["x", "y"]))], order: .progress))
-        XCTAssertEqual(ids(), ["d", "c", "b", "y", "x"], "held")
-        view.show(content([section(units: units(["b", "c", "d"]), withoutTask: units(["x", "y"]))], order: .sidebar))
-        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y"])
-        // In another section, or in a new one, nothing to hold: drawn as it comes.
+        // The order switch is the user's own click: it applies at once, the pointer on it. An order that came
+        // otherwise (another Board's switch) is held.
+        let sidebar = content([section(units: units(["a", "c", "d"]), withoutTask: units(["x", "y"]))], order: .sidebar)
+        view.show(sidebar)
+        XCTAssertEqual(ids(), ["d", "c", "c1", "a", "y", "x"], "held")
+        view.orderSwitch.selectedSegment = 1
+        _ = (view.orderSwitch.target as? NSObject)?.perform(view.orderSwitch.action, with: view.orderSwitch)
+        view.show(content([section(units: units(["a", "c", "d"]), withoutTask: units(["x", "y"]))], order: .progress))
+        XCTAssertEqual(ids(), ["a", "c", "d", "x", "y"])
+        // A section that comes goes after the others.
         view.show(content([
-            section(units: units(["c", "b", "d"]), withoutTask: units(["x", "y"])), section("site", units: units(["s2", "s1"]))
-        ], order: .sidebar))
-        XCTAssertEqual(ids(), ["b", "c", "d", "x", "y", "s2", "s1"])
-        // A unit is its lines: a task gaining a sub-task is another one, and goes after the others.
-        view.show(content([
-            section(units: [.task(line("b"), subtasks: [line("b1")]), .task(line("c"), subtasks: []), .task(line("d"), subtasks: [])],
-                    withoutTask: units(["x", "y"])),
-            section("site", units: units(["s1", "s2"]))
-        ], order: .sidebar))
-        XCTAssertEqual(ids(), ["c", "d", "b", "b1", "x", "y", "s2", "s1"])
-        // Hidden, the Board hears no pointer: it sorts.
+            section("site", units: units(["s1"])), section(units: units(["a", "c", "d"]), withoutTask: units(["x", "y"]))
+        ], order: .progress))
+        XCTAssertEqual(ids(), ["a", "c", "d", "x", "y", "s1"])
+        // Hidden, the Board hears no pointer: it settles.
         view.isHidden = true
         XCTAssertFalse(view.isPointerInside)
-        XCTAssertEqual(ids(), ["b", "b1", "c", "d", "x", "y", "s1", "s2"])
+        XCTAssertEqual(ids(), ["s1", "a", "c", "d", "x", "y"])
+    }
+
+    func testTheStationUnderThePointerAfterTheBoardSettles() throws {
+        let first = with(offering("first", .add, 1)) { $0.menu = [.openPullRequest(url: "https://github.com/acme/widgets/pull/1")] }
+        let view = board(content([section(units: tasks([first, offering("second", .add, 2)]))]))
+        view.settleLater = { $0() }
+        XCTAssertNotNil(view.lineViews[0].contextMenu())
+        let merge = BoardStagesView.Columns(width: 940).stations[3]
+        var pointer = place(merge, on: view.lineViews[0])
+        view.pointerLocation = { pointer }
+        view.mouseMoved(with: try moved(to: pointer, in: view))
+        XCTAssertEqual(view.lineViews.map(\.isStationHovered), [true, false])
+        // Held: "first" leaves, faded, its station dark; nothing else moves.
+        view.show(content([section(units: tasks([offering("second", .add, 2)]))]))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["first", "second"])
+        XCTAssertEqual(view.lineViews.map(\.isStationHovered), [false, false], "a departed line's station doesn't act")
+        XCTAssertNil(view.lineViews[0].contextMenu())
+        // The pointer leaves and comes back on the same place: the line now there is lit.
+        let place = pointer
+        pointer = NSPoint(x: -10, y: -10)
+        view.mouseExited(with: try moved(to: pointer, in: view))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["second"])
+        pointer = place
+        view.mouseMoved(with: try moved(to: place, in: view))
+        XCTAssertEqual(view.lineViews.map(\.isStationHovered), [true])
     }
 
     func testTheListScrollsUnderAStillPointer() throws {

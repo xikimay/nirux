@@ -133,7 +133,21 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     /// What a click on the Merge station does; nil where it does nothing
     /// more than anywhere on the line.
-    private var actingOffer: BoardStages.QueueOffer? { line.offer.flatMap { $0.blocked == nil ? $0 : nil } }
+    private var actingOffer: BoardStages.QueueOffer? {
+        isDeparted ? nil : line.offer.flatMap { $0.blocked == nil ? $0 : nil }
+    }
+
+    /// The Board no longer has this line: it stays where it was, faded and
+    /// inert, while the pointer is over the Board.
+    var isDeparted = false {
+        didSet {
+            guard isDeparted != oldValue else { return }
+            alphaValue = isDeparted ? 0.4 : 1
+            setAccessibilityElement(!isDeparted)
+            needsLayout = true
+            needsDisplay = true
+        }
+    }
 
     /// "12 min", counted to `now`; nothing for a line without a clock.
     func showTime(now: TimeInterval) {
@@ -456,9 +470,10 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     // MARK: Clicks
 
-    /// The line takes the mouse for all it holds: its words don't.
+    /// The line takes the mouse for all it holds: its words don't. A
+    /// departed one takes none.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
+        isDeparted || super.hitTest(point) == nil ? nil : self
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -527,7 +542,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
 
     func contextMenu() -> NSMenu? {
-        guard !line.menu.isEmpty else { return nil }
+        guard !line.menu.isEmpty, !isDeparted else { return nil }
         let menu = NSMenu()
         menu.autoenablesItems = false
         for item in line.menu {
@@ -545,7 +560,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// Chosen in a menu shown before the line changed: it acts only as
     /// the line, still on the Board, still offers it, the same and acting.
     @objc private func menuItemChosen(_ sender: NSMenuItem) {
-        guard let item = sender.representedObject as? BoardStages.MenuItem, item.blocked == nil, window != nil,
+        guard let item = sender.representedObject as? BoardStages.MenuItem, item.blocked == nil, window != nil, !isDeparted,
               line.menu.contains(item) else { return }
         onMenu?(item)
     }
