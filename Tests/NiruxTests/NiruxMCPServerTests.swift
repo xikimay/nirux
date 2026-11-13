@@ -59,12 +59,22 @@ final class NiruxMCPServerTests: XCTestCase {
         XCTAssertLessThanOrEqual(leads.count, 2048, "Claude Code cuts server instructions at 2,048 characters")
         let others = try XCTUnwrap(result(try send(initialize))?["instructions"] as? String)
         XCTAssertFalse(others.contains("Lead"))
-        // Only the others are sent to the skill: the Lead starts tasks with start_task.
-        XCTAssertTrue(others.contains(NiruxMCPServer.taskInstructions))
-        XCTAssertFalse(leads.contains(NiruxMCPServer.taskInstructions))
-        // Both learn that the binary starts no task.
-        for text in [leads, others] {
+        // A workspace's agent learns its task tools; one that can't name its
+        // workspace, the skill; the Lead neither: it starts tasks with its own.
+        var task = context
+        task.environment["NIRUX_WORKSPACE_ID"] = "workspace"
+        let tasks = try XCTUnwrap(result(try send(initialize, context: task))?["instructions"] as? String)
+        XCTAssertTrue(tasks.contains(NiruxMCPServer.taskInstructions))
+        XCTAssertFalse(tasks.contains("Lead"))
+        XCTAssertTrue(others.contains(NiruxMCPServer.skillInstructions))
+        XCTAssertFalse(others.contains(NiruxMCPServer.taskInstructions))
+        for extra in [NiruxMCPServer.taskInstructions, NiruxMCPServer.skillInstructions] {
+            XCTAssertFalse(leads.contains(extra))
+        }
+        // All learn that the binary starts no task.
+        for text in [leads, tasks, others] {
             XCTAssertTrue(text.contains("binary ($NIRUX_CLI_PATH) starts no task"))
+            XCTAssertLessThanOrEqual(text.count, 2048)
         }
     }
 

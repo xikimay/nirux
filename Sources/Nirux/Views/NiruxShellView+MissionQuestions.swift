@@ -213,9 +213,10 @@ extension NiruxShellView {
         }
         let store = MissionStore.shared
         let enabled = Self.currentMissionHandoffsEnabled()
-        // A Lead's task is answered whatever the setting.
+        // A Lead's task, or a sub-task a task's agent started with its
+        // tools, is answered whatever the setting.
         guard enabled || store.missions.contains(where: { mission in
-            mission.reportsToLead == true && mission.events.contains { $0.id == questionID }
+            mission.isAlwaysCarried && mission.events.contains { $0.id == questionID }
         }) else {
             showToast("Mission handoffs are off in Settings")
             return false

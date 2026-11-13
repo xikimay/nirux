@@ -20,6 +20,7 @@ extension NiruxShellView {
         missionID: String? = nil,
         parentWorkspaceID: String? = nil,
         reportsToLead: Bool = false,
+        reportsToTask: Bool = false,
         deliveredHandover: Bool = false,
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
@@ -61,6 +62,7 @@ extension NiruxShellView {
             startedByAgent: startedByAgent,
             isLead: isLead,
             reportsToLead: reportsToLead,
+            reportsToTask: reportsToTask,
             taskFolder: taskFolder,
             initialAgentUUID: initialAgentUUID
         )

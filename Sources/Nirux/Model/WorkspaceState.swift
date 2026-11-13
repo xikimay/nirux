@@ -68,8 +68,12 @@ final class WorkspaceState {
     /// A task a space's Lead started (`Mission.reportsToLead`): like the
     /// Lead's, its shells get the Mission variables whatever the setting.
     let reportsToLead: Bool
+    /// A sub-task a task's agent started with its tools
+    /// (`Mission.reportsToTask`): its shells get the Mission variables
+    /// whatever the setting, as a Lead's task's do.
+    let reportsToTask: Bool
     /// Whether new shells get the Mission variables.
-    var carriesMissions: Bool { missionHandoffsEnabled || isLead || reportsToLead }
+    var carriesMissions: Bool { missionHandoffsEnabled || isLead || reportsToLead || reportsToTask }
     /// Opened by a `nirux://` request from outside Nirux (one the user
     /// confirmed, with no launch ID): its shells never get the space's
     /// environment, nor its first agent the setup script (docs/design/projects.md,
@@ -222,6 +226,7 @@ final class WorkspaceState {
         startedByAgent: Bool = false,
         isLead: Bool = false,
         reportsToLead: Bool = false,
+        reportsToTask: Bool = false,
         taskFolder: String? = nil,
         initialAgentUUID: String = UUID().uuidString
     ) {
@@ -232,6 +237,7 @@ final class WorkspaceState {
         self.startedByAgent = startedByAgent
         self.isLead = isLead
         self.reportsToLead = reportsToLead
+        self.reportsToTask = reportsToTask
         self.cwd = cwd
         self.title = title ?? "workspace"
         self.titleIsManual = (title != nil)

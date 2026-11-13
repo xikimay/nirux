@@ -124,6 +124,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         }
     }
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
+    /// The task's agent that proposed this sub-task (`start_task` with
+    /// "Starts tasks without asking" off): it reports to that agent while
+    /// "Sub-task of" stays checked, and "Report to the Lead" hides.
+    var reportsToTaskAgent: NewTask.MissionParent? {
+        didSet { if reportsToTaskAgent != nil { lead = nil } }
+    }
 
     /// A task the new one goes under in the sidebar, and where it works:
     /// its sub-tasks work there too.
@@ -349,14 +355,14 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         refresh()
     }
 
-    /// A Lead's proposal (`start_task` with "Starts tasks without asking"
-    /// off): its description, and its template, picked once the
-    /// repository's templates are read.
-    func prefill(description: String, templateName: String?) {
+    /// A proposal (`start_task` with "Starts tasks without asking" off),
+    /// from the Lead or a task's agent: its description, and its template,
+    /// picked once the repository's templates are read.
+    func prefill(description: String, templateName: String?, proposedBy: String = "the Lead") {
         guard panel != nil else { return }
         descriptionView.string = description
         if let templateName { pickedTemplateName = templateName }
-        headingLabel.stringValue = "Proposed by the Lead · \(space.name)"
+        headingLabel.stringValue = "Proposed by \(proposedBy) · \(space.name)"
         hideError()
         refresh()
         // It comes while the user types elsewhere: no field takes the keys,
@@ -569,12 +575,16 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             }
             place = .folder(parent: parent, name: name, makesParent: makesParentFolder)
         }
-        return NewTask.Request(
+        // A task's agent proposed it: it reports there, as a sub-task only.
+        let agentParent = subtaskParentID == nil ? nil : reportsToTaskAgent
+        var request = NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
             projectID: space.id, place: place, fetchesFirst: !startsWithoutFetch,
-            reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil,
+            reportsTo: agentParent ?? (lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil),
             parentWorkspaceID: subtaskParentID
         )
+        request.reportsToTask = agentParent != nil
+        return request
     }
 
     private func beginEditingBranch() {

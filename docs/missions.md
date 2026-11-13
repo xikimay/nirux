@@ -2,7 +2,7 @@
 
 When an agent starts a task for another agent in a new worktree, Nirux links the two with a Mission: the agent that started the task is the parent, the new agent the child. The child can ask its parent a question and report its result, and the parent can send it more work.
 
-**Settings › Agents › Mission handoffs** turns Missions on or off for new terminals (on for a new install). A space's [Lead](spaces-and-tasks.md#the-lead) and the tasks it starts always have them.
+**Settings › Agents › Mission handoffs** turns Missions on or off for new terminals (on for a new install). A space's [Lead](spaces-and-tasks.md#the-lead) and the tasks it starts always have them, and so do the [sub-tasks](spaces-and-tasks.md#sub-tasks) a task's agent starts with its `start_task` tool.
 
 ## What you see
 
@@ -30,11 +30,11 @@ Nirux types a message only when the agent's `claude` is in front, its turn is ov
 - The parent can send more work after the child reported its result, which makes the Mission active again.
 - A Codex child can ask and report, but can't be sent work: Codex reports no dialogs, so Nirux can't know that its prompt is free. A Codex child waits for each answer in its terminal, and a Codex parent polls for its child's messages.
 - A worktree opened without a Mission keeps the plain handover file. The child reads it and works alone.
-- The tasks a Lead starts always have Missions with it, but a sub-task one of them starts gets a Mission only while Mission handoffs is on. Otherwise it works alone.
+- A sub-task an agent starts with the `nirux-worktree` skill gets a Mission only while Mission handoffs is on, even under a Lead's task. Otherwise it works alone. One started with `start_task` always has one.
 
 ## Commands
 
-Agents run these, not you. The bundled `nirux-worktree` skill teaches them.
+Agents run these, not you. The bundled `nirux-worktree` skill teaches them. A space's Lead, and a task's agent for the sub-tasks it started with `start_task`, answer with their `reply` tool instead.
 
 | Who | Command | Effect |
 | --- | --- | --- |

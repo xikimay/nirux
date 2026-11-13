@@ -79,6 +79,24 @@ final class MissionTests: XCTestCase {
         )
     }
 
+    /// A sub-task a task's agent started with its tools keeps its Mission
+    /// with handoffs off, as a Lead's task does: the record says so, its
+    /// events pass, and its agent's CLI gets past the setting.
+    func testATasksSubtaskMissionWorksWithHandoffsOff() throws {
+        let fileURL = try makeDirectory().appendingPathComponent("missions.json")
+        let store = MissionStore(fileURL: fileURL)
+        var subtask = request()
+        subtask.reportsToTask = true
+        let mission = try XCTUnwrap(store.create(subtask, enabled: false, now: 10))
+        XCTAssertEqual(mission.reportsToTask, true)
+        XCTAssertNil(mission.reportsToLead)
+        guard case .accepted = store.process(event(), enabled: false) else { return XCTFail("the sub-task asks with handoffs off") }
+        let ask = ["ask", "--message", "Hi"]
+        XCTAssertEqual(
+            MissionEventCLI.main(ask, handoffsEnabled: { false }, environment: ["NIRUX_MISSION_ID": missionID], missionsURL: fileURL), 2
+        )
+    }
+
     func testMissionCreationIsDisabledByDefaultAndRejectsMalformedIdentifiers() throws {
         let fileURL = try makeDirectory().appendingPathComponent("missions.json")
         let store = MissionStore(fileURL: fileURL)

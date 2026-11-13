@@ -53,6 +53,16 @@ With the description empty, **Start** opens a plain workspace instead: a shell i
 
 **Existing Branch…** lists the repository's worktrees, then its local branches and origin's that have none. Picking a worktree opens it. Picking a branch creates its worktree and opens a shell there.
 
+### Sub-tasks
+
+**New Sub-task…**, in a task's `⋯` menu and the Workspaces menu, opens the sheet under that task. The sub-task starts in the task's repository, from the same base branch as any task, or in a folder inside the task's own folder for a task without a repository. It lists right under its task in the sidebar.
+
+A task's Claude Code agent can start sub-tasks itself, with the `start_task` tool Nirux gives it, when you ask it to split the work. A sub-task it starts opens behind what you are doing. It reports to that agent even with Mission handoffs off: its questions and its result are typed into the agent's prompt (see [Missions](missions.md)). The agent lists its sub-tasks and answers their questions with its tools.
+
+- There are two levels at most: a sub-task's agent can't start sub-tasks of its own.
+- A task runs at most six sub-tasks at once. Archived sub-tasks and those that reported their result don't count.
+- When **Starts tasks without asking** is off in Space Settings › Lead, the agent's sub-task opens in the sheet, filled in, for you to start.
+
 ### Tasks without a repository
 
 Research, writing or a one-off script need no repository. Pick **No Repository**, the last item of the repository menu. Tasks in General, and in a space without a repository, always start this way.

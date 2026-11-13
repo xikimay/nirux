@@ -5,12 +5,17 @@ import AppKit
 /// What the app does for each of the Lead's tools (see LeadTools), sent by
 /// the MCP server through LeadChannel. A request is checked against the
 /// app's own state first: it must come from a column of a space's Lead,
-/// and it acts in that space only. Nothing here merges, removes a worktree
-/// or a branch, or starts a merge queue.
+/// and it acts in that space only. One from another workspace's column
+/// goes to that task's tools (NiruxShellView+TaskTools). Nothing here
+/// merges, removes a worktree or a branch, or starts a merge queue.
 extension NiruxShellView {
     typealias LeadAnswer = @MainActor (_ text: String, _ isError: Bool) -> Void
 
     func handleLeadRequest(_ request: LeadChannel.Request, answer: @escaping LeadAnswer) {
+        if let caller = workspaces.first(where: { $0.id == request.workspaceID && !$0.isLead && !$0.isClosing }),
+           caller.columns.contains(where: { $0.agentUUID == request.agentUUID }) {
+            return handleTaskRequest(request, from: caller, answer: answer)
+        }
         guard let lead = workspaces.first(where: { $0.id == request.workspaceID && $0.isLead && !$0.isClosing }),
               lead.columns.contains(where: { $0.agentUUID == request.agentUUID }),
               let space = profiles.first(where: { $0.id == lead.profileID })
@@ -112,8 +117,8 @@ extension NiruxShellView {
     /// Starts the task; a failed fetch starts it again from origin's base as
     /// last fetched, once, as ⌘N's "Start Without Fetching". Answers once
     /// the workspace and its Mission exist. `repository` is nil for a
-    /// folder.
-    private func startLeadTask(
+    /// folder. A Lead's task, or a task's sub-task (`reportsToTask`).
+    func startLeadTask(
         _ request: NewTask.Request, repository: String?, fetchError: String?, answer: @escaping LeadAnswer
     ) {
         startTask(request, completion: { [weak self] outcome in
@@ -148,15 +153,16 @@ extension NiruxShellView {
             let reports = MissionStore.shared.missions.contains { mission in
                 mission.parentWorkspaceID == request.reportsTo?.workspaceID && mission.childWorkspaceID == workspaceID
             }
+            let alone = request.reportsToTask ? "your terminal closed meanwhile" : "your Lead changed meanwhile"
             answer("Started “\(title)” \(place), with \(request.agent.rawValue). "
                 + (reports ? "It reports to you: its questions and its result come to your prompt."
-                    : "It doesn’t report to you (your Lead changed meanwhile): the user follows it."), false)
+                    : "It doesn’t report to you (\(alone)): the user follows it."), false)
         })
     }
 
     /// The first of `branch`, `branch-2`, `branch-3`… no local or remote
     /// branch has (in any case, which the filesystem doesn't tell apart).
-    nonisolated private static func unusedBranch(
+    nonisolated static func unusedBranch(
         _ branch: String, repository: String, completion: @escaping @MainActor @Sendable (String) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -246,33 +252,14 @@ extension NiruxShellView {
         )
         var lines: [String] = []
         for task in tasks {
-            var line = "- “\(MissionPromptText.quoted(task.title))”"
-            if let parent = parentTitles[task.id] { line += " · sub-task of “\(MissionPromptText.quoted(parent))”" }
-            if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
-            if let folder = task.taskFolder {
-                line += " · no repository · folder \(MissionPromptText.quoted(folder))"
-            } else if let repository = leadRepositoryName(of: task, in: space) {
-                line += " · \(repository)"
-            }
-            if task.isInactive { line += " · inactive" }
-            line += " · " + leadAgentState(of: task, snapshot: snapshot)
-            if let pr = task.prInfo {
-                line += " · PR #\(pr.number) \(pr.isDraft ? "draft" : pr.state.lowercased())"
-                if let ci = pr.ciStatus { line += ", checks \(ci.lowercased())" }
-            }
+            var line = taskListHead(task, in: space, parentTitle: parentTitles[task.id], snapshot: snapshot)
             // Only what its own tasks sent it: another agent's Mission
             // isn't its to answer.
             let missions = store.missions.filter { $0.childWorkspaceID == task.id && $0.parentWorkspaceID == leadID }
             if missions.isEmpty {
                 line += task.startedByAgent ? " · not yours (another agent started it)" : " · not yours (started by the user)"
             } else if let mission = missions.max(by: { $0.createdAt < $1.createdAt }) {
-                if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
-                    let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"
-                    line += "\n  \(holder), question \(question.id): \(MissionPromptText.quoted(question.message))"
-                } else if mission.status == .completed,
-                          let result = mission.events.last(where: { $0.kind == .completed }) {
-                    line += "\n  completed: \(MissionPromptText.quoted(result.message))"
-                }
+                line += taskListMissionLine(mission, of: task, store: store)
             }
             // Only where set_task_context reaches: its own tasks.
             for field in WorkspaceState.ContextField.allCases where missions.contains(where: { $0.reportsToLead == true }) {
@@ -281,12 +268,7 @@ extension NiruxShellView {
                 let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
                 line += "\n  \(name)\(owner): “\(text)”"
             }
-            // Where it stands, as its row says it: a model's reading of its
-            // last turn's message, or the user's own summary.
-            if turnStatusEnabled, let status = Self.leadContextText(task.statusLine) {
-                let source = task.lastSummaryIsManual ? "summary (the user wrote it)" : "last turn, as Sonnet read it"
-                line += "\n  \(source): “\(status)”"
-            }
+            line += taskListStatusLine(task)
             lines.append(line)
         }
         let repositories = space.anchors.filter(\.isKnown).map { anchor in
@@ -298,6 +280,47 @@ extension NiruxShellView {
             ? "No repository: each task starts in \(folderLine)."
             : "Repositories: \(repositories.joined(separator: ", ")); \"\(LeadTools.noRepository)\" starts a task in \(folderLine)."
         return ([header] + lines + [repositoryLine]).joined(separator: "\n")
+    }
+
+    /// A task's line in list_tasks, up to its pull request: what it is,
+    /// where it works, and what its agents do.
+    func taskListHead(_ task: WorkspaceState, in space: WorkspaceProfile, parentTitle: String?, snapshot: ProcessSnapshot) -> String {
+        var line = "- “\(MissionPromptText.quoted(task.title))”"
+        if let parentTitle { line += " · sub-task of “\(MissionPromptText.quoted(parentTitle))”" }
+        if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
+        if let folder = task.taskFolder {
+            line += " · no repository · folder \(MissionPromptText.quoted(folder))"
+        } else if let repository = leadRepositoryName(of: task, in: space) {
+            line += " · \(repository)"
+        }
+        if task.isInactive { line += " · inactive" }
+        line += " · " + leadAgentState(of: task, snapshot: snapshot)
+        if let pr = task.prInfo {
+            line += " · PR #\(pr.number) \(pr.isDraft ? "draft" : pr.state.lowercased())"
+            if let ci = pr.ciStatus { line += ", checks \(ci.lowercased())" }
+        }
+        return line
+    }
+
+    /// The question `mission`'s child waits on, or the result it sent, on
+    /// a line of its own; "" for neither.
+    func taskListMissionLine(_ mission: Mission, of task: WorkspaceState, store: MissionStore) -> String {
+        if let question = store.waitingQuestion(childWorkspaceID: task.id, childAgentUUID: mission.childAgentUUID)?.event {
+            let holder = question.handedToUserBecause == nil ? "asks you" : "asks the user (you handed it over)"
+            return "\n  \(holder), question \(question.id): \(MissionPromptText.quoted(question.message))"
+        }
+        if mission.status == .completed, let result = mission.events.last(where: { $0.kind == .completed }) {
+            return "\n  completed: \(MissionPromptText.quoted(result.message))"
+        }
+        return ""
+    }
+
+    /// Where a task stands, as its row says it: a model's reading of its
+    /// last turn's message, or the user's own summary; "" for neither.
+    func taskListStatusLine(_ task: WorkspaceState) -> String {
+        guard turnStatusEnabled, let status = Self.leadContextText(task.statusLine) else { return "" }
+        let source = task.lastSummaryIsManual ? "summary (the user wrote it)" : "last turn, as Sonnet read it"
+        return "\n  \(source): “\(status)”"
     }
 
     /// The space's repository a task works in, by name: its folder is the
@@ -399,6 +422,13 @@ extension NiruxShellView {
         }) else {
             return answer("No question “\(questionID)” from one of your tasks: copy its id from the [Nirux Mission] message or list_tasks.", true)
         }
+        sendReply(message, to: questionID, in: mission, answer: answer)
+    }
+
+    /// Answers `questionID`, a question of `mission`'s child, for its
+    /// parent: a Lead's reply, or a task's.
+    func sendReply(_ message: String, to questionID: String, in mission: Mission, answer: @escaping LeadAnswer) {
+        let store = MissionStore.shared
         guard store.response(to: questionID) == nil, mission.status == .active else {
             return answer("That question was already answered (perhaps by the user), or its task completed. Don't send it again.", true)
         }

@@ -66,8 +66,9 @@ enum MissionEventCLI {
         guard let command = arguments.first else { return usage(commands) }
         // Terminals keep their Mission environment after the setting is
         // turned off, while Nirux drops their events: say so, don't wait.
-        // A space's Lead and its tasks keep their Missions.
-        guard handoffsEnabled() != false || isLeadsMission(environment: environment, missionsURL: missionsURL) else {
+        // A space's Lead and its tasks, and the sub-tasks a task's agent
+        // started with its tools, keep their Missions.
+        guard handoffsEnabled() != false || isAlwaysCarried(environment: environment, missionsURL: missionsURL) else {
             writeStandardError("Mission handoffs are turned off in Nirux Settings; stop using Mission commands.")
             return 4
         }
@@ -85,14 +86,16 @@ enum MissionEventCLI {
         }
     }
 
-    /// A space's Lead (`NIRUX_LEAD=1`), or a task it started (its Mission
-    /// `reportsToLead`): Nirux carries their Missions whatever the setting.
-    static func isLeadsMission(environment: [String: String], missionsURL: URL) -> Bool {
+    /// A space's Lead (`NIRUX_LEAD=1`), or the child of a Mission Nirux
+    /// always carries (`Mission.isAlwaysCarried`: a Lead's task, or a
+    /// sub-task a task's agent started with its tools): Nirux carries their
+    /// Missions whatever the setting.
+    static func isAlwaysCarried(environment: [String: String], missionsURL: URL) -> Bool {
         if environment[WorkspaceState.leadEnvironmentKey] == "1" { return true }
         guard let missionID = environment["NIRUX_MISSION_ID"] else { return false }
         var ledger = MissionLedgerReader(url: missionsURL)
         ledger.refresh()
-        return ledger.missions.first { $0.id == missionID }?.reportsToLead == true
+        return ledger.missions.first { $0.id == missionID }?.isAlwaysCarried == true
     }
 
     static func run(

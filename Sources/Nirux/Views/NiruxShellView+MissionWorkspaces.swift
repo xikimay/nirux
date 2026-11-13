@@ -337,11 +337,19 @@ extension NiruxShellView {
 
     /// A ⌘N task's Mission, reporting to `parent` (see
     /// `NewTask.Request.reportsTo`); nil when that parent can't take one.
+    /// `reportsToTask`: a task's agent asked for it with its tools, which
+    /// answer through the app, so its terminal needs no Mission variables
+    /// and the setting doesn't matter; it must still be open, and no Lead's.
     func createMission(
         parent: NewTask.MissionParent, childWorkspaceID: String, childAgentUUID: String,
-        agent: NiruxApp.WorkspaceAgent, branch: String
+        agent: NiruxApp.WorkspaceAgent, branch: String, reportsToTask: Bool = false
     ) -> Mission? {
-        guard let valid = validMissionParent(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID) else { return nil }
+        let valid = reportsToTask
+            ? requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID).flatMap { requester in
+                requester.workspace.isLead ? nil : (workspaceID: requester.workspace.id, agentUUID: parent.agentUUID, isLead: false)
+            }
+            : validMissionParent(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID)
+        guard let valid else { return nil }
         let request = MissionCreationRequest(
             id: UUID().uuidString,
             parentWorkspaceID: valid.workspaceID,
@@ -350,7 +358,8 @@ extension NiruxShellView {
             childAgentUUID: childAgentUUID,
             childAgentKind: agent.rawValue,
             branch: branch,
-            reportsToLead: valid.isLead
+            reportsToLead: valid.isLead,
+            reportsToTask: reportsToTask
         )
         return MissionStore.shared.create(request, enabled: Self.currentMissionHandoffsEnabled())
     }
