@@ -217,6 +217,12 @@ final class BoardStagesFactsTests: XCTestCase {
         var gone = row(nil, workspaces: ["task"], group: .otherRepository, path: nil, folder: "/Users/me/old")
         gone.folderIsGone = true
         XCTAssertEqual(facts([gone]).lines.map(\.folder?.canCleanUp), [true], "a folder gone: Clean Up closes its workspaces")
+        // A merged task's clean-up runs, as its path says: its line says so, and so would "Merged today".
+        let merged = [row(workspaces: ["task"], pullRequest: pullRequest(9, state: "MERGED"))]
+        XCTAssertEqual(facts(merged).lines.map(\.cleanUp), [.offered])
+        XCTAssertEqual(facts(merged, cleaningUp: ["/p/widgets.x"]).lines.map(\.cleanUp), [.running])
+        XCTAssertEqual(facts(merged, cleaningUp: ["/p/widgets.other"]).lines.map(\.cleanUp), [.offered])
+        XCTAssertEqual(facts([row(workspaces: ["task"])], cleaningUp: ["/p/widgets.x"]).lines.map(\.cleanUp), [nil], "nothing merged to say")
     }
 
     // MARK: - Pull request

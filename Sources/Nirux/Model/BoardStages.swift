@@ -369,6 +369,17 @@ extension BoardStages {
 
     struct Queue: Equatable, Sendable {
         var list = QueueList.none
+        /// The queue's list holds it, or the queue works on it: not one
+        /// to retarget.
+        var holds: Bool { order != nil || step != nil }
+
+        /// Why Retarget does nothing for now: the list is locked (it
+        /// waits for the queue, as adding and removing do), or this build
+        /// can't change GitHub.
+        var retargetBlocked: String? {
+            if case .locked(let why) = list { return BoardStages.text(why) ?? why }
+            return BoardStages.text(dryRun)
+        }
         /// Its place in the queue's list, from 1: in the running queue's
         /// as the queue counts it ("3 of 7"), else in the next Start's.
         var order: Int?
@@ -541,11 +552,13 @@ extension BoardStages {
         if let offer { items.append(.queue(offer)) }
         // Not while the queue's list holds it, nor while the queue works on it.
         if let pullRequest, !pullRequest.isMerged, let merged = pullRequest.stack?.mergedBase, facts.queue.list != .none,
-           facts.queue.order == nil, facts.queue.step == nil {
-            items.append(.retarget(.retarget(number: pullRequest.number, onto: merged.onto), blocked: text(facts.queue.dryRun)))
+           !facts.queue.holds {
+            items.append(.retarget(.retarget(number: pullRequest.number, onto: merged.onto), blocked: facts.queue.retargetBlocked))
         }
         if facts.hasTask, var resume = facts.resume {
-            resume.blocked = text(resume.blocked)
+            // Without the failed turn it answers, it can't make sure to resume that one.
+            let unknown = resume.kind == .afterError && resume.failedAt == nil ? "The failed turn isn't known." : nil
+            resume.blocked = resume.blocked.map { text($0) ?? "Resume isn't offered." } ?? unknown
             items.append(.resume(resume))
         }
         if let folder = facts.folder {
@@ -690,13 +703,14 @@ extension BoardStages {
             }
             // Whatever its station: nothing lands on a merged branch.
             if let merged = pullRequest.stack?.mergedBase {
-                // A repository that isn't saved has nothing here to move it.
-                guard facts.queue.list != .none else { return Reading(.idle, "Base #\(merged.number) merged", since: last) }
+                // A repository that isn't saved has nothing here to move it;
+                // one the queue's list holds leaves it first (its Merge station).
+                guard facts.queue.list != .none, !facts.queue.holds else { return Reading(.idle, "Base #\(merged.number) merged", since: last) }
                 let link = Link.retarget(number: pullRequest.number, onto: merged.onto)
-                // A build that can't change GitHub says what to do, and why its words are no link.
-                let dryRun = text(facts.queue.dryRun)
+                // Locked, or a build that can't change GitHub: the words say what to do, and why they are no link.
+                let blocked = facts.queue.retargetBlocked
                 return Reading(
-                    .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: dryRun == nil ? link : nil, detail: dryRun
+                    .idle, "Base #\(merged.number) merged · \(link.title)", since: last, link: blocked == nil ? link : nil, detail: blocked
                 )
             }
             let parent = pullRequest.stack?.parent

@@ -164,6 +164,8 @@ extension BoardStages {
         // offers the clean-up only at the head it merged at.
         facts.cleanUp = (isAboutRow ? reading.cleanUp : nil)
             ?? (facts.pullRequest?.isMerged == true && row.canCleanUp ? .offered : nil)
+        // One that runs, as its path says: the phrase and "Merged today" say so too.
+        if facts.cleanUp != nil, facts.folder?.isCleaningUp == true { facts.cleanUp = .running }
         return facts
     }
 

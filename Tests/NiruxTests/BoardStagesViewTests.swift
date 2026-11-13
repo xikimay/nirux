@@ -680,6 +680,23 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(chosen.count, 3, "Retarget, no longer offered: nothing")
         contextMenu.performActionForItem(at: 0)
         XCTAssertEqual(chosen.last, "nirux offering Open Pull Request", "what it still offers acts, as it was")
+        // A Resume shown for one failure doesn't resume a later one in the same column; the item passed on is the one shown.
+        let column = UUID()
+        let resuming = { (failedAt: TimeInterval) in
+            self.with(offering) { $0.menu = [.resume(BoardStages.Resume(kind: .afterError, column: column, failedAt: failedAt))] }
+        }
+        var items: [BoardStages.MenuItem] = []
+        view.onMenu = { _, _, item in items.append(item) }
+        view.show(content(units(resuming(700))))
+        let first = try XCTUnwrap(shown.contextMenu())
+        view.show(content(units(resuming(800))))
+        first.performActionForItem(at: 0)
+        XCTAssertEqual(items, [], "a later failure: nothing")
+        try XCTUnwrap(shown.contextMenu()).performActionForItem(at: 0)
+        XCTAssertEqual(items, [.resume(BoardStages.Resume(kind: .afterError, column: column, failedAt: 800))])
+        view.onMenu = { section, line, item in chosen.append("\(section) \(line) \(item.title)") }
+        view.show(content(units(with(offering) { $0.menu = [.cleanUp(path: "/p/x", blocked: nil), .openPullRequest(url: url)] })))
+
         // The line leaves the Board while its menu is open: nothing.
         view.show(content(units(line("someone else"))))
         XCTAssertNil(shown.window)

@@ -354,9 +354,13 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertNil(BoardStages.Phrase(text: "Base #52 merged · Retarget to main").wordsBeforeLink, "no link")
         XCTAssertNil(BoardStages.Phrase(text: "Retarget to main, then merge", link: onto).wordsBeforeLink, "a text that doesn't end with it")
         XCTAssertNil(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase))).phrase.link, "no merge queue: no link")
-        // Retargeting is the Board's own call, not the queue's: a queue that runs, or that holds it, changes nothing.
-        let held = Queue(list: .locked("The queue is running."), order: 2)
-        XCTAssertEqual(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: held)).phrase.link, onto)
+        // In the queue's list, it leaves the list first (its Merge station): no Retarget to say.
+        XCTAssertEqual(line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open, order: 2))).phrase,
+                       BoardStages.Phrase(text: "Base #52 merged"))
+        // While the list is locked, Retarget waits as adding and removing do: the words stay, and say why they are no link.
+        let locked = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .locked(" The queue is running.\n"))))
+        XCTAssertEqual(locked.phrase, BoardStages.Phrase(text: "Base #52 merged · Retarget to main", detail: "The queue is running."))
+        XCTAssertEqual(locked.menu.first { $0.title == onto.title }?.blocked, "The queue is running.")
         // A build that can't change GitHub: the words stay, as what to do, and say why they are no link.
         let dryRun = "Dry run: this build doesn’t change GitHub."
         let inert = line(facts(pullRequest(53, base: "stack/a", stack: onMergedBase), queue: Queue(list: .open, dryRun: " \(dryRun)\n"))).phrase
@@ -462,6 +466,12 @@ final class BoardStagesLineTests: XCTestCase {
         ])
         XCTAssertEqual(line(with(red) { $0.cleanUp = .running }).menu.last?.blocked, "A clean-up of this worktree is running.",
                        "as the task's own reading says it")
+        // A Resume after an error, without the turn it answers, can't make sure to resume that one; an empty reason is one.
+        let blind = line(with(red) { $0.resume?.failedAt = nil }).menu.first { $0.title == "Resume" }
+        XCTAssertEqual(blind?.blocked, "The failed turn isn't known.")
+        XCTAssertEqual(line(with(red) { $0.resume?.blocked = " \n" }).menu.first { $0.title == "Resume" }?.blocked, "Resume isn't offered.")
+        let afterExit = with(red) { $0.resume = BoardStages.Resume(kind: .afterExit, column: column) }
+        XCTAssertNil(line(afterExit).menu.first { $0.title == "Resume" }?.blocked, "an exit has no failed turn to answer")
         XCTAssertEqual(line(with(red) { $0.cleanUp = .offered }).menu.last?.blocked, nil, "offered: it acts")
         // Without a merge queue: no list, no Retarget. In the queue's list, or worked on by it: no Retarget either.
         XCTAssertEqual(line(with(red) { $0.queue = Queue() }).menu.map(\.title), ["Open Pull Request", "Resume", "Clean Up…"])
@@ -483,6 +493,9 @@ final class BoardStagesLineTests: XCTestCase {
             .openPullRequest(url: url), .queue(BoardStages.QueueOffer(change: .add, number: 52)), .openWorktree(path: "/p/widgets", title: "main")
         ], "the main checkout: Open, no Clean Up")
         XCTAssertEqual(line(with(alone) { $0.folder = nil }).menu.map(\.title), ["Open Pull Request", "Add to Queue"])
+        let leads = with(alone) { $0.folder = BoardStages.Folder(path: "/p/widgets.lead", title: "lead", canCleanUp: true) }
+        XCTAssertEqual(line(leads).menu.map(\.title), ["Open Pull Request", "Add to Queue", "Clean Up…"],
+                       "a workspace is open there (the Lead's): no second one")
         // A task in no repository: what its agent and its folder offer. A pull request without a task has no agent here.
         let exited = BoardStages.Resume(kind: .afterExit, column: column)
         let notes = with(facts(activity: .failed("Exited mid-turn"))) {
