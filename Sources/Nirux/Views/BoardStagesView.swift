@@ -68,7 +68,9 @@ final class BoardStagesView: NSView {
     let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
     let stationTitles = BoardStages.Station.allCases.map { NSTextField(labelWithString: BoardStagesView.title(of: $0)) }
     private let separator = NSView()
-    let scrollView = NSScrollView()
+    /// As the sidebar: a scroller that takes no width, so the lines keep
+    /// the titles' columns whatever the Mac's setting.
+    let scrollView = OverlayScrollView()
     private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
@@ -132,9 +134,6 @@ final class BoardStagesView: NSView {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
-        // As the sidebar: a scroller that takes no width, so the lines
-        // keep the titles' columns whatever the Mac's setting.
-        scrollView.scrollerStyle = .overlay
         scrollView.documentView = documentView
         ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
             .forEach(addSubview)

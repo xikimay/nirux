@@ -251,7 +251,6 @@ final class SidebarView: NSView {
         contentScrollView.drawsBackground = false
         contentScrollView.hasVerticalScroller = true
         contentScrollView.hasHorizontalScroller = false
-        contentScrollView.scrollerStyle = .overlay
         contentScrollView.autohidesScrollers = true
         contentScrollView.documentView = contentDocumentView
         addSubview(contentScrollView)
