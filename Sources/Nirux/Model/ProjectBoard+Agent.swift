@@ -78,8 +78,8 @@ extension ProjectBoard {
     /// One column's state:
     /// - a stuck state (#55) as the sidebar reads it wins;
     /// - "waiting" needs the dialog the agent in front shows
-    ///   (`AgentStatusMachine.visibleDialog`: open, its own, no keystroke
-    ///   since) and a status other than `.working`: an approved dialog
+    ///   (`AgentStatusMachine.visibleDialog`: open, its own, not answered
+    ///   by a key since) and a status other than `.working`: an approved dialog
     ///   stays pending until its tool ends, while the column reads
     ///   `.working`, and an agent that died without ending its session
     ///   leaves its dialogs behind;
