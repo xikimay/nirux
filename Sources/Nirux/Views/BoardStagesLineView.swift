@@ -50,6 +50,12 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     var onClick: (() -> Void)?
     var onOffer: ((BoardStages.QueueOffer) -> Void)?
     var onLink: ((BoardStages.Link) -> Void)?
+    /// An item of its menu was chosen, while the line still offered it.
+    var onMenu: ((BoardStages.MenuItem) -> Void)?
+    /// Shows a menu where VoiceOver asked for it. (The tests give their own.)
+    var popUp: (NSMenu, NSPoint, NSView) -> Void = { menu, location, view in
+        menu.popUp(positioning: nil, at: location, in: view)
+    }
     /// The mouse moved with its button down, or came up, at this place in
     /// the window: no other event says where the pointer is meanwhile.
     var onPointer: ((NSPoint) -> Void)?
@@ -511,6 +517,44 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             })
         }
         return actions.isEmpty ? nil : actions
+    }
+
+    // MARK: The menu
+
+    /// The line's menu, as its model gives it, whatever its phrase says:
+    /// an item that does nothing for now is there, disabled, and says why
+    /// under the pointer. Nil where it offers nothing.
+    override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
+
+    func contextMenu() -> NSMenu? {
+        guard !line.menu.isEmpty else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for item in line.menu {
+            let menuItem = NSMenuItem(title: item.title, action: #selector(menuItemChosen(_:)), keyEquivalent: "")
+            menuItem.target = self
+            // Each item says what it is: menus shown since don't change it.
+            menuItem.representedObject = item
+            menuItem.isEnabled = item.blocked == nil
+            menuItem.toolTip = item.blocked
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    /// Chosen in a menu shown before the line changed: it acts only as
+    /// the line, still on the Board, still offers it, the same and acting.
+    @objc private func menuItemChosen(_ sender: NSMenuItem) {
+        guard let item = sender.representedObject as? BoardStages.MenuItem, item.blocked == nil, window != nil,
+              line.menu.contains(item) else { return }
+        onMenu?(item)
+    }
+
+    /// VoiceOver's "show menu": the same menu, under the line's title.
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let menu = contextMenu() else { return false }
+        popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
+        return true
     }
 
     // MARK: Under the pointer

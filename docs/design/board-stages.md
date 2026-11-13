@@ -341,14 +341,17 @@ to the queue yet.
     lights the one station under it; none while the Board is hidden, nor
     while the app isn't the active one, whose windows don't hear the
     pointer leave.
-- **Retarget** is the Board's own call to GitHub, not the queue's: a queue
-  that runs, or that holds the pull request, changes nothing to it.
+- **Retarget** bases a pull request on its merged base's base, on GitHub.
   - In a repository that isn't saved, the phrase reads "Base #52 merged",
-    without what nothing here can do.
-  - In a build that can't change GitHub (a dry run), the words stay, as what
-    to do, and are no link: the phrase's tooltip says why.
+    without what nothing here can do; so does one the queue's list holds, or
+    the queue works on: it leaves the list first, by its Merge station.
+  - While the list is locked (a queue runs, here or in another Nirux, or the
+    Start sheet is open), it waits as adding and removing do; in a build that
+    can't change GitHub (a dry run), it does nothing. Either way the words
+    stay, as what to do, and are no link: the phrase's tooltip says why, as
+    the menu's item does.
   - The link is the phrase's. A line that says something more pressing (a red
-    check, an agent at work) has none: Retarget will be in its menu.
+    check, an agent at work) has none: Retarget is in its menu.
 - **A link says what its click does** under the pointer: "Bases #53 on main,
   as GitHub does when a merged branch is deleted"; "Checks the worktree, then
   asks what goes". It is drawn apart, in the accent colour, right after the
@@ -392,6 +395,32 @@ to the queue yet.
   ends moves nothing below. On a Board too narrow for a link beside the
   caption, the entry shows none. `onLink` then names the entry's task's
   line, which has left the list by then.
+- **The line's menu** (a right click, or VoiceOver's "show menu") offers
+  what its phrase may not say, in this order, each item carrying what acting
+  needs (`MenuItem`):
+  - Open Pull Request, for an address of github.com only (whoever posted the
+    pull request can't send a click elsewhere);
+  - Add to or Remove from Queue, as the Merge station;
+  - Retarget to main, while the pull request is outside the queue's list
+    and the queue doesn't work on it;
+  - Resume, as the sidebar offers it for a stopped agent of the task, whatever
+    another agent of it does: its column, and after an error the failed turn
+    it answers, so that only that one is resumed (without it, Resume does
+    nothing);
+  - Clean Up… of the line's worktree, or of a folder already gone, as the
+    table offers it, with its path;
+  - Open, a shell where no workspace is open in the worktree (the main
+    checkout included), with its path and its branch for a title.
+
+  What does nothing for now is there, disabled, and says why under the
+  pointer: refused or locked, a dry run, a Resume the sidebar holds back
+  ("Resuming…"), a clean-up of that worktree that runs (known by its path,
+  for every line in it; the phrase and "Merged today" then say "cleaning
+  up…", with no link). A menu shown before the line changed acts only as
+  the line, still on the Board, still offers; each of its items stays what
+  it was. A worktree no line holds (a merged task closed since) gets its
+  menu with "Other worktrees" (2b-4). `BoardStagesView.onMenu` has no owner
+  yet.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
