@@ -150,6 +150,23 @@ final class BoardStagesView: NSView {
     private var askedOrder: BoardStages.Order?
     /// What is drawn is held for the pointer, not the content as it is.
     private var isHolding: Bool { shownSections != content?.sections || !departed.isEmpty }
+    /// The lines are held, or the foot.
+    private var isHeld: Bool { isHolding || runningQueueViews.map(\.queue) != content?.runningQueues }
+    /// A pointer still that long isn't aiming: the Board settles under it.
+    static let stillDelay: TimeInterval = 10
+    /// The time the still pointer is counted by. (The tests give their own.)
+    var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// Runs `work` after a delay, in seconds. (The tests run it when they say.)
+    var after: (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated(work) }
+    }
+    /// When the pointer last moved over the Board, or was first seen there.
+    private var pointerMovedAt = -TimeInterval.infinity
+    private var isAiming: Bool { clock() - pointerMovedAt < Self.stillDelay }
+    /// Lines moved under a still pointer: no station or link lights or
+    /// acts until the pointer moves.
+    private(set) var isPointerStale = false
+    private var isStillCheckPending = false
     /// Settles the Board once the pointer left, after the event that said
     /// so. (The tests run it at once.)
     var settleLater: (@escaping @MainActor () -> Void) -> Void = { work in
@@ -284,9 +301,12 @@ final class BoardStagesView: NSView {
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
+        let isOver = pointerIsOver(pointerLocation())
+        // A pointer first seen counts as one that moved.
+        if isOver, !isPointerInside { pointerMovedAt = clock() }
         // While the pointer is over the Board, a queue's line that ends stays, inert, and one that starts waits:
         // neither the foot nor the list moves.
-        if pointerIsOver(pointerLocation()), previous != nil {
+        if isOver, isAiming, previous != nil {
             let current = Set(content.runningQueues.map(\.id))
             let gone = runningQueueViews.map(\.queue).filter { !current.contains($0.id) }.map { queue in
                 RunningQueue(id: queue.id, title: queue.title, tooltip: queue.tooltip, status: queue.status, tone: .normal)
@@ -307,15 +327,18 @@ final class BoardStagesView: NSView {
             // The order the switch asked for, now shown; a request is good for this change only.
             let isAsked = askedOrder == content.order && content.order != previous?.order
             askedOrder = nil
-            if isPointerInside, !isAsked, previous != nil {
+            if isPointerInside, isAiming, !isAsked, previous != nil {
                 (shownSections, departed) = Self.holding(shownSections, in: content.sections)
             } else {
+                // Under a pointer that rests, the lines move: what is under it waits for it to move.
+                if isPointerInside, !isAsked, previous != nil { isPointerStale = true }
                 (shownSections, departed) = (content.sections, [])
             }
             buildItems()
         }
         showTimes()
         layoutContent()
+        if isHeld { settleOnceStill() }
     }
 
     /// `sections` drawn as `shown` were: each line shown keeps its place,
@@ -430,6 +453,7 @@ final class BoardStagesView: NSView {
             // The line's section may be another one than when its view was made.
             let section = sectionID
             view.onPointer = { [weak self] location in self?.hover(at: location) }
+            view.isAimed = { [weak self] in self?.isPointerStale != true }
             view.onOffer = { [weak self] offer in self?.onOffer?(section, offer) }
             view.onLink = { [weak self, weak view] link in
                 guard let self, let view else { return }
@@ -492,6 +516,7 @@ final class BoardStagesView: NSView {
                 merged.onOpen = { [weak self] line in self?.onOpen?(line) }
                 merged.onCleanUp = { [weak self] line in self?.onLink?(id, line, .cleanUp) }
                 merged.onUnfold = { [weak self] in self?.unfoldMerged(section: id) }
+                merged.isAimed = { [weak self] in self?.isPointerStale != true }
                 mergedViews[id] = merged
                 items.append(.merged(merged))
             }
@@ -785,8 +810,15 @@ final class BoardStagesView: NSView {
         refreshHover()
     }
 
-    override func mouseEntered(with event: NSEvent) { hover(at: event.locationInWindow) }
-    override func mouseMoved(with event: NSEvent) { hover(at: event.locationInWindow) }
+    override func mouseEntered(with event: NSEvent) { pointerMoved(to: event.locationInWindow) }
+    override func mouseMoved(with event: NSEvent) { pointerMoved(to: event.locationInWindow) }
+
+    /// The pointer moved: it aims again.
+    private func pointerMoved(to location: NSPoint) {
+        pointerMovedAt = clock()
+        isPointerStale = false
+        hover(at: location)
+    }
     /// Whoever's area the pointer left, the Board's or one inside it,
     /// which passed the event on: where it is now says what is lit.
     override func mouseExited(with event: NSEvent) { hover(at: event.locationInWindow) }
@@ -814,10 +846,10 @@ final class BoardStagesView: NSView {
         if inside != isPointerInside {
             isPointerInside = inside
             // The pointer left: the Board settles, once the event that said so is over.
-            if !inside { settleLater { [weak self] in self?.settle() } }
+            if inside { pointerMovedAt = clock() } else { settleLater { [weak self] in self?.settle() } }
         }
         var line: BoardStagesLineView?
-        if let location, scrollView.frame.contains(convert(location, from: nil)) {
+        if !isPointerStale, let location, scrollView.frame.contains(convert(location, from: nil)) {
             line = lineViews.first { $0.actsOnStation(at: $0.convert(location, from: nil)) }
         }
         guard line !== hoveredLine else { return }
@@ -833,7 +865,29 @@ final class BoardStagesView: NSView {
 
     /// What changed while the pointer was over the Board takes its place.
     private func settle() {
-        guard !isPointerInside, let content else { return }
+        guard !isPointerInside else { return }
+        showContent()
+    }
+
+    /// Once the pointer has rested `stillDelay` over the Board, what waited
+    /// takes its place under it, and nothing there acts until it moves:
+    /// someone reading a line that long isn't aiming at it.
+    private func settleOnceStill() {
+        guard !isStillCheckPending else { return }
+        isStillCheckPending = true
+        after(max(0, pointerMovedAt + Self.stillDelay - clock())) { [weak self] in
+            guard let self else { return }
+            self.isStillCheckPending = false
+            guard self.isPointerInside, self.isHeld else { return }
+            if self.isAiming { return self.settleOnceStill() }
+            self.isPointerStale = true
+            self.showContent()
+        }
+    }
+
+    /// The content as it is, where it was held.
+    private func showContent() {
+        guard let content else { return }
         if runningQueueViews.map(\.queue) != content.runningQueues {
             departedQueues = []
             showRunningQueues(content.runningQueues)

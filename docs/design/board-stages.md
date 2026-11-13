@@ -180,10 +180,17 @@ Once the pointer leaves the Board, or the Board hides, or the app isn't the
 active one any more (its windows don't hear the pointer leave), it settles,
 once the event that said so is over. The order switch is the user's own
 click: what it asks applies at once, for the change that brings it only; an
-order that changes otherwise (another Board's switch) is held. Left for the
-Lead: a pointer resting on the Board while the user types elsewhere holds it as
-long, new tasks waiting; and the Board knows the pointer by where it is, not by
-what covers it (a window over it).
+order that changes otherwise (another Board's switch) is held.
+
+**A pointer that rests isn't aiming** (the Lead, 2026-11-14): once it has been
+still over the Board for 10 s, what waited takes its place under it, and a
+change that comes while it rests isn't held. The lines may then have moved
+under it: until it moves again, no Merge station lights or acts, nor does a
+link (a phrase's or "Merged today"'s "Clean up"), so that someone who read a
+line for 12 s and clicks doesn't hit the pull request that came there; a
+click elsewhere on a line opens its task. The Board knows the pointer by where
+it is, not by what covers it: a window over it still holds it, as the sidebar
+does (accepted).
 
 **Merged today** closes the section: the pull requests merged since midnight,
 the newest first, each with its task's title while that task is open, its

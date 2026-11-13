@@ -59,6 +59,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     /// The mouse moved with its button down, or came up, at this place in
     /// the window: no other event says where the pointer is meanwhile.
     var onPointer: ((NSPoint) -> Void)?
+    /// The pointer moved since lines moved under it: its station and its
+    /// link act. (The Board says.)
+    var isAimed: () -> Bool = { true }
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
     /// The pointer is on the Merge station, as the Board follows it. The
@@ -481,6 +484,11 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     override func mouseDown(with event: NSEvent) {
         let target = target(at: convert(event.locationInWindow, from: nil))
+        // A station or a link that came under a still pointer isn't what it aimed at.
+        if target != .line, !isAimed() {
+            pressed = nil
+            return
+        }
         // The station takes the list's change back at a second click; a
         // double click opens a task, or follows a link, once.
         if case .offer = target {
