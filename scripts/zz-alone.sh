@@ -30,7 +30,8 @@ for test in "$@"; do
             grep -E ': error: ' "$log" | sed -E 's/^.*: error: /    /' | head -8
         fi
     done
-    results+=("ZZ RESULT $test: $passed of $count runs passed")
-    echo "${results[-1]}"
+    line="ZZ RESULT $test: $passed of $count runs passed"
+    results+=("$line")
+    echo "$line"
 done
 printf '%s\n' "${results[@]}"
