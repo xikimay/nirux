@@ -40,16 +40,17 @@ final class CatchUpTests: XCTestCase {
     }
 
     /// Waits on state, never on time: the card comes in after the
-    /// activation's own work, and CI runs several classes at once.
+    /// activation's own work, and CI runs several classes at once. The
+    /// description is read at the timeout: it can say what the test saw.
     @discardableResult
     private func waitFor(
-        _ description: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line,
-        _ condition: () -> Bool
+        _ description: @autoclosure () -> String, timeout: TimeInterval = 15, file: StaticString = #filePath,
+        line: UInt = #line, _ condition: () -> Bool
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         let met = condition()
-        XCTAssertTrue(met, "timed out waiting for \(description)", file: file, line: line)
+        XCTAssertTrue(met, "timed out waiting for \(description())", file: file, line: line)
         return met
     }
 
@@ -256,7 +257,12 @@ final class CatchUpTests: XCTestCase {
     }
 
     /// A list taller than the sidebar: the card comes into view, not above
-    /// the visible part.
+    /// the visible part. In height, which is what scrolling gives: the
+    /// width in view is the scrollers' business. AppKit settles which
+    /// style it prefers a moment after a process's first scroll view, and
+    /// a scroll view alive then takes it, whatever style it was given: on
+    /// a Mac with a mouse (CI's runners) the sidebar's scroller turns
+    /// legacy and takes 15 pt of the visible width, the card's × with it.
     func testTheCardComesIntoView() throws {
         let rows = (0..<30).map { index in
             WorkspaceInfo(
@@ -289,8 +295,14 @@ final class CatchUpTests: XCTestCase {
             guard case .catchUp(.dismiss) = area.region else { return false }
             return true
         })
-        waitFor("the card in view (visible was \(visibleBefore))") {
-            sidebar.contentScrollView.documentVisibleRect.contains(dismiss.frame)
+        let scroll = sidebar.contentScrollView
+        XCTAssertGreaterThan(dismiss.frame.minY, visibleBefore.maxY, "the card comes in above the visible part")
+        waitFor("""
+            the card in view: visible was \(visibleBefore), is \(scroll.documentVisibleRect), \
+            its × at \(dismiss.frame), scroller style \(scroll.scrollerStyle.rawValue)
+            """) {
+            let visible = scroll.documentVisibleRect
+            return visible.minY <= dismiss.frame.minY && dismiss.frame.maxY <= visible.maxY
         }
     }
 

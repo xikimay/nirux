@@ -489,6 +489,10 @@ extension MissionTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: processingURL.path))
     }
 
+    /// The save fails once, then works: the center retries on its own.
+    /// Waits as long as the suite's other waits: the retry and the unblock
+    /// run on the main queue, which a loaded runner can leave unserved for
+    /// seconds (one CI run timed out after 1 s, then delivered).
     func testCenterRetriesProcessingFileUntilMissionSaveSucceeds() async throws {
         let directory = try makeDirectory()
         let missionsURL = directory.appendingPathComponent("missions.json")
@@ -525,7 +529,7 @@ extension MissionTests {
                 XCTFail("Failed to restore mission persistence: \(error)")
             }
         }
-        await fulfillment(of: [delivered], timeout: 1)
+        await fulfillment(of: [delivered], timeout: 10)
         center.stop()
 
         XCTAssertEqual(store.missions[0].events.map(\.id), [pending.id])
