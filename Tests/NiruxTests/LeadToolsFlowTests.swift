@@ -820,6 +820,27 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A task without a repository has its sub-tasks in folders inside its
+    /// own, reporting to its agent.
+    func testAFolderTasksSubtaskGoesInItsFolder() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let started = try call(LeadTools.startTask, ["description": "Compare two parsers", "repo": "none"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Compare two parsers" })
+            let folder = try XCTUnwrap(task.taskFolder)
+            let agent = try XCTUnwrap(task.columns.first?.agentUUID)
+            let sub = try call(LeadTools.startTask, ["description": "Benchmark the first parser"], from: task, agentUUID: agent, in: harness)
+            XCTAssertFalse(sub.isError, sub.text)
+            XCTAssertTrue(sub.text.contains("It reports to you"), sub.text)
+            let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Benchmark the first parser" })
+            XCTAssertEqual(subtask.parentWorkspaceID, task.id)
+            XCTAssertEqual(subtask.taskFolder, folder + "/Benchmark the first parser")
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id }?.reportsToTask, true)
+        }
+    }
+
     /// With "Starts tasks without asking" off, a task's start_task fills
     /// the New Sub-task sheet in, under the task, without the Lead's
     /// checkbox; started from there, the sub-task reports to the agent.
