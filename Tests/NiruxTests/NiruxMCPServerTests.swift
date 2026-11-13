@@ -59,6 +59,13 @@ final class NiruxMCPServerTests: XCTestCase {
         XCTAssertLessThanOrEqual(leads.count, 2048, "Claude Code cuts server instructions at 2,048 characters")
         let others = try XCTUnwrap(result(try send(initialize))?["instructions"] as? String)
         XCTAssertFalse(others.contains("Lead"))
+        // Only the others are sent to the skill: the Lead starts tasks with start_task.
+        XCTAssertTrue(others.contains(NiruxMCPServer.taskInstructions))
+        XCTAssertFalse(leads.contains(NiruxMCPServer.taskInstructions))
+        // Both learn that the binary starts no task.
+        for text in [leads, others] {
+            XCTAssertTrue(text.contains("binary ($NIRUX_CLI_PATH) starts no task"))
+        }
     }
 
     func testHandshakeListsTheReadOnlyTool() throws {
