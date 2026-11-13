@@ -129,10 +129,11 @@ enum RealStateGuard {
         let copy = enclosingBundle(ofExecutable: executablePath) ?? executablePath
         let command = isolatedLaunchCommand(executablePath: executablePath)
         let installed = installedBundlePath ?? "\(systemBundlePath) (not found)"
+        // NIRUX_ALLOW_REAL_STATE=1 stays out of this message: an agent reading
+        // it would take it as the way through (docs/development.md has it).
         FileHandle.standardError.write(Data("""
             Nirux: not starting. Only the installed app, \(installed), opens your workspaces; this copy is \(copy).
             Run it on a state of its own: \(command)
-            NIRUX_ALLOW_REAL_STATE=1 lets it use the real state instead.
 
             """.utf8))
         // A terminal, a script or an agent's tool started it: stderr says it
