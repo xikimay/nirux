@@ -214,23 +214,19 @@ final class QuickSwitcherFlowTests: XCTestCase {
             }
             try press()
             try press()
-            // Away and back by hand: the next press starts over at the
-            // longest wait.
+            // Away and back by hand, onto the waiting column the last press
+            // left in front: the next press starts over at the longest wait,
+            // and the walk goes through the others before it comes back to
+            // where the user was.
             shell.switchToWorkspace(try index(of: repo, in: shell))
             shell.switchToWorkspace(try index(of: second, in: shell))
-            for _ in 0..<4 { try press() }
-            XCTAssertEqual(landed, ["acme#0", "second#0", "acme#0", "second#0", "parked#0", "acme#0"])
+            XCTAssertEqual(second.focusedIndex, 0)
+            for _ in 0..<3 { try press() }
+            XCTAssertEqual(landed, ["acme#0", "second#0", "acme#0", "parked#0", "acme#0"])
             XCTAssertEqual(shell.activeProfileID, clients.id)
             XCTAssertTrue(parked.isInactive)
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed, "landing on an inactive workspace kept the section folded")
             XCTAssertFalse(shell.quickSwitch.hint?.isShowing ?? false)
-
-            // From a waiting column reached by hand: the walk starts there,
-            // and goes through the others before it comes back.
-            shell.focusWorkspace(id: second.id, column: 0)
-            landed = []
-            for _ in 0..<3 { try press() }
-            XCTAssertEqual(landed, ["acme#0", "parked#0", "acme#0"])
 
             // Answered at the terminal: the next press starts over at the
             // longest wait left.
