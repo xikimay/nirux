@@ -134,6 +134,16 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
             XCTAssertEqual(clicked.columns[safe: columnIndex]?.turnQuestion, asked)
             XCTAssertEqual(clicked.rowSummary.mark, .needsYou)
             XCTAssertTrue(clicked.cardActions.contains(.turnQuestion(columnIndex: columnIndex, asked)))
+            // Read on screen once Nirux is in front too: Next Waiting Agent
+            // then goes to it after the waits nobody saw.
+            @MainActor func isRead() -> Bool? {
+                pty.agentBlockedWait(now: Date().timeIntervalSince1970, foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()))?.isRead
+            }
+            XCTAssertEqual(isRead(), false, "Nirux behind: nobody read it")
+            shell.sideEffects.appIsActive = { true }
+            _ = row()
+            XCTAssertEqual(isRead(), true)
+            shell.sideEffects.appIsActive = { false }
 
             // A subagent works on: the card has no button to answer with,
             // the row still says the question, and its menu puts it aside.

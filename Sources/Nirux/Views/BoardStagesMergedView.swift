@@ -12,6 +12,8 @@ final class BoardStagesMergedView: NSView {
     /// "+12 more": shows every pull request merged today.
     let moreButton = NSButton(title: "", target: nil, action: nil)
     var onOpen: ((String) -> Void)?
+    /// "Clean up" was clicked on an entry: its task's line.
+    var onCleanUp: ((String) -> Void)?
     var onUnfold: (() -> Void)?
     private var isUnfolded = false
 
@@ -49,6 +51,9 @@ final class BoardStagesMergedView: NSView {
             entry.onClick = { [weak self, weak entry] in
                 if let line = entry?.pullRequest.lineID { self?.onOpen?(line) }
             }
+            entry.onCleanUp = { [weak self, weak entry] in
+                if let line = entry?.pullRequest.lineID { self?.onCleanUp?(line) }
+            }
             return entry
         }
         subviews = [caption] + entries + [moreButton]
@@ -60,7 +65,8 @@ final class BoardStagesMergedView: NSView {
         let pad = BoardStagesView.Metrics.padding
         caption.frame = NSRect(x: pad, y: 14, width: ColumnHeaderView.textWidth(caption), height: 13)
         // A Board too narrow for the caption and an entry side by side
-        // starts the entries under it.
+        // starts the entries under it. Whatever their links: a clean-up
+        // that ends doesn't move the block, nor what comes under it.
         let isWide = width - 2 * pad - caption.frame.width - 18 >= 160
         let left = isWide ? caption.frame.maxX + 18 : pad
         let limit = width - pad
@@ -121,18 +127,46 @@ final class BoardStagesMergedView: NSView {
     @objc private func moreClicked() { onUnfold?() }
 }
 
-/// One pull request merged today: its dot, its title, then "#287 · 14:02".
-/// The title is what gives way; a click opens its task while that one is
-/// open here.
+/// One pull request merged today: its dot, its title, then "#287 · 14:02",
+/// and "· Clean up" while its task's worktree is there. The title is what
+/// gives way; a click opens its task while that one is open here, but on
+/// "Clean up", a link of its own.
 @MainActor
-final class BoardStagesMergedEntryView: NSView {
+final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
+    /// What a press and its release on an entry do, by where both land.
+    enum Target: Equatable {
+        case entry, cleanUp
+    }
+
     private(set) var pullRequest: BoardStages.Merged
     let titleLabel = NSTextField(labelWithString: "")
     let detailLabel = NSTextField(labelWithString: "")
+    /// "· Clean up", a link; "· cleaning up…" while one runs.
+    let linkLabel = NSTextField(labelWithString: "")
     var onClick: (() -> Void)?
-    private var isPressed = false
+    var onCleanUp: (() -> Void)?
+    /// What the mouse went down on: its release on the same is a click.
+    private var pressed: Target?
+    /// What the entry says under the pointer, by where.
+    private var toolTips = BoardStagesToolTips()
+    var hints: [(rect: NSRect, text: String)] { toolTips.places }
+    /// Where a hand was last given to AppKit.
+    private var registeredHandRects: [NSRect] = []
 
     private static let dot: CGFloat = 6
+    /// Under this, a title that is cut gives the link's room back.
+    private static let fewestTitle: CGFloat = 40
+    /// The room of the link, the same whether a clean-up is offered or
+    /// runs: the entries after it don't move under the pointer when one
+    /// starts.
+    static let linkRoom: CGFloat = {
+        let label = NSTextField(labelWithString: "")
+        label.font = Theme.Font.body
+        return [BoardStages.Link.cleanUp.title, BoardStages.CleanUp.runningWords].map { words -> CGFloat in
+            label.stringValue = "· \(words)"
+            return ColumnHeaderView.textWidth(label)
+        }.max() ?? 0
+    }()
 
     override var isFlipped: Bool { true }
 
@@ -144,7 +178,7 @@ final class BoardStagesMergedEntryView: NSView {
         titleLabel.lineBreakMode = .byTruncatingTail
         detailLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         detailLabel.textColor = Theme.Color.textTertiary
-        for label in [titleLabel, detailLabel] {
+        for label in [titleLabel, detailLabel, linkLabel] {
             label.setAccessibilityElement(false)
             addSubview(label)
         }
@@ -165,18 +199,41 @@ final class BoardStagesMergedEntryView: NSView {
         let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: pullRequest.mergedAt), now: Date(timeIntervalSince1970: now))
         titleLabel.stringValue = pullRequest.title
         detailLabel.stringValue = "#\(pullRequest.number) · \(time)"
+        // "· Clean up": joined as a phrase's link is, the words alone in the link's colour.
+        let link = NSMutableAttributedString()
+        if let words = linkWords {
+            link.append(NSAttributedString(string: "· ", attributes: [.font: Theme.Font.body, .foregroundColor: Theme.Color.textTertiary]))
+            link.append(NSAttributedString(string: words, attributes: [
+                .font: Theme.Font.body, .foregroundColor: offersCleanUp ? Theme.Color.accent : Theme.Color.textTertiary
+            ]))
+        }
+        linkLabel.attributedStringValue = link
         setAccessibilityRole(pullRequest.lineID == nil ? .staticText : .button)
         setAccessibilityLabel(
-            "\(pullRequest.title), #\(pullRequest.number), merged at \(time)" + (pullRequest.needsYou ? ", needs you" : "")
+            (["\(pullRequest.title), #\(pullRequest.number), merged at \(time)"] + (pullRequest.needsYou ? ["needs you"] : [])
+                + (linkWords.map { [$0] } ?? [])).joined(separator: ", ")
         )
     }
+
+    /// "Clean up" is a link while the clean-up is offered, of a task
+    /// that is open here: it is that task's worktree.
+    private var offersCleanUp: Bool { pullRequest.cleanUp == .offered && pullRequest.lineID != nil }
+
+    /// What follows the number and the time, if anything.
+    private var linkWords: String? {
+        if offersCleanUp { return BoardStages.Link.cleanUp.title }
+        return pullRequest.cleanUp == .running ? BoardStages.CleanUp.runningWords : nil
+    }
+
+    /// It says something of a clean-up after its number and its time.
+    var hasLink: Bool { linkWords != nil }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     /// The width it draws whole in.
     var fittingWidth: CGFloat {
-        Self.dot + 6 + ColumnHeaderView.textWidth(titleLabel) + 4 + ColumnHeaderView.textWidth(detailLabel)
+        Self.dot + 6 + ColumnHeaderView.textWidth(titleLabel) + 4 + ColumnHeaderView.textWidth(detailLabel) + (hasLink ? Self.linkRoom : 0)
     }
 
     /// Amber while an agent of its task needs the user: never hidden.
@@ -185,14 +242,58 @@ final class BoardStagesMergedEntryView: NSView {
     override func layout() {
         super.layout()
         let titleX = Self.dot + 6
-        let detailWidth = min(ColumnHeaderView.textWidth(detailLabel), max(0, bounds.width - titleX))
-        let titleWidth = max(0, min(ColumnHeaderView.textWidth(titleLabel), bounds.width - titleX - 4 - detailWidth))
+        let whole = ColumnHeaderView.textWidth(titleLabel)
+        // The number and the time give way last. The link shows whole or
+        // not at all, and only while the title keeps some of itself.
+        let detailWidth = min(ColumnHeaderView.textWidth(detailLabel), max(0, bounds.width - titleX - 4))
+        let room = max(0, bounds.width - titleX - 4 - detailWidth)
+        let linkWidth = hasLink && room - Self.linkRoom >= min(whole, Self.fewestTitle) ? Self.linkRoom : 0
+        let titleWidth = min(whole, room - linkWidth)
         titleLabel.frame = NSRect(x: titleX, y: 1, width: titleWidth, height: 16)
         detailLabel.frame = NSRect(x: titleLabel.frame.maxX + 4, y: 2, width: detailWidth, height: 15)
-        // The entry takes the mouse for its words: a title that is cut
-        // shows whole under the pointer.
-        let whole = titleWidth < ColumnHeaderView.textWidth(titleLabel) ? pullRequest.title : nil
-        if toolTip != whole { toolTip = whole }
+        linkLabel.frame = NSRect(x: detailLabel.frame.maxX, y: 1, width: linkWidth, height: 16)
+        linkLabel.isHidden = linkWidth == 0
+        // The entry takes the mouse for its words. A title that is cut
+        // shows whole under the pointer, wherever on the entry but on a
+        // link, which says what its click does.
+        var hints: [(rect: NSRect, text: String)] = []
+        let link = offersCleanUp ? linkRect : nil
+        if titleWidth < whole {
+            hints.append((NSRect(x: 0, y: 0, width: link?.minX ?? bounds.width, height: bounds.height), pullRequest.title))
+        }
+        if let link { hints.append((link, BoardStages.Link.cleanUp.hint)) }
+        toolTips.show(hints, on: self)
+        if handRects != registeredHandRects { window?.invalidateCursorRects(for: self) }
+    }
+
+    /// The link's place, the entry's height; nil where it has no room.
+    private var linkRect: NSRect? {
+        linkLabel.isHidden ? nil : NSRect(x: linkLabel.frame.minX, y: 0, width: linkLabel.frame.width, height: bounds.height)
+    }
+
+    /// What a click at `point` does.
+    func target(at point: NSPoint) -> Target {
+        offersCleanUp && linkRect?.contains(point) == true ? .cleanUp : .entry
+    }
+
+    /// What the pointer shows at `point`, if anything.
+    func toolTipText(at point: NSPoint) -> String? {
+        toolTips.text(at: point)
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        toolTipText(at: point) ?? ""
+    }
+
+    /// A hand on the link, as far as the entry is in sight.
+    var handRects: [NSRect] {
+        guard offersCleanUp, let rect = linkRect?.intersection(rectInSight), !rect.isEmpty else { return [] }
+        return [rect]
+    }
+
+    override func resetCursorRects() {
+        registeredHandRects = handRects
+        for rect in registeredHandRects { addCursorRect(rect, cursor: .pointingHand) }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -205,17 +306,42 @@ final class BoardStagesMergedEntryView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        isPressed = event.clickCount == 1 && pullRequest.lineID != nil
+        pressed = event.clickCount == 1 ? target(at: convert(event.locationInWindow, from: nil)) : nil
     }
 
+    /// The entry is listed, and shows, where VoiceOver may reach it
+    /// scrolled away: not one gone behind "+12 more", nor one that left
+    /// the list.
+    private var isShown: Bool { window != nil && !isHiddenOrHasHiddenAncestor }
+
+    /// The click is the mouse going up on what it went down on, as that
+    /// still is, where the entry is in sight: not one gone behind "+12
+    /// more", nor one that left the list.
     override func mouseUp(with event: NSEvent) {
-        defer { isPressed = false }
-        if isPressed, bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+        defer { pressed = nil }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let pressed, rectInSight.contains(point), target(at: point) == pressed else { return }
+        switch pressed {
+        case .entry: onClick?()
+        case .cleanUp: onCleanUp?()
+        }
     }
 
+    /// As a click: only on an entry that shows.
     override func accessibilityPerformPress() -> Bool {
-        guard pullRequest.lineID != nil else { return false }
+        guard pullRequest.lineID != nil, isShown else { return false }
         onClick?()
         return true
+    }
+
+    /// "Clean up" by name, and as a click: only while it is offered, on
+    /// an entry that shows.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard offersCleanUp else { return nil }
+        return [NSAccessibilityCustomAction(name: BoardStages.Link.cleanUp.title) { [weak self] in
+            guard let self, self.offersCleanUp, self.isShown, let onCleanUp = self.onCleanUp else { return false }
+            onCleanUp()
+            return true
+        }]
     }
 }
