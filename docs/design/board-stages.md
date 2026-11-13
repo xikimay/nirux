@@ -237,6 +237,9 @@ clicked. The sizes are the mockup's.
   sight while the list scrolls, and since it takes the foot, nothing above
   moves when it comes or goes. A Board too short for them all shows as many
   as there is room for under its header.
+
+  ![Two repositories' queues: one merging, in green, with Stop; one stopped on a problem, in red, with Start… · 1; at the Board's foot, the queue that runs here and one run by another Nirux](../images/board-stages-queues.png)
+
 - **A line** is 34 pt: its state's dot and its title, its rail, its phrase
   (amber or red when it needs a look, else grey), its pull request, its time.
   A press and its release on it open the task, but on its Merge station and
