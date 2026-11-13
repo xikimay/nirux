@@ -225,14 +225,35 @@ final class MissionDeliveryTests: XCTestCase {
         typealias Question = SidebarMissionQuestion
         XCTAssertEqual(Question.handOff(parent: .closed, askedAt: 100, threshold: 600, now: 101), .parentClosed)
         XCTAssertEqual(Question.handOff(parent: .notClaude, askedAt: 100, threshold: 600, now: 101), .parentNotClaude)
+        XCTAssertEqual(Question.handOff(parent: .notAtPrompt, askedAt: 100, threshold: 600, now: 101), .parentNotAtPrompt)
+        XCTAssertEqual(Question.handOff(parent: .restartedSinceTyped, askedAt: 100, threshold: 600, now: 101), .parentRestarted)
         XCTAssertNil(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 699))
         XCTAssertEqual(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 700), .unanswered(minutes: 10))
         XCTAssertEqual(Question.handOff(parent: .stoppedWithoutAnswer, askedAt: 100, threshold: 600, now: 101), .parentDidNotAnswer)
     }
 
-    /// No Claude in the parent's column, or a parent idle after it took
-    /// the question, counts only past a grace; a parent that stopped
-    /// without answering keeps the question with the user, turn after turn.
+    /// A `claude` that took no prompt since it started can't take a
+    /// question not typed yet, if its hooks tell. One typed already went to
+    /// a `claude` that could: one started since never gets it.
+    func testAParentThatTookNoPromptCantTakeTheQuestion() {
+        let claude = ForegroundProcess(instance: ProcessInstance(pid: 7, startedAt: 100), name: "claude", arguments: ["claude"])
+        func parent(_ foreground: ForegroundProcess?, typedAt: TimeInterval? = nil, tookPrompt: Bool?) -> SidebarMissionQuestion.Parent {
+            NiruxShellView.missionParent(
+                foreground: foreground, typedAt: typedAt, finishedTurnAfterTyping: { _ in false }, tookPrompt: { _ in tookPrompt }
+            )
+        }
+        XCTAssertEqual(parent(claude, tookPrompt: false), .notAtPrompt)
+        XCTAssertEqual(parent(claude, tookPrompt: true), .claude)
+        XCTAssertEqual(parent(claude, tookPrompt: nil), .claude, "its hooks never reported: nothing tells")
+        XCTAssertEqual(parent(claude, typedAt: 150, tookPrompt: false), .claude, "typed into this claude")
+        XCTAssertEqual(parent(claude, typedAt: 50, tookPrompt: true), .restartedSinceTyped, "typed into an earlier one")
+    }
+
+    /// A parent that can't take the question, whatever the reason (one
+    /// wait for all), or one idle after it took the question, counts only
+    /// past a grace; a parent that stopped without answering keeps the
+    /// question with the user, turn after turn. A process-table miss keeps
+    /// what the refresh before found.
     func testTheParentWatchWaitsOutTheGraceThenSticks() {
         let grace = NiruxShellView.missionParentGrace
         var watch = NiruxShellView.MissionParentWatch()
@@ -242,12 +263,34 @@ final class MissionDeliveryTests: XCTestCase {
                        "a process-table miss doesn't restart the clock")
         XCTAssertEqual(watch.settle(.claude, foregroundKnown: true, now: 200), .claude, "back")
         XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 201), .claude, "a new absence, a new grace")
+        XCTAssertEqual(watch.settle(.notAtPrompt, foregroundKnown: true, now: 201 + grace), .notAtPrompt,
+                       "its claude came to the front: the same wait")
+        XCTAssertEqual(watch.settle(.claude, foregroundKnown: false, now: 230), .notAtPrompt, "a miss changes nothing")
+        XCTAssertEqual(watch.settle(.claude, foregroundKnown: true, now: 240), .claude, "it took a prompt")
 
         var stopped = NiruxShellView.MissionParentWatch()
         XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300), .claude, "a reply may be queued")
         XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300 + grace), .stoppedWithoutAnswer)
         XCTAssertEqual(stopped.settle(.claude, foregroundKnown: true, now: 400), .stoppedWithoutAnswer, "its next turn changes nothing")
         XCTAssertEqual(stopped.settle(.closed, foregroundKnown: true, now: 500), .closed)
+
+        var restarted = NiruxShellView.MissionParentWatch()
+        XCTAssertEqual(restarted.settle(.restartedSinceTyped, foregroundKnown: true, now: 600), .claude)
+        XCTAssertEqual(restarted.settle(.restartedSinceTyped, foregroundKnown: true, now: 600 + grace), .restartedSinceTyped)
+    }
+
+    /// Handed to the user, a question stays with them until it is typed
+    /// into the parent's prompt (or answered: its watch then goes), and a
+    /// new reason only changes the words.
+    func testAQuestionHandedOverStaysUntilTyped() {
+        var watch = NiruxShellView.MissionParentWatch()
+        XCTAssertNil(watch.hold(nil, typedAt: nil))
+        XCTAssertEqual(watch.hold(.parentNotClaude, typedAt: nil), .parentNotClaude)
+        XCTAssertEqual(watch.hold(.parentNotAtPrompt, typedAt: nil), .parentNotAtPrompt, "a new reason")
+        XCTAssertEqual(watch.hold(nil, typedAt: nil), .parentNotAtPrompt, "back, but it hasn't got it")
+        XCTAssertNil(watch.hold(nil, typedAt: 300), "typed into its prompt")
+        XCTAssertEqual(watch.hold(.parentDidNotAnswer, typedAt: 300), .parentDidNotAnswer)
+        XCTAssertEqual(watch.hold(nil, typedAt: 300), .parentDidNotAnswer)
     }
 
     // MARK: - Card row

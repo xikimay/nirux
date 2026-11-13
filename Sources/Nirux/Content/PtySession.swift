@@ -770,6 +770,15 @@ final class PtySession: @unchecked Sendable {
         state.machine.finishedTurn(afterTypingAt: typedAt)
     }
 
+    /// Whether `foreground`, the column's `claude`, took a prompt since it
+    /// started (see `AgentStatusMachine.prompt(since:)`); nil while no hook
+    /// of it reached the column, as for a `claude` without Nirux's hooks:
+    /// nothing tells.
+    func agentTookPrompt(since foreground: ForegroundProcess) -> Bool? {
+        guard state.machine.hookKind == "claude" else { return nil }
+        return state.machine.prompt(since: foreground.instance.startedAt) != nil
+    }
+
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
     /// command-backed columns launch it with zsh-style `-i -l -c` flags
