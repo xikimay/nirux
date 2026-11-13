@@ -51,8 +51,9 @@ final class BoardStagesView: NSView {
     /// A line's Merge station was clicked where that changes the queue's
     /// list: its section's id, and what the click does.
     var onOffer: ((_ section: String, BoardStages.QueueOffer) -> Void)?
-    /// The link ending a line's phrase was clicked: its section's id, the
-    /// line's, and the link.
+    /// The link ending a line's phrase was clicked, or "Clean up" on a
+    /// "Merged today" entry: its section's id, its task's line's (which
+    /// an entry's has left the list by then), and the link.
     var onLink: ((_ section: String, _ line: String, BoardStages.Link) -> Void)?
 
     /// Where the pointer is, in the window; nil where the Board doesn't
