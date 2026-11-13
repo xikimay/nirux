@@ -218,50 +218,102 @@ final class TurnQuestionSidebarTests: XCTestCase {
         }
         XCTAssertEqual(stack[1].toolTip, "1. Staging replica (Recommended) — Safe to wipe; refreshed from production every night")
 
-        // What its hook lets through is never cut: drawn past a turn
-        // question's eight lines and a choice's six.
-        func words(_ count: Int) -> String { Array(repeating: "sentences", count: count).joined(separator: " ") }
-        let longest = AgentDialog(questions: [.init(text: words(29) + " which one?", options: [
-            .init(label: words(8) + "s", detail: words(16) + "s"),
-        ])])
-        XCTAssertEqual(longest.questions[0].text.count, 300)
-        XCTAssertEqual(AgentDialog.bounded(longest.questions), longest, "at its bounds")
-        asking.dialog = longest
-        let drawn = render(workspace([asking]))
-        let tall = labels(drawn)
-        let lineHeight = SidebarExpandedMetrics.questionLineHeight
-        let question = try XCTUnwrap(tall.first { $0.stringValue == longest.questions[0].text })
-        XCTAssertGreaterThan(question.frame.height, 8 * lineHeight)
-        XCTAssertEqual(question.maximumNumberOfLines, SidebarExpandedMetrics.dialogMaxLines, "its label takes them all")
-        let under = try XCTUnwrap(tall.first { $0.stringValue == "Answer in the terminal" })
-        XCTAssertEqual(under.frame.minY, drawn.bottomY + SidebarExpandedMetrics.rowPaddingY - 1, accuracy: 0.5, "and its block is as tall")
-        XCTAssertEqual(
-            question.frame.height, SidebarQuestionText.questionHeight(longest.questions[0].text, width: question.frame.width, maxLines: 99),
-            accuracy: 0.5
-        )
-        let option = try XCTUnwrap(tall.first { $0.stringValue.hasPrefix("1.\t") })
-        var uncapped = SidebarQuestionText.options(longest.questions[0])
-        uncapped.maxLines = 99
-        XCTAssertGreaterThan(option.frame.height, 6 * lineHeight)
-        XCTAssertEqual(option.frame.height, uncapped.height(width: option.frame.width), accuracy: 0.5)
 
-        // Several questions with all they offer would take the sidebar:
-        // such a block lists the labels, and a tooltip says what each
-        // option means.
+        // Too tall for the sidebar, a dialog gives way by steps, each within
+        // one bound; its tooltips keep what a step cuts.
+        let lineHeight = SidebarExpandedMetrics.questionLineHeight
+        func words(_ word: String, _ count: Int) -> String { Array(repeating: word, count: count).joined(separator: " ") }
+        @MainActor func drawn(_ dialog: AgentDialog) throws -> (layout: SidebarDialogLayout, labels: [NSTextField]) {
+            asking.dialog = dialog
+            let result = render(workspace([asking]))
+            let shown = labels(result)
+            let first = try XCTUnwrap(shown.first { $0.stringValue == dialog.questions[0].text }, "its first question")
+            let layout = SidebarDialogLayout.make(dialog, width: first.frame.width)
+            let hint = try XCTUnwrap(shown.first { $0.stringValue == layout.hint })
+            XCTAssertEqual(hint.frame.minY, result.bottomY + SidebarExpandedMetrics.rowPaddingY - 1, accuracy: 0.5, "as tall as it draws")
+            XCTAssertLessThanOrEqual(layout.height, SidebarExpandedMetrics.dialogMaxHeight)
+            for label in shown where label.stringValue.hasPrefix("1.\t") || label.stringValue == first.stringValue {
+                XCTAssertEqual(label.maximumNumberOfLines, Int((label.frame.height / lineHeight).rounded()), "its label takes its lines")
+            }
+            return (layout, shown)
+        }
+        func whole(_ text: NSAttributedString, width: CGFloat, indent: CGFloat = 0) -> CGFloat {
+            SidebarWrappedText.height(text, width: width, lineHeight: lineHeight, maxLines: 99, indent: indent)
+        }
+        XCTAssertEqual(try drawn(dialog).layout.step, .whole)
+
+        // What its hook lets through, whole: past a turn question's eight
+        // lines and a choice's six.
+        let longQuestion = words("sentences", 29) + " which one?"
+        let longest = AgentDialog(questions: [.init(text: longQuestion, options: [
+            .init(label: words("sentences", 8) + "s", detail: words("sentences", 16) + "s"),
+        ])])
+        XCTAssertEqual(longQuestion.count, 300)
+        XCTAssertEqual(AgentDialog.bounded(longest.questions), longest, "at its bounds")
+        var (layout, shown) = try drawn(longest)
+        XCTAssertEqual(layout.step, .whole)
+        let question = try XCTUnwrap(shown.first { $0.stringValue == longQuestion })
+        XCTAssertGreaterThan(question.frame.height, 8 * lineHeight)
+        XCTAssertEqual(question.frame.height, whole(SidebarQuestionText.question(longQuestion), width: question.frame.width), accuracy: 0.5)
+        let texts = SidebarQuestionText.options(longest.questions[0])
+        var option = try XCTUnwrap(shown.first { $0.stringValue.hasPrefix("1.\t") })
+        XCTAssertGreaterThan(option.frame.height, 6 * lineHeight)
+        XCTAssertEqual(
+            option.frame.height, whole(texts.whole.texts[0], width: option.frame.width, indent: texts.whole.indent), accuracy: 0.5
+        )
+
+        // Long meanings: two lines past each label, the tooltip whole.
+        let meaning = "Safe to wipe and refreshed from production every night, so a failed run costs nothing but the twenty minutes "
+            + "it takes to load again, and it keeps the indexes"
+        func asks(_ count: Int, label: String) throws -> AgentDialog {
+            try XCTUnwrap(AgentDialog.bounded([.init(
+                text: "Which database should the import job write to while the migration of the orders table runs?",
+                options: (1...count).map { .init(label: "Database \($0)\(label)", detail: meaning) }
+            )]))
+        }
+        let described = try asks(4, label: " (the staging copy)")
+        (layout, shown) = try drawn(described)
+        XCTAssertEqual(layout.step, .shortDetails)
+        option = try XCTUnwrap(shown.first { $0.stringValue.hasPrefix("1.\t") })
+        let labelOnly = SidebarQuestionText.options(described.questions[0]).labels
+        let labelHeight = whole(labelOnly.texts[0], width: option.frame.width, indent: labelOnly.indent)
+        XCTAssertEqual(option.frame.height, labelHeight + 2 * lineHeight, accuracy: 0.5)
+        XCTAssertTrue(option.stringValue.contains(" — Safe to wipe"), "what it means, still")
+        XCTAssertEqual(option.toolTip, "1. Database 1 (the staging copy) — \(described.questions[0].options[0].detail ?? "")")
+        // Then the labels alone.
+        (layout, shown) = try drawn(try asks(6, label: ", the staging copy of last week"))
+        XCTAssertEqual(layout.step, .labels)
+        XCTAssertEqual(shown.first { $0.stringValue.hasPrefix("1.\t") }?.stringValue, "1.\tDatabase 1, the staging copy of last week")
+
+        // Several questions: the first ones, and how many more the terminal shows.
         let many = AgentDialog(questions: (1...4).map { number in
             .init(text: "Question \(number): which of these should the import job use?", options: (1...4).map {
                 .init(label: "Option \($0)", detail: "What option \($0) means, in a sentence long enough to wrap")
             })
         })
-        XCTAssertTrue(SidebarExpandedMetrics.dialogShowsDetails(dialog, width: 224))
-        XCTAssertFalse(SidebarExpandedMetrics.dialogShowsDetails(many, width: 224))
-        asking.dialog = many
-        let compact = render(workspace([asking]))
-        let listed = labels(compact).filter { $0.stringValue == "1.\tOption 1" }
-        XCTAssertEqual(listed.count, 4, "every question's options")
-        XCTAssertEqual(listed.first?.toolTip, "1. Option 1 — What option 1 means, in a sentence long enough to wrap")
-        let where_ = try XCTUnwrap(labels(compact).first { $0.stringValue == "Answer in the terminal" })
-        XCTAssertEqual(where_.frame.minY, compact.bottomY + SidebarExpandedMetrics.rowPaddingY - 1, accuracy: 0.5, "as tall as what it draws")
+        (layout, shown) = try drawn(many)
+        XCTAssertEqual(layout.step, .firstQuestions)
+        XCTAssertEqual(layout.questions.count, 3)
+        XCTAssertEqual(layout.hint, "1 more question in the terminal")
+        XCTAssertEqual(shown.filter { $0.stringValue == "1.\tOption 1" }.count, 3)
+        XCTAssertNil(shown.first { $0.stringValue.hasPrefix("Question 4") })
+        XCTAssertEqual(shown.first { $0.stringValue == "1.\tOption 1" }?.toolTip, "1. Option 1 — What option 1 means, in a sentence long enough to wrap")
+
+        // At the hook's bounds everywhere, the last step meets the bound all
+        // the same: the first question's first lines, two of each label.
+        let label = words("sentences", 8) + "s"
+        let widest = AgentDialog(questions: (1...4).map { _ in
+            .init(text: longQuestion, options: (1...6).map { _ in .init(label: label, detail: words("sentences", 16) + "s") })
+        })
+        XCTAssertEqual(AgentDialog.bounded(widest.questions), widest)
+        (layout, shown) = try drawn(widest)
+        XCTAssertEqual(layout.step, .tight)
+        XCTAssertEqual(layout.hint, "3 more questions in the terminal")
+        XCTAssertEqual(shown.first { $0.stringValue == longQuestion }?.frame.height, 4 * lineHeight)
+        XCTAssertEqual(shown.filter { $0.stringValue.hasSuffix("\t" + label) }.map(\.frame.height), Array(repeating: 2 * lineHeight, count: 6))
+        (layout, _) = try drawn(AgentDialog(questions: [widest.questions[0]]))
+        XCTAssertEqual(layout.step, .tight, "one question that doesn't fit")
+        XCTAssertEqual(layout.hint, "Answer in the terminal")
     }
 
     /// "Dismiss Question" in the row's menu, for each question that stands

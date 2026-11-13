@@ -330,8 +330,7 @@ struct AgentStatusMachine {
                 sessionID: event.sessionID,
                 requestedAt: now
             )
-            // (A line this build can't read decodes to no question.)
-            request.dialog = event.dialog.flatMap { $0.questions.isEmpty ? nil : $0 }
+            request.dialog = event.dialog
             if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
                let text = event.approvalText {
                 request.approval = PermissionApprovalTicket(
@@ -758,7 +757,11 @@ struct AgentStatusMachine {
             } else if !pendingDialogs.isEmpty {
                 // Every entry looked answered, yet one waits: the newest
                 // (older ones were likely denied, which fires no hook).
+                // It may be a question dialog declined with Esc while a
+                // dialog no hook told of waits: its line, not options
+                // the terminal may no longer show.
                 pendingDialogs[pendingDialogs.count - 1].mayBeAnswered = false
+                pendingDialogs[pendingDialogs.count - 1].dialog = nil
                 reason = pendingDialogs[pendingDialogs.count - 1].reason
             } else if now - lastDialogClosedAt < Self.reminderRaceWindow,
                       now - lastClosedDialogRequestedAt >= Self.reminderDelay {

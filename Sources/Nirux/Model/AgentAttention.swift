@@ -274,13 +274,15 @@ struct AgentDialog: Codable, Hashable, Sendable {
         self = dialog
     }
 
-    /// Another build's line: what this one can show of it, else nothing.
-    /// Never an error, which would drop the dialog's whole event, and
-    /// bounded again: the reader can't count on its writer.
+    /// Bounded again: the reader can't count on its writer. An error for a
+    /// line with no question this build can show, which its event reads
+    /// as no dialog (`ReadOrNil`).
     init(from decoder: Decoder) throws {
-        let container = try? decoder.container(keyedBy: CodingKeys.self)
-        let decoded = (try? container?.decode([Question].self, forKey: .questions)) ?? []
-        questions = Self.bounded(decoded)?.questions ?? []
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let dialog = Self.bounded(try container.decode([Question].self, forKey: .questions)) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "no question to show"))
+        }
+        self = dialog
     }
 
     /// `questions` as a row may show them: every text cleaned and cut to
@@ -320,6 +322,40 @@ struct AgentHookOutcome: Equatable {
     /// the event closed by other means (answered at the terminal, turn or
     /// session over): release them, nothing will be decided.
     var abandonedApprovals: [AgentPermissionRequest] = []
+}
+
+/// A field another build may have written in another shape: read as
+/// nil then, never an error that would drop the whole line it is on.
+/// Left out of the line when nil.
+@propertyWrapper
+struct ReadOrNil<Value: Codable & Hashable & Sendable>: Codable, Hashable, Sendable {
+    var wrappedValue: Value?
+
+    init(wrappedValue: Value?) {
+        self.wrappedValue = wrappedValue
+    }
+
+    init(from decoder: Decoder) throws {
+        wrappedValue = try? decoder.singleValueContainer().decode(Value.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wrappedValue)
+    }
+}
+
+extension KeyedDecodingContainer {
+    /// A line written before the field: nil.
+    func decode<Value>(_ type: ReadOrNil<Value>.Type, forKey key: Key) throws -> ReadOrNil<Value> {
+        try decodeIfPresent(type, forKey: key) ?? ReadOrNil(wrappedValue: nil)
+    }
+}
+
+extension KeyedEncodingContainer {
+    mutating func encode<Value>(_ value: ReadOrNil<Value>, forKey key: Key) throws {
+        try encodeIfPresent(value.wrappedValue, forKey: key)
+    }
 }
 
 /// Display-safe text from agent payloads (notification messages, tool

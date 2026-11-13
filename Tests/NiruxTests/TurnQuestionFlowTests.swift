@@ -37,8 +37,8 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
     }
 
     /// A question dialog's options reach its task's row while the dialog
-    /// is the one on screen, and leave once its call ran: answered in the
-    /// terminal.
+    /// is the one on screen, but for the column the user looks at, and
+    /// leave once its call ran: answered in the terminal.
     func testADialogsOptionsShowOnItsRow() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -64,6 +64,17 @@ final class TurnQuestionFlowTests: UIFlowTestCase {
             XCTAssertEqual(asking.columns[safe: columnIndex]?.dialog, dialog)
             XCTAssertEqual(asking.cardActions, [.dialog(columnIndex: columnIndex, dialog)])
             XCTAssertEqual(asking.rowSummary.lineText, "Needs you · a question")
+
+            // Its column in front, Nirux in front: the user reads the
+            // dialog itself, and its row keeps its one line.
+            shell.sideEffects.appIsActive = { true }
+            shell.focusWorkspace(id: task.id, column: columnIndex)
+            let watched = try XCTUnwrap(row())
+            XCTAssertNil(watched.columns[safe: columnIndex]?.dialog)
+            XCTAssertEqual(watched.cardActions, [])
+            XCTAssertEqual(watched.rowSummary.lineText, "Needs you · Which one do you want?")
+            shell.sideEffects.appIsActive = { false }
+            XCTAssertEqual(try XCTUnwrap(row()).columns[safe: columnIndex]?.dialog, dialog, "Nirux behind: on its row again")
 
             _ = pty.applyAgentHook(event(.postToolUse, tool: "AskUserQuestion"), isUserFocused: false)
             XCTAssertNil(pty.pendingAgentDialog, "answered: the call ran")

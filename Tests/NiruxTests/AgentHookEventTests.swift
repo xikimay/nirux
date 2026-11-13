@@ -158,19 +158,25 @@ final class AgentHookEventTests: XCTestCase {
         let line = try JSONEncoder().encode(event)
         XCTAssertEqual(try JSONDecoder().decode(AgentHookEvent.self, from: line).dialog, dialog)
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: line) as? [String: Any])
+        func read(_ object: [String: Any]) throws -> AgentHookEvent {
+            try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: object))
+        }
         object["dialog"] = nil
-        XCTAssertNil(try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: object)).dialog)
-        // A line of another shape (another build's) keeps its event: the
-        // dialog is on screen whatever the row can show of it.
-        for other in [["questions": [["text": 7]]], ["asks": "?"], "?"] as [Any] {
+        let older = try read(object)
+        XCTAssertNil(older.dialog)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(older), as: UTF8.self).contains("dialog"), "no field without a dialog")
+        // A line of another shape (another build's) keeps its event: no
+        // dialog to list, the dialog's line all the same.
+        let fiveQuestions = (1...5).map { ["text": "Question \($0)?", "options": [] as [Any]] }
+        for other in [["questions": [["text": 7]]], ["asks": "?"], "?", ["questions": [] as [Any]], ["questions": fiveQuestions]] as [Any] {
             object["dialog"] = other
-            let read = try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: object))
+            let read = try read(object)
             XCTAssertEqual(read.name, .permissionRequest)
-            XCTAssertEqual(read.dialog?.questions, [], "\(other)")
+            XCTAssertNil(read.dialog, "\(other)")
         }
         // What it reads is bounded again: the reader can't count on its writer.
         object["dialog"] = ["questions": [["text": String(repeating: "why ", count: 500), "options": (1...9).map { ["label": "Option \($0)"] }]]]
-        let unbounded = try JSONDecoder().decode(AgentHookEvent.self, from: JSONSerialization.data(withJSONObject: object)).dialog
+        let unbounded = try read(object).dialog
         XCTAssertEqual(unbounded?.questions.first?.text.count, 300)
         XCTAssertEqual(unbounded?.questions.first?.options, [])
 

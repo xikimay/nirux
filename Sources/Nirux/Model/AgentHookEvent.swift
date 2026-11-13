@@ -124,8 +124,9 @@ struct AgentHookEvent: Codable, Equatable {
     var approvalOutcome: PermissionApproval.Outcome?
     /// On the PermissionRequest of a question dialog (AskUserQuestion):
     /// its questions and the options each offers, bounded, for the row of
-    /// its task. Nil from older receivers.
-    var dialog: AgentDialog?
+    /// its task. Nil from older receivers, and from a line this build
+    /// can't read: its event is kept.
+    @ReadOrNil var dialog: AgentDialog? = nil
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval

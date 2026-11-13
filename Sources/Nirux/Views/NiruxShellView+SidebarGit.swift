@@ -14,6 +14,7 @@ extension NiruxShellView {
         let approvalHolds = releaseApprovalsNotHeld()
         let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
         noteMissionQuestionHandOffs(missionQuestions)
+        let appIsActive = sideEffects.appIsActive()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
@@ -62,7 +63,9 @@ extension NiruxShellView {
                     circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
                     turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
                     questionAskedAt: asked?.since,
-                    dialog: dialog?.dialog,
+                    // The dialog the user is looking at needs no copy on
+                    // its row: its one line, as for any dialog.
+                    dialog: isUserFocused && appIsActive ? nil : dialog?.dialog,
                     id: col.id
                 )
             }

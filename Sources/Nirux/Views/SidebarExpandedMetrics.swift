@@ -124,36 +124,24 @@ enum SidebarExpandedMetrics {
     }
 
     /// A dialog's question, and each of its options: as long as its hook
-    /// lets them be (`AgentDialog.bounded`), in wide letters too, so none
-    /// is cut.
+    /// lets them be (`AgentDialog.bounded`), in Latin or wide letters.
+    /// (Emoji at those bounds take more: their tooltip has the rest.)
     static let dialogMaxLines = 18
     /// Between two questions of one dialog.
     static let dialogQuestionGap: CGFloat = 10
-    /// A dialog's block taller than this leaves what each option means to
-    /// its tooltip and to the terminal: several questions with all they
-    /// offer would take the sidebar from the other rows.
-    static let dialogDetailsMaxHeight: CGFloat = 420
+    /// The tallest a dialog's block gets: several questions with all they
+    /// offer would take the sidebar from the other rows. Past it, the
+    /// block gives way by steps (`SidebarDialogLayout`).
+    static let dialogMaxHeight: CGFloat = 420
+    /// The first step: what each option means, two lines past its label.
+    static let dialogShortDetailLines = 2
+    /// The last: the first question's first lines, and two of each label.
+    static let dialogTightQuestionLines = 4
+    static let dialogTightOptionLines = 2
 
-    /// Whether the block says what each option means, next to its label.
-    @MainActor
-    static func dialogShowsDetails(_ dialog: AgentDialog, width: CGFloat) -> Bool {
-        dialogBlockHeight(for: dialog, width: width, details: true) <= dialogDetailsMaxHeight
-    }
-
-    /// Each question with its options, then where to answer.
     @MainActor
     static func dialogBlockHeight(for dialog: AgentDialog, width: CGFloat) -> CGFloat {
-        dialogBlockHeight(for: dialog, width: width, details: dialogShowsDetails(dialog, width: width))
-    }
-
-    @MainActor
-    private static func dialogBlockHeight(for dialog: AgentDialog, width: CGFloat, details: Bool) -> CGFloat {
-        dialog.questions.reduce(CGFloat(0)) { height, question in
-            // One question over the options it offers.
-            let options = SidebarQuestionText.options(question, details: details).height(width: width)
-            return height + SidebarQuestionText.questionHeight(question.text, width: width, maxLines: dialogMaxLines)
-                + (options > 0 ? questionGap + options : 0)
-        } + CGFloat(max(dialog.questions.count - 1, 0)) * dialogQuestionGap + actionRowGap + actionLineHeight
+        SidebarDialogLayout.make(dialog, width: width).height
     }
 
     /// `width`: the block's, the card's content. `textWidth`: a line's
