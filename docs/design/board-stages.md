@@ -286,6 +286,9 @@ clicked. The sizes are the mockup's.
   (nothing for VoiceOver, no tooltip), in its repository, and one that comes
   waits; Open and Clean Up… ask where the pointer aimed, as a line's station
   does.
+
+  ![Other worktrees unfolded: a detached HEAD, a branch whose pull request merged, one being cleaned up](../images/board-stages-worktrees.png)
+
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
   (amber while its task needs the user), its title, then its number and time,
