@@ -360,9 +360,6 @@ extension MergeQueue {
         let behindBy: Int
         /// The base's commit: the base branch's tip, when it names a branch.
         let baseCommit: String
-        /// The newest commit the base and the head share: in the head's
-        /// history. Nil where GitHub didn't say.
-        var mergeBase: String?
     }
 
     struct CommitInfo: Equatable, Sendable {
@@ -409,12 +406,13 @@ extension MergeQueue {
         var worktrees: [LocalWorktree] = []
     }
 
-    /// A task open on this Mac, for the review passes it ran: on which
-    /// commit each last started.
+    /// A task open on this Mac, for the review passes it ran: the branch
+    /// it is on now, and each pass's last run, with the branch it was
+    /// recorded on.
     struct ReviewTask: Equatable, Sendable {
-        /// Comparable (`NiruxShellView.comparablePath`).
-        let cwd: String
-        let runs: [ReviewPass: String]
+        /// Nil on a detached HEAD, or before git was read.
+        let branch: String?
+        let runs: [ReviewPass: ReviewRun]
     }
 
     struct LocalWorktree: Equatable, Sendable {

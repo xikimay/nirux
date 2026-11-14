@@ -142,7 +142,8 @@ extension BoardStages {
         // is elsewhere) says nothing of this row's pull request, nor of
         // what its reviews are fresh on.
         let isAboutRow = reading.gitRoot == nil || reading.gitRoot == row.worktreePath
-        facts.reviews = isAboutRow ? reading.reviews : reading.reviews.map { ReviewBadges(runs: $0.runs, head: nil) }
+        // Its runs count when recorded on its branch, wherever they ran.
+        facts.reviews = reading.reviews.map { ReviewBadges(runs: $0.runs, head: isAboutRow ? $0.head : nil, branch: row.branch) }
         facts.flakyReason = isAboutRow ? reading.flakyReason : nil
         // What its agent and its folder offer, with a repository or without.
         facts.resume = reading.resume

@@ -87,11 +87,12 @@ extension NiruxShellView {
         return busy
     }
 
-    /// The tasks among `workspaces`, as the Board lists them (not the Lead,
-    /// not one closing), with the commit each review pass last started on.
+    /// The space's workspaces (not one closing), each with the branch it
+    /// is on and the review passes it recorded: a review counts on the
+    /// branch it was recorded on, in whatever workspace it ran.
     static func reviewTasks(of workspaces: [WorkspaceState]) -> [MergeQueue.ReviewTask] {
-        workspaces.filter { !$0.isClosing && !$0.isLead }.map { workspace in
-            MergeQueue.ReviewTask(cwd: comparablePath(workspace.cwd), runs: workspace.reviewRuns.mapValues(\.head))
+        workspaces.filter { !$0.isClosing }.map { workspace in
+            MergeQueue.ReviewTask(branch: workspace.gitContext?.branchName, runs: workspace.reviewRuns)
         }
     }
 

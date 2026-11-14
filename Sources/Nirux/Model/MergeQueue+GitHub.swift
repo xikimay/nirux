@@ -523,11 +523,11 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         graphQL(checksQuery, strings: ownerAndName(repository) + [("oid", sha)])
     }
 
-    /// Only the counts, the base commit and the merge base: a compare
-    /// lists up to 300 files and 250 commits.
+    /// Only the counts and the base commit: a compare lists up to 300
+    /// files and 250 commits.
     static func compareArguments(repository: String, base: String, head: String) -> [String] {
         ["api", "--hostname", host, "repos/\(repository)/compare/\(pathComponent(base))...\(pathComponent(head))",
-         "--jq", "{status, ahead_by, behind_by, base_commit: .base_commit.sha, merge_base_commit: .merge_base_commit.sha}"]
+         "--jq", "{status, ahead_by, behind_by, base_commit: .base_commit.sha}"]
     }
 
     /// REST, not GraphQL: only REST names `web-flow` as the committer of a

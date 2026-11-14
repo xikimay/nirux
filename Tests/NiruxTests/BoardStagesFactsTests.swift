@@ -128,7 +128,7 @@ final class BoardStagesFactsTests: XCTestCase {
     }
 
     func testATaskSaysWhatItsSidebarRowReads() {
-        let runs = [ReviewPass.codeReview: ReviewRun(head: head, at: 200)]
+        let runs = [ReviewPass.codeReview: ReviewRun(head: head, at: 200, branch: "feat/x")]
         var reading = BoardStages.TaskReading(activity: .needsYou("a question"))
         reading.reviews = ReviewBadges(runs: runs, head: head)
         reading.reviewsInFlight = [.premortem]
@@ -141,7 +141,8 @@ final class BoardStagesFactsTests: XCTestCase {
         var expected = BoardStages.Facts(id: "task", title: "Task", location: ["feat/x", "/p/widgets.x"])
         expected.folder = BoardStages.Folder(path: "/p/widgets.x", title: "feat/x", canCleanUp: true)
         expected.activity = .needsYou("a question")
-        expected.reviews = reading.reviews
+        // Read for its row's branch: its runs count when recorded on it.
+        expected.reviews = ReviewBadges(runs: runs, head: head, branch: "feat/x")
         expected.reviewsInFlight = [.premortem]
         expected.summary = "The import side"
         expected.statusLine = "Asked about the format"
@@ -158,7 +159,7 @@ final class BoardStagesFactsTests: XCTestCase {
         reading.mergedPullRequest = 20
         reading.reviewRequest = .feedback
         reading.cleanUp = .running
-        expected.reviews = ReviewBadges(runs: runs, head: nil)
+        expected.reviews = ReviewBadges(runs: runs, head: nil, branch: "feat/x")
         expected.flakyReason = nil
         XCTAssertEqual(facts([row(workspaces: ["task"])], reading: reading).lines, [expected],
                        "its reviews ran, on a HEAD nothing says; no pull request of elsewhere, nor its clean-up")

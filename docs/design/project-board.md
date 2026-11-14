@@ -794,17 +794,15 @@ pull request.
   fork, conflict, agent working or waiting on a dialog, unpushed commits or
   tracked changes in its worktree. A PR that changes `.github/workflows/` can
   join, with a warning: its checks ran its own version of the workflows. So
-  can one whose task here ran no code review on one of its own commits: in
-  its worktree's history after the merge base GitHub gives, as the branch
-  review counts its own (a review the same workspace ran on an earlier
-  branch, merged since with a merge commit, doesn't count). "No code review
-  yet: Nirux saw none run on its commits." comes first among its warnings;
-  where git can't say (the merge base or the commit not here), "Nirux
-  couldn’t tell whether a code review ran on its commits". The passes are
-  the ones the Board's Reviews station asks for; the tasks are the space's,
-  as the Board lists them (not the Lead's). A PR without a task here says
-  nothing of reviews, as the Board. Warnings are drawn in the sheet's text
-  colour with ⚠︎, not amber.
+  can one whose branch has none of the review passes the Board's Reviews
+  station asks for (a code review) recorded on it, in whatever workspace of
+  the space ran it: "No code review yet: Nirux saw none run on its branch."
+  comes first among its warnings. It holds through a review before the first
+  commit, a rebase, an amend; a run recorded on an earlier branch of the same
+  workspace doesn't count, nor one recorded before Nirux kept the branch. A
+  PR with no workspace on its branch here says nothing of reviews, as the
+  Board. No git call: the runs say their branch. Warnings and the dry run's
+  explanation are drawn in the sheet's text colour with ⚠︎, not amber.
 - **No post-merge workflow by accident.** The queue refuses to start until the
   config names one, or says `"none"`.
 - **A failed last post-merge run** on the base branch shows as a warning at the

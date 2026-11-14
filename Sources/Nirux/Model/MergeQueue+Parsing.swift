@@ -149,14 +149,13 @@ extension MergeQueue {
         return .success(checks)
     }
 
-    /// The compare filter's `{status, ahead_by, behind_by, base_commit,
-    /// merge_base_commit}`.
+    /// The compare filter's `{status, ahead_by, behind_by, base_commit}`.
     static func parseComparison(_ data: Data) -> Comparison? {
         guard let json = object(data), let status = json["status"] as? String,
               let ahead = json["ahead_by"] as? Int, let behind = json["behind_by"] as? Int,
               let base = objectID(json["base_commit"])
         else { return nil }
-        return Comparison(status: status, aheadBy: ahead, behindBy: behind, baseCommit: base, mergeBase: objectID(json["merge_base_commit"]))
+        return Comparison(status: status, aheadBy: ahead, behindBy: behind, baseCommit: base)
     }
 
     /// The commit filter's `{sha, committer, parents}`.

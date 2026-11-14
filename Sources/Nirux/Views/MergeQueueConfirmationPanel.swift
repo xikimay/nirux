@@ -32,8 +32,8 @@ final class MergeQueueConfirmationPanel: NSObject {
     private(set) var lines: [String] = []
 
     private static let size = NSSize(width: 700, height: 640)
-    private static let dryRunColor = NSColor.systemOrange
-    /// What may go wrong: amber means an agent waits for the user, nothing else.
+    /// What may go wrong, and what a dry run is: in the text's colour, since
+    /// amber means an agent waits for the user, nothing else.
     private static let warningColor = primaryText
     private static let refusalColor = Theme.Color.error
     private static let primaryText = NSColor.white.withAlphaComponent(0.9)
@@ -151,10 +151,10 @@ final class MergeQueueConfirmationPanel: NSObject {
         }
 
         if isDryRun {
-            add(Self.dryRunExplanation, color: Self.dryRunColor, font: .systemFont(ofSize: 12, weight: .semibold),
+            add(Self.dryRunExplanation, color: Self.warningColor, font: .systemFont(ofSize: 12, weight: .semibold),
                 gap: dryRunReason == nil ? 8 : 2)
             if let dryRunReason {
-                add("This build: \(dryRunReason).", color: Self.dryRunColor, font: .systemFont(ofSize: 11), gap: 8)
+                add("This build: \(dryRunReason).", color: Self.secondaryText, font: .systemFont(ofSize: 11), gap: 8)
             }
         }
         guard let confirmation else {
@@ -247,7 +247,7 @@ final class MergeQueueConfirmationPanel: NSObject {
         let container = NSView(frame: NSRect(origin: .zero, size: size))
         let heading = NSTextField(labelWithString: isDryRun ? "Dry Run of the Merge Queue" : "Start the Merge Queue")
         heading.font = .systemFont(ofSize: 16, weight: .semibold)
-        heading.textColor = isDryRun ? Self.dryRunColor : NSColor.white.withAlphaComponent(0.94)
+        heading.textColor = NSColor.white.withAlphaComponent(0.94)
         heading.frame = NSRect(x: 24, y: size.height - 46, width: size.width - 48, height: 22)
         container.addSubview(heading)
         let subheading = NSTextField(labelWithString: "\(repository) · into \(baseBranch)")

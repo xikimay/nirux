@@ -23,14 +23,11 @@ extension MergeQueue {
             var checksError: String?
             var detailsError: String?
             var compareError: String?
-            /// The review passes the Board asks for that ran on none of its
-            /// commits in a task of its worktrees, by name: "Code review".
-            /// None where no task of it is here, as the Board's Reviews
-            /// station has nothing to say then either.
+            /// The review passes the Board asks for that no task recorded on
+            /// its head branch, by name: "Code review". None where no task
+            /// is on that branch here, as the Board's Reviews station has
+            /// nothing to say then either.
             var missingReviews: [String] = []
-            /// Those git couldn't tell about: the commits they ran on, or
-            /// the merge base, aren't here.
-            var unknownReviews: [String] = []
 
             init(number: Int) {
                 self.number = number
@@ -231,13 +228,10 @@ extension MergeQueue {
             return leftOut(local.busyAgents.joined(separator: "; ") + ": wait until it is back at its prompt.")
         }
         if let reason = local.worktrees.lazy.compactMap(localProblem).first { return leftOut(reason) }
-        // A click on the Board's Merge station will list it for Start: the sheet says what no review ran on.
-        let named = { (passes: [String]) in spoken(passes.map { $0.lowercased() }) }
-        let unreviewed = (candidate.missingReviews.isEmpty ? [] : [
-            "No \(named(candidate.missingReviews)) yet: Nirux saw none run on its commits."
-        ]) + (candidate.unknownReviews.isEmpty ? [] : [
-            "Nirux couldn’t tell whether a \(named(candidate.unknownReviews)) ran on its commits: git here doesn’t have them all."
-        ])
+        // What the Board's Reviews station says of it, the sheet says too: a click on its Merge station lists it for Start.
+        let unreviewed = candidate.missingReviews.isEmpty ? [] : [
+            "No \(spoken(candidate.missingReviews.map { $0.lowercased() })) yet: Nirux saw none run on its branch."
+        ]
 
         var item = Confirmation.Item(
             entry: entry,
@@ -287,49 +281,19 @@ extension MergeQueue {
         return .joins(item)
     }
 
-    /// The `required` review passes that no task inside these worktrees
-    /// ran on one of the pull request's own commits (`isOwnCommit`: not one
-    /// of an earlier branch the same workspace was on), by name in the
-    /// badges' order: those that ran on none (`missing`), and those git
-    /// couldn't tell about (`unknown`). None where no task is there.
-    static func missingReviews(
-        in worktrees: [String], allWorktrees: [String], tasks: [ReviewTask], required: Set<ReviewPass>,
-        isOwnCommit: (String) -> Bool?
-    ) -> (missing: [String], unknown: [String]) {
-        let inside = tasks.filter { isInside($0.cwd, roots: worktrees, allWorktrees: allWorktrees) }
-        guard !inside.isEmpty else { return ([], []) }
-        var answers: [String: Bool?] = [:]
-        func answer(_ commit: String) -> Bool? {
-            if let known = answers[commit] { return known }
-            let found = isOwnCommit(commit)
-            answers[commit] = .some(found)
-            return found
-        }
-        var missing: [String] = []
-        var unknown: [String] = []
-        for pass in ReviewPass.allCases where required.contains(pass) {
-            let found = inside.compactMap { $0.runs[pass] }.map(answer)
-            if found.contains(true) { continue }
-            if found.contains(nil) { unknown.append(pass.displayName) } else { missing.append(pass.displayName) }
-        }
-        return (missing, unknown)
+    /// The `required` review passes that no task recorded on `branch`
+    /// (`ReviewRun.counts(onBranch:)`, the Board's Reviews station's rule),
+    /// in whatever task they ran, by name in the badges' order; none where
+    /// no task is on that branch here.
+    static func missingReviews(branch: String, tasks: [ReviewTask], required: Set<ReviewPass>) -> [String] {
+        guard tasks.contains(where: { $0.branch == branch }) else { return [] }
+        let ran = Set(tasks.flatMap { $0.runs.filter { $0.value.counts(onBranch: branch) }.keys })
+        return ReviewPass.allCases.filter { required.contains($0) && !ran.contains($0) }.map(\.displayName)
     }
 
     /// "a", "a or b", "a, b or c".
     static func spoken(_ names: [String]) -> String {
         names.count < 3 ? names.joined(separator: " or ") : names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
-    }
-
-    /// `commit` is one of the pull request's own: in the history of the
-    /// worktree's HEAD at `folder` (the pull request's head, or behind it:
-    /// GitHub may have updated it since) and not in `mergeBase`'s, as the
-    /// branch review counts its own commits (`BranchReview.isOwnCommit`).
-    /// Nil when git can't say: the merge base unknown or not here.
-    static func isOwnCommit(_ commit: String, mergeBase: String?, in folder: String) -> Bool? {
-        guard let mergeBase else { return nil }
-        var options = BranchReview.Options()
-        options.gitHub = nil
-        return BranchReview.isOwnCommit(commit, head: "HEAD", mergeBase: mergeBase, root: folder, options: options)
     }
 
     /// Why the queue would stop on this pull request at once.

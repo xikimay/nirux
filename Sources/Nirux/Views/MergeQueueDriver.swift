@@ -17,13 +17,8 @@ struct MergeQueueLocalAccess {
     }
     /// The agents working or waiting on a dialog in these worktrees.
     var busyAgents: @MainActor (_ worktrees: [String], _ allWorktrees: [String]) -> [String]
-    /// The tasks open in the project, for the review passes they ran.
+    /// The tasks open in the space, for the review passes they ran.
     var reviewTasks: @MainActor () -> [MergeQueue.ReviewTask]
-    /// Off the main thread: a commit is one of the pull request's own
-    /// (`MergeQueue.isOwnCommit`); nil when git can't say.
-    var isOwnCommit: @Sendable (_ commit: String, _ mergeBase: String?, _ folder: String) -> Bool? = {
-        MergeQueue.isOwnCommit($0, mergeBase: $1, in: $2)
-    }
 }
 
 /// The queue's clocks: `systemUptime` for every wait and timeout (it stops

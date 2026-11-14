@@ -401,20 +401,20 @@ extension NiruxShellView {
         updateSidebar()
     }
 
-    /// HEAD is read in the agent's own directory, now: the workspace's git
-    /// context follows its focused column, and pauses while Nirux is in the
-    /// background. An event replayed at launch is skipped, since the HEAD it
+    /// HEAD and its branch are read in the agent's own directory, now: the
+    /// workspace's git context follows its focused column, and pauses while
+    /// Nirux is in the background. An event replayed at launch is skipped, since the HEAD it
     /// ran on can't be known any more.
     private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState) {
         guard let passes = event.reviewPasses?.compactMap(ReviewPass.init(rawValue:)), !passes.isEmpty,
               let cwd = event.cwd,
               Date().timeIntervalSince1970 - event.timestamp < 60
         else { return }
-        // Only the HEAD counts here.
+        // Only the HEAD and its branch count here; a detached HEAD has none.
         GitDetect.contextAsync(at: cwd, startFolder: nil) { [weak self, weak workspace] result in
             guard case .observed(let context) = result, let head = context.identity.head,
                   let self, let workspace,
-                  workspace.recordReviewPasses(passes, head: head, at: event.timestamp)
+                  workspace.recordReviewPasses(passes, head: head, branch: context.branchName, at: event.timestamp)
             else { return }
             self.updateSidebar()
             self.saveState()
