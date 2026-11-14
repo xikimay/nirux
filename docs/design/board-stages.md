@@ -144,7 +144,7 @@ lines that are linked never part, each keeping its own state
   when none of its lines is in a family here; else the lines stay in their
   families, and their pull request cells ("#53 · 2/3") and phrases ("lands
   after #52") say the stack.
-- **Pull requests without a task** (no workspace here: a cloud session's)
+- **Pull requests without a task** (no task's workspace here: a cloud session's, or the Lead's)
   close the section, folded, as lines without a Reviews station. A stack with
   one task at least stays whole in the list, even where a family keeps its
   lines apart.
@@ -194,7 +194,8 @@ or a scroll is the pointer at work: the 10 s count from it; a hand that shakes
 the mouse less than 3 pt moves nothing. If what is under the pointer then
 changed (another line, another click on the same line: Add become Remove, a
 link come, another entry or "Clean up" become "cleaning up…", another queue's
-line at the foot, a header's Start become Stop; not a header's words), nothing
+line at the foot, a header's Start become Stop, another space's Lead; not a
+header's words), nothing
 there acts until the pointer moves 3 pt or more, or scrolls: no Merge station
 lights or acts, no link (a phrase's, or "Merged today"'s "Clean up"), no
 line's menu, no Start or Stop, and no hand shows, so that someone who read a
@@ -232,8 +233,12 @@ clicked. The sizes are the mockup's.
   the last to (a name longer than 160 pt keeps that much beside the switch).
   The Lead's dot keeps its place, in its state's colour, and says its line
   under the pointer. A click on the Lead (its dot and its line, one target,
-  with a hand) focuses it, as the table's row of the Lead did; it asks where
-  the pointer aimed, as a line's station does (`onLead` has no owner yet).
+  with a hand, read once by VoiceOver) focuses the Lead's workspace, where
+  the table's row focused its most urgent agent, a task's if it shared the
+  worktree. It asks where the pointer aimed, as a line's station does; and
+  since the header isn't held, a Lead that comes or grows under the pointer,
+  even one still aiming, acts only once it moves. A press that ends once the
+  Lead went does nothing (`onLead` has no owner yet).
   The order switch shows the content's order: it moves once the owner shows
   the order asked.
 - **A section per repository** scrolls below: its name, `owner/name`, its
@@ -306,23 +311,29 @@ clicked. The sizes are the mockup's.
   the pointer is over the Board, one that goes stays, faded and inert
   (nothing for VoiceOver, no tooltip), in its repository, and one that comes
   waits; Open and Clean Up… ask where the pointer aimed, as a line's station
-  does. The Lead's worktree, when it is a linked one, is listed first: titled
-  as the others, "Lead" in its pull request's place, with Focus in Open's
-  place, and Clean Up… (the clean-up's own check refuses while the Lead's
-  agent works). The main checkout, the Lead's usual place, gets no entry: the
-  space's header shows the Lead.
+  does. The Lead's worktree, when it is a linked one, is listed first:
+  "Lead · " and its name, its pull request (an open one is also a line
+  without a task, the Lead being no task), with Focus in Open's place, and
+  Clean Up… as the table offered it: the clean-up refuses an unmerged branch,
+  and its confirmation names the agents it would end, the Lead's included.
+  The main checkout, the Lead's usual place, gets no entry: the space's
+  header shows the Lead. Open, or Focus, keeps its place whether Clean Up…
+  is offered or not, so they line up from one entry, and one fold, to the
+  next.
 
   ![Other worktrees unfolded: a detached HEAD, a branch whose pull request merged, one being cleaned up](../images/board-stages-worktrees.png)
 
 - **Other workspaces** (a worktree of another repository with workspaces of
-  the space) are one fold of their own after the repositories, "Other
-  workspaces · N", with no repository's header: each entry is its
-  workspaces' title ("Site +1"), its folder, and Focus on the most urgent
-  agent there, as the table's row offered it. A workspace in no repository
-  is a line under "No repository". This lasts until the Board has a section
-  per repository of the space.
+  the space) are one fold after the repositories, in a repository header's
+  place and type, "▸ Other workspaces · N", with no `owner/name`, queue or
+  menu: a section of its own, not a fold of the one above. Each entry is its
+  folder and Focus on the most urgent agent there, as the table's row
+  offered it, titled by the workspace Focus goes to ("Docs +1"). A workspace
+  in no repository is a line under "No repository", one in another
+  repository is no line: each task is in one place. This lasts until the
+  Board has a section per repository of the space.
 
-  ![The Lead's worktree first under Other worktrees, with Focus and Clean Up…; then Other workspaces, a fold of its own after No repository, each with Focus](../images/board-stages-lead-and-others.png)
+  ![The Lead’s worktree first under Other worktrees, “Lead · lead/notes” with Focus and Clean Up…; then Other workspaces, in a repository title’s place after No repository, each with Focus lined up with the Open and Focus above](../images/board-stages-lead-and-others.png)
 
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
@@ -418,7 +429,7 @@ read. Pure; nothing is read again.
 - **Merged today** is the merged list's pull requests that have a merge date,
   a fork's included, with their title.
 - **No rail** where no pull request is read, and none is looked up there: a
-  workspace in another repository or in none, a section whose repository
+  workspace in no repository, a section whose repository
   isn't on GitHub, and any section until its open pull requests were read
   once.
 
@@ -549,8 +560,9 @@ to the queue yet.
   the line, still on the Board, still offers; each of its items stays what
   it was. A worktree no line holds (a merged task closed since) has its
   Open and Clean Up… under "Other worktrees" (section 5); the Lead's worktree
-  and "Other workspaces" have Focus (`MenuItem.focus`), the workspace at its
-  most urgent agent column.
+  and "Other workspaces" have Focus (`MenuItem.focus`): the Lead's workspace,
+  at its own agent column when that one is the row's most urgent; under
+  "Other workspaces", the most urgent agent's workspace and column.
   `BoardStagesView.onMenu` and `onWorktree` have no owner yet.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
@@ -569,6 +581,9 @@ to the queue yet.
 - **Other workspaces offer Focus only**: no agent state and no Resume, which
   the table's row showed; the sidebar shows both. Until the Board has a
   section per repository of the space, where they are lines.
+- **A Lead whose folder is gone** has nothing on the Board (the table offered
+  Clean Up… to close its workspace): the space header still shows the Lead,
+  and the sidebar closes it.
 - **Reviews Nirux can't see.** Codex has no prompt hook, and a `claude -p`
   review run from a shell doesn't count ([review-badges.md](review-badges.md)):
   such a task stays at Reviews, "No code review yet".

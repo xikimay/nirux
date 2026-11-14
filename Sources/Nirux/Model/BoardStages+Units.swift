@@ -57,9 +57,10 @@ extension BoardStages {
     struct OtherWorktree: Equatable, Sendable {
         /// Its top level, as git lists it.
         let path: String
-        /// Its branch, "detached HEAD (1a2b3c4)", or its folder's name.
+        /// Its branch, "detached HEAD (1a2b3c4)", or its folder's name;
+        /// "Lead · feat/notes"; a workspace's title under "Other workspaces".
         var title: String
-        /// Its merged pull request, as the table says it: "#41 merged".
+        /// Its pull request, as the table says it: "#41 merged".
         var pullRequest: String?
         /// That pull request's address, for its tooltip.
         var url: String?

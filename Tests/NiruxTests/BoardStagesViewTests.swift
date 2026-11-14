@@ -2062,6 +2062,7 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual([button.toolTip, button.accessibilityLabel(), button.accessibilityHelp()],
                        ["Lead · reviewing #438", "Lead · reviewing #438", "Focus the Lead"])
         XCTAssertTrue(button.aim === view.aim)
+        XCTAssertEqual(view.leadLabel.cell?.isAccessibilityElement(), false, "VoiceOver reads the Lead once, from its button")
         try click(button)
         XCTAssertEqual(focused, 1)
         XCTAssertEqual(view.leadHand, button.frame, "a hand where a click acts")
@@ -2081,6 +2082,8 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertTrue(button.isHidden)
         XCTAssertNil(view.leadHand)
         XCTAssertTrue(window.asked.contains { $0 === view }, "its hand goes with it")
+        NSApp.sendAction(try XCTUnwrap(button.action), to: button.target, from: button)
+        XCTAssertEqual(focused, 1, "a press that ends once the Lead went focuses nothing")
         // The Lead coming under a resting pointer: no hand, and a press does nothing until the pointer moves.
         view.pointerLocation = { overLead }
         view.mouseEntered(with: try moved(to: overLead, in: view))
@@ -2092,6 +2095,21 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(focused, 1)
         view.mouseMoved(with: try moved(to: NSPoint(x: overLead.x - 5, y: overLead.y), in: view))
         XCTAssertEqual(view.leadHand, button.frame)
+        // Another space's Lead under a resting pointer is another target.
+        var otherSpace = lines
+        otherSpace.header.name = "nirux-site"
+        time += 100
+        view.show(otherSpace)
+        XCTAssertTrue(view.isPointerStale)
+        view.mouseMoved(with: try moved(to: overLead, in: view))
+        // A Lead's line that grows under a pointer still aiming (left of it, on the summary): it waits for the pointer to move.
+        let beside = view.convert(NSPoint(x: button.frame.minX - 30, y: button.frame.midY), to: nil)
+        view.pointerLocation = { beside }
+        view.mouseMoved(with: try moved(to: beside, in: view))
+        XCTAssertFalse(view.isPointerStale)
+        view.show(content([section(units: tasks([line("a")]))], leadText: "Lead · reviewing #438 and the notes", name: "nirux-site"))
+        XCTAssertTrue(view.leadButton.frame.contains(view.convert(beside, from: nil)))
+        XCTAssertTrue(view.isPointerStale, "the header isn't held: a Lead come under the pointer waits")
         // Stale anywhere on the Board: no hand over the Lead either, and AppKit is asked again.
         view.show(content([section(units: tasks([offering("a", .add, 51)]))]))
         view.layoutSubtreeIfNeeded()
@@ -2117,9 +2135,13 @@ final class BoardStagesViewTests: XCTestCase {
             BoardStages.OtherWorktree(path: "/p/site", title: "Site +1", menu: [.focus(workspaceID: "docs", columnID: column)]),
             BoardStages.OtherWorktree(path: "/p/blog", title: "Blog", menu: [.focus(workspaceID: "blog", columnID: nil)])
         ]
+        // Nothing else of it is drawn.
+        others.lines.units = tasks([line("stray")])
+        others.lines.withoutTask = tasks([line("stray-pr")])
+        others.lines.merged = [BoardStages.Merged(lineID: nil, title: "Stray", number: 9, mergedAt: now - 60)]
         var nirux = section(units: tasks([line("a")]))
         nirux.lines.otherWorktrees = [
-            BoardStages.OtherWorktree(path: "/p/lead", title: "feat/lead-notes", pullRequest: "Lead", menu: [
+            BoardStages.OtherWorktree(path: "/p/lead", title: "Lead · feat/lead-notes", menu: [
                 .focus(workspaceID: "lead", columnID: nil), .cleanUp(path: "/p/lead", blocked: nil)
             ])
         ]
@@ -2127,9 +2149,19 @@ final class BoardStagesViewTests: XCTestCase {
         var chosen: [String] = []
         view.onWorktree = { section, item in chosen.append("\(section) \(item)") }
         XCTAssertNil(view.sectionHeader(section: "others"), "no repository's header: the label must be true")
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["a"])
+        XCTAssertNil(view.foldButton(section: "others"))
+        XCTAssertNil(view.mergedView(section: "others"))
         let fold = try XCTUnwrap(view.worktreesFold(section: "others"))
         XCTAssertEqual(fold.title, "▸ Other workspaces · 2")
         XCTAssertEqual(fold.accessibilityLabel(), "Other workspaces, 2")
+        // A section of its own, not a fold of the one above: in a repository's title's type, on its line, in its height.
+        let header = try XCTUnwrap(view.sectionHeader(section: "nirux"))
+        XCTAssertEqual(fold.attributedTitle.attribute(.font, at: 2, effectiveRange: nil) as? NSFont, header.titleLabel.font)
+        let first = board(content([others, section(units: [])]))
+        let next = try XCTUnwrap(first.sectionHeader(section: "nirux"))
+        XCTAssertEqual(next.frame.minY, BoardStagesView.Metrics.sectionHeaderHeight)
+        XCTAssertEqual(try XCTUnwrap(first.worktreesFold(section: "others")).frame.minY, next.titleLabel.frame.minY - 2, "on a title's line")
         XCTAssertEqual(try XCTUnwrap(view.worktreesFold(section: "nirux")).title, "▸ Other worktrees · 1")
         XCTAssertGreaterThan(fold.frame.minY, try XCTUnwrap(view.worktreesFold(section: "nirux")).frame.minY, "after the repositories")
         fold.performClick(nil)
@@ -2141,12 +2173,14 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(view.worktreeViews[0].pathLabel.toolTip, "/p/site", "its folder")
         view.worktreeViews[0].openButton.performClick(nil)
         XCTAssertEqual(chosen, ["others \(BoardStages.MenuItem.focus(workspaceID: "docs", columnID: column))"])
+        let site = view.worktreeViews[0]
         // The Lead's worktree: Focus in Open's place, then Clean Up….
         try XCTUnwrap(view.worktreesFold(section: "nirux")).performClick(nil)
         view.layoutSubtreeIfNeeded()
         let lead = try XCTUnwrap(view.worktreeViews.first { $0.worktree?.path == "/p/lead" })
-        XCTAssertEqual([lead.openButton.title, lead.pullRequestLabel.stringValue], ["Focus", "Lead"])
+        XCTAssertEqual([lead.openButton.title, lead.titleLabel.stringValue], ["Focus", "Lead · feat/lead-notes"])
         XCTAssertFalse(lead.cleanUpButton.isHidden)
+        XCTAssertEqual(site.openButton.frame.maxX, lead.openButton.frame.maxX, "Focus lines up from one fold to the other, Clean Up… or not")
         XCTAssertEqual(lead.contextMenu()?.items.map(\.title), ["Focus", "Clean Up…"])
         lead.openButton.performClick(nil)
         XCTAssertEqual(chosen.last, "nirux \(BoardStages.MenuItem.focus(workspaceID: "lead", columnID: nil))")
