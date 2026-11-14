@@ -223,7 +223,7 @@ extension WorkspaceInfo {
     }
 
     /// The command to allow, the question, else what the agent waits on.
-    private static func needsYouDetail(_ column: ColumnInfo) -> String {
+    static func needsYouDetail(_ column: ColumnInfo) -> String {
         if let approval = column.permissionApproval, approval.toolName != "ExitPlanMode",
            let text = AgentText.clean(approval.text, maxLength: 300) {
             return text
@@ -239,7 +239,7 @@ extension WorkspaceInfo {
     }
 
     /// "stopped on an API error" → "Stopped on an API error".
-    private static func sentence(_ text: String) -> String {
+    static func sentence(_ text: String) -> String {
         text.prefix(1).uppercased() + text.dropFirst()
     }
 

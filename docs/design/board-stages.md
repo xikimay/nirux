@@ -434,9 +434,18 @@ read. Pure; nothing is read again.
   isn't on GitHub, and any section until its open pull requests were read
   once.
 
-Still to come with the Board's column: the tasks' readings filled from the
-sidebar, kept from one sidebar pass to the next and for a space that isn't on
-screen.
+**A task's reading** is its sidebar row, built as the sidebar builds it, for
+the space the Board shows, on screen or not (`NiruxShellView.boardReadings`):
+nothing is ticked again (the sidebar ticks every agent once a pass, another
+space's too) and nothing is noted (a question seen, a hand-off), so the
+Board reads that pass's statuses, approvals and Mission questions. What its
+agents do climbs the row's own ladder (a wait on the user in the row's words,
+then a stop, then a question to its parent, then work, since its turn
+started); red checks are the pull request's, read there. Its texts are the
+row's; beside them, the user's own summary, the worktree its git facts were
+read in, the review passes recorded in a turn still running, the sidebar's
+Resume (a stop first, held back with why, else a `claude` that exited
+mid-turn) and the pull request its own detection found merged.
 
 ## 7. What a line offers
 
