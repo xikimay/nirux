@@ -52,6 +52,20 @@ requests; phases 1 and 2 run while the Board's swap ends.
   (`NSView.cornerConfiguration`) wait for Xcode 27 on CI: computed by hand
   meanwhile, from the window's radius measured on renders.
 
+## Glass view
+
+`GlassView` draws the glass: `NSGlassEffectView` on macOS 26 and later (the
+content sits inside it), a frosted `NSVisualEffectView` with a tint on top on
+macOS 14 and 15, a solid fill at Opaque. The chrome lets more through as the
+level rises; what floats over the work keeps a thick tint at every level and
+the floating shadow (left to the system on macOS 26). The tints are
+provisional: an offscreen capture can't show either material, so the render
+below approximates them (the content under the panel blurred, then the
+view's tint) beside the exact Opaque render, and they get tuned with the user
+on a demo at the end of phase 2.
+
+![The glass at each level: Opaque exact, the others approximated](../images/glass-levels.png)
+
 ## Plan
 
 1. Foundations, nothing on screen: tokens and the transparency levels, the
