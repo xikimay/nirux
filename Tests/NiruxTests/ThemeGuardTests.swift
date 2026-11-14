@@ -39,7 +39,7 @@ final class ThemeGuardTests: XCTestCase {
         let literal = try NSRegularExpression(pattern: #"""
             (systemFont|boldSystemFont|monospacedSystemFont|monospacedDigitSystemFont) \( \s* ofSize: \s* [0-9]
             | cornerRadius \s* = \s* [0-9] | xRadius: \s* [0-9]
-            | shadow(Opacity|Radius) \s* = \s* [0-9] | shadowOffset \s* = \s* (CGSize|NSSize) \( \s* width: \s* -? [0-9]
+            | shadow(Opacity|Radius|BlurRadius) \s* = \s* [0-9] | shadowOffset \s* = \s* (CGSize|NSSize) \( \s* width: \s* -? [0-9]
             """#, options: .allowCommentsAndWhitespace)
         let paths = try FileManager.default.subpathsOfDirectory(atPath: sources.path).filter {
             $0.hasSuffix(".swift") && $0 != "Util/Theme.swift"
@@ -67,7 +67,7 @@ final class ThemeGuardTests: XCTestCase {
         "Views/EditorSearchPanel.swift": 5,
         "Views/EditorTabBar.swift": 4,
         "Views/FilePickerPanel.swift": 5,
-        "Views/FindBar.swift": 3,
+        "Views/FindBar.swift": 4,
         "Views/GlobalSearchPanel.swift": 7,
         "Views/LocalServerChipView.swift": 3,
         "Views/MissionReplyViewController.swift": 1,

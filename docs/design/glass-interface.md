@@ -43,7 +43,8 @@ requests; phases 1 and 2 run while the Board's swap ends.
 - **Settings:** one window for the app and the space.
 - **No new literals:** font sizes, corner radii and shadows written as numbers
   outside `Theme` may not grow in any file (`ThemeGuardTests`); the glass
-  views add the tokens they need.
+  views add the tokens they need. The Board's and the merge queue's files
+  join once the Board's swap is done.
 - **macOS:** the minimum stays macOS 14. Glass (`NSGlassEffectView`) from
   macOS 26; a frosted `NSVisualEffectView` on macOS 14 and 15. CI builds with
   Xcode 26.3 on macOS 15, so glass is proven by offscreen renders on a newer
