@@ -363,6 +363,9 @@ final class BoardStagesView: NSView {
             departedQueues = []
             showRunningQueues(content.runningQueues)
         }
+        // What shows at once under a pointer that aims (a message, or what comes where nothing was shown) acts only once
+        // it moves.
+        var isShownAtOnce = false
         if content.sections != previous?.sections || content.order != previous?.order || content.message != previous?.message {
             // Nothing moves under the pointer: what changed is drawn where it
             // was, and settles once the pointer leaves. An order the switch
@@ -374,6 +377,8 @@ final class BoardStagesView: NSView {
             // A message takes the sections' place at once, and once it goes they come back at once, as they are; nothing
             // shown, nothing can move under the pointer.
             let isMessage = content.message != nil || previous?.message != nil
+            // The Board first drawn under the pointer too: it aimed at nothing on it yet.
+            isShownAtOnce = isPointerInside && isAiming && !isAsked && (isMessage || shownSections.isEmpty)
             if isPointerInside, isAiming, !isAsked, !isMessage, !shownSections.isEmpty, previous != nil {
                 (shownSections, departed) = Self.holding(shownSections, in: content.sections)
             } else {
@@ -383,9 +388,9 @@ final class BoardStagesView: NSView {
         }
         showTimes()
         layoutContent()
-        // Under a pointer that rests, or where a message came or went, what is under it may have changed: it waits for
+        // Under a pointer that rests, or where something showed at once, what is under it may have changed: it waits for
         // the pointer to move.
-        if isPointerInside, !isAiming || content.message != previous?.message {
+        if isPointerInside, !isAiming || isShownAtOnce {
             layoutSubtreeIfNeeded()
             goStale(ifChangedFrom: aimedBefore)
         }
@@ -483,10 +488,14 @@ final class BoardStagesView: NSView {
         if let message = content?.message {
             messageView.show(message)
             documentView.subviews = [messageView]
-            items = [.message(messageView)]
+            self.items = [.message(messageView)]
             lineViews = []
             sectionHeaders = [:]
             worktreeViews = []
+            foldButtons = [:]
+            worktreeFolds = [:]
+            mergedViews = [:]
+            captions = []
             return
         }
         let sections = shownSections

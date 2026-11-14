@@ -2354,6 +2354,8 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(message.label.alignment, .center)
         XCTAssertFalse(message.label.isSelectable)
         XCTAssertEqual(message.settingsButton.frame.width, ceil(message.settingsButton.intrinsicContentSize.width) + 8, "as the table's")
+        XCTAssertEqual(message.settingsButton.frame.height, 24)
+        XCTAssertNil(view.foldButton(section: "nirux"), "nothing of the sections is kept out of sight")
         XCTAssertEqual(message.label.stringValue, "board.json can’t be read: open Board Settings… to replace it.")
         XCTAssertEqual(message.label.frame.minX, 24)
         XCTAssertEqual(message.label.frame.width, message.bounds.width - 48)
@@ -2409,13 +2411,14 @@ final class BoardStagesViewTests: XCTestCase {
         var pointer = place(merge, on: view.lineViews[0])
         view.pointerLocation = { pointer }
         view.mouseMoved(with: try moved(to: pointer, in: view))
-        // It comes while the pointer aims, the sections changed: nothing held behind it, no look waits.
-        var told = content(sections(["b", "a"]))
+        // It comes while the pointer aims, with no section: nothing held behind it, no look waits.
+        var told = content([])
         told.message = BoardStagesView.Message(text: "board.json can’t be read: open Board Settings… to replace it.", offersSettings: true)
         view.show(told)
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(view.departed, [])
         XCTAssertEqual(checks, 0)
+        XCTAssertNil(view.foldButton(section: "nirux"), "its fold isn't kept out of sight")
         // Board Settings… under a pointer that aims, then rests on it.
         let button = view.messageView.settingsButton
         pointer = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
@@ -2430,6 +2433,64 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(view.lineViews.map(\.line.id), ["a", "b", "pr"], "the fold unfolded still")
         // What came under the pointer aimed at Board Settings… is another thing to click, though the pointer aims.
         XCTAssertTrue(view.isPointerStale)
+    }
+
+    func testWhatShowsAtOnceUnderAPointerThatAimsWaitsForItToMove() throws {
+        let merge = BoardStagesView.Columns(width: 940).stations[3]
+        let offering = content([section(units: tasks([self.offering("a", .add, 51)]))])
+        // Where line a's Merge station will be.
+        let probe = board(offering)
+        let pointer = place(merge, on: probe.lineViews[0])
+        // A message goes with no section, then the sections come in the next step, the pointer aiming all along.
+        var told = content([])
+        told.message = BoardStagesView.Message(text: "Reading board.json…", offersSettings: true)
+        let view = board(told)
+        view.after = { _, _ in }
+        view.pointerLocation = { pointer }
+        view.mouseMoved(with: try moved(to: pointer, in: view))
+        view.show(content([]))
+        view.show(offering)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["a"])
+        XCTAssertTrue(view.isPointerStale, "a station that showed at once under it isn't what it aimed at")
+        // An empty Board, only its foot: its first section, the same.
+        var foot = content([])
+        foot.runningQueues = [BoardStagesView.RunningQueue(id: "nirux", title: "nirux", status: "Merging #51", stop: .init(title: "Stop"))]
+        let empty = board(foot)
+        empty.after = { _, _ in }
+        empty.pointerLocation = { pointer }
+        empty.mouseMoved(with: try moved(to: pointer, in: empty))
+        var first = offering
+        first.runningQueues = foot.runningQueues
+        empty.show(first)
+        empty.layoutSubtreeIfNeeded()
+        XCTAssertTrue(empty.isPointerStale)
+        // A message coming while the sections stay in the content: Board Settings… under a pointer that aimed at a line.
+        var withMessage = offering
+        withMessage.message = BoardStagesView.Message(text: "Reading board.json…", offersSettings: true)
+        let settings = board(withMessage).messageView.settingsButton
+        let onSettings = settings.convert(NSPoint(x: settings.bounds.midX, y: settings.bounds.midY), to: nil)
+        let lines = board(content([section(units: tasks((1...6).map { self.line("t\($0)") }))]))
+        lines.after = { _, _ in }
+        lines.pointerLocation = { onSettings }
+        lines.mouseMoved(with: try moved(to: onSettings, in: lines))
+        var arriving = content([section(units: tasks((1...6).map { self.line("t\($0)") }))])
+        arriving.message = withMessage.message
+        lines.show(arriving)
+        lines.layoutSubtreeIfNeeded()
+        XCTAssertTrue(lines.isPointerStale)
+        // The Board first drawn under the pointer: what is there waits for it to move.
+        let fresh = BoardStagesView(frame: NSRect(x: 0, y: 0, width: 940, height: 600))
+        let window = NSWindow(contentRect: fresh.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        windows.append(window)
+        window.contentView = fresh
+        fresh.clock = { 0 }
+        fresh.after = { _, _ in }
+        fresh.pointerLocation = { pointer }
+        fresh.show(offering)
+        fresh.layoutSubtreeIfNeeded()
+        XCTAssertTrue(fresh.isPointerStale)
     }
 
     func testAMessageAppearingUnderAPointerThatRestsWaitsForItToMove() throws {
