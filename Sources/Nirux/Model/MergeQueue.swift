@@ -404,10 +404,14 @@ extension MergeQueue {
         /// another workspace's shell inside one: "claude working in “api”".
         var busyAgents: [String] = []
         var worktrees: [LocalWorktree] = []
-        /// The review passes the Board asks for that never ran in a task of
-        /// its worktrees, by name: "Code review". None where its task isn't
-        /// here: the Board's Reviews station has nothing to say of it either.
-        var missingReviews: [String] = []
+    }
+
+    /// A task open on this Mac, for the review passes it ran: on which
+    /// commit each last started.
+    struct ReviewTask: Equatable, Sendable {
+        /// Comparable (`NiruxShellView.comparablePath`).
+        let cwd: String
+        let runs: [ReviewPass: String]
     }
 
     struct LocalWorktree: Equatable, Sendable {

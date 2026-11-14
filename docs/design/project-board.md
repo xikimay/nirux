@@ -794,10 +794,15 @@ pull request.
   fork, conflict, agent working or waiting on a dialog, unpushed commits or
   tracked changes in its worktree. A PR that changes `.github/workflows/` can
   join, with a warning: its checks ran its own version of the workflows. So
-  can one whose task here ran no code review on any commit (what the Board's
-  Reviews station counts), with "No code review yet" first among its
-  warnings: one click on the Board's Merge station queues it. A PR without a
-  task here says nothing of reviews, as the Board.
+  can one whose task here ran no code review on one of its own commits (in
+  its head's history, not in the base's: a review the same workspace ran on
+  an earlier branch doesn't count), with "No code review yet: Nirux saw none
+  run on its commits." first among its warnings, since a click on the
+  Board's Merge station lists it for Start. The passes are the ones the
+  Board's Reviews station asks for; the tasks are the space's, as the Board
+  lists them (not the Lead's). A PR without a task here says nothing of
+  reviews, as the Board. Warnings are drawn in the sheet's text colour with
+  ⚠︎: amber means an agent waits for the user.
 - **No post-merge workflow by accident.** The queue refuses to start until the
   config names one, or says `"none"`.
 - **A failed last post-merge run** on the base branch shows as a warning at the

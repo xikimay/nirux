@@ -201,7 +201,7 @@ final class MergeQueueBoardTests: XCTestCase {
     private func controller(_ client: any MergeQueueGitHub = FakeQueueClient(isDryRun: true)) -> MergeQueueController {
         let controller = MergeQueueController(
             projectID: "project", repository: MQ.widgets, client: client,
-            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
             stateDirectory: root.appendingPathComponent("state"), lockFolder: root.appendingPathComponent("locks")
         )
         controller.beginActivity = { NSObject() }
@@ -289,7 +289,7 @@ final class MergeQueueBoardTests: XCTestCase {
         let lockFolder = root.appendingPathComponent("locks")
         let live = MergeQueueController(
             projectID: "project", repository: MQ.widgets, client: FakeQueueClient(),
-            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
             stateDirectory: root.appendingPathComponent("state"), lockFolder: lockFolder
         )
         var engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(4, head: MQ.sha("a"))])
@@ -351,14 +351,27 @@ final class MergeQueueBoardTests: XCTestCase {
             XCTAssertTrue(Thread.isMainThread)
             return []
         }
-        var reviewsAsked: [[String]] = []
-        queue.local.missingReviews = { worktrees, _ in
-            reviewsAsked.append(worktrees)
-            return ["Code review"]
+        // Its task ran a code review on a commit of an earlier branch; git is asked, off the main thread.
+        // Another worktree inside its own holds a task of its own.
+        queue.local.reviewTasks = {
+            [MergeQueue.ReviewTask(cwd: "/tmp/feat/1", runs: [.codeReview: "earlier"]),
+             MergeQueue.ReviewTask(cwd: "/tmp/feat/1/nested", runs: [.codeReview: "nested"])]
+        }
+        final class Asked: @unchecked Sendable {
+            private let lock = NSLock()
+            private var recorded: [[String?]] = []
+            func append(_ asked: [String?]) { lock.withLock { recorded.append(asked) } }
+            var all: [[String?]] { lock.withLock { recorded } }
+        }
+        let asked = Asked()
+        queue.local.isOwnCommit = { commit, head, base, folder in
+            asked.append([commit, head, base, folder])
+            return false
         }
         queue.local.inspect = { _, branch, _, _, _ in
             .success(MergeQueue.LocalInspection(
-                worktrees: [MergeQueue.LocalWorktree(path: "/tmp/\(branch)", problem: nil)], allWorktreePaths: []
+                worktrees: [MergeQueue.LocalWorktree(path: "/tmp/\(branch)", problem: nil)],
+                allWorktreePaths: ["/tmp/\(branch)", "/tmp/\(branch)/nested"]
             ))
         }
 
@@ -375,8 +388,8 @@ final class MergeQueueBoardTests: XCTestCase {
         XCTAssertEqual(confirmation.entries.map(\.number), [1])
         XCTAssertEqual(confirmation.excluded.map(\.reason), ["It is a draft."])
         XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits: the queue merges main into it first."])
-        XCTAssertEqual(reviewsAsked, [["/tmp/feat/1"]])
-        XCTAssertEqual(confirmation.items.first?.warnings, ["No code review yet: none ran in its task."])
+        XCTAssertEqual(asked.all, [["earlier", MQ.sha("a"), read.candidates.last?.comparison??.baseCommit, "/tmp/feat/1"]])
+        XCTAssertEqual(confirmation.items.first?.warnings, ["No code review yet: Nirux saw none run on its commits."])
         let reads = client.reads
         XCTAssertEqual(Array(reads.prefix(4)), [.auth, .rateLimit, .baseMergeQueue, .baseRuns], "the queue's own reads first")
         XCTAssertFalse(reads.contains(.checks(MQ.sha("b"))), "a draft is left out: its checks aren’t read")

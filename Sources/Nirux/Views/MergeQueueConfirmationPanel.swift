@@ -33,6 +33,8 @@ final class MergeQueueConfirmationPanel: NSObject {
 
     private static let size = NSSize(width: 700, height: 640)
     private static let dryRunColor = NSColor.systemOrange
+    /// What may go wrong: amber means an agent waits for the user, nothing else.
+    private static let warningColor = primaryText
     private static let refusalColor = Theme.Color.error
     private static let primaryText = NSColor.white.withAlphaComponent(0.9)
     private static let secondaryText = NSColor.white.withAlphaComponent(0.5)
@@ -164,7 +166,7 @@ final class MergeQueueConfirmationPanel: NSObject {
             add(refusal, color: Self.refusalColor, font: .systemFont(ofSize: 12, weight: .medium))
         }
         for warning in confirmation.warnings {
-            add("⚠︎ " + warning, color: Self.dryRunColor)
+            add("⚠︎ " + warning, color: Self.warningColor)
         }
         if !confirmation.items.isEmpty {
             heading("MERGES, IN THIS ORDER")
@@ -179,7 +181,7 @@ final class MergeQueueConfirmationPanel: NSObject {
                     add(note, color: Self.secondaryText, font: .systemFont(ofSize: 11), indent: 34, trailing: 90, gap: 2)
                 }
                 for warning in item.warnings {
-                    add("⚠︎ " + warning, color: Self.dryRunColor, font: .systemFont(ofSize: 11), indent: 34, trailing: 90,
+                    add("⚠︎ " + warning, color: Self.warningColor, font: .systemFont(ofSize: 11), indent: 34, trailing: 90,
                         gap: 2)
                 }
                 let up = moveButton("↑", index: index, action: #selector(moveUp(_:)), enabled: index > 0)

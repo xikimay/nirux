@@ -23,6 +23,11 @@ extension MergeQueue {
             var checksError: String?
             var detailsError: String?
             var compareError: String?
+            /// The review passes the Board asks for that ran on none of its
+            /// commits in a task of its worktrees, by name: "Code review".
+            /// None where no task of it is here, as the Board's Reviews
+            /// station has nothing to say then either.
+            var missingReviews: [String] = []
 
             init(number: Int) {
                 self.number = number
@@ -223,9 +228,9 @@ extension MergeQueue {
             return leftOut(local.busyAgents.joined(separator: "; ") + ": wait until it is back at its prompt.")
         }
         if let reason = local.worktrees.lazy.compactMap(localProblem).first { return leftOut(reason) }
-        // One click on a Merge station can queue it: the sheet says what the Board's Reviews station says.
-        let unreviewed = local.missingReviews.isEmpty ? [] : [
-            "No \(local.missingReviews.map { $0.lowercased() }.joined(separator: " or ")) yet: none ran in its task."
+        // A click on the Board's Merge station lists it for Start: the sheet says what no review ran on.
+        let unreviewed = candidate.missingReviews.isEmpty ? [] : [
+            "No \(spoken(candidate.missingReviews.map { $0.lowercased() })) yet: Nirux saw none run on its commits."
         ]
 
         var item = Confirmation.Item(
@@ -276,16 +281,43 @@ extension MergeQueue {
         return .joins(item)
     }
 
-    /// The `required` review passes that ran in none of the tasks inside
-    /// these worktrees, on any commit, by name in the badges' order; none
-    /// where no task is there.
+    /// The `required` review passes that no task inside these worktrees
+    /// ran on one of the pull request's own commits (`isOwnCommit`: not one
+    /// of an earlier branch the same workspace was on), by name in the
+    /// badges' order; none where no task is there.
     static func missingReviews(
-        in worktrees: [String], allWorktrees: [String], tasks: [(cwd: String, ran: Set<ReviewPass>)], required: Set<ReviewPass>
+        in worktrees: [String], allWorktrees: [String], tasks: [ReviewTask], required: Set<ReviewPass>,
+        isOwnCommit: (String) -> Bool
     ) -> [String] {
         let inside = tasks.filter { isInside($0.cwd, roots: worktrees, allWorktrees: allWorktrees) }
         guard !inside.isEmpty else { return [] }
-        let ran = Set(inside.flatMap(\.ran))
+        var answers: [String: Bool] = [:]
+        let ran = Set(inside.flatMap { task in
+            task.runs.filter { pass, head in
+                guard required.contains(pass) else { return false }
+                if let known = answers[head] { return known }
+                let answer = isOwnCommit(head)
+                answers[head] = answer
+                return answer
+            }.keys
+        })
         return ReviewPass.allCases.filter { required.contains($0) && !ran.contains($0) }.map(\.displayName)
+    }
+
+    /// "a", "a or b", "a, b or c".
+    static func spoken(_ names: [String]) -> String {
+        names.count < 3 ? names.joined(separator: " or ") : names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
+    }
+
+    /// `commit` is one of the pull request's own: in its head's history
+    /// (git doesn't know it, or can't say: it isn't), and not in the base's
+    /// tip's (`base`, when GitHub gave it; one git hasn't fetched yet holds
+    /// none of them).
+    static func isOwnCommit(_ commit: String, head: String, base: String?, in folder: String) -> Bool {
+        let tools = WorktreeCleanup.Tools.installed
+        guard WorktreeCleanup.git(["merge-base", "--is-ancestor", commit, head], in: folder, tools: tools).status == 0 else { return false }
+        guard let base else { return true }
+        return WorktreeCleanup.git(["merge-base", "--is-ancestor", commit, base], in: folder, tools: tools).status != 0
     }
 
     /// Why the queue would stop on this pull request at once.

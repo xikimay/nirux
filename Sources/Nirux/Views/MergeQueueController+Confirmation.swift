@@ -22,12 +22,13 @@ extension MergeQueueController {
         let client = self.client
         let folders = local.folders()
         let inspect = local.inspect
+        let reviews = Reviews(tasks: local.reviewTasks(), required: BoardStages.Rules().requiredReviews, isOwnCommit: local.isOwnCommit)
         let isDryRun = self.isDryRun
         let cancellation = MergeQueueReadCancellation()
         MergeQueueDriver.runOffMain({
             Self.fetchConfirmation(
                 settings: settings, numbers: numbers, isDryRun: isDryRun, client: client, folders: folders, inspect: inspect,
-                cancellation: cancellation
+                reviews: reviews, cancellation: cancellation
             )
         }, then: { [weak self] fetched in
             guard let self, !cancellation.isCancelled else { return }
@@ -37,13 +38,21 @@ extension MergeQueueController {
                 let worktrees = inspection.worktrees.map(\.path)
                 reading.candidates[index].local = MergeQueue.LocalState(
                     busyAgents: worktrees.isEmpty ? [] : self.local.busyAgents(worktrees, inspection.allWorktreePaths),
-                    worktrees: inspection.worktrees,
-                    missingReviews: worktrees.isEmpty ? [] : self.local.missingReviews(worktrees, inspection.allWorktreePaths)
+                    worktrees: inspection.worktrees
                 )
             }
             completion(reading)
         })
         return cancellation
+    }
+
+    /// What the sheet needs to say which review passes ran on a pull
+    /// request's commits: the tasks read on the main thread, the passes
+    /// the Board asks for, how git tells a pull request's own commits.
+    struct Reviews: Sendable {
+        var tasks: [MergeQueue.ReviewTask] = []
+        var required: Set<ReviewPass> = []
+        var isOwnCommit: @Sendable (_ commit: String, _ head: String, _ base: String?, _ folder: String) -> Bool = { _, _, _, _ in false }
     }
 
     struct ConfirmationFetch: Sendable {
@@ -62,6 +71,7 @@ extension MergeQueueController {
         client: any MergeQueueGitHub,
         folders: [String],
         inspect: MergeQueueLocalAccess.Inspect,
+        reviews: Reviews = Reviews(),
         cancellation: MergeQueueReadCancellation = MergeQueueReadCancellation()
     ) -> ConfirmationFetch {
         var fetch = ConfirmationFetch(reading: MergeQueue.ConfirmationReading(settings: settings, isDryRun: isDryRun))
@@ -92,7 +102,7 @@ extension MergeQueueController {
             defer { window.signal() }
             guard !cancellation.isCancelled else { return }
             let read = readCandidate(
-                numbers[index], settings: settings, client: client, folders: folders, inspect: inspect,
+                numbers[index], settings: settings, client: client, folders: folders, inspect: inspect, reviews: reviews,
                 cancellation: cancellation
             )
             results.set(read, at: index)
@@ -110,6 +120,7 @@ extension MergeQueueController {
         client: any MergeQueueGitHub,
         folders: [String],
         inspect: MergeQueueLocalAccess.Inspect,
+        reviews: Reviews,
         cancellation: MergeQueueReadCancellation
     ) -> (MergeQueue.ConfirmationReading.Candidate, MergeQueue.LocalInspection?) {
         var candidate = MergeQueue.ConfirmationReading.Candidate(number: number)
@@ -145,6 +156,11 @@ extension MergeQueueController {
         }
         switch inspect(folders, pullRequest.headRefName, head, settings, client) {
         case .success(let inspection):
+            let worktrees = inspection.worktrees.map(\.path)
+            let base = candidate.comparison??.baseCommit
+            candidate.missingReviews = MergeQueue.missingReviews(
+                in: worktrees, allWorktrees: inspection.allWorktreePaths, tasks: reviews.tasks, required: reviews.required
+            ) { commit in worktrees.first.map { reviews.isOwnCommit(commit, head, base, $0) } ?? false }
             return (candidate, inspection)
         case .failure(let error):
             candidate.error = "its worktrees couldn’t be checked: \(GitHubCLIQueueClient.message(of: error))"
