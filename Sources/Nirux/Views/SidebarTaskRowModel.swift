@@ -36,7 +36,7 @@ struct SidebarStatusLine: Hashable {
 }
 
 /// The sign before a row's title, in the state dots' column.
-enum SidebarRowMark: Hashable {
+enum SidebarRowMark: Hashable, CaseIterable {
     case needsYou, error, working, asking, blocked, readyToMerge, merged, idle
     /// A finished turn the user hasn't looked at yet, its status line
     /// beside it: a grey check where the grey dot is.

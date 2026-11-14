@@ -50,7 +50,7 @@ struct StateIcon: Hashable, Sendable {
 
     var kind: Kind
     /// How many of the four stations the ring shows: 0 to 4.
-    var stage: Int
+    private(set) var stage: Int
 
     init(_ kind: Kind, stage: Int = 0) {
         self.kind = kind
@@ -93,8 +93,18 @@ struct StateIcon: Hashable, Sendable {
         }
     }
 
-    /// What VoiceOver says.
+    /// What VoiceOver says: the state, then the station the ring shows.
     var accessibilityText: String {
+        let stations = ["Code", "Reviews", "Checks", "Merge"]
+        switch kind {
+        case .working where stage > 0, .idle where stage > 0, .checksRunning where stage > 0:
+            return "\(stateText), at \(stations[stage - 1])"
+        default:
+            return stateText
+        }
+    }
+
+    private var stateText: String {
         switch kind {
         case .working: return "Working"
         case .needsYou(.command): return "Needs you: a permission"
@@ -118,11 +128,16 @@ final class StateIconView: NSView {
             guard icon != oldValue else { return }
             needsDisplay = true
             setAccessibilityLabel(icon.accessibilityText)
+            NSAccessibility.post(element: self, notification: .titleChanged)
         }
     }
 
+    /// Its natural size, whatever frame a layout gives it.
+    private let size: CGFloat
+
     init(_ icon: StateIcon, size: CGFloat = 14) {
         self.icon = icon
+        self.size = size
         super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
@@ -132,7 +147,7 @@ final class StateIconView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var isFlipped: Bool { true }
-    override var intrinsicContentSize: NSSize { bounds.size }
+    override var intrinsicContentSize: NSSize { NSSize(width: size, height: size) }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -147,16 +162,22 @@ final class StateIconView: NSView {
     private static let ringRadius: CGFloat = 6.25
     private static let ringWidth: CGFloat = 1.5
     private static let glyphWidth: CGFloat = 1.6
+    /// Ten dashes around the ring, so that its seam doesn't show.
+    private static let dash: [CGFloat] = {
+        let period = 2 * CGFloat.pi * ringRadius / 10
+        return [period * 0.56, period * 0.44]
+    }()
 
-    /// Draws `icon` on the 16-unit grid, y going down.
-    static func draw(_ icon: StateIcon, in context: CGContext) {
+    /// Draws `icon` on the 16-unit grid of a context whose y goes down (the
+    /// view is flipped): the glyphs and the ring's fill assume it.
+    private static func draw(_ icon: StateIcon, in context: CGContext) {
         let center = CGPoint(x: 8, y: 8)
         let color = icon.color.cgColor
         let ink = Theme.Color.canvas.cgColor
         func ring(alpha: CGFloat = 1, dashed: Bool = false) {
             context.setStrokeColor(icon.color.withAlphaComponent(alpha).cgColor)
             context.setLineWidth(ringWidth)
-            context.setLineDash(phase: 0, lengths: dashed ? [2.4, 1.9] : [])
+            context.setLineDash(phase: 0, lengths: dashed ? dash : [])
             context.strokeEllipse(in: CGRect(x: 8 - ringRadius, y: 8 - ringRadius, width: 2 * ringRadius, height: 2 * ringRadius))
             context.setLineDash(phase: 0, lengths: [])
         }
@@ -224,42 +245,41 @@ final class StateIconView: NSView {
         }
     }
 
-    /// Glyph paths on the 16-unit grid, y going down. Computed: CGPath
-    /// isn't Sendable, and they cost nothing next to a draw.
+    /// Glyph paths on the 16-unit grid, y going down, built once.
     private enum Glyph {
-        static var chevron: CGPath {
+        @MainActor static let chevron: CGPath = {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 6.1, y: 5.4))
             path.addLine(to: CGPoint(x: 8.8, y: 8))
             path.addLine(to: CGPoint(x: 6.1, y: 10.6))
             return path
-        }
-        static var question: CGPath {
+        }()
+        @MainActor static let question: CGPath = {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 6.1, y: 6.4))
             path.addCurve(to: CGPoint(x: 9.9, y: 6.2), control1: CGPoint(x: 6.1, y: 4.1), control2: CGPoint(x: 9.7, y: 4.2))
             path.addCurve(to: CGPoint(x: 8, y: 9.1), control1: CGPoint(x: 10.1, y: 7.6), control2: CGPoint(x: 8, y: 7.9))
             path.addLine(to: CGPoint(x: 8, y: 9.6))
             return path
-        }
-        static var bang: CGPath {
+        }()
+        @MainActor static let bang: CGPath = {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 8, y: 4.9))
             path.addLine(to: CGPoint(x: 8, y: 8.8))
             return path
-        }
-        static var check: CGPath {
+        }()
+        @MainActor static let check: CGPath = {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 5.2, y: 8.2))
             path.addLine(to: CGPoint(x: 7, y: 10))
             path.addLine(to: CGPoint(x: 10.8, y: 6))
             return path
-        }
-        static var slash: CGPath {
+        }()
+        @MainActor static let slash: CGPath = {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 4.4, y: 11.6))
             path.addLine(to: CGPoint(x: 11.6, y: 4.4))
             return path
-        }
+        }()
     }
 }
