@@ -8,11 +8,12 @@ import XCTest
 final class BoardStagesReadingsTests: XCTestCase {
     private func column(
         _ index: Int, status: AgentStatus = .idle, reason: AgentAttentionReason? = nil, stuck: SidebarStuckState? = nil,
-        question: SidebarMissionQuestion? = nil, id: UUID = UUID()
+        question: SidebarMissionQuestion? = nil, elapsed: TimeInterval? = nil, id: UUID = UUID()
     ) -> ColumnInfo {
         var column = ColumnInfo(
             index: index, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
-            terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil, attentionReason: reason, id: id
+            terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil, agentElapsedSeconds: elapsed,
+            attentionReason: reason, id: id
         )
         column.stuck = stuck
         column.missionQuestion = question
@@ -65,16 +66,20 @@ final class BoardStagesReadingsTests: XCTestCase {
         let handed = row([column(0, status: .needsAttention, question: handedOff)])
         XCTAssertEqual(reading(handed).activity, .needsYou("Which base?"), "a question come to the user: the question itself")
         XCTAssertEqual(reading(handed).activity, needsYou(handed))
+        var behindDialog = column(0, question: handedOff)
+        behindDialog.openDialog = .permission(tool: "Bash", summary: "git push")
+        XCTAssertEqual(reading(row([behindDialog])).activity, .needsYou("Which base?"), "the question, whatever else the column shows")
         let broken = row([column(0, status: .working, id: first), stopped])
         XCTAssertEqual(reading(broken).activity, .failed(broken.rowSummary.status.text))
         XCTAssertEqual(reading(row([column(0, status: .working, id: first), column(1, question: asking)])).activity, .asking("Lead"))
         var answered = asking
         answered.isAnswered = true
         XCTAssertEqual(reading(row([column(0, question: answered)])).activity, .idle, "an answer to type: no agent's wait")
-        // Work: since its turn started, the first working column that knows when.
-        let working = row([column(0), column(1, status: .working, id: first), column(2, status: .working, id: second)])
-        XCTAssertEqual(reading(working, turns: [second: 500]).activity, .working(since: 500))
-        XCTAssertEqual(reading(working, turns: [first: 400, second: 500]).activity, .working(since: 400))
+        // Work: since its turn started, in the column the row's clock reads (the first working a minute in, else the first).
+        let working = row([column(0), column(1, status: .working, elapsed: 20, id: first), column(2, status: .working, elapsed: 720, id: second)])
+        XCTAssertEqual(reading(working, turns: [first: 980, second: 280]).activity, .working(since: 280))
+        let fresh = row([column(0), column(1, status: .working, elapsed: 20, id: first), column(2, status: .working, elapsed: 30, id: second)])
+        XCTAssertEqual(reading(fresh, turns: [first: 980, second: 970]).activity, .working(since: 980))
         XCTAssertEqual(reading(working).activity, .working(since: nil))
         XCTAssertEqual(reading(row([column(0)])).activity, .idle)
         // Red checks are the pull request's: the Board reads them there, not as the agents'.
@@ -122,12 +127,20 @@ final class BoardStagesReadingsTests: XCTestCase {
         XCTAssertEqual(reading(row([gone])).resume, BoardStages.Resume(kind: .afterExit, column: exited))
         XCTAssertNil(reading(row([column(0, stuck: .exitedMidTurn(processName: "codex"))])).resume, "the table offered it for claude only")
         XCTAssertNil(reading(row([column(0)])).resume)
+        // An agent restored at launch that hasn't resumed: "Paused · Resume", after a stop or an exit.
+        let restored = UUID()
+        var paused = column(2)
+        paused.deferredAgent = SidebarDeferredAgent(processName: "claude", summary: "claude --resume", columnID: restored)
+        XCTAssertEqual(reading(row([column(0), paused])).resume, BoardStages.Resume(kind: .afterRelaunch, column: restored))
+        XCTAssertEqual(reading(row([paused, gone])).resume?.kind, .afterExit)
     }
 
     func testAReviewPassRunsWhileTheTurnItStartedInDoes() {
         let runs: [ReviewPass: ReviewRun] = [.codeReview: ReviewRun(head: "a", at: 500), .premortem: ReviewRun(head: "a", at: 300)]
-        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [500]), [.codeReview])
-        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [600, 250]), [.codeReview, .premortem])
+        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [500]), [.codeReview], "the turn its prompt started")
+        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [300.4, 500]), [.codeReview, .premortem])
+        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [600, 250]), [],
+                       "another turn, later or earlier, another column's: done")
         XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: []), [], "no turn running: done")
     }
 }
