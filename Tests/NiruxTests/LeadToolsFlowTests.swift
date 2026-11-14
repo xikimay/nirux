@@ -821,6 +821,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let ownList = try call(LeadTools.listTasks, from: underPlain, agentUUID: try XCTUnwrap(underPlain.columns.first?.agentUUID), in: harness)
             XCTAssertFalse(ownList.isError, ownList.text)
 
+            let front = shell.activeWorkspace
             let started = try call(LeadTools.startTask, ["description": "Write the API docs"], from: task, agentUUID: agent, in: harness)
             XCTAssertFalse(started.isError, started.text)
             XCTAssertTrue(started.text.contains("feat/write-the-api-docs"), started.text)
@@ -829,7 +830,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(subtask.parentWorkspaceID, task.id)
             XCTAssertEqual(subtask.profileID, lead.space)
             XCTAssertTrue(subtask.startedByAgent)
-            XCTAssertTrue(shell.activeWorkspace === lead.workspace, "it opens behind what the user is doing")
+            XCTAssertTrue(shell.activeWorkspace === front, "it opens behind what the user is doing")
             let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id })
             XCTAssertEqual(mission.parentWorkspaceID, task.id)
             XCTAssertEqual(mission.parentAgentUUID, agent)
