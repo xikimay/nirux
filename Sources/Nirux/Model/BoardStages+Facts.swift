@@ -107,8 +107,22 @@ extension BoardStages {
             merged: repository.merged.compactMap { pullRequest in
                 guard pullRequest.state == "MERGED", let mergedAt = pullRequest.mergedAt else { return nil }
                 return MergedFacts(number: pullRequest.number, title: pullRequest.title, mergedAt: mergedAt.timeIntervalSince1970)
-            }
+            },
+            otherWorktrees: repository.rows.compactMap { otherWorktree($0, in: repository) }
         )
+    }
+
+    /// A worktree the table listed under "Other worktrees", with its
+    /// buttons: Open (no workspace is open there), and Clean Up… (a linked
+    /// worktree: the clean-up may delete it), held back while one runs
+    /// there.
+    private static func otherWorktree(_ row: ProjectBoard.Row, in repository: RepositoryReading) -> OtherWorktree? {
+        guard row.group == .otherWorktree, let path = row.worktreePath else { return nil }
+        let title = row.branch ?? (path as NSString).lastPathComponent
+        return OtherWorktree(path: path, title: title, menu: [
+            .openWorktree(path: path, title: title),
+            .cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil)
+        ])
     }
 
     /// The section's merged pull requests, by number.

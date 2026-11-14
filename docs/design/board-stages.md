@@ -271,6 +271,14 @@ clicked. The sizes are the mockup's.
   sit on a rail numbered in merge order, under the stack's title.
 - **Pull requests without a task** start folded, each time the Board opens,
   under a line that counts them.
+- **Other worktrees** (a worktree of the repository with neither an open
+  pull request nor a workspace: a task closed since, a branch left) start
+  folded too, after those, under "Other worktrees · N". Each is its branch
+  (its folder's name on a detached HEAD) and its path, then Open and Clean
+  Up…, as the table's buttons, also on a right click; "cleaning up…",
+  disabled with why, while a clean-up of it runs. While the pointer is over
+  the Board, one that goes stays, faded and inert, and one that comes waits;
+  Open and Clean Up… ask where the pointer aimed, as a line's station does.
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
   (amber while its task needs the user), its title, then its number and time,
@@ -490,9 +498,9 @@ to the queue yet.
   for every line in it; the phrase and "Merged today" then say "cleaning
   up…", with no link). A menu shown before the line changed acts only as
   the line, still on the Board, still offers; each of its items stays what
-  it was. A worktree no line holds (a merged task closed since) gets its
-  menu with "Other worktrees" (2b-4). `BoardStagesView.onMenu` has no owner
-  yet.
+  it was. A worktree no line holds (a merged task closed since) has its
+  Open and Clean Up… under "Other worktrees" (section 5).
+  `BoardStagesView.onMenu` and `onWorktree` have no owner yet.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station

@@ -692,6 +692,34 @@ final class BoardStagesFactsTests: XCTestCase {
 
     // MARK: - Merged today
 
+    // MARK: - Other worktrees
+
+    func testAWorktreeWithNoTaskAndNoOpenPullRequestIsListedWithOpenAndCleanUp() {
+        let merged = pullRequest(41, state: "MERGED", title: "Old work")
+        let section = facts([
+            row("feat/x", workspaces: ["task"]),
+            row("main", group: .main, path: "/p/widgets"),
+            row("feat/left", pullRequest: merged, group: .otherWorktree, path: "/p/widgets.left"),
+            row(nil, group: .otherWorktree, path: "/p/widgets.detached"),
+            row("feat/cleaning", group: .otherWorktree, path: "/p/widgets.cleaning"),
+            row("gone", group: .otherWorktree, path: nil),
+        ], cleaningUp: ["/p/widgets.cleaning"])
+        XCTAssertEqual(section.otherWorktrees, [
+            BoardStages.OtherWorktree(path: "/p/widgets.left", title: "feat/left", menu: [
+                .openWorktree(path: "/p/widgets.left", title: "feat/left"), .cleanUp(path: "/p/widgets.left", blocked: nil)
+            ]),
+            BoardStages.OtherWorktree(path: "/p/widgets.detached", title: "widgets.detached", menu: [
+                .openWorktree(path: "/p/widgets.detached", title: "widgets.detached"), .cleanUp(path: "/p/widgets.detached", blocked: nil)
+            ]),
+            BoardStages.OtherWorktree(path: "/p/widgets.cleaning", title: "feat/cleaning", menu: [
+                .openWorktree(path: "/p/widgets.cleaning", title: "feat/cleaning"),
+                .cleanUp(path: "/p/widgets.cleaning", blocked: BoardStages.CleanUp.runningReason)
+            ]),
+        ], "neither the task's worktree nor the main checkout; one git no longer lists has no place to open")
+        XCTAssertEqual(BoardStages.section(section, order: .sidebar, now: 0, timeZone: TimeZone(identifier: "UTC")!).otherWorktrees,
+                       section.otherWorktrees, "in the table's order")
+    }
+
     func testTheMergedListGivesTheDaysMergesTheirTitleAndTime() {
         let noon = Date(timeIntervalSince1970: 1_794_398_400)
         let section = facts([], merged: [

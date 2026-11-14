@@ -43,6 +43,20 @@ extension BoardStages {
         var withoutTask: [Unit]
         /// "Merged today", the newest first.
         var merged: [Merged]
+        /// "Other worktrees": folded, after the pull requests without a task.
+        var otherWorktrees: [OtherWorktree] = []
+    }
+
+    /// A worktree of the repository with neither an open pull request nor
+    /// a workspace (a task closed since, a branch left): listed folded
+    /// under "Other worktrees", with what the table offered it.
+    struct OtherWorktree: Equatable, Sendable {
+        /// Its top level, as git lists it.
+        let path: String
+        /// Its branch; its folder's name on a detached HEAD.
+        var title: String
+        /// Open, then Clean Up… where the clean-up may delete it.
+        var menu: [MenuItem]
     }
 
     /// A pull request of the merged batch.
@@ -64,6 +78,8 @@ extension BoardStages {
         /// (`WorkspaceStore.activeParents`), by their facts' `id`.
         var parents: [String: String] = [:]
         var merged: [MergedFacts] = []
+        /// In the table's order: by name.
+        var otherWorktrees: [OtherWorktree] = []
     }
 
     enum Order: String, Sendable {
@@ -143,7 +159,8 @@ extension BoardStages {
                     needsYou: gone.contains { lines[$0].state == .needsYou },
                     cleanUp: task.flatMap { facts.lines[$0].cleanUp }
                 )
-            }
+            },
+            otherWorktrees: facts.otherWorktrees
         )
     }
 
