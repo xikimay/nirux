@@ -63,6 +63,7 @@ final class NiruxMCPServerTests: XCTestCase {
         // workspace, the skill; the Lead neither: it starts tasks with its own.
         var task = context
         task.environment["NIRUX_WORKSPACE_ID"] = "workspace"
+        task.environment["NIRUX_LAUNCH_ID"] = "launch"
         let tasks = try XCTUnwrap(result(try send(initialize, context: task))?["instructions"] as? String)
         XCTAssertTrue(tasks.contains(NiruxMCPServer.taskInstructions))
         XCTAssertFalse(tasks.contains("Lead"))

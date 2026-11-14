@@ -300,6 +300,13 @@ extension NiruxShellView {
             slidesIn: pendingTaskSheet != nil
         )
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
+        // The agent that proposed it hears what the user started.
+        if let proposer = request.proposedByTaskAgent {
+            tellProposer(proposer, mission?.reportsToTask == true
+                ? "The user started the sub-task you proposed, “\(MissionPromptText.quoted(title))”, under your task: it reports to you."
+                : "The user started the task you proposed, “\(MissionPromptText.quoted(title))”, but not as your sub-task: "
+                    + "it doesn't report to you.")
+        }
         // The sheet's trust hint has done its job once a Claude Code task
         // started in the tasks folder, where the hint applies.
         // The cheap checks first: the settings are read only for such a task.

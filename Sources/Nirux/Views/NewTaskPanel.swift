@@ -133,6 +133,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             layout()
         }
     }
+    /// The proposal was closed without starting anything: its agent hears so.
+    var onDeclineProposal: (() -> Void)?
+    /// Who proposed what the sheet holds (`prefill`): the heading keeps
+    /// saying so.
+    private var proposedBy: String?
 
     /// "Report to the Lead" shows with a Lead, unless the sub-task a task's
     /// agent proposed is checked: that one reports to the agent.
@@ -281,6 +286,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// new work, where its task works: the Repository popup and Existing
     /// Branch… (see `refresh`) show only without one.
     private func updateForSubtask() {
+        if let proposedBy { return headingLabel.stringValue = "Proposed by \(proposedBy) · \(space.name)" }
         headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
     }
 
@@ -373,7 +379,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         guard panel != nil else { return }
         descriptionView.string = description
         if let templateName { pickedTemplateName = templateName }
-        headingLabel.stringValue = "Proposed by \(proposedBy) · \(space.name)"
+        self.proposedBy = proposedBy
+        updateForSubtask()
         hideError()
         refresh()
         // It comes while the user types elsewhere: no field takes the keys,
@@ -466,7 +473,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func cancelAction(_ sender: Any?) {
         if isStarting { return hide() }
+        let declined = onDeclineProposal
+        onDeclineProposal = nil
         dismiss()
+        declined?()
     }
 
     @objc func existingBranchAction(_ sender: Any?) {
@@ -597,6 +607,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             parentWorkspaceID: subtaskParentID
         )
         request.reportsToTask = agentParent != nil
+        request.proposedByTaskAgent = reportsToTaskAgent
         return request
     }
 

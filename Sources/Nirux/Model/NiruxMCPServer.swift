@@ -107,9 +107,14 @@ enum NiruxMCPServer {
         var sessionID: String? { nonEmpty("CLAUDE_CODE_SESSION_ID") }
         /// Launched in a space's Lead workspace (see `WorkspaceState.isLead`).
         var isLead: Bool { environment[WorkspaceState.leadEnvironmentKey] == "1" }
-        /// Launched by a Nirux workspace's terminal, which names itself: the
-        /// app can tell who calls.
-        var isWorkspaceAgent: Bool { nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil }
+        /// Launched by a Nirux workspace's terminal, which names itself (the
+        /// app can tell who calls) and carries this launch's id: one opened
+        /// by a link from outside Nirux has none, and its agents get no task
+        /// tools (the app refuses them too).
+        var isWorkspaceAgent: Bool {
+            nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil
+                && nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil
+        }
         /// The tools the app answers for this agent: the Lead's, or a task's.
         var appToolNames: [String] {
             if isLead { return LeadTools.names }

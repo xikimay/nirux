@@ -123,8 +123,8 @@ final class LeadChannelTests: XCTestCase {
 
     // MARK: - The MCP server
 
-    private func context(lead: Bool, inWorkspace: Bool = true) -> NiruxMCPServer.Context {
-        var environment = ["NIRUX_AGENT_UUID": UUID().uuidString]
+    private func context(lead: Bool, inWorkspace: Bool = true, launchID: String = "launch") -> NiruxMCPServer.Context {
+        var environment = ["NIRUX_AGENT_UUID": UUID().uuidString, "NIRUX_LAUNCH_ID": launchID]
         if inWorkspace { environment["NIRUX_WORKSPACE_ID"] = UUID().uuidString }
         if lead { environment["NIRUX_LEAD"] = "1" }
         var context = NiruxMCPServer.Context(
@@ -157,6 +157,8 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name] + LeadTools.names)
         XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name] + TaskTools.names)
         XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name])
+        // A workspace opened by a link from outside Nirux has no launch id.
+        XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
         XCTAssertNotNil(try call(LeadTools.queueMerge, ["prs": [1]], context: context(lead: false))["error"], "the Lead's only")
         XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false, inWorkspace: false))["error"], "unknown outside")
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
