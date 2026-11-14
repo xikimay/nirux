@@ -208,7 +208,7 @@ extension WorkspaceInfo {
     /// What its agents do, the most pressing first: the agents' steps of
     /// `rowSummary`'s ladder, which the Board as stages reads too
     /// (`BoardStages.TaskReading`). Nil when no agent waits, stopped, asks
-    /// or works.
+    /// or works, and no answer waits to be typed.
     enum AgentStep {
         /// A column waits on the user: the row's words after "Needs you · ";
         /// a Mission question come to the user is its own question, which a

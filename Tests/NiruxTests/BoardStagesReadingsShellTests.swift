@@ -75,9 +75,9 @@ final class BoardStagesReadingsShellTests: XCTestCase {
                 )
             }
             shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"]), event(.stop, nil), event(.userPromptSubmit, nil)])
-            XCTAssertEqual(task.reviewsRunning, [:], "one drain: the pass, its turn's end, the next prompt")
+            XCTAssertEqual(task.reviewsRunning, [], "one drain: the pass, its turn's end, the next prompt")
             shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"])])
-            XCTAssertEqual(task.reviewsRunning.mapValues(\.column), [.codeReview: column.id], "no HEAD needed: the event says it runs")
+            XCTAssertEqual(task.reviewsRunning.map(\.column), [column.id], "no HEAD needed: the event says it runs")
             // claude in front of the column's shell, as the process table would show it; then the shell back in front.
             let claude: pid_t = 99_997
             let table = { (front: pid_t) in
@@ -93,11 +93,11 @@ final class BoardStagesReadingsShellTests: XCTestCase {
                 ])
             }
             shell.updateSidebar(snapshot: table(claude))
-            XCTAssertEqual(task.reviewsRunning[.codeReview]?.isClaudeSeen, true)
+            XCTAssertEqual(task.reviewsRunning.first?.isClaudeSeen, true)
             shell.updateSidebar(snapshot: table(claude))
-            XCTAssertNotNil(task.reviewsRunning[.codeReview])
+            XCTAssertEqual(task.reviewsRunning.count, 1)
             shell.updateSidebar(snapshot: table(shellPID))
-            XCTAssertEqual(task.reviewsRunning, [:], "claude left the front: it exited, crashed or was quit")
+            XCTAssertEqual(task.reviewsRunning, [], "claude left the front: it exited, crashed or was quit")
         }
     }
 }

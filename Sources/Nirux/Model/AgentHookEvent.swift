@@ -90,6 +90,11 @@ struct AgentHookEvent: Codable, Equatable {
     /// an app older than its receiver skips a pass it doesn't know, not
     /// the whole event.
     let reviewPasses: [String]?
+    /// `reviewPasses`, as the passes Nirux knows.
+    var passes: [ReviewPass] { reviewPasses?.compactMap(ReviewPass.init(rawValue:)) ?? [] }
+    /// Its passes ran: a Skill call's start only says they run, until it
+    /// ends without failing (a failed call ran nothing).
+    var recordsReviewRun: Bool { name != .preToolUse }
     /// On UserPromptSubmit, the header line of a Branch Review message the
     /// prompt holds ("Review comments on … from Nirux:"): the comments
     /// pasted went to Claude (docs/design/branch-review.md, section 6.2). Only
@@ -206,8 +211,10 @@ struct AgentHookEvent: Codable, Equatable {
             reviewPasses = switch name {
             case .userPromptSubmit:
                 (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)
-            // A Skill call that failed (PostToolUseFailure) ran nothing.
-            case .postToolUse where toolName == "Skill" && hookName == "PostToolUse":
+            // A Skill call that failed (PostToolUseFailure) ran nothing. Its
+            // start says it runs (a Skill run in the background returns at once).
+            case .preToolUse where toolName == "Skill",
+                 .postToolUse where toolName == "Skill" && hookName == "PostToolUse":
                 ((payload["tool_input"] as? [String: Any])?["skill"] as? String)
                     .flatMap(ReviewPass.passes(inSkill:))?.map(\.rawValue)
             default:

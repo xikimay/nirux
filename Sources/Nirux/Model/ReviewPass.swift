@@ -61,14 +61,38 @@ enum ReviewPass: String, Codable, CaseIterable {
     }
 }
 
-/// A pass running now: the column it runs in, and whether its `claude` was
-/// seen in front of it since (the pass ends once another process is).
+/// A pass running now, in one column (`WorkspaceState.noteReviewPasses`).
 struct RunningPass: Equatable {
+    let pass: ReviewPass
     let column: UUID
+    /// The subagent whose own Skill call ran it, whose stop ends it; nil:
+    /// the main thread's.
+    var agentID: String?
+    /// The prompt whose turn ran it: a failed turn of an earlier prompt,
+    /// drained late, isn't its own.
+    var promptID: String?
+    /// The process that sent its event: once the process table no longer
+    /// has it, it exited (crashed or quit), whatever runs in front since.
+    var emitter: ProcessInstance?
+    /// Seen in front by its name, for an event that named no process.
     var isClaudeSeen = false
+    /// Its main turn ended while subagents it may wait on still work.
+    var isMainTurnOver = false
+    /// The subagents seen at work in its column since it started, not
+    /// stopped yet: a review run in the background outlives the main turn.
+    var subagents: Set<String> = []
 
-    /// What the process table says of its column.
-    enum Front { case claude, other, unknown, gone }
+    /// What the process table says of it.
+    enum Front {
+        /// Its process runs; or, without one named, `claude` is in front.
+        case claude
+        /// Another process is in front (it counts once `claude` was seen).
+        case other
+        /// The table wasn't read.
+        case unknown
+        /// Its process exited, nothing runs in its column, or the column closed.
+        case gone
+    }
 }
 
 /// A pass's latest run in a workspace: its HEAD when the pass started.

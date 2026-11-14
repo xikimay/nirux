@@ -185,7 +185,7 @@ final class WorkspaceState {
     /// events (`noteReviewPasses(of:in:now:)`, `followReviewPasses(_:)`).
     /// Apart from `reviewRuns`, whose run needs a HEAD git may not find.
     /// Not kept across launches: no turn outlives one.
-    var reviewsRunning: [ReviewPass: RunningPass] = [:]
+    var reviewsRunning: [RunningPass] = []
 
     var effectivePhase: WorkspacePhase {
         if let phase { return phase }

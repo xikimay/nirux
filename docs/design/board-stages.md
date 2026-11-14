@@ -454,15 +454,23 @@ the Board reads that pass's statuses, approvals and Mission questions.
   worktree its git facts were read in, and the pull request its own
   detection found merged (at the HEAD it merged at).
 - **A review pass runs** from its own hook event (the prompt that typed it,
-  or the Skill call that ran it), whatever git finds, until an event in its
-  column ends it, in the order the events come: the turn's end (Stop, a
-  failed turn, Claude back at its prompt after an interrupt), its session's
-  end, its `claude` leaving the front once seen there (it exited, crashed or
-  was quit), or its column closing (`WorkspaceState.reviewsRunning`). A
-  permission asked mid-review, or a message queued meanwhile, is no end; a
-  pass from before this launch isn't running. Known limits: a Stop hook that
-  keeps the turn going ends the pass at that Stop; an Esc leaves it running
-  until Claude reads idle at its prompt, about a minute.
+  the start of the Skill call that runs it, a subagent's own call), whatever
+  git finds, until events in its column end it, in the order they come
+  (`WorkspaceState.reviewsRunning`): the main turn's end (Stop, its own
+  failed turn, Claude idle at its prompt) once the subagents seen at work
+  there since have stopped, as a review run in the background outlives the
+  turn that started it; the stop of the subagent that ran it; its session's
+  end; the process that sent its event exiting (a crash or a quit, not a
+  Ctrl-Z; without one named, `claude` leaving the front once seen there); or
+  its column closing. A permission asked mid-review, a message queued
+  meanwhile, a subagent's or an earlier prompt's failed turn, is no end; a
+  pass from before this launch isn't running; a running pass reads running
+  on the Board before git gave its run a HEAD. Known limits: a Stop hook that
+  keeps the turn going ends it at that Stop; an Esc leaves it running until
+  Claude reads idle at its prompt, about a minute, or until the next turn's
+  end when a prompt follows; a Skill call that fails reads running until its
+  turn ends; a subagent at work there for something else keeps it running
+  until it stops.
 - **Resume** is the sidebar's: an agent stopped on an error first, held back
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").

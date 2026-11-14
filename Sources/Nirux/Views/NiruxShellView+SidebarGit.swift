@@ -12,7 +12,7 @@ extension NiruxShellView {
         let parents = workspaceStore.activeParents(in: activeProfileID)
         let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
-        followReviewPasses(foregroundProcesses: foregroundProcesses, processTableRead: processTableRead)
+        followReviewPasses(snapshot: snapshot, foregroundProcesses: foregroundProcesses)
         // The user is there to read: Nirux in front, and nothing the
         // catch-up card counts as away (a shell that doesn't follow the
         // system, a test's, goes by the first).
@@ -82,14 +82,18 @@ extension NiruxShellView {
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }
 
-    /// A pass ends once its `claude` leaves the front of its column, or its
-    /// column closed (`WorkspaceState.followReviewPasses`). An empty
-    /// process table says nothing of who is in front.
-    private func followReviewPasses(foregroundProcesses: [ObjectIdentifier: ForegroundProcess], processTableRead: Bool) {
+    /// What the process table says of each running pass
+    /// (`WorkspaceState.followReviewPasses`): the process that sent its
+    /// event runs or exited (a Ctrl-Z leaves it there, a crash or a quit
+    /// doesn't); without one named, who is in front of its column. An empty
+    /// process table says nothing.
+    private func followReviewPasses(snapshot: ProcessSnapshot, foregroundProcesses: [ObjectIdentifier: ForegroundProcess]) {
         for workspace in workspaces where !workspace.reviewsRunning.isEmpty {
-            workspace.followReviewPasses { id in
-                guard let column = workspace.columns.first(where: { $0.id == id }) else { return .gone }
-                guard processTableRead, let foreground = foregroundProcesses[ObjectIdentifier(column)] else { return .unknown }
+            workspace.followReviewPasses { running in
+                guard let column = workspace.columns.first(where: { $0.id == running.column }) else { return .gone }
+                guard !snapshot.isEmpty else { return .unknown }
+                if let emitter = running.emitter { return snapshot.contains(emitter) ? .claude : .gone }
+                guard let foreground = foregroundProcesses[ObjectIdentifier(column)] else { return .gone }
                 return foreground.name == "claude" ? .claude : .other
             }
         }
@@ -393,6 +397,7 @@ extension NiruxShellView {
 
     func applyAgentHookEvents(_ events: [AgentHookCenter.AppliedEvent]) {
         let snapshot = ProcessSnapshot()
+        let now = Date().timeIntervalSince1970
         var changed = false
         for appliedEvent in events {
             let event = appliedEvent.event
@@ -411,10 +416,8 @@ extension NiruxShellView {
                 changed = true
             }
             // In the drain's order: a pass, then its turn's end, ends it.
-            appliedEvent.resolution.workspace.noteReviewPasses(
-                of: event, in: appliedEvent.resolution.column.id, now: Date().timeIntervalSince1970
-            )
-            recordReviewPasses(of: event, in: appliedEvent.resolution.workspace)
+            appliedEvent.resolution.workspace.noteReviewPasses(of: event, in: appliedEvent.resolution.column.id, now: now)
+            recordReviewPasses(of: event, in: appliedEvent.resolution.workspace, now: now)
         }
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
@@ -447,11 +450,9 @@ extension NiruxShellView {
     /// workspace's git context follows its focused column, and pauses while
     /// Nirux is in the background. An event replayed at launch is skipped, since the HEAD it
     /// ran on can't be known any more.
-    private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState) {
-        guard let passes = event.reviewPasses?.compactMap(ReviewPass.init(rawValue:)), !passes.isEmpty,
-              let cwd = event.cwd,
-              Date().timeIntervalSince1970 - event.timestamp < 60
-        else { return }
+    private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState, now: TimeInterval) {
+        let passes = event.passes
+        guard !passes.isEmpty, event.recordsReviewRun, let cwd = event.cwd, now - event.timestamp < 60 else { return }
         // Only the HEAD and its branch count here; a detached HEAD has none.
         GitDetect.contextAsync(at: cwd, startFolder: nil) { [weak self, weak workspace] result in
             guard case .observed(let context) = result, let head = context.identity.head,

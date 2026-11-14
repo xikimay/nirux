@@ -49,7 +49,7 @@ extension NiruxShellView {
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
                 gitRoot: workspace.gitContext.map { comparable($0.identity.repositoryRoot) },
-                reviewsInFlight: Set(workspace.reviewsRunning.keys),
+                reviewsInFlight: Set(workspace.reviewsRunning.map(\.pass)),
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970
                 }

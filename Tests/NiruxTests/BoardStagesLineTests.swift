@@ -106,6 +106,11 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(line(reviewing).phrase.text, "Review running", "its agent at rest between two of the review's turns")
         reviewing.reviewsInFlight = [.premortem]
         XCTAssertEqual(line(reviewing).station, .merge, "a pass that doesn't count holds nothing")
+        // Running before git gave its run a HEAD (a first run, a detached HEAD, another branch): running all the same.
+        var first = facts(pullRequest())
+        first.reviews = nil
+        first.reviewsInFlight = [.codeReview]
+        XCTAssertEqual(line(first).phrase.text, "Review running")
     }
 
     func testTheRulesNameTheReviewsThatCount() {
@@ -563,7 +568,7 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(reviewsSay(with(unknownHead) { $0.reviewsInFlight = [.codeReview] }, BoardStages.Rules()),
                        "Code review running\nPremortem ran", "running, whatever its commit")
         XCTAssertEqual(reviewsSay(with(facts(reviews: nil)) { $0.reviewsInFlight = [.codeReview] }, BoardStages.Rules()),
-                       "No code review yet", "a pass in flight is recorded as it starts: without a run, it didn't")
+                       "Code review running", "running before git gave its run a HEAD, or on another branch")
         var both = BoardStages.Rules()
         both.requiredReviews = [.codeReview, .codeStyleReview]
         XCTAssertEqual(reviewsSay(facts(), both), "Code review ran on this commit\nNo code style review yet")
