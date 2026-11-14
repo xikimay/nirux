@@ -176,9 +176,11 @@ extension ProjectBoard {
         /// Its open pull request's place in a stack (docs/design/pr-stacks.md).
         var stack: StackPlace?
 
-        /// The first workspace's title, else the branch, else the folder.
-        var name: String {
-            if let title = workspaces.first?.title { return title }
+        /// The first workspace's title, else the worktree's name.
+        var name: String { workspaces.first?.title ?? worktreeName }
+
+        /// The branch, else "detached HEAD (1a2b3c4)", else the folder's name.
+        var worktreeName: String {
             if let branch { return branch }
             if let detachedHead { return "detached HEAD (\(WorktreeCleanup.short(detachedHead)))" }
             let path = worktreePath ?? folder ?? ""

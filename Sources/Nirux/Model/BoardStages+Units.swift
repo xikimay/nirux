@@ -43,23 +43,28 @@ extension BoardStages {
         var withoutTask: [Unit]
         /// "Merged today", the newest first.
         var merged: [Merged]
-        /// "Other worktrees": folded, after the pull requests without a task.
+        /// "Other worktrees": folded, after the pull requests without a
+        /// task. Of a section of "Other workspaces", its entries.
         var otherWorktrees: [OtherWorktree] = []
     }
 
     /// A linked worktree of the repository with no workspace and no open
     /// pull request (a task closed since, a branch left): listed folded
-    /// under "Other worktrees", with what the table offered it.
+    /// under "Other worktrees", with what the table offered it. The Lead's
+    /// linked worktree is listed there too, with Focus; and a worktree of
+    /// another repository with workspaces of the space, under "Other
+    /// workspaces".
     struct OtherWorktree: Equatable, Sendable {
         /// Its top level, as git lists it.
         let path: String
-        /// Its branch, "detached HEAD (1a2b3c4)", or its folder's name.
+        /// Its branch, "detached HEAD (1a2b3c4)", or its folder's name;
+        /// "Lead · feat/notes"; a workspace's title under "Other workspaces".
         var title: String
-        /// Its merged pull request, as the table says it: "#41 merged".
+        /// Its pull request, as the table says it: "#41 merged".
         var pullRequest: String?
         /// That pull request's address, for its tooltip.
         var url: String?
-        /// Open, then Clean Up….
+        /// Open (or Focus), then Clean Up….
         var menu: [MenuItem]
     }
 
@@ -82,7 +87,7 @@ extension BoardStages {
         /// (`WorkspaceStore.activeParents`), by their facts' `id`.
         var parents: [String: String] = [:]
         var merged: [MergedFacts] = []
-        /// By title.
+        /// The Lead's first, then by title.
         var otherWorktrees: [OtherWorktree] = []
     }
 

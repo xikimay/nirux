@@ -72,14 +72,14 @@ final class BoardStagesFactsTests: XCTestCase {
         _ rows: [ProjectBoard.Row], tasks: [String] = ["task"], reading: BoardStages.TaskReading? = nil,
         readings: [String: BoardStages.TaskReading] = [:], parents: [String: String] = [:], required: [String] = [],
         queue: ProjectBoard.QueueState? = nil, merged: [ProjectBoard.PullRequest] = [], heads: [String: String] = [:],
-        readsPullRequests: Bool = true, baseBranch: String? = "main", cleaningUp: Set<String> = []
+        readsPullRequests: Bool = true, baseBranch: String? = "main", cleaningUp: Set<String> = [], lead: String? = nil
     ) -> BoardStages.SectionFacts {
         BoardStages.sectionFacts(
             BoardStages.RepositoryReading(
                 id: "widgets", rows: rows, readsPullRequests: readsPullRequests, requiredChecks: required, baseBranch: baseBranch,
                 queue: queue, merged: merged, heads: heads, cleaningUp: cleaningUp
             ),
-            tasks: tasks, readings: reading.map { ["task": $0] } ?? readings, parents: parents
+            tasks: tasks, readings: reading.map { ["task": $0] } ?? readings, parents: parents, lead: lead
         )
     }
 
@@ -183,7 +183,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(facts([detached]).lines[0].location, ["main checkout", "detached HEAD (aaaaaaa)", "/p/widgets"])
 
         XCTAssertTrue(facts([row(workspaces: ["task"], inactive: true)]).lines[0].isArchived)
-        // No rail where no pull request is read: a repository not on GitHub, a workspace in another repository or in none.
+        // No rail where no pull request is read: a repository not on GitHub, a workspace in no repository.
         XCTAssertEqual(facts([row(workspaces: ["task"])], readsPullRequests: false).lines.map(\.hasRepository), [false])
         let folder = row(nil, workspaces: ["notes"], group: .otherRepository, path: nil, folder: "/Users/me/Nirux Tasks/Notes")
         XCTAssertEqual(facts([row(workspaces: ["task"]), folder], tasks: ["task", "notes"]).lines.map(\.hasRepository), [true, false])
@@ -310,11 +310,15 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(read.pullRequest, BoardStages.PullRequest(number: 9, isMerged: true, base: "release", checks: .passed, url: url(9)),
                        "its address too")
         XCTAssertEqual(facts([row(workspaces: ["task"])], reading: detected).lines[0].pullRequest?.base, "main", "beyond the list: the base branch")
-        // In another repository's worktree, the number detected is that repository's: not looked up here.
+        // In a folder of no repository, the number detected is another repository's: not looked up here. In another
+        // repository's worktree, the task is no line (it is under Other workspaces).
         detected.gitRoot = "/p/gadgets.x"
+        let cloud = row("cloud", pullRequest: pullRequest(9, "cloud"), path: nil)
+        let folder = row(nil, workspaces: ["task"], group: .otherRepository, path: nil, folder: "/p/gadgets.x")
+        XCTAssertEqual(facts([folder, cloud], reading: detected).lines.map(\.pullRequest?.number), [nil, 9],
+                       "this repository's #9 keeps its own line")
         let foreign = row(workspaces: ["task"], group: .otherRepository, path: "/p/gadgets.x")
-        let mixed = facts([foreign, row("cloud", pullRequest: pullRequest(9, "cloud"), path: nil)], reading: detected)
-        XCTAssertEqual(mixed.lines.map(\.pullRequest?.number), [nil, 9], "this repository's #9 keeps its own line")
+        XCTAssertEqual(facts([foreign, cloud], reading: detected).lines.map(\.pullRequest?.number), [9])
 
         // Merged by the queue before GitHub's list says so: the open list's copy reads merged. Only that one, and only once merged.
         let rows = [
@@ -581,7 +585,7 @@ final class BoardStagesFactsTests: XCTestCase {
         let elsewhere = facts([row(workspaces: ["task"])] + rows.dropFirst(), tasks: ["task", "next"], reading: detected, queue: listed)
         XCTAssertEqual(elsewhere.lines.map(\.queue.order), [nil, 2, 3])
         detected.gitRoot = nil
-        let foreign = row(workspaces: ["task"], group: .otherRepository, path: "/p/gadgets.x")
+        let foreign = row(nil, workspaces: ["task"], group: .otherRepository, path: nil, folder: "/p/gadgets.x")
         XCTAssertEqual(facts([foreign] + rows.dropFirst(), tasks: ["task", "next"], reading: detected, queue: listed).lines.map(\.queue.order),
                        [nil, 2, 3], "another repository's #12")
         let shown = [row(workspaces: ["task"], pullRequest: pullRequest(15, "new")), row("old", pullRequest: pullRequest(12, "old"), path: nil)]
@@ -727,6 +731,72 @@ final class BoardStagesFactsTests: XCTestCase {
         """)
         XCTAssertEqual(BoardStages.section(section, order: .sidebar, now: 0, timeZone: TimeZone(identifier: "UTC")!).otherWorktrees,
                        section.otherWorktrees)
+    }
+
+    func testTheLeadsLinkedWorktreeIsListedFirstWithFocusAndCleanUp() {
+        let column = UUID()
+        let entry = { (path: String, title: String, focus: String, column: UUID?, blocked: String??) in
+            BoardStages.OtherWorktree(
+                path: path, title: "Lead · \(title)", pullRequest: nil,
+                menu: [.focus(workspaceID: focus, columnID: column)] + (blocked.map { [.cleanUp(path: path, blocked: $0)] } ?? [])
+            )
+        }
+        var notes = row("feat/lead-notes", workspaces: ["lead"], path: "/p/widgets.lead")
+        notes.agent = ProjectBoard.Agent(state: .working(duration: nil), workspaceID: "lead", columnID: column)
+        let rows = [notes, row("feat/aaa", group: .otherWorktree, path: "/p/widgets.aaa")]
+        let section = facts(rows, tasks: [], lead: "lead")
+        XCTAssertEqual(section.otherWorktrees.map(\.path), ["/p/widgets.lead", "/p/widgets.aaa"], "the Lead's first, whatever its title")
+        XCTAssertEqual(section.otherWorktrees.first, entry("/p/widgets.lead", "feat/lead-notes", "lead", column, .some(nil)),
+                       "Focus at its agent's column, Clean Up… as the table's row offered them")
+        XCTAssertEqual(section.lines, [], "the Lead is no task")
+        // An agent column with no agent in it: Focus on the workspace, as the table's.
+        var idle = notes
+        idle.agent.state = .none
+        XCTAssertEqual(facts([idle], tasks: [], lead: "lead").otherWorktrees.first?.menu.first, .focus(workspaceID: "lead", columnID: nil))
+        XCTAssertEqual(facts(rows, tasks: [], cleaningUp: ["/p/widgets.lead"], lead: "lead").otherWorktrees.first,
+                       entry("/p/widgets.lead", "feat/lead-notes", "lead", column, BoardStages.CleanUp.runningReason))
+        XCTAssertEqual(facts(rows, tasks: []).otherWorktrees.map(\.path), ["/p/widgets.aaa"], "a space without a Lead")
+        // With an open pull request: its entry says it, and the pull request is a line without a task (the Lead is no task).
+        let open = facts([row("feat/lead-fix", workspaces: ["lead"], pullRequest: pullRequest(61, "feat/lead-fix"), path: "/p/widgets.fix")],
+                         tasks: [], lead: "lead")
+        XCTAssertEqual(open.otherWorktrees.map(\.pullRequest), ["#61 open"], "as the table says it")
+        XCTAssertEqual(open.otherWorktrees.map(\.url), [url(61)])
+        XCTAssertEqual(open.lines.map(\.id), ["widgets#61"])
+
+        // Sharing its worktree with a task: the task's line, and the Lead's entry, at its own column only.
+        var shared = row("feat/shared", workspaces: ["task", "lead"], path: "/p/widgets.shared")
+        shared.agent = ProjectBoard.Agent(state: .waiting(.question(nil)), workspaceID: "task", columnID: column)
+        let both = facts([shared, row("feat/other", workspaces: ["other"], path: "/p/widgets.other")], tasks: ["task", "other"], lead: "lead")
+        XCTAssertEqual(both.lines.map(\.id), ["task", "other"])
+        XCTAssertEqual(both.otherWorktrees, [entry("/p/widgets.shared", "feat/shared", "lead", nil, .some(nil))])
+
+        // The main checkout, the Lead's usual place: the space header shows it. A detached HEAD's title as the others'.
+        XCTAssertEqual(facts([row("main", workspaces: ["lead"], group: .main, path: "/p/widgets")], tasks: [], lead: "lead").otherWorktrees, [])
+        var detached = row(nil, workspaces: ["lead"], path: "/p/widgets.detached")
+        detached = ProjectBoard.Row(
+            group: .active, worktreePath: detached.worktreePath, branch: nil, detachedHead: String(repeating: "1a", count: 20),
+            workspaces: detached.workspaces, pullRequest: nil, agent: ProjectBoard.Agent(), folder: nil, stack: nil
+        )
+        XCTAssertEqual(facts([detached], tasks: [], lead: "lead").otherWorktrees.map(\.title), ["Lead · detached HEAD (1a1a1a1)"])
+        let elsewhere = row("feat/site", workspaces: ["lead"], group: .otherRepository, path: "/p/site")
+        XCTAssertEqual(facts([elsewhere], tasks: [], lead: "lead").otherWorktrees, [], "another repository's worktree isn't this one's")
+    }
+
+    func testOtherWorkspacesAreTheWorktreesOfAnotherRepository() {
+        let column = UUID()
+        var other = row("feat/site", workspaces: ["site", "docs"], group: .otherRepository, path: "/p/site.feat")
+        other.agent = ProjectBoard.Agent(state: .waiting(.question(nil)), workspaceID: "docs", columnID: column)
+        var resting = row("main", workspaces: ["blog", "news"], group: .otherRepository, path: "/p/blog")
+        // An agent column the table wouldn't focus: no agent in it.
+        resting.agent = ProjectBoard.Agent(state: .none, workspaceID: "news", columnID: column)
+        let outside = row(nil, workspaces: ["notes"], group: .otherRepository, path: nil, folder: "/p/notes")
+        XCTAssertEqual(BoardStages.otherWorkspaces([row("feat/x", workspaces: ["task"]), other, resting, outside]), [
+            BoardStages.OtherWorktree(path: "/p/site.feat", title: "Docs +1", pullRequest: nil,
+                                      menu: [.focus(workspaceID: "docs", columnID: column)]),
+            BoardStages.OtherWorktree(path: "/p/blog", title: "Blog +1", pullRequest: nil, menu: [.focus(workspaceID: "blog", columnID: nil)])
+        ], "titled by the workspace Focus goes to, the most urgent agent there; a folder in no repository is none of them")
+        // Each task in one place: one in another repository's worktree is no line; one in no repository is.
+        XCTAssertEqual(facts([other, resting, outside], tasks: ["site", "docs", "blog", "news", "notes"]).lines.map(\.id), ["notes"])
     }
 
     func testTheMergedListGivesTheDaysMergesTheirTitleAndTime() {

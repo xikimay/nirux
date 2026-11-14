@@ -24,7 +24,8 @@ final class BoardStagesView: NSView {
         var lead: Lead?
     }
 
-    /// One repository of the space, or its tasks without one.
+    /// One repository of the space, or its tasks without one; or the
+    /// workspaces in another repository (`Kind.otherWorkspaces`).
     struct Section: Equatable {
         let id: String
         /// "nirux"; "No repository".
@@ -38,6 +39,21 @@ final class BoardStagesView: NSView {
         var queue: SectionQueue?
         /// Its header's menu.
         var menu: [SectionMenuItem] = []
+        var kind = Kind.repository
+
+        /// The id of the section of "Other workspaces": never a
+        /// repository's ("git:…", "folder:…", "legacy").
+        static let otherWorkspacesID = "other-workspaces"
+
+        enum Kind: Equatable {
+            /// A repository's header, its lines, its folds, its merges.
+            case repository
+            /// One fold in a header's place, "Other workspaces", of its
+            /// `lines.otherWorktrees` (workspaces in another repository,
+            /// until the Board has a section per repository of the space);
+            /// nothing else of it is drawn.
+            case otherWorkspaces
+        }
     }
 
     /// A button of the queue, or why it does nothing.
@@ -128,6 +144,8 @@ final class BoardStagesView: NSView {
     var onSectionMenu: ((_ section: String, SectionMenuItem) -> Void)?
     /// Board Settings… was pressed under a message.
     var onBoardSettings: (() -> Void)?
+    /// The Lead was clicked in the space's header.
+    var onLead: (() -> Void)?
     /// A line was clicked, or a "Merged today" entry with a task: its id.
     var onOpen: ((String) -> Void)?
     /// A line's Merge station was clicked where that changes the queue's
@@ -140,8 +158,9 @@ final class BoardStagesView: NSView {
     /// An item of a line's menu was chosen: its section's id, the line's,
     /// and the item.
     var onMenu: ((_ section: String, _ line: String, BoardStages.MenuItem) -> Void)?
-    /// Open or Clean Up… was chosen on one of a section's other worktrees:
-    /// the section's id and the item.
+    /// Open, Focus or Clean Up… was chosen on one of a section's other
+    /// worktrees, or Focus under "Other workspaces": the section's id
+    /// (`Section.otherWorkspacesID` there, no repository's) and the item.
     var onWorktree: ((_ section: String, BoardStages.MenuItem) -> Void)?
 
     /// Where the pointer is, in the window; nil where the Board doesn't
@@ -213,6 +232,11 @@ final class BoardStagesView: NSView {
     let summaryLabel = NSTextField(labelWithString: "")
     let leadDot = NSView()
     let leadLabel = NSTextField(labelWithString: "")
+    /// Over the Lead's dot and line: a click focuses the Lead.
+    let leadButton = BoardStagesButton(title: "", target: nil, action: nil)
+    /// The space whose Lead the button shows, as laid out: another space's
+    /// Lead is another target.
+    private var leadSpace = ""
     let orderSwitch = NSSegmentedControl(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
     /// "Task", "Now", "Pull request": over their columns.
     let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
@@ -248,6 +272,8 @@ final class BoardStagesView: NSView {
         case line(BoardStagesLineView)
         case caption(NSTextField)
         case fold(NSButton)
+        /// "Other workspaces", in a repository header's place.
+        case sectionFold(NSButton)
         case worktree(BoardStagesWorktreeView)
         case merged(BoardStagesMergedView)
         case message(BoardStagesMessageView)
@@ -258,6 +284,7 @@ final class BoardStagesView: NSView {
             case .line(let view): return view
             case .caption(let view): return view
             case .fold(let view): return view
+            case .sectionFold(let view): return view
             case .worktree(let view): return view
             case .merged(let view): return view
             case .message(let view): return view
@@ -306,6 +333,14 @@ final class BoardStagesView: NSView {
         scrollView.onScroll = { [weak self] in self?.pointerMoved(to: nil) }
         messageView.aim = aim
         messageView.onSettings = { [weak self] in self?.onBoardSettings?() }
+        leadButton.isBordered = false
+        leadButton.setButtonType(.momentaryChange)
+        leadButton.target = self
+        leadButton.action = #selector(leadClicked)
+        leadButton.aim = aim
+        leadButton.setAccessibilityHelp("Focus the Lead")
+        // The button says the Lead's line, whole even where the label cuts it. (A label speaks through its cell.)
+        leadLabel.cell?.setAccessibilityElement(false)
         aim.onUse = { [weak self] in self?.pointerUsed() }
         // The lines move under a still pointer when the list scrolls, and
         // an app that isn't active doesn't hear the pointer leave.
@@ -317,7 +352,7 @@ final class BoardStagesView: NSView {
         for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification] {
             center.addObserver(self, selector: #selector(refreshHover), name: name, object: nil)
         }
-        ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
+        ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, leadButton, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
             .forEach(addSubview)
     }
 
@@ -343,6 +378,8 @@ final class BoardStagesView: NSView {
         leadLabel.stringValue = content.header.lead?.text ?? ""
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
+        leadButton.toolTip = content.header.lead?.text
+        leadButton.setAccessibilityLabel(content.header.lead?.text)
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
         let aimedBefore = aimed()
         let isOver = pointerIsOver(pointerLocation())
@@ -389,10 +426,12 @@ final class BoardStagesView: NSView {
         showTimes()
         layoutContent()
         // Under a pointer that rests, or where something showed at once, what is under it may have changed: it waits for
-        // the pointer to move.
+        // the pointer to move. So does a Lead come under a pointer still aiming (the header isn't held), and only it.
         if isPointerInside, !isAiming || isShownAtOnce {
             layoutSubtreeIfNeeded()
             goStale(ifChangedFrom: aimedBefore)
+        } else if isPointerInside, let now = aimed(), now.hasPrefix("lead "), now != aimedBefore {
+            setStale(true)
         }
         if isHeld { settleOnceStill() }
     }
@@ -572,16 +611,20 @@ final class BoardStagesView: NSView {
         for section in sections {
             let id = section.id
             sectionID = id
-            let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
-            header.show(title: section.title, detail: section.detail, status: section.status, queue: section.queue, menu: section.menu)
-            header.onStart = { [weak self] in self?.onStart?(id) }
-            header.onStop = { [weak self] in self?.onStop?(id) }
-            header.onMenu = { [weak self] item in self?.onSectionMenu?(id, item) }
-            header.aim = aim
-            sectionHeaders[id] = header
-            items.append(.sectionHeader(header))
-            section.lines.units.forEach(add)
-            let withoutTask = section.lines.withoutTask
+            // Other workspaces: its fold alone, at a section's level.
+            let isOtherWorkspaces = section.kind == .otherWorkspaces
+            if !isOtherWorkspaces {
+                let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
+                header.show(title: section.title, detail: section.detail, status: section.status, queue: section.queue, menu: section.menu)
+                header.onStart = { [weak self] in self?.onStart?(id) }
+                header.onStop = { [weak self] in self?.onStop?(id) }
+                header.onMenu = { [weak self] item in self?.onSectionMenu?(id, item) }
+                header.aim = aim
+                sectionHeaders[id] = header
+                items.append(.sectionHeader(header))
+            }
+            if !isOtherWorkspaces { section.lines.units.forEach(add) }
+            let withoutTask = isOtherWorkspaces ? [] : section.lines.withoutTask
             if !withoutTask.isEmpty {
                 let isUnfolded = unfolded.contains(id)
                 let count = withoutTask.reduce(0) { $0 + $1.lines.count }
@@ -600,14 +643,17 @@ final class BoardStagesView: NSView {
             if !others.isEmpty {
                 let isUnfolded = unfoldedWorktrees.contains(id)
                 let fold = keptWorktreeFolds.removeValue(forKey: id) ?? makeFold(section: id, action: #selector(worktreesFoldClicked(_:)))
-                fold.attributedTitle = NSAttributedString(
-                    string: "\(isUnfolded ? "▾" : "▸") Other worktrees · \(others.count)",
-                    attributes: [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary]
-                )
-                fold.setAccessibilityLabel("Other worktrees, \(others.count)")
+                let foldTitle = isOtherWorkspaces ? "Other workspaces" : "Other worktrees"
+                fold.attributedTitle = isOtherWorkspaces
+                    ? Self.sectionFoldTitle(foldTitle, count: others.count, isUnfolded: isUnfolded)
+                    : NSAttributedString(
+                        string: "\(isUnfolded ? "▾" : "▸") \(foldTitle) · \(others.count)",
+                        attributes: [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary]
+                    )
+                fold.setAccessibilityLabel("\(foldTitle), \(others.count)")
                 fold.setAccessibilityExpanded(isUnfolded)
                 worktreeFolds[id] = fold
-                items.append(.fold(fold))
+                items.append(isOtherWorkspaces ? .sectionFold(fold) : .fold(fold))
                 for worktree in isUnfolded ? others : [] {
                     let view = keptWorktrees.removeValue(forKey: worktree.path) ?? BoardStagesWorktreeView()
                     view.show(worktree, isDeparted: departed.contains(worktree.path))
@@ -617,7 +663,7 @@ final class BoardStagesView: NSView {
                     items.append(.worktree(view))
                 }
             }
-            if !section.lines.merged.isEmpty {
+            if !isOtherWorkspaces, !section.lines.merged.isEmpty {
                 let merged = keptMerged.removeValue(forKey: id) ?? BoardStagesMergedView()
                 merged.show(section.lines.merged, now: content?.now ?? 0, isUnfolded: unfoldedMerged.contains(id), keepsOrder: isHolding)
                 merged.onOpen = { [weak self] line in self?.onOpen?(line) }
@@ -632,6 +678,17 @@ final class BoardStagesView: NSView {
         // not taken out and put back.
         documentView.subviews = items.map(\.view)
         self.items = items
+    }
+
+    /// "▸ Other workspaces · 2", in a repository's title's type: a section
+    /// of its own, not a fold of the one above.
+    private static func sectionFoldTitle(_ title: String, count: Int, isUnfolded: Bool) -> NSAttributedString {
+        let made = NSMutableAttributedString(
+            string: "\(isUnfolded ? "▾" : "▸") ", attributes: [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary]
+        )
+        made.append(NSAttributedString(string: title, attributes: [.font: Theme.Font.bodyEmphasized, .foregroundColor: Theme.Color.textPrimary]))
+        made.append(NSAttributedString(string: " · \(count)", attributes: [.font: Theme.Font.body, .foregroundColor: Theme.Color.textTertiary]))
+        return made
     }
 
     private static func makeCaption() -> NSTextField {
@@ -827,6 +884,9 @@ final class BoardStagesView: NSView {
                 caption.frame = NSRect(x: pad, y: y + 9, width: max(0, listWidth - 2 * pad), height: 15)
             case .fold(let fold):
                 fold.frame = NSRect(x: pad, y: y + 7, width: max(0, listWidth - 2 * pad), height: 18)
+            case .sectionFold(let fold):
+                // On a repository's title's line.
+                fold.frame = NSRect(x: pad, y: y + Metrics.sectionHeaderHeight - 24, width: max(0, listWidth - 2 * pad), height: 20)
             case .worktree(let worktree):
                 worktree.frame = NSRect(x: 0, y: y, width: listWidth, height: Metrics.captionHeight)
             case .merged(let merged):
@@ -843,7 +903,7 @@ final class BoardStagesView: NSView {
     /// How far down `item` takes the next one, at `width`.
     private func advance(of item: Item, width: CGFloat) -> CGFloat {
         switch item {
-        case .sectionHeader: Metrics.sectionHeaderHeight
+        case .sectionHeader, .sectionFold: Metrics.sectionHeaderHeight
         case .line: Metrics.lineHeight
         case .caption, .fold, .worktree: Metrics.captionHeight
         case .merged(let merged): merged.height(for: width) + 10
@@ -890,6 +950,12 @@ final class BoardStagesView: NSView {
             leadDot.frame = NSRect(x: right - Metrics.dot, y: midY - Metrics.dot / 2, width: Metrics.dot, height: Metrics.dot)
             right = leadDot.frame.minX - 12
         }
+        // The dot and the line, as one target, as tall as the line.
+        leadButton.isHidden = !hasLead
+        let leadEnd = showsLeadLine ? leadLabel.frame.maxX : leadDot.frame.maxX
+        leadButton.frame = hasLead ? NSRect(x: leadDot.frame.minX - 4, y: midY - 10, width: leadEnd - leadDot.frame.minX + 8, height: 20) : .zero
+        leadSpace = content?.header.name ?? ""
+        leadHandChanged()
         // What the space holds, where 60 pt are left for it: never beside
         // a Lead's line that is cut, nor beside its dot alone.
         let summaryX = nameLabel.frame.maxX + 12
@@ -979,6 +1045,7 @@ final class BoardStagesView: NSView {
         guard aim.isStale != isStale else { return }
         aim.isStale = isStale
         // Hands, and a lit station, only where a click acts.
+        leadHandChanged()
         lineViews.forEach { $0.handsChanged() }
         mergedViews.values.forEach { $0.entries.forEach { $0.handsChanged() } }
         refreshHover()
@@ -998,6 +1065,7 @@ final class BoardStagesView: NSView {
         if let foot = runningQueueViews.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
             return "queue \(foot.queue.id) \(String(describing: foot.queue.stop))"
         }
+        if !leadButton.isHidden, leadButton.frame.contains(point) { return "lead \(leadSpace)" }
         guard scrollView.frame.contains(point) else { return nil }
         func under(_ view: NSView) -> NSPoint? {
             let local = view.convert(location, from: nil)
@@ -1111,6 +1179,19 @@ final class BoardStagesView: NSView {
         hover(at: isHiddenOrHasHiddenAncestor ? nil : pointerLocation())
     }
 
+    /// A hand over the Lead where a click there acts.
+    var leadHand: NSRect? { leadButton.isHidden || aim.isStale ? nil : leadButton.frame }
+    private var registeredLeadHand: NSRect?
+
+    private func leadHandChanged() {
+        if leadHand != registeredLeadHand { window?.invalidateCursorRects(for: self) }
+    }
+
+    override func resetCursorRects() {
+        registeredLeadHand = leadHand
+        if let leadHand { addCursorRect(leadHand, cursor: .pointingHand) }
+    }
+
     /// The lines moved under the pointer, and under their hands.
     @objc private func listScrolled() {
         window?.invalidateCursorRects(for: documentView)
@@ -1118,6 +1199,12 @@ final class BoardStagesView: NSView {
     }
 
     // MARK: - Clicks
+
+    /// Only while the Board still shows a Lead: one gone during the press is no target.
+    @objc private func leadClicked() {
+        guard content?.header.lead != nil, !leadButton.isHidden else { return }
+        onLead?()
+    }
 
     @objc private func orderChosen() {
         let asked: BoardStages.Order = orderSwitch.selectedSegment == 0 ? .sidebar : .progress
@@ -1467,8 +1554,9 @@ final class BoardStagesScrollView: NSScrollView {
 }
 
 /// A worktree under "Other worktrees": its title, its pull request, its
-/// path, then at the right Open and Clean Up…, also on a right click. One
-/// the content has no more, held under the pointer, is faded and does
+/// path, then at the right Open (Focus for the Lead's) and Clean Up…, also
+/// on a right click; or a worktree under "Other workspaces", with Focus.
+/// One the content has no more, held under the pointer, is faded and does
 /// nothing, for VoiceOver too.
 @MainActor
 final class BoardStagesWorktreeView: NSView {
@@ -1523,7 +1611,7 @@ final class BoardStagesWorktreeView: NSView {
     private func item(_ kind: Kind) -> BoardStages.MenuItem? {
         worktree?.menu.first { item in
             switch (item, kind) {
-            case (.openWorktree, .open), (.cleanUp, .cleanUp): return true
+            case (.openWorktree, .open), (.focus, .open), (.cleanUp, .cleanUp): return true
             default: return false
             }
         }
@@ -1536,7 +1624,9 @@ final class BoardStagesWorktreeView: NSView {
         pullRequestLabel.stringValue = worktree.pullRequest ?? ""
         pathLabel.stringValue = (worktree.path as NSString).abbreviatingWithTildeInPath
         let cleanUp = item(.cleanUp)
-        Self.style(openButton, title: "Open", acts: !isDeparted)
+        // Open, or Focus where a workspace is there (the Lead's, another repository's).
+        let open = item(.open)?.title ?? "Open"
+        Self.style(openButton, title: open, acts: !isDeparted)
         Self.style(cleanUpButton, title: cleanUp?.blocked == nil ? "Clean Up…" : BoardStages.CleanUp.runningWords,
                    acts: !isDeparted && cleanUp?.blocked == nil, alignment: .right)
         // A departed one says nothing it could do, nor anything at all to VoiceOver.
@@ -1548,7 +1638,7 @@ final class BoardStagesWorktreeView: NSView {
             view.setAccessibilityElement(!isDeparted)
         }
         setAccessibilityLabel(([worktree.title] + (worktree.pullRequest.map { [$0] } ?? [])).joined(separator: ", "))
-        openButton.setAccessibilityLabel("Open \(worktree.title)")
+        openButton.setAccessibilityLabel("\(open) \(worktree.title)")
         cleanUpButton.setAccessibilityLabel("\(cleanUpButton.title) \(worktree.title)")
         alphaValue = isDeparted ? 0.4 : 1
         needsLayout = true
@@ -1587,8 +1677,12 @@ final class BoardStagesWorktreeView: NSView {
         let title = ColumnHeaderView.textWidth(titleLabel)
         let openWidth = item(.open) == nil ? 0 : ceil(openButton.fittingSize.width)
         var right = bounds.width - pad
-        cleanUpButton.isHidden = item(.cleanUp) == nil || right - cleanUpRoom - 12 - left < min(title, 40)
-        if !cleanUpButton.isHidden {
+        // Clean Up…'s room is kept where it fits, offered or not, so Open and Focus line up from one entry to the next;
+        // not where it would cost an entry without Clean Up… its Focus.
+        let fitsCleanUp = right - cleanUpRoom - 12 - left >= min(title, 40)
+        let keepsRoom = fitsCleanUp && (item(.cleanUp) != nil || right - cleanUpRoom - 12 - openWidth - 12 - left >= min(title, 80))
+        cleanUpButton.isHidden = item(.cleanUp) == nil || !fitsCleanUp
+        if keepsRoom {
             cleanUpButton.frame = NSRect(x: right - cleanUpRoom, y: (bounds.height - 18) / 2, width: cleanUpRoom, height: 18)
             right = cleanUpButton.frame.minX - 12
         }

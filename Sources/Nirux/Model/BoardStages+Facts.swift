@@ -61,13 +61,20 @@ extension BoardStages {
     /// - An open pull request no task's line shows is a pull request
     ///   without a task, after the tasks, in the rows' order, once.
     /// - A main checkout or another worktree with neither is no line.
+    /// - A task in another repository's worktree is no line: it is under
+    ///   "Other workspaces" (`otherWorkspaces`). One in no repository (a
+    ///   folder) is a line without a rail: those rows are the "No
+    ///   repository" section's.
     /// `parents` gives each sub-task's workspace id the id of the one it
     /// is listed under in the sidebar (`WorkspaceStore.activeParents`).
+    /// `lead` is the space's Lead's workspace id: its worktree, when it is
+    /// a linked one, is listed first under "Other worktrees", with Focus.
     static func sectionFacts(
-        _ repository: RepositoryReading, tasks: [String], readings: [String: TaskReading], parents: [String: String] = [:]
+        _ repository: RepositoryReading, tasks: [String], readings: [String: TaskReading], parents: [String: String] = [:],
+        lead: String? = nil
     ) -> SectionFacts {
         var places: [String: (row: ProjectBoard.Row, workspace: ProjectBoard.WorkspaceRef)] = [:]
-        for row in repository.rows {
+        for row in repository.rows where !isInOtherRepository(row) {
             for workspace in row.workspaces { places[workspace.id] = (row, workspace) }
         }
         // Merged, as GitHub's lists say; and with what the tasks know of
@@ -108,9 +115,61 @@ extension BoardStages {
                 guard pullRequest.state == "MERGED", let mergedAt = pullRequest.mergedAt else { return nil }
                 return MergedFacts(number: pullRequest.number, title: pullRequest.title, mergedAt: mergedAt.timeIntervalSince1970)
             },
-            otherWorktrees: repository.rows.compactMap { otherWorktree($0, in: repository) }
-                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            otherWorktrees: (lead.map { lead in repository.rows.compactMap { leadWorktree($0, lead: lead, in: repository) } } ?? [])
+                + repository.rows.compactMap { otherWorktree($0, in: repository) }
+                    .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         )
+    }
+
+    /// The Lead's worktree when it is a linked one (the main checkout is
+    /// the Lead's usual place, which the space header shows): "Lead · " and
+    /// the worktree's name, its pull request (an open one is also a line
+    /// without a task: the Lead is no task), with Focus and Clean Up…, as
+    /// the table's row of the Lead offered them.
+    private static func leadWorktree(_ row: ProjectBoard.Row, lead: String, in repository: RepositoryReading) -> OtherWorktree? {
+        guard row.group != .main, row.group != .otherRepository, let path = row.worktreePath,
+              row.workspaces.contains(where: { $0.id == lead })
+        else { return nil }
+        // A linked worktree: the clean-up may delete it. Its confirmation names the agents it would end, the Lead's too.
+        let menu: [MenuItem] = [
+            .focus(workspaceID: lead, columnID: column(of: lead, in: row)),
+            .cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil)
+        ]
+        return OtherWorktree(
+            path: path, title: "Lead · \(row.worktreeName)",
+            pullRequest: row.pullRequest.map { ProjectBoard.pullRequestText($0, baseBranch: repository.baseBranch) },
+            url: row.pullRequest?.url, menu: menu
+        )
+    }
+
+    /// A worktree of another repository with workspaces of the space: its
+    /// tasks are "Other workspaces", no section's lines.
+    private static func isInOtherRepository(_ row: ProjectBoard.Row) -> Bool {
+        row.group == .otherRepository && row.worktreePath != nil
+    }
+
+    /// "Other workspaces": each worktree of another repository with
+    /// workspaces of the space, until the Board has a section per
+    /// repository of the space. Its folder, and Focus on the most urgent
+    /// agent there, as the table's row did, titled by the workspace it
+    /// focuses ("Docs +1"). A workspace in no repository is none of these:
+    /// its line is under "No repository".
+    static func otherWorkspaces(_ rows: [ProjectBoard.Row]) -> [OtherWorktree] {
+        rows.compactMap { row in
+            guard isInOtherRepository(row), let path = row.worktreePath, let first = row.workspaces.first else { return nil }
+            let workspaceID = row.agent.state != .none ? row.agent.workspaceID ?? first.id : first.id
+            let focused = row.workspaces.first { $0.id == workspaceID } ?? first
+            let more = row.workspaces.count > 1 ? " +\(row.workspaces.count - 1)" : ""
+            return OtherWorktree(
+                path: path, title: focused.title + more, pullRequest: nil,
+                menu: [.focus(workspaceID: focused.id, columnID: column(of: focused.id, in: row))]
+            )
+        }
+    }
+
+    /// The row's most urgent agent column, when it is that workspace's.
+    private static func column(of workspaceID: String, in row: ProjectBoard.Row) -> UUID? {
+        row.agent.state != .none && row.agent.workspaceID == workspaceID ? row.agent.columnID : nil
     }
 
     /// A worktree the table listed under "Other worktrees" (a linked one,
@@ -120,7 +179,7 @@ extension BoardStages {
     private static func otherWorktree(_ row: ProjectBoard.Row, in repository: RepositoryReading) -> OtherWorktree? {
         guard row.group == .otherWorktree, let path = row.worktreePath else { return nil }
         let folder = (path as NSString).lastPathComponent
-        let title = row.branch ?? row.detachedHead.map { "detached HEAD (\(WorktreeCleanup.short($0)))" } ?? folder
+        let title = row.worktreeName
         let menu: [MenuItem] = [
             .openWorktree(path: path, title: row.branch ?? folder),
             .cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil)
@@ -148,8 +207,8 @@ extension BoardStages {
     ) -> Facts {
         var facts = Facts(id: id, title: workspace.title)
         facts.location = location(of: row)
-        // A workspace in another repository, or in none, has no rail: no
-        // pull request is read there, and none of this one's is its own.
+        // A workspace in no repository (a folder) has no rail: no pull
+        // request is read there, and none of this one's is its own.
         facts.hasRepository = repository.readsPullRequests && row.group != .otherRepository
         facts.isArchived = workspace.isInactive
         facts.activity = reading.activity

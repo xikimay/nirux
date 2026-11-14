@@ -172,6 +172,9 @@ extension BoardStages {
         case cleanUp(path: String, blocked: String?)
         /// A shell in a worktree where no workspace is open.
         case openWorktree(path: String, title: String)
+        /// The workspace, at that agent column when one is named: the
+        /// Lead's under "Other worktrees", one under "Other workspaces".
+        case focus(workspaceID: String, columnID: UUID?)
 
         var title: String {
             switch self {
@@ -181,6 +184,7 @@ extension BoardStages {
             case .resume: return "Resume"
             case .cleanUp: return "Clean Up…"
             case .openWorktree: return "Open"
+            case .focus: return "Focus"
             }
         }
 
@@ -190,7 +194,7 @@ extension BoardStages {
             case .queue(let offer): return offer.blocked
             case .retarget(_, let blocked), .cleanUp(_, let blocked): return blocked
             case .resume(let resume): return resume.blocked
-            case .openPullRequest, .openWorktree: return nil
+            case .openPullRequest, .openWorktree, .focus: return nil
             }
         }
     }
