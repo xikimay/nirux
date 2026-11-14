@@ -37,7 +37,8 @@ extension MergeQueueController {
                 let worktrees = inspection.worktrees.map(\.path)
                 reading.candidates[index].local = MergeQueue.LocalState(
                     busyAgents: worktrees.isEmpty ? [] : self.local.busyAgents(worktrees, inspection.allWorktreePaths),
-                    worktrees: inspection.worktrees
+                    worktrees: inspection.worktrees,
+                    missingReviews: worktrees.isEmpty ? [] : self.local.missingReviews(worktrees, inspection.allWorktreePaths)
                 )
             }
             completion(reading)

@@ -404,6 +404,10 @@ extension MergeQueue {
         /// another workspace's shell inside one: "claude working in “api”".
         var busyAgents: [String] = []
         var worktrees: [LocalWorktree] = []
+        /// The review passes the Board asks for that never ran in a task of
+        /// its worktrees, by name: "Code review". None where its task isn't
+        /// here: the Board's Reviews station has nothing to say of it either.
+        var missingReviews: [String] = []
     }
 
     struct LocalWorktree: Equatable, Sendable {

@@ -793,7 +793,11 @@ pull request.
   PRs that can't join are listed apart, with the reason, and left out: draft,
   fork, conflict, agent working or waiting on a dialog, unpushed commits or
   tracked changes in its worktree. A PR that changes `.github/workflows/` can
-  join, with a warning: its checks ran its own version of the workflows.
+  join, with a warning: its checks ran its own version of the workflows. So
+  can one whose task here ran no code review on any commit (what the Board's
+  Reviews station counts), with "No code review yet" first among its
+  warnings: one click on the Board's Merge station queues it. A PR without a
+  task here says nothing of reviews, as the Board.
 - **No post-merge workflow by accident.** The queue refuses to start until the
   config names one, or says `"none"`.
 - **A failed last post-merge run** on the base branch shows as a warning at the

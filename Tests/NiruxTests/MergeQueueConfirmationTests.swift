@@ -155,6 +155,39 @@ final class MergeQueueConfirmationTests: XCTestCase {
         ])
     }
 
+    func testAPullRequestWhoseTaskRanNoCodeReviewSaysSoFirst() {
+        let missing = { (passes: [String]) in MergeQueue.LocalState(missingReviews: passes) }
+        let items = MergeQueue.confirmation(reading([
+            candidate(1, head: a, local: missing(["Code review"])),
+            candidate(2, head: a, files: [".github/workflows/tests.yml"], local: missing(["Code review", "Premortem"])),
+            candidate(3, head: a),
+        ])).items
+        XCTAssertEqual(items.map(\.entry.number), [1, 2, 3], "it joins: the sheet says it, the user decides")
+        XCTAssertEqual(items[0].warnings, ["No code review yet: none ran in its task."])
+        XCTAssertEqual(items[1].warnings, [
+            "No code review or premortem yet: none ran in its task.",
+            "It changes .github/workflows/: its checks ran its own version of the workflows.",
+        ])
+        XCTAssertEqual(items[2].warnings, [])
+    }
+
+    func testTheMissingReviewsAreThoseNoTaskInsideTheWorktreesRan() {
+        let worktrees = ["/code/widgets-fix"]
+        let all = ["/code/widgets", "/code/widgets-fix", "/code/widgets-fix/nested"]
+        let missing = { (tasks: [(cwd: String, ran: Set<ReviewPass>)], required: Set<ReviewPass>) in
+            MergeQueue.missingReviews(in: worktrees, allWorktrees: all, tasks: tasks, required: required)
+        }
+        // No task in its worktree: nothing to say, as the Board's Reviews station.
+        XCTAssertEqual(missing([("/code/widgets", [])], [.codeReview]), [])
+        XCTAssertEqual(missing([("/code/widgets-fix/nested", [])], [.codeReview]), [], "another worktree inside it isn't it")
+        // A task there that ran none; one that ran it, on any commit, in any of its tasks.
+        XCTAssertEqual(missing([("/code/widgets-fix", [.adversarial])], [.codeReview]), ["Code review"])
+        XCTAssertEqual(missing([("/code/widgets-fix/Sources", []), ("/code/widgets-fix", [.codeReview])], [.codeReview]), [])
+        XCTAssertEqual(missing([("/code/widgets-fix", [.premortem])], [.premortem, .codeReview]), ["Code review"], "in the badges' order")
+        XCTAssertEqual(missing([("/code/widgets-fix", [])], [.premortem, .codeReview]), ["Code review", "Premortem"])
+        XCTAssertEqual(missing([("/code/widgets-fix", [])], []), [], "a space that asks for none")
+    }
+
     func testUnreadChecksFilesOrComparisonAreSaidButDoNotLeaveThePullRequestOut() {
         var unread = candidate(1, head: a)
         unread.checks = nil

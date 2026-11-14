@@ -28,6 +28,9 @@ extension NiruxShellView {
                 folders: { [weak self] in self?.mergeQueueFolders(of: projectID) ?? [] },
                 busyAgents: { [weak self] worktrees, allWorktrees in
                     self?.mergeQueueBusyAgents(in: worktrees, allWorktrees: allWorktrees) ?? []
+                },
+                missingReviews: { [weak self] worktrees, allWorktrees in
+                    self?.mergeQueueMissingReviews(in: worktrees, allWorktrees: allWorktrees) ?? []
                 }
             ),
             lockFolder: mergeQueueLockFolder
@@ -84,6 +87,15 @@ extension NiruxShellView {
             }
         }
         return busy
+    }
+
+    /// The review passes the Board asks for (`BoardStages.Rules`) that never
+    /// ran in the workspaces open in these worktrees (paths comparable), on
+    /// any commit, as its Reviews station counts them; none where no
+    /// workspace is open there.
+    func mergeQueueMissingReviews(in worktrees: [String], allWorktrees: [String]) -> [String] {
+        let tasks = workspaces.filter { !$0.isClosing }.map { (cwd: Self.comparablePath($0.cwd), ran: Set($0.reviewRuns.keys)) }
+        return MergeQueue.missingReviews(in: worktrees, allWorktrees: allWorktrees, tasks: tasks, required: BoardStages.Rules().requiredReviews)
     }
 
     /// Queues running in this Nirux, in sidebar order of their projects.

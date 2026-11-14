@@ -351,6 +351,11 @@ final class MergeQueueBoardTests: XCTestCase {
             XCTAssertTrue(Thread.isMainThread)
             return []
         }
+        var reviewsAsked: [[String]] = []
+        queue.local.missingReviews = { worktrees, _ in
+            reviewsAsked.append(worktrees)
+            return ["Code review"]
+        }
         queue.local.inspect = { _, branch, _, _, _ in
             .success(MergeQueue.LocalInspection(
                 worktrees: [MergeQueue.LocalWorktree(path: "/tmp/\(branch)", problem: nil)], allWorktreePaths: []
@@ -370,6 +375,8 @@ final class MergeQueueBoardTests: XCTestCase {
         XCTAssertEqual(confirmation.entries.map(\.number), [1])
         XCTAssertEqual(confirmation.excluded.map(\.reason), ["It is a draft."])
         XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits: the queue merges main into it first."])
+        XCTAssertEqual(reviewsAsked, [["/tmp/feat/1"]])
+        XCTAssertEqual(confirmation.items.first?.warnings, ["No code review yet: none ran in its task."])
         let reads = client.reads
         XCTAssertEqual(Array(reads.prefix(4)), [.auth, .rateLimit, .baseMergeQueue, .baseRuns], "the queue's own reads first")
         XCTAssertFalse(reads.contains(.checks(MQ.sha("b"))), "a draft is left out: its checks aren’t read")

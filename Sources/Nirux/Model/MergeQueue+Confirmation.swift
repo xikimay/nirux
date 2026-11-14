@@ -223,13 +223,18 @@ extension MergeQueue {
             return leftOut(local.busyAgents.joined(separator: "; ") + ": wait until it is back at its prompt.")
         }
         if let reason = local.worktrees.lazy.compactMap(localProblem).first { return leftOut(reason) }
+        // One click on a Merge station can queue it: the sheet says what the Board's Reviews station says.
+        let unreviewed = local.missingReviews.isEmpty ? [] : [
+            "No \(local.missingReviews.map { $0.lowercased() }.joined(separator: " or ")) yet: none ran in its task."
+        ]
 
         var item = Confirmation.Item(
             entry: entry,
             title: title,
             url: pullRequest.url,
             checks: candidate.checks.map { checksText($0, required: settings.requiredChecks) }
-                ?? "checks unknown" + (candidate.checksError.map { ": \($0)" } ?? "")
+                ?? "checks unknown" + (candidate.checksError.map { ": \($0)" } ?? ""),
+            warnings: unreviewed
         )
         if case .some(.some(let comparison)) = candidate.comparison, comparison.behindBy > 0 {
             item.notes.append("Behind \(settings.baseBranch) by \(comparison.behindBy) "
@@ -269,6 +274,18 @@ extension MergeQueue {
                 + (candidate.detailsError.map { " (\($0))" } ?? "") + ": check .github/workflows/ yourself.")
         }
         return .joins(item)
+    }
+
+    /// The `required` review passes that ran in none of the tasks inside
+    /// these worktrees, on any commit, by name in the badges' order; none
+    /// where no task is there.
+    static func missingReviews(
+        in worktrees: [String], allWorktrees: [String], tasks: [(cwd: String, ran: Set<ReviewPass>)], required: Set<ReviewPass>
+    ) -> [String] {
+        let inside = tasks.filter { isInside($0.cwd, roots: worktrees, allWorktrees: allWorktrees) }
+        guard !inside.isEmpty else { return [] }
+        let ran = Set(inside.flatMap(\.ran))
+        return ReviewPass.allCases.filter { required.contains($0) && !ran.contains($0) }.map(\.displayName)
     }
 
     /// Why the queue would stop on this pull request at once.
