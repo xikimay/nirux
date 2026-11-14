@@ -47,6 +47,8 @@ struct ColumnInfo: Hashable {
     /// What the question dialog on screen asks and offers (Claude's
     /// AskUserQuestion): the row shows it, the terminal takes the answers.
     var dialog: AgentDialog?
+    /// Mission messages that wait too long for this agent's prompt.
+    var waitingMessages: SidebarWaitingMessages?
     /// The column's identity (`ColumnState.id`): a menu's items find it by it.
     var id: UUID?
 
@@ -88,6 +90,7 @@ struct ColumnInfo: Hashable {
             && lhs.questionAskedAt == rhs.questionAskedAt
             && lhs.dialog == rhs.dialog
             && lhs.circling == rhs.circling
+            && lhs.waitingMessages == rhs.waitingMessages
     }
 
     func hash(into hasher: inout Hasher) {
@@ -114,6 +117,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(questionAskedAt)
         hasher.combine(dialog)
         hasher.combine(circling)
+        hasher.combine(waitingMessages)
     }
 }
 

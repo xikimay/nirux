@@ -122,12 +122,15 @@ final class WaitingAgentTests: XCTestCase {
         machine.noteKeystroke(now: at(13.1), keys: Data([0x1B]))
         apply(event(.notification, at: 13, type: "permission_prompt"))
         XCTAssertNil(wait(at: 14), "a reminder sent before the Esc")
-        // An approval's first key is its answer, as before.
+        // An approval's answer is its first key but Up and Down, which move
+        // among its options.
         machine = AgentStatusMachine()
         startTurn()
         apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
         machine.noteKeystroke(now: at(6), keys: Data((esc + "[B").utf8))
-        XCTAssertNil(wait(at: 7))
+        XCTAssertEqual(wait(at: 7)?.since, t0 + 5, "moving")
+        machine.noteKeystroke(now: at(8), keys: Data("\r".utf8))
+        XCTAssertNil(wait(at: 9))
     }
 
     /// The question dialog in front takes the keys: they don't answer a

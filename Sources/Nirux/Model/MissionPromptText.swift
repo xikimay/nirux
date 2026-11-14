@@ -37,9 +37,34 @@ enum MissionPromptText {
             return "\(prefix) Answer from \(from): \(event.message)"
         case .completed:
             return "\(prefix) \(child) completed: \(quoted(event.message))"
+                + neverTypedNote(questionsNeverTyped(retiredBy: event, in: delivery.mission))
         case .acknowledged:
             return nil
         }
+    }
+
+    /// The child's questions its `completed` retired unanswered (see
+    /// `MissionStore.process`, which marks them consumed at its time) that
+    /// were never typed into the parent's prompt: the user may have answered
+    /// them in the child's terminal, and the parent never saw them.
+    static func questionsNeverTyped(retiredBy completed: MissionEvent, in mission: Mission) -> [MissionEvent] {
+        let answered = Set(mission.events.compactMap { $0.kind == .response ? $0.inReplyTo : nil })
+        return mission.events.filter {
+            $0.kind == .question && $0.parentTypedAt == nil && $0.parentConsumedAt == completed.timestamp
+                && !answered.contains($0.id)
+        }
+    }
+
+    static let neverTypedListed = 5
+    static let neverTypedExcerpt = 200
+
+    private static func neverTypedNote(_ questions: [MissionEvent]) -> String {
+        guard !questions.isEmpty else { return "" }
+        let count = questions.count == 1 ? "a question" : "\(questions.count) questions"
+        let listed = questions.prefix(neverTypedListed).map { "\n- " + (AgentText.clean(quoted($0.message), maxLength: neverTypedExcerpt) ?? "") }
+        let more = questions.count > neverTypedListed ? "\n(and \(questions.count - neverTypedListed) more)" : ""
+        return "\nIt asked you \(count) that never reached your prompt; the user may have answered in its terminal:"
+            + listed.joined() + more
     }
 
     /// A child's text on one line, without the prefix: it can't pass for a

@@ -19,6 +19,7 @@ extension NiruxShellView {
             && (!catchUpState.followsSystem || awayConditionsNow().subtracting([.appActive]).isEmpty)
         let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
         noteMissionQuestionHandOffs(missionQuestions)
+        let waitingMessages = waitingMissionMessages(snapshot: snapshot, now: now)
         let appIsActive = sideEffects.appIsActive()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
@@ -40,7 +41,8 @@ extension NiruxShellView {
                     approvalHold: approvalHolds[ObjectIdentifier(col)], missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     // The dialog the user is looking at needs no copy on
                     // its row: its one line, as for any dialog.
-                    showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now
+                    showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now,
+                    waitingMessages: waitingMessages[ObjectIdentifier(col)]
                 )
             }
             return sidebarWorkspaceInfo(
@@ -88,7 +90,7 @@ extension NiruxShellView {
     func sidebarColumnInfo(
         _ col: ColumnState, at colIndex: Int, isUserFocused: Bool, agentStatus: AgentStatus,
         foregroundProcess: ForegroundProcess?, approvalHold: PermissionApprovalHold?, missionQuestion: SidebarMissionQuestion?,
-        showsDialog: Bool, snapshot: ProcessSnapshot, now: TimeInterval
+        showsDialog: Bool, snapshot: ProcessSnapshot, now: TimeInterval, waitingMessages: SidebarWaitingMessages? = nil
     ) -> ColumnInfo {
         let editorFile = col.editorColumn?.currentPath.map {
             ($0 as NSString).lastPathComponent
@@ -127,6 +129,7 @@ extension NiruxShellView {
             turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
             questionAskedAt: asked?.since,
             dialog: showsDialog ? dialog?.dialog : nil,
+            waitingMessages: waitingMessages,
             id: col.id
         )
     }

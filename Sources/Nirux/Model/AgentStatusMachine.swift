@@ -1006,10 +1006,10 @@ struct AgentStatusMachine {
         return (code == 27 && held == 0) || (code == 99 && held == 4)
     }
 
-    /// Whether `dialog` waits for a key yet: none reached it since it
-    /// opened. A question dialog's keys move among its options and answer
-    /// its questions one by one: it ends with its tool's PostToolUse, or
-    /// at Esc or Ctrl-C, which fire no hook.
+    /// Whether `dialog` waits for a key yet: none but Up and Down reached it
+    /// since it opened. A question dialog's keys move among its options and
+    /// answer its questions one by one: it ends with its tool's PostToolUse,
+    /// or at Esc or Ctrl-C, which fire no hook.
     func waitsForKeys(_ dialog: AgentPermissionRequest) -> Bool {
         dialog.requestedAt >= (dialog.waitsPastKeys ? lastCancelKeyAt : lastKeystrokeAt)
     }
@@ -1017,9 +1017,23 @@ struct AgentStatusMachine {
     /// Arrows reached the agent without a key pressed (ghostty turns a
     /// wheel scroll into them on the alternate screen): an old prompt may be
     /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
-    /// keystroke: the user scrolled, typed nothing.
+    /// keystroke: the user scrolled, typed nothing. A dialog waiting for keys
+    /// takes them: they move among its options.
     mutating func notePromptRecall(now: Date) {
+        guard !openDialogs.contains(where: waitsForKeys) else { return }
         lastDraftInputAt = now.timeIntervalSince1970
+    }
+
+    /// Up or Down arrows only: what ghostty turns a wheel scroll into on the
+    /// alternate screen when the program there reports no mouse (Claude Code
+    /// under `CLAUDE_CODE_DISABLE_MOUSE`), and the keys that move among a
+    /// dialog's options. At an agent's prompt, Up recalls an old prompt.
+    static func isUpDownArrows(_ data: Data) -> Bool {
+        guard !data.isEmpty, data.count.isMultiple(of: 3) else { return false }
+        return stride(from: data.startIndex, to: data.endIndex, by: 3).allSatisfy { index in
+            let key = data[index..<index + 3]
+            return key.first == 0x1B && [0x5B, 0x4F].contains(key[index + 1]) && [0x41, 0x42].contains(key[index + 2])
+        }
     }
 
     /// One key's bytes: a character, a short escape sequence, or one
@@ -1050,7 +1064,10 @@ struct AgentStatusMachine {
         // answer an approval queued behind it.
         let inFront = openDialogs.first(where: waitsForKeys)
         let answersDialog = inFront != nil
-        if inFront?.waitsPastKeys != true { lastKeystrokeAt = time }
+        // Up and Down move among a dialog's options: an approval's answer is
+        // the key that follows them.
+        let movesInDialog = answersDialog && keys.map(Self.isUpDownArrows) == true
+        if inFront?.waitsPastKeys != true, !movesInDialog { lastKeystrokeAt = time }
         if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
         lastInputAt = time
         // A mode switch (Shift-Tab) leaves the prompt as it was; any other

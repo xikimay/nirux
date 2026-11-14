@@ -302,6 +302,10 @@ final class MissionTellTests: XCTestCase {
         machine.isPromptFree(foreground: foreground ?? claude(), runningSince: t0 + 100)
     }
 
+    private func refusal(_ machine: AgentStatusMachine) -> AgentPromptRefusal? {
+        machine.promptRefusal(foreground: claude(), runningSince: t0 + 100)
+    }
+
     /// A Claude session that took its first prompt and finished the turn.
     private func idleMachine() -> AgentStatusMachine {
         var machine = AgentStatusMachine()
@@ -316,20 +320,58 @@ final class MissionTellTests: XCTestCase {
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {
         var machine = idleMachine()
         XCTAssertTrue(isFree(machine))
-        XCTAssertFalse(machine.isPromptFree(foreground: nil, runningSince: t0 + 100))
+        XCTAssertEqual(machine.promptRefusal(foreground: nil, runningSince: t0 + 100), .noClaude)
         XCTAssertFalse(isFree(machine, foreground: ForegroundProcess(instance: claudeProcess, name: "zsh", arguments: [])))
         XCTAssertFalse(isFree(machine, foreground: claude(arguments: ["claude", "-p"])), "headless")
-        XCTAssertFalse(isFree(machine, foreground: claude(ProcessInstance(pid: 7, startedAt: t0 + 6))),
-                       "a claude that took no prompt since it started")
-        XCTAssertFalse(machine.isPromptFree(foreground: claude(), runningSince: claudeProcess.startedAt - 1),
+        XCTAssertEqual(machine.promptRefusal(foreground: claude(ProcessInstance(pid: 7, startedAt: t0 + 6)), runningSince: t0 + 100),
+                       .noPromptYet, "a claude that took no prompt since it started")
+        XCTAssertEqual(machine.promptRefusal(foreground: claude(), runningSince: claudeProcess.startedAt - 1), .restarted,
                        "a claude started after the tell, such as one restored after a relaunch")
 
         _ = machine.apply(hook(.userPromptSubmit, at: 6), isUserFocused: false)
-        XCTAssertFalse(isFree(machine), "working")
+        XCTAssertEqual(refusal(machine), .working)
         _ = machine.apply(hook(.permissionRequest, at: 7, tool: "Bash", key: "k"), isUserFocused: false)
-        XCTAssertFalse(isFree(machine), "a dialog is open")
+        XCTAssertEqual(refusal(machine), .dialog)
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
         XCTAssertTrue(isFree(machine))
+    }
+
+    /// Keys that answered a dialog aren't a draft at the prompt: once its
+    /// turn is over, a message goes in. A question dialog takes every key
+    /// until its submit; an approval and the plan dialog take Up and Down,
+    /// then the key that answers; a wheel scroll's arrows move among a
+    /// dialog's options. A key once it is answered may be a draft.
+    func testPromptIsFreeAfterADialogAnsweredWithItsKeys() {
+        let down = "\u{1B}[B", up = "\u{1B}[A"
+        func dialog(_ tool: String, keys: [String], scrolls: Bool = false) -> AgentStatusMachine {
+            var machine = idleMachine()
+            _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+            _ = machine.apply(hook(.preToolUse, at: 15, tool: tool), isUserFocused: false)
+            _ = machine.apply(hook(.permissionRequest, at: 15, tool: tool, key: "k"), isUserFocused: false)
+            _ = machine.apply(AgentHookEvent(
+                kind: .claude, name: .notification, sessionID: "lead", notificationType: "permission_prompt", timestamp: t0 + 21
+            ), isUserFocused: false)
+            if scrolls { machine.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 25)) }
+            for (index, key) in keys.enumerated() {
+                machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 30 + Double(index)), keys: Data(key.utf8))
+            }
+            _ = machine.apply(hook(.postToolUse, at: 50, tool: tool, key: "k"), isUserFocused: false)
+            _ = machine.apply(hook(.preToolUse, at: 51, tool: "Bash"), isUserFocused: false)
+            _ = machine.apply(hook(.postToolUse, at: 52, tool: "Bash", key: "b"), isUserFocused: false)
+            _ = machine.apply(hook(.stop, at: 60), isUserFocused: false)
+            return machine
+        }
+        // Two questions: an option for the first, two for the second, sent.
+        XCTAssertNil(refusal(dialog("AskUserQuestion", keys: [down, "\r", down, " ", down, " ", "\t", "\r"])))
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, "\r"])))
+        XCTAssertNil(refusal(dialog("ExitPlanMode", keys: [down, down, up, "\r"])))
+        XCTAssertNil(refusal(dialog("AskUserQuestion", keys: ["\r"], scrolls: true)), "a wheel scroll in the dialog")
+        XCTAssertNil(refusal(dialog("Bash", keys: ["\r"], scrolls: true)))
+
+        XCTAssertEqual(refusal(dialog("Bash", keys: [down, "\r", "x"])), .draft, "typed while the approved call ran")
+        var scrolled = dialog("Bash", keys: ["\r"])
+        scrolled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 70))
+        XCTAssertEqual(refusal(scrolled), .draft, "at the prompt, Up recalls an old one")
     }
 
     func testPromptIsNotFreeOverADraftOrTextNotSubmittedYet() {

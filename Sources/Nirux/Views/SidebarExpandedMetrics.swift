@@ -162,7 +162,7 @@ enum SidebarExpandedMetrics {
                 SidebarWorkspaceCardRenderer.missionQuestionText(question), width: textWidth, lineHeight: actionLineHeight,
                 maxLines: missionQuestionMaxLines
             )
-        case .cleanup, .reviewBadges, .ruleProposals: return actionLineHeight
+        case .cleanup, .reviewBadges, .ruleProposals, .waitingMessages: return actionLineHeight
         }
     }
 

@@ -228,6 +228,9 @@ extension WorkspaceInfo {
             if let question = column.missionQuestion, column.index != questionShown {
                 actions.append(.missionQuestion(columnIndex: column.index, question))
             }
+            if let waiting = column.waitingMessages {
+                actions.append(.waitingMessages(columnIndex: column.index, waiting))
+            }
         }
         // The blocker is the status line's, or waits behind what comes
         // first (the tooltip has it). The selected row adds the next step
@@ -277,6 +280,9 @@ enum SidebarCardAction: Hashable {
     /// The Lead's row: rules it proposed for the brief wait for the user;
     /// a click shows the oldest.
     case ruleProposals(count: Int)
+    /// Mission messages that wait too long for an agent's prompt: a click
+    /// shows its column.
+    case waitingMessages(columnIndex: Int, SidebarWaitingMessages)
 
     /// Information rather than something to do: no separator above. A
     /// proposed rule waits on nothing: it stays as quiet.
@@ -284,7 +290,7 @@ enum SidebarCardAction: Hashable {
         switch self {
         case .next, .reviewBadges, .ruleProposals: return true
         case .missionQuestion(_, let question): return question.handOff == nil
-        case .approval, .resume, .cleanup, .turnQuestion, .dialog: return false
+        case .approval, .resume, .cleanup, .turnQuestion, .dialog, .waitingMessages: return false
         }
     }
 }

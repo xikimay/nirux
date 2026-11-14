@@ -760,9 +760,13 @@ final class PtySession: @unchecked Sendable {
     /// `claude` already running at `runningSince` (see
     /// `AgentStatusMachine.isPromptFree`).
     func acceptsMissionMessage(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
-        !hasExited && state.machine.isPromptFree(
-            foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince
-        )
+        missionPromptRefusal(runningSince: runningSince, snapshot: snapshot) == nil
+    }
+
+    /// Why `acceptsMissionMessage` says no, nil when it says yes.
+    func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+        guard !hasExited else { return .noClaude }
+        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
     }
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.
@@ -966,18 +970,6 @@ final class PtySession: @unchecked Sendable {
     static func isUserText(_ data: Data) -> Bool {
         guard let first = data.first else { return false }
         return first != 0x1B || data.starts(with: [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]) // ESC[200~
-    }
-
-    /// Whether ghostty writes Up or Down arrows: what it turns a wheel
-    /// scroll into on the alternate screen when the program there reports
-    /// no mouse (Claude Code under `CLAUDE_CODE_DISABLE_MOUSE`). At an
-    /// agent's prompt, Up recalls an old prompt.
-    static func isUpDownArrows(_ data: Data) -> Bool {
-        guard !data.isEmpty, data.count.isMultiple(of: 3) else { return false }
-        return stride(from: data.startIndex, to: data.endIndex, by: 3).allSatisfy { index in
-            let key = data[index..<index + 3]
-            return key.first == 0x1B && [0x5B, 0x4F].contains(key[index + 1]) && [0x41, 0x42].contains(key[index + 2])
-        }
     }
 
     func sendRaw(_ string: String) {
@@ -1226,7 +1218,7 @@ private final class PtyState: @unchecked Sendable {
             DispatchQueue.main.async { [self] in
                 machine.noteKeystroke(now: Date(), keys: data)
             }
-        } else if PtySession.isUpDownArrows(data) {
+        } else if AgentStatusMachine.isUpDownArrows(data) {
             DispatchQueue.main.async { [self] in
                 machine.notePromptRecall(now: Date())
             }

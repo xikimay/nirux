@@ -214,9 +214,42 @@ final class MissionDeliveryTests: XCTestCase {
 
         let completed = try XCTUnwrap(store.accept(childEvent(.completed, "PR #42 open, CI green.", at: 40), enabled: true))
         XCTAssertEqual(
-            MissionPromptText.text(for: completed, childTitle: "Date filter API", parentTitle: nil),
+            MissionPromptText.text(for: completed, childTitle: "Date filter API", parentTitle: nil)?.components(separatedBy: "\n").first,
             "[Nirux Mission] \"Date filter API\" (branch feat/date-filter) completed: PR #42 open, CI green."
         )
+    }
+
+    /// A completion retires the questions nobody answered. Those never
+    /// typed into the parent's prompt (handed to the user, who answered in
+    /// the child's terminal) are named in it: the parent learns of them.
+    func testACompletionNamesTheQuestionsThatNeverReachedTheParent() throws {
+        let store = makeStore()
+        let typed = try XCTUnwrap(store.accept(childEvent(.question, "Typed?", at: 20), enabled: true))
+        XCTAssertTrue(store.markTyped(typed, at: 21))
+        let answered = try XCTUnwrap(store.accept(childEvent(.question, "Answered?", at: 22), enabled: true))
+        XCTAssertNotNil(store.respond(to: answered.event.id, message: "Yes", enabled: true, now: 23))
+        let printed = try XCTUnwrap(store.accept(childEvent(.question, "Printed by receive?", at: 24), enabled: true))
+        guard case .accepted = store.process(parentEvent(.acknowledged, "acknowledged", at: 25, inReplyTo: printed.event.id),
+                                             enabled: true)
+        else { return XCTFail("the parent's receive read it") }
+        XCTAssertNotNil(store.accept(childEvent(.question, "Keep date=\nfor mobile?", at: 26), enabled: true))
+        XCTAssertNotNil(store.accept(childEvent(.question, String(repeating: "Why? ", count: 100), at: 27), enabled: true))
+        let completed = try XCTUnwrap(store.accept(childEvent(.completed, "PR #42 open.", at: 40), enabled: true))
+        let lines = try XCTUnwrap(MissionPromptText.text(for: completed, childTitle: "Date filter API", parentTitle: nil))
+            .components(separatedBy: "\n")
+        XCTAssertEqual(Array(lines.prefix(3)), [
+            "[Nirux Mission] \"Date filter API\" (branch feat/date-filter) completed: PR #42 open.",
+            "It asked you 2 questions that never reached your prompt; the user may have answered in its terminal:",
+            "- Keep date= for mobile?"
+        ])
+        XCTAssertEqual(lines.count, 4)
+        XCTAssertEqual(lines.last?.count, 2 + MissionPromptText.neverTypedExcerpt, "an excerpt")
+
+        let crowded = makeStore()
+        for index in 1...7 { XCTAssertNotNil(crowded.accept(childEvent(.question, "Question \(index)?", at: Double(20 + index)), enabled: true)) }
+        let done = try XCTUnwrap(crowded.accept(childEvent(.completed, "Done.", at: 40), enabled: true))
+        let note = try XCTUnwrap(MissionPromptText.text(for: done, childTitle: nil, parentTitle: nil))
+        XCTAssertTrue(note.hasSuffix("- Question 5?\n(and 2 more)"), note)
     }
 
     // MARK: - Hand-off to the user
@@ -394,6 +427,35 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertFalse(sidebar.hitAreas.contains { area in
             guard case .link(let url, _) = area.region else { return false }
             return url.hasPrefix("action:mission-question:")
+        })
+    }
+
+    /// Messages that wait too long for an agent's prompt get a line on its
+    /// row, a Lead's too, which shows the agent's column.
+    func testMessagesWaitingTooLongForAPromptGetALineThatShowsTheColumn() throws {
+        _ = NSApplication.shared
+        let since = try XCTUnwrap(Calendar.current.date(bySettingHour: 22, minute: 21, second: 0, of: Date()))
+        let waiting = SidebarWaitingMessages(count: 2, since: since.timeIntervalSince1970, refusal: .draft)
+        XCTAssertEqual(waiting.line(now: since.timeIntervalSince1970 + 600), "2 messages waiting since 22:21")
+        var info = column(nil)
+        info.waitingMessages = waiting
+        var lead = workspace([info], index: 2)
+        lead.isLead = true
+        XCTAssertEqual(lead.cardActions, [.waitingMessages(columnIndex: 0, waiting)])
+        XCTAssertFalse(SidebarCardAction.waitingMessages(columnIndex: 0, waiting).isQuiet, "it may wait on the user")
+
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
+        sidebar.isExpanded = true
+        sidebar.update(profiles: [], workspaces: [lead])
+        sidebar.layoutSubtreeIfNeeded()
+        let label = try XCTUnwrap(sidebar.expandedViews.lazy.compactMap { $0 as? NSTextField }.first {
+            $0.stringValue.hasSuffix("messages waiting since 22:21")
+        })
+        XCTAssertEqual(label.toolTip, waiting.tooltip)
+        let frame = try XCTUnwrap(label.superview).convert(label.frame, to: sidebar.contentDocumentView)
+        XCTAssertTrue(sidebar.hitAreas.contains { area in
+            guard case .column(let workspaceIndex, let columnIndex) = area.region else { return false }
+            return workspaceIndex == 2 && columnIndex == 0 && area.frame.intersects(frame)
         })
     }
 

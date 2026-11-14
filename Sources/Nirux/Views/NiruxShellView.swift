@@ -120,6 +120,8 @@ final class NiruxShellView: NSView {
     /// Lines for a Lead's prompt (the user answered a question it handed
     /// over), typed once that prompt is free (`typeMissionMessages`).
     var pendingLeadNotices: [LeadNotice] = []
+    /// Mission messages that wait too long for a prompt (`waitingMissionMessages`).
+    var missionWaits = MissionWaitState()
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []

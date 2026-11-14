@@ -23,7 +23,13 @@ Click the line, grey or amber, to read the whole question and answer it in a pop
 
 ## When Nirux types into a prompt
 
-Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. Otherwise the message waits for the end of that agent's next turn.
+Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. The keys that answered a dialog don't count: those of a question dialog, and the arrows that move through a permission dialog's options before the key that answers it. Otherwise the message waits for the end of that agent's next turn.
+
+When a message has waited three minutes for an agent that isn't working, the agent's row says so, a Lead's too: `2 messages waiting since 22:21`. Its tooltip says why Nirux doesn't type them, and a click shows the agent's column. Sending the agent a prompt usually lets them in. Nirux writes the reason to the system log too:
+
+```
+log show --predicate 'subsystem == "com.xikimay.nirux" AND category == "missions"'
+```
 
 ## Limits
 
@@ -42,6 +48,6 @@ Agents run these, not you. The bundled `nirux-worktree` skill teaches them. A sp
 | --- | --- | --- |
 | Child | `"$NIRUX_CLI_PATH" --mission ask --message "..."` | Asks the parent. Nirux types the question into the parent's prompt as a `[Nirux Mission]` message |
 | Parent | `--mission reply` (the question names the full command) | Answers the child |
-| Child | `"$NIRUX_CLI_PATH" --mission completed --message "..."` | Reports the result. The parent gets a one-line notice |
+| Child | `"$NIRUX_CLI_PATH" --mission completed --message "..."` | Reports the result. The parent gets a one-line notice, followed by the child's questions that never reached its prompt, if any |
 | Parent | `"$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "..."` | Sends the child more work. Nirux types the message and Enter into its prompt, so a slash command such as `/code-review` runs |
 | Codex parent | `"$NIRUX_CLI_PATH" --mission receive` | Waits for the child's messages |

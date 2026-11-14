@@ -74,12 +74,20 @@ extension AgentStatusMachine {
     /// by Nirux that Claude has not submitted yet), and no turn end waiting
     /// for its verdict (`awaitsAnyVerdict`).
     func isPromptFree(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> Bool {
-        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
-              foreground.instance.startedAt <= time,
-              let lastPromptAt = prompt(since: foreground.instance.startedAt)
-        else { return false }
-        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && turnFailure == nil
-            && lastDraftInputAt <= lastPromptAt && !awaitsAnyVerdict
+        promptRefusal(foreground: foreground, runningSince: time) == nil
+    }
+
+    /// Why `isPromptFree` says no, nil when it says yes.
+    func promptRefusal(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
+        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground) else { return .noClaude }
+        guard foreground.instance.startedAt <= time else { return .restarted }
+        guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else { return .noPromptYet }
+        if !pendingDialogs.isEmpty { return .dialog }
+        if hookWorking || turnStartedAt != nil { return .working }
+        if turnFailure != nil { return .failedTurn }
+        if lastDraftInputAt > lastPromptAt { return .draft }
+        if awaitsAnyVerdict { return .verdict }
+        return nil
     }
 
     /// When the last prompt went in, if one did since `startedAt`, the
@@ -96,4 +104,23 @@ extension AgentStatusMachine {
         guard let lastPromptAt, lastPromptAt >= typedAt else { return false }
         return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil
     }
+}
+
+/// Why a Mission message isn't typed into an agent's prompt now (see
+/// `AgentStatusMachine.isPromptFree`).
+enum AgentPromptRefusal: String, Equatable, Sendable {
+    /// The column doesn't run an interactive `claude`.
+    case noClaude
+    /// Its `claude` started after the message was sent, which goes only to
+    /// the one that ran then.
+    case restarted
+    /// Its `claude` took no prompt since it started.
+    case noPromptYet
+    case dialog
+    case working
+    case failedTurn
+    /// Something was typed at its prompt since its last prompt went in.
+    case draft
+    /// Its last turn end waits for its verdict.
+    case verdict
 }

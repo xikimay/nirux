@@ -289,17 +289,8 @@ extension NiruxShellView {
             let mission = delivery.mission
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
-            let toParent = delivery.event.kind == .question || delivery.event.kind == .completed
-            let recipient = toParent
-                ? parentWorkspace?.columns.first { $0.agentUUID == mission.parentAgentUUID }
-                : childWorkspace?.columns.first { $0.agentUUID == mission.childAgentUUID }
-            // A `tell` goes only to the `claude` that ran when it was sent.
-            // The rest goes to whichever runs now: the child ended its turn
-            // to wait for its answer, and a parent restored since resumed
-            // its conversation.
-            let runningSince = delivery.event.kind == .instruction ? delivery.event.timestamp : now
-            guard let pty = recipient?.pty,
-                  pty.acceptsMissionMessage(runningSince: runningSince, snapshot: snapshot),
+            guard let pty = missionRecipient(of: delivery)?.pty,
+                  pty.acceptsMissionMessage(runningSince: Self.runningSince(of: delivery.event, now: now), snapshot: snapshot),
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
                   ),
@@ -311,7 +302,27 @@ extension NiruxShellView {
             typedAny = true
         }
         // The cards' "Asking …" and "Answer … ready" rows follow.
-        if typedAny { updateSidebar(snapshot: snapshot) }
+        if typedAny {
+            missionWaits.checkedAt = nil
+            updateSidebar(snapshot: snapshot)
+        }
+    }
+
+    /// The column a Mission message is typed into: the parent's for a
+    /// question or a completion, the child's for the rest.
+    func missionRecipient(of delivery: MissionStore.AcceptedEvent) -> ColumnState? {
+        let mission = delivery.mission
+        let toParent = delivery.event.kind == .question || delivery.event.kind == .completed
+        let workspace = workspaces.first { $0.id == (toParent ? mission.parentWorkspaceID : mission.childWorkspaceID) }
+        let agentUUID = toParent ? mission.parentAgentUUID : mission.childAgentUUID
+        return workspace?.columns.first { $0.agentUUID == agentUUID }
+    }
+
+    /// A `tell` goes only to the `claude` that ran when it was sent. The
+    /// rest goes to whichever runs now: the child ended its turn to wait for
+    /// its answer, and a parent restored since resumed its conversation.
+    nonisolated static func runningSince(of event: MissionEvent, now: TimeInterval) -> TimeInterval {
+        event.kind == .instruction ? event.timestamp : now
     }
 
     /// Types each Lead notice whose Lead's prompt is free; the others wait

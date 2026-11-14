@@ -519,10 +519,13 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste, whatever a dialog waits for")
         at = try turn(keys: [("ok", 3)], dialog: true)
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "text in one write")
-        // Several keys into a dialog may leave one at the prompt: refused,
+        // Up and Down move among a dialog's options; its answer is the key
+        // after them. A key after its answer may be at the prompt: refused,
         // the safe side (the user answers at the terminal or with Reply…).
         at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
-        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog answered with keys")
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "moved through, then answered")
+        at = try turn(keys: [("2", 3), ("\r", 3.2)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a key after its answer")
         // Its terminal still draws: a Stop hook's continuation at work.
         at = try ended()
         machine.noteRead(now: Date(timeIntervalSince1970: at + 2))
@@ -1644,11 +1647,11 @@ final class TurnEndClassificationTests: XCTestCase {
     /// "ESC[B". Those count; terminal replies and mouse reports don't.
     func testWheelArrowsAreTheOnlyEscapesThatCount() {
         for arrows in ["\u{1B}[A", "\u{1B}[A\u{1B}[A\u{1B}[A", "\u{1B}[B", "\u{1B}OA", "\u{1B}OB\u{1B}OB"] {
-            XCTAssertTrue(PtySession.isUpDownArrows(Data(arrows.utf8)), arrows.debugDescription)
+            XCTAssertTrue(AgentStatusMachine.isUpDownArrows(Data(arrows.utf8)), arrows.debugDescription)
         }
         for other in ["", "\u{1B}[I", "\u{1B}[O", "\u{1B}[C", "\u{1B}[D", "\u{1B}[<64;10;5M", "\u{1B}[A\u{1B}[I",
                       "\u{1B}[?62;22c", "A", "\u{1B}[AB"] {
-            XCTAssertFalse(PtySession.isUpDownArrows(Data(other.utf8)), other.debugDescription)
+            XCTAssertFalse(AgentStatusMachine.isUpDownArrows(Data(other.utf8)), other.debugDescription)
         }
     }
 
