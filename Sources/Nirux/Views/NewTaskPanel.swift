@@ -286,7 +286,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// new work, where its task works: the Repository popup and Existing
     /// Branch… (see `refresh`) show only without one.
     private func updateForSubtask() {
-        if let proposedBy { return headingLabel.stringValue = "Proposed by \(proposedBy) · \(space.name)" }
+        if let proposedBy, !ZZ("heading-reset") { return headingLabel.stringValue = "Proposed by \(proposedBy) · \(space.name)" }
         headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
     }
 
@@ -476,7 +476,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         let declined = onDeclineProposal
         onDeclineProposal = nil
         dismiss()
-        declined?()
+        if !ZZ("no-decline-notice") { declined?() }
     }
 
     @objc func existingBranchAction(_ sender: Any?) {
