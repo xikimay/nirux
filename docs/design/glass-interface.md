@@ -31,8 +31,8 @@ requests; phases 1 and 2 run while the Board's swap ends.
   draws no glass at all, and Reduce transparency and Increase contrast make
   everything opaque. What floats over the work keeps a thick background: no
   glass on glass. The values each level draws with come with the glass view,
-  tuned on renders: `NSGlassEffectView` takes a style and a tint, the
-  macOS 14 and 15 fallback has no tint at all.
+  tuned on renders: `NSGlassEffectView` takes a style and a tint, while the
+  macOS 14 and 15 frost has no tint of its own (`GlassView` lays one over it).
 - **Terminals:** opaque by default, with their own opacity slider apart from
   the interface, a floor at 60 % and Ghostty's minimum contrast. It touches
   the terminal engine: lane 3.
@@ -51,6 +51,24 @@ requests; phases 1 and 2 run while the Board's swap ends.
   Mac, never by CI. macOS 27's concentric corners
   (`NSView.cornerConfiguration`) wait for Xcode 27 on CI: computed by hand
   meanwhile, from the window's radius measured on renders.
+
+## Glass view
+
+`GlassView` draws the glass: `NSGlassEffectView` on macOS 26 and later (the
+content sits inside it), a frosted `NSVisualEffectView` with a tint on top on
+macOS 14 and 15, a solid fill at Opaque. The chrome lets more through as the
+level rises; what floats over the work keeps a thick tint at every level and
+the floating shadow (left to the system on macOS 26). The tints are
+provisional: an offscreen capture can't show either material, so the render
+below approximates them (the content under the panel blurred, then the
+view's tint) beside the exact Opaque render, and they get tuned with the user
+on a demo at the end of phase 2. The view follows macOS's Reduce transparency and Increase
+contrast as they change, and keeps the keyboard where it was when its content
+moves into or out of macOS 26's glass. A floating glass in a window of its
+own (⌘P if it stays a panel) needs blending behind the window and no layer
+shadow: step 2.4 adds that if it does.
+
+![The glass at each level: Opaque exact, the others approximated](../images/glass-levels.png)
 
 ## Plan
 

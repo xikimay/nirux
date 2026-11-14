@@ -112,6 +112,28 @@ enum Theme {
         static let panel: CGFloat = 12
     }
 
+    /// What floats over the work casts one shadow (the glass interface's
+    /// floating glass; docs/design/glass-interface.md).
+    enum Elevation {
+        static let floatingOpacity: Float = 0.38
+        static let floatingRadius: CGFloat = 16
+        static let floatingDrop: CGFloat = 12
+
+        /// Gives `layer` the floating shadow along `path`, the shape in the
+        /// layer's own coordinates; call it again when the shape changes.
+        /// The layer must not mask to its bounds, which would cut the shadow
+        /// off.
+        static func applyFloating(to layer: CALayer, path: CGPath) {
+            layer.shadowColor = NSColor.black.cgColor
+            layer.shadowOpacity = floatingOpacity
+            layer.shadowRadius = floatingRadius
+            // Below the shape, whichever way the layer counts y: a view's
+            // backing layer is flipped exactly when the view is.
+            layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? floatingDrop : -floatingDrop)
+            layer.shadowPath = path
+        }
+    }
+
     /// SF Symbol names (regular weight; 14 pt in headers and the palette,
     /// 12 pt in chips). All exist on macOS 14.
     enum Symbol {
