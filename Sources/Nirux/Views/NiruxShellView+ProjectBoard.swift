@@ -178,7 +178,25 @@ extension NiruxShellView {
     ) {
         let snapshot = snapshot ?? ProcessSnapshot()
         let members = projectWorkspaces(of: board.projectID)
-        let inputs = members.map { workspace in
+        let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+        // A workspace opened in a folder not listed yet: list them again.
+        if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
+            board.expireWorktrees()
+        }
+        board.reloadIfAnchorsChanged()
+        let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
+        var content = board.content(workspaces: inputs, projects: projects)
+        addQueues(to: &content, board: board)
+        board.view.show(content)
+    }
+
+    /// The space's workspaces as the Board's rows take them: their folder
+    /// as the worktrees were listed, and their most urgent agent column.
+    func projectBoardWorkspaces(
+        _ members: [WorkspaceState], of board: ProjectBoardController, snapshot: ProcessSnapshot, now: TimeInterval,
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
+    ) -> [ProjectBoard.Workspace] {
+        members.map { workspace in
             ProjectBoard.Workspace(
                 id: workspace.id,
                 title: workspace.title,
@@ -193,15 +211,6 @@ extension NiruxShellView {
                 })
             )
         }
-        // A workspace opened in a folder not listed yet: list them again.
-        if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
-            board.expireWorktrees()
-        }
-        board.reloadIfAnchorsChanged()
-        let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
-        var content = board.content(workspaces: inputs, projects: projects)
-        addQueues(to: &content, board: board)
-        board.view.show(content)
     }
 
     /// Each section's queue for its rows, and the queue lines: one line on a

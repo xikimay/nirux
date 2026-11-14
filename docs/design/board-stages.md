@@ -480,6 +480,28 @@ the Board reads that pass's statuses, approvals and Mission questions.
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").
 
+**The content** (`ProjectBoardController.stagesContent`) is what the table
+lists, as stages, from what the Board read and what the shell holds of the
+space (`NiruxShellView.stagesInputs`):
+
+- **Sections**: one per repository of today's Board, from the table's own
+  rows (`listedRows`); a space without an anchor titles its repository by
+  its name ("widgets"), `owner/name` beside it. Each header's pill says what
+  went wrong reading it, else "No settings" (why under the pointer: the
+  table's notice), else its post-merge run; its queue says Start… · N, N the
+  pull requests of the next Start's list it shows a place for, each once;
+  its menu has Board Settings…, and Open Main Checkout where the repository
+  has one. Then "No repository" (the workspaces in no repository, as lines)
+  and "Other workspaces".
+- **The header**: the space's name and colour, "1 repository · 4 tasks" (the
+  Lead is no task), and the Lead: "Lead · " and what a line would say of it,
+  in its state's colour.
+- **The foot**: every queue that runs, here or in another Nirux, a
+  repository's or one left on a repository no section has, as the table's
+  lines.
+- **The message** in place of the sections is the table's in place of its
+  rows (`bodyMessage`), word for word, Board Settings… where it offers it.
+
 For the wiring: the Board is drawn outside the sidebar's pass too (a read
 landing, a click), so it draws from the readings of the last pass, never
 from that pass's approval holds or Mission questions kept for later (their
