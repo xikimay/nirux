@@ -644,13 +644,17 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(laterLine("feat/sub").contains(" · inactive · "), "\(later)")
             XCTAssertTrue(laterLine("feat/sub").hasSuffix(" · not yours (another agent started it)"), "\(later)")
             XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), false))
+            // Two levels: a worktree the skill opens from a sub-task lists
+            // under that sub-task's task.
+            let deeper = try skill("feat/deeper", from: sub)
+            XCTAssertEqual(deeper.parentWorkspaceID, task.id)
 
             shell.saveState()
             shell.restoreState()
-            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
+            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task", "feat/deeper": "task"])
             XCTAssertEqual(
                 shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title).sorted(),
-                ["feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
+                ["feat/deeper", "feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
             )
         }
     }
@@ -758,6 +762,237 @@ final class LeadToolsFlowTests: XCTestCase {
             sheet.cancelButton.performClick(nil)
             harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == "Another one" }
             shell.newTaskPanel?.cancelButton.performClick(nil)
+        }
+    }
+
+    // MARK: - A task's tools
+
+    /// The answers to `tool` called with each of `argumentsList` at once,
+    /// none waiting for another's answer, in that order.
+    private func callAtOnce(
+        _ tool: String, _ argumentsList: [[String: Any]], from workspace: WorkspaceState, agentUUID: String, in harness: UIFlowHarness
+    ) throws -> [(text: String, isError: Bool)] {
+        var answers: [Int: (text: String, isError: Bool)] = [:]
+        for (index, arguments) in argumentsList.enumerated() {
+            let json = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: arguments), encoding: .utf8))
+            let request = LeadChannel.Request(
+                id: UUID().uuidString, tool: tool, arguments: json,
+                workspaceID: workspace.id, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
+            )
+            harness.shell.handleLeadRequest(request) { text, isError in answers[index] = (text, isError) }
+        }
+        harness.waitUntil("the answers to \(tool)") { answers.count == argumentsList.count }
+        return argumentsList.indices.compactMap { answers[$0] }
+    }
+
+    /// A task the Lead started, and its agent's column.
+    private func startTask(_ description: String, lead: Lead, in harness: UIFlowHarness) throws -> (WorkspaceState, String) {
+        let started = try call(LeadTools.startTask, ["description": description], lead: lead, in: harness)
+        XCTAssertFalse(started.isError, started.text)
+        let task = try XCTUnwrap(harness.shell.workspaces.first { $0.title == description })
+        return (task, try XCTUnwrap(task.columns.first?.agentUUID))
+    }
+
+    /// With Missions off, a task's agent starts a sub-task under its task,
+    /// in its repository, behind what the user does; lists it; hears its
+    /// question and answers it. Two levels, six running at most, its own
+    /// sub-tasks only, and none of the Lead's other tools.
+    func testATaskStartsFollowsAndAnswersItsSubtasks() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let (task, agent) = try startTask("Add a date filter", lead: lead, in: harness)
+            let other = try XCTUnwrap(shell.workspaces.first { !$0.isLead && $0 !== task })
+            let plain = try call(LeadTools.startTask, ["description": "Docs"], from: other,
+                                 agentUUID: try XCTUnwrap(other.columns.first?.agentUUID), in: harness)
+            XCTAssertTrue(plain.isError)
+            XCTAssertTrue(plain.text.contains("isn't a task"), plain.text)
+            // Opened by a link from outside Nirux: never, even in a task's
+            // worktree. A task under a plain workspace is no sub-task.
+            shell.addWorkspace(title: "From a link", cwd: harness.worktree, profileID: lead.space, startedOutsideNirux: true)
+            let linked = try XCTUnwrap(shell.workspaces.first { $0.title == "From a link" })
+            let outside = try call(LeadTools.startTask, ["description": "Docs"], from: linked,
+                                   agentUUID: try XCTUnwrap(linked.columns.first?.agentUUID), in: harness)
+            XCTAssertTrue(outside.isError)
+            XCTAssertTrue(outside.text.contains("opened by a link from outside Nirux"), outside.text)
+            shell.addWorkspace(title: "Under a plain one", cwd: harness.worktree, profileID: lead.space)
+            let underPlain = try XCTUnwrap(shell.workspaces.first { $0.title == "Under a plain one" })
+            underPlain.parentWorkspaceID = other.id
+            let ownList = try call(LeadTools.listTasks, from: underPlain, agentUUID: try XCTUnwrap(underPlain.columns.first?.agentUUID), in: harness)
+            XCTAssertFalse(ownList.isError, ownList.text)
+
+            let front = shell.activeWorkspace
+            let started = try call(LeadTools.startTask, ["description": "Write the API docs"], from: task, agentUUID: agent, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            XCTAssertTrue(started.text.contains("feat/write-the-api-docs"), started.text)
+            XCTAssertTrue(started.text.contains("It reports to you"), started.text)
+            let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Write the API docs" })
+            XCTAssertEqual(subtask.parentWorkspaceID, task.id)
+            XCTAssertEqual(subtask.profileID, lead.space)
+            XCTAssertTrue(subtask.startedByAgent)
+            XCTAssertTrue(shell.activeWorkspace === front, "it opens behind what the user is doing")
+            let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id })
+            XCTAssertEqual(mission.parentWorkspaceID, task.id)
+            XCTAssertEqual(mission.parentAgentUUID, agent)
+            XCTAssertEqual(mission.reportsToTask, true)
+            XCTAssertNil(mission.reportsToLead)
+            XCTAssertEqual(subtask.terminalEnvironment(agentUUID: mission.childAgentUUID)["NIRUX_MISSION_HANDOFFS"], "1",
+                           "its agent asks and reports with Missions off")
+            XCTAssertEqual(harness.agentLaunches.last.map { $0.contains("This is a Nirux mission workspace") }, true)
+            // Kept across a relaunch: its new shells still get the Mission's variables.
+            shell.saveState()
+            XCTAssertEqual(Persistence.load()?.workspaces.first { $0.id == subtask.id }?.reportsToTask, true)
+
+            let list = try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness)
+            XCTAssertTrue(list.text.hasPrefix("“Add a date filter”: 1 sub-task, 1 running of 6 at most."), list.text)
+            XCTAssertTrue(list.text.contains("“Write the API docs”"), list.text)
+            XCTAssertTrue(try call(LeadTools.listTasks, lead: lead, in: harness).text
+                .contains("“Write the API docs” · sub-task of “Add a date filter”"))
+
+            // Its question, carried with Missions off, typed with the tool
+            // to answer it; then answered.
+            let question = try ask("Document the old date= parameter?", from: mission)
+            let accepted = MissionStore.AcceptedEvent(mission: mission, event: question)
+            XCTAssertEqual(
+                MissionPromptText.text(for: accepted, childTitle: subtask.title, parentTitle: task.title),
+                "[Nirux Mission] Question from \"Write the API docs\" (branch feat/write-the-api-docs):\nDocument the old date= parameter?\n"
+                    + "Answer with the reply tool, question \(question.id) (if you can't tell, don't guess: ask the user)"
+            )
+            XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("question \(question.id)"))
+            XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], lead: lead, in: harness).isError,
+                          "not the Lead's to answer")
+            let (second, secondAgent) = try startTask("Sort the orders", lead: lead, in: harness)
+            XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], from: second, agentUUID: secondAgent, in: harness)
+                .isError, "nor another task's")
+            // Nor another agent of the same task: the question was typed
+            // into the prompt of the one that started the sub-task.
+            let otherColumn = UUID().uuidString
+            task.addColumn(agentUUID: otherColumn)
+            XCTAssertTrue(try call(LeadTools.reply, ["question": question.id, "message": "No"], from: task, agentUUID: otherColumn, in: harness)
+                .isError, "nor another column's")
+            let othersList = try call(LeadTools.listTasks, from: task, agentUUID: otherColumn, in: harness).text
+            XCTAssertTrue(othersList.contains("reports to another agent of this task"), othersList)
+            XCTAssertFalse(othersList.contains("question \(question.id)"), othersList)
+            XCTAssertFalse(try call(LeadTools.reply, ["question": question.id, "message": "No"], from: task, agentUUID: agent, in: harness).isError)
+            XCTAssertEqual(MissionStore.shared.response(to: question.id)?.message, "No")
+
+            // Two levels: the sub-task has none of its own.
+            let subAgent = mission.childAgentUUID
+            let nested = try call(LeadTools.startTask, ["description": "Deeper"], from: subtask, agentUUID: subAgent, in: harness)
+            XCTAssertTrue(nested.isError)
+            XCTAssertTrue(nested.text.contains("two levels"), nested.text)
+            XCTAssertTrue(try call(LeadTools.listTasks, from: subtask, agentUUID: subAgent, in: harness).isError)
+            // None of the Lead's other tools, nor another terminal's name.
+            let merge = try call(LeadTools.queueMerge, ["prs": [1]], from: task, agentUUID: agent, in: harness)
+            XCTAssertTrue(merge.isError)
+            XCTAssertTrue(merge.text.contains("Only a space's Lead"), merge.text)
+            XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: UUID().uuidString, in: harness).isError)
+
+            // Six running at most, counted before a sub-task's workspace
+            // exists: with five running, two calls at once start one. Only
+            // those reporting to the task count: not one the user started
+            // under it, nor one that completed.
+            for index in 2..<TaskTools.maxRunningSubtasks {
+                let workspaceID = UUID().uuidString
+                var running = MissionCreationRequest(
+                    id: UUID().uuidString, parentWorkspaceID: task.id, parentAgentUUID: agent, childWorkspaceID: workspaceID,
+                    childAgentUUID: UUID().uuidString, childAgentKind: "claude", branch: "feat/sub-\(index)"
+                )
+                running.reportsToTask = true
+                let created = try XCTUnwrap(MissionStore.shared.create(running, enabled: false))
+                shell.addWorkspace(
+                    title: "sub \(index)", cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                    missionID: created.id, parentWorkspaceID: task.id, reportsToTask: true
+                )
+            }
+            shell.addWorkspace(title: "the user's", cwd: harness.repo, profileID: lead.space, parentWorkspaceID: task.id)
+            XCTAssertEqual(shell.runningSubtaskCount(of: task), TaskTools.maxRunningSubtasks - 1)
+            let both = try callAtOnce(
+                LeadTools.startTask, [["description": "One more"], ["description": "And another"]], from: task, agentUUID: agent, in: harness
+            )
+            XCTAssertEqual(both.filter(\.isError).count, 1, both.map(\.text).joined(separator: " / "))
+            XCTAssertTrue(both.contains { $0.isError && $0.text.contains("already runs 6 sub-tasks") }, both.map(\.text).joined(separator: " / "))
+            XCTAssertEqual(shell.runningSubtaskCount(of: task), TaskTools.maxRunningSubtasks)
+            XCTAssertTrue(shell.pendingSubtaskStarts.isEmpty)
+            let completed = MissionEvent(
+                id: UUID().uuidString, missionID: mission.id,
+                childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
+                kind: .completed, message: "Docs written", timestamp: Date().timeIntervalSince1970
+            )
+            guard case .accepted = MissionStore.shared.process(completed, enabled: false) else { return XCTFail("its result is carried") }
+            XCTAssertEqual(shell.runningSubtaskCount(of: task), TaskTools.maxRunningSubtasks - 1)
+            XCTAssertTrue(try call(LeadTools.listTasks, from: task, agentUUID: agent, in: harness).text.contains("completed: Docs written"))
+        }
+    }
+
+    /// A task without a repository has its sub-tasks in folders inside its
+    /// own, reporting to its agent.
+    func testAFolderTasksSubtaskGoesInItsFolder() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let started = try call(LeadTools.startTask, ["description": "Compare two parsers", "repo": "none"], lead: lead, in: harness)
+            XCTAssertFalse(started.isError, started.text)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Compare two parsers" })
+            let folder = try XCTUnwrap(task.taskFolder)
+            let agent = try XCTUnwrap(task.columns.first?.agentUUID)
+            let sub = try call(LeadTools.startTask, ["description": "Benchmark the first parser"], from: task, agentUUID: agent, in: harness)
+            XCTAssertFalse(sub.isError, sub.text)
+            XCTAssertTrue(sub.text.contains("It reports to you"), sub.text)
+            let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Benchmark the first parser" })
+            XCTAssertEqual(subtask.parentWorkspaceID, task.id)
+            XCTAssertEqual(subtask.taskFolder, folder + "/Benchmark the first parser")
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id }?.reportsToTask, true)
+        }
+    }
+
+    /// With "Starts tasks without asking" off, a task's start_task fills
+    /// the New Sub-task sheet in, under the task, without the Lead's
+    /// checkbox, once the sheet up closes; started from there, the
+    /// sub-task reports to the agent, which hears what the user did, and
+    /// hears it too when they close the sheet.
+    func testATasksProposedSubtaskWaitsForTheUser() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let (task, agent) = try startTask("Add a date filter", lead: lead, in: harness)
+            shell.setLeadStartsTasks(false, spaceID: lead.space)
+            let busy = try XCTUnwrap(shell.showNewPanel(spaceID: lead.space))
+            let proposed = try call(LeadTools.startTask, ["description": "Write the API docs"], from: task, agentUUID: agent, in: harness)
+            XCTAssertFalse(proposed.isError, proposed.text)
+            XCTAssertTrue(proposed.text.hasPrefix("Queued for the user: the New Sub-task sheet shows it once the sheet open now closes."),
+                          proposed.text)
+            busy.cancelButton.performClick(nil)
+            harness.waitUntil("the proposal") { shell.newTaskPanel?.subtaskParentID == task.id }
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(sheet.headingLabel.stringValue, "Proposed by “Add a date filter” · Tools")
+            XCTAssertEqual(sheet.descriptionView.string, "Write the API docs")
+            XCTAssertTrue(sheet.reportCheckbox.isHidden, "it reports to the task's agent, not the Lead")
+            // Not a sub-task any more: the space's Lead is offered again,
+            // and the heading still says who proposed it.
+            sheet.subtaskCheckbox.performClick(nil)
+            XCTAssertFalse(sheet.reportCheckbox.isHidden)
+            XCTAssertEqual(sheet.headingLabel.stringValue, "Proposed by “Add a date filter” · Tools")
+            sheet.subtaskCheckbox.performClick(nil)
+            XCTAssertTrue(sheet.reportCheckbox.isHidden)
+            harness.waitUntil("the repository's info") { sheet.info?.target != nil }
+            sheet.startButton.performClick(nil)
+            harness.waitUntil("the sub-task to open") { shell.workspaces.contains { $0.title == "Write the API docs" } }
+            let subtask = try XCTUnwrap(shell.workspaces.first { $0.title == "Write the API docs" })
+            XCTAssertEqual(subtask.parentWorkspaceID, task.id)
+            XCTAssertFalse(subtask.startedByAgent, "the user started it")
+            let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == subtask.id })
+            XCTAssertEqual(mission.parentWorkspaceID, task.id)
+            XCTAssertEqual(mission.reportsToTask, true)
+            let notice = { shell.pendingLeadNotices.last.map { [$0.workspaceID, $0.agentUUID, $0.text] } }
+            XCTAssertEqual(notice(), [task.id, agent, "[Nirux Mission] The user started the sub-task you proposed, “Write the API docs”, "
+                + "under your task: it reports to you."])
+
+            // Closed without starting: the agent hears that too.
+            XCTAssertFalse(try call(LeadTools.startTask, ["description": "Draw the diagram"], from: task, agentUUID: agent, in: harness).isError)
+            try XCTUnwrap(shell.newTaskPanel).cancelButton.performClick(nil)
+            XCTAssertEqual(notice(), [task.id, agent, "[Nirux Mission] The user closed the New Sub-task sheet you proposed (“Draw the diagram”): "
+                + "nothing was started."])
         }
     }
 }

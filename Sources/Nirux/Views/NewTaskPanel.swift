@@ -117,13 +117,35 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// "One door: ⌘N"). Nil: no Lead, no checkbox.
     var lead: NewTask.MissionParent? {
         didSet {
-            reportCheckbox.isHidden = lead == nil
-            reportHint.isHidden = lead == nil
+            updateReportCheckbox()
             if lead != nil, oldValue == nil { reportCheckbox.state = .on }
             layout()
         }
     }
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
+    /// The task's agent that proposed this sub-task (`start_task` with
+    /// "Starts tasks without asking" off): it reports to that agent while
+    /// "Sub-task of" stays checked, and "Report to the Lead" hides
+    /// meanwhile.
+    var reportsToTaskAgent: NewTask.MissionParent? {
+        didSet {
+            updateReportCheckbox()
+            layout()
+        }
+    }
+    /// The proposal was closed without starting anything: its agent hears so.
+    var onDeclineProposal: (() -> Void)?
+    /// Who proposed what the sheet holds (`prefill`): the heading keeps
+    /// saying so.
+    private var proposedBy: String?
+
+    /// "Report to the Lead" shows with a Lead, unless the sub-task a task's
+    /// agent proposed is checked: that one reports to the agent.
+    private func updateReportCheckbox() {
+        let hidden = lead == nil || (reportsToTaskAgent != nil && subtaskParentID != nil)
+        reportCheckbox.isHidden = hidden
+        reportHint.isHidden = hidden
+    }
 
     /// A task the new one goes under in the sidebar, and where it works:
     /// its sub-tasks work there too.
@@ -264,6 +286,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// new work, where its task works: the Repository popup and Existing
     /// Branch… (see `refresh`) show only without one.
     private func updateForSubtask() {
+        if let proposedBy { return headingLabel.stringValue = "Proposed by \(proposedBy) · \(space.name)" }
         headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
     }
 
@@ -349,14 +372,15 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         refresh()
     }
 
-    /// A Lead's proposal (`start_task` with "Starts tasks without asking"
-    /// off): its description, and its template, picked once the
-    /// repository's templates are read.
-    func prefill(description: String, templateName: String?) {
+    /// A proposal (`start_task` with "Starts tasks without asking" off),
+    /// from the Lead or a task's agent: its description, and its template,
+    /// picked once the repository's templates are read.
+    func prefill(description: String, templateName: String?, proposedBy: String = "the Lead") {
         guard panel != nil else { return }
         descriptionView.string = description
         if let templateName { pickedTemplateName = templateName }
-        headingLabel.stringValue = "Proposed by the Lead · \(space.name)"
+        self.proposedBy = proposedBy
+        updateForSubtask()
         hideError()
         refresh()
         // It comes while the user types elsewhere: no field takes the keys,
@@ -449,7 +473,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func cancelAction(_ sender: Any?) {
         if isStarting { return hide() }
+        let declined = onDeclineProposal
+        onDeclineProposal = nil
         dismiss()
+        declined?()
     }
 
     @objc func existingBranchAction(_ sender: Any?) {
@@ -467,6 +494,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     @objc func subtaskToggled(_ sender: Any?) {
         restoreReturnKey()
         updateForSubtask()
+        updateReportCheckbox()
+        layout()
         // Checked again: back in the task's repository.
         if subtaskParentID != nil, let key = parentTask?.repositoryKey, key != selectedRepositoryKey,
            repositories.contains(where: { $0.key == key }) {
@@ -569,12 +598,17 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             }
             place = .folder(parent: parent, name: name, makesParent: makesParentFolder)
         }
-        return NewTask.Request(
+        // A task's agent proposed it: it reports there, as a sub-task only.
+        let agentParent = subtaskParentID == nil ? nil : reportsToTaskAgent
+        var request = NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
             projectID: space.id, place: place, fetchesFirst: !startsWithoutFetch,
-            reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil,
+            reportsTo: agentParent ?? (lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil),
             parentWorkspaceID: subtaskParentID
         )
+        request.reportsToTask = agentParent != nil
+        request.proposedByTaskAgent = reportsToTaskAgent
+        return request
     }
 
     private func beginEditingBranch() {
@@ -1046,8 +1080,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         reportHint.isSelectable = false
         reportHint.setAccessibilityElement(false)
         reportCheckbox.setAccessibilityHelp(reportHint.stringValue)
-        reportCheckbox.isHidden = lead == nil
-        reportHint.isHidden = lead == nil
+        updateReportCheckbox()
         subtaskCheckbox.target = self
         subtaskCheckbox.action = #selector(subtaskToggled(_:))
         subtaskCheckbox.lineBreakMode = .byTruncatingMiddle

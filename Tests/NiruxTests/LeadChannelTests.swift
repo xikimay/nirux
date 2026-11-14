@@ -123,8 +123,9 @@ final class LeadChannelTests: XCTestCase {
 
     // MARK: - The MCP server
 
-    private func context(lead: Bool) -> NiruxMCPServer.Context {
-        var environment = ["NIRUX_WORKSPACE_ID": UUID().uuidString, "NIRUX_AGENT_UUID": UUID().uuidString]
+    private func context(lead: Bool, inWorkspace: Bool = true, launchID: String = "launch") -> NiruxMCPServer.Context {
+        var environment = ["NIRUX_AGENT_UUID": UUID().uuidString, "NIRUX_LAUNCH_ID": launchID]
+        if inWorkspace { environment["NIRUX_WORKSPACE_ID"] = UUID().uuidString }
         if lead { environment["NIRUX_LEAD"] = "1" }
         var context = NiruxMCPServer.Context(
             workingDirectory: stateDirectory.path, environment: environment, stateDirectory: stateDirectory,
@@ -144,16 +145,22 @@ final class LeadChannelTests: XCTestCase {
         try send(["jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["name": tool, "arguments": arguments]], context: context)
     }
 
-    /// Only a Lead sees and calls the Lead's tools; every agent has them
-    /// pre-allowed, so a Lead's calls never ask.
-    func testOnlyTheLeadHasItsTools() throws {
+    /// A Lead sees and calls the Lead's tools; another workspace's agent a
+    /// task's, the same names scoped to its sub-tasks; an agent that can't
+    /// name its workspace neither. Every agent has them pre-allowed, so a
+    /// call never asks.
+    func testEachAgentHasItsRolesTools() throws {
         let list = ["jsonrpc": "2.0", "id": 0, "method": "tools/list"] as [String: Any]
         let names = { (context: NiruxMCPServer.Context) in
             ((try self.send(list, context: context)["result"] as? [String: Any])?["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
         }
-        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name])
         XCTAssertEqual(try names(context(lead: true)), [HistorySearchTool.name] + LeadTools.names)
-        XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false))["error"], "unknown elsewhere")
+        XCTAssertEqual(try names(context(lead: false)), [HistorySearchTool.name] + TaskTools.names)
+        XCTAssertEqual(try names(context(lead: false, inWorkspace: false)), [HistorySearchTool.name])
+        // A workspace opened by a link from outside Nirux has no launch id.
+        XCTAssertEqual(try names(context(lead: false, launchID: "")), [HistorySearchTool.name])
+        XCTAssertNotNil(try call(LeadTools.queueMerge, ["prs": [1]], context: context(lead: false))["error"], "the Lead's only")
+        XCTAssertNotNil(try call(LeadTools.listTasks, [:], context: context(lead: false, inWorkspace: false))["error"], "unknown outside")
         let allowed = NiruxMCPServer.claudeArguments(executable: "/x/Nirux").first { $0.hasPrefix("--allowedTools=") }
         for name in LeadTools.names { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
     }

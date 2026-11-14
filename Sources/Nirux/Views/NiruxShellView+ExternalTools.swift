@@ -243,7 +243,9 @@ extension NiruxShellView {
         Z" or "fix this separately" all qualify. Started from a task's workspace, the new one is
         that task's sub-task: Nirux lists it under the task.
 
-        If Nirux's tools include `start_task`, use that tool instead of this skill.
+        If Nirux's tools include `start_task`, use that tool instead of this skill, unless it answers
+        that this workspace isn't a task. There are two levels at most: opened from a sub-task, the
+        new workspace lists under that sub-task's task, beside it.
 
         ## Steps
 
@@ -316,8 +318,8 @@ extension NiruxShellView {
 
         Nirux links the two agents with a Mission only when Settings › Agents › Mission handoffs
         is on, or when you are a space's Lead, and only for a terminal started with
-        `NIRUX_MISSION_HANDOFFS=1`. That variable alone doesn't prove it: a Lead's tasks have it
-        with the setting off. Without a Mission the new agent works alone: it can't ask you
+        `NIRUX_MISSION_HANDOFFS=1`. That variable alone doesn't prove it: a Lead's tasks, and the
+        sub-tasks `start_task` starts, have it with the setting off. Without a Mission the new agent works alone: it can't ask you
         anything or report back, and you can't send it more work. Unless you know the setting is
         on, tell the user that the new task may not report back to you.
 

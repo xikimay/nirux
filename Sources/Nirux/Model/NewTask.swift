@@ -59,7 +59,17 @@ enum NewTask {
         /// A task its Lead started by itself (`start_task`): it opens in the
         /// Lead's space, without taking the user's focus or space.
         var startedByLead = false
-        var opensInFront: Bool { !startedByLead }
+        /// `reportsTo` is a task's agent, which asked for this sub-task with
+        /// its tools (see TaskTools): the Mission works with Mission handoffs
+        /// off too (`Mission.reportsToTask`).
+        var reportsToTask = false
+        /// A task's agent started it by itself (`start_task`): it opens
+        /// behind what the user is doing, as a Lead's task does.
+        var startedByTaskAgent = false
+        /// The task's agent that proposed it in the sheet: it hears what the
+        /// user started, a sub-task reporting to it or not.
+        var proposedByTaskAgent: MissionParent?
+        var opensInFront: Bool { !startedByLead && !startedByTaskAgent }
 
         /// The repository it branches from; nil for a folder.
         var target: Target? {

@@ -53,6 +53,18 @@ With the description empty, **Start** opens a plain workspace instead: a shell i
 
 **Existing Branch…** lists the repository's worktrees, then its local branches and origin's that have none. Picking a worktree opens it. Picking a branch creates its worktree and opens a shell there.
 
+### Sub-tasks
+
+**New Sub-task…**, in a task's `⋯` menu and the Workspaces menu, opens the sheet under that task. The sub-task starts in the task's repository, from the same base branch as any task, or in a folder inside the task's own folder for a task without a repository. It lists right under its task in the sidebar.
+
+A task's Claude Code agent can start sub-tasks itself, with the `start_task` tool Nirux gives it, when you ask it to split the work. A sub-task it starts opens behind what you are doing. It reports to that agent even with Mission handoffs off: its questions and its result are typed into the agent's prompt (see [Missions](missions.md)). The agent lists its sub-tasks and answers their questions with its tools.
+
+- There are two levels at most: `start_task` refuses to start a sub-task from a sub-task, and a worktree the `nirux-worktree` skill opens from a sub-task lists under that sub-task's task, beside it.
+- A task runs at most six sub-tasks at once. Only those that report to it count: not archived ones, not those that reported their result, and not those you started under it yourself.
+- When **Starts tasks without asking** is off in Space Settings › Lead, the agent's sub-task opens in the sheet, filled in, for you to start, once any sheet already open closes. The agent hears what you did.
+- Each sub-task reports to the agent that started it: another agent of the same task doesn't see its questions.
+- A workspace opened by a link from outside Nirux gets no such tools.
+
 ### Tasks without a repository
 
 Research, writing or a one-off script need no repository. Pick **No Repository**, the last item of the repository menu. Tasks in General, and in a space without a repository, always start this way.

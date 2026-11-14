@@ -115,17 +115,23 @@ extension NiruxShellView {
     /// "New Sub-task…": the sheet in the task's space and repository (see
     /// `subtaskRepositoryKey`), under it. A task without a repository has
     /// its sub-tasks' folders in its own.
-    func showNewSubtaskPanel(under parent: WorkspaceState) {
+    @discardableResult
+    func showNewSubtaskPanel(under parent: WorkspaceState) -> NewTaskPanel? {
         if let folder = parent.taskFolder, !parent.isLead {
-            guard NiruxURLRequest.directoryExists(folder) else { return NSSound.beep() }
-            showNewPanel(
+            guard NiruxURLRequest.directoryExists(folder) else {
+                NSSound.beep()
+                return nil
+            }
+            return showNewPanel(
                 spaceID: parent.profileID,
                 parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, place: .folder(folder))
             )
-            return
         }
-        guard let repositoryKey = subtaskRepositoryKey(of: parent) else { return NSSound.beep() }
-        showNewPanel(
+        guard let repositoryKey = subtaskRepositoryKey(of: parent) else {
+            NSSound.beep()
+            return nil
+        }
+        return showNewPanel(
             spaceID: parent.profileID,
             parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title, place: .repository(key: repositoryKey))
         )
@@ -268,7 +274,7 @@ extension NiruxShellView {
         let mission = request.reportsTo.flatMap { parent in
             createMission(
                 parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-                agent: request.agent, branch: created.folderName == nil ? label : title
+                agent: request.agent, branch: created.folderName == nil ? label : title, reportsToTask: request.reportsToTask
             )
         }
         addWorkspace(
@@ -281,16 +287,26 @@ extension NiruxShellView {
             missionID: mission?.id,
             parentWorkspaceID: request.parentWorkspaceID,
             reportsToLead: mission?.reportsToLead == true,
+            reportsToTask: mission?.reportsToTask == true,
             deliveredHandover: created.handoverError == nil,
             // A folder's name is as stable as a branch: it names the
             // session too (see `SessionName`).
             worktreeBranch: created.checkedOutBranch ?? created.folderName,
+            // The Lead's list_tasks says another agent started it.
+            startedByAgent: request.startedByTaskAgent,
             setupScript: setupScript(for: decision),
             taskFolder: created.folderName == nil ? nil : created.path,
             activate: request.opensInFront,
             slidesIn: pendingTaskSheet != nil
         )
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
+        // The agent that proposed it hears what the user started.
+        if let proposer = request.proposedByTaskAgent {
+            tellProposer(proposer, mission?.reportsToTask == true
+                ? "The user started the sub-task you proposed, “\(MissionPromptText.quoted(title))”, under your task: it reports to you."
+                : "The user started the task you proposed, “\(MissionPromptText.quoted(title))”, but not as your sub-task: "
+                    + "it doesn't report to you.")
+        }
         // The sheet's trust hint has done its job once a Claude Code task
         // started in the tasks folder, where the hint applies.
         // The cheap checks first: the settings are read only for such a task.

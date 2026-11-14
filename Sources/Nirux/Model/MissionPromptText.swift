@@ -22,6 +22,11 @@ enum MissionPromptText {
             return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"
                 + "Answer with the reply tool, question \(event.id); if neither the brief, the code nor the user's "
                 + "words settle it, don't guess: hand it to the user with ask_user."
+        case .question where delivery.mission.reportsToTask == true:
+            // A task's agent that started it with start_task answers with
+            // its tools too (see TaskTools).
+            return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"
+                + "Answer with the reply tool, question \(event.id) (if you can't tell, don't guess: ask the user)"
         case .question:
             return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"
                 + "Reply with: \"$NIRUX_CLI_PATH\" --mission reply --event \(event.id) --message \"<answer>\""

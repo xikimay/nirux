@@ -24,11 +24,19 @@ struct Mission: Codable, Equatable {
     /// Mission works even with Mission handoffs off in Settings. Nil (an
     /// older build's record) means no.
     var reportsToLead: Bool?
+    /// The parent is a task's agent, which started this sub-task with its
+    /// tools (`start_task`, see TaskTools): the Mission works with Mission
+    /// handoffs off too. Nil means no.
+    var reportsToTask: Bool?
+
+    /// Carried whatever the Mission handoffs setting: a Lead's task, or a
+    /// sub-task a task's agent started with its tools.
+    var isAlwaysCarried: Bool { reportsToLead == true || reportsToTask == true }
 
     /// Whether Nirux carries this Mission's messages, given the Mission
     /// handoffs setting.
     func isCarried(handoffsEnabled: Bool) -> Bool {
-        handoffsEnabled || reportsToLead == true
+        handoffsEnabled || isAlwaysCarried
     }
 }
 
@@ -131,6 +139,8 @@ struct MissionCreationRequest {
     let branch: String
     /// The parent is a space's Lead (see `Mission.reportsToLead`).
     var reportsToLead = false
+    /// The parent is a task's agent and its tools (see `Mission.reportsToTask`).
+    var reportsToTask = false
 }
 
 /// Durable mission state. Writes are immediate because this store is also
@@ -192,7 +202,7 @@ final class MissionStore {
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> Mission? {
-        guard enabled || request.reportsToLead,
+        guard enabled || request.reportsToLead || request.reportsToTask,
               ensureLoaded(),
               Self.isIdentifier(request.id),
               Self.isIdentifier(request.parentWorkspaceID),
@@ -216,7 +226,8 @@ final class MissionStore {
             createdAt: now,
             updatedAt: now,
             events: [],
-            reportsToLead: request.reportsToLead ? true : nil
+            reportsToLead: request.reportsToLead ? true : nil,
+            reportsToTask: request.reportsToTask ? true : nil
         )
         var updated = missions
         updated.append(mission)

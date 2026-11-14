@@ -164,7 +164,7 @@ enum LeadTools {
         ]
     }
 
-    private static func definition(
+    static func definition(
         _ name: String, title: String, description: String, properties: [String: Any], required: [String], readOnly: Bool = false
     ) -> [String: Any] {
         [

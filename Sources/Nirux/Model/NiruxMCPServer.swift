@@ -24,8 +24,19 @@ enum NiruxMCPServer {
         second Nirux.
         """
 
-    /// For any agent but a space's Lead, which starts tasks with its tools.
+    /// For the agent of a Nirux workspace that isn't a space's Lead: its
+    /// tools (TaskTools).
     static let taskInstructions = """
+        You can hand part of your task to another agent: start_task starts a sub-task under your task, in its \
+        own worktree; list_tasks shows your sub-tasks; reply answers their questions. Their questions and \
+        results are typed into your prompt as [Nirux Mission] messages, only once your turn is over: after \
+        starting sub-tasks, go on with your own work or end your turn; don't poll or sleep. Report your own \
+        result only once the sub-tasks you need are done. A sub-task can't start sub-tasks of its own. Where \
+        start_task answers that the workspace isn't a task, use the nirux-worktree skill.
+        """
+
+    /// For an agent outside a Nirux workspace, which has no task tools.
+    static let skillInstructions = """
         To start a task, or a sub-task of yours, in its own worktree, use the nirux-worktree skill.
         """
 
@@ -53,9 +64,10 @@ enum NiruxMCPServer {
 
     /// The instructions for whoever launched the server: the Lead's role
     /// comes first in its workspace (`NIRUX_LEAD=1`); any other agent
-    /// learns how to start a task.
+    /// learns how to start a task, with its tools in a Nirux workspace.
     static func instructions(for context: Context) -> String {
-        context.isLead ? leadInstructions + "\n\n" + instructions : instructions + "\n\n" + taskInstructions
+        if context.isLead { return leadInstructions + "\n\n" + instructions }
+        return instructions + "\n\n" + (context.isWorkspaceAgent ? taskInstructions : skillInstructions)
     }
 
     /// `--mcp-config=<this server>` and `--allowedTools=<its tools>` for
@@ -73,7 +85,8 @@ enum NiruxMCPServer {
     }
 
     /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's
-    /// are listed to a Lead only (and the app checks each call).
+    /// are listed to a Lead only, a task's (the same names) to the agent of
+    /// any other Nirux workspace, and the app checks each call.
     static let toolNames = [HistorySearchTool.name] + LeadTools.names
 
     /// Who runs the server, and where.
@@ -94,6 +107,25 @@ enum NiruxMCPServer {
         var sessionID: String? { nonEmpty("CLAUDE_CODE_SESSION_ID") }
         /// Launched in a space's Lead workspace (see `WorkspaceState.isLead`).
         var isLead: Bool { environment[WorkspaceState.leadEnvironmentKey] == "1" }
+        /// Launched by a Nirux workspace's terminal, which names itself (the
+        /// app can tell who calls) and carries this launch's id: one opened
+        /// by a link from outside Nirux has none, and its agents get no task
+        /// tools (the app refuses them too).
+        var isWorkspaceAgent: Bool {
+            nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil
+                && nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil
+        }
+        /// The tools the app answers for this agent: the Lead's, or a task's.
+        var appToolNames: [String] {
+            if isLead { return LeadTools.names }
+            return isWorkspaceAgent ? TaskTools.names : []
+        }
+
+        /// Their definitions, for `tools/list`.
+        var appToolDefinitions: [[String: Any]] {
+            if isLead { return LeadTools.definitions }
+            return isWorkspaceAgent ? TaskTools.definitions : []
+        }
         /// Tests shorten the Lead's calls' wait for the app.
         var leadTimeout: TimeInterval?
 
@@ -124,12 +156,12 @@ enum NiruxMCPServer {
     static func run(context: Context = .current()) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
         let output = ServerOutput()
-        // A Lead's call can wait minutes for the app: it answers on its
+        // An app tool's call can wait minutes for the app: it answers on its
         // own, so pings and other calls are read and answered meanwhile.
         let slowCalls = DispatchQueue(label: "nirux.mcp.lead-calls", attributes: .concurrent)
         while let line = readLine(strippingNewline: true), !output.isClosed {
             let data = Data(line.utf8)
-            if isLeadToolCall(data, context: context) {
+            if isAppToolCall(data, context: context) {
                 slowCalls.async { output.write(reply(to: data, context: context)) }
             } else {
                 output.write(reply(to: data, context: context))
@@ -138,14 +170,14 @@ enum NiruxMCPServer {
         return 0
     }
 
-    /// A `tools/call` of one of the Lead's tools, from a Lead.
-    static func isLeadToolCall(_ line: Data, context: Context) -> Bool {
-        guard context.isLead, line.count <= maxLineBytes,
+    /// A `tools/call` of one of the tools the app answers for this agent.
+    static func isAppToolCall(_ line: Data, context: Context) -> Bool {
+        guard !context.appToolNames.isEmpty, line.count <= maxLineBytes,
               let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
               object["method"] as? String == "tools/call",
               let name = (object["params"] as? [String: Any])?["name"] as? String
         else { return false }
-        return LeadTools.names.contains(name)
+        return context.appToolNames.contains(name)
     }
 
     /// The answer to one message, without its newline; nil for a
@@ -176,11 +208,10 @@ enum NiruxMCPServer {
         case "ping":
             return response(id: id, result: [:])
         case "tools/list":
-            let lead = context.isLead ? LeadTools.definitions : []
-            return response(id: id, result: ["tools": [HistorySearchTool.definition] + lead])
+            return response(id: id, result: ["tools": [HistorySearchTool.definition] + context.appToolDefinitions])
         case "tools/call":
             let name = params["name"] as? String
-            guard let name, name == HistorySearchTool.name || (context.isLead && LeadTools.names.contains(name)) else {
+            guard let name, name == HistorySearchTool.name || context.appToolNames.contains(name) else {
                 return response(id: id, error: (-32602, "Unknown tool: \(name ?? "none")"))
             }
             guard let arguments = params["arguments"] as? [String: Any] ?? (params["arguments"] == nil ? [:] : nil) else {
@@ -188,7 +219,7 @@ enum NiruxMCPServer {
             }
             let result = name == HistorySearchTool.name
                 ? HistorySearchTool.call(arguments, context: context)
-                : callLeadTool(name, arguments: arguments, context: context)
+                : callAppTool(name, arguments: arguments, context: context)
             return response(id: id, result: [
                 "content": [["type": "text", "text": result.text]],
                 "isError": result.isError
@@ -198,15 +229,15 @@ enum NiruxMCPServer {
         }
     }
 
-    /// A Lead's tool: checked here, then sent to the running app, which
-    /// acts and answers (see LeadChannel).
-    static func callLeadTool(_ name: String, arguments: [String: Any], context: Context) -> ToolResult {
+    /// A Lead's or a task's tool: checked here, then sent to the running
+    /// app, which acts and answers (see LeadChannel).
+    static func callAppTool(_ name: String, arguments: [String: Any], context: Context) -> ToolResult {
         if let problem = LeadTools.problem(tool: name, arguments: arguments) {
             return ToolResult(text: problem, isError: true)
         }
         guard let workspaceID = context.nonEmpty("NIRUX_WORKSPACE_ID"), let agentUUID = context.nonEmpty("NIRUX_AGENT_UUID"),
               let data = try? JSONSerialization.data(withJSONObject: arguments), let json = String(data: data, encoding: .utf8)
-        else { return ToolResult(text: "This terminal isn't a Nirux Lead's.", isError: true) }
+        else { return ToolResult(text: "This terminal isn't one of Nirux's.", isError: true) }
         let request = LeadChannel.Request(
             id: UUID().uuidString, tool: name, arguments: json,
             workspaceID: workspaceID, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
