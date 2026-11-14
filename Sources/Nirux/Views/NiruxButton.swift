@@ -34,6 +34,9 @@ final class NiruxButton: NSButton {
     private var hoverArea: NSTrackingArea?
     /// Setting the attributed title may set the title again.
     private var isApplyingLook = false
+    /// The title's colour as last set: only a new colour or a new title
+    /// sets the attributed title again.
+    private var titleColor: NSColor?
 
     init(title: String, kind: Kind, size: Size = .regular, target: AnyObject? = nil, action: Selector? = nil) {
         self.kind = kind
@@ -43,8 +46,12 @@ final class NiruxButton: NSButton {
         self.target = target
         self.action = action
         font = size.font
+        // A click leaves the keyboard where it was (the terminal, Monaco); a
+        // sheet that wants its buttons in the key loop turns this off.
+        refusesFirstResponder = true
         if kind == .glass, Self.drawsSystemGlass {
             if #available(macOS 26, *) { bezelStyle = .glass }
+            controlSize = size == .small ? .small : .regular
         } else {
             isBordered = false
             bezelStyle = .regularSquare
@@ -86,8 +93,12 @@ final class NiruxButton: NSButton {
             look = Look(fill: Theme.Color.error.withAlphaComponent([0.14, 0.2, 0.26][step]), text: Theme.Color.error)
         }
         if !enabled {
+            // Every kind greys out the same way, the primary included: a
+            // light slab with grey text would read neither as on nor off.
+            let resting = kind == .primary ? Self.look(.secondary, hovered: false, pressed: false, enabled: true) : look
+            look.fill = resting.fill.withAlphaComponent(resting.fill.alphaComponent / 2)
+            look.border = resting.border
             look.text = Theme.Color.textDisabled
-            look.fill = look.fill.withAlphaComponent(look.fill.alphaComponent / 2)
         }
         return look
     }
@@ -106,8 +117,24 @@ final class NiruxButton: NSButton {
         didSet {
             guard !isApplyingLook else { return }
             invalidateIntrinsicContentSize()
+            titleColor = nil
             applyLook()
         }
+    }
+
+    /// Fits the capsule to its title: call it after a title change when the
+    /// button is laid out with frames.
+    override func sizeToFit() {
+        setFrameSize(intrinsicContentSize)
+    }
+
+    override var isHidden: Bool {
+        didSet { if isHidden { isHovered = false } }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { isHovered = false }
     }
 
     override var mouseDownCanMoveWindow: Bool { false }
@@ -123,17 +150,20 @@ final class NiruxButton: NSButton {
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
-    /// Darker while the button tracks the mouse: without a border the cell
-    /// draws no highlight of its own.
-    override func mouseDown(with event: NSEvent) {
-        isPressed = true
-        super.mouseDown(with: event)
-        isPressed = false
+    /// Pressed while the cell highlights: on and off as the pointer moves in
+    /// and out during a press, off before the action runs. Without a border
+    /// the cell draws no highlight of its own.
+    override func highlight(_ flag: Bool) {
+        super.highlight(flag)
+        isPressed = flag
     }
 
-    override func layout() {
-        super.layout()
-        layer?.cornerRadius = bounds.height / 2
+    /// The tracking loop of a press eats the pointer's exit: after it, the
+    /// hover follows where the pointer is.
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        guard let window else { return isHovered = false }
+        isHovered = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -158,6 +188,8 @@ final class NiruxButton: NSButton {
         layer?.backgroundColor = look.fill.cgColor
         layer?.borderColor = look.border?.cgColor
         layer?.borderWidth = look.border == nil ? 0 : 1
+        guard look.text != titleColor else { return }
+        titleColor = look.text
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         attributedTitle = NSAttributedString(string: title, attributes: [

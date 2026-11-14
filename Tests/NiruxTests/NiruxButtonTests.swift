@@ -32,6 +32,35 @@ final class NiruxButtonTests: XCTestCase {
             XCTAssertEqual(NiruxButton.look(kind, hovered: true, pressed: true, enabled: false).text, Theme.Color.textDisabled)
         }
         XCTAssertEqual(NiruxButton.look(.danger, hovered: false, pressed: false, enabled: true).text, Theme.Color.error)
+        XCTAssertEqual(
+            NiruxButton.look(.primary, hovered: false, pressed: false, enabled: false),
+            NiruxButton.look(.secondary, hovered: false, pressed: false, enabled: false),
+            "a disabled primary greys out like the others, not as a light slab"
+        )
+    }
+
+    /// The pointer drives the look: hover on entering, the press with the
+    /// cell's highlight (so it lets go before the action runs), and no hover
+    /// left behind on a button that hid.
+    func testThePointerDrivesTheLook() throws {
+        let button = NiruxButton(title: "Deny", kind: .secondary)
+        func fill() -> CGColor? { button.layer?.backgroundColor }
+        func look(hovered: Bool, pressed: Bool) -> CGColor {
+            NiruxButton.look(.secondary, hovered: hovered, pressed: pressed, enabled: true).fill.cgColor
+        }
+        let entered = try XCTUnwrap(NSEvent.enterExitEvent(
+            with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+        ))
+        button.mouseEntered(with: entered)
+        XCTAssertEqual(fill(), look(hovered: true, pressed: false))
+        button.highlight(true)
+        XCTAssertEqual(fill(), look(hovered: true, pressed: true))
+        button.highlight(false)
+        XCTAssertEqual(fill(), look(hovered: true, pressed: false))
+        button.isHidden = true
+        button.isHidden = false
+        XCTAssertEqual(fill(), look(hovered: false, pressed: false), "shown again, not hovered")
     }
 
     /// A capsule of the size's height, as wide as its title, which keeps the
@@ -65,6 +94,7 @@ final class NiruxButtonTests: XCTestCase {
         let glass = NiruxButton(title: "Board", kind: .glass)
         if #available(macOS 26, *) {
             XCTAssertEqual(glass.bezelStyle, .glass)
+            XCTAssertEqual(NiruxButton(title: "Board", kind: .glass, size: .small).controlSize, .small)
         } else {
             XCTAssertFalse(glass.isBordered)
             XCTAssertEqual(glass.layer?.backgroundColor, button.layer?.backgroundColor)
