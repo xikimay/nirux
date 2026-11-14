@@ -2330,6 +2330,56 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(chosen, ["Open"], "taken off the Board while its menu was open")
     }
 
+    func testAMessageTakesTheSectionsPlaceAndOffersBoardSettings() throws {
+        let sections = [section(units: tasks([line("a"), line("b")]))]
+        var told = content(sections)
+        told.runningQueues = [BoardStagesView.RunningQueue(id: "orphan", title: "old-repo", status: "Merging #12", stop: .init(title: "Stop"))]
+        let view = board(told)
+        var opened = 0
+        view.onBoardSettings = { opened += 1 }
+        told.message = BoardStagesView.Message(text: "board.json can’t be read: open Board Settings… to replace it.", offersSettings: true)
+        // It comes at once, the pointer over the Board or not: the whole Board's state.
+        view.settleLater = { $0() }
+        let inside = view.convert(NSPoint(x: 400, y: 300), to: nil)
+        view.pointerLocation = { inside }
+        view.mouseMoved(with: try moved(to: inside, in: view))
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.lineViews.count, 0)
+        XCTAssertNil(view.sectionHeader(section: "nirux"))
+        let message = view.messageView
+        XCTAssertTrue(message.isDescendant(of: view.scrollView))
+        XCTAssertEqual(message.label.stringValue, "board.json can’t be read: open Board Settings… to replace it.")
+        XCTAssertEqual(message.label.frame.minX, 24)
+        XCTAssertEqual(message.label.frame.width, message.bounds.width - 48)
+        XCTAssertFalse(message.settingsButton.isHidden)
+        XCTAssertEqual(message.settingsButton.frame.midX, message.bounds.midX, accuracy: 1)
+        XCTAssertGreaterThan(message.settingsButton.frame.minY, message.label.frame.maxY)
+        XCTAssertEqual(message.frame.height, message.label.frame.maxY + 12 + 24 + 32, accuracy: 1)
+        XCTAssertTrue(message.settingsButton.aim === view.aim)
+        try click(message.settingsButton)
+        XCTAssertEqual(opened, 1)
+        XCTAssertEqual(view.runningQueueViews.map(\.queue.id), ["orphan"], "a queue that runs keeps its line")
+        // Narrow: its words wrap.
+        view.setFrameSize(NSSize(width: 300, height: 600))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(message.label.frame.height, 20)
+        view.setFrameSize(NSSize(width: 940, height: 600))
+        // One the settings can't fix: no button.
+        told.message = BoardStagesView.Message(text: "Reading board.json…")
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(message.settingsButton.isHidden)
+        XCTAssertEqual(message.frame.height, message.label.frame.maxY + 32, accuracy: 1)
+        // It goes at once too, the pointer over the Board: the sections come back as they are.
+        told.message = nil
+        told.sections = [section(units: tasks([line("b"), line("a")]))]
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertNil(message.superview)
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "a"])
+    }
+
     func testMergedTodayOpensTheTaskStillOpen() throws {
         let telegram = BoardStages.Merged(lineID: "telegram", title: "Remove Telegram", number: 287, mergedAt: now - 3600)
         let cloud = BoardStages.Merged(lineID: nil, title: "From the cloud", number: 198, mergedAt: now - 7200)
