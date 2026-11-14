@@ -177,6 +177,11 @@ final class BoardStagesView: NSView {
     let stationTitles = BoardStages.Station.allCases.map { NSTextField(labelWithString: BoardStagesView.title(of: $0)) }
     private let separator = NSView()
     let scrollView = NSScrollView()
+    /// The width the lines were last laid out at: the clip's.
+    private var listWidth: CGFloat = 0
+    /// The Board resizes its scroll view itself, right before laying the
+    /// lines out.
+    private var isResizingScrollView = false
     private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
@@ -245,15 +250,14 @@ final class BoardStagesView: NSView {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
-        // As the sidebar: a scroller that takes no width, so the lines
-        // keep the titles' columns whatever the Mac's setting.
-        scrollView.scrollerStyle = .overlay
         scrollView.documentView = documentView
         // The lines move under a still pointer when the list scrolls, and
         // an app that isn't active doesn't hear the pointer leave.
         scrollView.contentView.postsBoundsChangedNotifications = true
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(listScrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        scrollView.contentView.postsFrameChangedNotifications = true
+        center.addObserver(self, selector: #selector(clipResized), name: NSView.frameDidChangeNotification, object: scrollView.contentView)
         for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification] {
             center.addObserver(self, selector: #selector(refreshHover), name: name, object: nil)
         }
@@ -625,13 +629,46 @@ final class BoardStagesView: NSView {
         layoutContent()
     }
 
+    /// A legacy scroller came or went under lines already laid out (the
+    /// Mac's "Show scroll bars" setting changed, or a mouse came): they and
+    /// their titles take the width it leaves, at the next layout pass (the
+    /// clip resizes while AppKit tiles).
+    @objc private func clipResized() {
+        if !isResizingScrollView, scrollView.contentSize.width != listWidth { needsLayout = true }
+    }
+
+    override func layout() {
+        super.layout()
+        if scrollView.contentSize.width != listWidth { layoutContent() }
+    }
+
     private func layoutContent() {
         let width = bounds.width
         let pad = Metrics.padding
         layoutHeader(width: width)
+        let top = Metrics.headerHeight + Metrics.titlesHeight
+        separator.frame = NSRect(x: 0, y: top - 1, width: width, height: 1)
+        // The running queues take the foot, as many as there is room for
+        // under the header: the lines above them don't move.
+        let fitting = min(runningQueueViews.count, Int(max(0, bounds.height - top) / Metrics.queueLineHeight))
+        let foot = CGFloat(fitting) * Metrics.queueLineHeight
+        let scrollFrame = NSRect(x: 0, y: top, width: width, height: max(0, bounds.height - top - foot))
+        isResizingScrollView = true
+        scrollView.frame = scrollFrame
+        isResizingScrollView = false
+        for (index, view) in runningQueueViews.enumerated() {
+            view.isHidden = index >= fitting
+            let y = bounds.height - foot + CGFloat(index) * Metrics.queueLineHeight
+            view.frame = NSRect(x: 0, y: y, width: width, height: Metrics.queueLineHeight)
+        }
+        // What the clip shows for the lines' height: a legacy scroller sits
+        // beside them, as in Finder, and the titles keep over their columns.
+        listWidth = scrollView.documentWidth(frameSize: scrollFrame.size) { width in
+            (items.reduce(12) { $0 + advance(of: $1, width: width) }, ())
+        }.width
 
         // The columns' titles, each station's over its place on the rails.
-        let columns = Columns(width: width)
+        let columns = Columns(width: listWidth)
         let titlesY = Metrics.headerHeight + 6
         for (title, frame) in zip(columnTitles, [columns.task, columns.phrase, columns.pullRequest]) {
             title.isHidden = (frame?.width ?? 0) < 30
@@ -650,42 +687,35 @@ final class BoardStagesView: NSView {
             title.isHidden = isTight && index != 0 && index != stationTitles.count - 1
             title.frame = NSRect(x: (stations[index] - titleWidth / 2).rounded(), y: titlesY, width: titleWidth, height: 14)
         }
-        let top = Metrics.headerHeight + Metrics.titlesHeight
-        separator.frame = NSRect(x: 0, y: top - 1, width: width, height: 1)
-        // The running queues take the foot, as many as there is room for
-        // under the header: the lines above them don't move.
-        let fitting = min(runningQueueViews.count, Int(max(0, bounds.height - top) / Metrics.queueLineHeight))
-        let foot = CGFloat(fitting) * Metrics.queueLineHeight
-        scrollView.frame = NSRect(x: 0, y: top, width: width, height: max(0, bounds.height - top - foot))
-        for (index, view) in runningQueueViews.enumerated() {
-            view.isHidden = index >= fitting
-            let y = bounds.height - foot + CGFloat(index) * Metrics.queueLineHeight
-            view.frame = NSRect(x: 0, y: y, width: width, height: Metrics.queueLineHeight)
-        }
 
         var y: CGFloat = 0
         for item in items {
             switch item {
             case .sectionHeader(let header):
-                header.frame = NSRect(x: 0, y: y, width: width, height: Metrics.sectionHeaderHeight)
-                y += Metrics.sectionHeaderHeight
+                header.frame = NSRect(x: 0, y: y, width: listWidth, height: Metrics.sectionHeaderHeight)
             case .line(let line):
-                line.frame = NSRect(x: 0, y: y, width: width, height: Metrics.lineHeight)
-                y += Metrics.lineHeight
+                line.frame = NSRect(x: 0, y: y, width: listWidth, height: Metrics.lineHeight)
             case .caption(let caption):
-                caption.frame = NSRect(x: pad, y: y + 9, width: max(0, width - 2 * pad), height: 15)
-                y += Metrics.captionHeight
+                caption.frame = NSRect(x: pad, y: y + 9, width: max(0, listWidth - 2 * pad), height: 15)
             case .fold(let fold):
-                fold.frame = NSRect(x: pad, y: y + 7, width: max(0, width - 2 * pad), height: 18)
-                y += Metrics.captionHeight
+                fold.frame = NSRect(x: pad, y: y + 7, width: max(0, listWidth - 2 * pad), height: 18)
             case .merged(let merged):
-                let height = merged.height(for: width)
-                merged.frame = NSRect(x: 0, y: y + 10, width: width, height: height)
-                y += height + 10
+                merged.frame = NSRect(x: 0, y: y + 10, width: listWidth, height: merged.height(for: listWidth))
             }
+            y += advance(of: item, width: listWidth)
         }
-        documentView.frame = NSRect(x: 0, y: 0, width: width, height: max(scrollView.contentSize.height, y + 12))
+        documentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: max(scrollView.contentSize.height, y + 12))
         refreshHover()
+    }
+
+    /// How far down `item` takes the next one, at `width`.
+    private func advance(of item: Item, width: CGFloat) -> CGFloat {
+        switch item {
+        case .sectionHeader: Metrics.sectionHeaderHeight
+        case .line: Metrics.lineHeight
+        case .caption, .fold: Metrics.captionHeight
+        case .merged(let merged): merged.height(for: width) + 10
+        }
     }
 
     /// The space: its colour and name first, then at the right the order
