@@ -10,35 +10,44 @@ extension NiruxShellView {
     /// and the Board reads that pass's status. Then what the row doesn't
     /// hold (`BoardStages.TaskReading.init(_:summary:gitRoot:...)`).
     /// `approvalHolds` and `missionQuestions` are the sidebar's pass's:
-    /// reading them again would hand requests back or note hand-offs.
+    /// reading them again would hand requests back or note hand-offs. The
+    /// rows the sidebar just built (`sidebarInfos`, the space on screen's)
+    /// are taken as they are. `comparable` gives a git root the rows' form
+    /// of a path, without the disk where the Board knows it. The Lead is
+    /// read too: the space's header says it.
     func boardReadings(
         ofSpace spaceID: String,
+        sidebarInfos: [WorkspaceInfo] = [],
         foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
         approvalHolds: [ObjectIdentifier: PermissionApprovalHold],
         missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         snapshot: ProcessSnapshot,
-        now: TimeInterval
+        now: TimeInterval,
+        comparable: (String) -> String = NiruxShellView.comparablePath
     ) -> [String: BoardStages.TaskReading] {
+        let built = Dictionary(sidebarInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let parents = workspaceStore.activeParents(in: spaceID)
         var readings: [String: BoardStages.TaskReading] = [:]
         for index in workspaceStore.visibleWorkspaceIndices(in: spaceID) where !workspaces[index].isClosing {
             let workspace = workspaces[index]
-            let isActive = index == activeWSIndex
-            let columns = workspace.columns.enumerated().map { colIndex, col in
-                let isUserFocused = colIndex == workspace.focusedIndex && isActive
-                return sidebarColumnInfo(
-                    col, at: colIndex, isUserFocused: isUserFocused, agentStatus: col.pty?.cachedAgentState ?? .idle,
-                    foregroundProcess: foregroundProcesses[ObjectIdentifier(col)], approvalHold: approvalHolds[ObjectIdentifier(col)],
-                    missionQuestion: missionQuestions[ObjectIdentifier(col)], showsDialog: false, snapshot: snapshot, now: now
+            let info = built[workspace.id] ?? {
+                let isActive = index == activeWSIndex
+                let columns = workspace.columns.enumerated().map { colIndex, col in
+                    let isUserFocused = colIndex == workspace.focusedIndex && isActive
+                    return sidebarColumnInfo(
+                        col, at: colIndex, isUserFocused: isUserFocused, agentStatus: col.pty?.cachedAgentState ?? .idle,
+                        foregroundProcess: foregroundProcesses[ObjectIdentifier(col)], approvalHold: approvalHolds[ObjectIdentifier(col)],
+                        missionQuestion: missionQuestions[ObjectIdentifier(col)], showsDialog: false, snapshot: snapshot, now: now
+                    )
+                }
+                return sidebarWorkspaceInfo(
+                    at: index, columns: columns, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
                 )
-            }
-            let info = sidebarWorkspaceInfo(
-                at: index, columns: columns, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
-            )
+            }()
             readings[workspace.id] = BoardStages.TaskReading(
                 info,
-                summary: workspace.lastSummaryIsManual ? Self.oneLine(workspace.lastSummary) : nil,
-                gitRoot: workspace.gitContext.map { Self.comparablePath($0.identity.repositoryRoot) },
+                summary: workspace.lastSummaryIsManual ? WorkspaceInfo.normalizedContextText(workspace.lastSummary) : nil,
+                gitRoot: workspace.gitContext.map { comparable($0.identity.repositoryRoot) },
                 reviewsInFlight: Self.reviewsInFlight(of: workspace),
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970
@@ -48,23 +57,17 @@ extension NiruxShellView {
         return readings
     }
 
-    /// The review passes running: each recorded at its turn's start, in a
-    /// turn still running (a run kept from an earlier turn is done).
+    /// The review passes running: each recorded at the start of the turn
+    /// that runs it (the same prompt's time), while that turn goes on,
+    /// whatever its agent waits on meanwhile (a permission asked mid-review
+    /// is no end). A run kept from an earlier turn, or another column's, is
+    /// done.
     nonisolated static func reviewsInFlight(runs: [ReviewPass: ReviewRun], turnsStartedAt: [TimeInterval]) -> Set<ReviewPass> {
-        Set(runs.compactMap { pass, run in turnsStartedAt.contains { run.at >= $0 } ? pass : nil })
+        Set(runs.compactMap { pass, run in turnsStartedAt.contains { abs(run.at - $0) < 1 } ? pass : nil })
     }
 
     private static func reviewsInFlight(of workspace: WorkspaceState) -> Set<ReviewPass> {
-        let turns = workspace.columns.compactMap { column -> TimeInterval? in
-            guard let pty = column.pty, pty.cachedAgentState == .working else { return nil }
-            return pty.agentTurnStartedAt?.timeIntervalSince1970
-        }
+        let turns = workspace.columns.compactMap { $0.pty?.agentTurnStartedAt?.timeIntervalSince1970 }
         return reviewsInFlight(runs: workspace.reviewRuns, turnsStartedAt: turns)
-    }
-
-    /// What the user wrote, on one line; nil when empty.
-    private static func oneLine(_ text: String?) -> String? {
-        let words = (text ?? "").split(whereSeparator: \.isWhitespace)
-        return words.isEmpty ? nil : words.joined(separator: " ")
     }
 }

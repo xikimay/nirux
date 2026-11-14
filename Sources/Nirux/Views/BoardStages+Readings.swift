@@ -33,28 +33,21 @@ extension BoardStages.TaskReading {
         mergedPullRequest = info.prInfo.flatMap { $0.state == "MERGED" ? $0.number : nil }
     }
 
-    /// The row's ladder, as `WorkspaceInfo.rowSummary` climbs it, without
-    /// what isn't an agent's (red checks, the pull request, the texts).
+    /// The agents' steps of the row's ladder (`WorkspaceInfo.agentStep`),
+    /// in the Board's terms: red checks are the pull request's, read there.
     @MainActor
     private static func activity(of info: WorkspaceInfo, turnStartedAt: (UUID) -> TimeInterval?) -> BoardStages.Activity {
-        let columns = info.columns
-        if let waiting = columns.first(where: { $0.attention == .waiting }) {
-            if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
-                return .needsYou(AgentText.clean(question.text, maxLength: 300) ?? "a question")
-            }
-            return .needsYou(WorkspaceInfo.needsYouDetail(waiting))
+        switch info.agentStep {
+        case .needsYou(_, let words)?: return .needsYou(words)
+        case .broken(_, let sentence)?: return .failed(sentence)
+        case .asking(_, let question)?: return .asking(question.parentTitle)
+        case .working(let working)?:
+            // The row's clock: the column that may be going in circles, else the first working one a minute in.
+            let clocks = info.circlingColumn.map { [$0] } ?? working
+            let clock = clocks.first { $0.elapsedDisplay != nil } ?? clocks[0]
+            return .working(since: clock.id.flatMap(turnStartedAt))
+        case nil: return .idle
         }
-        if let broken = columns.first(where: { $0.attention == .error }), let headline = broken.attentionSummary?.headline {
-            return .failed(WorkspaceInfo.sentence(headline))
-        }
-        if let asking = WorkspaceInfo.questionColumn(in: columns), let pending = asking.missionQuestion, !pending.isAnswered {
-            return .asking(pending.parentTitle)
-        }
-        let working = columns.filter { $0.agentStatus == .working }
-        guard !working.isEmpty else { return .idle }
-        // The row's clock: the column that may be going in circles, else the first working one that has one.
-        let clocks = info.circlingColumn.map { [$0] } ?? working
-        return .working(since: clocks.compactMap { $0.id.flatMap(turnStartedAt) }.first)
     }
 
     /// What GitHub still asks of the open pull request: changes, then
@@ -68,7 +61,8 @@ extension BoardStages.TaskReading {
 
     /// The sidebar's Resume: an agent stopped on an error first (held back
     /// with why while it can't go out), else a `claude` that exited
-    /// mid-turn, as the table offered it.
+    /// mid-turn, as the table offered it, else an agent restored at launch
+    /// that hasn't resumed ("Paused · Resume").
     private static func resume(of columns: [ColumnInfo]) -> BoardStages.Resume? {
         for column in columns {
             if case .stoppedOnError(_, _, let failedAt, let resume)? = column.stuck, let id = column.id {
@@ -80,6 +74,6 @@ extension BoardStages.TaskReading {
                 return BoardStages.Resume(kind: .afterExit, column: id)
             }
         }
-        return nil
+        return columns.lazy.compactMap(\.deferredAgent).first.map { BoardStages.Resume(kind: .afterRelaunch, column: $0.columnID) }
     }
 }
