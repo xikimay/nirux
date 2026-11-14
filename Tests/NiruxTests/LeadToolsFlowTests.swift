@@ -816,6 +816,8 @@ final class LeadToolsFlowTests: XCTestCase {
                 .isError, "only its own sub-tasks")
             XCTAssertTrue(try call(LeadTools.tell, ["task": "Write the API docs", "message": "hi"], from: task, agentUUID: otherColumn,
                                    in: harness).isError, "not another column's")
+            shell.refreshGitContextNow(for: subtask)
+            harness.waitUntil("the sub-task's branch") { subtask.gitBranch == "feat/write-the-api-docs" }
             let handed = try ask("Keep the v1 examples?", from: mission)
             let why = "Only the user knows who reads them."
             XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/write-the-api-docs", "why": why], from: task, agentUUID: agent,
