@@ -793,7 +793,16 @@ pull request.
   PRs that can't join are listed apart, with the reason, and left out: draft,
   fork, conflict, agent working or waiting on a dialog, unpushed commits or
   tracked changes in its worktree. A PR that changes `.github/workflows/` can
-  join, with a warning: its checks ran its own version of the workflows.
+  join, with a warning: its checks ran its own version of the workflows. So
+  can one whose branch has none of the review passes the Board's Reviews
+  station asks for (a code review) recorded on it, in whatever workspace of
+  the space ran it: "No code review yet: Nirux saw none run on its branch."
+  comes first among its warnings. It holds through a review before the first
+  commit, a rebase, an amend; a run recorded on an earlier branch of the same
+  workspace doesn't count, nor one recorded before Nirux kept the branch. A
+  PR with no workspace on its branch here says nothing of reviews, as the
+  Board. No git call: the runs say their branch. Warnings and the dry run's
+  explanation are drawn in the sheet's text colour with ⚠︎, not amber.
 - **No post-merge workflow by accident.** The queue refuses to start until the
   config names one, or says `"none"`.
 - **A failed last post-merge run** on the base branch shows as a warning at the

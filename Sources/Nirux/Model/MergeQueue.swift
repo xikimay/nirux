@@ -406,6 +406,15 @@ extension MergeQueue {
         var worktrees: [LocalWorktree] = []
     }
 
+    /// A task open on this Mac, for the review passes it ran: the branch
+    /// it is on now, and each pass's last run, with the branch it was
+    /// recorded on.
+    struct ReviewTask: Equatable, Sendable {
+        /// Nil on a detached HEAD, or before git was read.
+        let branch: String?
+        let runs: [ReviewPass: ReviewRun]
+    }
+
     struct LocalWorktree: Equatable, Sendable {
         enum Problem: Equatable, Sendable {
             case trackedChanges

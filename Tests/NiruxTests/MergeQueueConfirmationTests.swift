@@ -155,6 +155,65 @@ final class MergeQueueConfirmationTests: XCTestCase {
         ])
     }
 
+    func testAPullRequestWhoseTaskRanNoCodeReviewSaysSoFirst() {
+        let missing = { (number: Int, passes: [String], files: [String]) in
+            var made = self.candidate(number, head: self.a, files: files)
+            made.missingReviews = passes
+            return made
+        }
+        let items = MergeQueue.confirmation(reading([
+            missing(1, ["Code review"], ["Sources/app.swift"]),
+            missing(2, ["Code review", "Premortem"], [".github/workflows/tests.yml"]),
+            missing(3, ["Adversarial review", "Premortem", "Code style review"], ["Sources/app.swift"]),
+            candidate(4, head: a),
+        ])).items
+        XCTAssertEqual(items.map(\.entry.number), [1, 2, 3, 4], "it joins: the sheet says it, the user decides")
+        XCTAssertEqual(items[0].warnings, ["No code review yet: Nirux saw none run on its branch."])
+        XCTAssertEqual(items[1].warnings, [
+            "No code review or premortem yet: Nirux saw none run on its branch.",
+            "It changes .github/workflows/: its checks ran its own version of the workflows.",
+        ])
+        XCTAssertEqual(items[2].warnings, ["No adversarial review, premortem or code style review yet: Nirux saw none run on its branch."])
+        XCTAssertEqual(items[3].warnings, [])
+    }
+
+    func testAReviewCountsWhenRecordedOnThePullRequestsBranchInWhateverTask() {
+        let run = { (branch: String?) in ReviewRun(head: String(repeating: "a", count: 40), at: 10, branch: branch) }
+        let task = { (branch: String?, runs: [ReviewPass: ReviewRun]) in MergeQueue.ReviewTask(branch: branch, runs: runs) }
+        let missing = { (tasks: [MergeQueue.ReviewTask], required: Set<ReviewPass>) in
+            MergeQueue.missingReviews(branch: "feat/x", tasks: tasks, required: required)
+        }
+        // No task on its branch here: nothing to say, as the Board's Reviews station.
+        XCTAssertEqual(missing([task("main", [.codeReview: run("main")])], [.codeReview]), [])
+        XCTAssertEqual(missing([task(nil, [:])], [.codeReview]), [], "a detached HEAD is on no branch")
+        // On its branch, none recorded there: missing; one recorded on an earlier branch of the same workspace doesn't count,
+        // nor one recorded before Nirux kept the branch.
+        XCTAssertEqual(missing([task("feat/x", [:])], [.codeReview]), ["Code review"])
+        XCTAssertEqual(missing([task("feat/x", [.codeReview: run("feat/earlier")])], [.codeReview]), ["Code review"])
+        XCTAssertEqual(missing([task("feat/x", [.codeReview: run(nil)])], [.codeReview]), ["Code review"])
+        // Recorded on it: it counts, whichever task ran it, even one on another branch now.
+        XCTAssertEqual(missing([task("feat/x", [:]), task("main", [.codeReview: run("feat/x")])], [.codeReview]), [])
+        XCTAssertEqual(missing([task("feat/x", [.premortem: run("feat/x")])], [.premortem, .codeReview]), ["Code review"])
+        XCTAssertEqual(missing([task("feat/x", [:])], [.premortem, .codeReview]), ["Code review", "Premortem"], "in the badges' order")
+        XCTAssertEqual(missing([task("feat/x", [:])], []), [], "a space that asks for none")
+    }
+
+    @MainActor
+    func testTheTasksAreTheSpacesWithTheBranchTheyAreOnAndTheirRuns() {
+        let run = ReviewRun(head: "c0ffee", at: 10, branch: "feat/x")
+        let task = WorkspaceState(title: "fix", cwd: "/tmp/widgets-fix")
+        task.reviewRuns = [.codeReview: run]
+        _ = task.updateGitContext(GitContext(branch: "feat/x", identity: GitIdentity(repositoryRoot: "/tmp/widgets-fix", head: "c0ffee")))
+        let detached = WorkspaceState(title: "detached", cwd: "/tmp/widgets-old")
+        _ = detached.updateGitContext(GitContext(branch: "HEAD", identity: GitIdentity(repositoryRoot: "/tmp/widgets-old", head: "1ead")))
+        let closing = WorkspaceState(title: "gone", cwd: "/tmp/widgets-gone")
+        closing.isClosing = true
+        XCTAssertEqual(NiruxShellView.reviewTasks(of: [task, detached, closing]), [
+            MergeQueue.ReviewTask(branch: "feat/x", runs: [.codeReview: run]),
+            MergeQueue.ReviewTask(branch: nil, runs: [:]),
+        ], "a detached HEAD is on no branch; one closing isn't a task")
+    }
+
     func testUnreadChecksFilesOrComparisonAreSaidButDoNotLeaveThePullRequestOut() {
         var unread = candidate(1, head: a)
         unread.checks = nil

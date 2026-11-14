@@ -197,7 +197,7 @@ final class MergeQueueFlowTests: XCTestCase {
             projectID: projectID,
             repository: MQ.widgets,
             client: client,
-            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
             stateDirectory: stateDirectory,
             lockFolder: lockFolder
         )
@@ -307,7 +307,7 @@ final class MergeQueueFlowTests: XCTestCase {
         let driver = MergeQueueDriver(
             engine: MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(52, head: a)]),
             client: FakeQueueClient(world: world),
-            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
             clock: VirtualClock().queueClock
         )
         var phaseWhenSent: MergeQueue.Phase?

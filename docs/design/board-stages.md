@@ -26,8 +26,11 @@ what comes next. It becomes the overview of a space:
 - **Four stations, the same for every task**: Code, Reviews, Checks, Merge.
   The current one is the first not done.
 - **A commit doesn't send a line back.** Reviews is done once a code review
-  ran in the task, on any commit, and its turn is over: fixes always follow a
-  review. The station's tooltip then says the review ran on another commit;
+  was recorded on the line's branch (in whatever task of the space ran it),
+  on any commit, and its turn is over: fixes always follow a review. A run
+  recorded on another branch (a workspace that moved on keeps its runs)
+  doesn't count; the Start sheet counts the same way (`ReviewRun.counts`,
+  [project-board.md](project-board.md), section 4). The station's tooltip then says the review ran on another commit;
   no mark is drawn for it, since it would be on most lines.
 - **Which reviews count, and whether they must be on HEAD, are two constants**
   (`BoardStages.Rules`), built to become space settings.
@@ -42,8 +45,8 @@ what comes next. It becomes the overview of a space:
 
 | Station | Done when | Read from |
 | --- | --- | --- |
-| Code | A review pass that counts ran in the task (on any commit), or its pull request is open and not a draft | Review badges ([review-badges.md](review-badges.md)); the Board's open pull requests |
-| Reviews | Each pass that counts ran, and its turn is over | Review badges; the turn that started the pass |
+| Code | A review pass that counts was recorded on its branch (on any commit), or its pull request is open and not a draft | Review badges ([review-badges.md](review-badges.md)); the Board's open pull requests |
+| Reviews | Each pass that counts was recorded on its branch, and its turn is over | Review badges; the turn that started the pass |
 | Checks | The pull request is open, every required check is green and none is red; with no required check, none still runs | The pull request's check rollup; `requiredChecks` of board.json |
 | Merge | The pull request is merged, and the queue is through with it | The Board's merged pull requests; the merge queue |
 
@@ -57,7 +60,8 @@ what comes next. It becomes the overview of a space:
   until the post-merge run ends, though GitHub says merged within a minute:
   its number stays on the Merge station meanwhile. A post-merge failure keeps
   it at Merge, in red; a stop from before its merge says nothing once it
-  merged. The user confirmed its head at Start, whatever its reviews.
+  merged. The user confirmed its head at Start, whatever its reviews: the
+  Start sheet said which passes weren't recorded on its branch.
 - **No Reviews station**, drawn as a gap, where no review is waited for or
   none was seen: a pull request with no workspace here, one the queue took or
   that merged before a review that counts ever ran, rules that ask for none.
@@ -504,6 +508,9 @@ to the queue yet.
 
 ## Known limits
 
+- **Reviews count by branch name.** A run recorded before Nirux kept the
+  branch has none and doesn't count; a branch name reused after its pull
+  request merged keeps the first one's reviews.
 - **Reviews Nirux can't see.** Codex has no prompt hook, and a `claude -p`
   review run from a shell doesn't count ([review-badges.md](review-badges.md)):
   such a task stays at Reviews, "No code review yet".

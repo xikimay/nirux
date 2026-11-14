@@ -17,6 +17,8 @@ struct MergeQueueLocalAccess {
     }
     /// The agents working or waiting on a dialog in these worktrees.
     var busyAgents: @MainActor (_ worktrees: [String], _ allWorktrees: [String]) -> [String]
+    /// The tasks open in the space, for the review passes they ran.
+    var reviewTasks: @MainActor () -> [MergeQueue.ReviewTask]
 }
 
 /// The queue's clocks: `systemUptime` for every wait and timeout (it stops
