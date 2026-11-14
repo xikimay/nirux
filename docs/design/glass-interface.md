@@ -26,10 +26,13 @@ requests; phases 1 and 2 run while the Board's swap ends.
   straight to the task. The edge pill of M3 (the name of an agent out of
   view) goes; the edge light stays.
 - **Transparency:** four levels in Settings › Appearance, Opaque, Tinted,
-  Glass and Clear (`InterfaceTransparency`), Tinted by default once an energy
-  measurement confirms it. Reduce transparency and Increase contrast make
+  Glass and Clear (`InterfaceTransparency`). Tinted becomes the default only
+  once an energy measurement confirms it; until then nothing changes. Opaque
+  draws no glass at all, and Reduce transparency and Increase contrast make
   everything opaque. What floats over the work keeps a thick background: no
-  glass on glass.
+  glass on glass. The values each level draws with come with the glass view,
+  tuned on renders: `NSGlassEffectView` takes a style and a tint, the
+  macOS 14 and 15 fallback has no tint at all.
 - **Terminals:** opaque by default, with their own opacity slider apart from
   the interface, a floor at 60 % and Ghostty's minimum contrast. It touches
   the terminal engine: lane 3.
@@ -38,12 +41,15 @@ requests; phases 1 and 2 run while the Board's swap ends.
   for the reason (a command, a question, a failure, a block, a merge). Amber
   still means an agent waits for the user, and nothing else.
 - **Settings:** one window for the app and the space.
+- **No new literals:** font sizes, corner radii and shadows written as numbers
+  outside `Theme` may not grow in any file (`ThemeGuardTests`); the glass
+  views add the tokens they need.
 - **macOS:** the minimum stays macOS 14. Glass (`NSGlassEffectView`) from
   macOS 26; a frosted `NSVisualEffectView` on macOS 14 and 15. CI builds with
   Xcode 26.3 on macOS 15, so glass is proven by offscreen renders on a newer
   Mac, never by CI. macOS 27's concentric corners
-  (`NSView.cornerConfiguration`) wait for Xcode 27 on CI:
-  `Theme.Radius.concentric` computes them meanwhile.
+  (`NSView.cornerConfiguration`) wait for Xcode 27 on CI: computed by hand
+  meanwhile, from the window's radius measured on renders.
 
 ## Plan
 

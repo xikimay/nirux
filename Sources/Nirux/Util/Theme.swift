@@ -90,12 +90,6 @@ enum Theme {
         static var mono: NSFont { NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) }
         /// Commands to approve, raw context.
         static var code: NSFont { NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) }
-        /// Titles in the glass interface's lists (task rows, requests,
-        /// palette rows): medium, so the hierarchy comes from weight and
-        /// space rather than colour.
-        static var listTitle: NSFont { NSFont.systemFont(ofSize: 13, weight: .medium) }
-        /// The search field of ⌘P under the command bar.
-        static var searchField: NSFont { NSFont.systemFont(ofSize: 16) }
     }
 
     /// A 4 pt grid. 2 pt stays allowed for optical alignment.
@@ -116,35 +110,6 @@ enum Theme {
         static let card: CGFloat = 8
         /// Palette, floating panels.
         static let panel: CGFloat = 12
-        /// Floating glass: the request inbox, the rail's callout, ⌘P under
-        /// the command bar.
-        static let floating: CGFloat = 18
-
-        /// The radius of a shape set `inset` inside a container whose
-        /// corners have radius `outer`, so that both curves share a centre
-        /// (concentric corners). macOS 27 computes this itself
-        /// (`NSView.cornerConfiguration`); CI builds with the macOS 26 SDK.
-        static func concentric(outer: CGFloat, inset: CGFloat, minimum: CGFloat = chip) -> CGFloat {
-            max(minimum, outer - inset)
-        }
-    }
-
-    /// What floats above the work casts one shadow, the same everywhere.
-    enum Elevation {
-        static let floatingOpacity: Float = 0.38
-        static let floatingRadius: CGFloat = 16
-        /// Below the shape: a view's backing layer counts y upward.
-        static let floatingOffset = CGSize(width: 0, height: -12)
-
-        /// Gives `layer` the floating shadow, along `path` when the shape is
-        /// known (cheaper than a shadow traced from the layer's content).
-        static func applyFloating(to layer: CALayer, path: CGPath? = nil) {
-            layer.shadowColor = NSColor.black.cgColor
-            layer.shadowOpacity = floatingOpacity
-            layer.shadowRadius = floatingRadius
-            layer.shadowOffset = floatingOffset
-            layer.shadowPath = path
-        }
     }
 
     /// SF Symbol names (regular weight; 14 pt in headers and the palette,
