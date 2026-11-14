@@ -12,10 +12,12 @@ The question comes to you instead when:
 
 - the parent's workspace was closed;
 - the parent's terminal doesn't run Claude Code;
+- the parent's Claude Code hasn't taken a prompt since it started, as after Nirux relaunches and resumes it: until then it may show a startup or resume screen that Nirux can't see, so Nirux doesn't type into it. If you don't answer, Nirux types the question into it after its next turn, within an hour of the question;
+- the parent's Claude Code restarted after it got the question;
 - the parent read the question and ended its turn without answering;
 - nobody answered within the time set by **Settings › Agents › Flag a dialog waiting after** (10 minutes by default; an hour when it is set to Never).
 
-The row then turns amber and reads `Needs you ·` followed by the question, on up to four lines. The Dock icon counts it, and a notification goes out while Nirux is in the background.
+The row then turns amber and reads `Needs you ·` followed by the question, on up to four lines. The Dock icon counts it, and a notification goes out while Nirux is in the background. The question stays with you until someone answers it or Nirux types it into the parent's prompt.
 
 Click the line, grey or amber, to read the whole question and answer it in a popover (`Cmd+Return` sends). Your answer reaches the child the way the parent's would.
 
@@ -30,6 +32,7 @@ Nirux types a message only when the agent's `claude` is in front, its turn is ov
 - The parent can send more work after the child reported its result, which makes the Mission active again.
 - A Codex child can ask and report, but can't be sent work: Codex reports no dialogs, so Nirux can't know that its prompt is free. A Codex child waits for each answer in its terminal, and a Codex parent polls for its child's messages.
 - A worktree opened without a Mission keeps the plain handover file. The child reads it and works alone.
+- The tasks a Lead starts always have Missions with it, but a sub-task one of them starts gets a Mission only while Mission handoffs is on. Otherwise it works alone.
 
 ## Commands
 

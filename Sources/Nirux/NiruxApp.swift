@@ -45,50 +45,53 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var launchURLBacklog: [URL] = []
     var lastExternalApp: NSRunningApplication?
     var niruxActivatedAt: TimeInterval = 0
+    /// Held until Nirux quits (see StateFolderLock), marked quitting as it
+    /// goes.
+    static var stateFolderLock: StateFolderLock?
 
     static func main() {
-        // Hook-receiver mode: `Nirux --hook claude|codex [payload-json]`.
-        // Claude Code hooks and Codex's notify command invoke the app binary
-        // this way (see AgentHookInstaller); the process appends one event
-        // line and exits — it must never launch the app UI.
-        let args = CommandLine.arguments
-        // Status line mode: Claude Code runs `Nirux --hook claude
-        // --statusline` with the session's state on stdin while the usage
-        // limits indicator is on. Spelled as a hook so that an older build at
-        // the same path (a rollback) reads a hook payload without an event
-        // and exits, instead of launching its UI on every response.
-        if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--statusline" {
+        // A command-line mode never launches the app UI (see
+        // LaunchArguments.Mode). Anything else opens the app only without
+        // arguments or with -Key value defaults: any other argument used to
+        // open it too, so `"$NIRUX_CLI_PATH" --help`, or a command an agent
+        // guessed, started a second Nirux on the real state.
+        switch LaunchArguments.decision(for: CommandLine.arguments) {
+        case .mode(.statusLine):
             exit(ClaudeStatusLineCLI.run())
-        }
-        // Tools server mode: Claude Code runs `Nirux --hook claude --mcp`
-        // for the agents Nirux launches (NiruxMCPServer), spelled as a hook
-        // for the same reason.
-        if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--mcp" {
+        case .mode(.toolsServer):
             exit(NiruxMCPServer.run())
-        }
-        // A setup script failed in a new worktree (SpaceSetupScript), also
-        // spelled as a hook: an older build reads a Codex payload it can't
-        // parse and exits.
-        if let workspaceID = SetupFailureSignal.workspaceID(in: args) {
+        case .mode(.setupFailure(let workspaceID)):
             exit(SetupFailureSignal.run(workspaceID: workspaceID))
-        }
-        if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
-            let payload = args.count > 3 ? args.last : nil
+        case .mode(.hook(let kind, let payload)):
             exit(AgentHookCLI.run(kind: kind, payload: payload))
-        }
-        if args.count >= 2, args[1] == "--mission" {
-            exit(MissionEventCLI.main(Array(args.dropFirst(2))))
-        }
-        // The nightly runs it on the app it packaged, before notarizing: a
-        // terminal runtime that doesn't load (libghostty-spm's resources
-        // left out of the app) fails the nightly, not users' first terminal.
-        if args.count == 2, args[1] == "--check-terminal-runtime" {
+        case .mode(.mission(let arguments)):
+            exit(MissionEventCLI.main(arguments))
+        case .mode(.checkTerminalRuntime):
+            // A terminal runtime that doesn't load (libghostty-spm's
+            // resources left out of the app) fails the nightly, not users'
+            // first terminal.
             exit(MainActor.assumeIsolated { TerminalAppearance.checkRuntime() })
-        }
-        // The nightly checks the app it publishes the way the merge queue
-        // checks itself; with a path, another app (a downloaded nightly).
-        if args.count >= 2, args[1] == "--check-release-signature" {
-            exit(MergeQueue.checkReleaseSignatureCommand(Array(args.dropFirst(2))))
+        case .mode(.checkReleaseSignature(let arguments)):
+            exit(MergeQueue.checkReleaseSignatureCommand(arguments))
+        case .ignoredHook(let readsInput):
+            if readsInput { LaunchArguments.readStandardInputToEnd() }
+            exit(EXIT_SUCCESS)
+        case .help:
+            guard LaunchArguments.startedByLaunchServices else {
+                FileHandle.standardOutput.write(Data(LaunchArguments.usage.utf8))
+                exit(EXIT_SUCCESS)
+            }
+            LaunchArguments.refuse(
+                standardError: LaunchArguments.usage, alertTitle: "Nirux didn't open",
+                alertText: LaunchArguments.usage, status: EXIT_SUCCESS
+            )
+        case .unknown(let argument):
+            LaunchArguments.refuse(
+                standardError: LaunchArguments.unknownArgumentMessage(argument), alertTitle: "Nirux didn't open",
+                alertText: LaunchArguments.unknownArgumentAlertText(argument), status: 2
+            )
+        case .launchApp:
+            break
         }
         // Only the installed app opens the real state; any other copy needs
         // a state of its own (see RealStateGuard). Command-line modes stay
@@ -96,6 +99,17 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // NIRUX_CLI_PATH, the nightly's checks), which this would stop.
         if let refused = RealStateGuard.refusedExecutable() {
             RealStateGuard.refuseLaunch(executablePath: refused)
+        }
+        // One Nirux per state folder: a second one (the binary run from a
+        // terminal, `open -n`) brings the first to the front and quits,
+        // before reading anything. See StateFolderLock.
+        switch StateFolderLock.acquire(in: Persistence.stateDirectory) {
+        case .acquired(let lock):
+            stateFolderLock = lock
+        case .unavailable(let problem):
+            NSLog("[Nirux] Opening without the state folder's lock: %@", problem)
+        case .held(let holder):
+            StateFolderLock.yield(to: holder)
         }
 
         let app = NSApplication.shared
@@ -282,6 +296,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // A Nirux opened meanwhile (Sparkle's relaunch, a quick reopen)
+        // waits for this one to go instead of bringing it to the front.
+        Self.stateFolderLock?.markQuitting()
         // Apply hooks still inside the drain debounce (a first prompt just
         // sent) so the saved Claude restore targets are current.
         AgentHookCenter.shared.drain()

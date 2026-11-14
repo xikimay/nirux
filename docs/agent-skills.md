@@ -6,7 +6,7 @@ Agent skills are instruction files that Nirux installs for Claude Code and Codex
 
 | Skill | What it lets an agent do |
 | --- | --- |
-| `nirux-worktree` | Open a separate Nirux workspace, in a new worktree, when you ask it to start a feature, a fix or a parallel piece of work |
+| `nirux-worktree` | Open a separate Nirux workspace, in a new worktree, when you ask it to start a feature, a fix, a task or a parallel piece of work. Started from a task, it is that task's sub-task |
 | `nirux-show-code` | Open code in an editor column when you ask to see it, instead of pasting it in the terminal |
 | `nirux-draft` | Put text you will paste elsewhere (a Slack message, a pull request description, a ticket, a SQL query) in an editor column, where `Cmd+A` then `Cmd+C` copies it exactly |
 | `nirux-second-opinion` | When you ask Claude Code for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply |

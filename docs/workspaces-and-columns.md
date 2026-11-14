@@ -52,7 +52,7 @@ A browser column keeps its URL history, downloads files to `~/Downloads`, and op
 ## Finding your way
 
 - `Cmd+P` opens the command palette (`Shift+Cmd+P` from the editor). It lists the current space's workspaces and its five most recent sessions, then the actions. Type a workspace's name, branch, space or folder and press Return to go to it, in any space, archived ones included. Each row shows its agents' state.
-- `Cmd+J` goes to the agent that has waited for you longest.
+- `Cmd+J` goes to the agent that has waited for you longest, those you have not seen yet first.
 - `Session History…` (command palette, Space menu) lists every past Claude Code and Codex session of the space, including those whose worktree was cleaned up. Return resumes one, in its workspace or in a new one, and brings its worktree back if needed.
 - `Option+Cmd+F`, Search Everywhere, finds text in the scrollback of every terminal, in every workspace and space, then in the transcripts of your Claude sessions. Picking a terminal match opens that terminal's find bar on it. Picking a transcript match resumes the session or goes to its column.
 - `Shift+Cmd+F` searches the files of the current workspace.

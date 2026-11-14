@@ -1,8 +1,9 @@
 name: Package
 
 # The nightly packages and publishes only from main. A pull request that
-# changes how the app is built or bundled packages it here first, the way the
-# nightly does (ad-hoc signed), and checks the packaged terminal runtime.
+# changes how the app is built, bundled or launched packages it here first,
+# the way the nightly does (ad-hoc signed), checks the packaged terminal
+# runtime, and runs the launch check.
 on:
   pull_request:
     branches: [main]
@@ -13,6 +14,10 @@ on:
       - Resources/Info.plist
       - Sources/Nirux/NiruxApp.swift
       - Sources/Nirux/Util/TerminalConfigBuilder.swift
+      - Sources/Nirux/Util/LaunchArguments.swift
+      - Sources/Nirux/Util/RealStateGuard.swift
+      - Sources/Nirux/Util/StateFolderLock.swift
+      - scripts/launch-check.sh
       - .github/workflows/nightly.yml
       - .github/workflows/package.yml
 
@@ -55,3 +60,8 @@ jobs:
 
       - name: Check the packaged app's terminal runtime
         run: Nirux.app/Contents/MacOS/Nirux --check-terminal-runtime
+
+      # As the nightly does before notarizing: it opens, its first terminal
+      # runs, and a second Nirux on the same state folder quits.
+      - name: Launch check
+        run: scripts/launch-check.sh Nirux.app

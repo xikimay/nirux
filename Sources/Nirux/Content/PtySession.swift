@@ -381,6 +381,22 @@ final class PtySession: @unchecked Sendable {
         state.machine.visibleQuestion(foreground: foreground)
     }
 
+    /// See `AgentStatusMachine.noteQuestion`.
+    @discardableResult
+    func noteAgentQuestion(
+        _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
+    ) -> Bool {
+        state.machine.noteQuestion(question, in: message, endingTurnAt: turnEndedAt, seen: seen)
+    }
+
+    /// See `AgentStatusMachine.noteQuestionSeen`.
+    func noteAgentQuestionSeen() {
+        state.machine.noteQuestionSeen()
+    }
+
+    /// A question its last turn end asked that the user hasn't read yet.
+    var agentHasUnseenQuestion: Bool { state.machine.askedQuestion.map { !$0.isSeen } ?? false }
+
     /// See `AgentStatusMachine.dismissQuestion`.
     @discardableResult
     func dismissAgentQuestion(askedAt since: TimeInterval? = nil) -> Bool {
@@ -752,6 +768,15 @@ final class PtySession: @unchecked Sendable {
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.
     func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
         state.machine.finishedTurn(afterTypingAt: typedAt)
+    }
+
+    /// Whether `foreground`, the column's `claude`, took a prompt since it
+    /// started (see `AgentStatusMachine.prompt(since:)`); nil while no hook
+    /// of it reached the column, as for a `claude` without Nirux's hooks:
+    /// nothing tells.
+    func agentTookPrompt(since foreground: ForegroundProcess) -> Bool? {
+        guard state.machine.hookKind == "claude" else { return nil }
+        return state.machine.prompt(since: foreground.instance.startedAt) != nil
     }
 
     /// The user's login shell ($SHELL) when it's a mainstream

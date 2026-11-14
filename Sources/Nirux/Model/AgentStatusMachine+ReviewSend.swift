@@ -84,7 +84,7 @@ extension AgentStatusMachine {
         // must report again (the very one back in front gets it back, see
         // `tick`). A prompt since it started: SessionStart can come before
         // Claude's own dialogs.
-        guard hookKind == "claude", let lastPromptAt, lastPromptAt >= foreground.instance.startedAt else {
+        guard hookKind == "claude", prompt(since: foreground.instance.startedAt) != nil else {
             return .notHeardFrom
         }
         // Any dialog still listed may be on screen.

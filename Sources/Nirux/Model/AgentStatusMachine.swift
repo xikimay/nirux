@@ -59,6 +59,11 @@ struct AgentStatusMachine {
         /// What it chooses between, when the message lists it right next
         /// to the question (`TurnEndText.choices`).
         var choices: [TurnEndChoice] = []
+        /// The user read it on screen, or it was asked under their eyes
+        /// (`noteQuestionSeen`). Nothing else changes it: the column's
+        /// state says other things (Nirux coming back idles every column,
+        /// a subagent's call sets it working).
+        var isSeen = false
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
@@ -102,6 +107,12 @@ struct AgentStatusMachine {
     /// said it asks. Whoever looks at the column reads it there and gets
     /// no alert, but the turn isn't done.
     private var mainTurnEndAsks = false
+    /// What the last turn end asked, if anything, is behind: Claude's main
+    /// thread did something since (a tool call: a Stop hook's
+    /// continuation, a wakeup), the user's click typed a prompt or
+    /// archived the task, or `claude` left the front. A question read as
+    /// it came is not noted after that (`noteQuestion`).
+    private var turnEndQuestionIsBehind = false
     /// The last new conversation in this process, or its end: a quick
     /// answer never crosses one (`acceptsQuickAnswer`).
     private var conversationChangedAt: TimeInterval = 0
@@ -128,6 +139,9 @@ struct AgentStatusMachine {
     /// Epoch seconds of the last keystroke Nirux sent (`PtySession.sendRaw`)
     /// — unlike `lastInteractionAt`, never terminal replies or resizes.
     private(set) var lastKeystrokeAt: TimeInterval = 0
+    /// The last Esc or Ctrl-C Nirux sent: what closes a question dialog
+    /// without a hook (`AgentPermissionRequest.waitsPastKeys`).
+    private(set) var lastCancelKeyAt: TimeInterval = 0
     /// Every keystroke or paste, never reset by Claude's reminders: input
     /// that may have reached a shell an agent just left.
     private(set) var lastInputAt: TimeInterval = 0
@@ -461,6 +475,7 @@ struct AgentStatusMachine {
         }
         askedQuestion = nil
         mainTurnEndedAt = now
+        turnEndQuestionIsBehind = false
         mainTurnEndIsLast = event.stopHookActive == true || !stopHooksKeepGoing
         mainTurnEndAsks = event.finalMessage.map(TurnEndText.endsOnQuestion) ?? false
         turnFailure = event.name == .stopFailure
@@ -543,10 +558,7 @@ struct AgentStatusMachine {
             mainTurnEndAsks = true
             // It stands until it is answered, whoever looks at the column
             // meanwhile: only its alert is theirs to miss.
-            askedQuestion = AskedQuestion(
-                text: line, since: request.turnEndedAt, isYesNo: question?.isYesNo == true,
-                choices: line.map { TurnEndText.choices(for: $0, in: request.message) } ?? []
-            )
+            ask(line, isYesNo: question?.isYesNo == true, endingTurnAt: request.turnEndedAt, in: request.message, seen: isUserFocused)
             // A question always alerts, even after this episode's "finished
             // its turn": missing one is what this is all about.
             attentionAlerted = false
@@ -554,6 +566,47 @@ struct AgentStatusMachine {
             reason = .turnFinished
         }
         return block(for: reason, isUserFocused: isUserFocused) ? reason : nil
+    }
+
+    /// The turn that ended at `turnEndedAt` got no verdict: nobody to
+    /// alert (the user looked at its column, `seen`), or a dialog still
+    /// open waits on the user first. Its final message ends on `question`,
+    /// the message's own line: the agent waits on an answer all the same,
+    /// and its column says so. Nothing alerts, and the status stays as it
+    /// is. False, and nothing
+    /// kept, when that turn end is behind (a prompt, a later end, another
+    /// conversation, Claude going on by itself, the task archived,
+    /// `claude` gone from the front), failed, or has its verdict coming.
+    /// As a verdict's, it stands behind a subagent's dialog, which shows
+    /// first, and where a Stop hook may still keep the turn going: the
+    /// continuation's first tool call takes it back.
+    @discardableResult
+    mutating func noteQuestion(
+        _ question: TurnEndQuestion, in message: String, endingTurnAt turnEndedAt: TimeInterval, seen: Bool
+    ) -> Bool {
+        guard isCurrentTurnEnd(turnEndedAt), !turnEndQuestionIsBehind, turnFailure == nil,
+              quietTurnEnd == nil, askedQuestion == nil
+        else { return false }
+        ask(question.text, isYesNo: question.isYesNo, endingTurnAt: turnEndedAt, in: message, seen: seen)
+        return true
+    }
+
+    /// The question asked at `turnEndedAt`, with the choices `message`
+    /// lists next to it.
+    private mutating func ask(
+        _ line: String?, isYesNo: Bool, endingTurnAt turnEndedAt: TimeInterval, in message: String, seen: Bool
+    ) {
+        askedQuestion = AskedQuestion(
+            text: line, since: turnEndedAt, isYesNo: isYesNo,
+            choices: line.map { TurnEndText.choices(for: $0, in: message) } ?? [], isSeen: seen
+        )
+    }
+
+    /// The user reads the question on screen: its column in front, they
+    /// are there. Next Waiting Agent then goes to it after what they
+    /// haven't seen.
+    mutating func noteQuestionSeen() {
+        askedQuestion?.isSeen = true
     }
 
     /// The question the foreground `claude` asked at its last turn end, if
@@ -574,11 +627,15 @@ struct AgentStatusMachine {
     /// finished turn); a dialog still open keeps its own. (A failed turn
     /// has no question: its end takes the place of the one that asked.)
     /// The turn end stays the current one: a reply still goes in.
-    /// Without `since`, the verdict a turn end still waits for is put
-    /// aside too: it would ask on the archived task's row.
+    /// Without `since`, whatever the turn end would still ask is put
+    /// aside too, or it would ask on the archived task's row: the verdict
+    /// it waits for, a question read as it came and not noted yet.
     @discardableResult
     mutating func dismissQuestion(askedAt since: TimeInterval? = nil) -> Bool {
-        if since == nil, case .pending = quietTurnEnd { quietTurnEnd = .done }
+        if since == nil {
+            if case .pending = quietTurnEnd { quietTurnEnd = .done }
+            turnEndQuestionIsBehind = true
+        }
         guard let asked = askedQuestion, since == nil || asked.since == since else { return false }
         askedQuestion = nil
         if state == .needsAttention, openDialogs.isEmpty { state = .idle }
@@ -624,6 +681,7 @@ struct AgentStatusMachine {
     mutating func notePromptFromUser() {
         if quietTurnEnd != nil { quietTurnEnd = .done }
         askedQuestion = nil
+        turnEndQuestionIsBehind = true
     }
 
     /// A turn end waits for its verdict: Nirux types nothing of its own
@@ -638,6 +696,7 @@ struct AgentStatusMachine {
     /// A main-thread tool event: the failed turn is behind.
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
+        turnEndQuestionIsBehind = true
         turnFailure = nil
         // Went on by itself (a Stop hook blocked its end, a background
         // task, a wakeup): a verdict would land on an agent at work, and
@@ -752,6 +811,8 @@ struct AgentStatusMachine {
             // request fires no PermissionRequest). Either way a dialog is
             // on screen and no keystroke answered it.
             lastKeystrokeAt = 0
+            // An Esc it crossed (the hook is async) still closed it.
+            if now - lastCancelKeyAt >= Self.reminderRaceWindow { lastCancelKeyAt = 0 }
             if let open = openDialogs.first {
                 reason = open.reason
             } else if !pendingDialogs.isEmpty {
@@ -777,10 +838,13 @@ struct AgentStatusMachine {
             }
         case "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input":
             lastKeystrokeAt = 0
+            lastCancelKeyAt = 0
             reason = .question(event.detail)
             pendingDialogs.append(AgentPermissionRequest(
                 toolName: nil, summary: event.detail, key: nil,
-                agentID: event.agentID, sessionID: event.sessionID, requestedAt: now, isQuestion: true
+                agentID: event.agentID, sessionID: event.sessionID, requestedAt: now, isQuestion: true,
+                // A form's `elicitation_response` comes whatever its end.
+                waitsPastKeys: event.notificationType != "agent_needs_input"
             ))
         case "idle_prompt":
             // Claude finished responding a minute ago: the main thread sits
@@ -915,6 +979,41 @@ struct AgentStatusMachine {
 
     private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
 
+    /// Esc or Ctrl-C pressed, as Claude Code reads them: the plain byte,
+    /// the kitty keyboard protocol's `ESC [ code ; mods u`, or xterm's
+    /// modifyOtherKeys `ESC [ 27 ; mods ; code ~`. Caps Lock and Num Lock
+    /// don't change the key; a release isn't a press.
+    static func isCancelKey(_ keys: Data) -> Bool {
+        guard keys.count <= 24 else { return false }
+        if keys == Data([0x1B]) || keys == Data([0x03]) { return true }
+        guard let text = String(data: keys, encoding: .ascii), text.hasPrefix("\u{1B}["), let final = text.last,
+              final == "u" || final == "~"
+        else { return false }
+        // Each field, its sub-fields: "99;69:1" is [["99"], ["69", "1"]].
+        let fields = text.dropFirst(2).dropLast().split(separator: ";", omittingEmptySubsequences: false)
+            .map { $0.split(separator: ":", omittingEmptySubsequences: false).map { Int($0) } }
+        let code: Int?, mods: Int?, event: Int?
+        if final == "u" {
+            code = fields.first?.first ?? nil
+            mods = fields.count > 1 ? fields[1].first ?? nil : 1
+            event = fields.count > 1 && fields[1].count > 1 ? fields[1][1] : 1
+        } else {
+            guard fields.count == 3, fields[0].first == 27 else { return false }
+            (code, mods, event) = (fields[2].first ?? nil, fields[1].first ?? nil, 1)
+        }
+        guard let code, let mods, mods >= 1, event != 3 else { return false }
+        let held = (mods - 1) & ~(64 | 128)
+        return (code == 27 && held == 0) || (code == 99 && held == 4)
+    }
+
+    /// Whether `dialog` waits for a key yet: none reached it since it
+    /// opened. A question dialog's keys move among its options and answer
+    /// its questions one by one: it ends with its tool's PostToolUse, or
+    /// at Esc or Ctrl-C, which fire no hook.
+    func waitsForKeys(_ dialog: AgentPermissionRequest) -> Bool {
+        dialog.requestedAt >= (dialog.waitsPastKeys ? lastCancelKeyAt : lastKeystrokeAt)
+    }
+
     /// Arrows reached the agent without a key pressed (ghostty turns a
     /// wheel scroll into them on the alternate screen): an old prompt may be
     /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
@@ -923,11 +1022,21 @@ struct AgentStatusMachine {
         lastDraftInputAt = now.timeIntervalSince1970
     }
 
-    /// One key's bytes: a character, or a short escape sequence (a
-    /// bracketed paste is longer).
+    /// One key's bytes: a character, a short escape sequence, or one
+    /// control sequence however long its parameters (a key the kitty
+    /// keyboard protocol or modifyOtherKeys reports). A bracketed paste is
+    /// more than one.
     static func isOneKey(_ keys: Data) -> Bool {
-        if keys.first == 0x1B { return keys.count <= 8 }
+        if keys.first == 0x1B { return keys.count <= 8 || isOneControlSequence(keys) }
         return String(data: keys, encoding: .utf8).map { $0.count == 1 } ?? false
+    }
+
+    /// `ESC [`, parameters, one final byte at the end.
+    private static func isOneControlSequence(_ keys: Data) -> Bool {
+        let bytes = [UInt8](keys)
+        guard bytes.count <= 32, bytes.count >= 3, bytes[1] == 0x5B, let final = bytes.last, (0x40...0x7E).contains(final)
+        else { return false }
+        return bytes.dropFirst(2).dropLast().allSatisfy { (0x20...0x3F).contains($0) }
     }
 
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
@@ -936,8 +1045,13 @@ struct AgentStatusMachine {
         let time = now.timeIntervalSince1970
         // A key answers a dialog only while none reached it yet: answered, it stays
         // listed until its tool ends (no hook between); later keys reach the prompt.
-        let answersDialog = openDialogs.contains { $0.requestedAt >= lastKeystrokeAt }
-        lastKeystrokeAt = time
+        // A question dialog takes keys until Esc or Ctrl-C (`waitsForKeys`).
+        // The dialog in front takes the keys: a question dialog's don't
+        // answer an approval queued behind it.
+        let inFront = openDialogs.first(where: waitsForKeys)
+        let answersDialog = inFront != nil
+        if inFront?.waitsPastKeys != true { lastKeystrokeAt = time }
+        if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
         lastInputAt = time
         // A mode switch (Shift-Tab) leaves the prompt as it was; any other
         // key may leave text there, or open a screen no hook tells of (Esc
@@ -1061,6 +1175,7 @@ struct AgentStatusMachine {
         if fgName != "claude" {
             if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
+            turnEndQuestionIsBehind = true
         }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
@@ -1093,7 +1208,7 @@ struct AgentStatusMachine {
     /// answered one while another still waits.
     private func isRunningAnsweredDialog(now: Date) -> Bool {
         let open = openDialogs
-        guard open.count == 1, lastKeystrokeAt > open[0].requestedAt else { return false }
+        guard open.count == 1, !waitsForKeys(open[0]) else { return false }
         return lastReadAt > lastKeystrokeAt
             && now.timeIntervalSince1970 - lastReadAt < Self.activityWindow
     }
@@ -1175,11 +1290,13 @@ struct AgentStatusMachine {
         stopHooksKeepGoing = false
         mainTurnEndIsLast = true
         mainTurnEndAsks = false
+        turnEndQuestionIsBehind = false
         conversationChangedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0
         lastKeystrokeAt = 0
+        lastCancelKeyAt = 0
         hasUserInput = false
         lastForegroundName = nil
         foregroundSince = nil

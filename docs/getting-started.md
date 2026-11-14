@@ -33,7 +33,7 @@ To open a plain shell instead, press `Cmd+N` and then Return with nothing typed.
 
 ## When an agent needs you
 
-A row whose agent is waiting for you turns amber and reads `Needs you · …`. `Cmd+J` goes to the agent that has waited longest, then to the next one at each press.
+A row whose agent is waiting for you turns amber and reads `Needs you · …`. `Cmd+J` goes to the agent that has waited longest, those you have not seen yet first, then to the next one at each press.
 
 While Nirux is in the background, it also sends a macOS notification and shows on its Dock icon how many workspaces need attention. [Agent status](agent-status.md) describes every state.
 

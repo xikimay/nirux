@@ -1938,11 +1938,14 @@ final class BoardStagesViewTests: XCTestCase {
         view.show(content([section(units: many)]))
         let document = try XCTUnwrap(view.scrollView.documentView)
         XCTAssertGreaterThan(document.frame.height, view.scrollView.contentSize.height)
-        XCTAssertEqual(view.scrollView.contentSize.width, 940, "its scroller takes no width from the lines, whatever the Mac's setting")
+        // At the clip's width, whatever the Mac's setting (LegacyScrollerTests).
+        XCTAssertEqual(view.lineViews[0].frame.width, view.scrollView.contentSize.width)
         view.setFrameSize(NSSize(width: 600, height: 600))
         view.layoutSubtreeIfNeeded()
-        XCTAssertEqual(view.lineViews[0].frame.width, 600)
-        XCTAssertEqual(view.lineViews[0].phraseLabel.frame.minX, BoardStagesView.Columns(width: 600).phrase.minX)
+        let width = view.scrollView.contentSize.width
+        XCTAssertEqual(width, 600, accuracy: NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy), "the new width")
+        XCTAssertEqual(view.lineViews[0].frame.width, width)
+        XCTAssertEqual(view.lineViews[0].phraseLabel.frame.minX, BoardStagesView.Columns(width: width).phrase.minX)
     }
 
     // MARK: - Header

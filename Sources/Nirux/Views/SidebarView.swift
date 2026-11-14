@@ -99,6 +99,8 @@ final class SidebarView: NSView {
             // The rail shows none of the rows' moments: none replays when
             // the list opens again.
             if !isExpanded { forgetRowMoments() }
+            // Before the rebuild: it lays the rows out at the width left.
+            updateScrollerVisibility()
             rebuildContent()
         }
     }
@@ -236,6 +238,16 @@ final class SidebarView: NSView {
     /// Scrollable container for the rail and the cards.
     let contentScrollView = SidebarScrollView()
     let contentDocumentView = NSView()
+    /// The width the rows were last laid out at: what the clip shows. A
+    /// legacy scroller (the Mac's "Show scroll bars: Always", or a mouse)
+    /// sits beside them, as in Finder's sidebar; an overlay one takes none.
+    var listWidth: CGFloat = 0
+    /// The sidebar resizes its scroll view or shows its scroller itself:
+    /// the rebuild that follows lays the rows out at the width left.
+    private var isTilingScrollView = false
+    /// Measures the Getting Started card at a width without touching the
+    /// one shown; never on screen.
+    let onboardingCardMeasure = OnboardingChecklistView()
 
     /// Add a child to the scrollable document view. Used by SidebarView+Rendering
     /// so that rebuilt content scrolls when the workspace list overflows.
@@ -249,11 +261,15 @@ final class SidebarView: NSView {
         layer?.backgroundColor = Theme.Color.base.cgColor
 
         contentScrollView.drawsBackground = false
-        contentScrollView.hasVerticalScroller = true
         contentScrollView.hasHorizontalScroller = false
-        contentScrollView.scrollerStyle = .overlay
         contentScrollView.autohidesScrollers = true
         contentScrollView.documentView = contentDocumentView
+        contentScrollView.contentView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(clipResized), name: NSView.frameDidChangeNotification, object: contentScrollView.contentView
+        )
+        contentScrollView.onScrollerStyleChange = { [weak self] in self?.updateScrollerVisibility() }
+        updateScrollerVisibility()
         addSubview(contentScrollView)
         observeScrollingForApprovalArming()
         observeRailTooltipDismissals()
@@ -265,8 +281,30 @@ final class SidebarView: NSView {
 
     override func layout() {
         super.layout()
+        isTilingScrollView = true
         contentScrollView.frame = bounds
+        isTilingScrollView = false
         rebuildContent()
+    }
+
+    /// The cards show the Mac's scroller. The rail (52 pt) shows an overlay
+    /// one, which takes no width, but no legacy one: it would cover the
+    /// tiles' right edge and their badges. It scrolls all the same.
+    func updateScrollerVisibility() {
+        let shows = isExpanded || contentScrollView.scrollerStyle == .overlay
+        guard contentScrollView.hasVerticalScroller != shows else { return }
+        isTilingScrollView = true
+        contentScrollView.hasVerticalScroller = shows
+        isTilingScrollView = false
+    }
+
+    /// A legacy scroller came or went under rows already laid out (the
+    /// Mac's "Show scroll bars" setting changed, or a mouse came): they
+    /// take the width it leaves.
+    @objc private func clipResized() {
+        guard !isTilingScrollView, contentScrollView.frame.size == bounds.size,
+              contentScrollView.contentSize.width != listWidth else { return }
+        needsLayout = true
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {

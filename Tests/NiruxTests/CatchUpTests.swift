@@ -257,13 +257,8 @@ final class CatchUpTests: XCTestCase {
     }
 
     /// A list taller than the sidebar: the card comes into view, not above
-    /// the visible part. Checked in height, what the reveal scrolls: AppKit
-    /// settles which scroller style it prefers a moment after a process's
-    /// first scroll view, and a scroll view alive then takes it whatever
-    /// style it was given. On CI's runners (a virtual mouse) the sidebar's
-    /// scroller turns legacy mid-test and covers the last 15 pt of the
-    /// visible width, part of the card's ×. That layout is the app's to
-    /// settle, not what this test proves.
+    /// the visible part. Checked in height, what the reveal scrolls: the
+    /// width a scroller leaves is LegacyScrollerTests' to check.
     func testTheCardComesIntoView() throws {
         let rows = (0..<30).map { index in
             WorkspaceInfo(
