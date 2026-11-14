@@ -201,9 +201,16 @@ extension NiruxShellView {
     /// own, while that folder is there; a worktree's work in its repository,
     /// so its space must have that repository (General never has one).
     func offersSubtask(_ workspace: WorkspaceState) -> Bool {
-        guard !workspace.isInactive, !workspace.isLead else { return false }
-        if let folder = workspace.taskFolder { return NiruxURLRequest.directoryExists(folder) }
-        return workspace.profileID != WorkspaceProfile.defaultID && subtaskRepositoryKey(of: workspace) != nil
+        subtaskPlace(of: workspace) != nil
+    }
+
+    /// Where `offersSubtask`'s sub-tasks work: the task's folder, or its
+    /// repository by key; nil when it offers none. Reads a file or two.
+    func subtaskPlace(of workspace: WorkspaceState) -> NewTaskPanel.ParentTask.Place? {
+        guard !workspace.isInactive, !workspace.isLead else { return nil }
+        if let folder = workspace.taskFolder { return NiruxURLRequest.directoryExists(folder) ? .folder(folder) : nil }
+        guard workspace.profileID != WorkspaceProfile.defaultID, let key = subtaskRepositoryKey(of: workspace) else { return nil }
+        return .repository(key: key)
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is
