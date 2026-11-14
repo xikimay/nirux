@@ -181,6 +181,10 @@ final class WorkspaceState {
     var unknownPhaseRawValue: String?
     /// Each review pass's latest run (docs/design/review-badges.md).
     var reviewRuns: [ReviewPass: ReviewRun] = [:]
+    /// The turn each of those runs runs in, as its event found it: the
+    /// Board as stages says a pass runs while that turn goes on. Not kept
+    /// across launches: no turn outlives one.
+    var reviewTurns: [ReviewPass: ReviewTurn] = [:]
 
     var effectivePhase: WorkspacePhase {
         if let phase { return phase }

@@ -391,11 +391,11 @@ struct WorkspaceInfo: Hashable {
     /// The blocker and the next step (the user's, or the Lead's), on one
     /// run of text: a row wraps them itself, and a line break in one
     /// would spend its lines on blanks. Nil when empty.
-    var blockerText: String? { Self.normalizedContextText(blocker) }
-    var nextStepText: String? { Self.normalizedContextText(nextStep) }
+    var blockerText: String? { Self.oneRunOfWords(blocker) }
+    var nextStepText: String? { Self.oneRunOfWords(nextStep) }
 
     /// A text on one run of words; nil when empty.
-    static func normalizedContextText(_ value: String?) -> String? {
+    static func oneRunOfWords(_ value: String?) -> String? {
         let words = (value ?? "").split(whereSeparator: \.isWhitespace)
         return words.isEmpty ? nil : words.joined(separator: " ")
     }
