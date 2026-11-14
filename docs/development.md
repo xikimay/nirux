@@ -22,6 +22,8 @@ Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/A
 
 Any copy, the installed app included, opens with no argument, or with `-Key value` defaults only (such as `-IgnoreGhosttyConfig YES`). Any other argument that none of its command-line modes (`--hook`, `--mission`, the release checks) takes prints the usage and exits with status 2: on stderr, or in an alert when Finder, the Dock or `open` started it. `--help` prints the usage. An agent guessing a command can't start a second Nirux this way.
 
+One Nirux runs per state folder. A second one started on the same folder (the binary run from a terminal, `open -n`, `open` on the binary) brings the first to the front and quits before reading anything. If the first can't be brought forward, it says so, in an alert when Finder or the Dock started it. When the first is quitting, the second waits up to five seconds for it. The lock is `app.lock` in the state folder, and it goes with the process, a crash included. A copy on `NIRUX_STATE_DIR` has its own folder, so it runs beside the installed app. A `nirux://` link given to such a second launch (`open -n -a Nirux nirux://…`) is dropped: without `-n`, macOS hands links to the Nirux already running.
+
 Delete old `Nirux.app` bundles left in checkouts. macOS may still hand them `nirux://` links, and a bundle built before this check existed doesn't have it.
 
 ## Environment variables

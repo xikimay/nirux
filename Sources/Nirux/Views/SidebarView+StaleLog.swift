@@ -91,6 +91,13 @@ extension SidebarView {
 /// The sidebar's scroll view: it tells a scroll before the list moves.
 final class SidebarScrollView: NSScrollView {
     var onScrollWheel: (() -> Void)?
+    var onScrollerStyleChange: (() -> Void)?
+
+    /// AppKit sets it on every live scroll view when the Mac's preferred
+    /// style changes.
+    override var scrollerStyle: NSScroller.Style {
+        didSet { onScrollerStyleChange?() }
+    }
 
     /// Overriding `scrollWheel` alone would turn responsive scrolling off.
     override class var isCompatibleWithResponsiveScrolling: Bool { true }
