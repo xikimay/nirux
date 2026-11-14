@@ -31,8 +31,8 @@ requests; phases 1 and 2 run while the Board's swap ends.
   draws no glass at all, and Reduce transparency and Increase contrast make
   everything opaque. What floats over the work keeps a thick background: no
   glass on glass. The values each level draws with come with the glass view,
-  tuned on renders: `NSGlassEffectView` takes a style and a tint, the
-  macOS 14 and 15 fallback has no tint at all.
+  tuned on renders: `NSGlassEffectView` takes a style and a tint, while the
+  macOS 14 and 15 frost has no tint of its own (`GlassView` lays one over it).
 - **Terminals:** opaque by default, with their own opacity slider apart from
   the interface, a floor at 60 % and Ghostty's minimum contrast. It touches
   the terminal engine: lane 3.

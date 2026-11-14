@@ -42,6 +42,11 @@ final class GlassView: NSView {
         didSet { if cornerRadius != oldValue { update() } }
     }
 
+    /// Turns the picked level into the one to draw: macOS's settings as they
+    /// are now, unless a test says otherwise (CI's runners reduce
+    /// transparency).
+    private let resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency
+
     private(set) var backing: Backing?
     private var backingView: NSView?
     private var tintView: NSView?
@@ -50,10 +55,14 @@ final class GlassView: NSView {
     private let shadowLayer = CALayer()
     private let shadowMask = CAShapeLayer()
 
-    init(role: Role, level: InterfaceTransparency, cornerRadius: CGFloat) {
+    init(
+        role: Role, level: InterfaceTransparency, cornerRadius: CGFloat,
+        resolveLevel: @escaping @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
+    ) {
         self.role = role
         self.level = level
         self.cornerRadius = cornerRadius
+        self.resolveLevel = resolveLevel
         super.init(frame: .zero)
         wantsLayer = true
         contentView.wantsLayer = true
@@ -109,7 +118,7 @@ final class GlassView: NSView {
     /// Rebuilds the backing only when its kind changes; a new tint, style or
     /// radius is applied in place.
     private func update() {
-        let wanted = Self.backing(for: level.effectiveNow(), hasGlass: Self.hasGlass)
+        let wanted = Self.backing(for: resolveLevel(level), hasGlass: Self.hasGlass)
         if wanted != backing { rebuild(wanted) }
         applyStyle()
         applyShape()
@@ -181,7 +190,7 @@ final class GlassView: NSView {
     }
 
     private func applyStyle() {
-        let level = self.level.effectiveNow()
+        let level = resolveLevel(self.level)
         let tint = Self.tintColor(for: role).withAlphaComponent(Self.tintAlpha(for: level, role: role))
         layer?.backgroundColor = backing == .solid ? tint.cgColor : nil
         tintView?.layer?.backgroundColor = tint.cgColor

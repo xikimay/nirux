@@ -34,7 +34,8 @@ final class GlassViewTests: XCTestCase {
     /// once Opaque, the content clipped to the shape, and the floating
     /// shadow only where the system draws none.
     func testItDrawsWithWhatThisMacHas() {
-        let view = GlassView(role: .floating, level: .glass, cornerRadius: 18)
+        // The level as picked: CI's runners reduce transparency.
+        let view = GlassView(role: .floating, level: .glass, cornerRadius: 18, resolveLevel: { $0 })
         view.frame = NSRect(x: 0, y: 0, width: 300, height: 120)
         let label = NSTextField(labelWithString: "Waiting for you")
         view.contentView.addSubview(label)
@@ -63,6 +64,15 @@ final class GlassViewTests: XCTestCase {
         XCTAssertTrue(label.superview === view.contentView && view.contentView.superview === view)
         XCTAssertEqual(view.layer?.backgroundColor, Theme.Color.raised.cgColor)
         XCTAssertTrue(view.castsShadow)
+    }
+
+    /// Reduce transparency or Increase contrast turn any level solid.
+    func testMacOSAccessibilityTurnsTheGlassSolid() {
+        let view = GlassView(role: .chrome, level: .clear, cornerRadius: 14) {
+            $0.effective(reducesTransparency: true, increasesContrast: false)
+        }
+        XCTAssertEqual(view.backing, .solid)
+        XCTAssertEqual(view.layer?.backgroundColor, Theme.Color.base.cgColor)
     }
 
     /// A glass smaller than its corners, or not yet laid out, keeps a radius
