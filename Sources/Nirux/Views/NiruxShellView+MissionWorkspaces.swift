@@ -122,8 +122,11 @@ extension NiruxShellView {
                         workspaceID: childWorkspaceID,
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
-                        // It lists under that one, Missions on or off.
-                        parentWorkspaceID: requester?.workspace.id,
+                        // It lists under that one, Missions on or off; under
+                        // its task when that one is a sub-task: two levels at
+                        // most. Its Mission, if any, stays with the asker.
+                        parentWorkspaceID: requester.map { self.isSubtask($0.workspace) ? $0.workspace.parentWorkspaceID : $0.workspace.id }
+                            ?? nil,
                         reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         worktreeBranch: checkedOutBranch,
