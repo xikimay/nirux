@@ -107,7 +107,28 @@ extension BoardStages {
             merged: repository.merged.compactMap { pullRequest in
                 guard pullRequest.state == "MERGED", let mergedAt = pullRequest.mergedAt else { return nil }
                 return MergedFacts(number: pullRequest.number, title: pullRequest.title, mergedAt: mergedAt.timeIntervalSince1970)
-            }
+            },
+            otherWorktrees: repository.rows.compactMap { otherWorktree($0, in: repository) }
+                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        )
+    }
+
+    /// A worktree the table listed under "Other worktrees" (a linked one,
+    /// with no workspace and no open pull request), with its buttons: Open,
+    /// named as the table names it (its branch, or its folder), and Clean
+    /// Up…, held back while one runs there.
+    private static func otherWorktree(_ row: ProjectBoard.Row, in repository: RepositoryReading) -> OtherWorktree? {
+        guard row.group == .otherWorktree, let path = row.worktreePath else { return nil }
+        let folder = (path as NSString).lastPathComponent
+        let title = row.branch ?? row.detachedHead.map { "detached HEAD (\(WorktreeCleanup.short($0)))" } ?? folder
+        let menu: [MenuItem] = [
+            .openWorktree(path: path, title: row.branch ?? folder),
+            .cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil)
+        ]
+        return OtherWorktree(
+            path: path, title: title,
+            pullRequest: row.pullRequest.map { ProjectBoard.pullRequestText($0, baseBranch: repository.baseBranch) },
+            url: row.pullRequest?.url, menu: menu
         )
     }
 
