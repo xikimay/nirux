@@ -62,7 +62,11 @@ the floating shadow (left to the system on macOS 26). The tints are
 provisional: an offscreen capture can't show either material, so the render
 below approximates them (the content under the panel blurred, then the
 view's tint) beside the exact Opaque render, and they get tuned with the user
-on a demo at the end of phase 2.
+on a demo at the end of phase 2. The view follows macOS's Reduce transparency and Increase
+contrast as they change, and keeps the keyboard where it was when its content
+moves into or out of macOS 26's glass. A floating glass in a window of its
+own (⌘P if it stays a panel) needs blending behind the window and no layer
+shadow: step 2.4 adds that if it does.
 
 ![The glass at each level: Opaque exact, the others approximated](../images/glass-levels.png)
 

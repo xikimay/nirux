@@ -7,8 +7,10 @@ import AppKit
 ///
 /// The tints are provisional: offscreen renders can't show the glass (the
 /// window server draws it), so they get tuned with the user on a demo at the
-/// end of phase 2. The frost blends within the window: the desktop shows
-/// through only once the window itself turns translucent (plan step 4.2).
+/// end of phase 2. The frost blends within the window; the translucent
+/// window (plan step 4.2) moves the chrome to blending behind it, and a
+/// floating glass in a window of its own (⌘P if it stays a panel) needs the
+/// same and no layer shadow: step 2.4 adds that if it does.
 final class GlassView: NSView {
     enum Role: Sendable {
         /// The sidebar, the command bar, the rail: it follows the level.
@@ -29,8 +31,9 @@ final class GlassView: NSView {
     /// macOS 26's glass, which adapts it to what shows through.
     let contentView = NSView()
 
-    /// The level to draw, already made opaque where macOS asks
-    /// (`InterfaceTransparency.effectiveNow`).
+    /// The level the user picked. The view draws it made opaque where macOS
+    /// asks (Reduce transparency, Increase contrast), and follows those
+    /// settings as they change.
     var level: InterfaceTransparency {
         didSet { if level != oldValue { update() } }
     }
@@ -61,6 +64,14 @@ final class GlassView: NSView {
         shadowMask.fillRule = .evenOdd
         shadowLayer.mask = shadowMask
         layer?.insertSublayer(shadowLayer, at: 0)
+        update()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(accessibilityDisplayOptionsChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil
+        )
+    }
+
+    @objc private func accessibilityDisplayOptionsChanged(_ notification: Notification) {
         update()
     }
 
@@ -98,19 +109,25 @@ final class GlassView: NSView {
     /// Rebuilds the backing only when its kind changes; a new tint, style or
     /// radius is applied in place.
     private func update() {
-        let wanted = Self.backing(for: level, hasGlass: Self.hasGlass)
+        let wanted = Self.backing(for: level.effectiveNow(), hasGlass: Self.hasGlass)
         if wanted != backing { rebuild(wanted) }
         applyStyle()
         applyShape()
     }
 
     private func rebuild(_ wanted: Backing) {
+        // Moving the content between the glass and this view takes it out of
+        // the window for a moment: keep the keyboard where it was.
+        let focused = Self.focusedView(in: window).flatMap { $0.isDescendant(of: contentView) ? $0 : nil }
+        defer { if let focused, focused.window != nil, focused.window?.firstResponder !== focused { focused.window?.makeFirstResponder(focused) } }
         if #available(macOS 26, *), let glass = backingView as? NSGlassEffectView { glass.contentView = nil }
         backingView?.removeFromSuperview()
         tintView?.removeFromSuperview()
         backingView = nil
         tintView = nil
         if contentView.superview !== self {
+            // The glass laid it out with constraints; here it follows frames.
+            contentView.translatesAutoresizingMaskIntoConstraints = true
             contentView.frame = bounds
             addSubview(contentView)
         }
@@ -149,6 +166,14 @@ final class GlassView: NSView {
     /// Whether the floating shadow shows (for the tests).
     var castsShadow: Bool { !shadowLayer.isHidden && shadowLayer.shadowOpacity > 0 }
 
+    /// The view holding the keyboard: a text field rather than the field
+    /// editor that edits it for the moment.
+    private static func focusedView(in window: NSWindow?) -> NSView? {
+        let responder = window?.firstResponder
+        if let editor = responder as? NSTextView, editor.isFieldEditor, let field = editor.delegate as? NSView { return field }
+        return responder as? NSView
+    }
+
     private func install(_ view: NSView) {
         view.autoresizingMask = [.width, .height]
         addSubview(view, positioned: .below, relativeTo: contentView)
@@ -156,6 +181,7 @@ final class GlassView: NSView {
     }
 
     private func applyStyle() {
+        let level = self.level.effectiveNow()
         let tint = Self.tintColor(for: role).withAlphaComponent(Self.tintAlpha(for: level, role: role))
         layer?.backgroundColor = backing == .solid ? tint.cgColor : nil
         tintView?.layer?.backgroundColor = tint.cgColor
