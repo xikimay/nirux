@@ -301,7 +301,7 @@ extension NiruxShellView {
         )
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
         // The agent that proposed it hears what the user started.
-        if let proposer = request.proposedByTaskAgent {
+        if let proposer = request.proposedByTaskAgent, !ZZ("no-start-notice") {
             tellProposer(proposer, mission?.reportsToTask == true
                 ? "The user started the sub-task you proposed, “\(MissionPromptText.quoted(title))”, under your task: it reports to you."
                 : "The user started the task you proposed, “\(MissionPromptText.quoted(title))”, but not as your sub-task: "

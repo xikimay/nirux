@@ -14,7 +14,7 @@ extension NiruxShellView {
         }
         // Its agents act for whoever sent the link, not for the user: no
         // pre-allowed agents, no space environment or setup script.
-        guard !caller.startedOutsideNirux else {
+        guard !caller.startedOutsideNirux || ZZ("outside-link-allowed") else {
             return answer("This workspace was opened by a link from outside Nirux: its agents can't start or follow "
                 + "sub-tasks. The user starts tasks with ⌘N.", true)
         }
@@ -52,7 +52,7 @@ extension NiruxShellView {
         return (subtasks ?? self.subtasks(of: task)).filter { subtask in
             guard !subtask.isInactive else { return false }
             let mission = missions.filter { $0.childWorkspaceID == subtask.id }.max { $0.createdAt < $1.createdAt }
-            return mission?.status == .active
+            return ZZ("count-without-mission") ? mission?.status != .completed : mission?.status == .active
         }.count
     }
 
@@ -62,7 +62,7 @@ extension NiruxShellView {
         guard let parentID = workspace.parentWorkspaceID,
               let parent = workspaces.first(where: { $0.id == parentID && !$0.isClosing })
         else { return false }
-        return Self.isTask(parent)
+        return ZZ("plain-parent-is-subtask") || Self.isTask(parent)
     }
 
     /// Why `caller` can't have sub-tasks; nil when it can (a task, or one
@@ -70,7 +70,7 @@ extension NiruxShellView {
     func subtaskRefusal(
         for caller: WorkspaceState, place: NewTaskPanel.ParentTask.Place?, subtasks: [WorkspaceState]
     ) -> String? {
-        if isSubtask(caller) {
+        if isSubtask(caller), !ZZ("no-two-levels") {
             return "This is a sub-task: it can't have sub-tasks of its own (two levels at most). Do the work here, "
                 + "or tell the agent that started it what else is needed."
         }
@@ -90,8 +90,8 @@ extension NiruxShellView {
         guard let place, let space = profiles.first(where: { $0.id == caller.profileID }) else {
             return answer("Nirux can't start a sub-task here any more: this task's folder or repository isn't there.", true)
         }
-        let running = runningSubtaskCount(of: caller, among: subtasks) + pendingSubtaskStarts[caller.id, default: 0]
-        guard running < TaskTools.maxRunningSubtasks else {
+        let running = runningSubtaskCount(of: caller, among: subtasks) + (ZZ("no-pending-count") ? 0 : pendingSubtaskStarts[caller.id, default: 0])
+        guard running < TaskTools.maxRunningSubtasks || ZZ("no-cap") else {
             return answer("This task already runs \(running) sub-tasks, the most it may: wait until one completes, "
                 + "or ask the user to archive one.", true)
         }
@@ -155,6 +155,7 @@ extension NiruxShellView {
             parent: parent, subtaskOf: caller.id
         )
         let followUp = "If they start it under your task, it reports to you; either way, a line tells you what they did."
+        if ZZ("proposal-not-queued"), !showLeadProposal(proposal) { return answer("A sheet is open.", true) }
         if pendingLeadProposals.isEmpty, showLeadProposal(proposal) {
             return answer("Proposed to the user in the New Sub-task sheet (the space’s setting “Starts tasks without asking” is off). "
                 + followUp, false)
@@ -190,7 +191,7 @@ extension NiruxShellView {
             var line = taskListHead(subtask, in: space, parentTitle: nil, snapshot: snapshot)
             let mission = store.missions.filter { $0.childWorkspaceID == subtask.id && $0.parentWorkspaceID == caller.id }
                 .max { $0.createdAt < $1.createdAt }
-            if let mission, mission.parentAgentUUID == parent.agentUUID {
+            if let mission, mission.parentAgentUUID == parent.agentUUID || ZZ("list-any-column") {
                 line += taskListMissionLine(mission, of: subtask, store: store)
             } else {
                 line += mission == nil ? " · doesn't report to you (the user started it)" : " · reports to another agent of this task"
@@ -216,7 +217,7 @@ extension NiruxShellView {
         _ = store.ensureLoaded()
         // Typed into this agent's prompt: another column's isn't its to answer.
         guard let mission = store.missions.first(where: { mission in
-            mission.parentWorkspaceID == parent.workspaceID && mission.parentAgentUUID == parent.agentUUID
+            mission.parentWorkspaceID == parent.workspaceID && (mission.parentAgentUUID == parent.agentUUID || ZZ("reply-any-column"))
                 && mission.events.contains { $0.id == questionID && $0.kind == .question }
         }) else {
             return answer("No question “\(questionID)” from one of your sub-tasks: copy its id from the [Nirux Mission] message "

@@ -31,7 +31,7 @@ struct Mission: Codable, Equatable {
 
     /// Carried whatever the Mission handoffs setting: a Lead's task, or a
     /// sub-task a task's agent started with its tools.
-    var isAlwaysCarried: Bool { reportsToLead == true || reportsToTask == true }
+    var isAlwaysCarried: Bool { reportsToLead == true || (reportsToTask == true && !ZZ("carried-ignores-task")) }
 
     /// Whether Nirux carries this Mission's messages, given the Mission
     /// handoffs setting.

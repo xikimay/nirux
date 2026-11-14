@@ -113,7 +113,7 @@ enum NiruxMCPServer {
         /// tools (the app refuses them too).
         var isWorkspaceAgent: Bool {
             nonEmpty("NIRUX_WORKSPACE_ID") != nil && nonEmpty("NIRUX_AGENT_UUID") != nil
-                && nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil
+                && (nonEmpty(NiruxLaunchAuthorization.environmentKey) != nil || ZZ("server-outside-tools"))
         }
         /// The tools the app answers for this agent: the Lead's, or a task's.
         var appToolNames: [String] {

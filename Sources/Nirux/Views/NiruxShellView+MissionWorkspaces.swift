@@ -347,7 +347,7 @@ extension NiruxShellView {
         parent: NewTask.MissionParent, childWorkspaceID: String, childAgentUUID: String,
         agent: NiruxApp.WorkspaceAgent, branch: String, reportsToTask: Bool = false
     ) -> Mission? {
-        let valid = reportsToTask
+        let valid = reportsToTask && !ZZ("mission-needs-handoffs")
             ? requestingTerminal(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID).flatMap { requester in
                 requester.workspace.isLead ? nil : (workspaceID: requester.workspace.id, agentUUID: parent.agentUUID, isLead: false)
             }
