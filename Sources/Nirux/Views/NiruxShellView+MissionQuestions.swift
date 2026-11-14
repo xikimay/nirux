@@ -130,7 +130,7 @@ extension NiruxShellView {
             var watch = missionParentWatch[question.id] ?? MissionParentWatch()
             parentState = watch.settle(parentState, foregroundKnown: foregroundKnown, now: now)
             let handOff = watch.hold(
-                question.handedToUserBecause.map { .lead(why: $0) } ?? SidebarMissionQuestion.handOff(
+                question.handedToUserBecause.map { .handedOver(why: $0) } ?? SidebarMissionQuestion.handOff(
                     parent: parentState, askedAt: question.timestamp,
                     threshold: stuckAgentWaitThreshold ?? MissionEventCLI.parentMessageLifetime, now: now
                 ),
@@ -282,7 +282,8 @@ extension NiruxShellView {
             updateSidebar()
             return false
         }
-        // The Lead that handed it over hears the answer too.
+        // The parent that handed it over, a Lead or a task's agent, hears the
+        // answer too.
         if let question = accepted.mission.events.first(where: { $0.id == questionID }), question.handedToUserBecause != nil {
             let childTitle = workspaces.first { $0.id == accepted.mission.childWorkspaceID }?.title ?? accepted.mission.branch
             pendingLeadNotices.append(LeadNotice(

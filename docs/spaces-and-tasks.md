@@ -57,7 +57,7 @@ With the description empty, **Start** opens a plain workspace instead: a shell i
 
 **New Sub-task…**, in a task's `⋯` menu and the Workspaces menu, opens the sheet under that task. The sub-task starts in the task's repository, from the same base branch as any task, or in a folder inside the task's own folder for a task without a repository. It lists right under its task in the sidebar.
 
-A task's Claude Code agent can start sub-tasks itself, with the `start_task` tool Nirux gives it, when you ask it to split the work. A sub-task it starts opens behind what you are doing. It reports to that agent even with Mission handoffs off: its questions and its result are typed into the agent's prompt (see [Missions](missions.md)). The agent lists its sub-tasks and answers their questions with its tools.
+A task's Claude Code agent can start sub-tasks itself, with the `start_task` tool Nirux gives it, when you ask it to split the work. A sub-task it starts opens behind what you are doing. It reports to that agent even with Mission handoffs off: its questions and its result are typed into the agent's prompt (see [Missions](missions.md)). With its tools, the agent lists its sub-tasks, gives one more work, answers their questions, or hands a question it can't settle to you: the sub-task's row then turns amber with its reason.
 
 - There are two levels at most: `start_task` refuses to start a sub-task from a sub-task, and a worktree the `nirux-worktree` skill opens from a sub-task lists under that sub-task's task, beside it.
 - A task runs at most six sub-tasks at once. Only those that report to it count: not archived ones, not those that reported their result, and not those you started under it yourself.

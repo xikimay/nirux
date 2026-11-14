@@ -414,8 +414,17 @@ extension NiruxShellView {
                 .filter { $0.childWorkspaceID == workspace.id && $0.parentWorkspaceID == leadID && $0.reportsToLead == true }
                 .max(by: { $0.createdAt < $1.createdAt })
         }
+        return namedTask(name, among: candidates, mission: mission)
+    }
+
+    /// The task of `candidates` named by its branch, its folder, or its
+    /// title or folder's name when only one has it, with `mission(of:)`'s
+    /// Mission: the caller's own tasks only.
+    func namedTask(
+        _ name: String, among candidates: [WorkspaceState], mission: (WorkspaceState) -> Mission?
+    ) -> (workspace: WorkspaceState, mission: Mission)? {
         func named(_ matches: (WorkspaceState) -> Bool) -> [(WorkspaceState, Mission)] {
-            candidates.filter(matches).compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
+            candidates.filter(matches).compactMap { workspace in mission(workspace).map { (workspace, $0) } }
         }
         if let first = named({ $0.gitBranch == name }).first { return first }
         // A task without a repository has its folder instead, by path as
@@ -439,6 +448,12 @@ extension NiruxShellView {
         let name = LeadTools.string(arguments, "task") ?? ""
         let message = LeadTools.string(arguments, "message") ?? ""
         guard let (workspace, mission) = leadTask(name, in: space, lead: leadID) else { return answer(noLeadTask(name), true) }
+        sendInstruction(message, to: workspace, in: mission, answer: answer)
+    }
+
+    /// Types `message` into the prompt of `mission`'s child, `workspace`,
+    /// for its parent: a Lead's `tell`, or a task's.
+    func sendInstruction(_ message: String, to workspace: WorkspaceState, in mission: Mission, answer: @escaping LeadAnswer) {
         guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
             return answer("Nirux types messages only into a Claude Code task; “\(workspace.title)” runs \(mission.childAgentKind).", true)
         }
@@ -499,6 +514,12 @@ extension NiruxShellView {
         let name = LeadTools.string(arguments, "task") ?? ""
         let why = LeadTools.string(arguments, "why") ?? ""
         guard let (workspace, mission) = leadTask(name, in: space, lead: leadID) else { return answer(noLeadTask(name), true) }
+        handQuestionToUser(of: workspace, in: mission, because: why, answer: answer)
+    }
+
+    /// Hands the question `mission`'s child, `workspace`, waits on to the
+    /// user, for its parent: a Lead's `ask_user`, or a task's.
+    func handQuestionToUser(of workspace: WorkspaceState, in mission: Mission, because why: String, answer: @escaping LeadAnswer) {
         // Its own Mission's question only.
         guard let question = mission.events.filter({ question in
             question.kind == .question && !mission.events.contains { $0.kind == .response && $0.inReplyTo == question.id }

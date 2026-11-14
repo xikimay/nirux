@@ -29,6 +29,17 @@ extension NiruxShellView {
             taskStartSubtask(arguments, from: caller, place: place, subtasks: subtasks, parent: parent, answer: answer)
         case LeadTools.listTasks:
             answer(taskSubtaskList(of: caller, for: parent, subtasks: subtasks), false)
+        case LeadTools.tell, LeadTools.askUser:
+            let name = LeadTools.string(arguments, "task") ?? ""
+            guard let (subtask, mission) = taskSubtask(name, for: parent, among: subtasks) else {
+                return answer("No sub-task of yours is named “\(name)”, or several share that title: use its branch or title "
+                    + "from list_tasks (its folder, for a sub-task without a repository).", true)
+            }
+            if request.tool == LeadTools.tell {
+                sendInstruction(LeadTools.string(arguments, "message") ?? "", to: subtask, in: mission, answer: answer)
+            } else {
+                handQuestionToUser(of: subtask, in: mission, because: LeadTools.string(arguments, "why") ?? "", answer: answer)
+            }
         case LeadTools.reply:
             taskReply(arguments, for: parent, answer: answer)
         default:
@@ -207,7 +218,21 @@ extension NiruxShellView {
         return ([header] + lines).joined(separator: "\n")
     }
 
-    // MARK: reply
+    // MARK: tell, reply, ask_user
+
+    /// The sub-task named `name` that `parent` (this agent) started, and its
+    /// latest Mission from it: one the user started, or another agent of
+    /// the task, isn't its to tell.
+    private func taskSubtask(
+        _ name: String, for parent: NewTask.MissionParent, among subtasks: [WorkspaceState]
+    ) -> (workspace: WorkspaceState, mission: Mission)? {
+        _ = MissionStore.shared.ensureLoaded()
+        let missions = MissionStore.shared.missions.filter { $0.parentWorkspaceID == parent.workspaceID }
+        return namedTask(name, among: subtasks) { subtask in
+            missions.filter { $0.childWorkspaceID == subtask.id }.max { $0.createdAt < $1.createdAt }
+                .flatMap { $0.parentAgentUUID == parent.agentUUID ? $0 : nil }
+        }
+    }
 
     private func taskReply(_ arguments: [String: Any], for parent: NewTask.MissionParent, answer: @escaping LeadAnswer) {
         let questionID = LeadTools.string(arguments, "question") ?? ""
