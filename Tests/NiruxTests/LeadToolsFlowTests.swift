@@ -578,13 +578,17 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(laterLine("feat/sub").contains(" · inactive · "), "\(later)")
             XCTAssertTrue(laterLine("feat/sub").hasSuffix(" · not yours (another agent started it)"), "\(later)")
             XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), false))
+            // Two levels: a worktree the skill opens from a sub-task lists
+            // under that sub-task's task.
+            let deeper = try skill("feat/deeper", from: sub)
+            XCTAssertEqual(deeper.parentWorkspaceID, task.id)
 
             shell.saveState()
             shell.restoreState()
-            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
+            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task", "feat/deeper": "task"])
             XCTAssertEqual(
                 shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title).sorted(),
-                ["feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
+                ["feat/deeper", "feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
             )
         }
     }

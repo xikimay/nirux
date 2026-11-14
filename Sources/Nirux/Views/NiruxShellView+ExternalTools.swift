@@ -244,8 +244,8 @@ extension NiruxShellView {
         that task's sub-task: Nirux lists it under the task.
 
         If Nirux's tools include `start_task`, use that tool instead of this skill, unless it answers
-        that this workspace isn't a task. A sub-task doesn't start sub-tasks of its own: when more
-        work needs another agent, say so to the agent that started it, or to the user.
+        that this workspace isn't a task. There are two levels at most: opened from a sub-task, the
+        new workspace lists under that sub-task's task, beside it.
 
         ## Steps
 
