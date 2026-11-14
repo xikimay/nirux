@@ -172,7 +172,6 @@ extension BoardStages {
         row.agent.state != .none && row.agent.workspaceID == workspaceID ? row.agent.columnID : nil
     }
 
-
     /// A worktree the table listed under "Other worktrees" (a linked one,
     /// with no workspace and no open pull request), with its buttons: Open,
     /// named as the table names it (its branch, or its folder), and Clean

@@ -24,7 +24,8 @@ final class BoardStagesView: NSView {
         var lead: Lead?
     }
 
-    /// One repository of the space, or its tasks without one.
+    /// One repository of the space, or its tasks without one; or the
+    /// workspaces in another repository (`Kind.otherWorkspaces`).
     struct Section: Equatable {
         let id: String
         /// "nirux"; "No repository".
@@ -425,10 +426,12 @@ final class BoardStagesView: NSView {
         showTimes()
         layoutContent()
         // Under a pointer that rests, or where something showed at once, what is under it may have changed: it waits for
-        // the pointer to move. So does a Lead that came or grew under it: the header isn't held.
-        if isPointerInside, !isAiming || isShownAtOnce || content.header.lead != previous?.header.lead {
+        // the pointer to move. So does a Lead come under a pointer still aiming (the header isn't held), and only it.
+        if isPointerInside, !isAiming || isShownAtOnce {
             layoutSubtreeIfNeeded()
             goStale(ifChangedFrom: aimedBefore)
+        } else if isPointerInside, let now = aimed(), now.hasPrefix("lead "), now != aimedBefore {
+            setStale(true)
         }
         if isHeld { settleOnceStill() }
     }
@@ -1674,10 +1677,12 @@ final class BoardStagesWorktreeView: NSView {
         let title = ColumnHeaderView.textWidth(titleLabel)
         let openWidth = item(.open) == nil ? 0 : ceil(openButton.fittingSize.width)
         var right = bounds.width - pad
-        // Clean Up…'s room is kept where it fits, offered or not: Open and Focus line up from one entry to the next.
+        // Clean Up…'s room is kept where it fits, offered or not, so Open and Focus line up from one entry to the next;
+        // not where it would cost an entry without Clean Up… its Focus.
         let fitsCleanUp = right - cleanUpRoom - 12 - left >= min(title, 40)
+        let keepsRoom = fitsCleanUp && (item(.cleanUp) != nil || right - cleanUpRoom - 12 - openWidth - 12 - left >= min(title, 80))
         cleanUpButton.isHidden = item(.cleanUp) == nil || !fitsCleanUp
-        if fitsCleanUp {
+        if keepsRoom {
             cleanUpButton.frame = NSRect(x: right - cleanUpRoom, y: (bounds.height - 18) / 2, width: cleanUpRoom, height: 18)
             right = cleanUpButton.frame.minX - 12
         }

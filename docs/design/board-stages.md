@@ -237,8 +237,9 @@ clicked. The sizes are the mockup's.
   the table's row focused its most urgent agent, a task's if it shared the
   worktree. It asks where the pointer aimed, as a line's station does; and
   since the header isn't held, a Lead that comes or grows under the pointer,
-  even one still aiming, acts only once it moves. A press that ends once the
-  Lead went does nothing (`onLead` has no owner yet).
+  or another space's, acts only once the pointer moves, even one still
+  aiming (nothing else then waits: the list is held). A press that ends once
+  the Lead went does nothing (`onLead` has no owner yet).
   The order switch shows the content's order: it moves once the owner shows
   the order asked.
 - **A section per repository** scrolls below: its name, `owner/name`, its
