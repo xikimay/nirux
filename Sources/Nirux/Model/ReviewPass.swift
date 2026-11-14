@@ -65,6 +65,18 @@ enum ReviewPass: String, Codable, CaseIterable {
 struct ReviewRun: Codable, Hashable {
     let head: String
     let at: TimeInterval
+    /// The branch it was recorded on, read in the agent's own directory;
+    /// nil on a detached HEAD, and for a run recorded before Nirux kept it.
+    var branch: String?
+
+    /// It counts for a pull request whose head branch is `branch`:
+    /// recorded on that branch, in whatever workspace it ran (the Lead's
+    /// rule, 2026-11-14). It holds through a review before the first
+    /// commit, a rebase, an amend, a base not fetched; a branch name reused
+    /// after its pull request merged is the one case it misses.
+    func counts(onBranch branch: String?) -> Bool {
+        branch != nil && self.branch == branch
+    }
 }
 
 /// What a workspace card shows: each pass's latest run, read against the
@@ -72,6 +84,14 @@ struct ReviewRun: Codable, Hashable {
 struct ReviewBadges: Hashable {
     let runs: [ReviewPass: ReviewRun]
     let head: String?
+    /// The branch they are read for (the Board's line's): only the runs
+    /// recorded on it count (`counted`).
+    var branch: String?
+
+    /// The runs that count for `branch` (`ReviewRun.counts(onBranch:)`).
+    var counted: [ReviewPass: ReviewRun] {
+        runs.filter { $0.value.counts(onBranch: branch) }
+    }
 
     func isFresh(_ pass: ReviewPass) -> Bool {
         guard let head, let run = runs[pass] else { return false }

@@ -13,13 +13,17 @@ final class BoardStagesLineTests: XCTestCase {
     /// A code review on the current HEAD.
     private static let reviewed = reviews(fresh: [.codeReview])
 
-    /// Review passes on the current HEAD (`fresh`) or on an earlier commit
-    /// (`earlier`).
-    private static func reviews(fresh: [ReviewPass] = [], earlier: [ReviewPass] = [], head: String? = head) -> ReviewBadges {
+    /// Review passes recorded on the line's branch, on the current HEAD
+    /// (`fresh`) or on an earlier commit (`earlier`); or on another branch
+    /// (`elsewhere`), as a workspace that moved on keeps them.
+    private static func reviews(
+        fresh: [ReviewPass] = [], earlier: [ReviewPass] = [], elsewhere: [ReviewPass] = [], head: String? = head
+    ) -> ReviewBadges {
         var runs: [ReviewPass: ReviewRun] = [:]
-        for pass in fresh { runs[pass] = ReviewRun(head: Self.head, at: 500) }
-        for pass in earlier { runs[pass] = ReviewRun(head: String(repeating: "b", count: 40), at: 500) }
-        return ReviewBadges(runs: runs, head: head)
+        for pass in fresh { runs[pass] = ReviewRun(head: Self.head, at: 500, branch: "feat/x") }
+        for pass in earlier { runs[pass] = ReviewRun(head: String(repeating: "b", count: 40), at: 500, branch: "feat/x") }
+        for pass in elsewhere { runs[pass] = ReviewRun(head: String(repeating: "c", count: 40), at: 500, branch: "feat/earlier") }
+        return ReviewBadges(runs: runs, head: head, branch: "feat/x")
     }
 
     private func pullRequest(
@@ -545,6 +549,13 @@ final class BoardStagesLineTests: XCTestCase {
         // Reviews: what is asked for and didn't run; no commit is named while HEAD isn't known.
         let reviewsSay = { (facts: Facts, rules: BoardStages.Rules) in self.line(facts, rules: rules).tooltips.stations[.reviews] }
         XCTAssertEqual(reviewsSay(facts(pullRequest(), reviews: nil), BoardStages.Rules()), "No code review yet")
+        // One recorded on another branch (a workspace that moved on) doesn't count: the line waits at Reviews.
+        let elsewhere = facts(pullRequest(), reviews: Self.reviews(elsewhere: [.codeReview]))
+        XCTAssertEqual(reviewsSay(elsewhere, BoardStages.Rules()), "No code review yet")
+        XCTAssertEqual(line(elsewhere).station, .reviews)
+        XCTAssertEqual(line(elsewhere).rail?.reviewIsOlderThanHead, false, "nothing that counts ran on another commit")
+        XCTAssertEqual(line(facts(pullRequest(draft: true), reviews: Self.reviews(elsewhere: [.codeReview]))).station, .code,
+                       "a draft whose task ran no review on its branch is still at Code")
         XCTAssertEqual(reviewsSay(facts(pullRequest(), reviews: Self.reviews(fresh: [.premortem])), BoardStages.Rules()),
                        "No code review yet\nPremortem ran on this commit")
         let unknownHead = facts(pullRequest(), reviews: Self.reviews(fresh: [.premortem], earlier: [.codeReview], head: nil))

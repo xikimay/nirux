@@ -71,9 +71,13 @@ Codex has no prompt hook: its reviews aren't seen.
 
 ## 3. Record and staleness
 
-- On the event, Nirux reads HEAD in the agent's own directory (the event's
-  `cwd`), off the main thread, and the workspace stores, per pass,
-  `{head, at}`. Not the workspace's git context: it follows the focused
+- On the event, Nirux reads HEAD and its branch in the agent's own directory
+  (the event's `cwd`), off the main thread, and the workspace stores, per
+  pass, `{head, at, branch}` (no branch on a detached HEAD). A run counts for
+  a pull request when it was recorded on that pull request's head branch, in
+  whatever workspace of the space it ran: the Board's Reviews station and the
+  Start sheet both read it so (`ReviewRun.counts(onBranch:)`). A run stored
+  before the branch was kept has none, and counts for no pull request. Not the workspace's git context: it follows the focused
   column, and pauses while Nirux is in the background.
 - An event replayed at launch (more than a minute old) is skipped: the HEAD
   it ran on can't be known any more. An event older than the stored run
