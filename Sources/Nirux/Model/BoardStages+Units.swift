@@ -47,21 +47,19 @@ extension BoardStages {
         var otherWorktrees: [OtherWorktree] = []
     }
 
-    /// A worktree of the repository with no open pull request and no task
-    /// of the space (a task closed since, a branch left, a workspace of
-    /// another space): listed folded under "Other worktrees", with what the
-    /// table offered it.
+    /// A linked worktree of the repository with no workspace and no open
+    /// pull request (a task closed since, a branch left): listed folded
+    /// under "Other worktrees", with what the table offered it.
     struct OtherWorktree: Equatable, Sendable {
         /// Its top level, as git lists it.
         let path: String
         /// Its branch, "detached HEAD (1a2b3c4)", or its folder's name.
         var title: String
-        /// Its pull request, merged or closed, as the table says it: "#41 merged".
+        /// Its merged pull request, as the table says it: "#41 merged".
         var pullRequest: String?
         /// That pull request's address, for its tooltip.
         var url: String?
-        /// Open where no workspace is open there, then Clean Up… where the
-        /// clean-up may delete it.
+        /// Open, then Clean Up….
         var menu: [MenuItem]
     }
 

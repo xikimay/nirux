@@ -271,20 +271,21 @@ clicked. The sizes are the mockup's.
   sit on a rail numbered in merge order, under the stack's title.
 - **Pull requests without a task** start folded, each time the Board opens,
   under a line that counts them.
-- **Other worktrees** (a worktree of the repository with no open pull
-  request and no task of the space: a task closed since, a branch left, a
-  workspace of another space) start folded too, after those, under "Other
-  worktrees · N", by title. Each is its branch ("detached HEAD (1a2b3c4)",
-  or its folder's name), its pull request as the table says it ("#41
-  merged", its address under the pointer), its path, then Open (where no
-  workspace is open there) and Clean Up…, as the table's buttons, also on a
-  right click and from VoiceOver; "cleaning up…", in Clean Up…'s room,
-  disabled with why, while a clean-up of it runs. On a narrow entry the
-  path goes first (under 40 pt), then the pull request, and Open gives way
-  before the title is cut below 80 pt; Clean Up… stays. While the pointer
-  is over the Board, one that goes stays, faded and inert (nothing for
-  VoiceOver, no tooltip), and one that comes waits; Open and Clean Up… ask
-  where the pointer aimed, as a line's station does.
+- **Other worktrees** (a linked worktree of the repository with no workspace
+  and no open pull request: a task closed since, a branch left) start folded
+  too, after those, under "Other worktrees · N", by title. Each is its branch
+  ("detached HEAD (1a2b3c4)" on a detached HEAD), its merged pull request as
+  the table says it ("#41 merged", its address under the pointer), its path,
+  then Open (named as the table names it: its branch, or its folder) and
+  Clean Up…, also on a right click and from VoiceOver; "cleaning up…", at the
+  right of Clean Up…'s room, disabled with why, while a clean-up of it runs.
+  On a narrow entry the title comes first: the path goes (under 40 pt), then
+  the pull request, then Open before the title is cut below 80 pt, then
+  Clean Up… before it is cut below 40 pt; what goes stays in its menu. While
+  the pointer is over the Board, one that goes stays, faded and inert
+  (nothing for VoiceOver, no tooltip), in its repository, and one that comes
+  waits; Open and Clean Up… ask where the pointer aimed, as a line's station
+  does.
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
   (amber while its task needs the user), its title, then its number and time,
@@ -496,7 +497,8 @@ to the queue yet.
   - Clean Up… of the line's worktree, or of a folder already gone, as the
     table offers it, with its path;
   - Open, a shell where no workspace is open in the worktree (the main
-    checkout included), with its path and its branch for a title.
+    checkout included), with its path and its branch (or its folder's name)
+    for a title.
 
   What does nothing for now is there, disabled, and says why under the
   pointer: refused or locked, a dry run, a Resume the sidebar holds back
@@ -518,6 +520,10 @@ to the queue yet.
 
 ## Known limits
 
+- **The Lead's worktree has no place on the Board** when it isn't the main
+  checkout and has no open pull request: the table shows it as a row with
+  Focus and Clean Up…; the Board leaves the Lead out of its lines and lists
+  only worktrees with no workspace under "Other worktrees".
 - **Reviews Nirux can't see.** Codex has no prompt hook, and a `claude -p`
   review run from a shell doesn't count ([review-badges.md](review-badges.md)):
   such a task stays at Reviews, "No code review yet".

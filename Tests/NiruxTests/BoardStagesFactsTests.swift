@@ -708,23 +708,21 @@ final class BoardStagesFactsTests: XCTestCase {
             row("feat/left", pullRequest: merged, group: .otherWorktree, path: "/p/widgets.left"),
             detached,
             row("feat/cleaning", group: .otherWorktree, path: "/p/widgets.cleaning"),
-            row("feat/elsewhere", workspaces: ["another space's"], path: "/p/widgets.elsewhere"),
             row("gone", group: .otherWorktree, path: nil),
         ], cleaningUp: ["/p/widgets.cleaning"])
-        let entry = { (path: String, title: String, pullRequest: String?, open: Bool, blocked: String?) in
+        let entry = { (path: String, title: String, opened: String, pullRequest: String?, blocked: String?) in
             BoardStages.OtherWorktree(
                 path: path, title: title, pullRequest: pullRequest, url: pullRequest.map { _ in "https://github.com/acme/widgets/pull/41" },
-                menu: (open ? [.openWorktree(path: path, title: title)] : []) + [.cleanUp(path: path, blocked: blocked)]
+                menu: [.openWorktree(path: path, title: opened), .cleanUp(path: path, blocked: blocked)]
             )
         }
         XCTAssertEqual(section.otherWorktrees, [
-            entry("/p/widgets.detached", "detached HEAD (1a1a1a1)", nil, true, nil),
-            entry("/p/widgets.cleaning", "feat/cleaning", nil, true, BoardStages.CleanUp.runningReason),
-            entry("/p/widgets.elsewhere", "feat/elsewhere", nil, false, nil),
-            entry("/p/widgets.left", "feat/left", "#41 merged", true, nil),
+            entry("/p/widgets.detached", "detached HEAD (1a1a1a1)", "widgets.detached", nil, nil),
+            entry("/p/widgets.cleaning", "feat/cleaning", "feat/cleaning", nil, BoardStages.CleanUp.runningReason),
+            entry("/p/widgets.left", "feat/left", "feat/left", "#41 merged", nil),
         ], """
-        by title, as they show; not the task's worktree, the main checkout, nor one with an open pull request; one git no \
-        longer lists has no place; one where another space works has Clean Up and no Open, as the table's row
+        by title, as they show; opened under the table's name (the folder's on a detached HEAD); not the task's worktree, \
+        the main checkout, nor one with an open pull request; one git no longer lists has no place
         """)
         XCTAssertEqual(BoardStages.section(section, order: .sidebar, now: 0, timeZone: TimeZone(identifier: "UTC")!).otherWorktrees,
                        section.otherWorktrees)

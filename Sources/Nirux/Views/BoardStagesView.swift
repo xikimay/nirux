@@ -1488,10 +1488,9 @@ final class BoardStagesWorktreeView: NSView {
         pullRequestLabel.stringValue = worktree.pullRequest ?? ""
         pathLabel.stringValue = (worktree.path as NSString).abbreviatingWithTildeInPath
         let cleanUp = item(.cleanUp)
-        cleanUpButton.isHidden = cleanUp == nil
         Self.style(openButton, title: "Open", acts: !isDeparted)
         Self.style(cleanUpButton, title: cleanUp?.blocked == nil ? "Clean Up…" : BoardStages.CleanUp.runningWords,
-                   acts: !isDeparted && cleanUp?.blocked == nil)
+                   acts: !isDeparted && cleanUp?.blocked == nil, alignment: .right)
         // A departed one says nothing it could do, nor anything at all to VoiceOver.
         pullRequestLabel.toolTip = isDeparted ? nil : worktree.url
         pathLabel.toolTip = isDeparted ? nil : worktree.path
@@ -1508,10 +1507,13 @@ final class BoardStagesWorktreeView: NSView {
     }
 
     /// A link's look: the accent colour while it acts.
-    private static func style(_ button: NSButton, title: String, acts: Bool) {
+    private static func style(_ button: NSButton, title: String, acts: Bool, alignment: NSTextAlignment = .natural) {
         button.isEnabled = acts
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment
         button.attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: Theme.Font.caption, .foregroundColor: acts ? Theme.Color.accent : Theme.Color.textTertiary
+            .font: Theme.Font.caption, .foregroundColor: acts ? Theme.Color.accent : Theme.Color.textTertiary,
+            .paragraphStyle: paragraph
         ])
     }
 
@@ -1527,8 +1529,9 @@ final class BoardStagesWorktreeView: NSView {
         return ceil(widths.max() ?? 0) + 4
     }
 
-    /// The title whole first, 80 pt of it at least: Open gives way before it
-    /// is cut more, then the pull request, then the path (from 40 pt).
+    /// The title first: the path goes (under 40 pt), then the pull request,
+    /// then Open, before the title is cut below 80 pt; Clean Up… last,
+    /// before it is cut below 40 pt. What goes stays in its menu.
     override func layout() {
         super.layout()
         let pad = BoardStagesView.Metrics.padding
@@ -1536,6 +1539,7 @@ final class BoardStagesWorktreeView: NSView {
         let title = ColumnHeaderView.textWidth(titleLabel)
         let openWidth = item(.open) == nil ? 0 : ceil(openButton.fittingSize.width)
         var right = bounds.width - pad
+        cleanUpButton.isHidden = item(.cleanUp) == nil || right - cleanUpRoom - 12 - left < min(title, 40)
         if !cleanUpButton.isHidden {
             cleanUpButton.frame = NSRect(x: right - cleanUpRoom, y: (bounds.height - 18) / 2, width: cleanUpRoom, height: 18)
             right = cleanUpButton.frame.minX - 12
@@ -1554,7 +1558,7 @@ final class BoardStagesWorktreeView: NSView {
             x = pullRequestLabel.frame.maxX + 10
         }
         pathLabel.frame = NSRect(x: x, y: (bounds.height - 15) / 2 + 1, width: max(0, right - x), height: 15)
-        pathLabel.isHidden = pathLabel.frame.width < 40
+        pathLabel.isHidden = pathLabel.frame.width < 40 || (pullRequest > 0 && pullRequestLabel.isHidden)
     }
 
     // MARK: Clicks
@@ -1562,9 +1566,10 @@ final class BoardStagesWorktreeView: NSView {
     @objc private func openClicked() { choose(item(.open)) }
     @objc private func cleanUpClicked() { choose(item(.cleanUp)) }
 
-    /// `item`, while the worktree is on the Board, still offers it, and it acts.
+    /// `item`, while the worktree is on the Board and still offers it as it
+    /// was (one held back since is another item).
     private func choose(_ item: BoardStages.MenuItem?) {
-        guard window != nil, !isDeparted, let item, worktree?.menu.contains(item) == true, item.blocked == nil else { return }
+        guard window != nil, !isDeparted, let item, worktree?.menu.contains(item) == true else { return }
         onMenu?(item)
     }
 
