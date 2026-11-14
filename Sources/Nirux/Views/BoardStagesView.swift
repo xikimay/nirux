@@ -105,6 +105,16 @@ final class BoardStagesView: NSView {
         /// The wall clock the lines' times count to.
         var now: TimeInterval
         var runningQueues: [RunningQueue] = []
+        /// In place of the sections: the space deleted, board.json unread
+        /// or unreadable, no repository set. The running queues' lines stay.
+        var message: Message?
+    }
+
+    /// What the Board says in place of its sections, and whether it offers
+    /// Board Settings… under it (the settings can fix what it says).
+    struct Message: Equatable {
+        var text: String
+        var offersSettings = false
     }
 
     /// The order switch was pressed.
@@ -116,6 +126,8 @@ final class BoardStagesView: NSView {
     var onStop: ((String) -> Void)?
     /// An item of a repository header's menu was chosen.
     var onSectionMenu: ((_ section: String, SectionMenuItem) -> Void)?
+    /// Board Settings… was pressed under a message.
+    var onBoardSettings: (() -> Void)?
     /// A line was clicked, or a "Merged today" entry with a task: its id.
     var onOpen: ((String) -> Void)?
     /// A line's Merge station was clicked where that changes the queue's
@@ -220,6 +232,8 @@ final class BoardStagesView: NSView {
     private var worktreeFolds: [String: NSButton] = [:]
     /// The other worktrees unfolded, from the top.
     private(set) var worktreeViews: [BoardStagesWorktreeView] = []
+    /// What the Board says in place of its sections.
+    let messageView = BoardStagesMessageView()
     private var mergedViews: [String: BoardStagesMergedView] = [:]
     /// The stacks' titles, from the top.
     private var captions: [NSTextField] = []
@@ -236,6 +250,7 @@ final class BoardStagesView: NSView {
         case fold(NSButton)
         case worktree(BoardStagesWorktreeView)
         case merged(BoardStagesMergedView)
+        case message(BoardStagesMessageView)
 
         var view: NSView {
             switch self {
@@ -245,6 +260,7 @@ final class BoardStagesView: NSView {
             case .fold(let view): return view
             case .worktree(let view): return view
             case .merged(let view): return view
+            case .message(let view): return view
             }
         }
     }
@@ -288,6 +304,8 @@ final class BoardStagesView: NSView {
         scrollView.documentView = documentView
         // Scrolled, the pointer aims at what comes under it.
         scrollView.onScroll = { [weak self] in self?.pointerMoved(to: nil) }
+        messageView.aim = aim
+        messageView.onSettings = { [weak self] in self?.onBoardSettings?() }
         aim.onUse = { [weak self] in self?.pointerUsed() }
         // The lines move under a still pointer when the list scrolls, and
         // an app that isn't active doesn't hear the pointer leave.
@@ -317,7 +335,7 @@ final class BoardStagesView: NSView {
         let previous = self.content
         self.content = content
         guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
-            || content.runningQueues != previous?.runningQueues else { return showTimes() }
+            || content.runningQueues != previous?.runningQueues || content.message != previous?.message else { return showTimes() }
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
@@ -345,7 +363,10 @@ final class BoardStagesView: NSView {
             departedQueues = []
             showRunningQueues(content.runningQueues)
         }
-        if content.sections != previous?.sections || content.order != previous?.order {
+        // What shows at once under a pointer that aims (a message, or what comes where nothing was shown) acts only once
+        // it moves.
+        var isShownAtOnce = false
+        if content.sections != previous?.sections || content.order != previous?.order || content.message != previous?.message {
             // Nothing moves under the pointer: what changed is drawn where it
             // was, and settles once the pointer leaves. An order the switch
             // asked for is the user's own click: it applies at once.
@@ -353,7 +374,12 @@ final class BoardStagesView: NSView {
             // The order the switch asked for, now shown; a request is good for this change only.
             let isAsked = askedOrder == content.order && content.order != previous?.order
             askedOrder = nil
-            if isPointerInside, isAiming, !isAsked, previous != nil {
+            // A message takes the sections' place at once, and once it goes they come back at once, as they are; nothing
+            // shown, nothing can move under the pointer.
+            let isMessage = content.message != nil || previous?.message != nil
+            // The Board first drawn under the pointer too: it aimed at nothing on it yet.
+            isShownAtOnce = isPointerInside && isAiming && !isAsked && (isMessage || shownSections.isEmpty)
+            if isPointerInside, isAiming, !isAsked, !isMessage, !shownSections.isEmpty, previous != nil {
                 (shownSections, departed) = Self.holding(shownSections, in: content.sections)
             } else {
                 (shownSections, departed) = (content.sections, [])
@@ -362,8 +388,9 @@ final class BoardStagesView: NSView {
         }
         showTimes()
         layoutContent()
-        // Under a pointer that rests, what is under it may have changed: it waits for the pointer to move.
-        if isPointerInside, !isAiming {
+        // Under a pointer that rests, or where something showed at once, what is under it may have changed: it waits for
+        // the pointer to move.
+        if isPointerInside, !isAiming || isShownAtOnce {
             layoutSubtreeIfNeeded()
             goStale(ifChangedFrom: aimedBefore)
         }
@@ -457,6 +484,20 @@ final class BoardStagesView: NSView {
     /// id, a repository's header, fold and "Merged today" by its section's,
     /// a stack's title by its place.
     private func buildItems() {
+        // A message in their place: the folds stay as they are, for when the sections come back.
+        if let message = content?.message {
+            messageView.show(message)
+            documentView.subviews = [messageView]
+            self.items = [.message(messageView)]
+            lineViews = []
+            sectionHeaders = [:]
+            worktreeViews = []
+            foldButtons = [:]
+            worktreeFolds = [:]
+            mergedViews = [:]
+            captions = []
+            return
+        }
         let sections = shownSections
         let ids = Set(sections.map(\.id))
         unfolded.formIntersection(ids)
@@ -790,6 +831,8 @@ final class BoardStagesView: NSView {
                 worktree.frame = NSRect(x: 0, y: y, width: listWidth, height: Metrics.captionHeight)
             case .merged(let merged):
                 merged.frame = NSRect(x: 0, y: y + 10, width: listWidth, height: merged.height(for: listWidth))
+            case .message(let message):
+                message.frame = NSRect(x: 0, y: y, width: listWidth, height: message.height(for: listWidth))
             }
             y += advance(of: item, width: listWidth)
         }
@@ -804,6 +847,7 @@ final class BoardStagesView: NSView {
         case .line: Metrics.lineHeight
         case .caption, .fold, .worktree: Metrics.captionHeight
         case .merged(let merged): merged.height(for: width) + 10
+        case .message(let message): message.height(for: width)
         }
     }
 
@@ -966,6 +1010,10 @@ final class BoardStagesView: NSView {
         if let (id, header) = sectionHeaders.first(where: { under($0.value) != nil }), let local = under(header) {
             let button = [header.startButton, header.stopButton].first { !$0.isHidden && $0.frame.contains(local) }
             return "header \(id) \(button.map { "\($0.title) \($0.isEnabled)" } ?? "")"
+        }
+        // A message's Board Settings…, shown (`under` passes over a hidden view).
+        if messageView.superview != nil, under(messageView.settingsButton) != nil {
+            return "message Board Settings…"
         }
         if let worktree = worktreeViews.first(where: { under($0) != nil }), let local = under(worktree), let path = worktree.worktree?.path {
             let button = [worktree.openButton, worktree.cleanUpButton].first { !$0.isHidden && $0.frame.contains(local) }
@@ -1607,4 +1655,59 @@ final class BoardStagesWorktreeView: NSView {
     @objc private func menuItemChosen(_ sender: NSMenuItem) {
         choose(sender.representedObject as? BoardStages.MenuItem)
     }
+}
+
+/// What the Board says in place of its sections, centred, with Board
+/// Settings… under it where the settings can fix it.
+@MainActor
+final class BoardStagesMessageView: NSView {
+    let label = NSTextField(wrappingLabelWithString: "")
+    let settingsButton = BoardStagesButton(title: "Board Settings…", target: nil, action: nil)
+    var onSettings: (() -> Void)?
+    /// Board Settings… acts only where the pointer aimed. (The Board says.)
+    var aim = BoardStagesAim() {
+        didSet { settingsButton.aim = aim }
+    }
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        label.font = Theme.Font.body
+        label.textColor = Theme.Color.textSecondary
+        label.alignment = .center
+        label.isSelectable = false
+        settingsButton.bezelStyle = .rounded
+        settingsButton.target = self
+        settingsButton.action = #selector(settingsClicked)
+        [label, settingsButton].forEach(addSubview)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ message: BoardStagesView.Message) {
+        label.stringValue = message.text
+        settingsButton.isHidden = !message.offersSettings
+        needsLayout = true
+    }
+
+    /// Its words wrapped at `width`, 32 pt above and below, the button between.
+    func height(for width: CGFloat) -> CGFloat {
+        32 + textHeight(width) + (settingsButton.isHidden ? 0 : 12 + 24) + 32
+    }
+
+    private func textHeight(_ width: CGFloat) -> CGFloat {
+        ceil(label.sizeThatFits(NSSize(width: max(0, width - 48), height: .greatestFiniteMagnitude)).height)
+    }
+
+    override func layout() {
+        super.layout()
+        label.frame = NSRect(x: 24, y: 32, width: max(0, bounds.width - 48), height: textHeight(bounds.width))
+        // As the table's button: its own width and 8 pt more; never past the left edge.
+        let width = ceil(settingsButton.intrinsicContentSize.width) + 8
+        settingsButton.frame = NSRect(x: max(0, ((bounds.width - width) / 2).rounded()), y: label.frame.maxY + 12, width: width, height: 24)
+    }
+
+    @objc private func settingsClicked() { onSettings?() }
 }
