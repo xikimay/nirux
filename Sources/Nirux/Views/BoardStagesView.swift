@@ -394,10 +394,6 @@ final class BoardStagesView: NSView {
             case .stack(let title, let stacked): return .stack(title: title, stacked.map(held))
             }
         }
-        var worktrees: [String: BoardStages.OtherWorktree] = [:]
-        for worktree in sections.flatMap(\.lines.otherWorktrees) where worktrees[worktree.path] == nil {
-            worktrees[worktree.path] = worktree
-        }
         let current = Dictionary(sections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let result: [Section] = shown.map { section in
             let shownWorktrees = section.lines.otherWorktrees
@@ -416,9 +412,10 @@ final class BoardStagesView: NSView {
             }()
             section.lines.units = section.lines.units.map(held)
             section.lines.withoutTask = section.lines.withoutTask.map(held)
-            // An other worktree: as a line, by its path.
+            // An other worktree: as a line, by its path in its repository (a path is absolute: no line's id is one).
+            let nowWorktrees = current[section.id]?.lines.otherWorktrees ?? []
             section.lines.otherWorktrees = shownWorktrees.map { worktree in
-                if let now = worktrees[worktree.path] { return now }
+                if let now = nowWorktrees.first(where: { $0.path == worktree.path }) { return now }
                 departed.insert(worktree.path)
                 return worktree
             }
@@ -1421,16 +1418,23 @@ final class BoardStagesScrollView: NSScrollView {
     }
 }
 
-/// A worktree under "Other worktrees": its branch, its path, then at the
-/// right Open and Clean Up…, also on a right click. One the content has no
-/// more, held under the pointer, is faded and does nothing.
+/// A worktree under "Other worktrees": its title, its pull request, its
+/// path, then at the right Open and Clean Up…, also on a right click. One
+/// the content has no more, held under the pointer, is faded and does
+/// nothing, for VoiceOver too.
 @MainActor
 final class BoardStagesWorktreeView: NSView {
     let titleLabel = NSTextField(labelWithString: "")
+    /// Its pull request: "#41 merged".
+    let pullRequestLabel = NSTextField(labelWithString: "")
     let pathLabel = NSTextField(labelWithString: "")
     let openButton = BoardStagesButton(title: "Open", target: nil, action: nil)
     let cleanUpButton = BoardStagesButton(title: "Clean Up…", target: nil, action: nil)
     var onMenu: ((BoardStages.MenuItem) -> Void)?
+    /// Shows a menu where VoiceOver asked for it. (The tests give their own.)
+    var popUp: (NSMenu, NSPoint, NSView) -> Void = { menu, location, view in
+        menu.popUp(positioning: nil, at: location, in: view)
+    }
     /// Its buttons and its menu act only where the pointer aimed. (The
     /// Board says.)
     var aim = BoardStagesAim() {
@@ -1441,40 +1445,62 @@ final class BoardStagesWorktreeView: NSView {
 
     override var isFlipped: Bool { true }
 
+    private enum Kind { case open, cleanUp }
+
     init() {
         super.init(frame: .zero)
         titleLabel.font = Theme.Font.body
         titleLabel.textColor = Theme.Color.textPrimary
+        pullRequestLabel.font = Theme.Font.mono
+        pullRequestLabel.textColor = Theme.Color.textSecondary
         pathLabel.font = Theme.Font.mono
         pathLabel.textColor = Theme.Color.textTertiary
         titleLabel.lineBreakMode = .byTruncatingTail
         pathLabel.lineBreakMode = .byTruncatingMiddle
-        for label in [titleLabel, pathLabel] { label.allowsExpansionToolTips = true }
+        for label in [titleLabel, pullRequestLabel, pathLabel] { label.allowsExpansionToolTips = true }
         for (button, action) in [(openButton, #selector(openClicked)), (cleanUpButton, #selector(cleanUpClicked))] {
             button.isBordered = false
             button.target = self
             button.action = action
         }
-        [titleLabel, pathLabel, openButton, cleanUpButton].forEach(addSubview)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        [titleLabel, pullRequestLabel, pathLabel, openButton, cleanUpButton].forEach(addSubview)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Its menu's item of that kind.
+    private func item(_ kind: Kind) -> BoardStages.MenuItem? {
+        worktree?.menu.first { item in
+            switch (item, kind) {
+            case (.openWorktree, .open), (.cleanUp, .cleanUp): return true
+            default: return false
+            }
+        }
+    }
+
     func show(_ worktree: BoardStages.OtherWorktree, isDeparted: Bool) {
         self.worktree = worktree
         self.isDeparted = isDeparted
         titleLabel.stringValue = worktree.title
+        pullRequestLabel.stringValue = worktree.pullRequest ?? ""
         pathLabel.stringValue = (worktree.path as NSString).abbreviatingWithTildeInPath
-        pathLabel.toolTip = worktree.path
-        let open = worktree.menu.first { if case .openWorktree = $0 { true } else { false } }
-        let cleanUp = worktree.menu.first { if case .cleanUp = $0 { true } else { false } }
-        openButton.isHidden = open == nil
+        let cleanUp = item(.cleanUp)
         cleanUpButton.isHidden = cleanUp == nil
         Self.style(openButton, title: "Open", acts: !isDeparted)
         Self.style(cleanUpButton, title: cleanUp?.blocked == nil ? "Clean Up…" : BoardStages.CleanUp.runningWords,
                    acts: !isDeparted && cleanUp?.blocked == nil)
-        cleanUpButton.toolTip = cleanUp?.blocked ?? "Check the worktree, then confirm what goes"
+        // A departed one says nothing it could do, nor anything at all to VoiceOver.
+        pullRequestLabel.toolTip = isDeparted ? nil : worktree.url
+        pathLabel.toolTip = isDeparted ? nil : worktree.path
+        cleanUpButton.toolTip = isDeparted ? nil : cleanUp?.blocked ?? "Check the worktree, then confirm what goes"
+        setAccessibilityElement(!isDeparted)
+        for view in [titleLabel, pullRequestLabel, pathLabel, openButton, cleanUpButton] as [NSView] {
+            view.setAccessibilityElement(!isDeparted)
+        }
+        setAccessibilityLabel(([worktree.title] + (worktree.pullRequest.map { [$0] } ?? [])).joined(separator: ", "))
         openButton.setAccessibilityLabel("Open \(worktree.title)")
         cleanUpButton.setAccessibilityLabel("\(cleanUpButton.title) \(worktree.title)")
         alphaValue = isDeparted ? 0.4 : 1
@@ -1493,31 +1519,52 @@ final class BoardStagesWorktreeView: NSView {
         isDeparted ? nil : super.hitTest(point)
     }
 
+    /// Clean Up… and "cleaning up…" take one room: Open doesn't move when one becomes the other.
+    private var cleanUpRoom: CGFloat {
+        let widths = ["Clean Up…", BoardStages.CleanUp.runningWords].map {
+            ($0 as NSString).size(withAttributes: [.font: Theme.Font.caption]).width
+        }
+        return ceil(widths.max() ?? 0) + 4
+    }
+
+    /// The title whole first, 80 pt of it at least: Open gives way before it
+    /// is cut more, then the pull request, then the path (from 40 pt).
     override func layout() {
         super.layout()
         let pad = BoardStagesView.Metrics.padding
-        var right = bounds.width - pad
-        for button in [cleanUpButton, openButton] where !button.isHidden {
-            let width = ceil(button.fittingSize.width)
-            button.frame = NSRect(x: right - width, y: (bounds.height - 18) / 2, width: width, height: 18)
-            right = button.frame.minX - 12
-        }
         let left = pad + 14
-        let titleWidth = min(ColumnHeaderView.textWidth(titleLabel), max(0, ((right - left) * 0.5).rounded(.down)))
-        titleLabel.frame = NSRect(x: left, y: (bounds.height - 16) / 2, width: titleWidth, height: 16)
-        let pathX = titleLabel.frame.maxX + 10
-        pathLabel.frame = NSRect(x: pathX, y: (bounds.height - 15) / 2 + 1, width: max(0, right - pathX), height: 15)
+        let title = ColumnHeaderView.textWidth(titleLabel)
+        let openWidth = item(.open) == nil ? 0 : ceil(openButton.fittingSize.width)
+        var right = bounds.width - pad
+        if !cleanUpButton.isHidden {
+            cleanUpButton.frame = NSRect(x: right - cleanUpRoom, y: (bounds.height - 18) / 2, width: cleanUpRoom, height: 18)
+            right = cleanUpButton.frame.minX - 12
+        }
+        openButton.isHidden = openWidth == 0 || right - openWidth - 12 - left < min(title, 80)
+        if !openButton.isHidden {
+            openButton.frame = NSRect(x: right - openWidth, y: (bounds.height - 18) / 2, width: openWidth, height: 18)
+            right = openButton.frame.minX - 12
+        }
+        titleLabel.frame = NSRect(x: left, y: (bounds.height - 16) / 2, width: min(title, max(0, right - left)), height: 16)
+        var x = titleLabel.frame.maxX + 10
+        let pullRequest = pullRequestLabel.stringValue.isEmpty ? 0 : ColumnHeaderView.textWidth(pullRequestLabel)
+        pullRequestLabel.isHidden = pullRequest == 0 || right - x < pullRequest
+        if !pullRequestLabel.isHidden {
+            pullRequestLabel.frame = NSRect(x: x, y: (bounds.height - 15) / 2 + 1, width: pullRequest, height: 15)
+            x = pullRequestLabel.frame.maxX + 10
+        }
+        pathLabel.frame = NSRect(x: x, y: (bounds.height - 15) / 2 + 1, width: max(0, right - x), height: 15)
         pathLabel.isHidden = pathLabel.frame.width < 40
     }
 
     // MARK: Clicks
 
-    @objc private func openClicked() { choose { if case .openWorktree = $0 { true } else { false } } }
-    @objc private func cleanUpClicked() { choose { if case .cleanUp = $0 { true } else { false } } }
+    @objc private func openClicked() { choose(item(.open)) }
+    @objc private func cleanUpClicked() { choose(item(.cleanUp)) }
 
-    /// The item of its menu that `matches`, while it still offers it and acts.
-    private func choose(_ matches: (BoardStages.MenuItem) -> Bool) {
-        guard !isDeparted, let item = worktree?.menu.first(where: matches), item.blocked == nil else { return }
+    /// `item`, while the worktree is on the Board, still offers it, and it acts.
+    private func choose(_ item: BoardStages.MenuItem?) {
+        guard window != nil, !isDeparted, let item, worktree?.menu.contains(item) == true, item.blocked == nil else { return }
         onMenu?(item)
     }
 
@@ -1525,6 +1572,12 @@ final class BoardStagesWorktreeView: NSView {
         aim.onUse()
         // A worktree that came under a still pointer isn't the one it aimed at.
         return aim.isStale ? nil : contextMenu()
+    }
+
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let menu = contextMenu() else { return false }
+        popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
+        return true
     }
 
     /// Its items, as the buttons offer them; one held back is there,
@@ -1547,7 +1600,6 @@ final class BoardStagesWorktreeView: NSView {
     /// Chosen in a menu shown before the worktree changed: only as it
     /// still offers it.
     @objc private func menuItemChosen(_ sender: NSMenuItem) {
-        guard let item = sender.representedObject as? BoardStages.MenuItem else { return }
-        choose { $0 == item }
+        choose(sender.representedObject as? BoardStages.MenuItem)
     }
 }

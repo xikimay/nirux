@@ -271,14 +271,20 @@ clicked. The sizes are the mockup's.
   sit on a rail numbered in merge order, under the stack's title.
 - **Pull requests without a task** start folded, each time the Board opens,
   under a line that counts them.
-- **Other worktrees** (a worktree of the repository with neither an open
-  pull request nor a workspace: a task closed since, a branch left) start
-  folded too, after those, under "Other worktrees · N". Each is its branch
-  (its folder's name on a detached HEAD) and its path, then Open and Clean
-  Up…, as the table's buttons, also on a right click; "cleaning up…",
-  disabled with why, while a clean-up of it runs. While the pointer is over
-  the Board, one that goes stays, faded and inert, and one that comes waits;
-  Open and Clean Up… ask where the pointer aimed, as a line's station does.
+- **Other worktrees** (a worktree of the repository with no open pull
+  request and no task of the space: a task closed since, a branch left, a
+  workspace of another space) start folded too, after those, under "Other
+  worktrees · N", by title. Each is its branch ("detached HEAD (1a2b3c4)",
+  or its folder's name), its pull request as the table says it ("#41
+  merged", its address under the pointer), its path, then Open (where no
+  workspace is open there) and Clean Up…, as the table's buttons, also on a
+  right click and from VoiceOver; "cleaning up…", in Clean Up…'s room,
+  disabled with why, while a clean-up of it runs. On a narrow entry the
+  path goes first (under 40 pt), then the pull request, and Open gives way
+  before the title is cut below 80 pt; Clean Up… stays. While the pointer
+  is over the Board, one that goes stays, faded and inert (nothing for
+  VoiceOver, no tooltip), and one that comes waits; Open and Clean Up… ask
+  where the pointer aimed, as a line's station does.
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
   (amber while its task needs the user), its title, then its number and time,

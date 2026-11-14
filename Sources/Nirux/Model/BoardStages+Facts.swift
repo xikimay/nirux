@@ -108,21 +108,34 @@ extension BoardStages {
                 guard pullRequest.state == "MERGED", let mergedAt = pullRequest.mergedAt else { return nil }
                 return MergedFacts(number: pullRequest.number, title: pullRequest.title, mergedAt: mergedAt.timeIntervalSince1970)
             },
-            otherWorktrees: repository.rows.compactMap { otherWorktree($0, in: repository) }
+            otherWorktrees: repository.rows.compactMap { otherWorktree($0, tasks: Set(tasks), in: repository) }
+                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         )
     }
 
-    /// A worktree the table listed under "Other worktrees", with its
-    /// buttons: Open (no workspace is open there), and Clean Up… (a linked
-    /// worktree: the clean-up may delete it), held back while one runs
-    /// there.
-    private static func otherWorktree(_ row: ProjectBoard.Row, in repository: RepositoryReading) -> OtherWorktree? {
-        guard row.group == .otherWorktree, let path = row.worktreePath else { return nil }
-        let title = row.branch ?? (path as NSString).lastPathComponent
-        return OtherWorktree(path: path, title: title, menu: [
-            .openWorktree(path: path, title: title),
-            .cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil)
-        ])
+    /// A worktree with no line: one the table listed under "Other
+    /// worktrees", or an active one whose only workspaces aren't the
+    /// space's tasks (another space's) and whose pull request isn't open.
+    /// With the table's buttons: Open where no workspace is open there,
+    /// Clean Up… where the clean-up may delete it, held back while one
+    /// runs there.
+    private static func otherWorktree(_ row: ProjectBoard.Row, tasks: Set<String>, in repository: RepositoryReading) -> OtherWorktree? {
+        guard let path = row.worktreePath else { return nil }
+        switch row.group {
+        case .otherWorktree: break
+        case .active where row.pullRequest?.isOpen != true && !row.workspaces.contains(where: { tasks.contains($0.id) }): break
+        default: return nil
+        }
+        let title = row.branch ?? row.detachedHead.map { "detached HEAD (\(WorktreeCleanup.short($0)))" } ?? (path as NSString).lastPathComponent
+        var menu: [MenuItem] = row.workspaces.isEmpty ? [.openWorktree(path: path, title: title)] : []
+        if row.canCleanUp {
+            menu.append(.cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil))
+        }
+        return OtherWorktree(
+            path: path, title: title,
+            pullRequest: row.pullRequest.map { ProjectBoard.pullRequestText($0, baseBranch: repository.baseBranch) },
+            url: row.pullRequest?.url, menu: menu
+        )
     }
 
     /// The section's merged pull requests, by number.

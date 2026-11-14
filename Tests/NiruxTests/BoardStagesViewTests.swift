@@ -2106,13 +2106,18 @@ final class BoardStagesViewTests: XCTestCase {
         fold.performClick(nil)
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(fold.title, "▾ Other worktrees · 2")
+        XCTAssertTrue(fold.isAccessibilityExpanded())
         XCTAssertEqual(view.worktreeViews.map(\.titleLabel.stringValue), ["feat/left", "feat/cleaning"])
+        XCTAssertEqual(view.worktreeViews.map { $0.openButton.accessibilityLabel() }, ["Open feat/left", "Open feat/cleaning"])
+        XCTAssertEqual(view.worktreeViews.map { $0.cleanUpButton.accessibilityLabel() }, ["Clean Up… feat/left", "cleaning up… feat/cleaning"])
         let left = view.worktreeViews[0]
         XCTAssertEqual(left.pathLabel.toolTip, "/p/left")
         XCTAssertGreaterThan(left.frame.minY, fold.frame.minY)
         XCTAssertLessThan(left.titleLabel.frame.maxX, left.openButton.frame.minX)
         XCTAssertLessThan(left.openButton.frame.maxX, left.cleanUpButton.frame.minX)
         XCTAssertTrue(left.openButton.aim === view.aim && left.cleanUpButton.aim === view.aim)
+        XCTAssertEqual([left.isAccessibilityElement(), left.openButton.isAccessibilityElement(), left.titleLabel.isAccessibilityElement()],
+                       [true, true, true], "VoiceOver reads it, and each part")
         left.openButton.performClick(nil)
         left.cleanUpButton.performClick(nil)
         XCTAssertEqual(chosen, ["nirux Open", "nirux Clean Up…"])
@@ -2151,16 +2156,20 @@ final class BoardStagesViewTests: XCTestCase {
         let inside = view.convert(NSPoint(x: 400, y: 300), to: nil)
         view.pointerLocation = { inside }
         view.mouseMoved(with: try moved(to: inside, in: view))
-        nirux.lines.otherWorktrees = [worktree("/p/new", "feat/new", false), worktree("/p/cleaning", "feat/cleaning", false)]
+        nirux.lines.otherWorktrees = [worktree("/p/new", "feat/new", false), worktree("/p/cleaning", "feat/cleaning", true)]
         view.show(content([nirux]))
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(view.worktreeViews.map(\.titleLabel.stringValue), ["feat/left", "feat/cleaning"])
         XCTAssertTrue(view.worktreeViews[0] === left && left.isDeparted)
         XCTAssertEqual(left.alphaValue, 0.4, accuracy: 0.01)
         XCTAssertNil(left.hitTest(NSPoint(x: left.frame.midX, y: left.frame.midY)))
-        XCTAssertFalse(left.openButton.isEnabled)
+        XCTAssertEqual([left.openButton.isEnabled, left.cleanUpButton.isEnabled], [false, false])
         XCTAssertNil(left.contextMenu())
-        XCTAssertTrue(view.worktreeViews[1].cleanUpButton.isEnabled, "the one still there takes its new state")
+        XCTAssertNil(left.cleanUpButton.toolTip, "it says nothing it could do")
+        XCTAssertNil(left.pathLabel.toolTip)
+        XCTAssertFalse(left.isAccessibilityElement() || left.openButton.isAccessibilityElement() || left.titleLabel.isAccessibilityElement(),
+                       "nor anything to VoiceOver")
+        XCTAssertEqual(view.worktreeViews[1].cleanUpButton.title, "cleaning up…", "the one still there takes its new state")
         shown.performActionForItem(at: 0)
         XCTAssertEqual(chosen.count, 3, "a menu shown before it went does nothing")
         view.mouseExited(with: try moved(to: NSPoint(x: -10, y: -10), in: view))
@@ -2168,6 +2177,9 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(left.superview)
 
         // Under a resting pointer, Clean Up become cleaning up… is another thing to click: it waits for the pointer.
+        nirux.lines.otherWorktrees = [worktree("/p/new", "feat/new", false), worktree("/p/cleaning", "feat/cleaning", false)]
+        view.show(content([nirux]))
+        view.layoutSubtreeIfNeeded()
         var time: TimeInterval = 100
         view.clock = { time }
         let button = view.worktreeViews[1].cleanUpButton
@@ -2178,10 +2190,88 @@ final class BoardStagesViewTests: XCTestCase {
         nirux.lines.otherWorktrees = [worktree("/p/new", "feat/new", false), worktree("/p/cleaning", "feat/cleaning", true)]
         view.show(content([nirux]))
         XCTAssertTrue(view.isPointerStale)
+        // A right click is the pointer at work: what comes next is held.
+        _ = view.worktreeViews[1].menu(for: try mouse(.rightMouseDown, at: onButton, in: view.window))
+        nirux.lines.otherWorktrees = [worktree("/p/cleaning", "feat/cleaning", true)]
+        view.show(content([nirux]))
+        XCTAssertEqual(view.worktreeViews.map(\.titleLabel.stringValue), ["feat/new", "feat/cleaning"], "held from the right click")
+        time = 300
+        // Another worktree slides under a resting pointer, its button as the other's: still another thing to click.
+        let open = view.worktreeViews[1].openButton
+        let onOpen = open.convert(NSPoint(x: open.bounds.midX, y: open.bounds.midY), to: nil)
+        view.pointerLocation = { onOpen }
+        view.mouseMoved(with: try moved(to: onOpen, in: view))
+        XCTAssertFalse(view.isPointerStale)
+        time = 400
+        nirux.lines.otherWorktrees = [worktree("/p/a", "feat/a", true), worktree("/p/b", "feat/b", true)]
+        view.show(content([nirux]))
+        XCTAssertTrue(view.isPointerStale)
         // Folded again, its entries go.
         fold.performClick(nil)
         XCTAssertEqual(view.worktreeViews.count, 0)
         XCTAssertEqual(fold.title, "▸ Other worktrees · 2")
+    }
+
+    func testAnOtherWorktreeKeepsItsNameOnANarrowBoardAndWhatItsMenuOffers() throws {
+        let path = "/p/widgets.feature"
+        let entry = { (cleaning: Bool, pullRequest: String?) in
+            BoardStages.OtherWorktree(
+                path: path, title: "feat/a-branch-name", pullRequest: pullRequest, url: "https://github.com/acme/widgets/pull/41",
+                menu: [.openWorktree(path: path, title: "feat/a-branch-name"),
+                       .cleanUp(path: path, blocked: cleaning ? BoardStages.CleanUp.runningReason : nil)]
+            )
+        }
+        let view = BoardStagesWorktreeView()
+        view.show(entry(false, "#41 merged"), isDeparted: false)
+        let title = ColumnHeaderView.textWidth(view.titleLabel)
+        let at = { (width: CGFloat) in
+            view.frame = NSRect(x: 0, y: 0, width: width, height: 28)
+            view.layoutSubtreeIfNeeded()
+        }
+        at(940)
+        XCTAssertEqual(view.titleLabel.frame.width, title)
+        XCTAssertFalse(view.pullRequestLabel.isHidden || view.pathLabel.isHidden || view.openButton.isHidden)
+        XCTAssertEqual(view.pullRequestLabel.stringValue, "#41 merged")
+        XCTAssertEqual(view.pullRequestLabel.toolTip, "https://github.com/acme/widgets/pull/41")
+        XCTAssertEqual(view.accessibilityLabel(), "feat/a-branch-name, #41 merged")
+        let frames = [view.titleLabel.frame.maxX, view.pullRequestLabel.frame.minX, view.pullRequestLabel.frame.maxX, view.pathLabel.frame.minX,
+                      view.pathLabel.frame.maxX, view.openButton.frame.minX, view.openButton.frame.maxX, view.cleanUpButton.frame.minX]
+        XCTAssertEqual(frames, frames.sorted(), "title, pull request, path, Open, Clean Up…")
+        // Clean Up… become "cleaning up…" takes the same room: Open stays.
+        let openFrame = view.openButton.frame
+        view.show(entry(true, "#41 merged"), isDeparted: false)
+        at(940)
+        XCTAssertEqual(view.openButton.frame, openFrame)
+        // Narrow: the path goes, then the pull request; Open gives way before the name is cut below 80 pt; Clean Up… stays.
+        for width in stride(from: CGFloat(150), through: 500, by: 5) {
+            at(width)
+            XCTAssertFalse(view.cleanUpButton.isHidden)
+            XCTAssertTrue(view.pathLabel.isHidden || view.pathLabel.frame.width >= 40, "at \(width)")
+            if !view.openButton.isHidden { XCTAssertGreaterThanOrEqual(view.titleLabel.frame.width, min(title, 80), "at \(width)") }
+            if !view.pullRequestLabel.isHidden { XCTAssertEqual(view.titleLabel.frame.width, title, "at \(width)") }
+        }
+        at(260)
+        XCTAssertGreaterThanOrEqual(view.titleLabel.frame.width, min(title, 80))
+        // VoiceOver's "show menu": the same menu as a right click.
+        var popped: [String] = []
+        view.popUp = { menu, _, _ in popped = menu.items.map(\.title) }
+        XCTAssertTrue(view.accessibilityPerformShowMenu())
+        XCTAssertEqual(popped, ["Open", "Clean Up…"])
+        // Off the Board, a menu shown before does nothing.
+        var chosen: [String] = []
+        view.onMenu = { chosen.append($0.title) }
+        let menu = try XCTUnwrap(view.contextMenu())
+        menu.performActionForItem(at: 0)
+        XCTAssertEqual(chosen, [], "in no window: not on the Board")
+        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        windows.append(window)
+        window.contentView?.addSubview(view)
+        menu.performActionForItem(at: 0)
+        XCTAssertEqual(chosen, ["Open"])
+        view.removeFromSuperview()
+        menu.performActionForItem(at: 0)
+        XCTAssertEqual(chosen, ["Open"], "taken off the Board while its menu was open")
     }
 
     func testMergedTodayOpensTheTaskStillOpen() throws {

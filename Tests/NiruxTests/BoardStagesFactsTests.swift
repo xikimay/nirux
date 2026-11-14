@@ -695,29 +695,39 @@ final class BoardStagesFactsTests: XCTestCase {
     // MARK: - Other worktrees
 
     func testAWorktreeWithNoTaskAndNoOpenPullRequestIsListedWithOpenAndCleanUp() {
-        let merged = pullRequest(41, state: "MERGED", title: "Old work")
+        let merged = pullRequest(41, "feat/left", state: "MERGED", title: "Old work")
+        let open = pullRequest(42, "feat/open")
+        let detached = ProjectBoard.Row(
+            group: .otherWorktree, worktreePath: "/p/widgets.detached", branch: nil, detachedHead: String(repeating: "1a", count: 20),
+            workspaces: [], pullRequest: nil, agent: ProjectBoard.Agent(), folder: nil, stack: nil
+        )
         let section = facts([
             row("feat/x", workspaces: ["task"]),
             row("main", group: .main, path: "/p/widgets"),
+            row("feat/open", pullRequest: open, path: "/p/widgets.open"),
             row("feat/left", pullRequest: merged, group: .otherWorktree, path: "/p/widgets.left"),
-            row(nil, group: .otherWorktree, path: "/p/widgets.detached"),
+            detached,
             row("feat/cleaning", group: .otherWorktree, path: "/p/widgets.cleaning"),
+            row("feat/elsewhere", workspaces: ["another space's"], path: "/p/widgets.elsewhere"),
             row("gone", group: .otherWorktree, path: nil),
         ], cleaningUp: ["/p/widgets.cleaning"])
+        let entry = { (path: String, title: String, pullRequest: String?, open: Bool, blocked: String?) in
+            BoardStages.OtherWorktree(
+                path: path, title: title, pullRequest: pullRequest, url: pullRequest.map { _ in "https://github.com/acme/widgets/pull/41" },
+                menu: (open ? [.openWorktree(path: path, title: title)] : []) + [.cleanUp(path: path, blocked: blocked)]
+            )
+        }
         XCTAssertEqual(section.otherWorktrees, [
-            BoardStages.OtherWorktree(path: "/p/widgets.left", title: "feat/left", menu: [
-                .openWorktree(path: "/p/widgets.left", title: "feat/left"), .cleanUp(path: "/p/widgets.left", blocked: nil)
-            ]),
-            BoardStages.OtherWorktree(path: "/p/widgets.detached", title: "widgets.detached", menu: [
-                .openWorktree(path: "/p/widgets.detached", title: "widgets.detached"), .cleanUp(path: "/p/widgets.detached", blocked: nil)
-            ]),
-            BoardStages.OtherWorktree(path: "/p/widgets.cleaning", title: "feat/cleaning", menu: [
-                .openWorktree(path: "/p/widgets.cleaning", title: "feat/cleaning"),
-                .cleanUp(path: "/p/widgets.cleaning", blocked: BoardStages.CleanUp.runningReason)
-            ]),
-        ], "neither the task's worktree nor the main checkout; one git no longer lists has no place to open")
+            entry("/p/widgets.detached", "detached HEAD (1a1a1a1)", nil, true, nil),
+            entry("/p/widgets.cleaning", "feat/cleaning", nil, true, BoardStages.CleanUp.runningReason),
+            entry("/p/widgets.elsewhere", "feat/elsewhere", nil, false, nil),
+            entry("/p/widgets.left", "feat/left", "#41 merged", true, nil),
+        ], """
+        by title, as they show; not the task's worktree, the main checkout, nor one with an open pull request; one git no \
+        longer lists has no place; one where another space works has Clean Up and no Open, as the table's row
+        """)
         XCTAssertEqual(BoardStages.section(section, order: .sidebar, now: 0, timeZone: TimeZone(identifier: "UTC")!).otherWorktrees,
-                       section.otherWorktrees, "in the table's order")
+                       section.otherWorktrees)
     }
 
     func testTheMergedListGivesTheDaysMergesTheirTitleAndTime() {
