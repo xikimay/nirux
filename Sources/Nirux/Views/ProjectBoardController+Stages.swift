@@ -26,9 +26,10 @@ extension ProjectBoardController {
         var readings: [String: BoardStages.TaskReading] = [:]
         /// Each section's merge queue, by section id.
         var queues: [String: ProjectBoard.QueueState] = [:]
-        /// Queues left running on a repository no section has: their lines
-        /// at the foot.
-        var orphanQueues: [BoardStagesView.RunningQueue] = []
+        /// The queues that run, here or in another Nirux, as the table's
+        /// queue lines name them (`NiruxShellView.projectBoardQueues`): a
+        /// section's, or one left on a repository no section has.
+        var runningQueues: [BoardStagesView.RunningQueue] = []
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []
         var order: BoardStages.Order = .sidebar
@@ -43,15 +44,7 @@ extension ProjectBoardController {
     func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> BoardStagesView.Content {
         var content = BoardStagesView.Content(
             header: stagesHeader(inputs), order: inputs.order, sections: [], now: now.timeIntervalSince1970,
-            runningQueues: sections.compactMap { section in
-                inputs.queues[section.id].flatMap { state in
-                    let repository = repository(of: section)?.name
-                    let title = section.anchor == nil ? repository : displayNames[section.id]
-                    return BoardStagesView.runningQueue(
-                        id: section.id, title: title ?? repository ?? "Repository", tooltip: repository, state: state
-                    )
-                }
-            } + inputs.orphanQueues
+            runningQueues: inputs.runningQueues
         )
         if let message = bodyMessage(projectExists: inputs.space != nil) {
             content.message = BoardStagesView.Message(text: message.text, offersSettings: message.offersSettings)
@@ -101,14 +94,19 @@ extension ProjectBoardController {
         return content
     }
 
-    /// The space: its colour and name, what it holds, its Lead's state and
-    /// line, said as a line says a task at rest or at work.
+    /// The space: its colour and name, what it holds (its repositories,
+    /// anchored or read; its tasks not archived, the Lead apart), its
+    /// Lead's state and line, said as a line says a task at rest or at work.
     private func stagesHeader(_ inputs: StagesInputs) -> BoardStagesView.Header {
-        let repositories = sections.count
-        let tasks = inputs.tasks.count
+        let repositories = sections.filter { $0.anchor != nil || reads[$0.id] != nil }.count
+        let tasks = inputs.workspaces.filter { !$0.isInactive && $0.id != inputs.lead }.count
+        let held = [
+            repositories == 0 ? nil : "\(repositories) \(repositories == 1 ? "repository" : "repositories")",
+            "\(tasks) \(tasks == 1 ? "task" : "tasks")"
+        ]
         var header = BoardStagesView.Header(
             name: inputs.space?.name ?? "Deleted space", color: inputs.space?.color ?? Theme.Color.textTertiary,
-            summary: "\(repositories) \(repositories == 1 ? "repository" : "repositories") · \(tasks) \(tasks == 1 ? "task" : "tasks")"
+            summary: held.compactMap { $0 }.joined(separator: " · ")
         )
         if let lead = inputs.lead {
             let reading = inputs.readings[lead] ?? BoardStages.TaskReading()
@@ -147,23 +145,38 @@ extension ProjectBoardController {
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
         if let state = inputs.queues[section.id] {
-            // The next Start's list as the Board shows it: each pull request once, a merged one for none.
-            let proposed = state.isLocked ? 0 : Set(facts.lines.compactMap { $0.queue.order == nil ? nil : $0.pullRequest?.number }).count
+            // The next Start's list, a merged one for none (as the queue, the merged list or a task's line knows it),
+            // whether or not the Board lists it (not read yet, closed, beyond the open pull requests read).
+            let merged = Set(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
+                .union((reads?.mergedPullRequests ?? []).filter { $0.state == "MERGED" }.map(\.number))
+                .union(facts.lines.compactMap { $0.pullRequest?.isMerged == true ? $0.pullRequest?.number : nil })
+            let proposed = state.isLocked ? 0 : state.selection.filter { !merged.contains($0) }.count
             shown.queue = BoardStagesView.sectionQueue(state, proposed: proposed)
         }
-        shown.menu = [.boardSettings] + (rows.first { $0.group == .main }?.worktreePath.map { [.openMainCheckout(path: $0)] } ?? [])
+        // Board Settings… where it can set the repository up and save it, as the table offered it.
+        let offersSettings = !isReadOnly && canBeSetUp(section)
+        shown.menu = (offersSettings ? [.boardSettings] : [])
+            + (rows.first { $0.group == .main }?.worktreePath.map { [.openMainCheckout(path: $0)] } ?? [])
         return shown
     }
 
+    private var isReadOnly: Bool {
+        if let loaded, case .readOnly = loaded.status { return true }
+        return false
+    }
+
     /// The header's pill: what went wrong reading the repository, else why
-    /// it has no saved settings ("No settings", the reason under the
-    /// pointer), else its post-merge run.
+    /// it has no saved settings, the table's sentence under the pointer:
+    /// "Read-only" when board.json can't be saved, "No settings" where Board
+    /// Settings can set it up, else "Not read" (its checkout gone, another
+    /// section reading its repository); else its post-merge run.
     private func stagesStatus(_ section: BoardSections.Section, now: Date) -> ColumnHeaderView.Status? {
         if let reads = reads[section.id], let error = Self.errorText(reads) {
             return ColumnHeaderView.Status(error.title, tone: .error, symbol: Theme.Symbol.agentError, toolTip: error.message)
         }
         if let note = setupNote(section) {
-            return ColumnHeaderView.Status("No settings", tone: .neutral, toolTip: note)
+            let words = isReadOnly ? "Read-only" : canBeSetUp(section) ? "No settings" : "Not read"
+            return ColumnHeaderView.Status(words, tone: .neutral, toolTip: note)
         }
         return reads[section.id].flatMap { Self.runStatus($0, now: now) }
     }

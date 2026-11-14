@@ -59,33 +59,30 @@ extension NiruxShellView {
     }
 
     /// What the shell holds of a Board's space for its stages, beside what
-    /// the Board read: the space, its tasks in the sidebar's order (the
-    /// Lead apart), each sub-task's parent, each section's queue and the
-    /// queues left on a repository no section has, the clean-ups running.
+    /// the Board read: the space, its tasks (`members`, the space's
+    /// workspaces in the sidebar's order) with the Lead apart, each
+    /// sub-task's parent, each section's queue and the queues that run (the
+    /// table's queue lines), the clean-ups running.
     func stagesInputs(
-        of board: ProjectBoardController, workspaces: [ProjectBoard.Workspace], readings: [String: BoardStages.TaskReading],
-        order: BoardStages.Order
+        of board: ProjectBoardController, members: [WorkspaceState], workspaces: [ProjectBoard.Workspace],
+        readings: [String: BoardStages.TaskReading], order: BoardStages.Order
     ) -> ProjectBoardController.StagesInputs {
         let spaceID = board.projectID
-        let members = workspaceStore.visibleWorkspaceIndices(in: spaceID).filter { !self.workspaces[$0].isClosing }
-        let parents = workspaceStore.activeParents(in: spaceID).map { (self.workspaces[$0.key].id, self.workspaces[$0.value].id) }
-        var queues: [String: ProjectBoard.QueueState] = [:]
-        for section in board.sections { queues[section.id] = projectBoardQueueState(board, section: section) }
+        let queues = projectBoardQueues(board)
         return ProjectBoardController.StagesInputs(
             space: profiles.first { $0.id == spaceID }.map { profile in
                 ProjectBoardController.StagesInputs.Space(name: profile.name, color: NSColor.niruxColor(hex: profile.colorHex) ?? Theme.Color.accent)
             },
             workspaces: workspaces,
-            tasks: members.filter { !self.workspaces[$0].isLead }.map { self.workspaces[$0].id },
-            parents: Dictionary(parents, uniquingKeysWith: { first, _ in first }),
-            lead: members.first { self.workspaces[$0].isLead }.map { self.workspaces[$0].id },
+            tasks: members.filter { !$0.isLead }.map(\.id),
+            parents: Dictionary(uniqueKeysWithValues: workspaceStore.activeParents(in: spaceID).map {
+                (self.workspaces[$0.key].id, self.workspaces[$0.value].id)
+            }),
+            lead: members.first { $0.isLead }?.id,
             readings: readings,
-            queues: queues,
-            orphanQueues: projectBoardOrphanQueues(board).compactMap { orphan in
-                BoardStagesView.runningQueue(
-                    id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
-                    tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.", state: orphanQueueState(orphan)
-                )
+            queues: queues.states,
+            runningQueues: queues.lines.compactMap { line in
+                BoardStagesView.runningQueue(id: line.id, title: line.title, tooltip: line.tooltip, state: line.queue)
             },
             cleaningUp: worktreeCleanupsInFlight,
             order: order
