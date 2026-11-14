@@ -42,7 +42,7 @@ extension NiruxShellView {
                     // The dialog the user is looking at needs no copy on
                     // its row: its one line, as for any dialog.
                     showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now,
-                    waitingMessages: waitingMessages[ObjectIdentifier(col)]
+                    waitingMessages: waitingMessages[col.id]
                 )
             }
             return sidebarWorkspaceInfo(
@@ -455,6 +455,7 @@ extension NiruxShellView {
     /// typed into its recipient's prompt; the child's card shows a waiting
     /// question from the ledger too (`missionQuestion(for:)`).
     func handleMissionEvent(_ mission: Mission, event: MissionEvent) -> Bool {
+        missionWaits.checkedAt = nil
         let workspace = workspaces.first(where: { $0.id == mission.childWorkspaceID })
         switch event.kind {
         case .acknowledged:

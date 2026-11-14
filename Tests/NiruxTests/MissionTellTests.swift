@@ -331,16 +331,26 @@ final class MissionTellTests: XCTestCase {
         _ = machine.apply(hook(.userPromptSubmit, at: 6), isUserFocused: false)
         XCTAssertEqual(refusal(machine), .working)
         _ = machine.apply(hook(.permissionRequest, at: 7, tool: "Bash", key: "k"), isUserFocused: false)
-        XCTAssertEqual(refusal(machine), .dialog)
+        XCTAssertEqual(refusal(machine), .working, "a dialog mid-turn")
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
         XCTAssertTrue(isFree(machine))
+        // A subagent's dialog outlives the turn.
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = machine.apply(AgentHookEvent(
+            kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: "s", agentID: "sub",
+            timestamp: t0 + 11
+        ), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 12), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .dialog)
     }
 
     /// Keys that answered a dialog aren't a draft at the prompt: once its
     /// turn is over, a message goes in. A question dialog takes every key
     /// until its submit; an approval and the plan dialog take Up and Down,
-    /// then the key that answers; a wheel scroll's arrows move among a
-    /// dialog's options. A key once it is answered may be a draft.
+    /// and the text of an option (why not, an amendment), until the key that
+    /// answers; a wheel scroll's arrows move among a dialog's options. A key
+    /// once it is answered may be a draft, and so may the keys of one closed
+    /// with no key answering it.
     func testPromptIsFreeAfterADialogAnsweredWithItsKeys() {
         let down = "\u{1B}[B", up = "\u{1B}[A"
         func dialog(_ tool: String, keys: [String], scrolls: Bool = false) -> AgentStatusMachine {
@@ -367,8 +377,13 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(dialog("ExitPlanMode", keys: [down, down, up, "\r"])))
         XCTAssertNil(refusal(dialog("AskUserQuestion", keys: ["\r"], scrolls: true)), "a wheel scroll in the dialog")
         XCTAssertNil(refusal(dialog("Bash", keys: ["\r"], scrolls: true)))
+        XCTAssertNil(refusal(dialog("Bash", keys: ["2"])), "an option's number")
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, down, "\t", "u", "s", "e", " ", "v", "2", "\u{7F}", "\r"])), "why not")
+        XCTAssertNil(refusal(dialog("ExitPlanMode", keys: [down, down, "\u{04}", "k", "e", "e", "p", "\r"])))
 
         XCTAssertEqual(refusal(dialog("Bash", keys: [down, "\r", "x"])), .draft, "typed while the approved call ran")
+        XCTAssertEqual(refusal(dialog("Bash", keys: [down, down])), .draft, "answered with no key: never on screen, maybe")
+        XCTAssertEqual(refusal(dialog("Bash", keys: [], scrolls: true)), .draft)
         var scrolled = dialog("Bash", keys: ["\r"])
         scrolled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 70))
         XCTAssertEqual(refusal(scrolled), .draft, "at the prompt, Up recalls an old one")

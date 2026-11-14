@@ -82,8 +82,8 @@ extension AgentStatusMachine {
         guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else { return .noPromptYet }
-        if !pendingDialogs.isEmpty { return .dialog }
         if hookWorking || turnStartedAt != nil { return .working }
+        if !pendingDialogs.isEmpty { return .dialog }
         if turnFailure != nil { return .failedTurn }
         if lastDraftInputAt > lastPromptAt { return .draft }
         if awaitsAnyVerdict { return .verdict }

@@ -129,6 +129,8 @@ final class WaitingAgentTests: XCTestCase {
         apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
         machine.noteKeystroke(now: at(6), keys: Data((esc + "[B").utf8))
         XCTAssertEqual(wait(at: 7)?.since, t0 + 5, "moving")
+        for keys in ["\t", "n", "o", "2"] { machine.noteKeystroke(now: at(7), keys: Data(keys.utf8)) }
+        XCTAssertEqual(wait(at: 7.5)?.since, t0 + 5, "saying why not")
         machine.noteKeystroke(now: at(8), keys: Data("\r".utf8))
         XCTAssertNil(wait(at: 9))
     }

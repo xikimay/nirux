@@ -50,8 +50,8 @@ enum MissionPromptText {
     static func questionsNeverTyped(retiredBy completed: MissionEvent, in mission: Mission) -> [MissionEvent] {
         let answered = Set(mission.events.compactMap { $0.kind == .response ? $0.inReplyTo : nil })
         return mission.events.filter {
-            $0.kind == .question && $0.parentTypedAt == nil && $0.parentConsumedAt == completed.timestamp
-                && !answered.contains($0.id)
+            $0.kind == .question && $0.parentTypedAt == nil && $0.handedToUserBecause == nil
+                && $0.parentConsumedAt == completed.timestamp && !answered.contains($0.id)
         }
     }
 
@@ -63,7 +63,7 @@ enum MissionPromptText {
         let count = questions.count == 1 ? "a question" : "\(questions.count) questions"
         let listed = questions.prefix(neverTypedListed).map { "\n- " + (AgentText.clean(quoted($0.message), maxLength: neverTypedExcerpt) ?? "") }
         let more = questions.count > neverTypedListed ? "\n(and \(questions.count - neverTypedListed) more)" : ""
-        return "\nIt asked you \(count) that never reached your prompt; the user may have answered in its terminal:"
+        return "\nIt asked you \(count) that never reached your prompt; the user may have answered in its terminal. Its words:"
             + listed.joined() + more
     }
 

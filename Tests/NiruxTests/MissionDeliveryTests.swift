@@ -232,6 +232,9 @@ final class MissionDeliveryTests: XCTestCase {
         guard case .accepted = store.process(parentEvent(.acknowledged, "acknowledged", at: 25, inReplyTo: printed.event.id),
                                              enabled: true)
         else { return XCTFail("the parent's receive read it") }
+        // One a Lead read in its task list and handed to the user.
+        let handed = try XCTUnwrap(store.accept(childEvent(.question, "Handed over?", at: 25.5), enabled: true))
+        XCTAssertNotNil(store.handToUser(questionID: handed.event.id, because: "a product call", now: 25.6))
         XCTAssertNotNil(store.accept(childEvent(.question, "Keep date=\nfor mobile?", at: 26), enabled: true))
         XCTAssertNotNil(store.accept(childEvent(.question, String(repeating: "Why? ", count: 100), at: 27), enabled: true))
         let completed = try XCTUnwrap(store.accept(childEvent(.completed, "PR #42 open.", at: 40), enabled: true))
@@ -239,7 +242,7 @@ final class MissionDeliveryTests: XCTestCase {
             .components(separatedBy: "\n")
         XCTAssertEqual(Array(lines.prefix(3)), [
             "[Nirux Mission] \"Date filter API\" (branch feat/date-filter) completed: PR #42 open.",
-            "It asked you 2 questions that never reached your prompt; the user may have answered in its terminal:",
+            "It asked you 2 questions that never reached your prompt; the user may have answered in its terminal. Its words:",
             "- Keep date= for mobile?"
         ])
         XCTAssertEqual(lines.count, 4)

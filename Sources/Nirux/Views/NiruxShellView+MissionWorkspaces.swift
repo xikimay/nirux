@@ -289,7 +289,7 @@ extension NiruxShellView {
             let mission = delivery.mission
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
-            guard let pty = missionRecipient(of: delivery)?.pty,
+            guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
                   pty.acceptsMissionMessage(runningSince: Self.runningSince(of: delivery.event, now: now), snapshot: snapshot),
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
@@ -299,13 +299,11 @@ extension NiruxShellView {
                   MissionStore.shared.markTyped(delivery, at: now)
             else { continue }
             pty.sendRaw(input)
+            missionWaits.noteTyped(into: recipient, at: now)
             typedAny = true
         }
         // The cards' "Asking …" and "Answer … ready" rows follow.
-        if typedAny {
-            missionWaits.checkedAt = nil
-            updateSidebar(snapshot: snapshot)
-        }
+        if typedAny { updateSidebar(snapshot: snapshot) }
     }
 
     /// The column a Mission message is typed into: the parent's for a
@@ -341,6 +339,7 @@ extension NiruxShellView {
                   let input = TypedPromptSanitizer.terminalInput(for: notice.text)
             else { return true }
             pty.sendRaw(input)
+            missionWaits.noteTyped(into: column, at: now)
             return false
         }
     }
