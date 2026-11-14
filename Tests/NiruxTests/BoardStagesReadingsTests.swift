@@ -135,12 +135,23 @@ final class BoardStagesReadingsTests: XCTestCase {
         XCTAssertEqual(reading(row([paused, gone])).resume?.kind, .afterExit)
     }
 
-    func testAReviewPassRunsWhileTheTurnItStartedInDoes() {
-        let runs: [ReviewPass: ReviewRun] = [.codeReview: ReviewRun(head: "a", at: 500), .premortem: ReviewRun(head: "a", at: 300)]
-        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [500]), [.codeReview], "the turn its prompt started")
-        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [300.4, 500]), [.codeReview, .premortem])
-        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: [600, 250]), [],
-                       "another turn, later or earlier, another column's: done")
-        XCTAssertEqual(NiruxShellView.reviewsInFlight(runs: runs, turnsStartedAt: []), [], "no turn running: done")
+    func testAReviewPassRunsWhileItsTurnGoesOnInItsColumn() {
+        let column = UUID(), other = UUID()
+        let turns: [ReviewPass: ReviewTurn] = [
+            .codeReview: ReviewTurn(column: column, startedAt: 500), .premortem: ReviewTurn(column: other, startedAt: 300)
+        ]
+        let running = { (live: [UUID: TimeInterval]) in NiruxShellView.reviewsInFlight(turns: turns, live: live) }
+        XCTAssertEqual(running([column: 500]), [.codeReview], "its turn goes on, typed with the prompt or a Skill called later in it")
+        XCTAssertEqual(running([column: 500.4, other: 300]), [.codeReview, .premortem])
+        XCTAssertEqual(running([column: 620, other: 300]), [.premortem], "a new turn in its column: done")
+        XCTAssertEqual(running([other: 500]), [], "another column's turn isn't its own")
+        XCTAssertEqual(running([:]), [], "no turn running: done")
+        // A column whose agent exited mid-turn has no turn in flight, whatever its machine kept.
+        var exited = ColumnInfo(
+            index: 0, processName: "zsh", abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil, terminalTitle: nil,
+            agentStatus: .idle, isEditor: false, editorFileName: nil, id: column
+        )
+        exited.stuck = .exitedMidTurn(processName: "claude")
+        XCTAssertEqual(NiruxShellView.liveTurns([column: 500, other: 300], columns: [exited, self.column(1, id: other)]), [other: 300])
     }
 }

@@ -396,7 +396,7 @@ extension NiruxShellView {
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
                 changed = true
             }
-            recordReviewPasses(of: event, in: appliedEvent.resolution.workspace)
+            recordReviewPasses(of: event, in: appliedEvent.resolution.workspace, column: appliedEvent.resolution.column)
         }
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
@@ -429,16 +429,18 @@ extension NiruxShellView {
     /// workspace's git context follows its focused column, and pauses while
     /// Nirux is in the background. An event replayed at launch is skipped, since the HEAD it
     /// ran on can't be known any more.
-    private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState) {
+    private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState, column: ColumnState) {
         guard let passes = event.reviewPasses?.compactMap(ReviewPass.init(rawValue:)), !passes.isEmpty,
               let cwd = event.cwd,
               Date().timeIntervalSince1970 - event.timestamp < 60
         else { return }
+        // The turn it runs in, as the event left it, before the turn can end.
+        let turn = column.pty?.agentTurnStartedAt.map { ReviewTurn(column: column.id, startedAt: $0.timeIntervalSince1970) }
         // Only the HEAD and its branch count here; a detached HEAD has none.
         GitDetect.contextAsync(at: cwd, startFolder: nil) { [weak self, weak workspace] result in
             guard case .observed(let context) = result, let head = context.identity.head,
                   let self, let workspace,
-                  workspace.recordReviewPasses(passes, head: head, branch: context.branchName, at: event.timestamp)
+                  workspace.recordReviewPasses(passes, head: head, branch: context.branchName, at: event.timestamp, turn: turn)
             else { return }
             self.updateSidebar()
             self.saveState()

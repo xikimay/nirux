@@ -4,13 +4,16 @@ import Foundation
 
 extension WorkspaceState {
     /// Records passes that started at `timestamp` on `head`, on `branch`
-    /// (nil on a detached HEAD). A replayed event older than the stored run
-    /// doesn't replace it.
+    /// (nil on a detached HEAD), in `turn` when its event knew it. A
+    /// replayed event older than the stored run doesn't replace it.
     @discardableResult
-    func recordReviewPasses(_ passes: [ReviewPass], head: String, branch: String? = nil, at timestamp: TimeInterval) -> Bool {
+    func recordReviewPasses(
+        _ passes: [ReviewPass], head: String, branch: String? = nil, at timestamp: TimeInterval, turn: ReviewTurn? = nil
+    ) -> Bool {
         var changed = false
         for pass in passes where reviewRuns[pass].map({ timestamp >= $0.at }) ?? true {
             reviewRuns[pass] = ReviewRun(head: head, at: timestamp, branch: branch)
+            reviewTurns[pass] = turn
             changed = true
         }
         return changed

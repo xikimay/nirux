@@ -115,9 +115,14 @@ final class ReviewBadgesTests: XCTestCase {
 
     func testOlderReplayedEventDoesNotReplaceANewerRun() {
         let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
-        workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20)
-        XCTAssertFalse(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10))
+        let turn = ReviewTurn(column: UUID(), startedAt: 18)
+        workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20, turn: turn)
+        XCTAssertEqual(workspace.reviewTurns[.codeReview], turn, "the turn it runs in, with it")
+        XCTAssertFalse(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10, turn: ReviewTurn(column: UUID(), startedAt: 9)))
         XCTAssertEqual(workspace.reviewRuns[.codeReview], ReviewRun(head: "bbb", at: 20))
+        XCTAssertEqual(workspace.reviewTurns[.codeReview], turn)
+        workspace.recordReviewPasses([.codeReview], head: "ccc", at: 30)
+        XCTAssertNil(workspace.reviewTurns[.codeReview], "a run whose turn wasn't known runs in none")
     }
 
     func testRunsDecodeAsReadAndLegacyWorkspacesHaveNone() throws {

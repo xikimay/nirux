@@ -62,6 +62,14 @@ enum ReviewPass: String, Codable, CaseIterable {
 }
 
 /// A pass's latest run in a workspace: its HEAD when the pass started.
+/// The agent turn a review pass runs in: its column, and the start that
+/// turn had when the pass's event came (typed with the prompt, or a Skill
+/// the agent called later in the turn).
+struct ReviewTurn: Hashable {
+    let column: UUID
+    let startedAt: TimeInterval
+}
+
 struct ReviewRun: Codable, Hashable {
     let head: String
     let at: TimeInterval
