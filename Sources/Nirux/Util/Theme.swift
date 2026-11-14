@@ -119,23 +119,18 @@ enum Theme {
         static let floatingRadius: CGFloat = 16
         static let floatingDrop: CGFloat = 12
 
-        /// Gives `view`'s layer the floating shadow along `path`, the shape
-        /// in the view's own coordinates; call it again when the shape
-        /// changes. Set it on an unclipped view: a layer that masks to its
-        /// bounds cuts its own shadow off.
-        @MainActor static func applyFloating(to view: NSView, path: CGPath) {
-            guard let layer = view.layer else { return }
+        /// Gives `layer` the floating shadow along `path`, the shape in the
+        /// layer's own coordinates; call it again when the shape changes.
+        /// The layer must not mask to its bounds, which would cut the shadow
+        /// off.
+        static func applyFloating(to layer: CALayer, path: CGPath) {
             layer.shadowColor = NSColor.black.cgColor
             layer.shadowOpacity = floatingOpacity
             layer.shadowRadius = floatingRadius
-            // Below the shape, whichever way the view counts y.
-            layer.shadowOffset = CGSize(width: 0, height: view.isFlipped ? floatingDrop : -floatingDrop)
+            // Below the shape, whichever way the layer counts y: a view's
+            // backing layer is flipped exactly when the view is.
+            layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? floatingDrop : -floatingDrop)
             layer.shadowPath = path
-        }
-
-        @MainActor static func removeShadow(from view: NSView) {
-            view.layer?.shadowOpacity = 0
-            view.layer?.shadowPath = nil
         }
     }
 

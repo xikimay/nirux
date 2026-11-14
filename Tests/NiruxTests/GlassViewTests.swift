@@ -31,7 +31,8 @@ final class GlassViewTests: XCTestCase {
     }
 
     /// On this Mac: the glass or the frost under the content, a solid fill
-    /// once Opaque, and the floating shadow only where the system draws none.
+    /// once Opaque, the content clipped to the shape, and the floating
+    /// shadow only where the system draws none.
     func testItDrawsWithWhatThisMacHas() {
         let view = GlassView(role: .floating, level: .glass, cornerRadius: 18)
         view.frame = NSRect(x: 0, y: 0, width: 300, height: 120)
@@ -45,20 +46,33 @@ final class GlassViewTests: XCTestCase {
             XCTAssertEqual(view.backing, .glass)
             let glass = effectViews().compactMap { $0 as? NSGlassEffectView }.first
             XCTAssertTrue(glass?.contentView === view.contentView, "the content sits in the glass")
-            XCTAssertEqual(view.layer?.shadowOpacity, 0, "the system draws the glass's edge")
+            XCTAssertEqual(glass?.style, .regular, "what floats stays the thicker glass")
+            XCTAssertFalse(view.castsShadow, "the system draws the glass's edge")
         } else {
             XCTAssertEqual(view.backing, .frosted)
             let frost = effectViews().compactMap { $0 as? NSVisualEffectView }.first
             XCTAssertEqual(frost?.state, .active, "frosted even in a window that isn't key")
             XCTAssertTrue(view.contentView.superview === view)
-            XCTAssertEqual(view.layer?.shadowOpacity, Theme.Elevation.floatingOpacity)
+            XCTAssertTrue(view.castsShadow)
         }
+        XCTAssertEqual(view.contentView.layer?.masksToBounds, true)
         view.level = .opaque
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(view.backing, .solid)
         XCTAssertEqual(effectViews().count, 0)
         XCTAssertTrue(label.superview === view.contentView && view.contentView.superview === view)
         XCTAssertEqual(view.layer?.backgroundColor, Theme.Color.raised.cgColor)
-        XCTAssertEqual(view.layer?.shadowOpacity, Theme.Elevation.floatingOpacity)
+        XCTAssertTrue(view.castsShadow)
+    }
+
+    /// A glass smaller than its corners, or not yet laid out, keeps a radius
+    /// of half its shorter side instead of an impossible shape.
+    func testTheCornersNeverExceedHalfASide() {
+        let view = GlassView(role: .floating, level: .opaque, cornerRadius: 18)
+        XCTAssertFalse(view.castsShadow, "nothing to cast before a size")
+        view.setFrameSize(NSSize(width: 40, height: 10))
+        XCTAssertEqual(view.layer?.cornerRadius, 5)
+        XCTAssertEqual(view.contentView.layer?.cornerRadius, 5)
+        XCTAssertTrue(view.castsShadow)
     }
 }
