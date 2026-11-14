@@ -111,6 +111,8 @@ final class BoardStagesLineTests: XCTestCase {
         first.reviews = nil
         first.reviewsInFlight = [.codeReview]
         XCTAssertEqual(line(first).phrase.text, "Review running")
+        first.pullRequest?.isDraft = true
+        XCTAssertEqual(line(first).station, .reviews, "a draft whose review runs has entered Reviews")
     }
 
     func testTheRulesNameTheReviewsThatCount() {

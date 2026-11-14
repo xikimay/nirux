@@ -86,7 +86,8 @@ struct AgentHookEvent: Codable, Equatable {
     let transcriptPath: String?
     /// Review passes the event starts (`ReviewPass` raw values): from the
     /// prompt on UserPromptSubmit, from the skill on a `Skill` call's
-    /// PostToolUse. Only the passes are kept, never the prompt. Strings, so
+    /// PreToolUse (it runs) and PostToolUse (it ran). Only the passes are
+    /// kept, never the prompt. Strings, so
     /// an app older than its receiver skips a pass it doesn't know, not
     /// the whole event.
     let reviewPasses: [String]?

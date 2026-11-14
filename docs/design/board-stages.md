@@ -470,7 +470,10 @@ the Board reads that pass's statuses, approvals and Mission questions.
   Claude reads idle at its prompt, about a minute, or until the next turn's
   end when a prompt follows; a Skill call that fails reads running until its
   turn ends; a subagent at work there for something else keeps it running
-  until it stops.
+  until it stops; and a review run in the background often reads done at
+  the main turn's end, since Nirux hears of a subagent only from its first
+  tool call, which mostly comes after that Stop (the Stop's list of
+  background tasks, or a SubagentStart hook, would tell it sooner).
 - **Resume** is the sidebar's: an agent stopped on an error first, held back
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").

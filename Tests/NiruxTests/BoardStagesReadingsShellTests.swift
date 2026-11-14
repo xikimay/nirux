@@ -98,6 +98,28 @@ final class BoardStagesReadingsShellTests: XCTestCase {
             XCTAssertEqual(task.reviewsRunning.count, 1)
             shell.updateSidebar(snapshot: table(shellPID))
             XCTAssertEqual(task.reviewsRunning, [], "claude left the front: it exited, crashed or was quit")
+            // An event naming its process: running while the table has it, whoever is in front; gone once it doesn't.
+            let emitter = ProcessInstance(pid: claude, startedAt: now - 700)
+            task.noteReviewPasses(
+                of: AgentHookEvent(kind: .claude, name: .userPromptSubmit, emitterProcess: emitter, reviewPasses: ["codeReview"], timestamp: now),
+                in: column.id, now: now
+            )
+            shell.updateSidebar(snapshot: table(shellPID))
+            XCTAssertEqual(task.reviewsRunning.count, 1, "a Ctrl-Z: the shell in front, its claude still there")
+            let shellAlone = ProcessSnapshot(entries: [ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: shellPID,
+                name: "zsh", startedAt: now - 800, arguments: ["zsh"]
+            )])
+            shell.updateSidebar(snapshot: shellAlone)
+            XCTAssertEqual(task.reviewsRunning, [], "its process exited")
+            // Without a process named, nothing at all in its column: gone.
+            shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"])])
+            let unrelated = ProcessSnapshot(entries: [ProcessSnapshot.Entry(
+                pid: 99_996, parentPID: 1, processGroupID: 99_996, terminalForegroundProcessGroupID: 99_996,
+                name: "launchd", startedAt: now - 900, arguments: []
+            )])
+            shell.updateSidebar(snapshot: unrelated)
+            XCTAssertEqual(task.reviewsRunning, [], "no process in its column")
         }
     }
 }

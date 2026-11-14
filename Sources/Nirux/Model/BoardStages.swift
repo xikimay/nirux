@@ -805,7 +805,7 @@ extension BoardStages {
     }
 
     private static func hasEnteredReview(_ facts: Facts, rules: Rules) -> Bool {
-        rules.requiredReviews.contains { facts.reviews?.counted[$0] != nil }
+        rules.requiredReviews.contains { facts.reviews?.counted[$0] != nil || facts.reviewsInFlight.contains($0) }
     }
 
     private static func reviewsAreDone(_ facts: Facts, rules: Rules) -> Bool {

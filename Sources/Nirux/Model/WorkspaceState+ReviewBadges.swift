@@ -46,7 +46,8 @@ extension WorkspaceState {
             for index in reviewsRunning.indices where reviewsRunning[index].column == column {
                 reviewsRunning[index].subagents.remove(agent)
             }
-        } else if let agent = event.agentID {
+        } else if let agent = event.agentID, [.preToolUse, .postToolUse, .permissionRequest].contains(event.name) {
+            // At work: a late failed turn or a resolved request, after its stop, isn't.
             for index in reviewsRunning.indices where reviewsRunning[index].column == column {
                 reviewsRunning[index].subagents.insert(agent)
             }
@@ -54,10 +55,15 @@ extension WorkspaceState {
         reviewsRunning.removeAll { $0.isMainTurnOver && $0.subagents.isEmpty }
         if now - event.timestamp < 60 {
             for pass in event.passes {
+                // Started again there (a Skill call's end after its start): what it waited on and its prompt stay.
+                let earlier = reviewsRunning.first { $0.pass == pass && $0.column == column }
                 reviewsRunning.removeAll { $0.pass == pass && $0.column == column }
-                reviewsRunning.append(RunningPass(
-                    pass: pass, column: column, agentID: event.agentID, promptID: event.promptID, emitter: event.emitterProcess
-                ))
+                var running = RunningPass(
+                    pass: pass, column: column, agentID: event.agentID, promptID: event.promptID ?? earlier?.promptID,
+                    emitter: event.emitterProcess ?? earlier?.emitter
+                )
+                running.subagents = earlier?.subagents ?? []
+                reviewsRunning.append(running)
             }
         }
         return reviewsRunning != before

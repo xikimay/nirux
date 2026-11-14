@@ -162,20 +162,27 @@ final class ReviewBadgesTests: XCTestCase {
         // A failed turn of an earlier prompt, drained late, or a subagent's, isn't its end; its own is, as are idle and the session's.
         note([event(.stopFailure, nil, nil, "p0", nil), event(.stopFailure, nil, "sub", "p1", nil)], column)
         XCTAssertEqual(running(), ["codeReview A"])
-        for end in [event(.stopFailure, nil, nil, "p1", nil), event(.notification, nil, nil, nil, "idle_prompt"), event(.sessionEnd, nil, nil, nil, nil)] {
+        let ends = [event(.stopFailure, nil, nil, "p1", nil), event(.notification, nil, nil, nil, "idle_prompt"), event(.sessionEnd, nil, nil, nil, nil)]
+        for end in ends {
             note([typed], column)
             note([end], column)
             XCTAssertEqual(running(), [], "\(end.name)")
         }
-        // Run in the background (a Skill, reviewers): the main turn ends first; it runs until the subagents seen since stop.
-        note([event(.preToolUse, ["premortem"], nil, "p3", nil), event(.preToolUse, nil, "r1", nil, nil), event(.postToolUse, nil, "r2", nil, nil)],
-             column)
+        // Run in the background (a Skill, reviewers): the main turn ends first; it runs until the subagents seen since stop,
+        // the Skill call's end (a restart) keeping them. One stopped, its late failed turn or resolved request is no work.
+        note([event(.preToolUse, ["premortem"], nil, nil, nil), event(.preToolUse, nil, "r1", nil, nil),
+              event(.postToolUse, nil, "r2", nil, nil), event(.postToolUse, ["premortem"], nil, nil, nil)], column)
         note([stop], column)
         XCTAssertEqual(running(), ["premortem A"])
-        note([event(.subagentStop, nil, "r1", nil, nil)], column)
+        note([event(.subagentStop, nil, "r1", nil, nil), event(.stopFailure, nil, "r1", nil, nil), event(.approvalResolved, nil, "r1", nil, nil)],
+             column)
         XCTAssertEqual(running(), ["premortem A"])
         note([event(.subagentStop, nil, "r2", nil, nil)], column)
         XCTAssertEqual(running(), [], "the last subagent stopped")
+        // Typed, then run as a Skill in the same turn: the prompt stays its own, so an earlier prompt's failed turn ends nothing.
+        note([typed, event(.postToolUse, ["codeReview"], nil, nil, nil), event(.stopFailure, nil, nil, "p0", nil)], column)
+        XCTAssertEqual(workspace.reviewsRunning.first?.promptID, "p1")
+        note([stop], column)
         // A subagent's own Skill call: it ends with that subagent, not with the main turn.
         note([event(.postToolUse, ["adversarial"], "r3", nil, nil), stop], column)
         XCTAssertEqual(running(), ["adversarial A"])
