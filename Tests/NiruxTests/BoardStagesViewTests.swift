@@ -1390,9 +1390,11 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(ids(), ["a", "b", "c"])
         XCTAssertEqual(view.runningQueueViews.count, 0)
         XCTAssertEqual(checks.map(\.delay), [BoardStagesView.stillDelay])
-        // It moved meanwhile: the Board looks again 10 s after that.
+        // It moved meanwhile (a shake of the hand doesn't count): the Board looks again 10 s after that.
+        time = 103
+        view.mouseMoved(with: try moved(to: NSPoint(x: atB.x + 2, y: atB.y + 2), in: view))
         time = 105
-        view.mouseMoved(with: try moved(to: atB, in: view))
+        view.mouseMoved(with: try moved(to: NSPoint(x: atB.x + 3, y: atB.y), in: view))
         time = 110
         try look()
         XCTAssertEqual(ids(), ["a", "b", "c"])
@@ -1425,9 +1427,9 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(ids(), ["b", "c", "a"])
         XCTAssertTrue(checks.isEmpty)
         // A hand on the mouse isn't a move. It moves: the station under it lights and acts, and so does the link.
-        view.mouseMoved(with: try moved(to: NSPoint(x: atB.x + 1, y: atB.y + 1), in: view))
+        view.mouseMoved(with: try moved(to: NSPoint(x: atB.x + 5, y: atB.y + 2), in: view))
         XCTAssertTrue(view.isPointerStale)
-        view.mouseMoved(with: try moved(to: NSPoint(x: atB.x + 4, y: atB.y), in: view))
+        view.mouseMoved(with: try moved(to: atB, in: view))
         XCTAssertFalse(view.isPointerStale)
         XCTAssertTrue(view.lineViews[1].isStationHovered)
         try press(view.lineViews[1], at: merge)
@@ -1476,7 +1478,7 @@ final class BoardStagesViewTests: XCTestCase {
         // though the pointer moved meanwhile.
         view.show(order(["a", "b"]))
         time = 115
-        view.mouseMoved(with: try moved(to: inside, in: view))
+        view.mouseMoved(with: try moved(to: NSPoint(x: inside.x - 4, y: inside.y), in: view))
         time = 120
         try look()
         XCTAssertFalse(view.isPointerStale)
@@ -1569,8 +1571,14 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(tracked, 0)
         // A scroll is the pointer at work too: what comes under it then is what it aims at.
         time = 400
-        let scroll = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: 0, wheel2: 0, wheel3: 0))
-        view.scrollView.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: scroll)))
+        let wheel = { (delta: Int32) in
+            try XCTUnwrap(NSEvent(cgEvent: try XCTUnwrap(CGEvent(
+                scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0
+            ))))
+        }
+        view.scrollView.scrollWheel(with: try wheel(0))
+        XCTAssertTrue(view.isPointerStale, "two fingers laid on the trackpad scroll nothing")
+        view.scrollView.scrollWheel(with: try wheel(-1))
         XCTAssertFalse(view.isPointerStale)
         XCTAssertFalse(under.handRects.isEmpty)
         view.show(board(["a", "b", "c"], "Checks running"))
@@ -1582,9 +1590,48 @@ final class BoardStagesViewTests: XCTestCase {
         time = 412
         view.show(board(["c", "a", "b"], "Checks running"))
         XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "c", "a"], "held from the press")
+        // A drag, a right click on a line are the pointer at work.
+        time = 430
+        let line = view.lineViews[1]
+        line.mouseDragged(with: try mouse(.leftMouseDragged, at: atB, in: view.window))
+        time = 437
+        view.show(board(["a", "b", "c"], "Checks running"))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "c", "a"], "held from the drag")
+        time = 460
+        _ = line.menu(for: try mouse(.rightMouseDown, at: atB, in: view.window))
+        time = 467
+        view.show(board(["c", "a", "b"], "Checks running"))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "c", "a"], "held from the right click")
         // At rest over a line that goes, nothing coming under the pointer: nothing to wait for.
         time = 500
         view.show(board(["b"], "Checks running"))
+        XCTAssertFalse(view.isPointerStale)
+    }
+
+    func testAPressOnAnEntryIsThePointerAtWorkAndALookElsewhereKeepsWhatIsUnderIt() throws {
+        let merged = [BoardStages.Merged(lineID: "gone", title: "Fix 7", number: 7, mergedAt: now - 60, cleanUp: .offered)]
+        let order = { (ids: [String]) in
+            self.content([self.section(units: self.tasks(ids.map { self.offering($0, .add, 50) }), merged: merged)])
+        }
+        let view = board(order(["a", "b"]))
+        var time: TimeInterval = 100
+        var checks: [@MainActor () -> Void] = []
+        view.clock = { time }
+        view.after = { _, work in checks.append(work) }
+        let entry = try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first)
+        let title = entry.convert(NSPoint(x: entry.titleLabel.frame.midX, y: entry.bounds.midY), to: nil)
+        view.pointerLocation = { title }
+        view.mouseMoved(with: try moved(to: title, in: view))
+        time = 150
+        entry.mouseDown(with: try mouse(.leftMouseDown, at: title, in: view.window))
+        entry.mouseUp(with: try mouse(.leftMouseUp, at: title, in: view.window))
+        time = 155
+        view.show(order(["b", "a"]))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["a", "b"], "held from the press")
+        // At the look, the lines settle above it; the entry under the pointer is what it was.
+        time = 170
+        try XCTUnwrap(checks.first)()
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "a"])
         XCTAssertFalse(view.isPointerStale)
     }
 
@@ -1629,14 +1676,36 @@ final class BoardStagesViewTests: XCTestCase {
         window.asked = []
         XCTAssertTrue(try rest(on: station, then: board(.remove, start, [7, 6], ["one", "two"])))
         XCTAssertTrue(window.asked.contains { $0 === line }, "its hand is asked for again")
-        // The repository's header: Start became Stop.
+        // The same line, a link come at the end of its phrase, where the pointer rests on the words.
+        let words = line.convert(NSPoint(x: BoardStagesView.Columns(width: 940).phrase.minX + 150, y: line.bounds.midY), to: nil)
+        var linked = board(.remove, start, [7, 6], ["one", "two"])
+        linked.sections[0].lines.units[0] = .task(with(offering("a", .remove, 51)) {
+            $0.phrase = BoardStages.Phrase(text: "Base #50 merged · Retarget to main", link: .retarget(number: 50, onto: "main"))
+        }, subtasks: [])
+        XCTAssertTrue(try rest(on: words, then: linked), "what a click there does is a link now")
+        // The repository's header: Start became Stop; its words alone change nothing a click does.
         let header = try XCTUnwrap(view.sectionHeader(section: "nirux"))
-        XCTAssertTrue(try rest(on: header.convert(NSPoint(x: header.bounds.maxX - 80, y: header.bounds.midY), to: nil),
-                               then: board(.remove, stop, [7, 6], ["one", "two"])))
-        // "Merged today": another entry came first.
+        let button = header.convert(NSPoint(x: header.startButton.frame.midX, y: header.startButton.frame.midY), to: nil)
+        XCTAssertTrue(try rest(on: button, then: board(.remove, stop, [7, 6], ["one", "two"])))
+        var later = stop
+        later.status = "Merging #51, waiting for checks"
+        XCTAssertFalse(try rest(on: button, then: board(.remove, later, [7, 6], ["one", "two"])))
+        // "Merged today": another entry came first; then "Clean up" came on the same entry.
         let entry = try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first)
         let first = entry.convert(NSPoint(x: 20, y: entry.bounds.midY), to: nil)
-        XCTAssertTrue(try rest(on: first, then: board(.remove, stop, [8, 7, 6], ["one", "two"])))
+        XCTAssertTrue(try rest(on: first, then: board(.remove, later, [8, 7, 6], ["one", "two"])))
+        let newest = try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first)
+        var cleaning = board(.remove, later, [8, 7, 6], ["one", "two"])
+        cleaning.sections[0].lines.merged[0].lineID = "gone"
+        cleaning.sections[0].lines.merged[0].cleanUp = .offered
+        view.show(cleaning)
+        view.layoutSubtreeIfNeeded()
+        newest.resetCursorRects()
+        let cleanUp = newest.convert(NSPoint(x: newest.linkLabel.frame.midX, y: newest.bounds.midY), to: nil)
+        window.asked = []
+        cleaning.sections[0].lines.merged[0].cleanUp = .running
+        XCTAssertTrue(try rest(on: cleanUp, then: cleaning), "Clean up became cleaning up…")
+        XCTAssertTrue(window.asked.contains { $0 === newest }, "its hand is asked for again")
         // The foot: the lower queue ended, the other came down under the pointer.
         let lower = try XCTUnwrap(view.runningQueueViews.last)
         XCTAssertTrue(try rest(on: lower.convert(NSPoint(x: 100, y: 15), to: nil), then: board(.remove, stop, [8, 7, 6], ["one"])))
@@ -1678,6 +1747,33 @@ final class BoardStagesViewTests: XCTestCase {
         view.hover(at: inside)
         view.show(order(["b", "a"]))
         XCTAssertEqual(view.lineViews.map(\.line.id), ["a", "b"])
+        // Where it was seen is where it rests: a shake of the hand there doesn't count as a move.
+        time = 505
+        view.mouseMoved(with: try moved(to: NSPoint(x: inside.x + 1, y: inside.y), in: view))
+        time = 512
+        view.show(order(["a", "b"]))
+        view.show(order(["b", "a"]))
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "a"], "not held: it rested since it was seen")
+    }
+
+    func testAShakingHandLetsTheBoardSettle() throws {
+        let order = { (ids: [String]) in self.content([self.section(units: self.tasks(ids.map { self.line($0) }))]) }
+        let view = board(order(["a", "b"]))
+        var time: TimeInterval = 100
+        var checks: [@MainActor () -> Void] = []
+        view.clock = { time }
+        view.after = { _, work in checks.append(work) }
+        let inside = place(400, on: view.lineViews[0])
+        view.pointerLocation = { inside }
+        view.mouseMoved(with: try moved(to: inside, in: view))
+        view.show(order(["b", "a"]))
+        for (step, shake) in [(103.0, 1.0), (106, -1), (109, 1)] {
+            time = step
+            view.mouseMoved(with: try moved(to: NSPoint(x: inside.x + shake, y: inside.y), in: view))
+        }
+        time = 110
+        try XCTUnwrap(checks.first)()
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "a"], "settled: the hand only shook")
     }
 
     func testTheStationUnderThePointerAfterTheBoardSettles() throws {

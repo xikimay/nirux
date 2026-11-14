@@ -170,8 +170,9 @@ final class BoardStagesView: NSView {
     /// What is under the pointer changed while it rested: nothing there
     /// lights or acts until it moves (3 pt or more from where it rested).
     var isPointerStale: Bool { aim.isStale }
-    /// Where the pointer rested when what was under it changed.
-    private var staleAt: NSPoint?
+    /// Where the pointer last moved, as far as a move counts: a hand on
+    /// the mouse that shakes it less than 3 pt moves nothing.
+    private var movedTo: NSPoint?
     private var isStillCheckPending = false
     /// Settles the Board once the pointer left, after the event that said
     /// so. (The tests run it at once.)
@@ -347,7 +348,10 @@ final class BoardStagesView: NSView {
         showTimes()
         layoutContent()
         // Under a pointer that rests, what is under it may have changed: it waits for the pointer to move.
-        if isPointerInside, !isAiming { goStale(ifChangedFrom: aimedBefore) }
+        if isPointerInside, !isAiming {
+            layoutSubtreeIfNeeded()
+            goStale(ifChangedFrom: aimedBefore)
+        }
         if isHeld { settleOnceStill() }
     }
 
@@ -822,8 +826,11 @@ final class BoardStagesView: NSView {
         refreshHover()
     }
 
+    /// The pointer came over the Board: a move. Over an area inside it
+    /// (a button's, a line's), which passed the event on: as any move.
     override func mouseEntered(with event: NSEvent) {
-        staleAt = nil
+        let isInner = event.type == .mouseEntered && event.trackingArea.map { $0 !== pointerArea } == true
+        if !isInner { movedTo = nil }
         pointerMoved(to: event.locationInWindow)
     }
     override func mouseMoved(with event: NSEvent) { pointerMoved(to: event.locationInWindow) }
@@ -831,12 +838,13 @@ final class BoardStagesView: NSView {
     /// The pointer moved, or the list scrolled under it (no place): it
     /// aims again, unless it only shook where it rested.
     private func pointerMoved(to location: NSPoint?) {
-        pointerMovedAt = clock()
-        if let location, let staleAt, hypot(location.x - staleAt.x, location.y - staleAt.y) < 3 {
+        if let location, let movedTo, hypot(location.x - movedTo.x, location.y - movedTo.y) < 3 {
             // A hand on the mouse: still resting.
-        } else {
-            setStale(false)
+            return hover(at: location)
         }
+        pointerMovedAt = clock()
+        if let location { movedTo = location }
+        setStale(false)
         if let location { hover(at: location) } else { refreshHover() }
     }
 
@@ -848,7 +856,6 @@ final class BoardStagesView: NSView {
     private func setStale(_ isStale: Bool) {
         guard aim.isStale != isStale else { return }
         aim.isStale = isStale
-        staleAt = isStale ? pointerLocation() : nil
         // Hands, and a lit station, only where a click acts.
         lineViews.forEach { $0.handsChanged() }
         mergedViews.values.forEach { $0.entries.forEach { $0.handsChanged() } }
@@ -877,8 +884,10 @@ final class BoardStagesView: NSView {
         if let line = lineViews.first(where: { under($0) != nil }), let local = under(line) {
             return "line \(line.line.id) \(line.target(at: local))"
         }
-        if let (id, header) = sectionHeaders.first(where: { under($0.value) != nil }) {
-            return "header \(id) \(String(describing: header.queue))"
+        // A header's words change as its queue goes: only its button counts.
+        if let (id, header) = sectionHeaders.first(where: { under($0.value) != nil }), let local = under(header) {
+            let button = [header.startButton, header.stopButton].first { !$0.isHidden && $0.frame.contains(local) }
+            return "header \(id) \(button.map { "\($0.title) \($0.isEnabled)" } ?? "")"
         }
         for entry in mergedViews.values.flatMap(\.entries) {
             if let local = under(entry) { return "merged \(entry.pullRequest.number) \(entry.target(at: local))" }
@@ -912,7 +921,7 @@ final class BoardStagesView: NSView {
         if inside != isPointerInside {
             isPointerInside = inside
             // The pointer left: the Board settles, once the event that said so is over.
-            if inside { pointerMovedAt = clock() } else { settleLater { [weak self] in self?.settle() } }
+            if inside { (pointerMovedAt, movedTo) = (clock(), location) } else { settleLater { [weak self] in self?.settle() } }
         }
         var line: BoardStagesLineView?
         if !isPointerStale, let location, scrollView.frame.contains(convert(location, from: nil)) {
@@ -1312,7 +1321,8 @@ final class BoardStagesScrollView: NSScrollView {
     var onScroll: () -> Void = {}
 
     override func scrollWheel(with event: NSEvent) {
-        onScroll()
+        // Two fingers laid on the trackpad scroll nothing.
+        if event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 { onScroll() }
         super.scrollWheel(with: event)
     }
 }
