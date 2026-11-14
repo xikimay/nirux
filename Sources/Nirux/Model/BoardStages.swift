@@ -620,7 +620,7 @@ extension BoardStages {
     private static func reviewsTooltip(_ facts: Facts, rules: Rules) -> String {
         ReviewPass.allCases.compactMap { pass -> String? in
             let name = pass.displayName
-            guard let reviews = facts.reviews, reviews.runs[pass] != nil else {
+            guard let reviews = facts.reviews, reviews.counted[pass] != nil else {
                 return rules.requiredReviews.contains(pass) ? "No \(name.lowercased()) yet" : nil
             }
             if facts.reviewsInFlight.contains(pass) { return "\(name) running" }
@@ -791,14 +791,14 @@ extension BoardStages {
     private static func reviewGaps(_ facts: Facts, rules: Rules) -> [(pass: ReviewPass, gap: ReviewGap)] {
         ReviewPass.allCases.compactMap { pass in
             guard rules.requiredReviews.contains(pass) else { return nil }
-            guard let reviews = facts.reviews, reviews.runs[pass] != nil else { return (pass, .never) }
+            guard let reviews = facts.reviews, reviews.counted[pass] != nil else { return (pass, .never) }
             if facts.reviewsInFlight.contains(pass) { return (pass, .running) }
             return rules.reviewsMustBeOnHead && reviews.head != nil && !reviews.isFresh(pass) ? (pass, .earlier) : nil
         }
     }
 
     private static func hasEnteredReview(_ facts: Facts, rules: Rules) -> Bool {
-        rules.requiredReviews.contains { facts.reviews?.runs[$0] != nil }
+        rules.requiredReviews.contains { facts.reviews?.counted[$0] != nil }
     }
 
     private static func reviewsAreDone(_ facts: Facts, rules: Rules) -> Bool {
@@ -809,7 +809,7 @@ extension BoardStages {
     /// A required pass ran on another commit than the current HEAD.
     private static func reviewIsOlderThanHead(_ facts: Facts, rules: Rules) -> Bool {
         guard let reviews = facts.reviews, reviews.head != nil else { return false }
-        return rules.requiredReviews.contains { reviews.runs[$0] != nil && !reviews.isFresh($0) }
+        return rules.requiredReviews.contains { reviews.counted[$0] != nil && !reviews.isFresh($0) }
     }
 
     /// Safe to show, on one line, bounded; nil when empty. The facts come

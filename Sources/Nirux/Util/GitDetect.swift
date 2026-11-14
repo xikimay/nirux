@@ -85,7 +85,10 @@ enum UpstreamRepositoryObservation: Hashable, Sendable {
 }
 
 struct GitContext: Hashable, Sendable {
+    /// "HEAD" on a detached HEAD.
     let branch: String
+    /// The branch's name; nil on a detached HEAD.
+    var branchName: String? { branch == "HEAD" ? nil : branch }
     let identity: GitIdentity
     let upstreamRepositoryObservation: UpstreamRepositoryObservation
     var upstreamRepository: GitHubRepository? { upstreamRepositoryObservation.repository }

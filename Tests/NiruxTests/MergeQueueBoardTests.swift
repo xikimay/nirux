@@ -201,7 +201,7 @@ final class MergeQueueBoardTests: XCTestCase {
     private func controller(_ client: any MergeQueueGitHub = FakeQueueClient(isDryRun: true)) -> MergeQueueController {
         let controller = MergeQueueController(
             projectID: "project", repository: MQ.widgets, client: client,
-            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
             stateDirectory: root.appendingPathComponent("state"), lockFolder: root.appendingPathComponent("locks")
         )
         controller.beginActivity = { NSObject() }
@@ -289,7 +289,7 @@ final class MergeQueueBoardTests: XCTestCase {
         let lockFolder = root.appendingPathComponent("locks")
         let live = MergeQueueController(
             projectID: "project", repository: MQ.widgets, client: FakeQueueClient(),
-            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] }),
             stateDirectory: root.appendingPathComponent("state"), lockFolder: lockFolder
         )
         var engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(4, head: MQ.sha("a"))])
@@ -351,6 +351,15 @@ final class MergeQueueBoardTests: XCTestCase {
             XCTAssertTrue(Thread.isMainThread)
             return []
         }
+        // Its task, on its branch, recorded a code review on an earlier branch; another task, elsewhere now, records one later.
+        var tasks = [
+            MergeQueue.ReviewTask(branch: "feat/1", runs: [.codeReview: ReviewRun(head: MQ.sha("e"), at: 1, branch: "feat/earlier")]),
+            MergeQueue.ReviewTask(branch: "main", runs: [:])
+        ]
+        queue.local.reviewTasks = {
+            XCTAssertTrue(Thread.isMainThread)
+            return tasks
+        }
         queue.local.inspect = { _, branch, _, _, _ in
             .success(MergeQueue.LocalInspection(
                 worktrees: [MergeQueue.LocalWorktree(path: "/tmp/\(branch)", problem: nil)], allWorktreePaths: []
@@ -370,6 +379,14 @@ final class MergeQueueBoardTests: XCTestCase {
         XCTAssertEqual(confirmation.entries.map(\.number), [1])
         XCTAssertEqual(confirmation.excluded.map(\.reason), ["It is a draft."])
         XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits: the queue merges main into it first."])
+        XCTAssertEqual(confirmation.items.first?.warnings, ["No code review yet: Nirux saw none run on its branch."])
+        // One recorded on its branch counts, whichever task ran it.
+        tasks[1] = MergeQueue.ReviewTask(branch: "main", runs: [.codeReview: ReviewRun(head: MQ.sha("a"), at: 2, branch: "feat/1")])
+        let again = ReadingBox()
+        queue.readConfirmation(settings: MQ.settings(), numbers: [1]) { again.value = $0 }
+        let until = Date().addingTimeInterval(10)
+        while again.value == nil, Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        XCTAssertEqual(MergeQueue.confirmation(try XCTUnwrap(again.value)).items.first?.warnings, [])
         let reads = client.reads
         XCTAssertEqual(Array(reads.prefix(4)), [.auth, .rateLimit, .baseMergeQueue, .baseRuns], "the queue's own reads first")
         XCTAssertFalse(reads.contains(.checks(MQ.sha("b"))), "a draft is left out: its checks aren’t read")

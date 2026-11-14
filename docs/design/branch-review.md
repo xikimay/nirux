@@ -1134,9 +1134,11 @@ Rejected:
   write that fails undoes the click.
 - **A new head never re-renders the page under the user.** A banner offers
   Reload; drafts survive it.
-- Later: "Changes since my last review", and the review state on the merge
+- Later: "Changes since my last review", and this page's state on the merge
   queue's confirmation sheet ("reviewed at db9ac66, 2 files changed since, 1
-  comment unanswered").
+  comment unanswered"), beside what the sheet already says of the review
+  passes not recorded on the branch ([project-board.md](project-board.md),
+  section 4).
 
 ## 7. Data and refresh
 

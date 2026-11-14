@@ -23,6 +23,11 @@ extension MergeQueue {
             var checksError: String?
             var detailsError: String?
             var compareError: String?
+            /// The review passes the Board asks for that no task recorded on
+            /// its head branch, by name: "Code review". None where no task
+            /// is on that branch here, as the Board's Reviews station has
+            /// nothing to say then either.
+            var missingReviews: [String] = []
 
             init(number: Int) {
                 self.number = number
@@ -223,13 +228,18 @@ extension MergeQueue {
             return leftOut(local.busyAgents.joined(separator: "; ") + ": wait until it is back at its prompt.")
         }
         if let reason = local.worktrees.lazy.compactMap(localProblem).first { return leftOut(reason) }
+        // What the Board's Reviews station says of it, the sheet says too: a click on its Merge station lists it for Start.
+        let unreviewed = candidate.missingReviews.isEmpty ? [] : [
+            "No \(spoken(candidate.missingReviews.map { $0.lowercased() })) yet: Nirux saw none run on its branch."
+        ]
 
         var item = Confirmation.Item(
             entry: entry,
             title: title,
             url: pullRequest.url,
             checks: candidate.checks.map { checksText($0, required: settings.requiredChecks) }
-                ?? "checks unknown" + (candidate.checksError.map { ": \($0)" } ?? "")
+                ?? "checks unknown" + (candidate.checksError.map { ": \($0)" } ?? ""),
+            warnings: unreviewed
         )
         if case .some(.some(let comparison)) = candidate.comparison, comparison.behindBy > 0 {
             item.notes.append("Behind \(settings.baseBranch) by \(comparison.behindBy) "
@@ -269,6 +279,21 @@ extension MergeQueue {
                 + (candidate.detailsError.map { " (\($0))" } ?? "") + ": check .github/workflows/ yourself.")
         }
         return .joins(item)
+    }
+
+    /// The `required` review passes that no task recorded on `branch`
+    /// (`ReviewRun.counts(onBranch:)`, the Board's Reviews station's rule),
+    /// in whatever task they ran, by name in the badges' order; none where
+    /// no task is on that branch here.
+    static func missingReviews(branch: String, tasks: [ReviewTask], required: Set<ReviewPass>) -> [String] {
+        guard tasks.contains(where: { $0.branch == branch }) else { return [] }
+        let ran = Set(tasks.flatMap { $0.runs.filter { $0.value.counts(onBranch: branch) }.keys })
+        return ReviewPass.allCases.filter { required.contains($0) && !ran.contains($0) }.map(\.displayName)
+    }
+
+    /// "a", "a or b", "a, b or c".
+    static func spoken(_ names: [String]) -> String {
+        names.count < 3 ? names.joined(separator: " or ") : names.dropLast().joined(separator: ", ") + " or " + (names.last ?? "")
     }
 
     /// Why the queue would stop on this pull request at once.

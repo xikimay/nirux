@@ -20,7 +20,8 @@ final class BoardStagesUnitsTests: XCTestCase {
     ) -> Facts {
         var facts = Facts(id: id, title: id.uppercased())
         facts.hasTask = hasTask
-        facts.reviews = hasTask ? ReviewBadges(runs: [.codeReview: ReviewRun(head: head, at: 500)], head: head) : nil
+        facts.reviews = hasTask
+            ? ReviewBadges(runs: [.codeReview: ReviewRun(head: head, at: 500, branch: "feat/x")], head: head, branch: "feat/x") : nil
         facts.pullRequest = number.map {
             BoardStages.PullRequest(
                 number: $0, isMerged: merged, base: stack == nil ? "main" : "stack", isOnBaseBranch: stack?.parent == nil,

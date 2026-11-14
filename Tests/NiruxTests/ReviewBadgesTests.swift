@@ -93,6 +93,26 @@ final class ReviewBadgesTests: XCTestCase {
         XCTAssertEqual(workspace.reviewBadges?.isFresh(.codeReview), false)
     }
 
+    func testAPassRecordsItsBranchAndCountsOnlyThere() {
+        let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
+        XCTAssertTrue(workspace.recordReviewPasses([.codeReview], head: "aaa", branch: "feat/x", at: 10))
+        let run = ReviewRun(head: "aaa", at: 10, branch: "feat/x")
+        XCTAssertEqual(workspace.reviewRuns[.codeReview], run)
+        // It counts for the pull request of the branch it was recorded on, through a rebase or an amend (its commit
+        // aside); not for another branch, nor where no branch is known.
+        XCTAssertTrue(run.counts(onBranch: "feat/x"))
+        XCTAssertFalse(run.counts(onBranch: "feat/y"))
+        XCTAssertFalse(run.counts(onBranch: nil))
+        XCTAssertFalse(ReviewRun(head: "aaa", at: 10).counts(onBranch: "feat/x"), "one recorded before Nirux kept the branch")
+        XCTAssertFalse(ReviewRun(head: "aaa", at: 10).counts(onBranch: nil))
+        let badges = ReviewBadges(runs: [.codeReview: run, .premortem: ReviewRun(head: "bbb", at: 11, branch: "feat/earlier")],
+                                  head: "aaa", branch: "feat/x")
+        XCTAssertEqual(badges.counted, [.codeReview: run])
+        // A detached HEAD is on no branch.
+        XCTAssertNil(GitContext(branch: "HEAD", identity: GitIdentity(repositoryRoot: "/tmp", head: "aaa")).branchName)
+        XCTAssertEqual(GitContext(branch: "feat/x", identity: GitIdentity(repositoryRoot: "/tmp", head: "aaa")).branchName, "feat/x")
+    }
+
     func testOlderReplayedEventDoesNotReplaceANewerRun() {
         let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
         workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20)
@@ -104,10 +124,11 @@ final class ReviewBadgesTests: XCTestCase {
         let json = #"""
         {"title":"w","cwd":"/tmp","columns":[],"focusedColumnIndex":0,"isInactive":false,
          "lastSummaryIsManual":false,
-         "reviewRuns":{"codeReview":{"head":"aaa","at":10},"futurePass":{"head":"bbb","at":11}}}
+         "reviewRuns":{"codeReview":{"head":"aaa","at":10},"futurePass":{"head":"bbb","at":11,"branch":"feat/x"}}}
         """#
         let persisted = try JSONDecoder().decode(PersistedWorkspace.self, from: Data(json.utf8))
-        XCTAssertEqual(persisted.reviewRuns?["codeReview"], ReviewRun(head: "aaa", at: 10))
+        XCTAssertEqual(persisted.reviewRuns?["codeReview"], ReviewRun(head: "aaa", at: 10), "one from before the branch: none")
+        XCTAssertEqual(persisted.reviewRuns?["futurePass"], ReviewRun(head: "bbb", at: 11, branch: "feat/x"))
         XCTAssertEqual(persisted.reviewRuns?.count, 2, "kept as read")
 
         let legacy = try JSONDecoder().decode(PersistedWorkspace.self, from: Data(#"""
