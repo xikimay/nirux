@@ -434,9 +434,41 @@ read. Pure; nothing is read again.
   isn't on GitHub, and any section until its open pull requests were read
   once.
 
-Still to come with the Board's column: the tasks' readings filled from the
-sidebar, kept from one sidebar pass to the next and for a space that isn't on
-screen.
+**A task's reading** is its sidebar row, built as the sidebar builds it, for
+the space the Board shows, on screen or not (`NiruxShellView.boardReadings`;
+the rows the sidebar just built for the space on screen are taken as they
+are): nothing is ticked again (the sidebar ticks every agent once a pass,
+another space's too) and nothing is noted (a question seen, a hand-off), so
+the Board reads that pass's statuses, approvals and Mission questions.
+
+- **What its agents do** is the agents' steps of the row's own ladder
+  (`WorkspaceInfo.agentStep`, which the row reads too): a wait on the user in
+  the row's words (so a permission's words follow the card, whole while the
+  card offers it), then a stop, then a question to its parent, then work,
+  since the turn the row's clock reads (the first working column a minute
+  in). Red checks are the pull request's, read there. What isn't an agent's
+  wait or work reads at rest, the phrase then saying where the task stands: a
+  finished turn not looked at yet, an answer waiting to be typed, the
+  circling hint's words.
+- **Its texts** are the row's; beside them, the user's own summary, the
+  worktree its git facts were read in, and the pull request its own
+  detection found merged (at the HEAD it merged at).
+- **A review pass runs** while the turn it runs in goes on in its column:
+  the turn its event found (the prompt that typed it, or the turn in which
+  the agent called the Skill), its start unchanged, whatever its agent waits
+  on meanwhile (a permission asked mid-review is no end). A pass whose turn
+  ended, or whose agent exited mid-turn, is done; so is one recorded before
+  this launch. Known limits: a Stop hook that keeps the turn going starts a
+  new turn for Nirux, so the pass reads done; an Esc that ends a turn without
+  a Stop leaves it in flight until the prompt reads idle, about a minute.
+- **Resume** is the sidebar's: an agent stopped on an error first, held back
+  with why, else a `claude` that exited mid-turn, else an agent restored at
+  launch that hasn't resumed ("Paused · Resume").
+
+For the wiring: the Board is drawn outside the sidebar's pass too (a read
+landing, a click), so it draws from the readings of the last pass, never
+from that pass's approval holds or Mission questions kept for later (their
+keys are columns' addresses).
 
 ## 7. What a line offers
 
@@ -543,10 +575,10 @@ to the queue yet.
   - Add to or Remove from Queue, as the Merge station;
   - Retarget to main, while the pull request is outside the queue's list
     and the queue doesn't work on it;
-  - Resume, as the sidebar offers it for a stopped agent of the task, whatever
-    another agent of it does: its column, and after an error the failed turn
-    it answers, so that only that one is resumed (without it, Resume does
-    nothing);
+  - Resume, as the sidebar offers it for a stopped agent of the task, or one
+    restored at launch that hasn't resumed, whatever another agent of it does:
+    its column, and after an error the failed turn it answers, so that only
+    that one is resumed (without it, Resume does nothing);
   - Clean Up… of the line's worktree, or of a folder already gone, as the
     table offers it, with its path;
   - Open, a shell where no workspace is open in the worktree (the main

@@ -119,13 +119,14 @@ extension WorkspaceInfo {
             SidebarRowSummary(mark: mark, status: SidebarStatusLine(text: text, tone: tone, action: action), trailing: trailing ?? age)
         }
 
-        if let waiting = columns.first(where: { $0.attention == .waiting }) {
+        let step = agentStep
+        if case .needsYou(let waiting, let words)? = step {
             var summary: SidebarRowSummary
             if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
                 // The question itself: a click on it opens the reply popover.
-                summary = row(.needsYou, question.needsYouLine, .needsYou, .missionQuestion(columnIndex: waiting.index))
+                summary = row(.needsYou, "Needs you · \(words)", .needsYou, .missionQuestion(columnIndex: waiting.index))
             } else {
-                summary = row(.needsYou, "Needs you · \(Self.needsYouDetail(waiting))", .needsYou)
+                summary = row(.needsYou, "Needs you · \(words)", .needsYou)
                 // Its block has it whole: the command in its box, the
                 // question over its buttons.
                 if waiting.permissionApproval != nil {
@@ -137,8 +138,8 @@ extension WorkspaceInfo {
             summary.focusColumn = waiting.index
             return summary
         }
-        if let broken = columns.first(where: { $0.attention == .error }), let headline = broken.attentionSummary?.headline {
-            var summary = row(.error, Self.sentence(headline), .error)
+        if case .broken(let broken, let sentence)? = step {
+            var summary = row(.error, sentence, .error)
             summary.focusColumn = broken.index
             return summary
         }
@@ -151,11 +152,10 @@ extension WorkspaceInfo {
         // asking comes before work. An answer waiting to be typed comes
         // after: a Claude restarted since works through the user's prompt.
         let question = Self.questionColumn(in: columns)
-        if let asking = question, let pending = asking.missionQuestion, !pending.isAnswered {
+        if case .asking(let asking, let pending)? = step {
             return row(.asking, "Asking \(pending.parentTitle)", .neutral, .missionQuestion(columnIndex: asking.index))
         }
-        let working = columns.filter { $0.agentStatus == .working }
-        if !working.isEmpty {
+        if case .working(let working)? = step {
             // The one that may be going in circles: its hint, its turn's
             // time, and a click on the row brings it up.
             let circling = circlingColumn
@@ -204,6 +204,37 @@ extension WorkspaceInfo {
         }
         let place = gitBranch ?? columns.first(where: \.isFocused)?.abbreviatedCwd ?? columns.first?.abbreviatedCwd
         return row(.idle, place ?? "No activity yet", place == nil ? .neutral : .branch)
+    }
+
+    /// What its agents do, the most pressing first: the agents' steps of
+    /// `rowSummary`'s ladder, which the Board as stages reads too
+    /// (`BoardStages.TaskReading`). Nil when no agent waits, stopped, asks
+    /// or works.
+    enum AgentStep {
+        /// A column waits on the user: the row's words after "Needs you · ".
+        case needsYou(ColumnInfo, words: String)
+        /// A column stopped: "Stopped on an API error".
+        case broken(ColumnInfo, sentence: String)
+        /// A column asked the agent that started it, which hasn't answered.
+        case asking(ColumnInfo, SidebarMissionQuestion)
+        case working([ColumnInfo])
+    }
+
+    var agentStep: AgentStep? {
+        if let waiting = columns.first(where: { $0.attention == .waiting }) {
+            if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
+                return .needsYou(waiting, words: question.needsYouDetail)
+            }
+            return .needsYou(waiting, words: Self.needsYouDetail(waiting))
+        }
+        if let broken = columns.first(where: { $0.attention == .error }), let headline = broken.attentionSummary?.headline {
+            return .broken(broken, sentence: Self.sentence(headline))
+        }
+        if let asking = Self.questionColumn(in: columns), let pending = asking.missionQuestion, !pending.isAnswered {
+            return .asking(asking, pending)
+        }
+        let working = columns.filter { $0.agentStatus == .working }
+        return working.isEmpty ? nil : .working(working)
     }
 
     /// The working column that may be going in circles, if any.

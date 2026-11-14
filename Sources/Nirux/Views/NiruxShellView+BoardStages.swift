@@ -1,0 +1,85 @@
+import Foundation
+
+// MARK: - What the Board as stages reads of a space (docs/design/board-stages.md, section 6)
+
+extension NiruxShellView {
+    /// What the Board says of each task of a space, by workspace id: its
+    /// sidebar row as the sidebar builds it, for any space, the one on
+    /// screen or another (`sidebarColumnInfo`), without ticking anything:
+    /// the sidebar ticks every agent once a pass, a space off screen's too,
+    /// and the Board reads that pass's status. Then what the row doesn't
+    /// hold (`BoardStages.TaskReading.init(_:summary:gitRoot:...)`).
+    /// `approvalHolds` and `missionQuestions` are the sidebar's pass's:
+    /// reading them again would hand requests back or note hand-offs. The
+    /// rows the sidebar just built (`sidebarInfos`, the space on screen's)
+    /// are taken as they are. `comparable` gives a git root the rows' form
+    /// of a path, without the disk where the Board knows it. The Lead is
+    /// read too: the space's header says it.
+    func boardReadings(
+        ofSpace spaceID: String,
+        sidebarInfos: [WorkspaceInfo] = [],
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
+        approvalHolds: [ObjectIdentifier: PermissionApprovalHold],
+        missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
+        snapshot: ProcessSnapshot,
+        now: TimeInterval,
+        comparable: (String) -> String = NiruxShellView.comparablePath
+    ) -> [String: BoardStages.TaskReading] {
+        let built = Dictionary(sidebarInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let parents = workspaceStore.activeParents(in: spaceID)
+        var readings: [String: BoardStages.TaskReading] = [:]
+        for index in workspaceStore.visibleWorkspaceIndices(in: spaceID) where !workspaces[index].isClosing {
+            let workspace = workspaces[index]
+            let info = built[workspace.id] ?? {
+                let isActive = index == activeWSIndex
+                let columns = workspace.columns.enumerated().map { colIndex, col in
+                    let isUserFocused = colIndex == workspace.focusedIndex && isActive
+                    return sidebarColumnInfo(
+                        col, at: colIndex, isUserFocused: isUserFocused, agentStatus: col.pty?.cachedAgentState ?? .idle,
+                        foregroundProcess: foregroundProcesses[ObjectIdentifier(col)], approvalHold: approvalHolds[ObjectIdentifier(col)],
+                        missionQuestion: missionQuestions[ObjectIdentifier(col)], showsDialog: false, snapshot: snapshot, now: now
+                    )
+                }
+                return sidebarWorkspaceInfo(
+                    at: index, columns: columns, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
+                )
+            }()
+            readings[workspace.id] = BoardStages.TaskReading(
+                info,
+                summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
+                gitRoot: workspace.gitContext.map { comparable($0.identity.repositoryRoot) },
+                reviewsInFlight: Self.reviewsInFlight(of: workspace, columns: info.columns),
+                turnStartedAt: { id in
+                    workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970
+                }
+            )
+        }
+        return readings
+    }
+
+    /// The review passes running: each while the turn it runs in goes on
+    /// in its column (that turn's start unchanged), whatever its agent
+    /// waits on meanwhile: a permission asked mid-review is no end. A pass
+    /// whose turn ended, or whose column's agent died mid-turn (`live`
+    /// leaves it out), is done.
+    nonisolated static func reviewsInFlight(turns: [ReviewPass: ReviewTurn], live: [UUID: TimeInterval]) -> Set<ReviewPass> {
+        Set(turns.compactMap { pass, turn in live[turn.column].map { abs($0 - turn.startedAt) < 1 } == true ? pass : nil })
+    }
+
+    /// Each column's turn in flight (`starts`), but where its agent exited
+    /// mid-turn: no hook ends that turn.
+    nonisolated static func liveTurns(_ starts: [UUID: TimeInterval], columns: [ColumnInfo]) -> [UUID: TimeInterval] {
+        starts.filter { id, _ in
+            !columns.contains { column in
+                guard column.id == id, case .exitedMidTurn? = column.stuck else { return false }
+                return true
+            }
+        }
+    }
+
+    private static func reviewsInFlight(of workspace: WorkspaceState, columns: [ColumnInfo]) -> Set<ReviewPass> {
+        var starts: [UUID: TimeInterval] = [:]
+        for column in workspace.columns { starts[column.id] = column.pty?.agentTurnStartedAt?.timeIntervalSince1970 }
+        return reviewsInFlight(turns: workspace.reviewTurns, live: liveTurns(starts, columns: columns))
+    }
+}

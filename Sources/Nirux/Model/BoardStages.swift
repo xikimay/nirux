@@ -132,6 +132,8 @@ extension BoardStages {
             /// It exited in the middle of a turn: its conversation is
             /// opened again.
             case afterExit
+            /// Restored at launch, it hasn't resumed yet: Resume starts it.
+            case afterRelaunch
         }
 
         var kind: Kind

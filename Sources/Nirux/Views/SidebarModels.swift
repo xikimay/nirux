@@ -187,7 +187,10 @@ struct SidebarMissionQuestion: Hashable {
 
     /// What its task's row says once it waits on the user: the question
     /// itself, on the status line and on the card's.
-    var needsYouLine: String { "Needs you · \(AgentText.clean(text, maxLength: 300) ?? "a question")" }
+    var needsYouLine: String { "Needs you · \(needsYouDetail)" }
+
+    /// The question, cleaned, on that line.
+    var needsYouDetail: String { AgentText.clean(text, maxLength: 300) ?? "a question" }
 
     /// The popover's line under the question.
     var explanation: String {
@@ -388,10 +391,11 @@ struct WorkspaceInfo: Hashable {
     /// The blocker and the next step (the user's, or the Lead's), on one
     /// run of text: a row wraps them itself, and a line break in one
     /// would spend its lines on blanks. Nil when empty.
-    var blockerText: String? { normalizedContextText(blocker) }
-    var nextStepText: String? { normalizedContextText(nextStep) }
+    var blockerText: String? { Self.oneRunOfWords(blocker) }
+    var nextStepText: String? { Self.oneRunOfWords(nextStep) }
 
-    private func normalizedContextText(_ value: String?) -> String? {
+    /// A text on one run of words; nil when empty.
+    static func oneRunOfWords(_ value: String?) -> String? {
         let words = (value ?? "").split(whereSeparator: \.isWhitespace)
         return words.isEmpty ? nil : words.joined(separator: " ")
     }
