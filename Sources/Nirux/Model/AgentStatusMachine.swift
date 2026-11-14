@@ -148,10 +148,10 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
-    /// The last key an approval took before its answer (`takesBeforeAnswer`),
-    /// the last that answered one (no reminder resets it), and the approval
-    /// whose text field takes every key.
-    private var lastKeyTakenByApprovalAt: TimeInterval = 0
+    /// The approval that took the last key before its answer
+    /// (`takesBeforeAnswer`) and when, the last key that answered one (no
+    /// reminder resets it), and the approval whose text field takes every key.
+    private var lastKeyTakenByApproval: (dialog: TimeInterval, at: TimeInterval)?
     private var lastApprovalAnswerAt: TimeInterval = 0
     private var approvalTextOpenedFor: TimeInterval?
     /// The agent process seen asking whether to trust its folder, and when
@@ -934,8 +934,9 @@ struct AgentStatusMachine {
         lastClosedDialogRequestedAt = dialog.requestedAt
         // No key answered it (a click, the sidebar, another hook, or it was
         // never on screen): the keys it seemed to take may be at the prompt.
-        if !dialog.waitsPastKeys, lastApprovalAnswerAt < dialog.requestedAt, lastKeyTakenByApprovalAt >= dialog.requestedAt {
-            lastDraftInputAt = max(lastDraftInputAt, lastKeyTakenByApprovalAt)
+        if !dialog.waitsPastKeys, let taken = lastKeyTakenByApproval, taken.dialog == dialog.requestedAt,
+           taken.at > lastApprovalAnswerAt {
+            lastDraftInputAt = max(lastDraftInputAt, taken.at)
         }
     }
 
@@ -1035,7 +1036,9 @@ struct AgentStatusMachine {
             lastDraftInputAt = now.timeIntervalSince1970
             return
         }
-        if !inFront.waitsPastKeys { lastKeyTakenByApprovalAt = now.timeIntervalSince1970 }
+        guard !inFront.waitsPastKeys else { return }
+        approvalTextOpenedFor = nil
+        lastKeyTakenByApproval = (inFront.requestedAt, now.timeIntervalSince1970)
     }
 
     /// Whether an approval takes `keys` before its answer, which is Enter,
@@ -1109,22 +1112,21 @@ struct AgentStatusMachine {
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date, keys: Data? = nil) {
         let time = now.timeIntervalSince1970
-        // A key answers a dialog only while none reached it yet: answered, it stays
-        // listed until its tool ends (no hook between); later keys reach the prompt.
-        // A question dialog takes keys until Esc or Ctrl-C (`waitsForKeys`).
+        // A dialog takes keys until one answers it (`takesBeforeAnswer`): answered,
+        // it stays listed until its tool ends (no hook between); later keys reach
+        // the prompt. A question dialog takes keys until Esc or Ctrl-C.
         // The dialog in front takes the keys: a question dialog's don't
         // answer an approval queued behind it.
         let inFront = openDialogs.first(where: waitsForKeys)
         let answersDialog = inFront != nil
-        // A paste or dictation is text, whatever a dialog waits for: one key
-        // answers a dialog, not a write of several.
-        // An option's text field takes it all the same.
+        // A paste or dictation is text, whatever a dialog waits for, but in an
+        // option's text field: one key answers a dialog, not a write of several.
         let oneKey = keys.map(Self.isOneKey) ?? true
         let approval = inFront.flatMap { $0.waitsPastKeys ? nil : $0 }
         let inText = approval.map { approvalTextOpenedFor == $0.requestedAt } ?? false
         let takenBeforeAnswer = (oneKey || inText) && approval.map { takesBeforeAnswer(keys, in: $0) } ?? false
         if inFront?.waitsPastKeys != true, !takenBeforeAnswer { lastKeystrokeAt = time }
-        if takenBeforeAnswer { lastKeyTakenByApprovalAt = time }
+        if takenBeforeAnswer, let approval { lastKeyTakenByApproval = (approval.requestedAt, time) }
         let cancels = keys.map(Self.isCancelKey) ?? true
         // Esc or Ctrl-C may as well interrupt a turn behind a dialog that
         // isn't on screen, the keys it took left at the prompt.
@@ -1384,7 +1386,7 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
-        lastKeyTakenByApprovalAt = 0
+        lastKeyTakenByApproval = nil
         lastApprovalAnswerAt = 0
         approvalTextOpenedFor = nil
         circling.reset()
