@@ -28,7 +28,8 @@ extension NiruxShellView {
                 folders: { [weak self] in self?.mergeQueueFolders(of: projectID) ?? [] },
                 busyAgents: { [weak self] worktrees, allWorktrees in
                     self?.mergeQueueBusyAgents(in: worktrees, allWorktrees: allWorktrees) ?? []
-                }
+                },
+                reviewTasks: { [weak self] in Self.reviewTasks(of: self?.projectWorkspaces(of: projectID) ?? []) }
             ),
             lockFolder: mergeQueueLockFolder
         )
@@ -84,6 +85,15 @@ extension NiruxShellView {
             }
         }
         return busy
+    }
+
+    /// The space's workspaces (not one closing), each with the branch it
+    /// is on and the review passes it recorded: a review counts on the
+    /// branch it was recorded on, in whatever workspace it ran.
+    static func reviewTasks(of workspaces: [WorkspaceState]) -> [MergeQueue.ReviewTask] {
+        workspaces.filter { !$0.isClosing }.map { workspace in
+            MergeQueue.ReviewTask(branch: workspace.gitContext?.branchName, runs: workspace.reviewRuns)
+        }
     }
 
     /// Queues running in this Nirux, in sidebar order of their projects.

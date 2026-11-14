@@ -32,7 +32,14 @@ extension MergeQueueController {
         }, then: { [weak self] fetched in
             guard let self, !cancellation.isCancelled else { return }
             var reading = fetched.reading
+            // On the main thread, from what the tasks recorded: no git.
+            let tasks = self.local.reviewTasks()
             for index in reading.candidates.indices {
+                if let branch = reading.candidates[index].pullRequest?.headRefName {
+                    reading.candidates[index].missingReviews = MergeQueue.missingReviews(
+                        branch: branch, tasks: tasks, required: BoardStages.Rules().requiredReviews
+                    )
+                }
                 guard let inspection = fetched.inspections[reading.candidates[index].number] else { continue }
                 let worktrees = inspection.worktrees.map(\.path)
                 reading.candidates[index].local = MergeQueue.LocalState(
