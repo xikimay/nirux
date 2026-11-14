@@ -90,6 +90,9 @@ enum Theme {
         static var mono: NSFont { NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) }
         /// Commands to approve, raw context.
         static var code: NSFont { NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) }
+        /// The glass interface's buttons (`NiruxButton`), in their two sizes.
+        static var button: NSFont { NSFont.systemFont(ofSize: 12, weight: .medium) }
+        static var buttonSmall: NSFont { NSFont.systemFont(ofSize: 11, weight: .medium) }
     }
 
     /// A 4 pt grid. 2 pt stays allowed for optical alignment.
