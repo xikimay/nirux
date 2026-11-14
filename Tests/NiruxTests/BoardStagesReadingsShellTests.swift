@@ -20,7 +20,7 @@ final class BoardStagesReadingsShellTests: XCTestCase {
             let read = { (infos: [WorkspaceInfo]) in
                 shell.boardReadings(
                     ofSpace: side.id, sidebarInfos: infos, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:],
-                    snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970
+                    snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970, comparable: { $0 }
                 )
             }
             let state = task.columns.first?.pty?.cachedAgentState
@@ -37,7 +37,7 @@ final class BoardStagesReadingsShellTests: XCTestCase {
             // The rows the sidebar just built are taken as they are.
             let built = try XCTUnwrap(shell.boardReadings(
                 ofSpace: shell.activeProfileID, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:],
-                snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970
+                snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970, comparable: { $0 }
             ).keys.first)
             XCTAssertNotEqual(built, task.id)
             var info = shell.sidebarWorkspaceInfo(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === task }), columns: [],
@@ -52,6 +52,52 @@ final class BoardStagesReadingsShellTests: XCTestCase {
             task.isClosing = true
             XCTAssertEqual(read([]), [:])
             task.isClosing = false
+        }
+    }
+
+    /// A review pass runs from its own hook event until its turn ends (in
+    /// the drain's order), or until no `claude` is in front of its column.
+    func testAPassRunsUntilItsTurnEndsOrClaudeLeavesTheFront() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            let column = try XCTUnwrap(task.columns.first)
+            let pty = try XCTUnwrap(column.pty)
+            harness.waitUntil("its shell starts") { pty.shellPID != nil }
+            let shellPID = try XCTUnwrap(pty.shellPID)
+            let resolution = AgentHookCenter.Resolution(
+                workspace: task, column: column, columnIndex: 0, isUserFocused: false, approvalHold: .never
+            )
+            let now = Date().timeIntervalSince1970
+            let event = { (name: AgentHookEvent.Name, passes: [String]?) in
+                AgentHookCenter.AppliedEvent(
+                    event: AgentHookEvent(kind: .claude, name: name, reviewPasses: passes, timestamp: now), resolution: resolution
+                )
+            }
+            shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"]), event(.stop, nil), event(.userPromptSubmit, nil)])
+            XCTAssertEqual(task.reviewsRunning, [:], "one drain: the pass, its turn's end, the next prompt")
+            shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"])])
+            XCTAssertEqual(task.reviewsRunning.mapValues(\.column), [.codeReview: column.id], "no HEAD needed: the event says it runs")
+            // claude in front of the column's shell, as the process table would show it; then the shell back in front.
+            let claude: pid_t = 99_997
+            let table = { (front: pid_t) in
+                ProcessSnapshot(entries: [
+                    ProcessSnapshot.Entry(
+                        pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: front,
+                        name: "zsh", startedAt: now - 800, arguments: ["zsh"]
+                    ),
+                    ProcessSnapshot.Entry(
+                        pid: claude, parentPID: shellPID, processGroupID: claude, terminalForegroundProcessGroupID: front,
+                        name: "claude", startedAt: now - 700, arguments: ["claude"]
+                    )
+                ])
+            }
+            shell.updateSidebar(snapshot: table(claude))
+            XCTAssertEqual(task.reviewsRunning[.codeReview]?.isClaudeSeen, true)
+            shell.updateSidebar(snapshot: table(claude))
+            XCTAssertNotNil(task.reviewsRunning[.codeReview])
+            shell.updateSidebar(snapshot: table(shellPID))
+            XCTAssertEqual(task.reviewsRunning, [:], "claude left the front: it exited, crashed or was quit")
         }
     }
 }

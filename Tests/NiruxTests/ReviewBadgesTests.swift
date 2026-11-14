@@ -115,14 +115,57 @@ final class ReviewBadgesTests: XCTestCase {
 
     func testOlderReplayedEventDoesNotReplaceANewerRun() {
         let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
-        let turn = ReviewTurn(column: UUID(), startedAt: 18)
-        workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20, turn: turn)
-        XCTAssertEqual(workspace.reviewTurns[.codeReview], turn, "the turn it runs in, with it")
-        XCTAssertFalse(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10, turn: ReviewTurn(column: UUID(), startedAt: 9)))
+        workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20)
+        XCTAssertFalse(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10))
         XCTAssertEqual(workspace.reviewRuns[.codeReview], ReviewRun(head: "bbb", at: 20))
-        XCTAssertEqual(workspace.reviewTurns[.codeReview], turn)
-        workspace.recordReviewPasses([.codeReview], head: "ccc", at: 30)
-        XCTAssertNil(workspace.reviewTurns[.codeReview], "a run whose turn wasn't known runs in none")
+    }
+
+    /// A pass runs from its own event until its column's turn ends, its
+    /// session ends, or (`endReviewPasses`) its agent leaves the front: in
+    /// the order the events come, whatever their times or git finds.
+    func testAPassRunsFromItsEventUntilItsColumnsTurnEnds() {
+        let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
+        let column = UUID(), other = UUID()
+        let now: TimeInterval = 1_000
+        let event = { (name: AgentHookEvent.Name, passes: [String]?, notification: String?) in
+            AgentHookEvent(kind: .claude, name: name, notificationType: notification, reviewPasses: passes, timestamp: now - 1)
+        }
+        let typed = event(.userPromptSubmit, ["codeReview"], nil)
+        let note = { (events: [AgentHookEvent], id: UUID) in
+            for event in events { workspace.noteReviewPasses(of: event, in: id, now: now) }
+        }
+        // One drain: the pass, its turn's end, the next prompt.
+        note([typed, event(.stop, nil, nil), event(.userPromptSubmit, nil, nil)], column)
+        XCTAssertEqual(workspace.reviewsRunning, [:], "its turn ended within the drain")
+        // Typed, then a message queued mid-turn: it still runs.
+        note([typed, event(.userPromptSubmit, nil, nil), event(.postToolUse, nil, nil)], column)
+        XCTAssertEqual(workspace.reviewsRunning, [.codeReview: RunningPass(column: column)])
+        // Another column's turn ending changes nothing; its own does, failed or back at the prompt after an interrupt.
+        note([event(.stop, nil, nil)], other)
+        XCTAssertEqual(workspace.reviewsRunning, [.codeReview: RunningPass(column: column)])
+        for end in [event(.stopFailure, nil, nil), event(.notification, nil, "idle_prompt"), event(.sessionEnd, nil, nil)] {
+            note([typed], column)
+            note([end], column)
+            XCTAssertEqual(workspace.reviewsRunning, [:], "\(end.name)")
+        }
+        // A permission asked mid-review is no end; a Skill call later in the turn starts its pass then.
+        note([event(.postToolUse, ["premortem"], nil), event(.notification, nil, "permission_prompt")], column)
+        XCTAssertEqual(workspace.reviewsRunning, [.premortem: RunningPass(column: column)])
+        // Its claude seen in front, then another process there: it exited, crashed or was quit. Not before it was seen.
+        XCTAssertFalse(workspace.followReviewPasses { _ in .other })
+        XCTAssertFalse(workspace.followReviewPasses { _ in .unknown })
+        XCTAssertFalse(workspace.followReviewPasses { _ in .claude })
+        XCTAssertEqual(workspace.reviewsRunning[.premortem]?.isClaudeSeen, true)
+        XCTAssertFalse(workspace.followReviewPasses { _ in .unknown }, "an unread process table says nothing")
+        XCTAssertTrue(workspace.followReviewPasses { _ in .other })
+        XCTAssertEqual(workspace.reviewsRunning, [:])
+        // Its column closed.
+        note([typed], column)
+        XCTAssertTrue(workspace.followReviewPasses { _ in .gone })
+        // A replayed event (a minute old) says nothing.
+        let replayed = AgentHookEvent(kind: .claude, name: .userPromptSubmit, reviewPasses: ["codeReview"], timestamp: now - 61)
+        XCTAssertFalse(workspace.noteReviewPasses(of: replayed, in: column, now: now))
+        XCTAssertEqual(workspace.reviewsRunning, [:])
     }
 
     func testRunsDecodeAsReadAndLegacyWorkspacesHaveNone() throws {

@@ -453,14 +453,16 @@ the Board reads that pass's statuses, approvals and Mission questions.
 - **Its texts** are the row's; beside them, the user's own summary, the
   worktree its git facts were read in, and the pull request its own
   detection found merged (at the HEAD it merged at).
-- **A review pass runs** while the turn it runs in goes on in its column:
-  the turn its event found (the prompt that typed it, or the turn in which
-  the agent called the Skill), its start unchanged, whatever its agent waits
-  on meanwhile (a permission asked mid-review is no end). A pass whose turn
-  ended, or whose agent exited mid-turn, is done; so is one recorded before
-  this launch. Known limits: a Stop hook that keeps the turn going starts a
-  new turn for Nirux, so the pass reads done; an Esc that ends a turn without
-  a Stop leaves it in flight until the prompt reads idle, about a minute.
+- **A review pass runs** from its own hook event (the prompt that typed it,
+  or the Skill call that ran it), whatever git finds, until an event in its
+  column ends it, in the order the events come: the turn's end (Stop, a
+  failed turn, Claude back at its prompt after an interrupt), its session's
+  end, its `claude` leaving the front once seen there (it exited, crashed or
+  was quit), or its column closing (`WorkspaceState.reviewsRunning`). A
+  permission asked mid-review, or a message queued meanwhile, is no end; a
+  pass from before this launch isn't running. Known limits: a Stop hook that
+  keeps the turn going ends the pass at that Stop; an Esc leaves it running
+  until Claude reads idle at its prompt, about a minute.
 - **Resume** is the sidebar's: an agent stopped on an error first, held back
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").
