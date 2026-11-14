@@ -29,74 +29,23 @@ extension NiruxShellView {
                 // user there. Next Waiting Agent goes to it after the others.
                 if isUserFocused, col.pty?.agentHasUnseenQuestion == true, userIsThere { col.pty?.noteAgentQuestionSeen() }
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
-                let editorFile = col.editorColumn?.currentPath.map {
-                    ($0 as NSString).lastPathComponent
-                }
                 let agentStatus = col.pty?.agentStatus(
                     foregroundProcess: foregroundProcess,
                     isUserFocused: isUserFocused,
                     processTableRead: processTableRead,
                     claudeFiredHooks: foregroundProcess.map { col.claudeHooksFired(by: $0.instance) } ?? false
                 ) ?? .idle
-                let permissionApproval = sidebarApproval(for: col, hold: approvalHolds[ObjectIdentifier(col)])
-                // The Project Board's rule: an approved dialog stays listed
-                // while its tool runs, the column working. A question
-                // waits even while subagents work, as the header and ⌘J
-                // say; behind a dialog, the dialog is what waits.
-                let dialog = agentStatus == .working ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)
-                let asked = dialog == nil ? col.pty?.agentQuestion(foreground: foregroundProcess) : nil
-                return ColumnInfo(
-                    index: colIndex,
-                    processName: foregroundProcess?.name,
-                    abbreviatedCwd: col.pty?.childCwd?.abbreviatedPath(),
-                    isFocused: isUserFocused,
-                    isWebView: col.isWebView,
-                    webTitle: col.webViewColumn?.pageTitle,
-                    terminalTitle: col.terminalTitle,
-                    agentStatus: agentStatus,
-                    isEditor: col.isEditor,
-                    editorFileName: editorFile,
-                    isProjectBoard: col.isProjectBoard,
-                    isBranchReview: col.isBranchReview,
-                    editorIsDirty: col.editorColumn?.isDirty ?? false,
-                    agentElapsedSeconds: col.pty?.agentTurnStartedAt
-                        .map { Date().timeIntervalSince($0) },
-                    attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
-                    permissionApproval: permissionApproval,
-                    openDialog: dialog?.reason ?? asked.map { .askedInReply($0.text) }
-                        ?? col.pty?.agentTrustPrompt(foreground: foregroundProcess).map { _ in AgentTrustPrompt.reason },
-                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
-                    deferredAgent: Self.sidebarDeferredAgent(of: col),
-                    missionQuestion: missionQuestions[ObjectIdentifier(col)],
-                    circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
-                    turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
-                    questionAskedAt: asked?.since,
+                return sidebarColumnInfo(
+                    col, at: colIndex, isUserFocused: isUserFocused, agentStatus: agentStatus, foregroundProcess: foregroundProcess,
+                    approvalHold: approvalHolds[ObjectIdentifier(col)], missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     // The dialog the user is looking at needs no copy on
                     // its row: its one line, as for any dialog.
-                    dialog: isUserFocused && appIsActive ? nil : dialog?.dialog,
-                    id: col.id
+                    showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now
                 )
             }
-            return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
-                          profileID: workspace.profileID, isInactive: workspace.isInactive,
-                          columnCount: workspace.columns.count,
-                          focusedColumn: workspace.focusedIndex,
-                          gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
-                          ciFlakyReason: workspace.ciFlakyReason,
-                          diffStats: workspace.diffStats,
-                          purpose: workspace.purpose, nextStep: workspace.nextStep,
-                          blocker: workspace.blocker, phase: workspace.effectivePhase,
-                          // A status line written before the option went off is no summary.
-                          lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
-                          lastActivityAt: workspace.lastActivityAt,
-                          reviewBadges: workspace.reviewBadges,
-                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
-                          isLead: workspace.isLead,
-                          parentTitle: parents[index].map { workspaces[$0].title },
-                          statusLine: turnStatusEnabled ? workspace.statusLine : nil,
-                          turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
-                          ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
+            return sidebarWorkspaceInfo(
+                at: index, columns: colInfos, isActive: isActive, parentTitle: parents[index].map { workspaces[$0].title }
+            )
         }
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead
@@ -130,6 +79,81 @@ extension NiruxShellView {
         closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+    }
+
+    /// A column's facts for its task's row, its agent's status for this
+    /// pass given: the sidebar reads it ticking the status machine, the
+    /// Board the last tick's. Reads only: what the user saw is the
+    /// sidebar's to note.
+    func sidebarColumnInfo(
+        _ col: ColumnState, at colIndex: Int, isUserFocused: Bool, agentStatus: AgentStatus,
+        foregroundProcess: ForegroundProcess?, approvalHold: PermissionApprovalHold?, missionQuestion: SidebarMissionQuestion?,
+        showsDialog: Bool, snapshot: ProcessSnapshot, now: TimeInterval
+    ) -> ColumnInfo {
+        let editorFile = col.editorColumn?.currentPath.map {
+            ($0 as NSString).lastPathComponent
+        }
+        let permissionApproval = sidebarApproval(for: col, hold: approvalHold)
+        // The Project Board's rule: an approved dialog stays listed
+        // while its tool runs, the column working. A question
+        // waits even while subagents work, as the header and ⌘J
+        // say; behind a dialog, the dialog is what waits.
+        let dialog = agentStatus == .working ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)
+        let asked = dialog == nil ? col.pty?.agentQuestion(foreground: foregroundProcess) : nil
+        return ColumnInfo(
+            index: colIndex,
+            processName: foregroundProcess?.name,
+            abbreviatedCwd: col.pty?.childCwd?.abbreviatedPath(),
+            isFocused: isUserFocused,
+            isWebView: col.isWebView,
+            webTitle: col.webViewColumn?.pageTitle,
+            terminalTitle: col.terminalTitle,
+            agentStatus: agentStatus,
+            isEditor: col.isEditor,
+            editorFileName: editorFile,
+            isProjectBoard: col.isProjectBoard,
+            isBranchReview: col.isBranchReview,
+            editorIsDirty: col.editorColumn?.isDirty ?? false,
+            agentElapsedSeconds: col.pty?.agentTurnStartedAt
+                .map { Date().timeIntervalSince($0) },
+            attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
+            permissionApproval: permissionApproval,
+            openDialog: dialog?.reason ?? asked.map { .askedInReply($0.text) }
+                ?? col.pty?.agentTrustPrompt(foreground: foregroundProcess).map { _ in AgentTrustPrompt.reason },
+            stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
+            deferredAgent: Self.sidebarDeferredAgent(of: col),
+            missionQuestion: missionQuestion,
+            circling: circlingHintEnabled ? col.pty?.agentCirclingHint : nil,
+            turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
+            questionAskedAt: asked?.since,
+            dialog: showsDialog ? dialog?.dialog : nil,
+            id: col.id
+        )
+    }
+
+    /// A task's row, from its columns' facts.
+    func sidebarWorkspaceInfo(at index: Int, columns: [ColumnInfo], isActive: Bool, parentTitle: String?) -> WorkspaceInfo {
+        let workspace = workspaces[index]
+        return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
+                      profileID: workspace.profileID, isInactive: workspace.isInactive,
+                      columnCount: workspace.columns.count,
+                      focusedColumn: workspace.focusedIndex,
+                      gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: isActive,
+                      columns: columns, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
+                      ciFlakyReason: workspace.ciFlakyReason,
+                      diffStats: workspace.diffStats,
+                      purpose: workspace.purpose, nextStep: workspace.nextStep,
+                      blocker: workspace.blocker, phase: workspace.effectivePhase,
+                      // A status line written before the option went off is no summary.
+                      lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
+                      lastActivityAt: workspace.lastActivityAt,
+                      reviewBadges: workspace.reviewBadges,
+                      mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
+                      isLead: workspace.isLead,
+                      parentTitle: parentTitle,
+                      statusLine: turnStatusEnabled ? workspace.statusLine : nil,
+                      turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
+                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
     }
 
     /// Every column's foreground process, shown or not, and what follows
