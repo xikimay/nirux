@@ -52,7 +52,7 @@ extension MergeQueueController {
     struct Reviews: Sendable {
         var tasks: [MergeQueue.ReviewTask] = []
         var required: Set<ReviewPass> = []
-        var isOwnCommit: @Sendable (_ commit: String, _ head: String, _ base: String?, _ folder: String) -> Bool = { _, _, _, _ in false }
+        var isOwnCommit: @Sendable (_ commit: String, _ mergeBase: String?, _ folder: String) -> Bool? = { _, _, _ in nil }
     }
 
     struct ConfirmationFetch: Sendable {
@@ -71,7 +71,7 @@ extension MergeQueueController {
         client: any MergeQueueGitHub,
         folders: [String],
         inspect: MergeQueueLocalAccess.Inspect,
-        reviews: Reviews = Reviews(),
+        reviews: Reviews,
         cancellation: MergeQueueReadCancellation = MergeQueueReadCancellation()
     ) -> ConfirmationFetch {
         var fetch = ConfirmationFetch(reading: MergeQueue.ConfirmationReading(settings: settings, isDryRun: isDryRun))
@@ -157,10 +157,10 @@ extension MergeQueueController {
         switch inspect(folders, pullRequest.headRefName, head, settings, client) {
         case .success(let inspection):
             let worktrees = inspection.worktrees.map(\.path)
-            let base = candidate.comparison??.baseCommit
-            candidate.missingReviews = MergeQueue.missingReviews(
+            let mergeBase = candidate.comparison??.mergeBase
+            (candidate.missingReviews, candidate.unknownReviews) = MergeQueue.missingReviews(
                 in: worktrees, allWorktrees: inspection.allWorktreePaths, tasks: reviews.tasks, required: reviews.required
-            ) { commit in worktrees.first.map { reviews.isOwnCommit(commit, head, base, $0) } ?? false }
+            ) { commit in worktrees.first.flatMap { reviews.isOwnCommit(commit, mergeBase, $0) } }
             return (candidate, inspection)
         case .failure(let error):
             candidate.error = "its worktrees couldn’t be checked: \(GitHubCLIQueueClient.message(of: error))"

@@ -360,6 +360,9 @@ extension MergeQueue {
         let behindBy: Int
         /// The base's commit: the base branch's tip, when it names a branch.
         let baseCommit: String
+        /// The newest commit the base and the head share: in the head's
+        /// history. Nil where GitHub didn't say.
+        var mergeBase: String?
     }
 
     struct CommitInfo: Equatable, Sendable {

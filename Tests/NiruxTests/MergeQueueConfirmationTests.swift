@@ -175,6 +175,14 @@ final class MergeQueueConfirmationTests: XCTestCase {
         ])
         XCTAssertEqual(items[2].warnings, ["No code review, premortem or adversarial review yet: Nirux saw none run on its commits."])
         XCTAssertEqual(items[3].warnings, [])
+        // What git couldn't tell about is said as such.
+        var unsure = candidate(5, head: a)
+        unsure.missingReviews = ["Premortem"]
+        unsure.unknownReviews = ["Code review"]
+        XCTAssertEqual(MergeQueue.confirmation(reading([unsure])).items.first?.warnings, [
+            "No premortem yet: Nirux saw none run on its commits.",
+            "Nirux couldn’t tell whether a code review ran on its commits: git here doesn’t have them all.",
+        ])
     }
 
     func testTheMissingReviewsAreThoseNoTaskInsideTheWorktreesRan() {
@@ -189,7 +197,7 @@ final class MergeQueueConfirmationTests: XCTestCase {
             ) { commit in
                 asked.append(commit)
                 return commit == "own"
-            }
+            }.missing
         }
         // No task in its worktree: nothing to say, as the Board's Reviews station.
         XCTAssertEqual(missing([("/code/widgets", [])], [.codeReview]), [])
@@ -205,14 +213,22 @@ final class MergeQueueConfirmationTests: XCTestCase {
         asked = []
         let reused = MergeQueue.ReviewTask(cwd: "/code/widgets-fix", runs: [.codeReview: "earlier", .premortem: "own", .adversarial: "aside"])
         let other = MergeQueue.ReviewTask(cwd: "/code/widgets-fix/Sources", runs: [.premortem: "own"])
-        XCTAssertEqual(MergeQueue.missingReviews(in: worktrees, allWorktrees: all, tasks: [reused, other], required: [.codeReview, .premortem]) {
+        let found = MergeQueue.missingReviews(in: worktrees, allWorktrees: all, tasks: [reused, other], required: [.codeReview, .premortem]) {
             asked.append($0)
             return $0 == "own"
-        }, ["Code review"])
+        }
+        XCTAssertEqual(found.missing, ["Code review"])
+        XCTAssertEqual(found.unknown, [])
         XCTAssertEqual(asked.sorted(), ["earlier", "own"])
+        // git can't say for one: unknown, unless another run of that pass was on the pull request's own commits.
+        let unsure = MergeQueue.ReviewTask(cwd: "/code/widgets-fix", runs: [.codeReview: "unknown", .premortem: "unknown"])
+        let found2 = MergeQueue.missingReviews(in: worktrees, allWorktrees: all, tasks: [unsure, other], required: [.codeReview, .premortem]) {
+            $0 == "unknown" ? nil : $0 == "own"
+        }
+        XCTAssertEqual([found2.missing, found2.unknown], [[], ["Code review"]])
     }
 
-    func testAPullRequestsOwnCommitsAreInItsHeadsHistoryAndNotInItsBases() throws {
+    func testAPullRequestsOwnCommitsAreInItsWorktreesHistoryAfterTheMergeBase() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("own-commits-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: folder) }
@@ -222,21 +238,25 @@ final class MergeQueueConfirmationTests: XCTestCase {
             return try git(["rev-parse", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         _ = try git(["init", "-q", "-b", "main"])
-        let base = try commit("base")
+        _ = try commit("base")
+        // An earlier branch of the same workspace, merged with a merge commit (the queue's default method).
         _ = try git(["switch", "-q", "-c", "earlier"])
         let earlier = try commit("an earlier branch's work")
         _ = try git(["switch", "-q", "main"])
+        _ = try git(["merge", "-q", "--no-ff", "-m", "Merge earlier", "earlier"])
         _ = try git(["switch", "-q", "-c", "feature"])
         let first = try commit("its first commit")
-        let head = try commit("its head")
-        XCTAssertTrue(MergeQueue.isOwnCommit(first, head: head, base: base, in: folder))
-        XCTAssertTrue(MergeQueue.isOwnCommit(head, head: head, base: base, in: folder))
-        XCTAssertFalse(MergeQueue.isOwnCommit(earlier, head: head, base: base, in: folder), "another branch's")
-        XCTAssertFalse(MergeQueue.isOwnCommit(base, head: head, base: base, in: folder), "the base's")
-        XCTAssertFalse(MergeQueue.isOwnCommit(String(repeating: "1", count: 40), head: head, base: base, in: folder), "unknown here")
-        XCTAssertTrue(MergeQueue.isOwnCommit(first, head: head, base: nil, in: folder), "no base given: its head's history")
-        XCTAssertTrue(MergeQueue.isOwnCommit(first, head: head, base: String(repeating: "2", count: 40), in: folder),
-                      "a base git doesn't have yet: its head's history")
+        _ = try commit("its head")
+        let mergeBase = try git(["merge-base", "feature", "main"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(MergeQueue.isOwnCommit(first, mergeBase: mergeBase, in: folder), true)
+        XCTAssertEqual(MergeQueue.isOwnCommit(earlier, mergeBase: mergeBase, in: folder), false, "in its history through the merge, not its own")
+        XCTAssertEqual(MergeQueue.isOwnCommit(String(repeating: "1", count: 40), mergeBase: mergeBase, in: folder), false, "gone")
+        XCTAssertEqual(MergeQueue.isOwnCommit("--all", mergeBase: mergeBase, in: folder), false, "not a commit id: never given to git")
+        XCTAssertNil(MergeQueue.isOwnCommit(first, mergeBase: nil, in: folder), "no merge base: git can't say")
+        XCTAssertNil(MergeQueue.isOwnCommit(first, mergeBase: String(repeating: "2", count: 40), in: folder), "a merge base not here")
+        // The queue's own access asks the same.
+        let access = MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }, reviewTasks: { [] })
+        XCTAssertEqual([access.isOwnCommit(first, mergeBase, folder), access.isOwnCommit(earlier, mergeBase, folder)], [true, false])
     }
 
     @MainActor

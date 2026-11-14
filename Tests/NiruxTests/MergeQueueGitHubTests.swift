@@ -64,7 +64,8 @@ final class MergeQueueGitHubTests: XCTestCase {
     """
 
     static let comparison = """
-    {"ahead_by":0,"base_commit":"fa74b4ce919c2b94a0f7bc88fbba3845357c9a07","behind_by":9,"status":"behind"}
+    {"ahead_by":0,"base_commit":"fa74b4ce919c2b94a0f7bc88fbba3845357c9a07","behind_by":9,"status":"behind",
+     "merge_base_commit":"0b1f2e3d4c5b6a79880716253443526170819203"}
     """
 
     static let notFound = """
@@ -164,7 +165,10 @@ final class MergeQueueGitHubTests: XCTestCase {
 
         XCTAssertEqual(MergeQueue.parseComparison(Data(Self.comparison.utf8)),
                        MergeQueue.Comparison(status: "behind", aheadBy: 0, behindBy: 9,
-                                             baseCommit: "fa74b4ce919c2b94a0f7bc88fbba3845357c9a07"))
+                                             baseCommit: "fa74b4ce919c2b94a0f7bc88fbba3845357c9a07",
+                                             mergeBase: "0b1f2e3d4c5b6a79880716253443526170819203"))
+        XCTAssertNil(MergeQueue.parseComparison(Data(#"{"ahead_by":0,"base_commit":"\#(MQ.sha("a"))","behind_by":0,"status":"identical"}"#.utf8))?
+            .mergeBase, "a merge base GitHub didn't give")
         XCTAssertNil(MergeQueue.parseComparison(Data(Self.notFound.utf8)))
 
         let runs = try XCTUnwrap(MergeQueue.parseRuns(Data(Self.runs.utf8)))
@@ -303,6 +307,9 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertEqual(GitHubCLIQueueClient.pathComponent("release/1.0#2%"), "release%2F1.0%232%25")
         XCTAssertEqual(GitHubCLIQueueClient.compareArguments(repository: "acme/widgets", base: "rel#1", head: MQ.sha("a"))[3],
                        "repos/acme/widgets/compare/rel%231...\(MQ.sha("a"))")
+        XCTAssertEqual(GitHubCLIQueueClient.compareArguments(repository: "acme/widgets", base: "main", head: MQ.sha("a")).last,
+                       "{status, ahead_by, behind_by, base_commit: .base_commit.sha, merge_base_commit: .merge_base_commit.sha}",
+                       "the counts, the base's tip and the merge base the sheet tells a pull request's own commits by")
         XCTAssertEqual(GitHubCLIQueueClient.rulesArguments(repository: "acme/widgets", branch: "a/b")[3],
                        "repos/acme/widgets/rules/branches/a%2Fb?per_page=100")
         // GraphQL takes the branch as a plain string value.

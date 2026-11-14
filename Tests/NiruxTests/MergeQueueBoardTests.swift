@@ -364,8 +364,8 @@ final class MergeQueueBoardTests: XCTestCase {
             var all: [[String?]] { lock.withLock { recorded } }
         }
         let asked = Asked()
-        queue.local.isOwnCommit = { commit, head, base, folder in
-            asked.append([commit, head, base, folder])
+        queue.local.isOwnCommit = { commit, mergeBase, folder in
+            asked.append([commit, mergeBase, folder])
             return false
         }
         queue.local.inspect = { _, branch, _, _, _ in
@@ -388,8 +388,16 @@ final class MergeQueueBoardTests: XCTestCase {
         XCTAssertEqual(confirmation.entries.map(\.number), [1])
         XCTAssertEqual(confirmation.excluded.map(\.reason), ["It is a draft."])
         XCTAssertEqual(confirmation.items.first?.notes, ["Behind main by 2 commits: the queue merges main into it first."])
-        XCTAssertEqual(asked.all, [["earlier", MQ.sha("a"), read.candidates.last?.comparison??.baseCommit, "/tmp/feat/1"]])
+        XCTAssertEqual(asked.all, [["earlier", read.candidates.last?.comparison??.mergeBase, "/tmp/feat/1"]])
         XCTAssertEqual(confirmation.items.first?.warnings, ["No code review yet: Nirux saw none run on its commits."])
+        // git can't say: the sheet says so.
+        queue.local.isOwnCommit = { _, _, _ in nil }
+        let again = ReadingBox()
+        queue.readConfirmation(settings: MQ.settings(), numbers: [1]) { again.value = $0 }
+        let until = Date().addingTimeInterval(10)
+        while again.value == nil, Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        XCTAssertEqual(MergeQueue.confirmation(try XCTUnwrap(again.value)).items.first?.warnings,
+                       ["Nirux couldn’t tell whether a code review ran on its commits: git here doesn’t have them all."])
         let reads = client.reads
         XCTAssertEqual(Array(reads.prefix(4)), [.auth, .rateLimit, .baseMergeQueue, .baseRuns], "the queue's own reads first")
         XCTAssertFalse(reads.contains(.checks(MQ.sha("b"))), "a draft is left out: its checks aren’t read")
@@ -419,7 +427,7 @@ final class MergeQueueBoardTests: XCTestCase {
         let client = SignedOut()
         let fetch = MergeQueueController.fetchConfirmation(
             settings: MQ.settings(), numbers: [1, 2], isDryRun: false, client: client, folders: [],
-            inspect: { _, _, _, _, _ in XCTFail("no local read"); return .success(MergeQueue.LocalInspection()) }
+            inspect: { _, _, _, _, _ in XCTFail("no local read"); return .success(MergeQueue.LocalInspection()) }, reviews: .init()
         )
         XCTAssertEqual(client.reads, [.auth])
         XCTAssertEqual(fetch.reading.candidates, [])
@@ -441,7 +449,7 @@ final class MergeQueueBoardTests: XCTestCase {
         }
         let fetch = MergeQueueController.fetchConfirmation(
             settings: MQ.settings(), numbers: [1], isDryRun: true, client: Confused(), folders: [],
-            inspect: { _, _, _, _, _ in .success(MergeQueue.LocalInspection()) }
+            inspect: { _, _, _, _, _ in .success(MergeQueue.LocalInspection()) }, reviews: .init()
         )
         XCTAssertEqual(fetch.reading.setupError, "GitHub’s answers were incomplete. Start again to retry.")
         XCTAssertFalse(MergeQueue.confirmation(fetch.reading).canStart, "no rate limit read is no rate limit checked")
@@ -467,7 +475,7 @@ final class MergeQueueBoardTests: XCTestCase {
         let client = FakeQueueClient(isDryRun: true)
         _ = MergeQueueController.fetchConfirmation(
             settings: MQ.settings(), numbers: [1, 2], isDryRun: true, client: client, folders: [],
-            inspect: { _, _, _, _, _ in .success(MergeQueue.LocalInspection()) }, cancellation: cancelled
+            inspect: { _, _, _, _, _ in .success(MergeQueue.LocalInspection()) }, reviews: .init(), cancellation: cancelled
         )
         XCTAssertEqual(client.reads, [], "nothing is read for a sheet already closed")
 

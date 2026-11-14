@@ -20,9 +20,9 @@ struct MergeQueueLocalAccess {
     /// The tasks open in the project, for the review passes they ran.
     var reviewTasks: @MainActor () -> [MergeQueue.ReviewTask]
     /// Off the main thread: a commit is one of the pull request's own
-    /// (`MergeQueue.isOwnCommit`).
-    var isOwnCommit: @Sendable (_ commit: String, _ head: String, _ base: String?, _ folder: String) -> Bool = {
-        MergeQueue.isOwnCommit($0, head: $1, base: $2, in: $3)
+    /// (`MergeQueue.isOwnCommit`); nil when git can't say.
+    var isOwnCommit: @Sendable (_ commit: String, _ mergeBase: String?, _ folder: String) -> Bool? = {
+        MergeQueue.isOwnCommit($0, mergeBase: $1, in: $2)
     }
 }
 
