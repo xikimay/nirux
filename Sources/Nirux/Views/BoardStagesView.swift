@@ -38,6 +38,16 @@ final class BoardStagesView: NSView {
         var queue: SectionQueue?
         /// Its header's menu.
         var menu: [SectionMenuItem] = []
+        var kind = Kind.repository
+
+        enum Kind: Equatable {
+            /// A repository's header, its lines, its folds, its merges.
+            case repository
+            /// No header: one fold, "Other workspaces", of its
+            /// `lines.otherWorktrees` (workspaces in another repository,
+            /// until the Board has a section per repository of the space).
+            case otherWorkspaces
+        }
     }
 
     /// A button of the queue, or why it does nothing.
@@ -128,6 +138,8 @@ final class BoardStagesView: NSView {
     var onSectionMenu: ((_ section: String, SectionMenuItem) -> Void)?
     /// Board Settings… was pressed under a message.
     var onBoardSettings: (() -> Void)?
+    /// The Lead was clicked in the space's header.
+    var onLead: (() -> Void)?
     /// A line was clicked, or a "Merged today" entry with a task: its id.
     var onOpen: ((String) -> Void)?
     /// A line's Merge station was clicked where that changes the queue's
@@ -213,6 +225,8 @@ final class BoardStagesView: NSView {
     let summaryLabel = NSTextField(labelWithString: "")
     let leadDot = NSView()
     let leadLabel = NSTextField(labelWithString: "")
+    /// Over the Lead's dot and line: a click focuses the Lead.
+    let leadButton = BoardStagesButton(title: "", target: nil, action: nil)
     let orderSwitch = NSSegmentedControl(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
     /// "Task", "Now", "Pull request": over their columns.
     let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
@@ -306,6 +320,12 @@ final class BoardStagesView: NSView {
         scrollView.onScroll = { [weak self] in self?.pointerMoved(to: nil) }
         messageView.aim = aim
         messageView.onSettings = { [weak self] in self?.onBoardSettings?() }
+        leadButton.isBordered = false
+        leadButton.setButtonType(.momentaryChange)
+        leadButton.target = self
+        leadButton.action = #selector(leadClicked)
+        leadButton.aim = aim
+        leadButton.setAccessibilityHelp("Focus the Lead")
         aim.onUse = { [weak self] in self?.pointerUsed() }
         // The lines move under a still pointer when the list scrolls, and
         // an app that isn't active doesn't hear the pointer leave.
@@ -317,7 +337,7 @@ final class BoardStagesView: NSView {
         for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification] {
             center.addObserver(self, selector: #selector(refreshHover), name: name, object: nil)
         }
-        ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
+        ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, leadButton, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
             .forEach(addSubview)
     }
 
@@ -343,6 +363,8 @@ final class BoardStagesView: NSView {
         leadLabel.stringValue = content.header.lead?.text ?? ""
         // Where the Lead's line has no room, its dot says it.
         leadDot.toolTip = content.header.lead?.text
+        leadButton.toolTip = content.header.lead?.text
+        leadButton.setAccessibilityLabel(content.header.lead?.text)
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
         let aimedBefore = aimed()
         let isOver = pointerIsOver(pointerLocation())
@@ -572,14 +594,16 @@ final class BoardStagesView: NSView {
         for section in sections {
             let id = section.id
             sectionID = id
-            let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
-            header.show(title: section.title, detail: section.detail, status: section.status, queue: section.queue, menu: section.menu)
-            header.onStart = { [weak self] in self?.onStart?(id) }
-            header.onStop = { [weak self] in self?.onStop?(id) }
-            header.onMenu = { [weak self] item in self?.onSectionMenu?(id, item) }
-            header.aim = aim
-            sectionHeaders[id] = header
-            items.append(.sectionHeader(header))
+            if section.kind == .repository {
+                let header = keptHeaders.removeValue(forKey: id) ?? BoardStagesSectionHeaderView()
+                header.show(title: section.title, detail: section.detail, status: section.status, queue: section.queue, menu: section.menu)
+                header.onStart = { [weak self] in self?.onStart?(id) }
+                header.onStop = { [weak self] in self?.onStop?(id) }
+                header.onMenu = { [weak self] item in self?.onSectionMenu?(id, item) }
+                header.aim = aim
+                sectionHeaders[id] = header
+                items.append(.sectionHeader(header))
+            }
             section.lines.units.forEach(add)
             let withoutTask = section.lines.withoutTask
             if !withoutTask.isEmpty {
@@ -600,11 +624,12 @@ final class BoardStagesView: NSView {
             if !others.isEmpty {
                 let isUnfolded = unfoldedWorktrees.contains(id)
                 let fold = keptWorktreeFolds.removeValue(forKey: id) ?? makeFold(section: id, action: #selector(worktreesFoldClicked(_:)))
+                let foldTitle = section.kind == .otherWorkspaces ? "Other workspaces" : "Other worktrees"
                 fold.attributedTitle = NSAttributedString(
-                    string: "\(isUnfolded ? "▾" : "▸") Other worktrees · \(others.count)",
+                    string: "\(isUnfolded ? "▾" : "▸") \(foldTitle) · \(others.count)",
                     attributes: [.font: Theme.Font.caption, .foregroundColor: Theme.Color.textTertiary]
                 )
-                fold.setAccessibilityLabel("Other worktrees, \(others.count)")
+                fold.setAccessibilityLabel("\(foldTitle), \(others.count)")
                 fold.setAccessibilityExpanded(isUnfolded)
                 worktreeFolds[id] = fold
                 items.append(.fold(fold))
@@ -890,6 +915,11 @@ final class BoardStagesView: NSView {
             leadDot.frame = NSRect(x: right - Metrics.dot, y: midY - Metrics.dot / 2, width: Metrics.dot, height: Metrics.dot)
             right = leadDot.frame.minX - 12
         }
+        // The dot and the line, as one target, as tall as the line.
+        leadButton.isHidden = !hasLead
+        let leadEnd = showsLeadLine ? leadLabel.frame.maxX : leadDot.frame.maxX
+        leadButton.frame = hasLead ? NSRect(x: leadDot.frame.minX - 4, y: midY - 10, width: leadEnd - leadDot.frame.minX + 8, height: 20) : .zero
+        leadHandChanged()
         // What the space holds, where 60 pt are left for it: never beside
         // a Lead's line that is cut, nor beside its dot alone.
         let summaryX = nameLabel.frame.maxX + 12
@@ -979,6 +1009,7 @@ final class BoardStagesView: NSView {
         guard aim.isStale != isStale else { return }
         aim.isStale = isStale
         // Hands, and a lit station, only where a click acts.
+        leadHandChanged()
         lineViews.forEach { $0.handsChanged() }
         mergedViews.values.forEach { $0.entries.forEach { $0.handsChanged() } }
         refreshHover()
@@ -998,6 +1029,7 @@ final class BoardStagesView: NSView {
         if let foot = runningQueueViews.first(where: { !$0.isHidden && $0.frame.contains(point) }) {
             return "queue \(foot.queue.id) \(String(describing: foot.queue.stop))"
         }
+        if !leadButton.isHidden, leadButton.frame.contains(point) { return "lead" }
         guard scrollView.frame.contains(point) else { return nil }
         func under(_ view: NSView) -> NSPoint? {
             let local = view.convert(location, from: nil)
@@ -1111,6 +1143,19 @@ final class BoardStagesView: NSView {
         hover(at: isHiddenOrHasHiddenAncestor ? nil : pointerLocation())
     }
 
+    /// A hand over the Lead where a click there acts.
+    var leadHand: NSRect? { leadButton.isHidden || aim.isStale ? nil : leadButton.frame }
+    private var registeredLeadHand: NSRect?
+
+    private func leadHandChanged() {
+        if leadHand != registeredLeadHand { window?.invalidateCursorRects(for: self) }
+    }
+
+    override func resetCursorRects() {
+        registeredLeadHand = leadHand
+        if let leadHand { addCursorRect(leadHand, cursor: .pointingHand) }
+    }
+
     /// The lines moved under the pointer, and under their hands.
     @objc private func listScrolled() {
         window?.invalidateCursorRects(for: documentView)
@@ -1118,6 +1163,8 @@ final class BoardStagesView: NSView {
     }
 
     // MARK: - Clicks
+
+    @objc private func leadClicked() { onLead?() }
 
     @objc private func orderChosen() {
         let asked: BoardStages.Order = orderSwitch.selectedSegment == 0 ? .sidebar : .progress
@@ -1523,7 +1570,7 @@ final class BoardStagesWorktreeView: NSView {
     private func item(_ kind: Kind) -> BoardStages.MenuItem? {
         worktree?.menu.first { item in
             switch (item, kind) {
-            case (.openWorktree, .open), (.cleanUp, .cleanUp): return true
+            case (.openWorktree, .open), (.focus, .open), (.cleanUp, .cleanUp): return true
             default: return false
             }
         }
@@ -1536,7 +1583,9 @@ final class BoardStagesWorktreeView: NSView {
         pullRequestLabel.stringValue = worktree.pullRequest ?? ""
         pathLabel.stringValue = (worktree.path as NSString).abbreviatingWithTildeInPath
         let cleanUp = item(.cleanUp)
-        Self.style(openButton, title: "Open", acts: !isDeparted)
+        // Open, or Focus where a workspace is there (the Lead's, another repository's).
+        let open = item(.open)?.title ?? "Open"
+        Self.style(openButton, title: open, acts: !isDeparted)
         Self.style(cleanUpButton, title: cleanUp?.blocked == nil ? "Clean Up…" : BoardStages.CleanUp.runningWords,
                    acts: !isDeparted && cleanUp?.blocked == nil, alignment: .right)
         // A departed one says nothing it could do, nor anything at all to VoiceOver.
@@ -1548,7 +1597,7 @@ final class BoardStagesWorktreeView: NSView {
             view.setAccessibilityElement(!isDeparted)
         }
         setAccessibilityLabel(([worktree.title] + (worktree.pullRequest.map { [$0] } ?? [])).joined(separator: ", "))
-        openButton.setAccessibilityLabel("Open \(worktree.title)")
+        openButton.setAccessibilityLabel("\(open) \(worktree.title)")
         cleanUpButton.setAccessibilityLabel("\(cleanUpButton.title) \(worktree.title)")
         alphaValue = isDeparted ? 0.4 : 1
         needsLayout = true

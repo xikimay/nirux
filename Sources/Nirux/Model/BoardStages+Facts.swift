@@ -63,8 +63,11 @@ extension BoardStages {
     /// - A main checkout or another worktree with neither is no line.
     /// `parents` gives each sub-task's workspace id the id of the one it
     /// is listed under in the sidebar (`WorkspaceStore.activeParents`).
+    /// `lead` is the space's Lead's workspace id: its worktree, when it is
+    /// a linked one, is listed first under "Other worktrees", with Focus.
     static func sectionFacts(
-        _ repository: RepositoryReading, tasks: [String], readings: [String: TaskReading], parents: [String: String] = [:]
+        _ repository: RepositoryReading, tasks: [String], readings: [String: TaskReading], parents: [String: String] = [:],
+        lead: String? = nil
     ) -> SectionFacts {
         var places: [String: (row: ProjectBoard.Row, workspace: ProjectBoard.WorkspaceRef)] = [:]
         for row in repository.rows {
@@ -108,9 +111,54 @@ extension BoardStages {
                 guard pullRequest.state == "MERGED", let mergedAt = pullRequest.mergedAt else { return nil }
                 return MergedFacts(number: pullRequest.number, title: pullRequest.title, mergedAt: mergedAt.timeIntervalSince1970)
             },
-            otherWorktrees: repository.rows.compactMap { otherWorktree($0, in: repository) }
-                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            otherWorktrees: (lead.map { lead in repository.rows.compactMap { leadWorktree($0, lead: lead, in: repository) } } ?? [])
+                + repository.rows.compactMap { otherWorktree($0, in: repository) }
+                    .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         )
+    }
+
+    /// The Lead's worktree when it is a linked one (the main checkout is
+    /// the Lead's usual place, which the space header shows): titled as an
+    /// other worktree, "Lead" in its pull request's place, with Focus and
+    /// Clean Up…, as the table's row of the Lead offered them.
+    private static func leadWorktree(_ row: ProjectBoard.Row, lead: String, in repository: RepositoryReading) -> OtherWorktree? {
+        guard row.group != .main, row.group != .otherRepository, let path = row.worktreePath,
+              row.workspaces.contains(where: { $0.id == lead })
+        else { return nil }
+        // A linked worktree: the clean-up may delete it (its own check refuses while the Lead's agent works).
+        let menu: [MenuItem] = [
+            .focus(workspaceID: lead, columnID: column(of: lead, in: row)),
+            .cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil)
+        ]
+        return OtherWorktree(path: path, title: title(of: row, path: path), pullRequest: "Lead", menu: menu)
+    }
+
+    /// "Other workspaces": each worktree of another repository with
+    /// workspaces of the space, until the Board has a section per
+    /// repository of the space. Its workspaces' title, its folder, and
+    /// Focus on the most urgent agent there, as the table's row did. A
+    /// workspace in no repository is none of these: its line is under "No
+    /// repository".
+    static func otherWorkspaces(_ rows: [ProjectBoard.Row]) -> [OtherWorktree] {
+        rows.compactMap { row in
+            guard row.group == .otherRepository, let path = row.worktreePath, let first = row.workspaces.first else { return nil }
+            let workspaceID = row.agent.state != .none ? row.agent.workspaceID ?? first.id : first.id
+            let more = row.workspaces.count > 1 ? " +\(row.workspaces.count - 1)" : ""
+            return OtherWorktree(
+                path: path, title: first.title + more, pullRequest: nil,
+                menu: [.focus(workspaceID: workspaceID, columnID: column(of: workspaceID, in: row))]
+            )
+        }
+    }
+
+    /// The row's most urgent agent column, when it is that workspace's.
+    private static func column(of workspaceID: String, in row: ProjectBoard.Row) -> UUID? {
+        row.agent.state != .none && row.agent.workspaceID == workspaceID ? row.agent.columnID : nil
+    }
+
+    /// Its branch, "detached HEAD (1a2b3c4)", or its folder's name.
+    private static func title(of row: ProjectBoard.Row, path: String) -> String {
+        row.branch ?? row.detachedHead.map { "detached HEAD (\(WorktreeCleanup.short($0)))" } ?? (path as NSString).lastPathComponent
     }
 
     /// A worktree the table listed under "Other worktrees" (a linked one,
@@ -120,7 +168,7 @@ extension BoardStages {
     private static func otherWorktree(_ row: ProjectBoard.Row, in repository: RepositoryReading) -> OtherWorktree? {
         guard row.group == .otherWorktree, let path = row.worktreePath else { return nil }
         let folder = (path as NSString).lastPathComponent
-        let title = row.branch ?? row.detachedHead.map { "detached HEAD (\(WorktreeCleanup.short($0)))" } ?? folder
+        let title = title(of: row, path: path)
         let menu: [MenuItem] = [
             .openWorktree(path: path, title: row.branch ?? folder),
             .cleanUp(path: path, blocked: repository.cleaningUp.contains(path) ? CleanUp.runningReason : nil)

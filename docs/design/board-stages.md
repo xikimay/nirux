@@ -231,8 +231,11 @@ clicked. The sizes are the mockup's.
   in this order: the summary, the Lead's line, the order switch; the name is
   the last to (a name longer than 160 pt keeps that much beside the switch).
   The Lead's dot keeps its place, in its state's colour, and says its line
-  under the pointer. The order switch shows the content's order: it moves once
-  the owner shows the order asked.
+  under the pointer. A click on the Lead (its dot and its line, one target,
+  with a hand) focuses it, as the table's row of the Lead did; it asks where
+  the pointer aimed, as a line's station does (`onLead` has no owner yet).
+  The order switch shows the content's order: it moves once the owner shows
+  the order asked.
 - **A section per repository** scrolls below: its name, `owner/name`, its
   post-merge run's pill (or what went wrong reading it), then at its right
   what its merge queue does ("Merging #52, 1 of 2", "2 pull requests
@@ -303,9 +306,23 @@ clicked. The sizes are the mockup's.
   the pointer is over the Board, one that goes stays, faded and inert
   (nothing for VoiceOver, no tooltip), in its repository, and one that comes
   waits; Open and Clean Up… ask where the pointer aimed, as a line's station
-  does.
+  does. The Lead's worktree, when it is a linked one, is listed first: titled
+  as the others, "Lead" in its pull request's place, with Focus in Open's
+  place, and Clean Up… (the clean-up's own check refuses while the Lead's
+  agent works). The main checkout, the Lead's usual place, gets no entry: the
+  space's header shows the Lead.
 
   ![Other worktrees unfolded: a detached HEAD, a branch whose pull request merged, one being cleaned up](../images/board-stages-worktrees.png)
+
+- **Other workspaces** (a worktree of another repository with workspaces of
+  the space) are one fold of their own after the repositories, "Other
+  workspaces · N", with no repository's header: each entry is its
+  workspaces' title ("Site +1"), its folder, and Focus on the most urgent
+  agent there, as the table's row offered it. A workspace in no repository
+  is a line under "No repository". This lasts until the Board has a section
+  per repository of the space.
+
+  ![The Lead's worktree first under Other worktrees, with Focus and Clean Up…; then Other workspaces, a fold of its own after No repository, each with Focus](../images/board-stages-lead-and-others.png)
 
 - **Merged today** keeps to two rows, then "+12 more": a day of twenty merges
   doesn't push the next repository off the Board. Each entry is its dot
@@ -360,6 +377,9 @@ read. Pure; nothing is read again.
   lines, on the same pull request. An open pull request no task's line shows
   is a pull request without a task: after the tasks, in the rows' order, once,
   named by its title. A main checkout or a worktree with neither is no line.
+  The Lead's linked worktree is listed first under "Other worktrees", with
+  Focus; the worktrees of another repository with workspaces of the space are
+  "Other workspaces" (`BoardStages.otherWorkspaces`).
 - **A task says what its sidebar row read**: what its agents do, its reviews,
   its texts. One the sidebar hasn't read yet is a line at rest. What the
   sidebar read of git in another worktree (the task's focused column is
@@ -528,7 +548,9 @@ to the queue yet.
   up…", with no link). A menu shown before the line changed acts only as
   the line, still on the Board, still offers; each of its items stays what
   it was. A worktree no line holds (a merged task closed since) has its
-  Open and Clean Up… under "Other worktrees" (section 5).
+  Open and Clean Up… under "Other worktrees" (section 5); the Lead's worktree
+  and "Other workspaces" have Focus (`MenuItem.focus`), the workspace at its
+  most urgent agent column.
   `BoardStagesView.onMenu` and `onWorktree` have no owner yet.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
@@ -544,10 +566,9 @@ to the queue yet.
 - **Reviews count by branch name.** A run recorded before Nirux kept the
   branch has none and doesn't count; a branch name reused after its pull
   request merged keeps the first one's reviews.
-- **The Lead's worktree has no place on the Board** when it isn't the main
-  checkout and has no open pull request: the table shows it as a row with
-  Focus and Clean Up…; the Board leaves the Lead out of its lines and lists
-  only worktrees with no workspace under "Other worktrees".
+- **Other workspaces offer Focus only**: no agent state and no Resume, which
+  the table's row showed; the sidebar shows both. Until the Board has a
+  section per repository of the space, where they are lines.
 - **Reviews Nirux can't see.** Codex has no prompt hook, and a `claude -p`
   review run from a shell doesn't count ([review-badges.md](review-badges.md)):
   such a task stays at Reviews, "No code review yet".
