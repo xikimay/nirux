@@ -149,8 +149,10 @@ struct AgentStatusMachine {
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
     /// The last key an approval took before its answer (`takesBeforeAnswer`),
-    /// and the approval whose text field takes every key.
+    /// the last that answered one (no reminder resets it), and the approval
+    /// whose text field takes every key.
     private var lastKeyTakenByApprovalAt: TimeInterval = 0
+    private var lastApprovalAnswerAt: TimeInterval = 0
     private var approvalTextOpenedFor: TimeInterval?
     /// The agent process seen asking whether to trust its folder, and when
     /// (see AgentTrustPrompt): no hook reports that question.
@@ -932,7 +934,7 @@ struct AgentStatusMachine {
         lastClosedDialogRequestedAt = dialog.requestedAt
         // No key answered it (a click, the sidebar, another hook, or it was
         // never on screen): the keys it seemed to take may be at the prompt.
-        if !dialog.waitsPastKeys, waitsForKeys(dialog), lastKeyTakenByApprovalAt >= dialog.requestedAt {
+        if !dialog.waitsPastKeys, lastApprovalAnswerAt < dialog.requestedAt, lastKeyTakenByApprovalAt >= dialog.requestedAt {
             lastDraftInputAt = max(lastDraftInputAt, lastKeyTakenByApprovalAt)
         }
     }
@@ -1037,21 +1039,33 @@ struct AgentStatusMachine {
     }
 
     /// Whether an approval takes `keys` before its answer, which is Enter,
-    /// Esc, Ctrl-C or an option's number: Up, Down, Ctrl-U and Ctrl-D move
-    /// among its options or through it; Tab, or another character, starts
-    /// the text of one (why not, an amendment), which takes every key until
-    /// Enter, Esc or Ctrl-C.
+    /// Esc, Ctrl-C, Shift-Tab or an option's number: Up and Down move among
+    /// its options (out of a text field too), other keys through it
+    /// (`movesThroughDialog`); Tab, or another character, starts the text of
+    /// an option (why not, an amendment), which takes everything until Enter,
+    /// Esc, Ctrl-C, Up or Down.
     private mutating func takesBeforeAnswer(_ keys: Data?, in dialog: AgentPermissionRequest) -> Bool {
         guard let keys else { return false }
         if keys == Data([0x0D]) || Self.isCancelKey(keys) {
             approvalTextOpenedFor = nil
             return false
         }
-        if Self.isUpDownArrows(keys) || keys == Data([0x15]) || keys == Data([0x04]) { return true }
-        if approvalTextOpenedFor == dialog.requestedAt { return true }
+        if Self.isUpDownArrows(keys) {
+            approvalTextOpenedFor = nil
+            return true
+        }
+        if approvalTextOpenedFor == dialog.requestedAt || Self.movesThroughDialog(keys) { return true }
         guard keys == Data([0x09]) || Self.isTextCharacter(keys) else { return false }
         approvalTextOpenedFor = dialog.requestedAt
         return true
+    }
+
+    /// One key that moves through a dialog rather than answers it: the
+    /// arrows, Home, End, Page Up and Down, Ctrl-U and Ctrl-D (a plan's
+    /// scroll), Backspace.
+    static func movesThroughDialog(_ keys: Data) -> Bool {
+        if [Data([0x15]), Data([0x04]), Data([0x7F])].contains(keys) { return true }
+        return keys.count > 1 && keys.first == 0x1B && keys != modeSwitchKey && isOneKey(keys)
     }
 
     /// One printable character, a space too, but an option's number.
@@ -1104,16 +1118,23 @@ struct AgentStatusMachine {
         let answersDialog = inFront != nil
         // A paste or dictation is text, whatever a dialog waits for: one key
         // answers a dialog, not a write of several.
+        // An option's text field takes it all the same.
         let oneKey = keys.map(Self.isOneKey) ?? true
-        let takenBeforeAnswer = oneKey && inFront.map { !$0.waitsPastKeys && takesBeforeAnswer(keys, in: $0) } ?? false
+        let approval = inFront.flatMap { $0.waitsPastKeys ? nil : $0 }
+        let inText = approval.map { approvalTextOpenedFor == $0.requestedAt } ?? false
+        let takenBeforeAnswer = (oneKey || inText) && approval.map { takesBeforeAnswer(keys, in: $0) } ?? false
         if inFront?.waitsPastKeys != true, !takenBeforeAnswer { lastKeystrokeAt = time }
         if takenBeforeAnswer { lastKeyTakenByApprovalAt = time }
-        if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
+        let cancels = keys.map(Self.isCancelKey) ?? true
+        // Esc or Ctrl-C may as well interrupt a turn behind a dialog that
+        // isn't on screen, the keys it took left at the prompt.
+        if approval != nil, !takenBeforeAnswer, !cancels { lastApprovalAnswerAt = time }
+        if cancels { lastCancelKeyAt = time }
         lastInputAt = time
         // A mode switch (Shift-Tab) leaves the prompt as it was; any other
         // key may leave text there, or open a screen no hook tells of (Esc
         // Esc's rewind picker, Ctrl-O's transcript, a slash command's).
-        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        if !(answersDialog && (oneKey || takenBeforeAnswer)), keys != Self.modeSwitchKey { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
@@ -1364,6 +1385,7 @@ struct AgentStatusMachine {
         lastInputAt = 0
         lastDraftInputAt = 0
         lastKeyTakenByApprovalAt = 0
+        lastApprovalAnswerAt = 0
         approvalTextOpenedFor = nil
         circling.reset()
     }
