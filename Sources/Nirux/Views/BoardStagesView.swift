@@ -304,6 +304,8 @@ final class BoardStagesView: NSView {
         scrollView.documentView = documentView
         // Scrolled, the pointer aims at what comes under it.
         scrollView.onScroll = { [weak self] in self?.pointerMoved(to: nil) }
+        messageView.aim = aim
+        messageView.onSettings = { [weak self] in self?.onBoardSettings?() }
         aim.onUse = { [weak self] in self?.pointerUsed() }
         // The lines move under a still pointer when the list scrolls, and
         // an app that isn't active doesn't hear the pointer leave.
@@ -369,9 +371,10 @@ final class BoardStagesView: NSView {
             // The order the switch asked for, now shown; a request is good for this change only.
             let isAsked = askedOrder == content.order && content.order != previous?.order
             askedOrder = nil
-            // A message takes the sections' place at once; once it goes, they come back at once, as they are.
-            let wasMessage = previous?.message != nil
-            if isPointerInside, isAiming, !isAsked, !wasMessage, previous != nil {
+            // A message takes the sections' place at once, and once it goes they come back at once, as they are; nothing
+            // shown, nothing can move under the pointer.
+            let isMessage = content.message != nil || previous?.message != nil
+            if isPointerInside, isAiming, !isAsked, !isMessage, !shownSections.isEmpty, previous != nil {
                 (shownSections, departed) = Self.holding(shownSections, in: content.sections)
             } else {
                 (shownSections, departed) = (content.sections, [])
@@ -380,8 +383,9 @@ final class BoardStagesView: NSView {
         }
         showTimes()
         layoutContent()
-        // Under a pointer that rests, what is under it may have changed: it waits for the pointer to move.
-        if isPointerInside, !isAiming {
+        // Under a pointer that rests, or where a message came or went, what is under it may have changed: it waits for
+        // the pointer to move.
+        if isPointerInside, !isAiming || content.message != previous?.message {
             layoutSubtreeIfNeeded()
             goStale(ifChangedFrom: aimedBefore)
         }
@@ -475,6 +479,16 @@ final class BoardStagesView: NSView {
     /// id, a repository's header, fold and "Merged today" by its section's,
     /// a stack's title by its place.
     private func buildItems() {
+        // A message in their place: the folds stay as they are, for when the sections come back.
+        if let message = content?.message {
+            messageView.show(message)
+            documentView.subviews = [messageView]
+            items = [.message(messageView)]
+            lineViews = []
+            sectionHeaders = [:]
+            worktreeViews = []
+            return
+        }
         let sections = shownSections
         let ids = Set(sections.map(\.id))
         unfolded.formIntersection(ids)
@@ -497,14 +511,6 @@ final class BoardStagesView: NSView {
         worktreeViews = []
         mergedViews = [:]
         captions = []
-        if let message = content?.message {
-            messageView.show(message)
-            messageView.aim = aim
-            messageView.onSettings = { [weak self] in self?.onBoardSettings?() }
-            documentView.subviews = [messageView]
-            self.items = [.message(messageView)]
-            return
-        }
         // The section being listed.
         var sectionID = ""
         func add(_ line: BoardStages.Line, link: BoardStagesLineView.Link) {
@@ -995,6 +1001,10 @@ final class BoardStagesView: NSView {
         if let (id, header) = sectionHeaders.first(where: { under($0.value) != nil }), let local = under(header) {
             let button = [header.startButton, header.stopButton].first { !$0.isHidden && $0.frame.contains(local) }
             return "header \(id) \(button.map { "\($0.title) \($0.isEnabled)" } ?? "")"
+        }
+        // A message's Board Settings…, shown (`under` passes over a hidden view).
+        if messageView.superview != nil, under(messageView.settingsButton) != nil {
+            return "message Board Settings…"
         }
         if let worktree = worktreeViews.first(where: { under($0) != nil }), let local = under(worktree), let path = worktree.worktree?.path {
             let button = [worktree.openButton, worktree.cleanUpButton].first { !$0.isHidden && $0.frame.contains(local) }
@@ -1657,8 +1667,8 @@ final class BoardStagesMessageView: NSView {
         label.font = Theme.Font.body
         label.textColor = Theme.Color.textSecondary
         label.alignment = .center
+        label.isSelectable = false
         settingsButton.bezelStyle = .rounded
-        settingsButton.controlSize = .small
         settingsButton.target = self
         settingsButton.action = #selector(settingsClicked)
         [label, settingsButton].forEach(addSubview)
@@ -1685,8 +1695,9 @@ final class BoardStagesMessageView: NSView {
     override func layout() {
         super.layout()
         label.frame = NSRect(x: 24, y: 32, width: max(0, bounds.width - 48), height: textHeight(bounds.width))
-        let width = ceil(settingsButton.fittingSize.width)
-        settingsButton.frame = NSRect(x: ((bounds.width - width) / 2).rounded(), y: label.frame.maxY + 12, width: width, height: 24)
+        // As the table's button: its own width and 8 pt more; never past the left edge.
+        let width = ceil(settingsButton.intrinsicContentSize.width) + 8
+        settingsButton.frame = NSRect(x: max(0, ((bounds.width - width) / 2).rounded()), y: label.frame.maxY + 12, width: width, height: 24)
     }
 
     @objc private func settingsClicked() { onSettings?() }

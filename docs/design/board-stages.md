@@ -256,15 +256,18 @@ clicked. The sizes are the mockup's.
 
   ![Two repositories' queues: one merging, in green, with Stop; one stopped on a problem, in red, with Start… · 1; at the Board's foot, the queue that runs here and one run by another Nirux](../images/board-stages-queues.png)
 
-- **A message** takes the sections' place, as the table's does (the space
-  deleted, board.json unreadable or not read yet, no repository set): its
-  words centred, wrapped, and Board Settings… under them where the settings
-  can fix what they say. The running queues' lines stay at the foot. It
-  comes at once, the pointer over the Board or not (it is the whole Board's
-  state, and rarely changes); once it goes, the sections come back at once,
-  as they are.
+- **A message** takes the sections' place when the table would show one
+  in place of its rows (the space deleted, board.json unreadable, read-only
+  or not read yet, no repository set, worktrees being listed): its words
+  centred, wrapped, scrolling when long, and Board Settings… under them where
+  the settings can fix what they say. The running queues' lines stay at the
+  foot. Nothing is held for it: it comes at once, and once it goes the
+  sections come back at once, their folds as they were; nothing shown,
+  nothing can move under the pointer. Where it came or went under the
+  pointer, what is now there acts only once the pointer moves, as after a
+  rest (section 4).
 
-  ![The Board saying its space has no repository set, with Board Settings… under it; the running queues' lines at its foot](../images/board-stages-message.png)
+  ![The Board saying board.json can't be read, with Board Settings… under it; the running queues' lines at its foot](../images/board-stages-message.png)
 
 - **A line** is 34 pt: its state's dot and its title, its rail, its phrase
   (amber or red when it needs a look, else grey), its pull request, its time.

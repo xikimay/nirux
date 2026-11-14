@@ -2349,6 +2349,11 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(view.sectionHeader(section: "nirux"))
         let message = view.messageView
         XCTAssertTrue(message.isDescendant(of: view.scrollView))
+        XCTAssertEqual(view.scrollView.documentView?.subviews.count, 1, "alone in the list: nothing drawn under it")
+        XCTAssertEqual([message.frame.minX, message.frame.width], [0, view.scrollView.contentSize.width])
+        XCTAssertEqual(message.label.alignment, .center)
+        XCTAssertFalse(message.label.isSelectable)
+        XCTAssertEqual(message.settingsButton.frame.width, ceil(message.settingsButton.intrinsicContentSize.width) + 8, "as the table's")
         XCTAssertEqual(message.label.stringValue, "board.json can’t be read: open Board Settings… to replace it.")
         XCTAssertEqual(message.label.frame.minX, 24)
         XCTAssertEqual(message.label.frame.width, message.bounds.width - 48)
@@ -2360,10 +2365,18 @@ final class BoardStagesViewTests: XCTestCase {
         try click(message.settingsButton)
         XCTAssertEqual(opened, 1)
         XCTAssertEqual(view.runningQueueViews.map(\.queue.id), ["orphan"], "a queue that runs keeps its line")
-        // Narrow: its words wrap.
+        // Narrow: its words wrap, and a long one scrolls.
         view.setFrameSize(NSSize(width: 300, height: 600))
         view.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(message.label.frame.height, 20)
+        told.message?.text = String(repeating: "board.json can’t be read. ", count: 60)
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(view.scrollView.documentView).frame.height, message.frame.maxY)
+        XCTAssertGreaterThan(message.frame.maxY, view.scrollView.contentSize.height)
+        view.setFrameSize(NSSize(width: 40, height: 600))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThanOrEqual(message.settingsButton.frame.minX, 0, "nothing past the left edge")
         view.setFrameSize(NSSize(width: 940, height: 600))
         // One the settings can't fix: no button.
         told.message = BoardStagesView.Message(text: "Reading board.json…")
@@ -2378,6 +2391,83 @@ final class BoardStagesViewTests: XCTestCase {
         view.layoutSubtreeIfNeeded()
         XCTAssertNil(message.superview)
         XCTAssertEqual(view.lineViews.map(\.line.id), ["b", "a"])
+    }
+
+    func testAMessageThatComesOrGoesUnderThePointerAimsAgainAndKeepsTheFolds() throws {
+        let sections = { (ids: [String]) in
+            [self.section(units: self.tasks(ids.map { self.offering($0, .add, 50) }), withoutTask: self.tasks([self.line("pr")]))]
+        }
+        let view = board(content(sections(["a", "b"])))
+        var time: TimeInterval = 100
+        var checks = 0
+        view.clock = { time }
+        view.after = { _, _ in checks += 1 }
+        view.settleLater = { $0() }
+        view.foldButton(section: "nirux")?.performClick(nil)
+        view.layoutSubtreeIfNeeded()
+        let merge = BoardStagesView.Columns(width: 940).stations[3]
+        var pointer = place(merge, on: view.lineViews[0])
+        view.pointerLocation = { pointer }
+        view.mouseMoved(with: try moved(to: pointer, in: view))
+        // It comes while the pointer aims, the sections changed: nothing held behind it, no look waits.
+        var told = content(sections(["b", "a"]))
+        told.message = BoardStagesView.Message(text: "board.json can’t be read: open Board Settings… to replace it.", offersSettings: true)
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.departed, [])
+        XCTAssertEqual(checks, 0)
+        // Board Settings… under a pointer that aims, then rests on it.
+        let button = view.messageView.settingsButton
+        pointer = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        view.mouseMoved(with: try moved(to: pointer, in: view))
+        XCTAssertFalse(view.isPointerStale)
+        // It goes, the sections coming back with no section: the folds are as they were.
+        time = 101
+        told.message = nil
+        told.sections = sections(["a", "b"])
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["a", "b", "pr"], "the fold unfolded still")
+        // What came under the pointer aimed at Board Settings… is another thing to click, though the pointer aims.
+        XCTAssertTrue(view.isPointerStale)
+    }
+
+    func testAMessageAppearingUnderAPointerThatRestsWaitsForItToMove() throws {
+        let view = board(content([section(units: tasks([line("a")]))]))
+        var time: TimeInterval = 100
+        view.clock = { time }
+        view.after = { _, _ in }
+        // Where Board Settings… will be.
+        var told = content([])
+        told.message = BoardStagesView.Message(text: "Reading board.json…", offersSettings: true)
+        let probe = board(told)
+        let button = probe.messageView.settingsButton
+        let pointer = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        view.pointerLocation = { pointer }
+        view.mouseMoved(with: try moved(to: pointer, in: view))
+        time = 200
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(view.isPointerStale, "Board Settings… came under a pointer that rests")
+        // Without its button first, then with it, under a pointer that rests: still another thing to click.
+        time = 205
+        view.mouseMoved(with: try moved(to: NSPoint(x: pointer.x + 5, y: pointer.y), in: view))
+        view.mouseMoved(with: try moved(to: pointer, in: view))
+        told.message?.offersSettings = false
+        view.show(told)
+        XCTAssertFalse(view.isPointerStale)
+        time = 207
+        told.message?.offersSettings = true
+        view.show(told)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(view.isPointerStale)
+        // It goes with no section; the sections come in a second step, the pointer moving over the Board: shown at once.
+        time = 210
+        view.mouseMoved(with: try moved(to: NSPoint(x: pointer.x + 5, y: pointer.y), in: view))
+        view.show(content([]))
+        view.show(content([section(units: tasks([line("a"), line("b")]))]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.lineViews.map(\.line.id), ["a", "b"], "nothing was shown: nothing to hold")
     }
 
     func testMergedTodayOpensTheTaskStillOpen() throws {
