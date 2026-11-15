@@ -763,6 +763,11 @@ final class PtySession: @unchecked Sendable {
         missionPromptRefusal(runningSince: runningSince, snapshot: snapshot) == nil
     }
 
+    /// See `AgentStatusMachine.promptFacts`.
+    func missionPromptFacts(now: TimeInterval) -> String {
+        state.machine.promptFacts(now: now)
+    }
+
     /// Why `acceptsMissionMessage` says no, nil when it says yes.
     func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }

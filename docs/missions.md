@@ -23,9 +23,9 @@ Click the line, grey or amber, to read the whole question and answer it in a pop
 
 ## When Nirux types into a prompt
 
-Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. The keys that went to a dialog don't count: those of a question dialog, and those that move through a permission or plan dialog's options or type the text of one (why not, an amendment) before the key that answers it. Otherwise the message waits for the end of that agent's next turn.
+Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. The keys that went to a dialog don't count: those of a question dialog, and those that move through a permission or plan dialog's options or type the text of one (why not, an amendment) before the key that answers it. Nor do the keys that only move the view or the cursor: Page Up and Down, Ctrl+Home and Ctrl+End, Shift+Up and Shift+Down, Left and Home. Otherwise the message waits for the end of that agent's next turn.
 
-When a message has waited three minutes for an agent that isn't working, the agent's row says so, a Lead's too: `2 messages waiting since 22:21`. Its tooltip says why Nirux doesn't type them, and a click shows the agent's column. Sending the agent a prompt usually lets them in. Nirux writes the reason to the system log too:
+When a message has waited three minutes for an agent that isn't working, the agent's row says so, a Lead's too: `2 messages waiting since 22:21`. Its tooltip says why Nirux doesn't type them, and a click shows the agent's column. Sending the agent a prompt usually lets them in. Within half a minute (a few minutes while it works), Nirux writes the reason to the system log, with what it read it from:
 
 ```
 log show --predicate 'subsystem == "com.xikimay.nirux" AND category == "missions"'

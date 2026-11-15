@@ -473,11 +473,16 @@ final class StuckAgentSidebarTests: XCTestCase {
             return shell.waitingMissionMessages(snapshot: processes ?? snapshot, now: time, store: store)
         }
         XCTAssertTrue(waits(at: now - 10).isEmpty, "not waiting long yet")
-        XCTAssertNotNil(ask(at: now - 10))
+        // The log says why within seconds, with what it read.
+        XCTAssertEqual(lines.count, 1)
+        let line = try XCTUnwrap(lines.first)
+        XCTAssertTrue(line.hasPrefix("untyped mission message id=\(first.id.prefix(8)) kind=question agent=\(agentUUID.prefix(8)) "
+            + "waited=175s reason=draft waiting=1 fg=claude working=0 inFlight=0 turn=- dialogs=[] prompt="), line)
+        XCTAssertTrue(line.contains(" draft=text/") && line.contains(" verdict=none ") && line.contains(" last=stop/"), line)
+        let second = try XCTUnwrap(ask(at: now - 10))
         let waiting = SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft)
         XCTAssertEqual(waits(at: now)[column.id], waiting)
-        XCTAssertEqual(lines, ["untyped mission message id=\(first.id.prefix(8)) kind=question agent=\(agentUUID.prefix(8)) "
-            + "waited=185s reason=draft waiting=2"])
+        XCTAssertEqual(lines.count, 1, "once per message and reason")
 
         // The row says so: the refresh takes a check made just before.
         shell.isSidebarExpanded = true
@@ -490,7 +495,8 @@ final class StuckAgentSidebarTests: XCTestCase {
             ($0 as? NSTextField)?.stringValue == waiting.line(now: now)
         })
         _ = waits(at: now + 30)
-        XCTAssertEqual(lines.count, 1, "once per reason")
+        XCTAssertEqual(lines.count, 2, "each message once per reason")
+        XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(second.id.prefix(8)) ") == true)
         // What Nirux just typed reads as a draft until it goes in.
         shell.missionWaits.noteTyped(into: column, at: now + 31)
         XCTAssertTrue(waits(at: now + 32).isEmpty)
@@ -510,7 +516,9 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: now + 40), isUserFocused: true)
         XCTAssertTrue(waits(at: now + 41).isEmpty, "its turn runs")
-        XCTAssertEqual(lines.count, 1)
+        // Past a few minutes, a turn holding it is logged too.
+        XCTAssertEqual(lines.count, 3)
+        XCTAssertTrue(lines.last?.contains(" reason=working waiting=2 fg=claude working=1 inFlight=1 turn=1s ") == true, lines.last ?? "")
     }
 
     // MARK: - Going in circles

@@ -67,6 +67,9 @@ extension NiruxShellView {
     /// end's verdict.
     nonisolated static let missionMessageStallAge: TimeInterval = 180
     nonisolated static let missionWaitCheckInterval: TimeInterval = 5
+    /// How long a message may wait for a reason other than a turn at work
+    /// before the log says why: past a turn end's verdict.
+    nonisolated static let missionWaitLogAge: TimeInterval = 30
     /// What Nirux types goes in within a second: a draft before then is
     /// its own text.
     nonisolated static let typedTextGrace: TimeInterval = 10
@@ -83,9 +86,10 @@ extension NiruxShellView {
     /// agent doesn't work: not those an agent other than Claude Code
     /// collects itself, nor those Nirux types into no `claude` running now
     /// (sent to one since restarted, or to one without Nirux's hooks). Each
-    /// message's reason goes to the log once. A free prompt gets one more
-    /// try, at most once a stuck-watch interval: a prompt can free up with
-    /// no turn end to try at (a subagent's dialog closing after the turn).
+    /// message's reason, with what it was read from, goes to the log once
+    /// (`missionWaitLogAge`). A free prompt gets one more try, at most once
+    /// a stuck-watch interval: a prompt can free up with no turn end to try
+    /// at (a subagent's dialog closing after the turn).
     func waitingMissionMessages(
         snapshot: ProcessSnapshot, now: TimeInterval, store: MissionStore = .shared
     ) -> [UUID: SidebarWaitingMessages] {
@@ -120,22 +124,28 @@ extension NiruxShellView {
             let pty = entry.column.pty
             if let name = pty?.foregroundProcess(snapshot: snapshot)?.name, name != "claude",
                AgentStatusMachine.isRecognizedAgentProcess(name) { continue }
-            let held = entry.messages.compactMap { message -> (message: WaitingMessage, refusal: AgentPromptRefusal?)? in
+            let refused = entry.messages.compactMap { message -> (message: WaitingMessage, refusal: AgentPromptRefusal?)? in
                 let refusal = pty.map { $0.missionPromptRefusal(runningSince: message.runningSince, snapshot: snapshot) } ?? .noClaude
-                guard refusal != .working, refusal != .draft || missionWaits.typedAt[id] == nil else { return nil }
+                guard refusal != .draft || missionWaits.typedAt[id] == nil else { return nil }
                 return (message, refusal)
             }
-            let stalled = held.filter { now - $0.message.sentAt >= Self.missionMessageStallAge }
-            retries = retries || stalled.contains { $0.refusal == nil }
-            for (message, refusal) in stalled {
+            // A turn holds a message for as long as it runs; anything else
+            // says why within seconds.
+            let overdue = refused.filter {
+                now - $0.message.sentAt >= ($0.refusal == .working ? Self.missionMessageStallAge : Self.missionWaitLogAge)
+            }
+            retries = retries || overdue.contains { $0.refusal == nil }
+            for (message, refusal) in overdue {
                 let reason = refusal?.rawValue ?? "free"
                 guard missionWaits.logged.insert("\(message.id) \(reason)").inserted else { continue }
                 let waited = Int(min(now - message.sentAt, MissionEventCLI.parentMessageLifetime * 24))
                 sideEffects.logMissionWait(
                     "untyped mission message id=\(message.id.prefix(8)) kind=\(message.kind) "
-                        + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) waiting=\(held.count)"
+                        + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) waiting=\(refused.count) "
+                        + "fg=\(pty?.foregroundProcess(snapshot: snapshot)?.name ?? "-") \(pty?.missionPromptFacts(now: now) ?? "")"
                 )
             }
+            let held = refused.filter { $0.refusal != .working }
             let typable = held.filter { $0.refusal != .restarted && ($0.refusal != .noPromptYet || pty?.agentHookKind == "claude") }
             guard typable.contains(where: { now - $0.message.sentAt >= Self.missionMessageStallAge }),
                   let oldest = typable.min(by: { $0.message.sentAt < $1.message.sentAt })

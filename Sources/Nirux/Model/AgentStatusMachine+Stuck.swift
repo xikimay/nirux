@@ -90,6 +90,23 @@ extension AgentStatusMachine {
         return nil
     }
 
+    /// What `promptRefusal` reads, for the log: ages in seconds and names,
+    /// no text.
+    func promptFacts(now: TimeInterval) -> String {
+        func age(_ time: TimeInterval?) -> String { time.map { String(Int(min(max(now - $0, 0), 1e7))) + "s" } ?? "-" }
+        let verdict = switch quietTurnEnd {
+        case .pending?: "pending"
+        case .done?: "done"
+        case .superseded?: "superseded"
+        case nil: "none"
+        }
+        let dialogs = pendingDialogs.map { "\($0.toolName ?? "?")/\($0.agentID == nil ? "main" : "sub")/\(age($0.requestedAt))" }
+        let draft = lastDraftInputAt > (lastPromptAt ?? 0) ? "\(lastDraftKind ?? "?")/\(age(lastDraftInputAt))" : "-"
+        return "working=\(hookWorking ? 1 : 0) inFlight=\(hookTurnInFlight ? 1 : 0) turn=\(age(turnStartedAt)) "
+            + "dialogs=[\(dialogs.joined(separator: ","))] prompt=\(age(lastPromptAt)) draft=\(draft) verdict=\(verdict) "
+            + "failed=\(turnFailure == nil ? 0 : 1) last=\(lastEventName ?? "-")/\(age(lastEventAt > 0 ? lastEventAt : nil))"
+    }
+
     /// When the last prompt went in, if one did since `startedAt`, the
     /// start of the `claude` in front (`/clear` counts): before one, it may
     /// still show a screen no hook reports, a startup dialog or, once

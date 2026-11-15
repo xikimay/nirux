@@ -152,6 +152,10 @@ struct AgentStatusMachine {
     /// (`takesBeforeAnswer`) and when, the last key that answered one (no
     /// reminder resets it), and the approval whose text field takes every key.
     private var lastKeyTakenByApproval: (dialog: TimeInterval, at: TimeInterval)?
+    /// What the last draft was, for the log (`keyKind`), and the last hook
+    /// event's name.
+    private(set) var lastDraftKind: String?
+    private(set) var lastEventName: String?
     private var lastApprovalAnswerAt: TimeInterval = 0
     private var approvalTextOpenedFor: TimeInterval?
     /// The agent process seen asking whether to trust its folder, and when
@@ -297,6 +301,7 @@ struct AgentStatusMachine {
     mutating func apply(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
         let now = event.timestamp
         lastEventAt = now
+        lastEventName = event.name.rawValue + (event.agentID == nil ? "" : "(sub)")
         let waitingBefore = pendingDialogs.filter { $0.approval.map { $0.sent == nil } ?? false }
         var outcome = AgentHookOutcome()
         applyEvent(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
@@ -935,8 +940,9 @@ struct AgentStatusMachine {
         // No key answered it (a click, the sidebar, another hook, or it was
         // never on screen): the keys it seemed to take may be at the prompt.
         if !dialog.waitsPastKeys, let taken = lastKeyTakenByApproval, taken.dialog == dialog.requestedAt,
-           taken.at > lastApprovalAnswerAt {
-            lastDraftInputAt = max(lastDraftInputAt, taken.at)
+           taken.at > lastApprovalAnswerAt, taken.at > lastDraftInputAt {
+            lastDraftInputAt = taken.at
+            lastDraftKind = "dialog"
         }
     }
 
@@ -1034,6 +1040,7 @@ struct AgentStatusMachine {
     mutating func notePromptRecall(now: Date) {
         guard let inFront = openDialogs.first(where: waitsForKeys) else {
             lastDraftInputAt = now.timeIntervalSince1970
+            lastDraftKind = "wheel"
             return
         }
         guard !inFront.waitsPastKeys else { return }
@@ -1069,6 +1076,41 @@ struct AgentStatusMachine {
     static func movesThroughDialog(_ keys: Data) -> Bool {
         if [Data([0x15]), Data([0x04]), Data([0x7F])].contains(keys) { return true }
         return keys.count > 1 && keys.first == 0x1B && keys != modeSwitchKey && isOneKey(keys)
+    }
+
+    /// Keys that leave the prompt as it was: Shift-Tab (the mode), Page Up
+    /// and Down, Ctrl-Home and Ctrl-End (Claude Code scrolls its
+    /// conversation), Shift-Up and Shift-Down (the effort), Left and Home
+    /// with or without a modifier, Option-Left (the cursor). Not Up or Down
+    /// alone, which recall an old prompt, nor Right or End, which may take
+    /// in a suggested prompt.
+    static func leavesPromptAsItWas(_ keys: Data) -> Bool {
+        if keys == modeSwitchKey || keys == Data([0x1B, 0x62]) { return true }
+        guard (3...12).contains(keys.count), keys.first == 0x1B,
+              let text = String(data: keys.dropFirst(), encoding: .ascii), let final = text.last
+        else { return false }
+        if text == "OD" || text == "OH" { return true }
+        guard text.hasPrefix("[") else { return false }
+        let fields = text.dropFirst().dropLast().split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+        let modifier = fields.count == 2 && fields[0] == "1" ? Int(fields[1]) : nil
+        switch final {
+        case "D", "H": return fields == [""] || (modifier ?? 0) > 1
+        case "A", "B": return modifier == 2
+        case "F": return modifier == 5
+        case "~": return ["1", "5", "6"].contains(fields.first ?? "")
+        default: return false
+        }
+    }
+
+    /// What kind of key a write was, for the log: never its characters.
+    static func keyKind(_ keys: Data?) -> String {
+        guard let keys else { return "key" }
+        if keys == Data([0x0D]) { return "enter" }
+        if isCancelKey(keys) { return "cancel" }
+        if isUpDownArrows(keys) { return "upDown" }
+        if keys.first == 0x1B { return isOneKey(keys) ? "escape" : "paste" }
+        if let byte = keys.first, keys.count == 1, byte < 0x20 || byte == 0x7F { return "control" }
+        return isOneKey(keys) ? "text" : "paste"
     }
 
     /// One printable character, a space too, but an option's number.
@@ -1136,7 +1178,10 @@ struct AgentStatusMachine {
         // A mode switch (Shift-Tab) leaves the prompt as it was; any other
         // key may leave text there, or open a screen no hook tells of (Esc
         // Esc's rewind picker, Ctrl-O's transcript, a slash command's).
-        if !(answersDialog && (oneKey || takenBeforeAnswer)), keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        if !(answersDialog && (oneKey || takenBeforeAnswer)), !(keys.map(Self.leavesPromptAsItWas) ?? false) {
+            lastDraftInputAt = time
+            lastDraftKind = Self.keyKind(keys)
+        }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
@@ -1388,6 +1433,8 @@ struct AgentStatusMachine {
         lastDraftInputAt = 0
         lastKeyTakenByApproval = nil
         lastApprovalAnswerAt = 0
+        lastDraftKind = nil
+        lastEventName = nil
         approvalTextOpenedFor = nil
         circling.reset()
     }
