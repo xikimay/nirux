@@ -117,6 +117,9 @@ final class CommandBarView: NSView {
             host.addSubview(button)
         }
         searchButton.setAccessibilityLabel("Search, Command P")
+        // A press on it while ⌘P shows closes the palette, as the title
+        // bar's Search does (`CommandPalette.isSearchButtonPress`).
+        searchButton.identifier = TitleBarActions.searchButtonID
         // Before the first content: no state to show, words to say.
         taskIcon.isHidden = true
         spaceButton.setAccessibilityLabel("Space")

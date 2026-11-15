@@ -92,6 +92,7 @@ final class CommandBarViewTests: XCTestCase {
         bar.onWaiting = { pressed.append("waiting") }
         for button in [bar.spaceButton, bar.taskButton, bar.searchButton, bar.waitingButton] { button.performClick(nil) }
         XCTAssertEqual(pressed, ["space", "task", "search", "waiting"])
+        XCTAssertEqual(bar.searchButton.identifier, TitleBarActions.searchButtonID, "a press on it closes an open ⌘P")
     }
 
     /// VoiceOver finds the four segments, named, and nothing else: it reads

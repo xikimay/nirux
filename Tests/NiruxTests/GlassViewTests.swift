@@ -85,4 +85,24 @@ final class GlassViewTests: XCTestCase {
         XCTAssertEqual(view.contentView.layer?.cornerRadius, 5)
         XCTAssertTrue(view.castsShadow)
     }
+
+    /// A glass that is its window's background (⌘P's panel) leaves the
+    /// shadow to the window, and its frost blends what is behind the window.
+    func testAGlassFillingItsWindowLeavesTheShadowToIt() {
+        func glass(_ level: InterfaceTransparency, fillsWindow: Bool) -> GlassView {
+            let view = GlassView(role: .floating, level: level, cornerRadius: 12, fillsWindow: fillsWindow, resolveLevel: { $0 })
+            view.frame = NSRect(x: 0, y: 0, width: 300, height: 120)
+            view.layoutSubtreeIfNeeded()
+            return view
+        }
+        // Solid on every Mac, where a floating glass casts its own shadow.
+        XCTAssertTrue(glass(.opaque, fillsWindow: false).castsShadow)
+        XCTAssertFalse(glass(.opaque, fillsWindow: true).castsShadow)
+        let frost = glass(.glass, fillsWindow: true)
+        XCTAssertFalse(frost.castsShadow)
+        if frost.backing == .frosted {
+            XCTAssertTrue(frost.blendsBehindWindow)
+            XCTAssertFalse(glass(.glass, fillsWindow: false).blendsBehindWindow, "over the work in its window, it blends within it")
+        }
+    }
 }

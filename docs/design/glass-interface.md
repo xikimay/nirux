@@ -65,8 +65,9 @@ view's tint) beside the exact Opaque render, and they get tuned with the user
 on a demo at the end of phase 2. The view follows macOS's Reduce transparency and Increase
 contrast as they change, and keeps the keyboard where it was when its content
 moves into or out of macOS 26's glass. A floating glass in a window of its
-own (⌘P if it stays a panel) needs blending behind the window and no layer
-shadow: step 2.4 adds that if it does.
+own (⌘P's panel) is made with `fillsWindow`: its frost blends what is behind
+the window, and the window casts the shadow, which a layer would have cut at
+the window's edge.
 
 ![The glass at each level: Opaque exact, the others approximated](../images/glass-levels.png)
 
@@ -156,6 +157,23 @@ as it opens whatever question its column holds.
 ![The inbox with three requests: Opaque exact, Glass approximated](../images/request-inbox.png)
 
 ![The rail's callout: Opaque exact, Glass approximated](../images/request-callout.png)
+
+## ⌘P under the bar
+
+`CommandPalette.show(relativeTo:sections:placement:)` with `.underBar(bar,
+level:)` hangs the palette 8 pt under the command bar (the bar's view: the
+palette finds it on screen), centred on it, inside its window and on the screen,
+at today's size; it unfolds from the bar (not under Reduce motion), and the field and
+the rows sit on floating glass that fills the panel. While the bar shows
+nowhere, the palette opens centred. Today's centred palette stays the
+default and doesn't change. A press on the bar's search segment closes an
+open palette, as the title bar's Search does. The scopes (tasks, sessions,
+files, actions) come later. For the demo at the end of phase 2: macOS 26's
+glass in a window of its own (that it shows what is behind the window, and
+whether the window's shadow doubles its edge). For phase 3: the level
+follows Settings as the other views' do, set by the host.
+
+![⌘P under the command bar: Opaque exact, Glass approximated](../images/palette-under-bar.png)
 
 ## Plan
 
