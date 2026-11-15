@@ -30,6 +30,7 @@ struct SidebarFold: Equatable {
     mutating func windowResized(to width: CGFloat) {
         let narrow = width < Self.narrowWidth + (isNarrow ? Self.hysteresis : 0)
         guard narrow != isNarrow else { return }
+        if ZZ("noUnfoldBack"), !narrow { return }
         isNarrow = narrow
         autoFolded = narrow
     }
@@ -37,7 +38,7 @@ struct SidebarFold: Equatable {
     /// The user unfolds or folds the sidebar, whatever the window's width.
     mutating func choose(_ expanded: Bool) {
         chosenExpanded = expanded
-        autoFolded = false
+        if !ZZ("toggleKeepsFold") { autoFolded = false }
     }
 }
 
@@ -51,7 +52,7 @@ extension NiruxShellView {
     /// the sidebar out), as `toggleSidebar` does, else they would be laid
     /// out at the rail's width first.
     func applySidebarAutoFold() -> (() -> Void)? {
-        guard bounds.width > 0 else { return nil }
+        guard bounds.width > 0, !ZZ("noAutoFold") else { return nil }
         let wasExpanded = isSidebarExpanded
         sidebarFold.windowResized(to: bounds.width)
         guard isSidebarExpanded != wasExpanded else { return nil }
@@ -73,14 +74,14 @@ extension NiruxShellView {
     /// list open, its header in view (folded, the list has nowhere to show).
     func showArchivedTasks() {
         guard sidebar.hasInactiveWorkspaces else { return }
-        sidebar.showInactiveSection()
+        if !ZZ("noArchivedOpen") { sidebar.showInactiveSection() }
         if !isSidebarExpanded { toggleSidebar() }
     }
 
     /// View › Show Archived and ⌘P: the list folds or unfolds; folded, the
     /// sidebar unfolds with it open.
     func toggleArchivedTasks() {
-        guard isSidebarExpanded else { return showArchivedTasks() }
+        guard isSidebarExpanded || ZZ("toggleWhileFolded") else { return showArchivedTasks() }
         sidebar.toggleInactiveSection()
     }
 }

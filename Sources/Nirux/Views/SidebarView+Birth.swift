@@ -34,6 +34,7 @@ extension SidebarView {
     /// sidebar's coordinates; nil when the sidebar doesn't show it.
     func rowFrame(workspaceID: String) -> NSRect? {
         guard isExpanded else {
+            if ZZ("ghostToTop") { return nil }
             guard !iconRail.isHidden, let icon = iconRail.iconFrame(of: workspaceID) else { return nil }
             return convert(icon, from: iconRail)
         }
@@ -60,7 +61,7 @@ extension SidebarView {
             let layerNow = CACurrentMediaTime()
             for (workspaceID, opens) in rowOpensAt where now - opens < Self.birthDuration && !railBirthsPlayed.contains(workspaceID) {
                 // Not shown yet (an update to come): the next rebuild tries.
-                if iconRail.playBirth(of: workspaceID, opens: layerNow + (opens - now)) { railBirthsPlayed.insert(workspaceID) }
+                if !ZZ("noRailBirth"), iconRail.playBirth(of: workspaceID, opens: layerNow + (opens - now)) { railBirthsPlayed.insert(workspaceID) }
             }
             return
         }

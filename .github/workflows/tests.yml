@@ -54,5 +54,10 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the flake gate of IconRailFlowTests (a new UI flow
+      # class): its mutants, then ten runs, three at a time, next to two
+      # heavy flow classes.
+      - name: Flake gate
+        run: |
+          scripts/mutants-class.sh NiruxTests.IconRailFlowTests noBoard noArchivedOpen noAutoFold noUnfoldBack toggleKeepsFold ghostToTop noRailBirth toggleWhileFolded
+          scripts/repeat-class.sh NiruxTests.IconRailFlowTests 10 3 NiruxTests.PaletteCommandFlowTests NiruxTests.TaskBirthTests
