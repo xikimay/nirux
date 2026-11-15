@@ -1027,8 +1027,12 @@ struct AgentStatusMachine {
     /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
     /// keystroke: the user scrolled, typed nothing.
     mutating func notePromptRecall(now: Date) {
-        // Over a dialog that waits for keys, they move among its options.
-        guard !openDialogs.contains(where: waitsForKeys) else { return }
+        // Over a listed dialog, they move among its options (out of an
+        // option's text too).
+        guard !openDialogs.contains(where: { $0.requestedAt >= lastCancelKeyAt }) else {
+            approvalTextOpenedFor = nil
+            return
+        }
         lastDraftInputAt = now.timeIntervalSince1970
         lastDraftKind = "wheel"
     }
@@ -1045,24 +1049,28 @@ struct AgentStatusMachine {
         }
     }
 
-    /// Whether `keys` answer an approval or a plan: Enter, Esc, Ctrl-C, or
-    /// an option's number. Claude Code's dialogs bind no other letter (j
-    /// and k move); Tab, or a paste, opens the text of an option (why not, an
-    /// amendment), where a number is text, until Enter, Esc, Ctrl-C, Up,
-    /// Down or Tab again.
+    /// Whether `keys` answer an approval or a plan, for its row: Enter, Esc,
+    /// Ctrl-C, or an option's number. Claude Code's dialogs bind no other
+    /// letter (j and k move); Tab, or a paste, opens the text of an option
+    /// (why not, an amendment), where a number is text, until Enter, Esc,
+    /// Ctrl-C, Up, Down or Tab again.
     private mutating func answersApproval(_ keys: Data?, of dialog: AgentPermissionRequest) -> Bool {
         guard let keys else { return true }
         let inText = approvalTextOpenedFor == dialog.requestedAt
-        if keys == Data([0x0D]) || Self.isCancelKey(keys) || (keys == Data([0x09]) && inText) || Self.isUpDownArrows(keys) {
+        let answers = keys == Self.enterKey || Self.isCancelKey(keys)
+        if answers || (keys == Self.tabKey && inText) || Self.isUpDownArrows(keys) {
             approvalTextOpenedFor = nil
-            return keys == Data([0x0D]) || Self.isCancelKey(keys)
+            return answers
         }
-        if keys == Data([0x09]) || !Self.isOneKey(keys) {
+        if keys == Self.tabKey || !Self.isOneKey(keys) {
             approvalTextOpenedFor = dialog.requestedAt
             return false
         }
-        return !inText && String(data: keys, encoding: .utf8).map { ("1"..."9").contains($0) } == true
+        return !inText && keys.count == 1 && (0x31...0x39).contains(keys[keys.startIndex])
     }
+
+    private static let enterKey = Data([0x0D])
+    private static let tabKey = Data([0x09])
 
     /// Keys that leave the prompt as it was, with Claude Code's default
     /// bindings: Shift-Tab (the mode), Page Up and Down, Ctrl-Home and
@@ -1129,31 +1137,28 @@ struct AgentStatusMachine {
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date, keys: Data? = nil) {
         let time = now.timeIntervalSince1970
-        // The dialog in front takes the keys: a question dialog's don't answer
-        // an approval queued behind it. A question dialog takes them until Esc
-        // or Ctrl-C (`waitsForKeys`). An approval or a plan takes them until
-        // one answers it (`answersApproval`), and none is a draft; answered,
-        // it stays listed until its tool ends (no hook between), and later keys
-        // reach the prompt. Nothing turns a key a dialog took into a draft later.
-        let inFront = openDialogs.first(where: waitsForKeys)
-        let reachesDialog: Bool
-        switch inFront {
+        // A listed dialog takes every key until Esc or Ctrl-C ends it, and
+        // none is a draft, nor becomes one when it closes. Its row waits
+        // until a key answers it: a question at its submit's PostToolUse, an
+        // approval or a plan at `answersApproval`. The dialog in front takes
+        // the keys: a question dialog's don't answer an approval behind it.
+        // Known limit: what is typed at the prompt while an approved command
+        // runs, its dialog still listed, is no draft either.
+        let takenByDialog = openDialogs.contains { $0.requestedAt >= lastCancelKeyAt }
+        switch openDialogs.first(where: waitsForKeys) {
         case nil:
             lastKeystrokeAt = time
-            reachesDialog = false
         case let question? where question.waitsPastKeys:
-            // A paste or dictation is text, whatever a question waits for.
-            reachesDialog = keys.map(Self.isOneKey) ?? true
+            break
         case let approval?:
             if answersApproval(keys, of: approval) { lastKeystrokeAt = time }
-            reachesDialog = true
         }
         if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
         lastInputAt = time
         // Any other key may leave text at the prompt, or open a screen no hook
         // tells of (Esc Esc's rewind picker, Ctrl-O's transcript, a slash
         // command's), but those that leave it as it was.
-        if !reachesDialog, !(keys.map(Self.leavesPromptAsItWas) ?? false) {
+        if !takenByDialog, !(keys.map(Self.leavesPromptAsItWas) ?? false) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
         }

@@ -344,13 +344,10 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(machine), .dialog)
     }
 
-    /// Keys a dialog took aren't a draft at the prompt, and nothing turns
-    /// them into one when it closes: once its turn is over, a message goes
-    /// in. A question dialog takes every key until its submit; an approval or
-    /// a plan takes them until Enter, Esc, Ctrl-C or a number answers it (Tab
-    /// or a paste opens an option's text, where a number is text); a wheel
-    /// scroll's arrows move among a dialog's options. After its answer, or
-    /// after Esc, a key may be a draft.
+    /// A listed dialog takes every key, a paste too, until Esc or Ctrl-C:
+    /// none is a draft at the prompt, nor becomes one when it closes, and
+    /// once its turn is over a message goes in. A wheel scroll's arrows move
+    /// among its options. Once it closed, or after Esc, a key may be a draft.
     func testPromptIsFreeAfterADialogAnsweredWithItsKeys() {
         let down = "\u{1B}[B", up = "\u{1B}[A", esc = "\u{1B}"
         func dialog(_ tool: String, keys: [String], scrolls: Bool = false) -> AgentStatusMachine {
@@ -379,11 +376,14 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(dialog("Bash", keys: [down, "\u{1B}[200~/tmp/x\u{1B}[201~", "2", "\r"])), "a paste opens its text")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, down])), "answered with a click")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, down, esc])), "denied with Esc after moving")
+        XCTAssertNil(refusal(dialog("AskUserQuestion", keys: [down, "\u{1B}[200~yes\u{1B}[201~", "\r"])), "a paste in a question's text")
         XCTAssertNil(refusal(dialog("AskUserQuestion", keys: ["\r"], scrolls: true)), "a wheel scroll in the dialog")
         XCTAssertNil(refusal(dialog("Bash", keys: [], scrolls: true)))
 
-        XCTAssertEqual(refusal(dialog("Bash", keys: [down, "\r", "x"])), .draft, "typed while the approved call ran")
-        XCTAssertEqual(refusal(dialog("Bash", keys: [down, esc, "x"])), .draft, "typed once Esc closed it")
+        var typedAfter = dialog("Bash", keys: [down, "\r"])
+        typedAfter.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 70), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(typedAfter), .draft, "typed once it closed")
+        XCTAssertEqual(refusal(dialog("Bash", keys: [down, esc, "x"])), .draft, "typed once Esc ended it")
         var scrolled = dialog("Bash", keys: ["\r"])
         scrolled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 70))
         XCTAssertEqual(refusal(scrolled), .draft, "at the prompt, Up recalls an old one")

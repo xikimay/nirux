@@ -513,12 +513,12 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "Ctrl-O's transcript")
         at = try turn(keys: [("\r", 3)], dialog: true)
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog's answer")
+        // Known limit: typed at the prompt while its tool runs, the dialog
+        // still listed, it is no draft either.
         at = try turn(keys: [("\r", 3), ("and add a test", 3.5)], dialog: true)
-        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "typed while its tool runs")
-        // An approval takes keys until one answers it: a paste or text in
-        // one write goes to an option's text, Down moves. A key after its
-        // answer may be at the prompt: refused, the safe side (the user
-        // answers at the terminal or with Reply…).
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "typed while its tool runs")
+        // A listed dialog takes every key: a paste or text in one write goes
+        // to an option's text, Down moves, a number answers.
         at = try turn(keys: [("\u{1B}[200~and add a test\u{1B}[201~", 3)], dialog: true)
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste goes to an option's text")
         at = try turn(keys: [("ok", 3)], dialog: true)
@@ -526,7 +526,7 @@ final class TurnEndClassificationTests: XCTestCase {
         at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "moved through, then answered")
         at = try turn(keys: [("2", 3), ("\r", 3.2)], dialog: true)
-        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a key after its answer")
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a key after its answer")
         // Its terminal still draws: a Stop hook's continuation at work.
         at = try ended()
         machine.noteRead(now: Date(timeIntervalSince1970: at + 2))
