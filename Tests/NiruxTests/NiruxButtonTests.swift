@@ -39,9 +39,9 @@ final class NiruxButtonTests: XCTestCase {
         )
     }
 
-    /// The pointer drives the look: hover on entering, the press with the
-    /// cell's highlight (so it lets go before the action runs), and no hover
-    /// left behind on a button that hid.
+    /// The pointer drives the look: hover on entering, pressed while the
+    /// cell highlights (AppKit highlights the cell, not the control, during
+    /// a click), and no hover left behind on a hidden button.
     func testThePointerDrivesTheLook() throws {
         let button = NiruxButton(title: "Deny", kind: .secondary)
         func fill() -> CGColor? { button.layer?.backgroundColor }
@@ -54,13 +54,16 @@ final class NiruxButtonTests: XCTestCase {
         ))
         button.mouseEntered(with: entered)
         XCTAssertEqual(fill(), look(hovered: true, pressed: false))
-        button.highlight(true)
+        let cell = try XCTUnwrap(button.cell)
+        cell.highlight(true, withFrame: button.bounds, in: button)
         XCTAssertEqual(fill(), look(hovered: true, pressed: true))
-        button.highlight(false)
+        cell.highlight(false, withFrame: button.bounds, in: button)
         XCTAssertEqual(fill(), look(hovered: true, pressed: false))
         button.isHidden = true
         button.isHidden = false
         XCTAssertEqual(fill(), look(hovered: false, pressed: false), "shown again, not hovered")
+        XCTAssertTrue(button.refusesFirstResponder, "a click leaves the keyboard where it was")
+        XCTAssertFalse(NiruxButton(title: "Start", kind: .primary, focusable: true).refusesFirstResponder)
     }
 
     /// A capsule of the size's height, as wide as its title, which keeps the

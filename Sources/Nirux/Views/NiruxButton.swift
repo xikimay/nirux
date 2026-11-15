@@ -15,7 +15,7 @@ final class NiruxButton: NSButton {
         case regular, small
 
         var height: CGFloat { self == .regular ? 24 : 20 }
-        var padding: CGFloat { self == .regular ? 11 : 8 }
+        var padding: CGFloat { self == .regular ? 12 : 8 }
         var font: NSFont { self == .regular ? Theme.Font.button : Theme.Font.buttonSmall }
     }
 
@@ -30,7 +30,9 @@ final class NiruxButton: NSButton {
     let size: Size
 
     private var isHovered = false { didSet { if isHovered != oldValue { applyLook() } } }
-    private var isPressed = false { didSet { if isPressed != oldValue { applyLook() } } }
+    /// While the cell highlights: during a press with the pointer on the
+    /// button, and while its action runs.
+    fileprivate var isPressed = false { didSet { if isPressed != oldValue { applyLook() } } }
     private var hoverArea: NSTrackingArea?
     /// Setting the attributed title may set the title again.
     private var isApplyingLook = false
@@ -38,7 +40,18 @@ final class NiruxButton: NSButton {
     /// sets the attributed title again.
     private var titleColor: NSColor?
 
-    init(title: String, kind: Kind, size: Size = .regular, target: AnyObject? = nil, action: Selector? = nil) {
+    override class var cellClass: AnyClass? {
+        get { NiruxButtonCell.self }
+        set {}
+    }
+
+    /// `focusable`: in the key loop under Full Keyboard Access (a sheet's,
+    /// Settings' buttons); otherwise a click leaves the keyboard where it
+    /// was (the terminal, Monaco).
+    init(
+        title: String, kind: Kind, size: Size = .regular, focusable: Bool = false,
+        target: AnyObject? = nil, action: Selector? = nil
+    ) {
         self.kind = kind
         self.size = size
         super.init(frame: NSRect(x: 0, y: 0, width: 0, height: size.height))
@@ -46,9 +59,7 @@ final class NiruxButton: NSButton {
         self.target = target
         self.action = action
         font = size.font
-        // A click leaves the keyboard where it was (the terminal, Monaco); a
-        // sheet that wants its buttons in the key loop turns this off.
-        refusesFirstResponder = true
+        refusesFirstResponder = !focusable
         if kind == .glass, Self.drawsSystemGlass {
             if #available(macOS 26, *) { bezelStyle = .glass }
             controlSize = size == .small ? .small : .regular
@@ -128,8 +139,10 @@ final class NiruxButton: NSButton {
         setFrameSize(intrinsicContentSize)
     }
 
-    override var isHidden: Bool {
-        didSet { if isHidden { isHovered = false } }
+    /// Hidden, itself or with its container: no hover left behind.
+    override func viewDidHide() {
+        super.viewDidHide()
+        isHovered = false
     }
 
     override func viewDidMoveToWindow() {
@@ -149,14 +162,6 @@ final class NiruxButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
-
-    /// Pressed while the cell highlights: on and off as the pointer moves in
-    /// and out during a press, off before the action runs. Without a border
-    /// the cell draws no highlight of its own.
-    override func highlight(_ flag: Bool) {
-        super.highlight(flag)
-        isPressed = flag
-    }
 
     /// The tracking loop of a press eats the pointer's exit: after it, the
     /// hover follows where the pointer is.
@@ -195,5 +200,19 @@ final class NiruxButton: NSButton {
         attributedTitle = NSAttributedString(string: title, attributes: [
             .font: size.font, .foregroundColor: look.text, .paragraphStyle: paragraph,
         ])
+    }
+}
+
+/// Tells its button when it highlights (AppKit highlights the cell, not the
+/// control, during a press, a `performClick` or a key equivalent), and draws
+/// the button's own title: AppKit would recolour a disabled one.
+private final class NiruxButtonCell: NSButtonCell {
+    override func highlight(_ flag: Bool, withFrame cellFrame: NSRect, in controlView: NSView) {
+        super.highlight(flag, withFrame: cellFrame, in: controlView)
+        (controlView as? NiruxButton)?.isPressed = flag
+    }
+
+    override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
+        super.drawTitle((controlView as? NSButton)?.attributedTitle ?? title, withFrame: frame, in: controlView)
     }
 }
