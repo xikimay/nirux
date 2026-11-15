@@ -193,7 +193,7 @@ final class WorktreeCleanupPanel: NSObject {
         checkbox.isEnabled = Self.isSelectable(candidate) && !isRunning && !isFinished
         checkbox.state = checkedPaths.contains(candidate.path) && Self.isSelectable(candidate) ? .on : .off
 
-        let text: String
+        var text: String
         let color: NSColor
         var toolTip: String?
         switch results[candidate.path] {
@@ -204,9 +204,9 @@ final class WorktreeCleanupPanel: NSObject {
         case .failed(let message)?:
             (text, color, toolTip) = (message.replacingOccurrences(of: "\n", with: " "), .systemRed, message)
         case .skipped(let message)?:
-            (text, color) = (message.asWarning, .niruxWarning)
+            (text, color, toolTip) = (message.asWarning, .niruxWarning, message)
         case nil:
-            if case .blocked = candidate.availability { text = candidate.detail.asWarning } else { text = candidate.detail }
+            text = candidate.detail
             switch candidate.availability {
             case .checking:
                 color = NSColor.white.withAlphaComponent(0.35)
@@ -214,6 +214,7 @@ final class WorktreeCleanupPanel: NSObject {
                 color = NSColor.white.withAlphaComponent(0.35)
                 toolTip = candidate.report?.problems.joined(separator: "\n")
             case .blocked(let problems):
+                text = text.asWarning
                 color = .niruxWarning
                 toolTip = problems.joined(separator: "\n")
             case .ready, .closeOnly:

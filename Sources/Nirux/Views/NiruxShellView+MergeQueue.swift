@@ -374,7 +374,6 @@ extension NiruxShellView {
             isRunning: shown.isRunning,
             // Stop All stays in reach while any queue isn't stopping yet.
             isStopping: stopsAll ? running.allSatisfy { $0.engine?.phase == .stopping } : engine.phase == .stopping,
-            isDryRun: shown.isDryRun,
             isFailure: isFailure,
             stopsAll: stopsAll
         )

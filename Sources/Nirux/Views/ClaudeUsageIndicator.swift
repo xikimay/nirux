@@ -1,8 +1,8 @@
 import AppKit
 
 /// "5h 42% · 7d 18%" at the trailing end of the main window's title bar:
-/// the Claude plan usage limits (see `ClaudeUsageLimits`), orange from 80%
-/// of either window like a nearly full context. The tooltip gives each
+/// the Claude plan usage limits (see `ClaudeUsageLimits`), a warning from
+/// 80% of either window like a nearly full context. The tooltip gives each
 /// window's reset. While the option is off or nothing is known it takes
 /// no room: the controller's `isHidden` only works for top and bottom
 /// accessories, so the view hides and shrinks to nothing itself.

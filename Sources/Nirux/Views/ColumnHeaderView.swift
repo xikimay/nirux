@@ -581,7 +581,7 @@ final class ColumnHeaderButton: NSButton {
 }
 
 /// A caption among a header's accessories (the terminal's context usage):
-/// hidden while empty or when it doesn't fit.
+/// hidden while empty or when none of its texts fits.
 @MainActor
 final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
     convenience init() {
@@ -590,13 +590,23 @@ final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
         textColor = Theme.Color.textTertiary
     }
 
+    /// What it says, then shorter words for a narrow header (a warning's
+    /// without "⚠︎ "): it shows the first that fits.
+    var texts: [String] = [] {
+        didSet { stringValue = texts.first ?? "" }
+    }
+
     var accessoryHeight: CGFloat { 16 }
     var accessoryInset: CGFloat { ColumnHeaderView.labelInset }
 
     func width(fitting maxWidth: CGFloat) -> CGFloat {
-        guard !stringValue.isEmpty else { return 0 }
-        let width = ColumnHeaderView.textWidth(self)
-        return width <= maxWidth ? width : 0
+        for text in texts where !text.isEmpty {
+            stringValue = text
+            let width = ColumnHeaderView.textWidth(self)
+            if width <= maxWidth { return width }
+        }
+        stringValue = texts.first ?? ""
+        return 0
     }
 }
 

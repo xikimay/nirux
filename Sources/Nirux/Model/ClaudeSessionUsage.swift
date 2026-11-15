@@ -201,7 +201,7 @@ struct ClaudeTranscriptUsageParser {
 // MARK: - Display
 
 extension ClaudeSessionUsage {
-    /// From this share of the window on, the label turns orange.
+    /// From this share of the window on, the label says it as a warning.
     static let nearlyFullFraction = 0.8
 
     /// Column header text: "ctx 62%" when the window is known, "ctx 124k"

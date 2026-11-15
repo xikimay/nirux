@@ -23,7 +23,6 @@ final class StatusBarView: NSView {
         var tooltip: String?
         var isRunning: Bool
         var isStopping = false
-        var isDryRun: Bool
         /// Stopped by a problem, not by the user.
         var isFailure = false
         /// Several queues run: Stop stops them all.

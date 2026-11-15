@@ -97,6 +97,11 @@ final class ThemeGuardTests: XCTestCase {
     ]
 
     /// 1-based lines of `path` with a literal color, `.darkAqua` or `niruxAccent`.
+    /// `systemOrange`, `NSColor.yellow`, `= .orange`, `(.systemYellow`…: a colour, not a space's colour name.
+    private static let amberLookAlike = try! NSRegularExpression(
+        pattern: #"\bsystem(Orange|Yellow)\b|\bNSColor\.(orange|yellow)\b|[:=(,?]\s*\.(orange|yellow)\b"#
+    )
+
     private func offendingLines(in path: String) throws -> [Int] {
         // `\s*` spans newlines: the codebase splits long initializers over lines.
         let literalColor = try NSRegularExpression(pattern: #"""
@@ -118,10 +123,10 @@ final class ThemeGuardTests: XCTestCase {
             if line.contains(".darkAqua") || (line.contains("niruxAccent") && !isAliasDefinition) {
                 lines.append(index + 1)
             }
-            // Orange reads as amber, which says an agent waits for the user: a warning is `NSColor.niruxWarning`.
-            // Git's mark of a modified file keeps the colour editors give it.
+            // Orange or yellow reads as amber, which says something waits for the user's answer: a warning is
+            // `NSColor.niruxWarning`. Git's mark of a modified file keeps the colour editors give it.
             let isGitMark = path == "Views/EditorFileTree.swift" && line.contains("case .modified")
-            if line.contains("systemOrange") || line.contains("NSColor.orange"), !isGitMark {
+            if !isGitMark, Self.amberLookAlike.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
                 lines.append(index + 1)
             }
         }
