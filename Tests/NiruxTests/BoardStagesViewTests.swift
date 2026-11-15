@@ -1174,8 +1174,13 @@ final class BoardStagesViewTests: XCTestCase {
     /// today" entry, in the Board's order; Space or Return opens the task,
     /// Control-Return shows the menu. Without it, they aren't stops.
     func testTheKeyboardReachesEachLineAndEntry() throws {
+        // Not the process's last event: a click another test sent would refuse the keyboard.
         BoardStagesKeyboard.isFullAccess = { true }
-        defer { BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled } }
+        BoardStagesKeyboard.currentEvent = { nil }
+        defer {
+            BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+            BoardStagesKeyboard.currentEvent = { NSApp.currentEvent }
+        }
         var withMenu = line("b")
         withMenu.menu = [.openWorktree(path: "/p/b", title: "b")]
         let merged = [BoardStages.Merged(lineID: "a", title: "Fix 7", number: 7, mergedAt: now - 60, cleanUp: .offered)]
