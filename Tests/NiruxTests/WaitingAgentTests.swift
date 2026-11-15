@@ -122,12 +122,25 @@ final class WaitingAgentTests: XCTestCase {
         machine.noteKeystroke(now: at(13.1), keys: Data([0x1B]))
         apply(event(.notification, at: 13, type: "permission_prompt"))
         XCTAssertNil(wait(at: 14), "a reminder sent before the Esc")
-        // An approval's first key is its answer, as before.
+        // An approval waits while Up, Down or an option's text (Tab, then any
+        // key) go in, until a key answers it.
         machine = AgentStatusMachine()
         startTurn()
         apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
         machine.noteKeystroke(now: at(6), keys: Data((esc + "[B").utf8))
-        XCTAssertNil(wait(at: 7))
+        XCTAssertEqual(wait(at: 7)?.since, t0 + 5, "moving")
+        for keys in ["\t", "n", "o", "2"] { machine.noteKeystroke(now: at(7), keys: Data(keys.utf8)) }
+        XCTAssertEqual(wait(at: 7.5)?.since, t0 + 5, "saying why not")
+        machine.noteKeystroke(now: at(8), keys: Data("\r".utf8))
+        XCTAssertNil(wait(at: 9))
+        // Down leaves the text: a number answers again.
+        machine = AgentStatusMachine()
+        startTurn()
+        apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
+        for keys in ["\t", "x", esc + "[B"] { machine.noteKeystroke(now: at(6), keys: Data(keys.utf8)) }
+        XCTAssertEqual(wait(at: 7)?.since, t0 + 5)
+        machine.noteKeystroke(now: at(8), keys: Data("1".utf8))
+        XCTAssertNil(wait(at: 9))
     }
 
     /// The question dialog in front takes the keys: they don't answer a

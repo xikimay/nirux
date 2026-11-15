@@ -344,6 +344,76 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(machine), .dialog)
     }
 
+    /// Keys a dialog took aren't a draft at the prompt, and nothing turns
+    /// them into one when it closes: once its turn is over, a message goes
+    /// in. A question dialog takes every key until its submit; an approval or
+    /// a plan takes them until Enter, Esc, Ctrl-C or a number answers it (Tab
+    /// or a paste opens an option's text, where a number is text); a wheel
+    /// scroll's arrows move among a dialog's options. After its answer, or
+    /// after Esc, a key may be a draft.
+    func testPromptIsFreeAfterADialogAnsweredWithItsKeys() {
+        let down = "\u{1B}[B", up = "\u{1B}[A", esc = "\u{1B}"
+        func dialog(_ tool: String, keys: [String], scrolls: Bool = false) -> AgentStatusMachine {
+            var machine = idleMachine()
+            _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+            _ = machine.apply(hook(.preToolUse, at: 15, tool: tool), isUserFocused: false)
+            _ = machine.apply(hook(.permissionRequest, at: 15, tool: tool, key: "k"), isUserFocused: false)
+            _ = machine.apply(AgentHookEvent(
+                kind: .claude, name: .notification, sessionID: "lead", notificationType: "permission_prompt", timestamp: t0 + 21
+            ), isUserFocused: false)
+            if scrolls { machine.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 25)) }
+            for (index, key) in keys.enumerated() {
+                machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 30 + Double(index)), keys: Data(key.utf8))
+            }
+            _ = machine.apply(hook(.postToolUse, at: 50, tool: tool, key: "k"), isUserFocused: false)
+            _ = machine.apply(hook(.stop, at: 60), isUserFocused: false)
+            return machine
+        }
+        // Two questions: an option for the first, two for the second, sent.
+        XCTAssertNil(refusal(dialog("AskUserQuestion", keys: [down, "\r", down, " ", down, " ", "\t", "\r"])))
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, "\r"])))
+        XCTAssertNil(refusal(dialog("ExitPlanMode", keys: [down, down, up, "\r"])))
+        XCTAssertNil(refusal(dialog("Bash", keys: ["2"])), "an option's number")
+        XCTAssertNil(refusal(dialog("Bash", keys: ["n", "2"])), "a letter out of habit, then the number")
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, down, "\t", "u", "s", "e", " ", "v", "2", "\u{7F}", "\r"])), "why not")
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, "\u{1B}[200~/tmp/x\u{1B}[201~", "2", "\r"])), "a paste opens its text")
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, down])), "answered with a click")
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, down, esc])), "denied with Esc after moving")
+        XCTAssertNil(refusal(dialog("AskUserQuestion", keys: ["\r"], scrolls: true)), "a wheel scroll in the dialog")
+        XCTAssertNil(refusal(dialog("Bash", keys: [], scrolls: true)))
+
+        XCTAssertEqual(refusal(dialog("Bash", keys: [down, "\r", "x"])), .draft, "typed while the approved call ran")
+        XCTAssertEqual(refusal(dialog("Bash", keys: [down, esc, "x"])), .draft, "typed once Esc closed it")
+        var scrolled = dialog("Bash", keys: ["\r"])
+        scrolled.notePromptRecall(now: Date(timeIntervalSince1970: t0 + 70))
+        XCTAssertEqual(refusal(scrolled), .draft, "at the prompt, Up recalls an old one")
+    }
+
+    /// Keys that move the view or the cursor leave the prompt as it was:
+    /// reading the reply with Page Up and Down (Claude Code scrolls its
+    /// conversation) keeps no message out. Up recalls an old prompt; Right
+    /// and End may take in a suggested one.
+    func testPromptStaysFreeWhileTheUserScrollsItsConversation() {
+        var machine = idleMachine()
+        let reading = ["\u{1B}[5~", "\u{1B}[6~", "\u{1B}[5;2~", "\u{1B}[1;5H", "\u{1B}[1;5F", "\u{1B}[H", "\u{1B}OH",
+                       "\u{1B}[1;2D", "\u{1B}[1;5D", "\u{1B}b", "\u{1B}[Z"]
+        for (index, key) in reading.enumerated() {
+            machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10 + Double(index)), keys: Data(key.utf8))
+        }
+        XCTAssertTrue(isFree(machine))
+        XCTAssertTrue(machine.promptFacts(now: t0 + 100).contains(" draft=- "), machine.promptFacts(now: t0 + 100))
+        // Left alone opens the agents view from an empty prompt, Shift-Down a
+        // finished task's view.
+        for key in ["\u{1B}[A", "\u{1B}[C", "\u{1B}[F", "\u{1B}f", "\u{1B}[1;5A", "\u{1B}[3~", "\u{1B}[D", "\u{1B}OD",
+                    "\u{1B}[1;2A", "\u{1B}[1;2B"] {
+            var moved = idleMachine()
+            moved.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10), keys: Data(key.utf8))
+            XCTAssertEqual(refusal(moved), .draft, key.debugDescription)
+        }
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 30), keys: Data("\u{1B}[A".utf8))
+        XCTAssertTrue(machine.promptFacts(now: t0 + 100).contains(" draft=upDown/70s "), machine.promptFacts(now: t0 + 100))
+    }
+
     func testPromptIsNotFreeOverADraftOrTextNotSubmittedYet() {
         var machine = idleMachine()
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7))
