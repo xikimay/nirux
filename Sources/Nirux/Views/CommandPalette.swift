@@ -161,14 +161,21 @@ final class CommandPalette: NSObject {
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(searchField)
 
-        // Opening animation: scale from 0.96 → 1.0 (under the bar, from its
-        // top middle, so that it unfolds from the bar).
-        let scale: CGFloat = 0.96
-        var start = CGAffineTransform(scaleX: scale, y: scale)
+        // Opening animation: scale from 0.96 → 1.0
         if let origin = unfoldsFrom {
-            start = CGAffineTransform(translationX: origin.x * (1 - scale), y: origin.y * (1 - scale)).scaledBy(x: scale, y: scale)
+            // Under the bar it unfolds from the bar's middle. The view's
+            // layer takes no implicit animation: an explicit one.
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer = panel.contentView?.layer {
+                let unfold = CABasicAnimation(keyPath: "transform")
+                unfold.fromValue = CATransform3DMakeAffineTransform(Self.unfoldStart(from: origin))
+                unfold.toValue = CATransform3DIdentity
+                unfold.duration = 0.12
+                unfold.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                layer.add(unfold, forKey: "unfold")
+            }
+        } else {
+            panel.contentView?.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.96, y: 0.96))
         }
-        panel.contentView?.layer?.setAffineTransform(start)
         panel.alphaValue = 0
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.12
@@ -176,6 +183,13 @@ final class CommandPalette: NSObject {
             panel.animator().alphaValue = 1
             panel.contentView?.layer?.setAffineTransform(.identity)
         }
+    }
+
+    /// Where the palette unfolds from: 96 %, `origin` (in the panel's
+    /// layer, y up) staying where it is.
+    static func unfoldStart(from origin: NSPoint) -> CGAffineTransform {
+        let scale: CGFloat = 0.96
+        return CGAffineTransform(translationX: origin.x * (1 - scale), y: origin.y * (1 - scale)).scaledBy(x: scale, y: scale)
     }
 
     /// Today's frame: centred over a window at `windowFrame` (screen
@@ -188,13 +202,13 @@ final class CommandPalette: NSObject {
     }
 
     /// Under the bar (`bar`, in screen coordinates): centred on it, inside
-    /// its window (`windowFrame`), the left edge first, and above the
-    /// screen's bottom (`screen`, its visible frame).
+    /// its window (`windowFrame`), the left edge first, and on the screen
+    /// (`screen`, its visible frame), its bottom first.
     static func frame(underBar bar: NSRect, in windowFrame: NSRect, screen: NSRect?) -> NSRect {
         let margin = Theme.Space.sm
         let x = max(min(bar.midX - size.width / 2, windowFrame.maxX - margin - size.width), windowFrame.minX + margin)
         var y = bar.minY - barGap - size.height
-        if let screen { y = max(y, screen.minY + margin) }
+        if let screen { y = max(min(y, screen.maxY - margin - size.height), screen.minY + margin) }
         return NSRect(x: x, y: y, width: size.width, height: size.height)
     }
 

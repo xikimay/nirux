@@ -53,6 +53,8 @@ final class GlassView: NSView {
 
     private(set) var backing: Backing?
     private var backingView: NSView?
+    /// The radius the frost's mask was drawn for.
+    private var frostMaskRadius: CGFloat?
     private var tintView: NSView?
     /// Casts the floating shadow, masked to outside the shape so that it
     /// never shows through the translucent glass.
@@ -139,6 +141,7 @@ final class GlassView: NSView {
         tintView?.removeFromSuperview()
         backingView = nil
         tintView = nil
+        frostMaskRadius = nil
         if contentView.superview !== self {
             // The glass laid it out with constraints; here it follows frames.
             contentView.translatesAutoresizingMaskIntoConstraints = true
@@ -189,15 +192,23 @@ final class GlassView: NSView {
         return frost.blendingMode == .behindWindow && frost.maskImage != nil
     }
 
-    /// A stretchable rounded shape for a frost's `maskImage`.
-    private static func mask(radius: CGFloat) -> NSImage {
-        let side = radius * 2 + 1
+    /// A stretchable rounded shape for a frost's `maskImage`, its corners
+    /// continuous as the layers' are. Its drawing may run on any thread.
+    nonisolated private static func mask(radius: CGFloat) -> NSImage {
+        // A continuous corner reaches about 1.53 radii along each side.
+        let corner = ceil(radius * 1.6)
+        let side = corner * 2 + 1
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            let shape = CALayer()
+            shape.frame = rect
+            shape.cornerRadius = radius
+            shape.cornerCurve = .continuous
+            shape.backgroundColor = NSColor.black.cgColor
+            shape.render(in: context)
             return true
         }
-        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.capInsets = NSEdgeInsets(top: corner, left: corner, bottom: corner, right: corner)
         image.resizingMode = .stretch
         return image
     }
@@ -237,7 +248,10 @@ final class GlassView: NSView {
         contentView.layer?.cornerRadius = radius
         backingView?.layer?.cornerRadius = radius
         tintView?.layer?.cornerRadius = radius
-        if fillsWindow, let frost = backingView as? NSVisualEffectView { frost.maskImage = Self.mask(radius: radius) }
+        if fillsWindow, let frost = backingView as? NSVisualEffectView, frostMaskRadius != radius {
+            frost.maskImage = Self.mask(radius: radius)
+            frostMaskRadius = radius
+        }
         if #available(macOS 26, *), let glass = backingView as? NSGlassEffectView { glass.cornerRadius = radius }
         updateShadow(radius: radius)
     }

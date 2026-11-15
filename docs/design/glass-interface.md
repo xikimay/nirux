@@ -162,8 +162,8 @@ as it opens whatever question its column holds.
 
 `CommandPalette.show(relativeTo:sections:placement:)` with `.underBar(bar,
 level:)` hangs the palette 8 pt under the command bar (the bar's view: the
-palette finds it on screen), centred on it, inside its window and above the
-screen's bottom, at today's size; it unfolds from the bar, and the field and
+palette finds it on screen), centred on it, inside its window and on the screen,
+at today's size; it unfolds from the bar (not under Reduce motion), and the field and
 the rows sit on floating glass that fills the panel. While the bar shows
 nowhere, the palette opens centred. Today's centred palette stays the
 default and doesn't change. A press on the bar's search segment closes an
