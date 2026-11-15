@@ -4,8 +4,8 @@ import AppKit
 /// icon shows that task's request beside it, with its answers (the inbox's
 /// card, the rows' answers), "Open task", and how many more wait (⌘J).
 /// Escape or a click elsewhere closes it. Built, not shown yet: phase 3
-/// hosts it at the icon `IconRail.onRequest` gives, and calls
-/// `restartArming` whenever it moves it with its icon.
+/// hosts it at the icon `IconRail.onRequest` gives; as it follows the icon,
+/// the answers that slid on screen wait again by themselves.
 final class RequestCalloutView: NSView {
     static let width: CGFloat = 330
 
@@ -21,7 +21,7 @@ final class RequestCalloutView: NSView {
 
     private(set) var request: WaitingRequest?
     private let glass: GlassView
-    private let content = FlippedContentView()
+    private let content = BoardStagesFlippedView()
     let card = RequestCardView(trailing: .openTask)
     /// "1 more · ⌘J".
     let moreLabel = NSTextField(labelWithString: "")
@@ -90,9 +90,9 @@ final class RequestCalloutView: NSView {
             width: bounds.width - 2 * RequestCardView.padding, height: 16
         )
         guard let id = request?.id else { return arming.refresh([:]) }
-        // From the top: the "more" line below can come and go.
+        // On screen, or from the top: the "more" line below can come and go.
         arming.refresh(card.answerButtons.reduce(into: [:]) { frames, entry in
-            frames[RequestInboxView.armingKey(id, entry.key)] = content.convert(entry.value.bounds, from: entry.value)
+            frames[RequestInboxView.armingKey(id, entry.key)] = RequestArming.place(of: entry.value, in: content)
         })
     }
 
@@ -102,15 +102,26 @@ final class RequestCalloutView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        RequestArming.observeMoves(of: window, by: self, selector: #selector(windowMoved))
         if window != nil { restartArming() }
     }
+
+    /// Moved beside its icon, or its window moved: the next layout finds
+    /// which answers slid on screen.
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        let moved = newOrigin != frame.origin
+        super.setFrameOrigin(newOrigin)
+        if moved { needsLayout = true }
+    }
+
+    @objc private func windowMoved() { needsLayout = true }
 
     override func viewDidUnhide() {
         super.viewDidUnhide()
         restartArming()
     }
 
-    /// The answers slid under a still pointer (the host moved the callout).
+    /// Every answer waits again before it takes a click.
     func restartArming() { arming.restartAll() }
 
     // MARK: - Keys

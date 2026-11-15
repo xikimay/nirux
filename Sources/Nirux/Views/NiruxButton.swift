@@ -167,12 +167,16 @@ final class NiruxButton: NSButton {
     /// no action (an answer's button that just moved under the pointer, the
     /// second press of a double-click).
     var acceptsPress: ((NSEvent) -> Bool)?
+    /// After a press it accepted, once its tracking is over: released on it
+    /// (its action already sent) or elsewhere.
+    var pressEnded: (() -> Void)?
 
     /// The tracking loop of a press eats the pointer's exit: after it, the
     /// hover follows where the pointer is.
     override func mouseDown(with event: NSEvent) {
         if let acceptsPress, !acceptsPress(event) { return }
         super.mouseDown(with: event)
+        pressEnded?()
         guard let window else { return isHovered = false }
         isHovered = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }

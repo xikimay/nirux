@@ -32,9 +32,9 @@ final class RequestInboxView: NSView {
     private let headerLine = NSView()
     let emptyLabel = NSTextField(labelWithString: "No agent waits for you")
     /// Everything on the glass, counting y down.
-    private let content = FlippedContentView()
+    private let content = BoardStagesFlippedView()
     private let scroll = NSScrollView()
-    private let list = FlippedContentView()
+    private let list = BoardStagesFlippedView()
     /// One card per request, reused by id.
     private(set) var cards: [String: RequestCardView] = [:]
     private var lines: [NSView] = []
@@ -92,13 +92,13 @@ final class RequestInboxView: NSView {
 
     /// Shows `requests` in their order, each once, reusing each card by its
     /// request's id. The choice stays on its request; a choice whose request
-    /// went falls to the one now in its place, and the list stays where it
-    /// is.
+    /// went falls to the first one after it still listed (else the nearest
+    /// before), and the list stays where it is.
     func show(_ requests: [WaitingRequest]) {
         var seen = Set<String>()
         let requests = requests.filter { seen.insert($0.id).inserted }
         guard requests != self.requests else { return }
-        let chosenIndex = self.requests.firstIndex { $0.id == chosenID }
+        let before = self.requests.map(\.id)
         self.requests = requests
         for (id, card) in cards where !seen.contains(id) {
             card.removeFromSuperview()
@@ -107,22 +107,30 @@ final class RequestInboxView: NSView {
         for request in requests {
             (cards[request.id] ?? makeCard(id: request.id)).show(request)
         }
-        // VoiceOver reads the cards in their views' order.
-        lines.forEach { $0.removeFromSuperview() }
-        lines = requests.dropFirst().map { _ in
-            let line = NSView()
-            line.wantsLayer = true
-            line.layer?.backgroundColor = Theme.Color.line.cgColor
-            return line
+        // The same requests in the same order (a wait ticking): the cards
+        // and their lines stay where they are, a hover with them.
+        if requests.map(\.id) != before {
+            let count = max(requests.count - 1, 0)
+            while lines.count < count {
+                let line = NSView()
+                line.wantsLayer = true
+                line.layer?.backgroundColor = Theme.Color.line.cgColor
+                lines.append(line)
+            }
+            lines.removeLast(lines.count - count)
+            // VoiceOver reads the cards in their views' order.
+            list.subviews = requests.compactMap { cards[$0.id] } + lines
         }
-        list.subviews = requests.compactMap { cards[$0.id] } + lines
         countLabel.stringValue = "\(requests.count)"
         emptyLabel.isHidden = !requests.isEmpty
         let count = requests.count
         setAccessibilityLabel(count == 0 ? "No agent waits for you" : "\(count) \(count == 1 ? "request" : "requests") waiting for you")
         needsLayout = true
-        if !requests.contains(where: { $0.id == chosenID }) {
-            chosenID = requests.isEmpty ? nil : requests[min(chosenIndex ?? 0, requests.count - 1)].id
+        if !seen.contains(chosenID ?? ""), let gone = before.firstIndex(of: chosenID ?? "") {
+            chosenID = before[(gone + 1)...].first(where: seen.contains) ?? before[..<gone].last(where: seen.contains)
+                ?? requests.first?.id
+        } else if !seen.contains(chosenID ?? "") {
+            chosenID = requests.first?.id
         }
         markChoice()
     }
@@ -167,8 +175,8 @@ final class RequestInboxView: NSView {
     }
 
     /// The host shows the inbox (⌘J, the badge): the oldest chosen, and
-    /// every answer waits again before it takes a click. It also calls
-    /// `restartArming` whenever it moves the inbox.
+    /// every answer waits again before it takes a click. Moving it needs no
+    /// call: the answers that slid on screen wait again by themselves.
     func opened() {
         choose(requests.first?.id)
         restartArming()
@@ -176,15 +184,26 @@ final class RequestInboxView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        RequestArming.observeMoves(of: window, by: self, selector: #selector(windowMoved))
         if window != nil { restartArming() }
     }
+
+    /// Moved in its window, or its window moved: the next layout finds which
+    /// answers slid on screen (a resize from the top moves none of them).
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        let moved = newOrigin != frame.origin
+        super.setFrameOrigin(newOrigin)
+        if moved { needsLayout = true }
+    }
+
+    @objc private func windowMoved() { needsLayout = true }
 
     override func viewDidUnhide() {
         super.viewDidUnhide()
         restartArming()
     }
 
-    /// The answers slid under a still pointer (the host moved the inbox).
+    /// Every answer waits again before it takes a click.
     func restartArming() { arming.restartAll() }
 
     // MARK: - Layout
@@ -237,7 +256,7 @@ final class RequestInboxView: NSView {
             card.needsLayout = true
             card.layoutSubtreeIfNeeded()
             for (choice, button) in card.answerButtons {
-                frames[Self.armingKey(request.id, choice)] = list.convert(button.bounds, from: button)
+                frames[Self.armingKey(request.id, choice)] = RequestArming.place(of: button, in: list)
             }
             y += cardHeight
         }

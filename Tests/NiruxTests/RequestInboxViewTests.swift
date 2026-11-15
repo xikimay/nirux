@@ -7,7 +7,6 @@ import XCTest
 @MainActor
 final class RequestInboxViewTests: XCTestCase {
     private var clock: TimeInterval = 100
-    private var windows: [NSWindow] = []
 
     /// A permission for each name, on its own task unless `task` says.
     private func requests(_ names: [String], task: String? = nil) throws -> [WaitingRequest] {
@@ -69,9 +68,18 @@ final class RequestInboxViewTests: XCTestCase {
         inbox.show(try requests(["c", "d", "e"]))
         inbox.choose(id("d"))
         inbox.show(try requests(["c", "e"]))
-        XCTAssertEqual(inbox.chosenID, id("e"), "answered elsewhere: the next one in its place")
+        XCTAssertEqual(inbox.chosenID, id("e"), "answered elsewhere: the next one still listed")
+        inbox.show(try requests(["a", "b", "c", "d"]))
+        inbox.choose(id("b"))
+        inbox.show(try requests(["c", "d"]))
+        XCTAssertEqual(inbox.chosenID, id("c"), "a and b answered elsewhere: c, the next one after b")
+        inbox.choose(id("d"))
+        inbox.show(try requests(["c"]))
+        XCTAssertEqual(inbox.chosenID, id("c"), "nothing after it: the nearest before")
         inbox.opened()
         XCTAssertEqual(inbox.chosenID, id("c"), "the inbox opens on the oldest")
+        inbox.show(try requests(["f"]))
+        XCTAssertEqual(inbox.chosenID, id("f"), "none of them left: the first")
 
         var closed = 0
         inbox.onClose = { closed += 1 }
@@ -100,11 +108,21 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertLessThanOrEqual(last.frame.maxX, clip.frame.width, "the cards leave it room")
 
         clip.scroll(to: .zero)
+        let list = try XCTUnwrap(last.superview)
+        let views = list.subviews
         var later = try requests(names)
         later[0].waited = "2m"
         inbox.show(later)
         inbox.layoutSubtreeIfNeeded()
         XCTAssertEqual(clip.bounds.origin.y, 0, "the wait ticked: no jump back to the choice")
+        XCTAssertTrue(zip(list.subviews, views).allSatisfy { $0 === $1 } && list.subviews.count == views.count,
+                      "nor a card or a line rebuilt or moved")
+        func lines() -> [NSView] { list.subviews.filter { !($0 is RequestCardView) } }
+        let before = lines()
+        later[3] = try requests(["other"])[0]
+        inbox.show(later)
+        XCTAssertTrue(zip(lines(), before).allSatisfy { $0 === $1 } && lines().count == before.count,
+                      "one request in another's place: the lines stay")
         clip.scroll(to: NSPoint(x: 0, y: 200))
         later.removeLast()
         inbox.show(later)
@@ -150,7 +168,7 @@ final class RequestInboxViewTests: XCTestCase {
 
         let window = NSWindow(contentRect: inbox.frame, styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
-        windows.append(window)
+        defer { window.close() }
         inbox.choose(id("c"))
         window.contentView = inbox
         inbox.layoutSubtreeIfNeeded()
@@ -163,11 +181,29 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertEqual(answered.count, 3, "the inbox just opened")
         clock += delay
 
+        clock += delay
+        window.setFrameOrigin(NSPoint(x: 300, y: 200))
+        NotificationCenter.default.post(name: NSWindow.didMoveNotification, object: window)
+        inbox.layoutSubtreeIfNeeded()
+        try allow("b").performClick(nil)
+        XCTAssertEqual(answered.count, 3, "its window moved")
+        clock += delay
+        let resting = inbox.frame
+        inbox.frame = NSRect(x: resting.minX, y: resting.minY - 50, width: resting.width, height: resting.height + 50)
+        inbox.layoutSubtreeIfNeeded()
+        try allow("b").performClick(nil)
+        XCTAssertEqual(answered.count, 4, "grown from its top: nothing slid on screen, nothing waits")
+        inbox.setFrameOrigin(NSPoint(x: 40, y: inbox.frame.minY))
+        inbox.layoutSubtreeIfNeeded()
+        try allow("b").performClick(nil)
+        XCTAssertEqual(answered.count, 4, "it moved in its window")
+        clock += delay
+
         let replacing = try requests(["e"], task: "b")
         show(replacing + (try requests(["c"])), in: inbox)
         XCTAssertNil(inbox.cards[id("b")])
         try allow("e").performClick(nil)
-        XCTAssertEqual(answered.count, 3, "another request in b's place: its own card, unarmed")
+        XCTAssertEqual(answered.count, 4, "another request in b's place: its own card, unarmed")
     }
 
     /// VoiceOver hears how many wait, then each request: its task, what it
@@ -227,9 +263,29 @@ final class RequestInboxViewTests: XCTestCase {
         clock += SidebarView.approvalArmingDelay
         let window = NSWindow(contentRect: callout.frame, styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
-        windows.append(window)
+        defer { window.close() }
         window.contentView = callout
         deny.performClick(nil)
         XCTAssertEqual(answered.count, 1, "the callout just opened beside its icon")
+        clock += SidebarView.approvalArmingDelay
+        callout.setFrameOrigin(NSPoint(x: 0, y: 30))
+        callout.layoutSubtreeIfNeeded()
+        deny.performClick(nil)
+        XCTAssertEqual(answered.count, 1, "it followed its icon")
+        clock += SidebarView.approvalArmingDelay
+
+        // Held on a's Deny while the host shows b, the same buttons, and
+        // released once they armed: b isn't answered.
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ))
+        XCTAssertEqual(deny.acceptsPress?(event), true)
+        let other = RequestCardViewTests.request(.permission(try XCTUnwrap(RequestCardViewTests.approval("npm run a", id: "b"))), task: "b")
+        callout.show(other, othersWaiting: 0)
+        callout.layoutSubtreeIfNeeded()
+        clock += SidebarView.approvalArmingDelay
+        deny.performClick(nil)
+        XCTAssertEqual(answered.count, 1, "the press was on a")
     }
 }
