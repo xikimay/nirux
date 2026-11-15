@@ -67,8 +67,8 @@ extension NiruxShellView {
     /// end's verdict.
     nonisolated static let missionMessageStallAge: TimeInterval = 180
     nonisolated static let missionWaitCheckInterval: TimeInterval = 5
-    /// How long a message may wait for a reason other than a turn at work
-    /// before the log says why: past a turn end's verdict.
+    /// How long a message may wait over a draft, or at a free prompt, before
+    /// the log says why: past a turn end's verdict.
     nonisolated static let missionWaitLogAge: TimeInterval = 30
     /// What Nirux types goes in within a second: a draft before then is
     /// its own text.
@@ -122,17 +122,24 @@ extension NiruxShellView {
         var retries = false
         for (id, entry) in waiting {
             let pty = entry.column.pty
-            if let name = pty?.foregroundProcess(snapshot: snapshot)?.name, name != "claude",
-               AgentStatusMachine.isRecognizedAgentProcess(name) { continue }
+            let foreground = pty?.foregroundProcess(snapshot: snapshot)
+            if let name = foreground?.name, name != "claude", AgentStatusMachine.isRecognizedAgentProcess(name) { continue }
             let refused = entry.messages.compactMap { message -> (message: WaitingMessage, refusal: AgentPromptRefusal?)? in
                 let refusal = pty.map { $0.missionPromptRefusal(runningSince: message.runningSince, snapshot: snapshot) } ?? .noClaude
                 guard refusal != .draft || missionWaits.typedAt[id] == nil else { return nil }
                 return (message, refusal)
             }
-            // A turn holds a message for as long as it runs; anything else
-            // says why within seconds.
-            let overdue = refused.filter {
-                now - $0.message.sentAt >= ($0.refusal == .working ? Self.missionMessageStallAge : Self.missionWaitLogAge)
+            // A draft or a free prompt, which nothing on screen explains, says
+            // so within seconds; a turn at work only once no hook came for a
+            // stall's length.
+            let silentFor = now - (pty?.lastAgentHookAt ?? 0)
+            let overdue = refused.filter { message, refusal in
+                let age = now - message.sentAt
+                switch refusal {
+                case nil, .draft?: return age >= Self.missionWaitLogAge
+                case .working?: return age >= Self.missionMessageStallAge && silentFor >= Self.missionMessageStallAge
+                default: return age >= Self.missionMessageStallAge
+                }
             }
             retries = retries || overdue.contains { $0.refusal == nil }
             for (message, refusal) in overdue {
@@ -141,8 +148,9 @@ extension NiruxShellView {
                 let waited = Int(min(now - message.sentAt, MissionEventCLI.parentMessageLifetime * 24))
                 sideEffects.logMissionWait(
                     "untyped mission message id=\(message.id.prefix(8)) kind=\(message.kind) "
-                        + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) waiting=\(refused.count) "
-                        + "fg=\(pty?.foregroundProcess(snapshot: snapshot)?.name ?? "-") \(pty?.missionPromptFacts(now: now) ?? "")"
+                        + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) messages=\(refused.count) "
+                        + "fg=\(foreground.map { "\($0.name)/\(Int(max(now - $0.instance.startedAt, 0)))s" } ?? "-") "
+                        + (pty?.missionPromptFacts(now: now) ?? "")
                 )
             }
             let held = refused.filter { $0.refusal != .working }

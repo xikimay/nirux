@@ -763,6 +763,9 @@ final class PtySession: @unchecked Sendable {
         missionPromptRefusal(runningSince: runningSince, snapshot: snapshot) == nil
     }
 
+    /// When the last hook event came, of any command (0: none).
+    var lastAgentHookAt: TimeInterval { state.machine.lastEventAt }
+
     /// See `AgentStatusMachine.promptFacts`.
     func missionPromptFacts(now: TimeInterval) -> String {
         state.machine.promptFacts(now: now)

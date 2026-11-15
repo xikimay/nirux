@@ -469,24 +469,36 @@ final class MissionTellTests: XCTestCase {
 
     /// Keys that move the view or the cursor leave the prompt as it was:
     /// reading the reply with Page Up and Down (Claude Code scrolls its
-    /// conversation) keeps no message out. Up recalls an old prompt; Right
-    /// and End may take in a suggested one.
+    /// conversation) keeps no message out, even behind a dialog that closes
+    /// with no key answering it. Up recalls an old prompt; Right and End may
+    /// take in a suggested one.
     func testPromptStaysFreeWhileTheUserScrollsItsConversation() {
         var machine = idleMachine()
-        let reading = ["\u{1B}[5~", "\u{1B}[6~", "\u{1B}[5;2~", "\u{1B}[1;5H", "\u{1B}[1;5F", "\u{1B}[1;2A", "\u{1B}[1;2B",
-                       "\u{1B}[D", "\u{1B}[H", "\u{1B}[1;2D", "\u{1B}b", "\u{1B}OD", "\u{1B}[Z"]
+        let reading = ["\u{1B}[5~", "\u{1B}[6~", "\u{1B}[5;2~", "\u{1B}[1;5H", "\u{1B}[1;5F", "\u{1B}[H", "\u{1B}OH",
+                       "\u{1B}[1;2D", "\u{1B}[1;5D", "\u{1B}b", "\u{1B}[Z"]
         for (index, key) in reading.enumerated() {
             machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10 + Double(index)), keys: Data(key.utf8))
         }
         XCTAssertTrue(isFree(machine))
         XCTAssertTrue(machine.promptFacts(now: t0 + 100).contains(" draft=- "), machine.promptFacts(now: t0 + 100))
-        for key in ["\u{1B}[A", "\u{1B}[C", "\u{1B}[F", "\u{1B}f", "\u{1B}[1;5A", "\u{1B}[3~"] {
+        // Left alone opens the agents view from an empty prompt, Shift-Down a
+        // finished task's view.
+        for key in ["\u{1B}[A", "\u{1B}[C", "\u{1B}[F", "\u{1B}f", "\u{1B}[1;5A", "\u{1B}[3~", "\u{1B}[D", "\u{1B}OD",
+                    "\u{1B}[1;2A", "\u{1B}[1;2B"] {
             var moved = idleMachine()
             moved.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10), keys: Data(key.utf8))
             XCTAssertEqual(refusal(moved), .draft, key.debugDescription)
         }
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 30), keys: Data("\u{1B}[A".utf8))
         XCTAssertTrue(machine.promptFacts(now: t0 + 100).contains(" draft=upDown/70s "), machine.promptFacts(now: t0 + 100))
+
+        var paged = idleMachine()
+        _ = paged.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = paged.apply(hook(.permissionRequest, at: 15, tool: "Bash", key: "k"), isUserFocused: false)
+        paged.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 30), keys: Data("\u{1B}[6~".utf8))
+        _ = paged.apply(hook(.postToolUse, at: 50, tool: "Bash", key: "k"), isUserFocused: false)
+        _ = paged.apply(hook(.stop, at: 60), isUserFocused: false)
+        XCTAssertNil(refusal(paged), "paged behind an approval answered with no key")
     }
 
     func testPromptIsNotFreeOverADraftOrTextNotSubmittedYet() {

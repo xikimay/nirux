@@ -477,7 +477,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertEqual(lines.count, 1)
         let line = try XCTUnwrap(lines.first)
         XCTAssertTrue(line.hasPrefix("untyped mission message id=\(first.id.prefix(8)) kind=question agent=\(agentUUID.prefix(8)) "
-            + "waited=175s reason=draft waiting=1 fg=claude working=0 inFlight=0 turn=- dialogs=[] prompt="), line)
+            + "waited=175s reason=draft messages=1 fg=claude/690s working=0 inFlight=0 turn=- dialogs=[] prompt="), line)
         XCTAssertTrue(line.contains(" draft=text/") && line.contains(" verdict=none ") && line.contains(" last=stop/"), line)
         let second = try XCTUnwrap(ask(at: now - 10))
         let waiting = SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft)
@@ -516,9 +516,12 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: now + 40), isUserFocused: true)
         XCTAssertTrue(waits(at: now + 41).isEmpty, "its turn runs")
-        // Past a few minutes, a turn holding it is logged too.
-        XCTAssertEqual(lines.count, 3)
-        XCTAssertTrue(lines.last?.contains(" reason=working waiting=2 fg=claude working=1 inFlight=1 turn=1s ") == true, lines.last ?? "")
+        XCTAssertEqual(lines.count, 2, "a turn at work says nothing")
+        // Unless no hook came for a stall's length.
+        _ = waits(at: now + 40 + NiruxShellView.missionMessageStallAge)
+        XCTAssertEqual(lines.count, 4)
+        XCTAssertTrue(lines.suffix(2).allSatisfy { $0.contains(" reason=working messages=2 ") && $0.contains(" working=1 inFlight=1 turn=180s ") },
+                      lines.last ?? "")
     }
 
     // MARK: - Going in circles

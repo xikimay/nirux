@@ -1078,24 +1078,25 @@ struct AgentStatusMachine {
         return keys.count > 1 && keys.first == 0x1B && keys != modeSwitchKey && isOneKey(keys)
     }
 
-    /// Keys that leave the prompt as it was: Shift-Tab (the mode), Page Up
-    /// and Down, Ctrl-Home and Ctrl-End (Claude Code scrolls its
-    /// conversation), Shift-Up and Shift-Down (the effort), Left and Home
-    /// with or without a modifier, Option-Left (the cursor). Not Up or Down
-    /// alone, which recall an old prompt, nor Right or End, which may take
-    /// in a suggested prompt.
+    /// Keys that leave the prompt as it was, with Claude Code's default
+    /// bindings: Shift-Tab (the mode), Page Up and Down, Ctrl-Home and
+    /// Ctrl-End (it scrolls its conversation), Home, a modified Left and
+    /// Option-Left (the cursor). Not Up or Down, which recall an old prompt
+    /// (Shift-Down opens a finished task's view), nor Left alone, which
+    /// opens the agents view from an empty prompt, nor Right or End, which
+    /// may take in a suggested prompt.
     static func leavesPromptAsItWas(_ keys: Data) -> Bool {
         if keys == modeSwitchKey || keys == Data([0x1B, 0x62]) { return true }
         guard (3...12).contains(keys.count), keys.first == 0x1B,
               let text = String(data: keys.dropFirst(), encoding: .ascii), let final = text.last
         else { return false }
-        if text == "OD" || text == "OH" { return true }
+        if text == "OH" { return true }
         guard text.hasPrefix("[") else { return false }
         let fields = text.dropFirst().dropLast().split(separator: ";", omittingEmptySubsequences: false).map(String.init)
         let modifier = fields.count == 2 && fields[0] == "1" ? Int(fields[1]) : nil
         switch final {
-        case "D", "H": return fields == [""] || (modifier ?? 0) > 1
-        case "A", "B": return modifier == 2
+        case "H": return fields == [""] || (modifier ?? 0) > 1
+        case "D": return (modifier ?? 0) > 1
         case "F": return modifier == 5
         case "~": return ["1", "5", "6"].contains(fields.first ?? "")
         default: return false
@@ -1108,7 +1109,15 @@ struct AgentStatusMachine {
         if keys == Data([0x0D]) { return "enter" }
         if isCancelKey(keys) { return "cancel" }
         if isUpDownArrows(keys) { return "upDown" }
-        if keys.first == 0x1B { return isOneKey(keys) ? "escape" : "paste" }
+        if keys.first == 0x1B {
+            guard isOneKey(keys) else { return "paste" }
+            switch keys.count == 2 ? nil : keys.last {
+            case nil: return "meta"
+            case 0x41, 0x42, 0x43, 0x44: return "arrow"
+            case 0x48, 0x46, 0x7E: return "nav"
+            default: return "sequence"
+            }
+        }
         if let byte = keys.first, keys.count == 1, byte < 0x20 || byte == 0x7F { return "control" }
         return isOneKey(keys) ? "text" : "paste"
     }
@@ -1168,7 +1177,10 @@ struct AgentStatusMachine {
         let inText = approval.map { approvalTextOpenedFor == $0.requestedAt } ?? false
         let takenBeforeAnswer = (oneKey || inText) && approval.map { takesBeforeAnswer(keys, in: $0) } ?? false
         if inFront?.waitsPastKeys != true, !takenBeforeAnswer { lastKeystrokeAt = time }
-        if takenBeforeAnswer, let approval { lastKeyTakenByApproval = (approval.requestedAt, time) }
+        // At the prompt, behind a dialog not on screen, only those would be a draft.
+        if takenBeforeAnswer, let approval, !(keys.map(Self.leavesPromptAsItWas) ?? false) {
+            lastKeyTakenByApproval = (approval.requestedAt, time)
+        }
         let cancels = keys.map(Self.isCancelKey) ?? true
         // Esc or Ctrl-C may as well interrupt a turn behind a dialog that
         // isn't on screen, the keys it took left at the prompt.
