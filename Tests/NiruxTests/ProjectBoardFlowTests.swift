@@ -787,7 +787,8 @@ final class ProjectBoardFlowTests: XCTestCase {
                 return board.view.stages.runningQueueViews.map(\.queue.title) == ["acme/widgets"]
                     && board.view.stages.content?.sections.first?.detail == "acme/gadgets"
             }
-            XCTAssertEqual(board.repository?.name, "acme/gadgets")
+            // Saved for gadgets: widgets' checkout is a read-only section of its own now, without a queue.
+            XCTAssertEqual(board.sections.first.flatMap(board.repository(of:))?.name, "acme/gadgets")
             let section = try XCTUnwrap(board.view.stages.content?.sections.first)
             XCTAssertNotNil(section.queue, "gadgets' queue, in its header")
             XCTAssertNil(section.queue?.stop, "which doesn't run")

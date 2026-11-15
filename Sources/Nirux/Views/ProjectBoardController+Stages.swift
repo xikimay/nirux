@@ -252,7 +252,8 @@ extension ProjectBoardController {
             if let loaded, case .readOnly(let reason) = loaded.status {
                 return ColumnHeaderView.Status("Read-only", tone: .neutral, toolTip: reason.message)
             }
-            let word = section.config != nil && reads[section.id] == nil ? "Invalid settings" : canBeSetUp(section) ? "No settings" : "Not read"
+            let word = isExtra(section) ? (reads[section.id] == nil ? "Not read" : "Read-only")
+                : section.config != nil && reads[section.id] == nil ? "Invalid settings" : canBeSetUp(section) ? "No settings" : "Not read"
             return ColumnHeaderView.Status(word, tone: .neutral, toolTip: note)
         }
         return reads[section.id].flatMap { Self.runStatus($0, now: now) }

@@ -92,6 +92,11 @@ final class ProjectBoardController {
     private(set) var context = BoardSections.Context()
     /// One per repository anchor, else the space's one repository.
     private(set) var sections: [BoardSections.Section] = []
+    /// The repositories of the space's workspaces that are no anchor of it
+    /// (nor, without anchors, the one board.json names), as the worktrees
+    /// listed them: a read-only section each, after the anchors' (no Board
+    /// Settings, no merge queue), so every repository of the space shows.
+    private(set) var extraRepositories: [SpaceAnchor] = []
     /// Each section's name, by id, told apart when two share one.
     private(set) var displayNames: [String: String] = [:]
     private(set) var local: ProjectBoard.LocalSnapshot?
@@ -205,6 +210,7 @@ final class ProjectBoardController {
         requestedAnchors = nil
         context = BoardSections.Context()
         sections = []
+        extraRepositories = []
         local = nil
         reads = [:]
         // The old space's tasks: the new one's are read without the sidebar's pass until its next one.
@@ -327,6 +333,12 @@ final class ProjectBoardController {
         // An unreadable file holds no config this build can use.
         let entries = newConfig.status == .unreadable ? [] : newConfig.entries
         sections = BoardSections.sections(entries, context: context)
+        let anchored = Set(sections.compactMap(\.commonDir))
+        sections += extraRepositories.compactMap { anchor in
+            BoardSections.commonDir(of: anchor).flatMap { commonDir in
+                anchored.contains(commonDir) ? nil : BoardSections.Section(slot: .anchor(commonDir: commonDir), anchor: anchor, config: nil)
+            }
+        }
         displayNames = BoardSections.displayNames(sections)
         var newReads: [String: RepositoryReads] = [:]
         // Two sections never read one repository, as Board Settings never
@@ -435,6 +447,7 @@ final class ProjectBoardController {
             guard let self, current == self.generation else { return }
             self.schedule.finish(.worktrees)
             self.local = snapshot
+            self.noteExtraRepositories(in: snapshot)
             self.scheduleRender()
         })
     }
@@ -595,7 +608,36 @@ final class ProjectBoardController {
 
     /// Board Settings is what would show its pull requests: not for a
     /// checkout gone, nor for the repository another section reads.
+    /// A section of a repository that is no anchor of the space
+    /// (`extraRepositories`): read-only.
+    func isExtra(_ section: BoardSections.Section) -> Bool {
+        section.anchor.map(extraRepositories.contains) ?? false
+    }
+
+    /// The repositories the worktrees listed that no section has: a section
+    /// each from now on, read from their remotes as an anchor without
+    /// settings is.
+    private func noteExtraRepositories(in snapshot: ProjectBoard.LocalSnapshot) {
+        let anchored = Set(sections.filter { !isExtra($0) }.compactMap(\.commonDir))
+        // Without anchors, the one board.json names takes its repository's checkouts.
+        let named = sections.first { $0.slot == .legacy }.flatMap { reads[$0.id]?.gitHub }
+        var seen = Set<String>()
+        let found = snapshot.repositories.compactMap { repository -> SpaceAnchor? in
+            guard let commonDir = repository.commonDir, !anchored.contains(commonDir), seen.insert(commonDir).inserted,
+                  !repository.remotes.contains(where: { $0 == named })
+            else { return nil }
+            var anchor = SpaceAnchor(kind: .gitRepository(commonDir: commonDir), name: "")
+            anchor.name = ((anchor.folder ?? (commonDir as NSString).deletingLastPathComponent) as NSString).lastPathComponent
+            return anchor
+        }
+        guard found != extraRepositories, let loaded else { return }
+        extraRepositories = found
+        apply(loaded, context: context, listsWorktreesAgain: false)
+        readBaseRemotesWhenShown(configRead: configRead)
+    }
+
     func canBeSetUp(_ section: BoardSections.Section) -> Bool {
+        if isExtra(section) { return false }
         if case .notARepository? = section.commonDir.flatMap({ context.baseRemotes[$0] }), reads[section.id] == nil {
             return false
         }
@@ -617,6 +659,7 @@ final class ProjectBoardController {
     /// Why a section has no saved repository, in a sentence; nil when it
     /// has one, or while its remote is being read.
     func setupNote(_ section: BoardSections.Section) -> String? {
+        if isExtra(section) { return extraNote(section) }
         if let reads = reads[section.id] {
             return reads.remoteName.map { "Read-only, from \($0): save Board Settings to use the merge queue." }
         }
@@ -642,6 +685,27 @@ final class ProjectBoardController {
             return nil
         case .gitHub?, nil:
             return "No GitHub repository: set it in Board Settings to see its pull requests."
+        }
+    }
+
+    /// What a section of a repository that is no anchor of the space says:
+    /// read-only, whatever its remote, and why it reads nothing when it does.
+    private func extraNote(_ section: BoardSections.Section) -> String? {
+        let notAnchor = "not one of this space’s repositories, so no merge queue here"
+        if let reads = reads[section.id] { return "Read-only, from \(reads.remoteName ?? "its remote"): \(notAnchor)." }
+        if let other = sectionSharingRemote(with: section) {
+            let otherName = displayNames[other.id] ?? other.name ?? "another repository"
+            return "Same GitHub repository as “\(otherName)”: its pull requests show there."
+        }
+        switch section.commonDir.flatMap({ context.baseRemotes[$0] }) {
+        case .noRemote?: return "No remote: its pull requests don’t show (\(notAnchor))."
+        case .notGitHub(let host, let remote)?:
+            let place = host.map { "\(remote) points to \($0), not github.com" } ?? "\(remote) isn’t on github.com"
+            return "\(place): its pull requests don’t show (\(notAnchor))."
+        case .notARepository?: return "Its checkout is gone, or no longer a git repository."
+        case .unread?: return "Nirux couldn’t read its remotes: Refresh to read them again."
+        case nil where isReadingRemotes: return nil
+        case .gitHub?, nil: return "No GitHub repository: its pull requests don’t show (\(notAnchor))."
         }
     }
 
