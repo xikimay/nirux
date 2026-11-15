@@ -160,10 +160,11 @@ final class IconRail: NSView {
     }
 
     /// The icon of `id` in this view's coordinates, laid out first; nil
-    /// when the rail doesn't show it.
+    /// when the rail doesn't show it, or not in view (the list scrolled).
     func iconFrame(of id: String) -> NSRect? {
         layoutSubtreeIfNeeded()
-        guard let view = itemViews[id], view.superview != nil else { return nil }
+        guard let view = itemViews[id], view.superview != nil,
+              scroll.contentView.documentVisibleRect.intersects(view.frame) else { return nil }
         return convert(view.bounds, from: view)
     }
 
@@ -171,21 +172,23 @@ final class IconRail: NSView {
     /// clock, `CACurrentMediaTime`), the icons under it give way by one
     /// place, and the buttons under the capsule stay. Nothing is pushed in
     /// a list that scrolls: which icons kept their place depends on the
-    /// scroll.
-    func playBirth(of id: String, opens: CFTimeInterval) {
+    /// scroll. False when the rail doesn't show `id`.
+    @discardableResult
+    func playBirth(of id: String, opens: CFTimeInterval) -> Bool {
         layoutSubtreeIfNeeded()
-        guard let born = itemViews[id], born.superview != nil else { return }
+        guard let born = itemViews[id], born.superview != nil else { return false }
         born.wantsLayer = true
         born.layer?.add(SidebarView.birthAppearance(at: opens), forKey: SidebarView.birthKey)
         // The list is flipped, its layers too: up the screen is -y.
         born.layer?.add(SidebarView.birthSpring(from: -8, at: opens, damping: 16), forKey: SidebarView.birthSpringKey)
-        guard list.frame.height <= scroll.contentSize.height + 0.5 else { return }
+        guard list.frame.height <= scroll.contentSize.height + 0.5 else { return true }
         for view in list.subviews where view !== born && !view.isHidden && view.frame.minY >= born.frame.maxY - 1 {
             view.wantsLayer = true
             view.layer?.add(
                 SidebarView.birthSpring(from: -Self.pitch, at: opens, damping: 26), forKey: SidebarView.birthPushKey(id)
             )
         }
+        return true
     }
 
     /// A first click on a waiting task asks for its request and a

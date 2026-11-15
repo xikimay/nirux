@@ -165,6 +165,18 @@ final class TaskBirthTests: UIFlowTestCase {
         )
         sidebar.update(profiles: [], workspaces: [row("born", index: 0), row("under", index: 1), row("new", index: 2)])
         XCTAssertTrue(born.animation(forKey: SidebarView.birthKey) === appear, "not started again")
+
+        // Born before its row is listed: it plays once the rail shows it.
+        sidebar.noteBirth(workspaceID: "late")
+        sidebar.update(profiles: [], workspaces: [row("born", index: 0), row("under", index: 1), row("late", index: 2)])
+        XCTAssertNotNil(rail.itemViews["late"]?.layer?.animation(forKey: SidebarView.birthKey), "played when it came")
+
+        // Born on the unfolded rows, then folded: nothing starts part-way.
+        let unfolded = self.sidebar([row("first", index: 0), row("second", index: 1)], expanded: true)
+        unfolded.noteBirth(workspaceID: "first")
+        unfolded.isExpanded = false
+        XCTAssertNil(unfolded.iconRail.itemViews["first"]?.layer?.animation(forKey: SidebarView.birthKey))
+        XCTAssertNil(unfolded.iconRail.itemViews["second"]?.layer?.animation(forKey: SidebarView.birthPushKey("first")))
     }
 
     /// Rows that may not move open nothing: not at a birth, and not at a

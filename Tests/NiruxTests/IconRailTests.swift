@@ -171,6 +171,8 @@ final class IconRailTests: XCTestCase {
         long.layoutSubtreeIfNeeded()
         let first = try XCTUnwrap(long.itemViews["task0"])
         XCTAssertTrue(clip.documentVisibleRect.contains(first.frame), "and the next one too")
+        XCTAssertNotNil(long.iconFrame(of: "task0"))
+        XCTAssertNil(long.iconFrame(of: "task39"), "scrolled out of view: no place to aim at")
     }
 
     private func button(in view: NSView) throws -> NSButton {
@@ -285,5 +287,6 @@ final class IconRailTests: XCTestCase {
         long.playBirth(of: "task0", opens: opens)
         XCTAssertNotNil(long.itemViews["task0"]?.layer?.animation(forKey: SidebarView.birthKey))
         XCTAssertNil(long.itemViews["task1"]?.layer?.animation(forKey: SidebarView.birthPushKey("task0")), "the list scrolls")
+        XCTAssertFalse(long.playBirth(of: "gone", opens: opens), "not shown: not played")
     }
 }

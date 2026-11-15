@@ -25,6 +25,8 @@ final class IconRailFlowTests: XCTestCase {
             self.fold(shell)
             let rail = shell.sidebar.iconRail
             XCTAssertFalse(rail.isHidden)
+            shell.toggleArchivedTasks()
+            XCTAssertFalse(shell.isSidebarExpanded, "nothing archived: nothing to unfold for")
             try self.press(rail.boardButton)
             XCTAssertTrue(shell.activeWorkspace?.columns.contains(where: \.isProjectBoard) == true, "the Board opened")
 
@@ -66,6 +68,7 @@ final class IconRailFlowTests: XCTestCase {
             resize(1200)
             XCTAssertTrue(shell.sidebar.isExpanded, "wide again: unfolded")
             XCTAssertEqual(shell.sidebar.frame.width, 260)
+            XCTAssertGreaterThan(shell.sidebar.listWidth, 200, "the cards laid out at the sidebar's width, not the rail's")
 
             resize(800)
             shell.toggleSidebar()

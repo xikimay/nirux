@@ -426,7 +426,9 @@ final class NiruxShellView: NSView {
     // MARK: - Layout
 
     func relayout(animated: Bool) {
-        applySidebarAutoFold()
+        // Once the sidebar has its width.
+        let unfold = applySidebarAutoFold()
+        defer { unfold?() }
         let sidebarW = sidebarWidth
         // Status bar: only when it has content (update, crash, merge queue)
         statusBar.isHidden = !statusBar.hasContent

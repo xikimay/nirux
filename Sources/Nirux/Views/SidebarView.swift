@@ -102,9 +102,20 @@ final class SidebarView: NSView {
             // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
             lastFollowedActiveIndex = Int.min
-            // The rail shows none of the rows' moments: none replays when
-            // the list opens again.
-            if !isExpanded { forgetRowMoments() }
+            if !isExpanded {
+                // The rail shows none of the rows' moments: none replays
+                // when the list opens again.
+                forgetRowMoments()
+                // Births the rows played don't start again on the rail,
+                // part-way.
+                railBirthsPlayed.formUnion(rowOpensAt.keys)
+                // An unfold asked for with the archived list open didn't
+                // come (folded again meanwhile): the list stays as it was.
+                if revealsInactiveSectionOnNextBuild {
+                    revealsInactiveSectionOnNextBuild = false
+                    isInactiveSectionCollapsed = true
+                }
+            }
             // Before the rebuild: it lays the rows out at the width left.
             updateScrollerVisibility()
             rebuildContent()

@@ -115,7 +115,8 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertEqual(pressed, ["archived", "new", "board"])
     }
 
-    /// The working icons breathe while rows may move, not otherwise.
+    /// The working icons breathe while rows may move and the rail shows,
+    /// not otherwise.
     func testTheRailBreathesWhileRowsMayMove() throws {
         let sidebar = sidebar(rows)
         let checkout = try XCTUnwrap(sidebar.iconRail.itemViews["checkout"])
@@ -123,6 +124,10 @@ final class IconRailSidebarTests: XCTestCase {
         sidebar.animates = false
         XCTAssertNil(checkout.iconView.layer?.animation(forKey: RailItemView.breathKey))
         sidebar.animates = true
+        XCTAssertNotNil(checkout.iconView.layer?.animation(forKey: RailItemView.breathKey))
+        sidebar.isExpanded = true
+        XCTAssertNil(checkout.iconView.layer?.animation(forKey: RailItemView.breathKey), "hidden: still")
+        sidebar.isExpanded = false
         XCTAssertNotNil(checkout.iconView.layer?.animation(forKey: RailItemView.breathKey))
     }
 
@@ -150,6 +155,14 @@ final class IconRailSidebarTests: XCTestCase {
         let none = self.sidebar([row("a", index: 0, active: true)])
         none.showInactiveSection()
         XCTAssertTrue(none.isInactiveSectionCollapsed)
+
+        // Folded again before the cards came: the list stays folded, and a
+        // later unfold doesn't jump to it.
+        let cancelled = self.sidebar(many, width: 260)
+        cancelled.showInactiveSection()
+        cancelled.isExpanded = false
+        XCTAssertTrue(cancelled.isInactiveSectionCollapsed)
+        XCTAssertFalse(cancelled.revealsInactiveSectionOnNextBuild)
     }
 
     /// Faded out for an unfold, the rail stays hidden through rebuilds

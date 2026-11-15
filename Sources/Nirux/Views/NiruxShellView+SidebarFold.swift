@@ -44,21 +44,33 @@ struct SidebarFold: Equatable {
 extension NiruxShellView {
     /// Folds the sidebar when the window just got narrow, unfolds it back
     /// when it widened again: at once, as the window's own resize moves the
-    /// columns.
-    func applySidebarAutoFold() {
-        guard bounds.width > 0 else { return }
+    /// columns. The rail comes before the sidebar narrows; the cards only
+    /// once it is wide (`relayout` calls the returned unfold after laying
+    /// the sidebar out), as `toggleSidebar` does, else they would be laid
+    /// out at the rail's width first.
+    func applySidebarAutoFold() -> (() -> Void)? {
+        guard bounds.width > 0 else { return nil }
         let wasExpanded = isSidebarExpanded
         sidebarFold.windowResized(to: bounds.width)
-        guard isSidebarExpanded != wasExpanded else { return }
+        guard isSidebarExpanded != wasExpanded else { return nil }
         // An unfold under way (`toggleSidebar`) gives way.
         sidebarToggleGeneration += 1
-        if isSidebarExpanded { refreshOnboardingChecklist() }
-        sidebar.isExpanded = isSidebarExpanded
+        guard isSidebarExpanded else {
+            sidebar.isExpanded = false
+            return nil
+        }
+        let generation = sidebarToggleGeneration
+        return { [weak self] in
+            guard let self, sidebarToggleGeneration == generation, isSidebarExpanded else { return }
+            refreshOnboardingChecklist()
+            sidebar.isExpanded = true
+        }
     }
 
     /// The rail's archived tasks: the sidebar unfolds with the archived
     /// list open, its header in view (folded, the list has nowhere to show).
     func showArchivedTasks() {
+        guard sidebar.hasInactiveWorkspaces else { return }
         sidebar.showInactiveSection()
         if !isSidebarExpanded { toggleSidebar() }
     }

@@ -59,8 +59,8 @@ extension SidebarView {
             // the layers' clock.
             let layerNow = CACurrentMediaTime()
             for (workspaceID, opens) in rowOpensAt where now - opens < Self.birthDuration && !railBirthsPlayed.contains(workspaceID) {
-                railBirthsPlayed.insert(workspaceID)
-                iconRail.playBirth(of: workspaceID, opens: layerNow + (opens - now))
+                // Not shown yet (an update to come): the next rebuild tries.
+                if iconRail.playBirth(of: workspaceID, opens: layerNow + (opens - now)) { railBirthsPlayed.insert(workspaceID) }
             }
             return
         }
