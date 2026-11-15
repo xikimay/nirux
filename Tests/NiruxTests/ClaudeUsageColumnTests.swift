@@ -113,9 +113,10 @@ final class ClaudeUsageColumnTests: XCTestCase {
     /// without "⚠︎ " where the warning doesn't fit, rather than nothing.
     func testANearlyFullContextKeepsItsNumberInANarrowHeader() {
         let label = ColumnHeaderLabel()
-        label.texts = ["ctx 85%"]
+        label.stringValue = "ctx 85%"
         let short = label.width(fitting: .greatestFiniteMagnitude)
-        label.texts = ["⚠︎ ctx 85%", "ctx 85%"]
+        label.stringValue = "⚠︎ ctx 85%"
+        label.shortText = "ctx 85%"
         let full = label.width(fitting: .greatestFiniteMagnitude)
         XCTAssertEqual(label.stringValue, "⚠︎ ctx 85%")
         XCTAssertGreaterThan(full, short)

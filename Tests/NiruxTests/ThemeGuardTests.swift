@@ -11,7 +11,8 @@ final class ThemeGuardTests: XCTestCase {
         text → .textPrimary/.textSecondary/.textTertiary; \
         agent states → .working/.waiting/.error/.idle (.waiting only when something waits for the user's answer); \
         merged PR → .done; checks passed → .success; \
-        a warning → NSColor.niruxWarning, its words after "⚠︎ " (String.asWarning), never orange (it reads as amber) nor .waiting; \
+        a warning → NSColor.niruxWarning, its words after "⚠︎ " (String.asWarning), never orange or yellow (they read as amber) \
+        nor .waiting; \
         NSColor.niruxAccent → .accent; NSAppearance(named: .darkAqua) → Theme.appearance
         """
 
@@ -96,12 +97,8 @@ final class ThemeGuardTests: XCTestCase {
         "Views/WorktreeCleanupPanel.swift": 7
     ]
 
-    /// 1-based lines of `path` with a literal color, `.darkAqua` or `niruxAccent`.
-    /// `systemOrange`, `NSColor.yellow`, `= .orange`, `(.systemYellow`…: a colour, not a space's colour name.
-    private static let amberLookAlike = try! NSRegularExpression(
-        pattern: #"\bsystem(Orange|Yellow)\b|\bNSColor\.(orange|yellow)\b|[:=(,?]\s*\.(orange|yellow)\b"#
-    )
-
+    /// 1-based lines of `path` with a literal color, `.darkAqua`, `niruxAccent`, or orange or yellow as a colour
+    /// (`amberLines`).
     private func offendingLines(in path: String) throws -> [Int] {
         // `\s*` spans newlines: the codebase splits long initializers over lines.
         let literalColor = try NSRegularExpression(pattern: #"""
@@ -123,13 +120,51 @@ final class ThemeGuardTests: XCTestCase {
             if line.contains(".darkAqua") || (line.contains("niruxAccent") && !isAliasDefinition) {
                 lines.append(index + 1)
             }
-            // Orange or yellow reads as amber, which says something waits for the user's answer: a warning is
-            // `NSColor.niruxWarning`. Git's mark of a modified file keeps the colour editors give it.
-            let isGitMark = path == "Views/EditorFileTree.swift" && line.contains("case .modified")
-            if !isGitMark, Self.amberLookAlike.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
-                lines.append(index + 1)
-            }
+        }
+        // Git's mark of a modified file keeps the colour editors give it.
+        let allLines = text.components(separatedBy: "\n")
+        lines += Self.amberLines(in: text).filter { line in
+            !(path == "Views/EditorFileTree.swift" && allLines[line - 1].contains("case .modified"))
         }
         return lines.sorted()
+    }
+
+    /// 1-based lines of `text` that use orange or yellow as a colour, which read as amber (something waits for the
+    /// user's answer): `systemOrange`, `NSColor.yellow` or `Color.orange` (a chain split over lines too), and an implicit
+    /// `.orange` where a colour is meant (`= .orange`, `return .orange`, `[.orange`, `{ .yellow`, `?? .orange`, a line
+    /// starting with it). Not in a comment, not a `case` pattern's names, not a member of something else
+    /// (`palette?.orange`). A warning is `NSColor.niruxWarning`.
+    static func amberLines(in text: String) -> [Int] {
+        // Comments and case patterns go, each line kept: its number stays.
+        let code = text.components(separatedBy: "\n").map { line -> String in
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { return "" }
+            var code = line
+            if let comment = code.range(of: #"\s//.*$"#, options: .regularExpression) { code.removeSubrange(comment) }
+            if let pattern = code.range(of: #"^\s*case\s[^:]*:"#, options: .regularExpression) { code.removeSubrange(pattern) }
+            return code
+        }.joined(separator: "\n")
+        guard let amber = try? NSRegularExpression(pattern: #"""
+            \b system (Orange|Yellow) \b
+            | \b (NS|UI|CG)? Color \s* \. \s* (orange|yellow) \b
+            | (?: ^ | [\[({,:=] | \b return | \?\? | \s\? ) [\x20\t]* \. (orange|yellow) \b
+            """#, options: [.allowCommentsAndWhitespace, .anchorsMatchLines]) else { return [1] }
+        return amber.matches(in: code, range: NSRange(code.startIndex..., in: code)).compactMap { match in
+            Range(match.range, in: code).map { code[..<$0.lowerBound].components(separatedBy: "\n").count }
+        }
+    }
+
+    /// Each form the guard is for, put back: caught; comments and names that aren't colours: not.
+    func testTheAmberGuardCatchesOrangeAndYellowAsColoursOnly() {
+        let colours = [
+            "return .orange", "let tones = [.orange, .red]", "let pick = { .yellow }", "Text(\"x\").foregroundColor(Color.orange)",
+            "let c = NSColor\n    .orange", "label.textColor = .systemYellow", "let c = x ?? .orange", "let c = isOn ? .orange : .gray",
+            "layer.borderColor = NSColor.systemOrange.cgColor", "    .orange", "switch tone { case .low: return .yellow }"
+        ]
+        for snippet in colours { XCTAssertEqual(Self.amberLines(in: snippet), [1], snippet) }
+        let others = [
+            "/// never systemOrange", "let x = 1 // .orange here", "let c = palette?.orange", "case .red, .orange:",
+            "let name = \"Orange\"", "  // NSColor.orange", "let url = \"https://example.com/orange\""
+        ]
+        for snippet in others { XCTAssertEqual(Self.amberLines(in: snippet), [], snippet) }
     }
 }

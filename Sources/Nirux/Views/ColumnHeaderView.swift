@@ -581,7 +581,8 @@ final class ColumnHeaderButton: NSButton {
 }
 
 /// A caption among a header's accessories (the terminal's context usage):
-/// hidden while empty or when none of its texts fits.
+/// its text, else its shorter one where that doesn't fit; hidden while
+/// empty or when neither fits.
 @MainActor
 final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
     convenience init() {
@@ -590,25 +591,49 @@ final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
         textColor = Theme.Color.textTertiary
     }
 
-    /// What it says, then shorter words for a narrow header (a warning's
-    /// without "⚠︎ "): it shows the first that fits. Empty, it says its
-    /// `stringValue`, or nothing.
-    var texts: [String] = [] {
-        didSet { stringValue = texts.first ?? "" }
+    /// What it says; what it shows may be `shortText` (`width(fitting:)`).
+    private var text = ""
+    /// Shorter words for a narrow header (a warning's without "⚠︎ "); nil
+    /// for none.
+    var shortText: String? {
+        didSet { if shortText != oldValue { widths = nil } }
+    }
+    /// The two texts' widths, measured once each (the header lays out at
+    /// each agent tick).
+    private var widths: (text: CGFloat, short: CGFloat?)?
+
+    override var stringValue: String {
+        get { super.stringValue }
+        set {
+            text = newValue
+            widths = nil
+            super.stringValue = newValue
+        }
     }
 
     var accessoryHeight: CGFloat { 16 }
     var accessoryInset: CGFloat { ColumnHeaderView.labelInset }
 
     func width(fitting maxWidth: CGFloat) -> CGFloat {
-        let choices = texts.isEmpty ? [stringValue] : texts
-        for text in choices where !text.isEmpty {
-            stringValue = text
-            let width = ColumnHeaderView.textWidth(self)
-            if width <= maxWidth { return width }
-        }
-        stringValue = choices.first ?? ""
+        guard !text.isEmpty else { return 0 }
+        let measured = widths ?? (measure(text), shortText.map(measure))
+        widths = measured
+        if measured.text <= maxWidth { return show(text, measured.text) }
+        if let short = shortText, let width = measured.short, width <= maxWidth { return show(short, width) }
+        _ = show(text, 0)
         return 0
+    }
+
+    /// `text` as the label would draw it, without showing it.
+    private func measure(_ text: String) -> CGFloat {
+        guard let cell = cell?.copy() as? NSCell else { return 0 }
+        cell.stringValue = text
+        return ceil(cell.cellSize.width)
+    }
+
+    private func show(_ shown: String, _ width: CGFloat) -> CGFloat {
+        if super.stringValue != shown { super.stringValue = shown }
+        return width
     }
 }
 

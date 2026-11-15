@@ -34,7 +34,7 @@ final class MergeQueueConfirmationPanel: NSObject {
     private static let size = NSSize(width: 700, height: 640)
     /// What may go wrong, and what a dry run is: in the text's colour, since
     /// amber means an agent waits for the user, nothing else.
-    private static let warningColor = primaryText
+    private static let warningColor = NSColor.niruxWarning
     private static let refusalColor = Theme.Color.error
     private static let primaryText = NSColor.white.withAlphaComponent(0.9)
     private static let secondaryText = NSColor.white.withAlphaComponent(0.5)
