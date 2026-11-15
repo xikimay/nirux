@@ -3,36 +3,39 @@ import AppKit
 /// The glass interface's rail (docs/design/glass-interface.md): a vertical
 /// glass capsule with the space's Lead, then one state icon per task in the
 /// sidebar's order; under it, the archived tasks and a new task. The task on
-/// screen wears a halo; a task whose agent waits for the user wears an amber
-/// ring. A click on an amber icon asks for its request (the callout, plan
-/// step 2.3); a double-click on it, or a click on any other icon, goes to the
-/// task. Built, not shown yet: phase 3 puts it in the window.
+/// screen wears a halo and stays in view; a task whose agent waits for the
+/// user wears an amber ring. A click on an amber icon asks for its request
+/// (the callout, plan step 2.3); a double-click on it, or a click on any
+/// other icon, goes to the task. Built, not shown yet: phase 3 puts it in the
+/// window.
 final class IconRail: NSView {
     struct Item: Equatable {
         var id: String
         var title: String
         var icon: StateIcon
-        /// The task on screen.
-        var isSelected = false
     }
 
     struct Content: Equatable {
         /// The space's Lead, first, apart.
         var lead: Item?
         var tasks: [Item]
+        /// The task on screen, or the Lead.
+        var selectedID: String?
     }
 
     static let width: CGFloat = 38
     /// One icon's place, top to bottom.
     static let pitch: CGFloat = 28
-    private static let iconSize: CGFloat = 15
+    static let iconSize: CGFloat = 15
     private static let gap = Theme.Space.sm
 
-    /// A click on a task, or a double-click on a waiting one: go to it.
+    /// A click on a task, a double-click on a waiting one, or VoiceOver's
+    /// "Open task": go to it.
     var onSelect: ((String) -> Void)?
-    /// A click on a waiting task: its request, anchored to `frame` (in the
-    /// rail's coordinates).
-    var onRequest: ((String, NSRect) -> Void)?
+    /// A click on a waiting task: its request, anchored to the task's icon
+    /// (scrolled into view first), which a popover can follow as the rail
+    /// scrolls or changes.
+    var onRequest: ((String, NSView) -> Void)?
     var onArchived: (() -> Void)?
     var onNew: (() -> Void)?
 
@@ -47,9 +50,15 @@ final class IconRail: NSView {
     private let glass: GlassView
     private let scroll = NSScrollView()
     private let list = FlippedView()
-    private let separator = NSView()
+    /// Between the Lead and the tasks, when both show.
+    let separator = NSView()
     /// One view per item, reused by id.
     private(set) var itemViews: [String: RailItemView] = [:]
+    /// The selection changed: scroll it into view at the next layout.
+    private var revealPending = false
+    /// The task whose first click was handled last: a double-click counts as
+    /// one only on top of it.
+    private var firstClick: String?
     let archivedButton: RailRoundButton
     let newButton: RailRoundButton
 
@@ -71,6 +80,7 @@ final class IconRail: NSView {
         glass.contentView.addSubview(scroll)
         separator.wantsLayer = true
         separator.layer?.backgroundColor = Theme.Color.lineStrong.cgColor
+        separator.isHidden = true
         list.addSubview(separator)
         archivedButton.onPress = { [weak self] in self?.onArchived?() }
         newButton.onPress = { [weak self] in self?.onNew?() }
@@ -83,9 +93,15 @@ final class IconRail: NSView {
 
     override var isFlipped: Bool { true }
 
-    /// Shows `content`, reusing each item's view by its id.
+    /// Shows `content`, reusing each item's view by its id. An id shows
+    /// once: a Lead listed again among the tasks, or a task listed twice,
+    /// keeps its first place.
     func show(_ content: Content) {
+        var content = content
+        var seen = Set(content.lead.map { [$0.id] } ?? [])
+        content.tasks = content.tasks.filter { seen.insert($0.id).inserted }
         guard content != self.content else { return }
+        if content.selectedID != self.content.selectedID { revealPending = true }
         self.content = content
         let ids = Set(items.map(\.id))
         for (id, view) in itemViews where !ids.contains(id) {
@@ -96,25 +112,35 @@ final class IconRail: NSView {
             let view = itemViews[item.id] ?? {
                 let view = RailItemView()
                 view.onPress = { [weak self] id, clicks in self?.press(id, clicks: clicks) }
-                list.addSubview(view)
+                view.onOpen = { [weak self] id in self?.onSelect?(id) }
                 itemViews[item.id] = view
                 return view
             }()
-            view.show(item, isLead: item.id == content.lead?.id)
+            view.show(item, isLead: item.id == content.lead?.id, isSelected: item.id == content.selectedID)
         }
+        // VoiceOver reads the icons in their views' order, not by position.
+        list.subviews = [separator] + items.compactMap { itemViews[$0.id] }
         separator.isHidden = content.lead == nil || content.tasks.isEmpty
         needsLayout = true
     }
 
-    /// A waiting task's first click asks for its request and its second goes
-    /// to the task (the callout closes as the task opens); any other task goes
-    /// on the first click and ignores the rest.
+    /// A first click on a waiting task asks for its request and a
+    /// double-click goes to the task (the callout closes as the task opens); a
+    /// first click on any other task goes to it. A double-click whose first
+    /// click never came here (it closed a callout, say) counts as a first
+    /// click.
     private func press(_ id: String, clicks: Int) {
-        guard let item = items.first(where: { $0.id == id }), let view = itemViews[id] else { return }
-        switch (item.icon.waitsForUser, clicks) {
-        case (true, 1): onRequest?(id, convert(view.bounds, from: view))
-        case (true, 2), (false, 1): onSelect?(id)
-        default: break
+        guard (1...2).contains(clicks), let item = items.first(where: { $0.id == id }), let view = itemViews[id] else { return }
+        let isDouble = clicks == 2 && firstClick == id
+        firstClick = isDouble ? nil : id
+        switch (item.icon.waitsForUser, isDouble) {
+        case (true, false):
+            list.scrollToVisible(view.frame)
+            onRequest?(id, view)
+        case (true, true), (false, false):
+            onSelect?(id)
+        case (false, true):
+            break
         }
     }
 
@@ -142,14 +168,10 @@ final class IconRail: NSView {
         }
         content.tasks.forEach(place)
         list.frame = NSRect(x: 0, y: 0, width: Self.width, height: max(y + Theme.Space.xs, scroll.contentSize.height))
-    }
-
-    /// Brings the task on screen (or the Lead) into view when the rail
-    /// scrolls.
-    func revealSelection() {
-        guard let selected = items.first(where: \.isSelected), let view = itemViews[selected.id] else { return }
-        layoutSubtreeIfNeeded()
-        list.scrollToVisible(view.frame)
+        if revealPending, let id = content.selectedID, let view = itemViews[id] {
+            revealPending = false
+            list.scrollToVisible(view.frame)
+        }
     }
 }
 
@@ -166,18 +188,24 @@ extension StateIcon {
     }
 }
 
-/// One task on the rail: its state icon, a halo when it is on screen, an
-/// amber ring while its agent waits for the user. A button for VoiceOver.
+/// One task on the rail: its state icon (the Lead's sign, in its state's
+/// colour), a halo when it is on screen or under the pointer, an amber ring
+/// while its agent waits for the user. A button for VoiceOver.
 final class RailItemView: NSView {
     var onPress: ((String, Int) -> Void)?
+    /// VoiceOver's "Open task" on a waiting task.
+    var onOpen: ((String) -> Void)?
     private(set) var item: IconRail.Item?
-    let iconView = StateIconView(StateIcon(.idle), size: 15)
-    /// The task on screen.
+    let iconView = StateIconView(StateIcon(.idle), size: IconRail.iconSize)
+    /// The task on screen, or under the pointer (fainter).
     let halo = NSView()
     /// Its agent waits for the user.
     let ring = NSView()
-    private var isLead = false
-    private let leadIcon = NSImageView()
+    let leadIcon = NSImageView()
+    private var isSelected = false
+    private var isHovered = false {
+        didSet { updateHalo() }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -185,15 +213,14 @@ final class RailItemView: NSView {
             view.wantsLayer = true
             addSubview(view)
         }
-        halo.layer?.backgroundColor = Theme.Color.fillPressed.cgColor
         ring.layer?.borderColor = Theme.Color.waiting.cgColor
         ring.layer?.borderWidth = 1.5
         addSubview(iconView)
         leadIcon.image = NSImage(systemSymbolName: Theme.Symbol.lead, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
-        leadIcon.contentTintColor = Theme.Color.textSecondary
         leadIcon.cell?.setAccessibilityElement(false)
         addSubview(leadIcon)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
     }
@@ -201,18 +228,38 @@ final class RailItemView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ item: IconRail.Item, isLead: Bool) {
+    func show(_ item: IconRail.Item, isLead: Bool, isSelected: Bool) {
         self.item = item
-        self.isLead = isLead
+        self.isSelected = isSelected
         iconView.icon = item.icon
         iconView.isHidden = isLead
         leadIcon.isHidden = !isLead
-        halo.isHidden = !item.isSelected
+        leadIcon.contentTintColor = item.icon.color
         ring.isHidden = !item.icon.waitsForUser
+        updateHalo()
         let name = isLead ? "Lead" : item.title
         toolTip = "\(name) · \(item.icon.accessibilityText)"
-        setAccessibilityLabel("\(name), \(item.icon.accessibilityText)")
+        let label = "\(name), \(item.icon.accessibilityText)"
+        if label != accessibilityLabel() {
+            let isChange = accessibilityLabel() != nil
+            setAccessibilityLabel(label)
+            // VoiceOver on this icon hears its new state.
+            if isChange, window != nil { NSAccessibility.post(element: self, notification: .titleChanged) }
+        }
+        setAccessibilitySelected(isSelected)
+        setAccessibilityCustomActions(item.icon.waitsForUser ? [
+            NSAccessibilityCustomAction(name: "Open task") { [weak self] in
+                guard let id = self?.item?.id else { return false }
+                self?.onOpen?(id)
+                return true
+            },
+        ] : nil)
         needsLayout = true
+    }
+
+    private func updateHalo() {
+        halo.isHidden = !isSelected && !isHovered
+        halo.layer?.backgroundColor = (isSelected ? Theme.Color.fillPressed : Theme.Color.fillHover).cgColor
     }
 
     override func layout() {
@@ -227,6 +274,15 @@ final class RailItemView: NSView {
         iconView.frame.origin = NSPoint(x: center.x - iconView.frame.width / 2, y: center.y - iconView.frame.height / 2)
         leadIcon.frame = NSRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)
     }
+
+    /// The whole place is the button: its sign, halo and ring are drawings.
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+    /// A click acts even while the window is in the background, as the
+    /// sidebar's rail does today.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseUp(with event: NSEvent) {
         guard let item, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
