@@ -82,6 +82,19 @@ its small size, so the rows, the inbox and the callout show the same buttons;
 a button that just moved under the pointer ignores clicks for a moment, as
 the rows' buttons do today.
 
+## Command bar
+
+`CommandBarView` is the bar at the top of the window, on chrome glass: the
+space (its colour square, its name, the space menu), the task on screen (its
+state icon, its title, where it stands), the search (⌘P), and how many agents
+wait for the user (an amber count and ⌘J), shown only while one waits. Each
+segment is a quiet `NiruxButton` underneath, for its hover, its click and
+what VoiceOver says. When the bar narrows, the task's title keeps 120 pt
+before anything goes: first its detail, then the space's name, then the
+search's key; the signs always stay.
+
+![The command bar at three widths and with nothing open: Opaque exact, the other levels approximated](../images/command-bar.png)
+
 ## Plan
 
 1. Foundations, nothing on screen: tokens and the transparency levels, the
