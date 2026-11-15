@@ -94,7 +94,7 @@ extension ProjectBoardController {
         switch listedRows(local: local, workspaces: inputs.workspaces) {
         case .one(let rows, let repository):
             guard !rows.isEmpty, let only = sections.first else {
-                content.message = BoardStagesView.Message(text: Self.nothingToList(in: repository))
+                content.message = BoardStagesView.Message(text: emptyRepositoryMessage(repository))
                 return content
             }
             others = rows.filter { $0.group == .otherRepository }
@@ -126,6 +126,15 @@ extension ProjectBoardController {
             ))
         }
         return content
+    }
+
+    /// Why the one repository lists nothing: what went wrong reading it
+    /// (no section's pill is there to say it), else that it has nothing yet.
+    private func emptyRepositoryMessage(_ repository: String) -> String {
+        guard let reads = sections.first.flatMap({ reads[$0.id] }), let error = Self.errorText(reads) else {
+            return Self.nothingToList(in: repository)
+        }
+        return "Couldn’t read \(reads.name) on GitHub: \(error.message)"
     }
 
     /// The space: its colour and name, what it holds (its repositories,

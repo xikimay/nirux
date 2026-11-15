@@ -148,6 +148,9 @@ final class BoardStagesView: NSView {
     var onLead: (() -> Void)?
     /// A line was clicked, or a "Merged today" entry with a task: its id.
     var onOpen: ((String) -> Void)?
+    /// A task's line was clicked once departed (faded, held in place under
+    /// the pointer): its id, its workspace's.
+    var onTaskGone: ((String) -> Void)?
     /// A line's Merge station was clicked where that changes the queue's
     /// list: its section's id, and what the click does.
     var onOffer: ((_ section: String, BoardStages.QueueOffer) -> Void)?
@@ -571,6 +574,10 @@ final class BoardStagesView: NSView {
                 made.onClick = { [weak self, weak made] in
                     guard let self, let made else { return }
                     self.onOpen?(made.line.id)
+                }
+                made.onGone = { [weak self, weak made] in
+                    guard let self, let made, made.line.hasTask else { return }
+                    self.onTaskGone?(made.line.id)
                 }
                 view = made
             }

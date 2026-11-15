@@ -8,6 +8,27 @@ struct SidebarApprovalButtonArming: Equatable {
     let frame: NSRect
     /// `ProcessInfo.systemUptime` seconds.
     let armedAt: TimeInterval
+
+    /// After a rebuild: buttons at a new place (or new) start their delay
+    /// again; buttons that stayed put keep theirs. The rows and the glass
+    /// interface's requests (`RequestArming`) arm alike.
+    @MainActor
+    static func rearmed(_ previous: [String: Self], frames: [String: NSRect], now: TimeInterval) -> [String: Self] {
+        frames.reduce(into: [:]) { arming, entry in
+            if let kept = previous[entry.key], kept.frame == entry.value {
+                arming[entry.key] = kept
+            } else {
+                arming[entry.key] = Self(frame: entry.value, armedAt: now + SidebarView.approvalArmingDelay)
+            }
+        }
+    }
+
+    /// Scrolling slides buttons under a still pointer: every button waits
+    /// its delay again.
+    @MainActor
+    static func restarted(_ arming: [String: Self], now: TimeInterval) -> [String: Self] {
+        arming.mapValues { Self(frame: $0.frame, armedAt: now + SidebarView.approvalArmingDelay) }
+    }
 }
 
 /// A decision clicked in the sidebar, where its button was released.
@@ -48,15 +69,7 @@ extension SidebarView {
     /// After a rebuild: buttons at a new place (or new) start their delay
     /// again; buttons that stayed put keep theirs.
     func refreshApprovalArming(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        var arming: [String: SidebarApprovalButtonArming] = [:]
-        for (key, button) in approvalButtonViews {
-            if let previous = approvalButtonArming[key], previous.frame == button.frame {
-                arming[key] = previous
-            } else {
-                arming[key] = SidebarApprovalButtonArming(frame: button.frame, armedAt: now + Self.approvalArmingDelay)
-            }
-        }
-        approvalButtonArming = arming
+        approvalButtonArming = SidebarApprovalButtonArming.rearmed(approvalButtonArming, frames: approvalButtonViews.mapValues(\.frame), now: now)
     }
 
     func isApprovalButtonArmed(_ key: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
@@ -93,10 +106,7 @@ extension SidebarView {
     /// Scrolling slides buttons under a still pointer: every button waits
     /// its delay again.
     @objc func approvalClipViewScrolled(_ notification: Notification) {
-        let now = ProcessInfo.processInfo.systemUptime
-        approvalButtonArming = approvalButtonArming.mapValues {
-            SidebarApprovalButtonArming(frame: $0.frame, armedAt: now + Self.approvalArmingDelay)
-        }
+        approvalButtonArming = SidebarApprovalButtonArming.restarted(approvalButtonArming, now: ProcessInfo.processInfo.systemUptime)
     }
 
     /// The decision a click makes, if any: a single click, released on the

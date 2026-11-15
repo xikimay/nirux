@@ -72,12 +72,14 @@ enum SidebarExpandedMetrics {
     static let approvalBoxPaddingX: CGFloat = 6
     static let approvalBoxPaddingY: CGFloat = 6
 
-    static func approvalLines(_ text: String) -> [String] {
+    /// `perLine` characters a line (the inbox's box is wider than a row's).
+    static func approvalLines(_ text: String, perLine: Int = approvalCharactersPerLine) -> [String] {
+        let perLine = max(perLine, 1)
         var lines: [String] = []
         var rest = Substring(text)
         repeat {
-            lines.append(String(rest.prefix(approvalCharactersPerLine)))
-            rest = rest.dropFirst(approvalCharactersPerLine)
+            lines.append(String(rest.prefix(perLine)))
+            rest = rest.dropFirst(perLine)
         } while !rest.isEmpty
         return lines
     }

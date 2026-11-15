@@ -103,4 +103,38 @@ final class NiruxButtonTests: XCTestCase {
             XCTAssertEqual(glass.layer?.backgroundColor, button.layer?.backgroundColor)
         }
     }
+
+    /// A press the button refuses (`acceptsPress`, an answer not armed yet)
+    /// never starts its tracking: the release waiting in the queue stays
+    /// there, and nothing acts.
+    func testARefusedPressNeverTracks() throws {
+        final class Target: NSObject {
+            var presses = 0
+            @objc func press(_ sender: Any?) { presses += 1 }
+        }
+        let target = Target()
+        let button = NiruxButton(title: "Allow", kind: .primary, target: target, action: #selector(Target.press(_:)))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 120, height: 40), styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(button)
+        var asked = 0
+        button.acceptsPress = { _ in
+            asked += 1
+            return false
+        }
+        let point = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        func event(_ type: NSEvent.EventType) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            ))
+        }
+        NSApp.postEvent(try event(.leftMouseUp), atStart: false)
+        button.mouseDown(with: try event(.leftMouseDown))
+        let release = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true)
+        XCTAssertEqual(asked, 1)
+        XCTAssertNotNil(release, "nothing took the release")
+        XCTAssertEqual(target.presses, 0)
+        window.close()
+    }
 }

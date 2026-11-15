@@ -785,6 +785,14 @@ final class ProjectBoardFlowTests: XCTestCase {
             try BoardStagesClicks.click(lead.openButton)
             XCTAssertEqual(shell.activeWorkspace?.title, "Lead")
 
+            // A task's line clicked once it departed (held faded under the pointer): its workspace where it went, else
+            // the table's word that it was closed.
+            try select("login", in: shell)
+            board.view.stages.onTaskGone?(try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" }?.id))
+            XCTAssertEqual(shell.activeWorkspace?.title, "widgets")
+            board.view.stages.onTaskGone?("a workspace closed since")
+            XCTAssertEqual(shell.toast?.message, "That workspace was closed")
+
             // The order switch: every Board takes it, and it is saved.
             XCTAssertEqual(board.view.stages.content?.order, .sidebar)
             let orderSwitch = board.view.stages.orderSwitch
