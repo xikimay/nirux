@@ -133,10 +133,17 @@ final class CommandPalette: NSObject {
     static let barGap = Theme.Space.sm
     /// Today's background, under the centred palette.
     private static var restingBackground: NSColor { Theme.Color.base.withAlphaComponent(0.98) }
-    /// The glass under the bar, behind the field and the rows.
+    /// The glass under the bar, holding the field and the rows; kept,
+    /// hidden, while the palette opens centred.
     private(set) var glass: GlassView?
-    /// It opens from the bar: it unfolds from the bar's middle.
-    private var unfoldsFrom: NSPoint?
+    /// It opens from the bar: the point it unfolds from, the bar's middle on
+    /// the edge facing it (in the panel's layer, y up).
+    private(set) var unfoldsFrom: NSPoint?
+    /// How the panel is dressed: restyled only when this changes.
+    private var dressedUnderBar: Bool?
+    /// Whether a window shows: ordered in, not minimized, on the active
+    /// Space (a test's own for windows it never shows).
+    var windowShows: @MainActor (NSWindow) -> Bool = { $0.isVisible && !$0.isMiniaturized && $0.isOnActiveSpace }
 
     private var keyMonitor: Any?
     private var clickMonitor: Any?
@@ -162,9 +169,10 @@ final class CommandPalette: NSObject {
         panel.makeFirstResponder(searchField)
 
         // Opening animation: scale from 0.96 → 1.0
+        let centred = unfoldsFrom == nil
         if let origin = unfoldsFrom {
-            // Under the bar it unfolds from the bar's middle. The view's
-            // layer takes no implicit animation: an explicit one.
+            // Under the bar it unfolds from the bar. The view's layer takes
+            // no implicit animation: an explicit one.
             if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer = panel.contentView?.layer {
                 let unfold = CABasicAnimation(keyPath: "transform")
                 unfold.fromValue = CATransform3DMakeAffineTransform(Self.unfoldStart(from: origin))
@@ -181,7 +189,7 @@ final class CommandPalette: NSObject {
             ctx.duration = 0.12
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1
-            panel.contentView?.layer?.setAffineTransform(.identity)
+            if centred { panel.contentView?.layer?.setAffineTransform(.identity) }
         }
     }
 
@@ -201,24 +209,49 @@ final class CommandPalette: NSObject {
         )
     }
 
-    /// Under the bar (`bar`, in screen coordinates): centred on it, inside
-    /// its window (`windowFrame`), the left edge first, and on the screen
-    /// (`screen`, its visible frame), its bottom first.
-    static func frame(underBar bar: NSRect, in windowFrame: NSRect, screen: NSRect?) -> NSRect {
-        let margin = Theme.Space.sm
-        let x = max(min(bar.midX - size.width / 2, windowFrame.maxX - margin - size.width), windowFrame.minX + margin)
-        var y = bar.minY - barGap - size.height
-        if let screen { y = max(min(y, screen.maxY - margin - size.height), screen.minY + margin) }
-        return NSRect(x: x, y: y, width: size.width, height: size.height)
+    /// Where the palette goes beside the bar, and whether above it.
+    struct BarPlace: Equatable {
+        let frame: NSRect
+        let isAbove: Bool
     }
 
-    /// The bar's rect on screen and its window, or nil while it shows
-    /// nowhere (no window, hidden, outside its window).
-    static func barOnScreen(_ bar: NSView) -> (rect: NSRect, window: NSWindow)? {
-        guard let window = bar.window, !bar.isHiddenOrHasHiddenAncestor else { return nil }
+    /// Beside the bar (`bar`, in screen coordinates): centred on it, inside
+    /// its window (`windowFrame`) and then on the screen (`screen`, its
+    /// visible frame), the left edge first; below the bar, or above it where
+    /// the screen's bottom leaves no room, so that it never covers the bar.
+    static func place(underBar bar: NSRect, in windowFrame: NSRect, screen: NSRect?) -> BarPlace {
+        let margin = Theme.Space.sm
+        var x = max(min(bar.midX - size.width / 2, windowFrame.maxX - margin - size.width), windowFrame.minX + margin)
+        var y = bar.minY - barGap - size.height
+        guard let screen else { return BarPlace(frame: NSRect(x: x, y: y, width: size.width, height: size.height), isAbove: false) }
+        x = max(min(x, screen.maxX - margin - size.width), screen.minX + margin)
+        var isAbove = false
+        if y < screen.minY + margin, bar.maxY + barGap + size.height <= screen.maxY - margin {
+            y = bar.maxY + barGap
+            isAbove = true
+        } else {
+            y = max(min(y, screen.maxY - margin - size.height), screen.minY + margin)
+        }
+        return BarPlace(frame: NSRect(x: x, y: y, width: size.width, height: size.height), isAbove: isAbove)
+    }
+
+    /// The point the palette unfolds from: the bar's middle, on the edge
+    /// facing the bar (its top below the bar, its bottom above it), in the
+    /// panel's layer (y up).
+    static func unfoldOrigin(of place: BarPlace, bar: NSRect) -> NSPoint {
+        NSPoint(x: bar.midX - place.frame.minX, y: place.isAbove ? 0 : place.frame.height)
+    }
+
+    /// The bar's rect on screen, or nil while nobody sees it: not in
+    /// `host`, its window not showing (`windowShows`), hidden, transparent,
+    /// clipped away, or outside its window.
+    static func barOnScreen(_ bar: NSView, in host: NSWindow, windowShows: (NSWindow) -> Bool) -> NSRect? {
+        guard let window = bar.window, window === host, windowShows(window), window.alphaValue > 0,
+              !bar.isHiddenOrHasHiddenAncestor, !bar.visibleRect.isEmpty,
+              sequence(first: bar, next: \.superview).allSatisfy({ $0.alphaValue > 0 }) else { return nil }
         let rect = window.convertToScreen(bar.convert(bar.bounds, to: nil))
         guard window.frame.intersects(rect) else { return nil }
-        return (rect, window)
+        return rect
     }
 
     /// Places and dresses the panel for `placement` beside `window` (making
@@ -226,33 +259,48 @@ final class CommandPalette: NSObject {
     func apply(_ placement: Placement, relativeTo window: NSWindow) {
         if panel == nil { createPanel() }
         guard let panel, let background = panel.contentView else { return }
-        guard case let .underBar(bar, level) = placement, let onScreen = Self.barOnScreen(bar) else {
-            glass?.removeFromSuperview()
-            glass = nil
+        guard case let .underBar(bar, level) = placement, let barRect = Self.barOnScreen(bar, in: window, windowShows: windowShows) else {
+            dress(underBar: false, background: background)
             unfoldsFrom = nil
-            background.layer?.backgroundColor = Self.restingBackground.cgColor
-            background.layer?.cornerCurve = .circular
             panel.setFrame(Self.centeredFrame(in: window.frame), display: true)
-            panel.invalidateShadow()
             return
         }
-        let glass = self.glass ?? {
-            let glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel, fillsWindow: true)
-            glass.frame = background.bounds
-            glass.autoresizingMask = [.width, .height]
-            background.addSubview(glass, positioned: .below, relativeTo: nil)
-            self.glass = glass
-            return glass
-        }()
-        glass.level = level
-        background.layer?.backgroundColor = nil
-        // The glass's corners: no sliver of the panel's left outside them.
-        background.layer?.cornerCurve = .continuous
-        let frame = Self.frame(underBar: onScreen.rect, in: onScreen.window.frame, screen: onScreen.window.screen?.visibleFrame)
-        unfoldsFrom = NSPoint(x: onScreen.rect.midX - frame.minX, y: frame.height)
-        panel.setFrame(frame, display: true)
+        dress(underBar: true, background: background, level: level)
+        let place = Self.place(underBar: barRect, in: window.frame, screen: window.screen?.visibleFrame)
+        unfoldsFrom = Self.unfoldOrigin(of: place, bar: barRect)
+        panel.setFrame(place.frame, display: true)
+    }
+
+    /// Today's background, or the glass holding the field and the rows
+    /// (macOS 26's glass adapts what it holds); dressed again only when the
+    /// placement changes.
+    private func dress(underBar: Bool, background: NSView, level: InterfaceTransparency = .opaque) {
+        if underBar { glass?.level = level }
+        guard underBar != dressedUnderBar else { return }
+        dressedUnderBar = underBar
+        let content = [fieldContainer, separator, listContainer].compactMap { $0 }
+        if underBar {
+            let glass = self.glass ?? {
+                let glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel, fillsWindow: true)
+                glass.frame = background.bounds
+                glass.autoresizingMask = [.width, .height]
+                background.addSubview(glass, positioned: .below, relativeTo: nil)
+                self.glass = glass
+                return glass
+            }()
+            glass.isHidden = false
+            content.forEach { glass.contentView.addSubview($0) }
+            background.layer?.backgroundColor = nil
+            // The glass's corners: no sliver of the panel's left outside them.
+            background.layer?.cornerCurve = .continuous
+        } else {
+            content.forEach { background.addSubview($0) }
+            glass?.isHidden = true
+            background.layer?.backgroundColor = Self.restingBackground.cgColor
+            background.layer?.cornerCurve = .circular
+        }
         // The window's shadow follows what it now draws.
-        panel.invalidateShadow()
+        panel?.invalidateShadow()
     }
 
     /// Apply a prefilter to an already-visible palette without re-showing
@@ -279,13 +327,17 @@ final class CommandPalette: NSObject {
         }
     }
 
-    /// A press on the title bar's Search button (`TitleBarActions`) while
-    /// the palette shows: it closes the palette here, on mouse-down, and
-    /// is consumed, or the button would open it again on mouse-up.
+    /// The buttons that open the palette: the title bar's Search
+    /// (`TitleBarActions`), the command bar's search segment.
+    static let searchButtonIDs: Set<NSUserInterfaceItemIdentifier> = [TitleBarActions.searchButtonID, CommandBarView.searchButtonID]
+
+    /// A press on a button that opens the palette while it shows: it
+    /// closes the palette here, on mouse-down, and is consumed, or the button
+    /// would open it again on mouse-up.
     static func isSearchButtonPress(_ event: NSEvent) -> Bool {
         guard let frameView = event.window?.contentView?.superview else { return false }
         let hit = frameView.hitTest(frameView.convert(event.locationInWindow, from: nil))
-        return hit?.identifier == TitleBarActions.searchButtonID
+        return hit?.identifier.map(searchButtonIDs.contains) == true
     }
 
     func dismiss() {

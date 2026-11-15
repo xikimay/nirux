@@ -162,10 +162,13 @@ as it opens whatever question its column holds.
 
 `CommandPalette.show(relativeTo:sections:placement:)` with `.underBar(bar,
 level:)` hangs the palette 8 pt under the command bar (the bar's view: the
-palette finds it on screen), centred on it, inside its window and on the screen,
-at today's size; it unfolds from the bar (not under Reduce motion), and the field and
-the rows sit on floating glass that fills the panel. While the bar shows
-nowhere, the palette opens centred. Today's centred palette stays the
+palette finds it on screen), centred on it, inside its window and then on
+the screen, at today's size; near the screen's bottom it opens above the bar
+rather than over it. It unfolds from the bar (not under Reduce motion), and
+the field and the rows sit inside floating glass that fills the panel (macOS
+26's glass adapts what it holds). While nobody sees the bar (hidden,
+transparent, in another window than the palette's, or its window ordered
+out, minimized or on another Space), the palette opens centred. Today's centred palette stays the
 default and doesn't change. A press on the bar's search segment closes an
 open palette, as the title bar's Search does. The scopes (tasks, sessions,
 files, actions) come later. For the demo at the end of phase 2: macOS 26's
