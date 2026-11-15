@@ -87,8 +87,10 @@ extension NiruxShellView {
         // the user's answer (an agent stopped on an error isn't amber); not
         // the column on screen, which ⌘J never goes to.
         let onScreen = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }.map(ObjectIdentifier.init)
-        let waitingCount = blockedWaits.filter { $0.key != onScreen && $0.value.reason.signal == .waiting }.count
-        updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: waitingCount)
+        updateCommandBar(
+            task: infos.first { $0.index == activeWSIndex },
+            waitingCount: Self.commandBarWaitingCount(blockedWaits: blockedWaits, onScreen: onScreen)
+        )
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)
@@ -269,12 +271,9 @@ extension NiruxShellView {
     }
 
     /// `WorkspaceInfo.attention` for a workspace of another space, which
-    /// has no card: what blocks its agents (a dialog on screen, a failed
-    /// turn, an exit mid-turn), their attention, and what happened while
-    /// the user was away.
-    /// What a workspace of a space not on screen asks of the user, read off
-    /// its columns (`blockedWaits`: what blocks each on the user) and its
-    /// notification.
+    /// has no card: what blocks its agents (`blockedWaits`: a dialog on
+    /// screen, a failed turn, an exit mid-turn), their attention, and what
+    /// happened while the user was away.
     private static func attention(
         of workspace: WorkspaceState,
         blockedWaits: [ObjectIdentifier: AgentWait],

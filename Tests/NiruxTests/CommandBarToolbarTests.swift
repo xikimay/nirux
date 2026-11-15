@@ -46,8 +46,10 @@ final class CommandBarToolbarTests: XCTestCase {
         XCTAssertFalse(item.isBordered, "no bordered background behind the bar's own glass")
         if #available(macOS 26, *) { XCTAssertEqual(item.style, .plain) }
         XCTAssertEqual(toolbar.toolbar.items.map(\.itemIdentifier), [CommandBarToolbar.barItemID], "nothing else")
-        toolbar.toolbar.displayMode = .labelOnly
-        XCTAssertEqual(toolbar.toolbar.displayMode, .iconOnly, "never a text item in the bar's place")
+        // What macOS 14's strip menu offers (AppKit itself refuses label
+        // only on a unified toolbar).
+        toolbar.toolbar.displayMode = .iconAndLabel
+        XCTAssertEqual(toolbar.toolbar.displayMode, .iconOnly, "never a label under the bar, nor a taller title bar")
         XCTAssertEqual(toolbar.bar.frame.width, CommandBarToolbar.maximumBarWidth, accuracy: 0.5, "a wide window: the widest bar")
         XCTAssertEqual(toolbar.bar.frame.height, CommandBarView.height)
         let bar = toolbar.bar.convert(toolbar.bar.bounds, to: nil)

@@ -63,6 +63,22 @@ final class CommandBarContentTests: XCTestCase {
         XCTAssertEqual(failed.taskIcon, StateIcon(.error))
     }
 
+    /// The count: what waits for the user's answer, not an agent stopped on
+    /// an error or exited (which ⌘J also visits), nor the column on screen.
+    func testTheCountIsWhatWaitsForAnAnswerOffScreen() {
+        final class Column {}
+        let (asks, failed, exited, shown) = (Column(), Column(), Column(), Column())
+        let waits: [ObjectIdentifier: AgentWait] = [
+            ObjectIdentifier(asks): AgentWait(reason: .permission(tool: "Bash", summary: nil), since: 1),
+            ObjectIdentifier(failed): AgentWait(reason: .apiError(kind: nil, detail: nil), since: 2),
+            ObjectIdentifier(exited): AgentWait(reason: .exitedMidTurn, since: 3),
+            ObjectIdentifier(shown): AgentWait(reason: .question("Which base?"), since: 4),
+        ]
+        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(blockedWaits: waits, onScreen: ObjectIdentifier(shown)), 1)
+        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(blockedWaits: waits, onScreen: nil), 2)
+        withExtendedLifetime((asks, failed, exited, shown)) {}
+    }
+
     /// A space with nothing open says so; a colour that doesn't read falls
     /// back to the accent.
     func testNothingOpenAndAnUnreadableColour() {

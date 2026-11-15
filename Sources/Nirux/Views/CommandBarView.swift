@@ -14,7 +14,8 @@ final class CommandBarView: NSView {
         var taskIcon: StateIcon?
         /// Where it stands, after its title: "working 12m".
         var taskDetail: String?
-        /// Agents waiting for the user, in every space (what ⌘J reaches).
+        /// Agents waiting for the user's answer in every space, as ⌘J
+        /// reaches them (not the column on screen).
         var waitingCount: Int
     }
 
