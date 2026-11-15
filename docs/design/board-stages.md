@@ -693,6 +693,11 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 
 ## Known limits
 
+- **A merge only a task's detection knows counts in its repository's name
+  as GitHub gives it.** A repository renamed since board.json was saved
+  reads the detection as another repository's, until the Board's merged
+  list has the merge.
+
 - **Full Keyboard Access doesn't stop on a line.** VoiceOver reaches each
   line, its Merge station and its link by name, but Tab doesn't: the
   table's row buttons were key views. A line's menu is reached with the

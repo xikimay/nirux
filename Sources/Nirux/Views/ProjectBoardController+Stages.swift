@@ -41,10 +41,6 @@ extension ProjectBoardController {
         /// A task's line, by its id (its workspace's): Focus on its most
         /// urgent agent column, else on the workspace.
         var focus: [String: ProjectBoardView.Action] = [:]
-        /// The pull requests of each section's lines, by section id: a
-        /// line held in place under the pointer may show another
-        /// repository's by now, and the queue and Retarget act only on the
-        /// section's own.
         /// A repository's line's worktree, by its id, for its "Clean up"
         /// link (a merged pull request's, so never a line without a
         /// repository); a merged task's too, which has left the list for
@@ -53,6 +49,10 @@ extension ProjectBoardController {
         /// Open Main Checkout, by the checkout's path: Focus where a
         /// workspace is open there, else Open a shell there.
         var mainCheckouts: [String: ProjectBoardView.Action] = [:]
+        /// The pull requests of each section's lines, by section id: a
+        /// line held in place under the pointer may show another
+        /// repository's by now, and the queue and Retarget act only on the
+        /// section's own.
         var pullRequests: [String: Set<Int>] = [:]
     }
 

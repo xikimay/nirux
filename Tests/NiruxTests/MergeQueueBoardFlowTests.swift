@@ -192,7 +192,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             // A pull request none of the section's lines has: not retargeted.
             let section = try XCTUnwrap(board.view.stages.content?.sections.first?.id)
             shell.performBoardLink(.retarget(number: 99, onto: "main"), line: nil, section: section, board: board)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
             XCTAssertFalse(client.calls.contains { $0.what.contains("#99") })
             XCTAssertFalse(client.calls.contains(where: \.onMainThread), "gh never runs on the main thread")
         }

@@ -12,6 +12,7 @@ enum BoardStagesClicks {
     /// `performClick`, since a button's own tracking never ends in a window
     /// that isn't shown.
     static func click(_ button: NSButton, file: StaticString = #filePath, line: UInt = #line) throws {
+        layOut(button)
         let hit = try hitView(over: button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY))
         XCTAssertTrue(hit === button, "\(hit) is under the pointer, not \(button.title)", file: file, line: line)
         XCTAssertTrue(button.isEnabled, "\(button.title) is disabled", file: file, line: line)
