@@ -1323,9 +1323,13 @@ final class BoardStagesViewTests: XCTestCase {
         let kept = ids.filter { !["t2", "t5"].contains($0) }
         view.show(content([section(units: tasks(kept.map { line($0) }), merged: merged)]))
         XCTAssertEqual((window.firstResponder as? BoardStagesLineView)?.line.id, "t6")
-        // A click on a line gives the keyboard to the column, not to it, the line that has it too: no ring stays.
-        try press(try XCTUnwrap(view.lineViews.first { $0.line.id == "t6" }), at: 40)
+        // A click on a line gives the keyboard to the column, not to it, whichever line has it: no ring stays.
+        try press(try XCTUnwrap(view.lineViews.first { $0.line.id == "t9" }), at: 40)
         XCTAssertTrue(window.firstResponder === column)
+        let six = try XCTUnwrap(view.lineViews.first { $0.line.id == "t6" })
+        XCTAssertTrue(window.makeFirstResponder(six))
+        try press(six, at: 40)
+        XCTAssertTrue(window.firstResponder === column, "the line that had it too")
         // The last one goes: the line now last takes it, not "Merged today" below it.
         XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(view.lineViews.last)))
         view.show(content([section(units: tasks(kept.dropLast().map { line($0) }), merged: merged)]))
@@ -1411,6 +1415,11 @@ final class BoardStagesViewTests: XCTestCase {
         view.show(content([nirux]))
         view.layoutSubtreeIfNeeded()
         XCTAssertTrue(window.firstResponder === header.stopButton, "\(String(describing: window.firstResponder))")
+        // The queue ends: Stop hands it back to Start, not to the menu after it nor a line.
+        nirux.queue = BoardStagesView.SectionQueue(status: "Stopped", start: BoardStagesView.QueueButton(title: "Start… · 1"))
+        view.show(content([nirux]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(window.firstResponder === header.startButton, "\(String(describing: window.firstResponder))")
     }
 
     /// The Board's column, which takes the keyboard.

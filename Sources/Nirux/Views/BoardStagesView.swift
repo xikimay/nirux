@@ -242,7 +242,7 @@ final class BoardStagesView: NSView {
     /// The space whose Lead the button shows, as laid out: another space's
     /// Lead is another target.
     private var leadSpace = ""
-    let orderSwitch = NSSegmentedControl(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
+    let orderSwitch = BoardStagesKeySwitch(labels: ["Sidebar order", "By progress"], trackingMode: .selectOne, target: nil, action: nil)
     /// "Task", "Now", "Pull request": over their columns.
     let columnTitles = ["Task", "Now", "Pull request"].map { NSTextField(labelWithString: $0) }
     let stationTitles = BoardStages.Station.allCases.map { NSTextField(labelWithString: BoardStagesView.title(of: $0)) }
@@ -1470,12 +1470,10 @@ final class BoardStagesSectionHeaderView: NSView {
             button.title = state?.title ?? button.title
             button.toolTip = state?.tooltip
             button.setAccessibilityLabel(state.map { "\($0.title) \(title)" })
+            button.isEnabled = state?.isEnabled ?? false
             if button === shown {
-                button.isEnabled = state?.isEnabled ?? false
                 button.isHidden = queue?.stop == nil && queue?.start == nil
                 BoardStagesKeyboard.setHidden(other, true, handingTo: shown)
-            } else {
-                button.isEnabled = state?.isEnabled ?? false
             }
         }
         needsLayout = true
@@ -1501,10 +1499,8 @@ final class BoardStagesSectionHeaderView: NSView {
             moreButton.frame = NSRect(x: right - 20, y: baseline - 2, width: 20, height: 20)
             right = moreButton.frame.minX - 6
         }
+        // Which of Start and Stop shows: `show` set it, and handed the keyboard on.
         let button = queue?.stop != nil ? stopButton : startButton
-        button.isHidden = queue?.stop == nil && queue?.start == nil
-        // Start that had the keyboard hands it to Stop, and back.
-        BoardStagesKeyboard.setHidden(button === stopButton ? startButton : stopButton, true, handingTo: button)
         if !button.isHidden {
             let width = ceil(button.fittingSize.width)
             button.frame = NSRect(x: right - width, y: baseline - 3, width: width, height: 22)
@@ -1809,7 +1805,6 @@ final class BoardStagesWorktreeView: NSView {
         // not where it would cost an entry without Clean Up… its Focus.
         let fitsCleanUp = right - cleanUpRoom - 12 - left >= min(title, 40)
         let keepsRoom = fitsCleanUp && (item(.cleanUp) != nil || right - cleanUpRoom - 12 - openWidth - 12 - left >= min(title, 80))
-        BoardStagesKeyboard.setHidden(cleanUpButton, item(.cleanUp) == nil || !fitsCleanUp, handingTo: openButton)
         if keepsRoom {
             cleanUpButton.frame = NSRect(x: right - cleanUpRoom, y: (bounds.height - 18) / 2, width: cleanUpRoom, height: 18)
             right = cleanUpButton.frame.minX - 12
@@ -1819,6 +1814,8 @@ final class BoardStagesWorktreeView: NSView {
             openButton.frame = NSRect(x: right - openWidth, y: (bounds.height - 18) / 2, width: openWidth, height: 18)
             right = openButton.frame.minX - 12
         }
+        // Once Open's place is known: Clean Up… that had the keyboard hands it to Open.
+        BoardStagesKeyboard.setHidden(cleanUpButton, item(.cleanUp) == nil || !fitsCleanUp, handingTo: openButton)
         titleLabel.frame = NSRect(x: left, y: (bounds.height - 16) / 2, width: min(title, max(0, right - left)), height: 16)
         var x = titleLabel.frame.maxX + 10
         let pullRequest = pullRequestLabel.stringValue.isEmpty ? 0 : ColumnHeaderView.textWidth(pullRequestLabel)

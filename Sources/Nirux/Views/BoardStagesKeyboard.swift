@@ -136,10 +136,17 @@ class BoardStagesKeyButton: NSButton {
     }
 }
 
+/// The order switch: it takes the keyboard as the Board's buttons do, so a
+/// drag (a window resized) that leaves no other stop doesn't hand it there.
+@MainActor
+final class BoardStagesKeySwitch: NSSegmentedControl {
+    override var acceptsFirstResponder: Bool { isEnabled && BoardStagesKeyboard.takesKeyboard() }
+}
+
 /// A line or a "Merged today" entry from the keyboard: a stop while Full
 /// Keyboard Access is on and it does something (`isKeyStop`), with a
 /// rounded ring; Space, Return and Control-Return act as the key comes up
-/// (`BoardStagesKeyboard.Held`), on `pressed`.
+/// (`BoardStagesKeyboard.Held`), on `keyPressed`.
 @MainActor
 class BoardStagesKeyView: NSView {
     /// The key that went down on it, which acts as it comes up.
