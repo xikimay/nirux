@@ -117,7 +117,8 @@ extension BoardStages {
             },
             otherWorktrees: (lead.map { lead in repository.rows.compactMap { leadWorktree($0, lead: lead, in: repository) } } ?? [])
                 + repository.rows.compactMap { otherWorktree($0, in: repository) }
-                    .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                    .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending },
+            knownMerged: merged.known
         )
     }
 
@@ -412,8 +413,7 @@ extension BoardStages {
     ///   shows the list as it was when it opened.
     static func queue(of number: Int, head: String?, in state: ProjectBoard.QueueState?, merged: Set<Int> = []) -> Queue {
         guard let state else { return Queue() }
-        let merged = merged.union(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
-        let proposed = state.selection.filter { !merged.contains($0) }.firstIndex(of: number).map { $0 + 1 }
+        let proposed = nextStartList(state, knownMerged: merged).firstIndex(of: number).map { $0 + 1 }
         var queue = Queue(list: listLock(state).map(QueueList.locked) ?? .open, order: state.isLocked ? nil : proposed)
         if state.isDryRun {
             queue.dryRun = "Dry run: this build doesn’t change GitHub." + (state.dryRunReason.map { " This build: \($0)." } ?? "")
@@ -440,6 +440,14 @@ extension BoardStages {
             }
         }
         return queue
+    }
+
+    /// The next Start's list as the Board shows it, a place for each: the
+    /// queue's list without the pull requests known merged (`knownMerged`,
+    /// a section's `SectionFacts.knownMerged`) or that the queue merged.
+    static func nextStartList(_ state: ProjectBoard.QueueState, knownMerged: Set<Int>) -> [Int] {
+        let merged = knownMerged.union(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
+        return state.selection.filter { !merged.contains($0) }
     }
 
     /// What the queue says of a row's pull request, and, of an open

@@ -305,9 +305,10 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(webColumn.header.frame.maxY, 400)
         XCTAssertLessThanOrEqual(webColumn.webView.frame.maxY, webColumn.header.frame.minY)
 
-        let board = ProjectBoardView(frame: .zero)
+        let board = BoardColumnView(frame: .zero)
         board.frame.size = NSSize(width: 600, height: 400)
         XCTAssertEqual(board.header.frame, NSRect(x: 0, y: 0, width: 600, height: ColumnHeaderView.height), "flipped: on top")
+        XCTAssertEqual(board.stages.frame, NSRect(x: 0, y: ColumnHeaderView.height, width: 600, height: 400 - ColumnHeaderView.height))
 
         let editor = makeEditor(root: FileManager.default.temporaryDirectory.path)
         let terminal = ColumnState(cwd: "/tmp")
@@ -504,6 +505,58 @@ final class ProjectBoardHeaderTests: XCTestCase {
         board.show(.init(header: deleted, body: .message("…")))
         XCTAssertEqual(board.projectMenu().items.map(\.title), ["Deleted space", "Board", "Tools"])
         XCTAssertEqual(board.projectMenu().items.map(\.state), [.on, .off, .off])
+    }
+
+    /// The Board's column: the repository of a Board with one, else its
+    /// space; Refresh says when the pull requests were read, or what went
+    /// wrong; no pill (each repository's header has its own). Its ⋯ menu
+    /// picks the space, opens Board Settings, then the column's items.
+    func testTheBoardColumnsHeaderNamesWhatItShowsAndItsMenuPicksTheSpace() throws {
+        let board = BoardColumnView(frame: NSRect(x: 0, y: 0, width: 700, height: 400))
+        var picked: [String] = []
+        var settingsOpened = 0
+        board.onSelectSpace = { picked.append($0) }
+        board.onBoardSettings = { settingsOpened += 1 }
+        let stages = BoardStagesView.Content(
+            header: BoardStagesView.Header(name: "Board", color: .systemGreen, summary: "1 task"), order: .sidebar, sections: [], now: 0
+        )
+        var header = BoardColumnView.Header(
+            spaceName: "Board", repository: "acme/widgets", status: "Updated 21:14",
+            spaces: [.init(id: "a", name: "Board"), .init(id: "b", name: "Tools")], spaceID: "a"
+        )
+        board.show(header: header, stages: stages)
+        XCTAssertEqual(board.header.context, "acme/widgets")
+        XCTAssertEqual(board.header.titleToolTip, "Board · Board")
+        XCTAssertNil(board.header.status)
+        XCTAssertEqual(board.refreshButton.toolTip, "Refresh · Updated 21:14")
+        XCTAssertEqual(board.stages.content, stages)
+
+        let menu = board.header.currentMenu()
+        XCTAssertEqual(menu.items.prefix(2).map(\.title), ["Space", "Board Settings…"])
+        XCTAssertEqual(menu.items.suffix(5).map(\.title), ["Move Left", "Move Right", "Cycle Width", "", "Close Column"])
+        let spaces = try XCTUnwrap(menu.items.first?.submenu)
+        XCTAssertEqual(spaces.items.map(\.title), ["Board", "Tools"])
+        XCTAssertEqual(spaces.items.map(\.state), [.on, .off])
+        spaces.performActionForItem(at: 1)
+        XCTAssertEqual(picked, ["b"])
+        menu.performActionForItem(at: 1)
+        XCTAssertEqual(settingsOpened, 1)
+
+        // Several repositories: the space; what went wrong, under Refresh.
+        header.repository = nil
+        header.status = "Retarget #14: gh: HTTP 422"
+        board.show(header: header, stages: stages)
+        XCTAssertEqual(board.header.context, "Board")
+        XCTAssertEqual(board.refreshButton.toolTip, "Refresh · Retarget #14: gh: HTTP 422")
+        XCTAssertNil(board.header.status)
+
+        header.spaceIsMissing = true
+        board.show(header: header, stages: stages)
+        XCTAssertEqual(board.header.context, "Deleted space")
+        XCTAssertEqual(board.spaceMenu().items.map(\.title), ["Deleted space", "Board", "Tools"])
+        XCTAssertEqual(board.spaceMenu().items.map(\.state), [.on, .off, .off])
+        board.chooseSpace(id: "b")
+        XCTAssertEqual(picked, ["b", "b"])
     }
 
     /// What went wrong takes the run's place as a red pill: the rows under

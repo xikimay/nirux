@@ -67,6 +67,12 @@ One Explain runs at a time in the whole app, and **Cancel** stops it. Explain is
 
 ## The Board
 
-`Ctrl+Cmd+B`, or `Open Board` in the command palette, opens a table of the current space's branches with their agents, pull requests and checks.
+`Ctrl+Cmd+B`, or `Open Board` in the command palette, opens the Board of the current space: a section per repository, one line per task.
 
-From the Board you can queue pull requests to merge one at a time. Nothing merges without your confirmation. The queue reruns a failed required check once, then stops at the first problem. Its rules are written down in the design record [Project Board](design/project-board.md).
+- Each line shows the task's state, a rail of four stations (Code, Reviews, Checks, Merge), a phrase saying what the task waits for, its pull request and a time. A sub-task sits under its task; a stack of pull requests shares a numbered rail.
+- A click on a line opens the task. A right click shows its menu: Open Pull Request, Add to Queue, Retarget, Resume, Clean Up…, Open.
+- Pull requests without a task and other worktrees are folded at the end of each repository, then the pull requests merged today.
+- The switch at the top orders the lines as the sidebar does, or by progress.
+- A repository's header shows its last post-merge run, or what went wrong reading it, and its merge queue: Start… and Stop.
+
+From the Board you can queue pull requests to merge one at a time: a click on a line's Merge station adds its pull request to the queue, a second one takes it back. Nothing merges without your confirmation. The queue reruns a failed required check once, then stops at the first problem. Its rules are written down in the design record [Project Board](design/project-board.md).

@@ -73,11 +73,29 @@ final class BoardStagesContentFlowTests: XCTestCase {
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             try waitUntil("the pull requests and the post-merge run are read, the worktrees listed") {
                 board.reads.values.first?.openPullRequests != nil && board.reads.values.first?.mergedPullRequests != nil
-                    && board.local != nil && !board.view.rowViews.isEmpty
-                    && board.view.header.status?.toolTip?.contains("success") == true
+                    && board.local != nil && !board.view.stages.lineViews.isEmpty
+                    && board.view.stages.content?.sections.first?.status?.toolTip?.contains("success") == true
             }
             let ids = { (title: String) in shell.workspaces.first { $0.title == title }?.id ?? "" }
             let content = try stages(of: board, in: shell)
+
+            // A click on a task's line focuses its workspace, at its most urgent agent column when one works there.
+            XCTAssertEqual(board.stagesTargets.focus[ids("login")], .focus(workspaceID: ids("login"), columnID: nil), "a shell: no agent")
+            let column = UUID()
+            var withAgent = shell.stagesInputs(
+                of: board, members: shell.projectWorkspaces(of: board.projectID),
+                workspaces: shell.projectBoardWorkspaces(shell.projectWorkspaces(of: board.projectID), of: board, snapshot: ProcessSnapshot(),
+                                                         now: Date().timeIntervalSince1970),
+                readings: [:], order: .sidebar
+            )
+            let loginIndex = try XCTUnwrap(withAgent.workspaces.firstIndex { $0.id == ids("login") })
+            let shown = withAgent.workspaces[loginIndex]
+            withAgent.workspaces[loginIndex] = ProjectBoard.Workspace(
+                id: shown.id, title: shown.title, folder: shown.folder, folderIsGone: shown.folderIsGone, isInactive: shown.isInactive,
+                agent: ProjectBoard.Agent(state: .working(duration: nil), workspaceID: shown.id, columnID: column)
+            )
+            _ = board.stagesContent(withAgent)
+            XCTAssertEqual(board.stagesTargets.focus[ids("login")], .focus(workspaceID: ids("login"), columnID: column))
 
             // The space, what it holds (the Lead is no task), its Lead.
             XCTAssertEqual(content.header.name, "Board")
@@ -112,17 +130,10 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(others.lines.otherWorktrees.map(\.title), ["gadget"])
             XCTAssertEqual(others.lines.otherWorktrees.map(\.path), [gadgets])
 
-            // The order switch, as asked; Start says what the next one takes.
-            XCTAssertEqual(try stages(of: board, in: shell, order: .progress).order, .progress)
+            // Start says what the next one takes.
             shell.addToMergeQueue(12, board: board, section: nil)
             shell.addToMergeQueue(40, board: board, section: nil)
             XCTAssertEqual(try stages(of: board, in: shell).sections[0].queue?.start?.title.hasSuffix(" · 1"), true, "a merged one counts for none")
-            // The queues that run keep their lines at the foot, as the table's queue lines name them; none runs here.
-            XCTAssertEqual(shell.stagesInputs(of: board, members: [], workspaces: [], readings: [:], order: .sidebar).runningQueues, [])
-            var inputs = shell.stagesInputs(of: board, members: [], workspaces: [], readings: [:], order: .sidebar)
-            let orphan = BoardStagesView.RunningQueue(id: "orphan", title: "acme/old", status: "Running in another Nirux")
-            inputs.runningQueues = [orphan]
-            XCTAssertEqual(board.stagesContent(inputs).runningQueues, [orphan])
         }
     }
 
@@ -144,8 +155,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
             try waitUntil("board.json is read") { board.loaded != nil }
             shell.spaceSettings?.close()
             let message = try stages(of: board, in: shell).message
-            guard case .message(let table)? = board.view.content?.body else { return XCTFail("the table shows no message") }
-            XCTAssertEqual(message?.text, table)
+            shell.renderProjectBoard(board)
+            XCTAssertEqual(board.view.stages.content?.message, message, "what the column shows")
             XCTAssertEqual(message?.text, "Set this space’s repository in Board Settings… to list its branches and pull requests.")
             XCTAssertEqual(message?.offersSettings, true)
 
@@ -183,6 +194,15 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // Nothing read, a pull request queued all the same: Start counts the list, as the table's.
             shell.addToMergeQueue(12, board: board, section: nil)
             XCTAssertEqual(try stages(of: board, in: shell).sections.first?.queue?.start?.title.hasSuffix(" · 1"), true)
+            // Unless only its task knows it merged: none left to start. Its git context in, which names its root as /var
+            // where git lists the worktree under /private/var.
+            try waitUntil("its git context") { shell.workspaces.first { $0.title == "widgets" }?.gitContext != nil }
+            let start = try stages(of: board, in: shell) { readings in
+                readings[shell.workspaces.first { $0.title == "widgets" }?.id ?? "", default: BoardStages.TaskReading()].mergedPullRequest = 12
+            }.sections.first?.queue?.start
+            XCTAssertEqual(start?.title.hasSuffix(" · 1"), false, start?.title ?? "")
+            XCTAssertEqual(start?.isEnabled, false)
+            XCTAssertEqual(start?.tooltip, "Add pull requests to the queue first.")
 
             // Another space, its repository anchored but not saved in Board Settings: read from its remote, read-only.
             let other = shell.workspaceStore.createProfile(named: "Gadgets")
@@ -221,6 +241,28 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(lockedSection.status?.text, "Read-only")
             XCTAssertEqual(lockedSection.status?.toolTip, BoardConfigStore.ReadOnlyReason.newerSchema(3).message)
             XCTAssertFalse(lockedSection.menu.contains(.boardSettings), "Board Settings can't save it")
+
+            // A fourth whose board.json names no valid GitHub repository: its settings are there, but invalid.
+            let invalid = shell.workspaceStore.createProfile(named: "Invalid")
+            let site = root + "/site-app"
+            try BoardConfigSuggestionsTests.makeRepository(at: site, remote: "https://github.com/acme/site.git")
+            var siteAnchor = try XCTUnwrap(FolderIdentity.identify(site, timeout: 10)).anchor
+            siteAnchor.isDefault = true
+            XCTAssertTrue(shell.workspaceStore.setAnchors([siteAnchor], forProfile: invalid.id))
+            let invalidStore = try XCTUnwrap(BoardConfigStore(spaceID: invalid.id))
+            try FileManager.default.createDirectory(at: invalidStore.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let commonDir = try XCTUnwrap(BoardSections.commonDir(of: siteAnchor))
+            try Data(#"{"schemaVersion": 2, "repositories": [{"commonDir": "\#(commonDir)", "repository": "not a repository"}]}"#.utf8)
+                .write(to: invalidStore.fileURL)
+            shell.addWorkspace(title: "site", cwd: site, profileID: invalid.id)
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "site" }))
+            try runPaletteAction("Open Board", in: shell)
+            let invalidBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: invalid.id)?.board)
+            try waitUntil("board.json is read and the worktrees listed") { invalidBoard.loaded != nil && invalidBoard.local != nil }
+            let invalidSection = try XCTUnwrap(try stages(of: invalidBoard, in: shell).sections.first)
+            XCTAssertEqual(invalidSection.status?.text, "Invalid settings")
+            XCTAssertEqual(invalidSection.status?.toolTip, "Board Settings has no valid GitHub repository for it: set one to see its pull requests.")
+            XCTAssertEqual(invalidSection.menu.first, .boardSettings, "the settings can fix it")
         }
     }
 
@@ -228,16 +270,19 @@ final class BoardStagesContentFlowTests: XCTestCase {
 
     /// What the stages would show now, from the shell's own readings.
     @MainActor
+    /// `change` changes the readings first.
     private func stages(
-        of board: ProjectBoardController, in shell: NiruxShellView, order: BoardStages.Order = .sidebar
+        of board: ProjectBoardController, in shell: NiruxShellView, order: BoardStages.Order = .sidebar,
+        _ change: (inout [String: BoardStages.TaskReading]) -> Void = { _ in }
     ) throws -> BoardStagesView.Content {
         let now = Date().timeIntervalSince1970
         let members = shell.projectWorkspaces(of: board.projectID)
         let workspaces = shell.projectBoardWorkspaces(members, of: board, snapshot: ProcessSnapshot(), now: now)
-        let readings = shell.boardReadings(
+        var readings = shell.boardReadings(
             ofSpace: board.projectID, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:], snapshot: ProcessSnapshot(),
-            now: now, comparable: board.comparableFolder
+            now: now, comparable: board.comparableRoot
         )
+        change(&readings)
         return board.stagesContent(shell.stagesInputs(of: board, members: members, workspaces: workspaces, readings: readings, order: order))
     }
 

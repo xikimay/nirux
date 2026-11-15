@@ -7,7 +7,7 @@ import AppKit
 /// the pull requests without a task folded, and "Merged today".
 ///
 /// It only draws what `BoardStages.section` decided, and says what was
-/// clicked. Nothing shows it yet: the Board's column still holds the table.
+/// clicked. The Board's column (`BoardColumnView`) shows it under its header.
 @MainActor
 final class BoardStagesView: NSView {
     struct Lead: Equatable {

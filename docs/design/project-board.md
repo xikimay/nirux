@@ -1,7 +1,7 @@
 # Project Board
 
 > **Design record:** shipped, except B3b. The board, its config and the merge queue are in the app.\
-> **Differs today:** B3b (the journal view and Ask Agent to Resolve) was not built, and the text says "project" where the app says "space".\
+> **Differs today:** B3b (the journal view and Ask Agent to Resolve) was not built, the text says "project" where the app says "space", and the Board shows the stages of [Board Stages](board-stages.md) in place of the table; the config and the merge queue are as here.\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
