@@ -29,6 +29,9 @@ extension BoardStages {
         /// merged, at the HEAD it merged at: known before the Board's
         /// merged list is read again, and for one that list doesn't reach.
         var mergedPullRequest: Int?
+        /// The repository that pull request is in, from its address: gh
+        /// may find one in a fork, whose number means nothing here.
+        var mergedPullRequestRepository: GitHubRepository?
     }
 
     /// One repository as today's Board holds it, or the workspaces in none.
@@ -49,6 +52,9 @@ extension BoardStages {
         var heads: [String: String] = [:]
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []
+        /// The GitHub repository its pull requests are read from; nil
+        /// without one.
+        var gitHub: GitHubRepository?
     }
 
     /// The facts of a section's lines.
@@ -270,7 +276,10 @@ extension BoardStages {
            }) {
             return entry.number
         }
-        return reading.gitRoot == nil || reading.gitRoot == row.worktreePath ? reading.mergedPullRequest : nil
+        guard reading.gitRoot == nil || reading.gitRoot == row.worktreePath else { return nil }
+        // Another repository's (a fork's, where gh looked): its number isn't one of this repository's.
+        if let theirs = reading.mergedPullRequestRepository, let ours = repository.gitHub, theirs != ours { return nil }
+        return reading.mergedPullRequest
     }
 
     /// Where a row's work is on disk, as the table's buttons use it

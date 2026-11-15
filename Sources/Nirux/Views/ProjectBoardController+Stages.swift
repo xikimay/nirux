@@ -61,13 +61,13 @@ extension ProjectBoardController {
 
     /// What the Board as stages shows of the space: what the table lists,
     /// as stages. Its message in place of the sections is the table's in
-    /// place of its rows; the running queues' lines stay at its foot. What
-    /// its clicks act on is kept (`stagesTargets`).
-    func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> BoardStagesView.Content {
+    /// place of its rows; the running queues' lines stay at its foot. With
+    /// it, what its clicks act on (whoever shows it keeps them:
+    /// `stagesTargets`).
+    func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> (content: BoardStagesView.Content, targets: StagesTargets) {
         var targets = StagesTargets()
         let content = stagesContent(inputs, now: now, targets: &targets)
-        stagesTargets = targets
-        return content
+        return (content, targets)
     }
 
     private func stagesContent(_ inputs: StagesInputs, now: Date, targets: inout StagesTargets) -> BoardStagesView.Content {
@@ -168,7 +168,8 @@ extension ProjectBoardController {
         let reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
             requiredChecks: section.config?.requiredChecks ?? [], baseBranch: reads?.baseBranch ?? section.config?.baseBranch,
-            queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp
+            queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp,
+            gitHub: reads?.gitHub
         )
         let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
         Self.noteFolders(of: facts, in: &targets)

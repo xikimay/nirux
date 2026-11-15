@@ -79,7 +79,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
             let ids = { (title: String) in shell.workspaces.first { $0.title == title }?.id ?? "" }
             let content = try stages(of: board, in: shell)
 
-            // A click on a task's line focuses its workspace, at its most urgent agent column when one works there.
+            // A click on a task's line focuses its workspace, at its most urgent agent column when one works there: as the
+            // Board shows it.
             XCTAssertEqual(board.stagesTargets.focus[ids("login")], .focus(workspaceID: ids("login"), columnID: nil), "a shell: no agent")
             let column = UUID()
             var withAgent = shell.stagesInputs(
@@ -94,8 +95,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
                 id: shown.id, title: shown.title, folder: shown.folder, folderIsGone: shown.folderIsGone, isInactive: shown.isInactive,
                 agent: ProjectBoard.Agent(state: .working(duration: nil), workspaceID: shown.id, columnID: column)
             )
-            _ = board.stagesContent(withAgent)
-            XCTAssertEqual(board.stagesTargets.focus[ids("login")], .focus(workspaceID: ids("login"), columnID: column))
+            XCTAssertEqual(board.stagesContent(withAgent).targets.focus[ids("login")], .focus(workspaceID: ids("login"), columnID: column))
 
             // The space, what it holds (the Lead is no task), its Lead.
             XCTAssertEqual(content.header.name, "Board")
@@ -163,9 +163,9 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(try stages(of: board, in: shell).header.summary, "1 task", "no repository set: none counted")
             var inputs = shell.stagesInputs(of: board, members: [], workspaces: [], readings: [:], order: .sidebar)
             inputs.space = nil
-            XCTAssertEqual(board.stagesContent(inputs).message,
+            XCTAssertEqual(board.stagesContent(inputs).content.message,
                            BoardStagesView.Message(text: "This space was deleted. Pick another one in the ⋯ menu above."))
-            XCTAssertEqual(board.stagesContent(inputs).header.name, "Deleted space")
+            XCTAssertEqual(board.stagesContent(inputs).content.header.name, "Deleted space")
         }
     }
 
@@ -283,7 +283,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             now: now, comparable: board.comparableRoot
         )
         change(&readings)
-        return board.stagesContent(shell.stagesInputs(of: board, members: members, workspaces: workspaces, readings: readings, order: order))
+        return board.stagesContent(shell.stagesInputs(of: board, members: members, workspaces: workspaces, readings: readings, order: order)).content
     }
 
     @MainActor

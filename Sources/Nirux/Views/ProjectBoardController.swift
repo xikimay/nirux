@@ -81,8 +81,8 @@ final class ProjectBoardController {
     /// (`NiruxShellView.boardReadings`): a render between two passes (a
     /// read landing, a click) draws with it.
     var stagesReadings: [String: BoardStages.TaskReading]?
-    /// What the Board's clicks act on, as it last showed them: kept by
-    /// `stagesContent`.
+    /// What the Board's clicks act on, as it last showed them
+    /// (`stagesContent`).
     var stagesTargets = StagesTargets()
     private let client: any ProjectBoardGitHub
 

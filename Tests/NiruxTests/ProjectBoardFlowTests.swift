@@ -849,7 +849,8 @@ final class ProjectBoardFlowTests: XCTestCase {
     /// did.
     @MainActor
     func testMergedTodaysCleanUpChecksItsTasksWorktree() throws {
-        let mergedAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-60))
+        // Now: a minute earlier may be yesterday, just after midnight.
+        let mergedAt = ISO8601DateFormatter().string(from: Date())
         let merged = """
         [{"number": 12, "state": "MERGED", "headRefName": "feat/login", "headRefOid": "\(String(repeating: "a", count: 40))",
           "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",

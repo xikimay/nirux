@@ -693,6 +693,11 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 
 ## Known limits
 
+- **Full Keyboard Access doesn't stop on a line.** VoiceOver reaches each
+  line, its Merge station and its link by name, but Tab doesn't: the
+  table's row buttons were key views. A line's menu is reached with the
+  pointer or VoiceOver only.
+
 - **Reviews count by branch name.** A run recorded before Nirux kept the
   branch has none and doesn't count; a branch name reused after its pull
   request merged keeps the first one's reviews.

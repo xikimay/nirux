@@ -200,12 +200,14 @@ extension NiruxShellView {
             ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
             now: now, comparable: board.comparableRoot
         )
-        let content = board.stagesContent(
+        let (content, targets) = board.stagesContent(
             stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),
             now: Date(timeIntervalSince1970: now)
         )
         let spaces = profiles.map { BoardColumnView.Space(id: $0.id, name: $0.name) }
         board.view.show(header: board.columnHeader(spaces: spaces, now: Date(timeIntervalSince1970: now)), stages: content)
+        // What the clicks act on is what the Board shows.
+        board.stagesTargets = targets
     }
 
     private func foregroundProcesses(of members: [WorkspaceState], snapshot: ProcessSnapshot) -> [ObjectIdentifier: ForegroundProcess] {
