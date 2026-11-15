@@ -196,7 +196,6 @@ final class RequestCardView: NSView {
         case .permission(let approval):
             box.isHidden = false
             commandLabel.setAccessibilityLabel("\(approval.toolName) permission request: \(approval.text)")
-            commandLabel.toolTip = "\(approval.toolName): \(approval.text) — answer in the terminal for more options"
             if let status = RequestChoices.permissionStatus(approval.display) {
                 note = (status, approval.display == .undelivered ? Theme.Color.textSecondary : Theme.Color.textTertiary)
             } else {
@@ -217,7 +216,12 @@ final class RequestCardView: NSView {
             note = (SidebarDialogLayout.hint(more: 0), Theme.Color.textSecondary)
         }
         textLabel.stringValue = text.map(AgentText.withoutMarks) ?? ""
-        textLabel.toolTip = text
+        // On the card: off its buttons, the pointer is the card's.
+        if case .permission(let approval) = request.kind {
+            toolTip = "\(approval.toolName): \(approval.text) — answer in the terminal for more options"
+        } else {
+            toolTip = text
+        }
         textLabel.isHidden = text == nil
         textLabel.setAccessibilityLabel(text.map { "\(request.asker): \($0)" })
         choicesLabel.stringValue = choices.map { "\($0.marker ?? "•") \(AgentText.withoutMarks($0.text))" }.joined(separator: "\n")

@@ -92,11 +92,13 @@ final class RequestInboxView: NSView {
 
     /// Shows `requests` in their order, each once, reusing each card by its
     /// request's id. The choice stays on its request; a choice whose request
-    /// went falls to the first.
+    /// went falls to the one now in its place, and the list stays where it
+    /// is.
     func show(_ requests: [WaitingRequest]) {
         var seen = Set<String>()
         let requests = requests.filter { seen.insert($0.id).inserted }
         guard requests != self.requests else { return }
+        let chosenIndex = self.requests.firstIndex { $0.id == chosenID }
         self.requests = requests
         for (id, card) in cards where !seen.contains(id) {
             card.removeFromSuperview()
@@ -120,10 +122,9 @@ final class RequestInboxView: NSView {
         setAccessibilityLabel(count == 0 ? "No agent waits for you" : "\(count) \(count == 1 ? "request" : "requests") waiting for you")
         needsLayout = true
         if !requests.contains(where: { $0.id == chosenID }) {
-            choose(requests.first?.id)
-        } else {
-            markChoice()
+            chosenID = requests.isEmpty ? nil : requests[min(chosenIndex ?? 0, requests.count - 1)].id
         }
+        markChoice()
     }
 
     private func makeCard(id: String) -> RequestCardView {
@@ -165,19 +166,21 @@ final class RequestInboxView: NSView {
         choose(requests[min(max(index + step, 0), requests.count - 1)].id)
     }
 
-    /// The inbox opens (⌘J, the badge): the oldest chosen, and every answer
-    /// waits again before it takes a click. The host also calls
+    /// The host shows the inbox (⌘J, the badge): the oldest chosen, and
+    /// every answer waits again before it takes a click. It also calls
     /// `restartArming` whenever it moves the inbox.
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else { return }
+    func opened() {
         choose(requests.first?.id)
         restartArming()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { restartArming() }
+    }
+
     override func viewDidUnhide() {
         super.viewDidUnhide()
-        choose(requests.first?.id)
         restartArming()
     }
 

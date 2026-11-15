@@ -28,6 +28,13 @@ final class RequestInboxViewTests: XCTestCase {
         return inbox
     }
 
+    /// `requests` shown, the inbox sized to them as its host sizes it.
+    private func show(_ requests: [WaitingRequest], in inbox: RequestInboxView, maximum: CGFloat = 900) {
+        inbox.show(requests)
+        inbox.frame.size.height = inbox.fittingHeight(maximum: maximum)
+        inbox.layoutSubtreeIfNeeded()
+    }
+
     private func key(_ characters: String) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
@@ -38,8 +45,8 @@ final class RequestInboxViewTests: XCTestCase {
     private var down: String { String(UnicodeScalar(NSDownArrowFunctionKey)!) }
 
     /// The requests stand in their order, the first chosen, each once; ↑ ↓
-    /// move the choice, which stays on its request as others go; Escape
-    /// closes.
+    /// move the choice, which stays on its request as others go, or falls
+    /// to the one in its place; opening chooses the oldest; Escape closes.
     func testTheRequestsStandInOrderAndTheChoiceFollows() throws {
         let inbox = inbox(try requests(["a", "b", "c"]))
         let tops = ["a", "b", "c"].compactMap { inbox.cards[id($0)]?.frame.minY }
@@ -59,6 +66,12 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertNil(inbox.cards[id("a")])
         inbox.show(try requests(["c", "d", "c"]))
         XCTAssertEqual(inbox.requests.map(\.taskID), ["task-c", "task-d"], "a request listed twice shows once")
+        inbox.show(try requests(["c", "d", "e"]))
+        inbox.choose(id("d"))
+        inbox.show(try requests(["c", "e"]))
+        XCTAssertEqual(inbox.chosenID, id("e"), "answered elsewhere: the next one in its place")
+        inbox.opened()
+        XCTAssertEqual(inbox.chosenID, id("c"), "the inbox opens on the oldest")
 
         var closed = 0
         inbox.onClose = { closed += 1 }
@@ -66,8 +79,9 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertEqual(closed, 1)
     }
 
-    /// The choice comes into view; a refresh that keeps it scrolls nothing;
-    /// the cards fit the clip, beside a legacy scroller too.
+    /// The choice comes into view; a refresh, even one that takes the chosen
+    /// request away, scrolls nothing; the cards fit the clip, beside a
+    /// legacy scroller too.
     func testTheChoiceComesIntoViewAndARefreshStaysPut() throws {
         let names = (0..<12).map { "task\($0)" }
         let inbox = inbox(try requests(names), maximum: 320)
@@ -91,6 +105,12 @@ final class RequestInboxViewTests: XCTestCase {
         inbox.show(later)
         inbox.layoutSubtreeIfNeeded()
         XCTAssertEqual(clip.bounds.origin.y, 0, "the wait ticked: no jump back to the choice")
+        clip.scroll(to: NSPoint(x: 0, y: 200))
+        later.removeLast()
+        inbox.show(later)
+        inbox.layoutSubtreeIfNeeded()
+        XCTAssertEqual(inbox.chosenID, id("task10"))
+        XCTAssertEqual(clip.bounds.origin.y, 200, "the chosen request went: the list stays where it is")
     }
 
     /// An answer's button that arrived, moved up, slid under a scroll, or
@@ -111,13 +131,11 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertEqual(answered.map(\.0), [id("b")])
         XCTAssertEqual(answered.first?.1, .permission(.allow))
 
-        inbox.show(try requests(["a", "b", "c"]))
-        inbox.layoutSubtreeIfNeeded()
+        show(try requests(["a", "b", "c"]), in: inbox)
         try allow("b").performClick(nil)
         XCTAssertEqual(answered.count, 2, "a request arriving below leaves it armed")
 
-        inbox.show(try requests(["b", "c"]))
-        inbox.layoutSubtreeIfNeeded()
+        show(try requests(["b", "c"]), in: inbox)
         try allow("b").performClick(nil)
         XCTAssertEqual(answered.count, 2, "it moved up under the pointer")
         clock += delay
@@ -133,15 +151,20 @@ final class RequestInboxViewTests: XCTestCase {
         let window = NSWindow(contentRect: inbox.frame, styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         windows.append(window)
+        inbox.choose(id("c"))
         window.contentView = inbox
         inbox.layoutSubtreeIfNeeded()
+        try allow("b").performClick(nil)
+        XCTAssertEqual(answered.count, 3, "the inbox just moved into its window")
+        XCTAssertEqual(inbox.chosenID, id("c"), "moving it keeps the choice")
+        clock += delay
+        inbox.opened()
         try allow("b").performClick(nil)
         XCTAssertEqual(answered.count, 3, "the inbox just opened")
         clock += delay
 
         let replacing = try requests(["e"], task: "b")
-        inbox.show(replacing + (try requests(["c"])))
-        inbox.layoutSubtreeIfNeeded()
+        show(replacing + (try requests(["c"])), in: inbox)
         XCTAssertNil(inbox.cards[id("b")])
         try allow("e").performClick(nil)
         XCTAssertEqual(answered.count, 3, "another request in b's place: its own card, unarmed")
@@ -196,5 +219,17 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertEqual(answered, [.permission(.deny)], "the line below went: the buttons didn't move")
         callout.keyDown(with: try key("\u{1b}"))
         XCTAssertEqual(closed, 1)
+        XCTAssertEqual(callout.card.openButton.acceptsPress?(try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, clickCount: 2, pressure: 1
+        ))), false, "a double-click's second press doesn't open the task")
+
+        clock += SidebarView.approvalArmingDelay
+        let window = NSWindow(contentRect: callout.frame, styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        windows.append(window)
+        window.contentView = callout
+        deny.performClick(nil)
+        XCTAssertEqual(answered.count, 1, "the callout just opened beside its icon")
     }
 }

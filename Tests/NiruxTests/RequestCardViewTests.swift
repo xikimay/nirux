@@ -55,7 +55,9 @@ final class RequestCardViewTests: XCTestCase {
         XCTAssertEqual(answers(asks), ["Dismiss", "Reply…", "No", "Yes"])
         XCTAssertEqual(asks.textLabel.accessibilityLabel(), "Claude asks: Shall I merge it?")
         XCTAssertEqual(answers(card(.question(open))), ["Dismiss", "Reply…"])
-        XCTAssertEqual(answers(card(.mission(mission))), ["Reply…"])
+        let reply = card(.mission(mission))
+        XCTAssertEqual(answers(reply), ["Reply…"])
+        XCTAssertEqual(reply.textLabel.accessibilityLabel(), "The agent asks: Which base?")
 
         let sending = card(.permission(try XCTUnwrap(Self.approval("npm test", sent: .allow))))
         XCTAssertTrue(sending.answerButtons.isEmpty)

@@ -140,8 +140,10 @@ answer goes to the receiver the rows use. The rows' click rule holds too: a
 single click, on a button that has sat still for 0.6 s (`RequestArming`,
 the same rearming as the rows'), so that a request arriving, moving up or
 taking another's place never takes a click aimed at what was there; a
-scroll, the panel opening, or its host moving it (`restartArming`) restarts
-the wait. A card belongs to its request, never to its task: its id comes
+scroll, the panel opening (the host calls `opened()`, which also chooses the
+oldest), or its host moving it (`restartArming`) restarts the wait. A
+request answered elsewhere leaves its place to the next one, and the list
+stays where it is. A card belongs to its request, never to its task: its id comes
 from the request (the permission's id, the question's column and time), so a
 request that takes another's place gets a new card. Answers stay clicks; the
 keyboard only moves the inbox's choice. For phase 3: the hosting (a popover
