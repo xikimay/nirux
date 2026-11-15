@@ -665,19 +665,23 @@ what each click runs.
   and the link are in it), an entry's "Clean up". Each acts once, as its
   key comes up: the repeats of a key held down stay on the line, never in
   the terminal the task opens, where a Return would answer its agent
-  (`BoardStagesKeyboard.Held`). A stop takes the keyboard from the keyboard
-  only (a key, or a change the Board made by itself): a click on a line or
-  an entry gives it to the column, not to it, as a button's click does, so
-  no ring stays on the line that had it; nor does a rebuild a click ran (a
-  fold closed) move it to a line. A departed line is no stop, but one that
-  had the keyboard says where its task went on Space. What has the
-  keyboard and goes, or hides, hands it on (`BoardStagesView.viewsChanged`):
-  "+12 more" pressed, to the first entry it showed that takes it; a line,
-  to the nearest line that takes it, after it before before it, else to
-  the column; anything else, to the nearest stop of the loop; and from a
-  click, to the column. Meanwhile the stops AppKit hands it to don't scroll
-  the list. An entry that does nothing (its task not open here) is no stop;
-  without Full Keyboard Access, neither is anything.
+  (`BoardStagesKeyboard.Held`). A stop takes the keyboard as a button does:
+  not from the pointer's buttons (a click, a drag, a rebuild a click ran,
+  such as a fold closed), from anything else (a key, or a change the Board
+  made by itself, under whatever event AppKit kept last). A click on a
+  line or an entry, or its menu asked with the pointer, gives the keyboard
+  to the column, the line that had it too: no ring stays. A departed line
+  is no stop, but one that had the keyboard says where its task went on
+  Space. What has the keyboard and goes, or hides, hands it on
+  (`BoardStagesView.viewsChanged`): "+12 more" pressed, to the first entry
+  it showed that takes it; a line, to the nearest line that takes it, after
+  it before before it, else to the column; anything else, to the nearest of
+  the Board's own stops; and from a click, to the column. Start hands it to
+  Stop as the queue starts, and back; a worktree's Clean Up… hidden for
+  room, to its Open (`BoardStagesKeyboard.setHidden`). Meanwhile the stops
+  AppKit hands it to don't scroll the list. An entry that does nothing (its
+  task not open here) is no stop; without Full Keyboard Access, neither is
+  anything.
 - **A hand** shows where a click does something of its own: on a station
   that acts, on a link, as far as the line is in sight. A line or an entry
   asks AppKit for its places again whenever they are no longer those it

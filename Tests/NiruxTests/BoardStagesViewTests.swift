@@ -1268,6 +1268,13 @@ final class BoardStagesViewTests: XCTestCase {
         let tab = try BoardStagesClicks.key("\t", 48)
         BoardStagesKeyboard.currentEvent = { tab }
         XCTAssertTrue(a.acceptsFirstResponder, "Tab")
+        // AppKit keeps the last event: a change the Board makes by itself once the pointer moved runs under it.
+        let moved = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+            clickCount: 0, pressure: 0
+        ))
+        BoardStagesKeyboard.currentEvent = { moved }
+        XCTAssertTrue(a.acceptsFirstResponder, "a pointer that moved")
         BoardStagesKeyboard.currentEvent = { nil }
         XCTAssertTrue(view.leadButton.acceptsFirstResponder, "a change the Board made by itself")
         // An entry that can do nothing (its task not open here, nothing to clean up) is no stop.
@@ -1283,9 +1290,9 @@ final class BoardStagesViewTests: XCTestCase {
     }
 
     /// The line the keyboard reaches scrolls into sight; one that goes
-    /// hands the keyboard to the line now in its place, else to the column;
-    /// "+12 more" pressed from the keyboard hands it to the first entry it
-    /// showed that takes it.
+    /// hands the keyboard to the nearest line, else to the column; "+12
+    /// more" pressed from the keyboard hands it to the first entry it showed
+    /// that takes it; a click on a line or an entry, to the column.
     func testTheKeyboardStaysWhereTheUserCanSeeIt() throws {
         BoardStagesKeyboard.isFullAccess = { true }
         BoardStagesKeyboard.currentEvent = { nil }
@@ -1316,27 +1323,18 @@ final class BoardStagesViewTests: XCTestCase {
         let kept = ids.filter { !["t2", "t5"].contains($0) }
         view.show(content([section(units: tasks(kept.map { line($0) }), merged: merged)]))
         XCTAssertEqual((window.firstResponder as? BoardStagesLineView)?.line.id, "t6")
-        // A click on a line gives the keyboard to the column, not to it: the next Space opens nothing it had.
-        try press(try XCTUnwrap(view.lineViews.first { $0.line.id == "t9" }), at: 40)
+        // A click on a line gives the keyboard to the column, not to it, the line that has it too: no ring stays.
+        try press(try XCTUnwrap(view.lineViews.first { $0.line.id == "t6" }), at: 40)
         XCTAssertTrue(window.firstResponder === column)
         // The last one goes: the line now last takes it, not "Merged today" below it.
         XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(view.lineViews.last)))
         view.show(content([section(units: tasks(kept.dropLast().map { line($0) }), merged: merged)]))
         XCTAssertEqual((window.firstResponder as? BoardStagesLineView)?.line.id, "t28")
 
-        // An entry that has the keyboard pushed behind "+N more" by newer merges: the nearest entry still shown takes it.
-        let firstShown = try XCTUnwrap(view.mergedView(section: "nirux")).entries.filter { !$0.isHidden }
-        XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(firstShown.last)))
-        let newer = (31...45).map { BoardStages.Merged(lineID: "t0", title: "Fix \($0)", number: $0, mergedAt: now - 30 + Double($0 - 45)) }
-        view.show(content([section(units: tasks(kept.dropLast().map { line($0) }), merged: newer + merged)]))
-        let entryNow = try XCTUnwrap(window.firstResponder as? BoardStagesMergedEntryView, "\(String(describing: window.firstResponder))")
-        XCTAssertFalse(entryNow.isHiddenOrHasHiddenAncestor)
-        XCTAssertTrue(firstShown.last?.isHiddenOrHasHiddenAncestor == true, "it went behind \"+N more\"")
 
         // "+N more" from the keyboard, in sight once it has it: the first entry it shows that takes the keyboard
         // takes it.
         // The first two it would show merged in tasks not open here (a teammate's): no stops.
-        view.show(content([section(units: tasks(kept.dropLast().map { line($0) }), merged: merged)]))
         let shown = try XCTUnwrap(view.mergedView(section: "nirux")).entries.filter { !$0.isHidden }.count
         let teammates = merged.map { entry -> BoardStages.Merged in
             var entry = entry
@@ -1354,6 +1352,9 @@ final class BoardStagesViewTests: XCTestCase {
         let revealed = try XCTUnwrap(window.firstResponder as? BoardStagesMergedEntryView)
         XCTAssertEqual(revealed.pullRequest.number, shown + 3)
         XCTAssertTrue(clip.bounds.contains(clip.convert(revealed.bounds, from: revealed)), "in sight, where it showed")
+        // A click on an entry gives the keyboard to the column too.
+        try BoardStagesClicks.press(revealed, at: NSPoint(x: 8, y: revealed.bounds.midY))
+        XCTAssertTrue(window.firstResponder === column)
 
         // No line left to take it: the column has it.
         XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(view.lineViews.first)))
@@ -1382,9 +1383,34 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertTrue(window.makeFirstResponder(entry))
         let newer = (31...45).map { BoardStages.Merged(lineID: "a0", title: "Fix \($0)", number: $0, mergedAt: now - 30 + Double($0 - 45)) }
         view.show(shown(newer + merged))
-        let now = try XCTUnwrap(window.firstResponder as? BoardStagesMergedEntryView, "\(String(describing: window.firstResponder))")
-        XCTAssertFalse(now.isHiddenOrHasHiddenAncestor)
+        let focused = try XCTUnwrap(window.firstResponder as? BoardStagesMergedEntryView, "\(String(describing: window.firstResponder))")
+        XCTAssertFalse(focused.isHiddenOrHasHiddenAncestor)
         XCTAssertTrue(entry.isHiddenOrHasHiddenAncestor, "it went behind \"+N more\"")
+    }
+
+    /// Start that had the keyboard when its queue starts hands it to Stop,
+    /// in its place, not to the next stop of the loop.
+    func testStartThatHadTheKeyboardHandsItToStop() throws {
+        BoardStagesKeyboard.isFullAccess = { true }
+        BoardStagesKeyboard.currentEvent = { nil }
+        defer {
+            BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+            BoardStagesKeyboard.currentEvent = { NSApp.currentEvent }
+        }
+        var nirux = section(units: tasks([line("a")]))
+        nirux.queue = BoardStagesView.SectionQueue(status: "1 pull request queued", start: BoardStagesView.QueueButton(title: "Start… · 1"))
+        nirux.menu = [.boardSettings]
+        let view = board(content([nirux]))
+        let window = try XCTUnwrap(view.window)
+        let header = try XCTUnwrap(view.sectionHeader(section: "nirux"))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(window.makeFirstResponder(header.startButton))
+        nirux.queue = BoardStagesView.SectionQueue(
+            status: "Merging #52, 1 of 1", tone: .working, stop: BoardStagesView.QueueButton(title: "Stop")
+        )
+        view.show(content([nirux]))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(window.firstResponder === header.stopButton, "\(String(describing: window.firstResponder))")
     }
 
     /// The Board's column, which takes the keyboard.

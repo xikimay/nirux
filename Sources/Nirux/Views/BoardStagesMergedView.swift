@@ -363,7 +363,7 @@ final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
 
     /// Space or Return opens its task, as a click; Control-Return shows
     /// "Clean up", while it is offered.
-    override func pressed(_ key: BoardStagesKeyboard.Key) {
+    override func keyPressed(_ key: BoardStagesKeyboard.Key) {
         switch key {
         case .press: if !accessibilityPerformPress() { NSSound.beep() }
         case .menu:

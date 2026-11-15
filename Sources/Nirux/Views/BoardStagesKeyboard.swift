@@ -13,15 +13,19 @@ enum BoardStagesKeyboard {
     /// The event being handled. (The tests give their own.)
     static var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
-    /// A stop of the Board takes the keyboard from the keyboard only (a
-    /// key, or no event: a change the Board made by itself), as a button
-    /// does: not from a click, a drag, nor a rebuild a click's action ran.
-    /// A click on a line or an entry gives the keyboard to the Board's
-    /// column (`clicked`): no ring.
+    /// A stop of the Board takes the keyboard as a button does: not from
+    /// the pointer's buttons (a click, a drag, a rebuild a click's action
+    /// ran); from a key, no event, or a change the Board made by itself
+    /// (AppKit keeps the last event: a timer's change runs under a pointer
+    /// that moved, or left). A click on a line or an entry gives the
+    /// keyboard to the Board's column (`clicked`): no ring.
     static func takesKeyboard() -> Bool {
         guard isFullAccess() else { return false }
-        let keys: Set<NSEvent.EventType> = [.keyDown, .keyUp, .flagsChanged]
-        return currentEvent().map { keys.contains($0.type) } ?? true
+        let buttons: Set<NSEvent.EventType> = [
+            .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+            .otherMouseDown, .otherMouseUp, .otherMouseDragged
+        ]
+        return currentEvent().map { !buttons.contains($0.type) } ?? true
     }
 
     /// While the Board rebuilds its views, a stop AppKit hands the keyboard
@@ -34,16 +38,31 @@ enum BoardStagesKeyboard {
         if rebuilds == 0 { view.scrollToVisible(view.bounds) }
     }
 
-    /// A click on a line or an entry: whatever of the Board had the keyboard
-    /// gives it to the column, as a click in a column does, so that the next
-    /// Space doesn't open the line that had it.
+    /// A click on a line or an entry, or its menu asked with the pointer:
+    /// whatever of the Board had the keyboard, that one too, gives it to the
+    /// column, as a click in a column does, so that the next Space doesn't
+    /// open the line that had it, and no ring stays.
     static func clicked(_ view: NSView) {
-        guard let window = view.window, let responder = window.firstResponder as? NSView, responder !== view,
+        guard let window = view.window, let responder = window.firstResponder as? NSView,
               let stages = sequence(first: view, next: \.superview).first(where: { $0 is BoardStagesView }),
               responder.isDescendant(of: stages), let column = stages.superview
         else { return }
         window.makeFirstResponder(column)
     }
+
+    /// Shows or hides `view`, a stop: one that had the keyboard and hides
+    /// hands it to `next` (Start to Stop, Clean Up… to Open), not to the
+    /// stop AppKit's loop has after it.
+    static func setHidden(_ view: NSView, _ hidden: Bool, handingTo next: NSView?) {
+        let hadKeyboard = hidden && !view.isHidden && view.window?.firstResponder === view
+        view.isHidden = hidden
+        guard hadKeyboard, let next, !next.isHiddenOrHasHiddenAncestor, next.acceptsFirstResponder else { return }
+        if view.window?.makeFirstResponder(next) == true { handedOff = next }
+    }
+
+    /// Where `setHidden` handed the keyboard during the Board's change: the
+    /// Board keeps it there (`BoardStagesView.viewsChanged`).
+    static weak var handedOff: NSView?
 
     enum Key: Equatable {
         /// Space or Return: as a click.
@@ -130,7 +149,7 @@ class BoardStagesKeyView: NSView {
     var isKeyStop: Bool { true }
 
     /// Space or Return (`.press`), Control-Return (`.menu`).
-    func pressed(_ key: BoardStagesKeyboard.Key) {}
+    func keyPressed(_ key: BoardStagesKeyboard.Key) {}
 
     override var acceptsFirstResponder: Bool { isKeyStop && BoardStagesKeyboard.takesKeyboard() }
     override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
@@ -153,6 +172,6 @@ class BoardStagesKeyView: NSView {
     }
 
     override func keyUp(with event: NSEvent) {
-        if let key = held.keyUp(event) { pressed(key) } else { super.keyUp(with: event) }
+        if let key = held.keyUp(event) { keyPressed(key) } else { super.keyUp(with: event) }
     }
 }

@@ -570,6 +570,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
     /// under the pointer. Nil where it offers nothing.
     override func menu(for event: NSEvent) -> NSMenu? {
         aim.onUse()
+        BoardStagesKeyboard.clicked(self)
         // A line that came under a still pointer isn't the one it aimed at.
         return aim.isStale ? nil : contextMenu()
     }
@@ -614,7 +615,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
     /// Space or Return opens the task, as a click on the line (departed
     /// since it took the keyboard, it says where its task went); Control-
     /// Return shows its menu, where the Merge station and the link are too.
-    override func pressed(_ key: BoardStagesKeyboard.Key) {
+    override func keyPressed(_ key: BoardStagesKeyboard.Key) {
         switch key {
         case .press: isDeparted ? onGone?() : onClick?()
         case .menu: if isDeparted || !accessibilityPerformShowMenu() { NSSound.beep() }

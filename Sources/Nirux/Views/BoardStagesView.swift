@@ -220,9 +220,9 @@ final class BoardStagesView: NSView {
 
     private(set) var content: Content?
     /// The lines drawn, from the top, for the tests to click through.
+    private(set) var lineViews: [BoardStagesLineView] = []
     /// Tab's loop, as last linked (`linkKeyViews`).
     private var keyViews: [NSView] = []
-    private(set) var lineViews: [BoardStagesLineView] = []
     /// The sections whose pull requests without a task are unfolded, and
     /// those whose "Merged today" shows every pull request. Both start
     /// folded each time the Board opens.
@@ -1300,6 +1300,7 @@ final class BoardStagesView: NSView {
     /// own handoffs scroll nothing until `viewsChanged`.
     private func viewsWillChange() -> KeyboardFocus? {
         BoardStagesKeyboard.rebuilds += 1
+        BoardStagesKeyboard.handedOff = nil
         guard let focused = window?.firstResponder as? NSView, focused.isDescendant(of: self) else { return nil }
         let revealed = mergedViews.values.first { $0.moreButton === focused }?.entries.filter(\.isHidden) ?? []
         let neighbours = keyViews.firstIndex { $0 === focused }.map { Self.nearestFirst(keyViews, from: $0, to: focused) } ?? []
@@ -1308,15 +1309,27 @@ final class BoardStagesView: NSView {
 
     /// The views changed: Tab's loop again; and what had the keyboard and
     /// went, or hid, hands it on. From the keyboard, or a change the Board
-    /// made by itself, to the nearest stop (`nearestStop`); from the pointer
-    /// (a fold clicked), to the column, without a ring: no stop takes the
-    /// keyboard then.
+    /// made by itself, to the nearest of the Board's own stops
+    /// (`nearestStop`); from the pointer (a fold clicked), to the column,
+    /// without a ring: no stop takes the keyboard then. One still there
+    /// keeps it, even where AppKit moved it while it hid for a moment.
     private func viewsChanged(focus: KeyboardFocus?) {
         BoardStagesKeyboard.rebuilds -= 1
         linkKeyViews()
-        guard let focus, let window, focus.view.window == nil || focus.view.isHiddenOrHasHiddenAncestor else { return }
-        let isStop = { (view: NSView) in view.window === window && view.canBecomeKeyView }
-        window.makeFirstResponder(focus.revealed.first(where: isStop) ?? nearestStop(to: focus, isStop) ?? superview)
+        guard let focus, let window else { return }
+        // Start that hid as Stop showed has handed it on already.
+        if let handed = BoardStagesKeyboard.handedOff, window.firstResponder === handed { return }
+        if focus.view.window === window, !focus.view.isHiddenOrHasHiddenAncestor {
+            if window.firstResponder !== focus.view, focus.view.acceptsFirstResponder { window.makeFirstResponder(focus.view) }
+            return
+        }
+        let isStop = { (view: NSView) in
+            (view is BoardStagesKeyView || view is BoardStagesKeyButton) && view.window === window && view.canBecomeKeyView
+        }
+        let next = focus.revealed.first(where: isStop) ?? nearestStop(to: focus, isStop)
+        // AppKit may have given it there already, while the list didn't scroll.
+        if let next, window.firstResponder === next { return BoardStagesKeyboard.tookKeyboard(next) }
+        window.makeFirstResponder(next ?? superview)
     }
 
     /// The stop of Tab's loop nearest where `focus` is, or was: itself
@@ -1449,11 +1462,21 @@ final class BoardStagesSectionHeaderView: NSView {
         queueLabel.stringValue = queue?.status ?? ""
         queueLabel.textColor = Self.color(of: queue?.tone ?? .normal)
         dryRunBadge.toolTip = queue?.dryRun
-        for (button, state) in [(startButton, queue?.start), (stopButton, queue?.stop)] {
+        // The one that shows first: Start that had the keyboard hands it to Stop before going off, and back.
+        let shown = queue?.stop != nil ? stopButton : startButton
+        let other = shown === stopButton ? startButton : stopButton
+        for button in [shown, other] {
+            let state = button === stopButton ? queue?.stop : queue?.start
             button.title = state?.title ?? button.title
-            button.isEnabled = state?.isEnabled ?? false
             button.toolTip = state?.tooltip
             button.setAccessibilityLabel(state.map { "\($0.title) \(title)" })
+            if button === shown {
+                button.isEnabled = state?.isEnabled ?? false
+                button.isHidden = queue?.stop == nil && queue?.start == nil
+                BoardStagesKeyboard.setHidden(other, true, handingTo: shown)
+            } else {
+                button.isEnabled = state?.isEnabled ?? false
+            }
         }
         needsLayout = true
     }
@@ -1479,8 +1502,9 @@ final class BoardStagesSectionHeaderView: NSView {
             right = moreButton.frame.minX - 6
         }
         let button = queue?.stop != nil ? stopButton : startButton
-        (button === stopButton ? startButton : stopButton).isHidden = true
         button.isHidden = queue?.stop == nil && queue?.start == nil
+        // Start that had the keyboard hands it to Stop, and back.
+        BoardStagesKeyboard.setHidden(button === stopButton ? startButton : stopButton, true, handingTo: button)
         if !button.isHidden {
             let width = ceil(button.fittingSize.width)
             button.frame = NSRect(x: right - width, y: baseline - 3, width: width, height: 22)
@@ -1785,7 +1809,7 @@ final class BoardStagesWorktreeView: NSView {
         // not where it would cost an entry without Clean Up… its Focus.
         let fitsCleanUp = right - cleanUpRoom - 12 - left >= min(title, 40)
         let keepsRoom = fitsCleanUp && (item(.cleanUp) != nil || right - cleanUpRoom - 12 - openWidth - 12 - left >= min(title, 80))
-        cleanUpButton.isHidden = item(.cleanUp) == nil || !fitsCleanUp
+        BoardStagesKeyboard.setHidden(cleanUpButton, item(.cleanUp) == nil || !fitsCleanUp, handingTo: openButton)
         if keepsRoom {
             cleanUpButton.frame = NSRect(x: right - cleanUpRoom, y: (bounds.height - 18) / 2, width: cleanUpRoom, height: 18)
             right = cleanUpButton.frame.minX - 12
