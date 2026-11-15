@@ -53,8 +53,8 @@ final class GlassView: NSView {
 
     private(set) var backing: Backing?
     private var backingView: NSView?
-    /// The radius the frost's mask was drawn for.
-    private var frostMaskRadius: CGFloat?
+    /// The radius and corner the frost's mask was drawn for.
+    private var frostMaskKey: [CGFloat]?
     private var tintView: NSView?
     /// Casts the floating shadow, masked to outside the shape so that it
     /// never shows through the translucent glass.
@@ -141,7 +141,7 @@ final class GlassView: NSView {
         tintView?.removeFromSuperview()
         backingView = nil
         tintView = nil
-        frostMaskRadius = nil
+        frostMaskKey = nil
         if contentView.superview !== self {
             // The glass laid it out with constraints; here it follows frames.
             contentView.translatesAutoresizingMaskIntoConstraints = true
@@ -194,9 +194,14 @@ final class GlassView: NSView {
 
     /// A stretchable rounded shape for a frost's `maskImage`, its corners
     /// continuous as the layers' are. Its drawing may run on any thread.
-    nonisolated private static func mask(radius: CGFloat) -> NSImage {
-        // A continuous corner reaches about 1.53 radii along each side.
-        let corner = ceil(radius * 1.6)
+    /// How far a mask's stretchable corner reaches: a continuous corner
+    /// spans about 1.53 radii along each side, never past half the view.
+    nonisolated static func maskCorner(radius: CGFloat, in size: NSSize) -> CGFloat {
+        max(0, min(ceil(radius * 1.6), floor(min(size.width, size.height) / 2)))
+    }
+
+    nonisolated static func mask(radius: CGFloat, in size: NSSize) -> NSImage {
+        let corner = maskCorner(radius: radius, in: size)
         let side = corner * 2 + 1
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             guard let context = NSGraphicsContext.current?.cgContext else { return false }
@@ -248,9 +253,10 @@ final class GlassView: NSView {
         contentView.layer?.cornerRadius = radius
         backingView?.layer?.cornerRadius = radius
         tintView?.layer?.cornerRadius = radius
-        if fillsWindow, let frost = backingView as? NSVisualEffectView, frostMaskRadius != radius {
-            frost.maskImage = Self.mask(radius: radius)
-            frostMaskRadius = radius
+        let maskKey = [radius, Self.maskCorner(radius: radius, in: bounds.size)]
+        if fillsWindow, let frost = backingView as? NSVisualEffectView, frostMaskKey != maskKey {
+            frost.maskImage = Self.mask(radius: radius, in: bounds.size)
+            frostMaskKey = maskKey
         }
         if #available(macOS 26, *), let glass = backingView as? NSGlassEffectView { glass.cornerRadius = radius }
         updateShadow(radius: radius)
