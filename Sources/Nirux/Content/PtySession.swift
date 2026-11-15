@@ -760,9 +760,21 @@ final class PtySession: @unchecked Sendable {
     /// `claude` already running at `runningSince` (see
     /// `AgentStatusMachine.isPromptFree`).
     func acceptsMissionMessage(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
-        !hasExited && state.machine.isPromptFree(
-            foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince
-        )
+        missionPromptRefusal(runningSince: runningSince, snapshot: snapshot) == nil
+    }
+
+    /// When the last hook event came, of any command (0: none).
+    var lastAgentHookAt: TimeInterval { state.machine.lastEventAt }
+
+    /// See `AgentStatusMachine.promptFacts`.
+    func missionPromptFacts(now: TimeInterval) -> String {
+        state.machine.promptFacts(now: now)
+    }
+
+    /// Why `acceptsMissionMessage` says no, nil when it says yes.
+    func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+        guard !hasExited else { return .noClaude }
+        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
     }
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.

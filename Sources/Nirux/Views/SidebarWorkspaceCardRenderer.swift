@@ -749,6 +749,20 @@ final class SidebarWorkspaceCardRenderer {
                 frame: label.frame.insetBy(dx: -2, dy: -2),
                 region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.profileID), label: label)
             ))
+        case let .waitingMessages(columnIndex, waiting):
+            let label = NSTextField.sidebarLine(NSAttributedString(string: waiting.line, attributes: [
+                .font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary
+            ]))
+            label.toolTip = waiting.tooltip
+            label.setAccessibilityLabel(waiting.line)
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
+            hitAreas.append(SidebarHitArea(
+                frame: label.frame.insetBy(dx: -2, dy: -2), region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
+            ))
         }
     }
 

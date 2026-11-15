@@ -41,7 +41,8 @@ extension NiruxShellView {
                     approvalHold: approvalHolds[ObjectIdentifier(col)], missionQuestion: missionQuestions[ObjectIdentifier(col)],
                     // The dialog the user is looking at needs no copy on
                     // its row: its one line, as for any dialog.
-                    showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now
+                    showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now,
+                    waitingMessages: missionWaits.shown[col.id]
                 )
             }
             return sidebarWorkspaceInfo(
@@ -102,7 +103,7 @@ extension NiruxShellView {
     func sidebarColumnInfo(
         _ col: ColumnState, at colIndex: Int, isUserFocused: Bool, agentStatus: AgentStatus,
         foregroundProcess: ForegroundProcess?, approvalHold: PermissionApprovalHold?, missionQuestion: SidebarMissionQuestion?,
-        showsDialog: Bool, snapshot: ProcessSnapshot, now: TimeInterval
+        showsDialog: Bool, snapshot: ProcessSnapshot, now: TimeInterval, waitingMessages: SidebarWaitingMessages? = nil
     ) -> ColumnInfo {
         let editorFile = col.editorColumn?.currentPath.map {
             ($0 as NSString).lastPathComponent
@@ -141,6 +142,7 @@ extension NiruxShellView {
             turnQuestion: Self.sidebarTurnQuestion(of: col, status: agentStatus, foreground: foregroundProcess),
             questionAskedAt: asked?.since,
             dialog: showsDialog ? dialog?.dialog : nil,
+            waitingMessages: waitingMessages,
             id: col.id
         )
     }
@@ -465,6 +467,7 @@ extension NiruxShellView {
     /// typed into its recipient's prompt; the child's card shows a waiting
     /// question from the ledger too (`missionQuestion(for:)`).
     func handleMissionEvent(_ mission: Mission, event: MissionEvent) -> Bool {
+        missionWaits.checkedAt = nil
         let workspace = workspaces.first(where: { $0.id == mission.childWorkspaceID })
         switch event.kind {
         case .acknowledged:

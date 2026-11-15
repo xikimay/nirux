@@ -78,6 +78,11 @@ struct ShellSideEffects {
     /// to the system log, a test's shell writes none.
     var logSidebarState: @MainActor (String) -> Void = { _ in }
 
+    /// Takes a line about a Mission message waiting too long for a prompt
+    /// (`waitingMissionMessages`): the app's shell writes it to the system
+    /// log, a test's shell writes none.
+    var logMissionWait: @MainActor (String) -> Void = { _ in }
+
     /// Calls back at each click or scroll the app receives, until stopped;
     /// the events go on as they were. Keys come through the app's key
     /// interceptor, which consumes the terminals' own. Tests watch

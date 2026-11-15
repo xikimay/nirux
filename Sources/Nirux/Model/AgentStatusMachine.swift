@@ -148,6 +148,10 @@ struct AgentStatusMachine {
     /// The same, typed while no dialog was believed open: text that may sit
     /// in the agent's prompt as a draft.
     private(set) var lastDraftInputAt: TimeInterval = 0
+    /// What the last draft was, for the log (`keyKind`), and the last hook
+    /// event's name.
+    private(set) var lastDraftKind: String?
+    private(set) var lastEventName: String?
     /// The agent process seen asking whether to trust its folder, and when
     /// (see AgentTrustPrompt): no hook reports that question.
     var trustPromptSighting: AgentTrustPrompt.Sighting?
@@ -291,6 +295,7 @@ struct AgentStatusMachine {
     mutating func apply(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
         let now = event.timestamp
         lastEventAt = now
+        lastEventName = event.name.rawValue + (event.agentID == nil ? "" : "(sub)")
         let waitingBefore = pendingDialogs.filter { $0.approval.map { $0.sent == nil } ?? false }
         var outcome = AgentHookOutcome()
         applyEvent(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
@@ -1020,6 +1025,7 @@ struct AgentStatusMachine {
     /// keystroke: the user scrolled, typed nothing.
     mutating func notePromptRecall(now: Date) {
         lastDraftInputAt = now.timeIntervalSince1970
+        lastDraftKind = "wheel"
     }
 
     /// One key's bytes: a character, a short escape sequence, or one
@@ -1037,6 +1043,25 @@ struct AgentStatusMachine {
         guard bytes.count <= 32, bytes.count >= 3, bytes[1] == 0x5B, let final = bytes.last, (0x40...0x7E).contains(final)
         else { return false }
         return bytes.dropFirst(2).dropLast().allSatisfy { (0x20...0x3F).contains($0) }
+    }
+
+    /// What kind of key a write was, for the log: never its characters.
+    static func keyKind(_ keys: Data?) -> String {
+        guard let keys else { return "key" }
+        if keys == Data([0x0D]) { return "enter" }
+        if isCancelKey(keys) { return "cancel" }
+        if keys.first == 0x1B {
+            guard isOneKey(keys) else { return "paste" }
+            switch keys.count == 2 ? nil : keys.last {
+            case nil: return "meta"
+            case 0x41, 0x42: return "upDown"
+            case 0x43, 0x44: return "arrow"
+            case 0x48, 0x46, 0x7E: return "nav"
+            default: return "sequence"
+            }
+        }
+        if let byte = keys.first, keys.count == 1, byte < 0x20 || byte == 0x7F { return "control" }
+        return isOneKey(keys) ? "text" : "paste"
     }
 
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
@@ -1059,7 +1084,10 @@ struct AgentStatusMachine {
         // paste or dictation is text, whatever a dialog waits for: one key
         // answers a dialog, not a write of several.
         let oneKey = keys.map(Self.isOneKey) ?? true
-        if !(answersDialog && oneKey), keys != Self.modeSwitchKey { lastDraftInputAt = time }
+        if !(answersDialog && oneKey), keys != Self.modeSwitchKey {
+            lastDraftInputAt = time
+            lastDraftKind = Self.keyKind(keys)
+        }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
@@ -1309,6 +1337,8 @@ struct AgentStatusMachine {
         hookTurnInFlight = false
         lastInputAt = 0
         lastDraftInputAt = 0
+        lastDraftKind = nil
+        lastEventName = nil
         circling.reset()
     }
 }

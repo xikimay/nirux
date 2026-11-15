@@ -228,6 +228,7 @@ extension NiruxShellView {
                 send(column, text)
             } else if let input = TypedPromptSanitizer.terminalInput(for: text) {
                 column.pty?.sendRaw(input)
+                missionWaits.noteTyped(into: column, at: Date().timeIntervalSince1970)
             }
         }
     }

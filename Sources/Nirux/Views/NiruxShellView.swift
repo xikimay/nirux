@@ -120,6 +120,8 @@ final class NiruxShellView: NSView {
     /// Lines for a Lead's prompt (the user answered a question it handed
     /// over), typed once that prompt is free (`typeMissionMessages`).
     var pendingLeadNotices: [LeadNotice] = []
+    /// Mission messages that wait too long for a prompt (`waitingMissionMessages`).
+    var missionWaits = MissionWaitState()
     /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
     /// a time, and the timer that shows the next once no sheet is up.
     var pendingLeadProposals: [LeadProposal] = []
@@ -357,6 +359,7 @@ final class NiruxShellView: NSView {
                 // Git and PR reads are event-driven; the tick only starts
                 // the ones that are due (see GitRefreshPolicy).
                 self.refreshGitAndPullRequests()
+                self.checkMissionWaits(snapshot: snapshot, now: Date().timeIntervalSince1970)
                 self.refreshMetadata(snapshot: snapshot)
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 {

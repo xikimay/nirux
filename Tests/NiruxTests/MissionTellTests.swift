@@ -302,6 +302,10 @@ final class MissionTellTests: XCTestCase {
         machine.isPromptFree(foreground: foreground ?? claude(), runningSince: t0 + 100)
     }
 
+    private func refusal(_ machine: AgentStatusMachine) -> AgentPromptRefusal? {
+        machine.promptRefusal(foreground: claude(), runningSince: t0 + 100)
+    }
+
     /// A Claude session that took its first prompt and finished the turn.
     private func idleMachine() -> AgentStatusMachine {
         var machine = AgentStatusMachine()
@@ -316,20 +320,28 @@ final class MissionTellTests: XCTestCase {
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {
         var machine = idleMachine()
         XCTAssertTrue(isFree(machine))
-        XCTAssertFalse(machine.isPromptFree(foreground: nil, runningSince: t0 + 100))
+        XCTAssertEqual(machine.promptRefusal(foreground: nil, runningSince: t0 + 100), .noClaude)
         XCTAssertFalse(isFree(machine, foreground: ForegroundProcess(instance: claudeProcess, name: "zsh", arguments: [])))
         XCTAssertFalse(isFree(machine, foreground: claude(arguments: ["claude", "-p"])), "headless")
-        XCTAssertFalse(isFree(machine, foreground: claude(ProcessInstance(pid: 7, startedAt: t0 + 6))),
-                       "a claude that took no prompt since it started")
-        XCTAssertFalse(machine.isPromptFree(foreground: claude(), runningSince: claudeProcess.startedAt - 1),
+        XCTAssertEqual(machine.promptRefusal(foreground: claude(ProcessInstance(pid: 7, startedAt: t0 + 6)), runningSince: t0 + 100),
+                       .noPromptYet, "a claude that took no prompt since it started")
+        XCTAssertEqual(machine.promptRefusal(foreground: claude(), runningSince: claudeProcess.startedAt - 1), .restarted,
                        "a claude started after the tell, such as one restored after a relaunch")
 
         _ = machine.apply(hook(.userPromptSubmit, at: 6), isUserFocused: false)
-        XCTAssertFalse(isFree(machine), "working")
+        XCTAssertEqual(refusal(machine), .working)
         _ = machine.apply(hook(.permissionRequest, at: 7, tool: "Bash", key: "k"), isUserFocused: false)
-        XCTAssertFalse(isFree(machine), "a dialog is open")
+        XCTAssertEqual(refusal(machine), .working, "a dialog mid-turn")
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
         XCTAssertTrue(isFree(machine))
+        // A subagent's dialog outlives the turn.
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = machine.apply(AgentHookEvent(
+            kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: "s", agentID: "sub",
+            timestamp: t0 + 11
+        ), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 12), isUserFocused: false)
+        XCTAssertEqual(refusal(machine), .dialog)
     }
 
     func testPromptIsNotFreeOverADraftOrTextNotSubmittedYet() {

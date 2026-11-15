@@ -187,6 +187,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // The app's shell only: whether the user is away is the app's.
         shellView.wireCatchUp()
         shellView.followSystemForSidebarStaleLog()
+        // Message ids, kinds, reasons and counts: public.
+        shellView.sideEffects.logMissionWait = { MissionWaitLog.logger.notice("\($0, privacy: .public)") }
         let hooks = AgentHookCenter.shared
         // Before the backlog replay in start(): it releases what it can't hold.
         hooks.applySidebarApprovals(enabled: NiruxShellView.currentSidebarApprovalsEnabled())

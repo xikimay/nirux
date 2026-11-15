@@ -403,6 +403,154 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertNil(shell.stuckWatchTimer)
     }
 
+    // MARK: - Mission messages that wait
+
+    /// A Mission message that waits too long for an idle agent's prompt
+    /// shows on its row and goes to the log, once per reason; nothing while
+    /// the agent works.
+    func testAMessageWaitingTooLongForAPromptShowsAndIsLogged() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-mission-wait-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", root.path, 1)
+        defer {
+            if let previousStateDirectory { setenv("NIRUX_STATE_DIR", previousStateDirectory, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = shell
+        defer { window.close() }
+
+        let workspace = try XCTUnwrap(shell.workspaces.first)
+        let column = try XCTUnwrap(workspace.columns.first)
+        let agentUUID = try XCTUnwrap(column.agentUUID)
+        let pty = try XCTUnwrap(column.pty)
+        let started = try await waitUntil(timeout: 10) { pty.shellPID != nil }
+        XCTAssertTrue(started)
+        let shellPID = try XCTUnwrap(pty.shellPID)
+        let now = Date().timeIntervalSince1970
+        let claudePID: pid_t = 99_997
+        let snapshot = ProcessSnapshot(entries: [
+            ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: claudePID,
+                name: "zsh", startedAt: now - 800, arguments: ["zsh"]
+            ),
+            ProcessSnapshot.Entry(
+                pid: claudePID, parentPID: shellPID, processGroupID: claudePID, terminalForegroundProcessGroupID: claudePID,
+                name: "claude", startedAt: now - 700, arguments: ["claude"]
+            )
+        ])
+        // Its claude took a prompt and ended its turn; a key reached its
+        // prompt since.
+        for (name, offset) in [(AgentHookEvent.Name.sessionStart, 650.0), (.userPromptSubmit, 600), (.stop, 590)] {
+            pty.applyAgentHook(AgentHookEvent(kind: .claude, name: name, sessionID: "s", timestamp: now - offset), isUserFocused: true)
+        }
+        pty.sendRaw(Data("x".utf8))
+
+        let store = MissionStore(persistsToDisk: false)
+        let missionID = UUID().uuidString, childWorkspaceID = UUID().uuidString, childAgentUUID = UUID().uuidString
+        XCTAssertNotNil(store.create(MissionCreationRequest(
+            id: missionID, parentWorkspaceID: workspace.id, parentAgentUUID: agentUUID,
+            childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID, childAgentKind: "claude", branch: "feat/x"
+        ), enabled: true, now: now - 900))
+        @MainActor func ask(at time: TimeInterval) -> MissionEvent? {
+            store.accept(MissionEvent(
+                id: UUID().uuidString, missionID: missionID, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
+                kind: .question, message: "Which?", timestamp: time
+            ), enabled: true)?.event
+        }
+        let first = try XCTUnwrap(ask(at: now - NiruxShellView.missionMessageStallAge - 5))
+        var lines: [String] = []
+        shell.sideEffects.logMissionWait = { lines.append($0) }
+        @MainActor func waits(at time: TimeInterval, in processes: ProcessSnapshot? = nil) -> [UUID: SidebarWaitingMessages] {
+            shell.missionWaits.checkedAt = nil
+            shell.checkMissionWaits(snapshot: processes ?? snapshot, now: time, store: store)
+            return shell.missionWaits.shown
+        }
+        // The sidebar reads what a check kept, and checks nothing itself.
+        shell.updateSidebar(snapshot: snapshot)
+        XCTAssertTrue(lines.isEmpty && shell.missionWaits.shown.isEmpty)
+        XCTAssertTrue(waits(at: now - 10).isEmpty, "not waiting long yet")
+        // The log says why within seconds, with what it read.
+        XCTAssertEqual(lines.count, 1)
+        let line = try XCTUnwrap(lines.first)
+        XCTAssertTrue(line.hasPrefix("untyped mission message id=\(first.id.prefix(8)) kind=question agent=\(agentUUID.prefix(8)) "
+            + "waited=175s reason=draft messages=1 fg=claude/690s working=0 inFlight=0 turn=- dialogs=[] prompt="), line)
+        XCTAssertTrue(line.contains(" draft=text/") && line.contains(" verdict=none ") && line.contains(" last=stop/"), line)
+        let second = try XCTUnwrap(ask(at: now - 10))
+        let waiting = SidebarWaitingMessages(count: 2, since: first.timestamp, refusal: .draft, now: now)
+        XCTAssertEqual(waits(at: now)[column.id], waiting)
+        XCTAssertEqual(lines.count, 1, "once per message and reason")
+
+        // The row says so: the refresh takes a check made just before.
+        shell.isSidebarExpanded = true
+        shell.sidebar.isExpanded = true
+        shell.relayout(animated: false)
+        shell.missionWaits.checkedAt = nil
+        shell.updateSidebar(snapshot: snapshot)
+        XCTAssertTrue(shell.sidebar.expandedViews.contains {
+            ($0 as? NSTextField)?.stringValue == waiting.line
+        }, "what the check kept, not a check of its own")
+        _ = waits(at: now + 30)
+        XCTAssertEqual(lines.count, 2, "each message once per reason")
+        XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(second.id.prefix(8)) ") == true)
+        // What Nirux just typed reads as a draft until it goes in.
+        shell.missionWaits.noteTyped(into: column, at: now + 31)
+        XCTAssertTrue(waits(at: now + 32).isEmpty)
+        XCTAssertEqual(waits(at: now + 31 + NiruxShellView.typedTextGrace)[column.id], waiting)
+        // Codex in front collects its own messages.
+        let codex = ProcessSnapshot(entries: [
+            ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: claudePID,
+                name: "zsh", startedAt: now - 800, arguments: ["zsh"]
+            ),
+            ProcessSnapshot.Entry(
+                pid: claudePID, parentPID: shellPID, processGroupID: claudePID, terminalForegroundProcessGroupID: claudePID,
+                name: "codex", startedAt: now - 700, arguments: ["codex"]
+            )
+        ])
+        XCTAssertTrue(waits(at: now + 50, in: codex).isEmpty)
+
+        pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: now + 40), isUserFocused: true)
+        XCTAssertTrue(waits(at: now + 41).isEmpty, "its turn runs")
+        XCTAssertEqual(lines.count, 2, "a turn at work says nothing")
+        // Unless no hook came for a stall's length.
+        _ = waits(at: now + 40 + NiruxShellView.missionMessageStallAge)
+        XCTAssertEqual(lines.count, 4)
+        XCTAssertTrue(lines.suffix(2).allSatisfy { $0.contains(" reason=working messages=2 ") && $0.contains(" working=1 inFlight=1 turn=180s ") },
+                      lines.last ?? "")
+
+        // A tell to a child other than Claude Code waits for nobody here.
+        let codexMission = UUID().uuidString, otherWorkspace = UUID().uuidString, otherAgent = UUID().uuidString
+        XCTAssertNotNil(store.create(MissionCreationRequest(
+            id: codexMission, parentWorkspaceID: otherWorkspace, parentAgentUUID: otherAgent,
+            childWorkspaceID: workspace.id, childAgentUUID: agentUUID, childAgentKind: "codex", branch: "feat/y"
+        ), enabled: true, now: now - 900))
+        XCTAssertNotNil(store.accept(MissionEvent(
+            id: UUID().uuidString, missionID: codexMission, childWorkspaceID: workspace.id, childAgentUUID: agentUUID,
+            parentWorkspaceID: otherWorkspace, parentAgentUUID: otherAgent, kind: .instruction, message: "Go", timestamp: now - 300
+        ), enabled: true))
+        // Its turn over and its prompt free: a few more tries, then the row
+        // says typing failed.
+        pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .stop, sessionID: "s", timestamp: now + 400), isUserFocused: true)
+        let free = try XCTUnwrap(waits(at: now + 410)[column.id])
+        XCTAssertEqual(free.count, 2)
+        XCTAssertNil(free.refusal)
+        XCTAssertFalse(free.untypable)
+        XCTAssertEqual(shell.missionWaits.tries[first.id], 1)
+        _ = waits(at: now + 420)
+        XCTAssertEqual(shell.missionWaits.tries[first.id], 1, "one try a stuck-watch interval")
+        for offset in [440.0, 470, 500] { _ = waits(at: now + offset) }
+        XCTAssertEqual(shell.missionWaits.tries[first.id], NiruxShellView.missionTypingTries)
+        XCTAssertEqual(waits(at: now + 530)[column.id]?.untypable, true)
+    }
+
     // MARK: - Going in circles
 
     /// From Claude's hook events to the task's row: a working agent whose
