@@ -743,8 +743,9 @@ pull request.
   sheet once confirmed.
 - **The local checks keep the project's folders at Start**, plus those opened
   since: a workspace closed or moved mid-queue doesn't turn them off. A space
-  whose queue runs can't be deleted: stop it first. The board keeps its queue
-  line, and Stop, while a queue runs, even when board.json can't be read.
+  whose queue runs can't be deleted, nor can the workspace of its board move:
+  stop it first. The board keeps its queue line, and Stop, while a queue runs,
+  even when board.json can't be read.
 - **Warnings and refusals.** Besides section 4's: a post-merge run going on the
   base (the first merge waits for it), a red check that isn't required (the
   queue never merges with one), a required check that ended skipped or neutral,

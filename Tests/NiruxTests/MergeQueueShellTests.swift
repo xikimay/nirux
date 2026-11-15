@@ -281,13 +281,17 @@ final class MergeQueueShellTests: XCTestCase {
         let space = shell.workspaceStore.createProfile(named: "Widgets")
         let other = shell.workspaceStore.createProfile(named: "Gadgets")
         shell.addWorkspace(title: "widgets", cwd: root.path, profileID: space.id)
+        shell.addWorkspace(title: "notes", cwd: root.path, profileID: space.id)
         let workspace = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
-        // Read nothing: no gh, no Board Settings.
+        let notes = try XCTUnwrap(shell.workspaces.first { $0.title == "notes" })
+        // A Board that reads nothing (it is never reloaded): no gh, no Board Settings.
         workspace.addProjectBoardColumn(shell.makeProjectBoard(projectID: space.id, offersSettings: false))
         let queue = start(shell, projectID: space.id)
 
         shell.moveWorkspaceToSpace(workspaceID: workspace.id, profileID: other.id)
         XCTAssertEqual(workspace.profileID, space.id, "a toast says why (this shell has no window to show it)")
+        shell.moveWorkspaceToSpace(workspaceID: notes.id, profileID: other.id)
+        XCTAssertEqual(notes.profileID, other.id, "one without the Board moves")
         queue.stop()
         shell.moveWorkspaceToSpace(workspaceID: workspace.id, profileID: other.id)
         XCTAssertEqual(workspace.profileID, other.id, "stopped: it moves, its Board with it")

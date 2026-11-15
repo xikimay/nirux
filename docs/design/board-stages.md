@@ -689,9 +689,10 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 - **It shows its workspace's space**, with no menu to pick another
   (`NiruxShellView.boardsFollowTheirWorkspaces`). Its workspace moved to
   another space, or its space deleted (its workspaces go to General), it
-  shows that space, its tasks read again. While its space's merge queue
-  runs, the workspace that holds it doesn't move (as the space isn't
-  deleted then): the Board keeps the queue's line and Stop. A space keeps
+  shows that space, its tasks read again. The workspace that holds it
+  doesn't move while its space's merge queue runs, as the space isn't
+  deleted then: the Board keeps the queue's line and Stop, and a toast
+  says why. A space keeps
   one Board: one that comes to a space that has its Board closes, and the
   space's own comes to the front, with a toast naming that space; alone in
   its workspace, it leaves a shell there. A Board an older build saved on

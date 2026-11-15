@@ -50,7 +50,8 @@ extension NiruxShellView {
         // deleted then, the workspace doesn't move.
         let space = workspaces[index].profileID
         if workspaces[index].columns.contains(where: \.isProjectBoard), mergeQueues(of: space).contains(where: \.isRunning) {
-            return showToast("This space’s merge queue is running: stop it before moving the workspace of its Board")
+            let name = profiles.first { $0.id == space }?.name ?? "This space"
+            return showToast("The merge queue of \(name) is running: stop it before moving the workspace of its Board")
         }
         guard workspaceStore.moveWorkspace(at: index, toProfile: profileID) else { return }
         boardsFollowTheirWorkspaces()
