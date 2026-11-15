@@ -62,7 +62,7 @@ final class ThemeGuardTests: XCTestCase {
         "Views/ClaudeUsageIndicator.swift": 1,
         "Views/ColumnInternalViews.swift": 9,
         "Views/CommandPalette+URLMode.swift": 4,
-        "Views/CommandPalette.swift": 5,
+        "Views/CommandPalette.swift": 4,
         "Views/EditorFileTree.swift": 8,
         "Views/EditorSearchPanel.swift": 5,
         "Views/EditorTabBar.swift": 4,

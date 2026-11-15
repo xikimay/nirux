@@ -8,9 +8,9 @@ import AppKit
 /// The tints are provisional: offscreen renders can't show the glass (the
 /// window server draws it), so they get tuned with the user on a demo at the
 /// end of phase 2. The frost blends within the window; the translucent
-/// window (plan step 4.2) moves the chrome to blending behind it, and a
-/// floating glass in a window of its own (⌘P if it stays a panel) needs the
-/// same and no layer shadow: step 2.4 adds that if it does.
+/// window (plan step 4.2) moves the chrome to blending behind it, and a glass
+/// that is its window's background (⌘P's panel, `fillsWindow`) blends behind
+/// its window and leaves the shadow to it.
 final class GlassView: NSView {
     enum Role: Sendable {
         /// The sidebar, the command bar, the rail: it follows the level.
@@ -161,6 +161,8 @@ final class GlassView: NSView {
             let frost = NSVisualEffectView(frame: bounds)
             frost.material = role == .floating ? .popover : .sidebar
             frost.blendingMode = fillsWindow ? .behindWindow : .withinWindow
+            // Blending behind the window ignores the layer's corners: a
+            // mask of the shape holds them (`applyShape`).
             frost.state = .active
             frost.wantsLayer = true
             frost.layer?.masksToBounds = true
@@ -180,8 +182,25 @@ final class GlassView: NSView {
     /// Whether the floating shadow shows (for the tests).
     var castsShadow: Bool { !shadowLayer.isHidden && shadowLayer.shadowOpacity > 0 }
 
-    /// Whether the frost blends what is behind the window (for the tests).
-    var blendsBehindWindow: Bool { (backingView as? NSVisualEffectView)?.blendingMode == .behindWindow }
+    /// Whether the frost blends what is behind the window, held to the shape
+    /// by its mask (for the tests).
+    var blendsBehindWindow: Bool {
+        guard let frost = backingView as? NSVisualEffectView else { return false }
+        return frost.blendingMode == .behindWindow && frost.maskImage != nil
+    }
+
+    /// A stretchable rounded shape for a frost's `maskImage`.
+    private static func mask(radius: CGFloat) -> NSImage {
+        let side = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
+    }
 
     /// The view holding the keyboard: a text field rather than the field
     /// editor that edits it for the moment.
@@ -218,6 +237,7 @@ final class GlassView: NSView {
         contentView.layer?.cornerRadius = radius
         backingView?.layer?.cornerRadius = radius
         tintView?.layer?.cornerRadius = radius
+        if fillsWindow, let frost = backingView as? NSVisualEffectView { frost.maskImage = Self.mask(radius: radius) }
         if #available(macOS 26, *), let glass = backingView as? NSGlassEffectView { glass.cornerRadius = radius }
         updateShadow(radius: radius)
     }

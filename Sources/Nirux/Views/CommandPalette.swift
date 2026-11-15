@@ -118,14 +118,14 @@ final class CommandPalette: NSObject {
     var detectedURLs: Set<String> = []
 
     /// Where the palette opens.
-    enum Placement: Equatable {
+    enum Placement {
         /// Today's: over the window's middle, its bottom at 55 % of the
         /// window's height.
         case centered
         /// The glass interface's (docs/design/glass-interface.md; phase 3
-        /// opens it so): unfolding from the command bar (`bar`, in screen
-        /// coordinates), on floating glass at `level`.
-        case underBar(NSRect, level: InterfaceTransparency)
+        /// opens it so): unfolding from the command bar, `bar`, on floating
+        /// glass at `level`. Centred instead while the bar shows nowhere.
+        case underBar(NSView, level: InterfaceTransparency)
     }
 
     static let size = NSSize(width: 520, height: 340)
@@ -133,9 +133,10 @@ final class CommandPalette: NSObject {
     static let barGap = Theme.Space.sm
     /// Today's background, under the centred palette.
     private static var restingBackground: NSColor { Theme.Color.base.withAlphaComponent(0.98) }
-    private(set) var placement = Placement.centered
     /// The glass under the bar, behind the field and the rows.
     private(set) var glass: GlassView?
+    /// It opens from the bar: it unfolds from the bar's middle.
+    private var unfoldsFrom: NSPoint?
 
     private var keyMonitor: Any?
     private var clickMonitor: Any?
@@ -143,7 +144,7 @@ final class CommandPalette: NSObject {
     private var scrollMonitor: Any?
 
     func show(relativeTo window: NSWindow, sections: [PaletteSection] = [], placement: Placement = .centered) {
-        apply(placement, in: window.frame)
+        apply(placement, relativeTo: window)
         guard let panel, let searchField else { return }
 
         self.sections = sections
@@ -160,8 +161,14 @@ final class CommandPalette: NSObject {
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(searchField)
 
-        // Opening animation: scale from 0.96 → 1.0
-        panel.contentView?.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.96, y: 0.96))
+        // Opening animation: scale from 0.96 → 1.0 (under the bar, from its
+        // top middle, so that it unfolds from the bar).
+        let scale: CGFloat = 0.96
+        var start = CGAffineTransform(scaleX: scale, y: scale)
+        if let origin = unfoldsFrom {
+            start = CGAffineTransform(translationX: origin.x * (1 - scale), y: origin.y * (1 - scale)).scaledBy(x: scale, y: scale)
+        }
+        panel.contentView?.layer?.setAffineTransform(start)
         panel.alphaValue = 0
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.12
@@ -171,46 +178,65 @@ final class CommandPalette: NSObject {
         }
     }
 
-    /// The panel's frame for `placement`, beside a window at `windowFrame`
-    /// (screen coordinates). Under the bar: centred on it, inside the window.
-    static func frame(for placement: Placement, in windowFrame: NSRect) -> NSRect {
-        switch placement {
-        case .centered:
-            return NSRect(
-                x: windowFrame.origin.x + (windowFrame.width - size.width) / 2, y: windowFrame.origin.y + windowFrame.height * 0.55,
-                width: size.width, height: size.height
-            )
-        case .underBar(let bar, _):
-            let margin = Theme.Space.sm
-            let x = min(max(bar.midX - size.width / 2, windowFrame.minX + margin), windowFrame.maxX - margin - size.width)
-            return NSRect(x: x, y: bar.minY - barGap - size.height, width: size.width, height: size.height)
-        }
+    /// Today's frame: centred over a window at `windowFrame` (screen
+    /// coordinates).
+    static func centeredFrame(in windowFrame: NSRect) -> NSRect {
+        NSRect(
+            x: windowFrame.origin.x + (windowFrame.width - size.width) / 2, y: windowFrame.origin.y + windowFrame.height * 0.55,
+            width: size.width, height: size.height
+        )
     }
 
-    /// Places and dresses the panel for `placement` (making it the first
-    /// time), without showing it.
-    func apply(_ placement: Placement, in windowFrame: NSRect) {
+    /// Under the bar (`bar`, in screen coordinates): centred on it, inside
+    /// its window (`windowFrame`), the left edge first, and above the
+    /// screen's bottom (`screen`, its visible frame).
+    static func frame(underBar bar: NSRect, in windowFrame: NSRect, screen: NSRect?) -> NSRect {
+        let margin = Theme.Space.sm
+        let x = max(min(bar.midX - size.width / 2, windowFrame.maxX - margin - size.width), windowFrame.minX + margin)
+        var y = bar.minY - barGap - size.height
+        if let screen { y = max(y, screen.minY + margin) }
+        return NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// The bar's rect on screen and its window, or nil while it shows
+    /// nowhere (no window, hidden, outside its window).
+    static func barOnScreen(_ bar: NSView) -> (rect: NSRect, window: NSWindow)? {
+        guard let window = bar.window, !bar.isHiddenOrHasHiddenAncestor else { return nil }
+        let rect = window.convertToScreen(bar.convert(bar.bounds, to: nil))
+        guard window.frame.intersects(rect) else { return nil }
+        return (rect, window)
+    }
+
+    /// Places and dresses the panel for `placement` beside `window` (making
+    /// it the first time), without showing it.
+    func apply(_ placement: Placement, relativeTo window: NSWindow) {
         if panel == nil { createPanel() }
         guard let panel, let background = panel.contentView else { return }
-        self.placement = placement
-        switch placement {
-        case .centered:
+        guard case let .underBar(bar, level) = placement, let onScreen = Self.barOnScreen(bar) else {
             glass?.removeFromSuperview()
             glass = nil
+            unfoldsFrom = nil
             background.layer?.backgroundColor = Self.restingBackground.cgColor
-        case let .underBar(_, level):
-            let glass = self.glass ?? {
-                let glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel, fillsWindow: true)
-                glass.frame = background.bounds
-                glass.autoresizingMask = [.width, .height]
-                background.addSubview(glass, positioned: .below, relativeTo: nil)
-                self.glass = glass
-                return glass
-            }()
-            glass.level = level
-            background.layer?.backgroundColor = nil
+            background.layer?.cornerCurve = .circular
+            panel.setFrame(Self.centeredFrame(in: window.frame), display: true)
+            panel.invalidateShadow()
+            return
         }
-        panel.setFrame(Self.frame(for: placement, in: windowFrame), display: true)
+        let glass = self.glass ?? {
+            let glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel, fillsWindow: true)
+            glass.frame = background.bounds
+            glass.autoresizingMask = [.width, .height]
+            background.addSubview(glass, positioned: .below, relativeTo: nil)
+            self.glass = glass
+            return glass
+        }()
+        glass.level = level
+        background.layer?.backgroundColor = nil
+        // The glass's corners: no sliver of the panel's left outside them.
+        background.layer?.cornerCurve = .continuous
+        let frame = Self.frame(underBar: onScreen.rect, in: onScreen.window.frame, screen: onScreen.window.screen?.visibleFrame)
+        unfoldsFrom = NSPoint(x: onScreen.rect.midX - frame.minX, y: frame.height)
+        panel.setFrame(frame, display: true)
         // The window's shadow follows what it now draws.
         panel.invalidateShadow()
     }
@@ -258,7 +284,7 @@ final class CommandPalette: NSObject {
 
     private func createPanel() {
         let palettePanel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 340),
+            contentRect: NSRect(origin: .zero, size: Self.size),
             styleMask: [.titled, .fullSizeContentView],
             backing: .buffered, defer: false
         )
@@ -273,16 +299,17 @@ final class CommandPalette: NSObject {
         palettePanel.becomesKeyOnlyIfNeeded = false
         palettePanel.acceptsMouseMovedEvents = true
 
-        let background = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 340))
+        let width = Self.size.width, height = Self.size.height
+        let background = NSView(frame: NSRect(origin: .zero, size: Self.size))
         background.wantsLayer = true
-        background.layer?.cornerRadius = 12
+        background.layer?.cornerRadius = Theme.Radius.panel
         background.layer?.backgroundColor = Self.restingBackground.cgColor
         background.layer?.borderWidth = 1
         background.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
         background.layer?.masksToBounds = true
 
         // Search field
-        let fieldContainer = NSView(frame: NSRect(x: 0, y: 340 - 44, width: 520, height: 44))
+        let fieldContainer = NSView(frame: NSRect(x: 0, y: height - 44, width: width, height: 44))
         fieldContainer.wantsLayer = true
         fieldContainer.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
 
@@ -296,7 +323,7 @@ final class CommandPalette: NSObject {
         field.focusRingType = .none
         field.drawsBackground = false
         field.placeholderString = "Type a command..."
-        field.frame = NSRect(x: 42, y: 10, width: 460, height: 24)
+        field.frame = NSRect(x: 42, y: 10, width: width - 60, height: 24)
         field.delegate = self
         fieldContainer.addSubview(field)
 
@@ -304,20 +331,20 @@ final class CommandPalette: NSObject {
         self.fieldContainer = fieldContainer
 
         // Separator
-        let separatorView = NSView(frame: NSRect(x: 0, y: 340 - 45, width: 520, height: 1))
+        let separatorView = NSView(frame: NSRect(x: 0, y: height - 45, width: width, height: 1))
         separatorView.wantsLayer = true
         separatorView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
         background.addSubview(separatorView)
         self.separator = separatorView
 
         // List container (scrollable area)
-        let list = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 340 - 46))
+        let list = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height - 46))
         list.wantsLayer = true
         background.addSubview(list)
         list.layer?.masksToBounds = true
 
         // Scroll indicator
-        let indicator = NSView(frame: NSRect(x: 520 - 6, y: 0, width: 3, height: 40))
+        let indicator = NSView(frame: NSRect(x: width - 6, y: 0, width: 3, height: 40))
         indicator.wantsLayer = true
         indicator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.2).cgColor
         indicator.layer?.cornerRadius = 1.5
