@@ -4,7 +4,7 @@ import AppKit
 
 /// Full Keyboard Access on the Board: Tab stops on each line and each
 /// "Merged today" entry, as on any control; Space or Return opens the
-/// task; Control-Return, macOS's own key for it, shows the menu.
+/// task; Control-Return shows the menu.
 @MainActor
 enum BoardStagesKeyboard {
     /// Tab stops on every control (System Settings › Keyboard). The tests
@@ -40,6 +40,38 @@ enum BoardStagesKeyboard {
         case 36, 76: return flags.isEmpty ? .press : flags == .control ? .menu : .other
         default: return .other
         }
+    }
+
+    /// A key pressed on a line or an entry: Space, Return or Control-Return
+    /// acts as it comes up, as a button's Space does. The repeats of a key
+    /// held down land on the line then, not where the press sends the
+    /// keyboard: a task's terminal, where a Return would answer its agent.
+    @MainActor
+    struct Held {
+        private var down: (code: UInt16, key: Key)?
+
+        /// A key going down on the view: false for one it doesn't take
+        /// (its superclass's).
+        mutating func keyDown(_ event: NSEvent) -> Bool {
+            let key = BoardStagesKeyboard.key(event)
+            switch key {
+            case .press, .menu: down = (event.keyCode, key)
+            case .repeated: break
+            case .other: return false
+            }
+            return true
+        }
+
+        /// What to do as a key comes up: what it went down for on the view,
+        /// once; nil for one that went down elsewhere.
+        mutating func keyUp(_ event: NSEvent) -> Key? {
+            guard let down, down.code == event.keyCode else { return nil }
+            self.down = nil
+            return down.key
+        }
+
+        /// The keyboard went elsewhere: a key coming up later went down there.
+        mutating func reset() { down = nil }
     }
 
     /// The focus ring's shape: the view's bounds, rounded.

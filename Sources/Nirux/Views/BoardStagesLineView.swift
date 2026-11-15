@@ -67,6 +67,8 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
+    /// The key that went down on it, which acts as it comes up.
+    private var held = BoardStagesKeyboard.Held()
     /// The pointer is on the Merge station, as the Board follows it. The
     /// station says what a click does only while one acts.
     var isStationHovered = false {
@@ -620,15 +622,24 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         return took
     }
 
+    override func resignFirstResponder() -> Bool {
+        held.reset()
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !held.keyDown(event) { super.keyDown(with: event) }
+    }
+
     /// Space or Return opens the task, as a click on the line (departed
     /// since it took the keyboard, it says where its task went); Control-
     /// Return shows its menu, where the Merge station and the link are too.
-    override func keyDown(with event: NSEvent) {
-        switch BoardStagesKeyboard.key(event) {
-        case .press: isDeparted ? onGone?() : onClick?()
-        case .menu where !isDeparted: if !accessibilityPerformShowMenu() { NSSound.beep() }
-        case .repeated: break
-        default: super.keyDown(with: event)
+    /// As the key comes up (`BoardStagesKeyboard.Held`).
+    override func keyUp(with event: NSEvent) {
+        switch held.keyUp(event) {
+        case .press?: isDeparted ? onGone?() : onClick?()
+        case .menu?: if isDeparted || !accessibilityPerformShowMenu() { NSSound.beep() }
+        default: super.keyUp(with: event)
         }
     }
 

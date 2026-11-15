@@ -184,7 +184,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(try BoardStagesClicks.tabToNextLine(in: window).line.title, "widgets")
             let focused = try BoardStagesClicks.tabToNextLine(in: window)
             XCTAssertEqual(focused.line.title, "login")
-            focused.keyDown(with: try BoardStagesClicks.key(" ", 49))
+            try BoardStagesClicks.type(" ", 49, on: focused)
             XCTAssertEqual(shell.activeWorkspace?.title, "login")
             try select("widgets", in: shell)
             dropWorkspaceSnapshots(shell)

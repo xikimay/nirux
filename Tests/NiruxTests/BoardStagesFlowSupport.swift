@@ -65,12 +65,20 @@ enum BoardStagesClicks {
         try press(entry, at: point, file: file, line: line)
     }
 
-    /// A key going down, as the keyboard sends it.
-    static func key(_ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], isARepeat: Bool = false) throws -> NSEvent {
+    /// A key going down, or coming up, as the keyboard sends it.
+    static func key(
+        _ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], isARepeat: Bool = false, up: Bool = false
+    ) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
-            with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+            with: up ? .keyUp : .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
             characters: characters, charactersIgnoringModifiers: characters, isARepeat: isARepeat, keyCode: code
         ))
+    }
+
+    /// A key pressed on `view`: down, then up.
+    static func type(_ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], on view: NSView) throws {
+        view.keyDown(with: try key(characters, code, flags))
+        view.keyUp(with: try key(characters, code, flags, up: true))
     }
 
     /// Tab, as the window takes it, until a line has the keyboard: the

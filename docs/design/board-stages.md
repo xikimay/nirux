@@ -660,9 +660,11 @@ what each click runs.
   foot's Stops, and back to Refresh (`BoardStagesView.linkKeyViews`, linked
   again whenever the views change). A line or an entry draws the focus ring,
   and the list scrolls what takes the keyboard into sight. Space or Return
-  opens the task; Control-Return, macOS's own key for a contextual menu,
-  shows the line's menu (the Merge station and the link are in it), an
-  entry's "Clean up"; a key held down acts once. A click takes the keyboard
+  opens the task; Control-Return shows the line's menu (the Merge station
+  and the link are in it), an entry's "Clean up". Each acts once, as its
+  key comes up: the repeats of a key held down stay on the line, never in
+  the terminal the task opens, where a Return would answer its agent
+  (`BoardStagesKeyboard.Held`). A click takes the keyboard
   from nowhere (a terminal keeps it), as a button's click doesn't. A
   departed line is no stop, but one that had the keyboard says where its
   task went on Space; one that goes hands the keyboard to the line now in

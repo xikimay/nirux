@@ -159,6 +159,8 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
     var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
+    /// The key that went down on it, which acts as it comes up.
+    private var held = BoardStagesKeyboard.Held()
     /// What the entry says under the pointer, by where.
     private var toolTips = BoardStagesToolTips()
     var hints: [(rect: NSRect, text: String)] { toolTips.places }
@@ -372,16 +374,25 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
         return took
     }
 
-    /// Space or Return opens its task, as a click; Control-Return shows
-    /// "Clean up", while it is offered.
+    override func resignFirstResponder() -> Bool {
+        held.reset()
+        return super.resignFirstResponder()
+    }
+
     override func keyDown(with event: NSEvent) {
-        switch BoardStagesKeyboard.key(event) {
-        case .press: if !accessibilityPerformPress() { NSSound.beep() }
-        case .menu:
+        if !held.keyDown(event) { super.keyDown(with: event) }
+    }
+
+    /// Space or Return opens its task, as a click; Control-Return shows
+    /// "Clean up", while it is offered. As the key comes up
+    /// (`BoardStagesKeyboard.Held`).
+    override func keyUp(with event: NSEvent) {
+        switch held.keyUp(event) {
+        case .press?: if !accessibilityPerformPress() { NSSound.beep() }
+        case .menu?:
             guard let menu = contextMenu() else { return NSSound.beep() }
             popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
-        case .repeated: break
-        case .other: super.keyDown(with: event)
+        default: super.keyUp(with: event)
         }
     }
 
