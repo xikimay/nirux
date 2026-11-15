@@ -41,7 +41,7 @@ final class CommandPalettePlacementTests: XCTestCase {
         defer { window.close() }
         let onScreen = try XCTUnwrap(CommandPalette.barOnScreen(bar, in: window, windowShows: { _ in true }))
         XCTAssertEqual(onScreen, NSRect(x: 400, y: 852, width: 600, height: 36), "the bar's rect on screen")
-        let under = CommandPalette.place(underBar: onScreen, in: windowFrame, screen: window.screen?.visibleFrame)
+        let under = CommandPalette.place(underBar: onScreen, in: windowFrame, screen: nil)
         XCTAssertFalse(under.isAbove)
         XCTAssertEqual(under.frame.maxY, onScreen.minY - CommandPalette.barGap)
         XCTAssertEqual(under.frame.midX, onScreen.midX)
@@ -69,7 +69,11 @@ final class CommandPalettePlacementTests: XCTestCase {
 
         let palette = palette()
         palette.apply(.underBar(bar, level: .glass), relativeTo: window)
-        XCTAssertEqual(palette.unfoldsFrom, NSPoint(x: onScreen.midX - under.frame.minX, y: under.frame.height), "from the bar's middle, at its top")
+        // Placed on the machine's screen (CI's runners have small ones).
+        let applied = CommandPalette.place(underBar: onScreen, in: windowFrame, screen: window.screen?.visibleFrame)
+        XCTAssertEqual(palette.unfoldsFrom, CommandPalette.unfoldOrigin(of: applied, bar: onScreen), "from the bar's middle")
+        XCTAssertEqual(CommandPalette.unfoldOrigin(of: under, bar: onScreen), NSPoint(x: onScreen.midX - under.frame.minX, y: under.frame.height),
+                       "below the bar, from its top edge")
         let origin = try XCTUnwrap(palette.unfoldsFrom)
         let start = CommandPalette.unfoldStart(from: origin)
         XCTAssertEqual(origin.applying(start), origin, "that point stays put")
