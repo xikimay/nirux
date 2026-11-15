@@ -21,7 +21,7 @@ final class RequestCalloutView: NSView {
 
     private(set) var request: WaitingRequest?
     private let glass: GlassView
-    private let content = FlippedContentView()
+    private let content = BoardStagesFlippedView()
     let card = RequestCardView(trailing: .openTask)
     /// "1 more · ⌘J".
     let moreLabel = NSTextField(labelWithString: "")
@@ -102,8 +102,19 @@ final class RequestCalloutView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        RequestArming.observeMoves(of: window, by: self, selector: #selector(windowMoved))
         if window != nil { restartArming() }
     }
+
+    /// Moved beside its icon, or its window moved: the answers slid under a
+    /// still pointer.
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        let moved = newOrigin != frame.origin
+        super.setFrameOrigin(newOrigin)
+        if moved { restartArming() }
+    }
+
+    @objc private func windowMoved() { restartArming() }
 
     override func viewDidUnhide() {
         super.viewDidUnhide()

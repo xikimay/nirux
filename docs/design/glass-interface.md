@@ -141,9 +141,12 @@ single click, on a button that has sat still for 0.6 s (`RequestArming`,
 the same rearming as the rows'), so that a request arriving, moving up or
 taking another's place never takes a click aimed at what was there; a
 scroll, the panel opening (the host calls `opened()`, which also chooses the
-oldest), or its host moving it (`restartArming`) restarts the wait. A
-request answered elsewhere leaves its place to the next one, and the list
-stays where it is. A card belongs to its request, never to its task: its id comes
+oldest), or the panel or its window moving restarts the wait; and a release
+answers the request its press was on, never another that took the card
+meanwhile. A chosen request answered elsewhere leaves the choice to the next
+one still listed, and the list stays where it is. The question and its
+choices take the rows' text and items (`SidebarQuestionText`), so a row and
+a card show the same lines. A card belongs to its request, never to its task: its id comes
 from the request (the permission's id, the question's column and time), so a
 request that takes another's place gets a new card. Answers stay clicks; the
 keyboard only moves the inbox's choice. For phase 3: the hosting (a popover
