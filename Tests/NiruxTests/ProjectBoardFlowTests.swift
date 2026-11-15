@@ -722,6 +722,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertNotNil(section.queue, "gadgets' queue, in its header")
             XCTAssertNil(section.queue?.stop, "which doesn't run")
             let line = try XCTUnwrap(board.view.stages.runningQueueViews.first)
+            BoardStagesClicks.layOut(line)
             XCTAssertEqual(line.queue.tooltip, "Its queue runs, but it isn’t one of this board’s repositories now.")
             XCTAssertFalse(line.stopButton.isHidden)
             try BoardStagesClicks.click(line.stopButton)
@@ -890,7 +891,7 @@ final class ProjectBoardFlowTests: XCTestCase {
                 alerts.append(alert)
                 return .alertFirstButtonReturn
             }
-            try BoardStagesClicks.press(entry, at: NSPoint(x: entry.linkLabel.frame.midX, y: entry.bounds.midY))
+            try BoardStagesClicks.pressCleanUp(entry)
             try waitUntil("the worktree is checked") { !alerts.isEmpty }
             XCTAssertEqual(alerts.map(\.messageText), ["Can’t clean up widgets.feat-login · feat/login"], "that task's worktree")
             XCTAssertTrue(shell.worktreeCleanupsInFlight.isEmpty)

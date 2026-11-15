@@ -76,6 +76,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertEqual(queue.selection, [12, 14])
             XCTAssertEqual(try line("login", in: board).line.tooltips.stations[.merge], "Remove from Queue")
             let header = try self.header(of: board)
+            BoardStagesClicks.layOut(header)
             XCTAssertFalse(header.dryRunBadge.isHidden, "a dev build's queue is a dry run, and says so")
             XCTAssertTrue(header.dryRunBadge.toolTip?.hasSuffix("\nThis build: NIRUX_STATE_DIR is set.") == true,
                           "and why: \(header.dryRunBadge.toolTip ?? "")")
@@ -141,12 +142,14 @@ final class MergeQueueBoardFlowTests: XCTestCase {
                 return false
             }
             try waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Waiting for checks" }
+            BoardStagesClicks.layOut(header)
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
             XCTAssertEqual(board.view.stages.runningQueueViews.map(\.queue.title), ["acme/widgets"], "and at the Board's foot")
             try BoardStagesClicks.click(header.stopButton)
             XCTAssertFalse(queue.isRunning)
             XCTAssertEqual(header.queueLabel.stringValue, "Stopped: Stopped by the user. · 1 pull request queued")
+            BoardStagesClicks.layOut(header)
             XCTAssertTrue(header.stopButton.isHidden)
             XCTAssertEqual(header.startButton.isEnabled, true, "a new Start opens a new sheet")
             XCTAssertEqual(board.view.stages.runningQueueViews.count, 0)
@@ -209,6 +212,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
                 (BoardStagesClicks.shownLine("feat/api", in: board)?.line.phrase.text) == "Base #10 merged · Retarget to main"
             }
             let api = try line("feat/api", in: board)
+            BoardStagesClicks.layOut(api)
             XCTAssertNil(api.line.phrase.link)
             XCTAssertTrue(api.linkLabel.isHidden)
             let item = try XCTUnwrap(api.contextMenu()?.items.first { $0.title == "Retarget to main" })

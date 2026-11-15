@@ -28,21 +28,40 @@ enum BoardStagesClicks {
         view.mouseUp(with: try mouse(.leftMouseUp, at: location, in: view.window))
     }
 
+    /// Lays the window out, as AppKit does before a real click lands: a
+    /// window that is never shown gets no layout pass of its own, and what
+    /// a view placed or hid in `layout()` waits for one.
+    static func layOut(_ view: NSView) {
+        view.window?.contentView?.layoutSubtreeIfNeeded()
+    }
+
     /// A click on a line's title: it opens its task.
     static func open(_ line: BoardStagesLineView, file: StaticString = #filePath, line number: UInt = #line) throws {
+        layOut(line)
         try press(line, at: NSPoint(x: line.titleLabel.frame.minX + 4, y: line.bounds.midY), file: file, line: number)
     }
 
     /// A click on a line's Merge station.
     static func pressMerge(_ line: BoardStagesLineView, file: StaticString = #filePath, line number: UInt = #line) throws {
+        layOut(line)
         let merge = try XCTUnwrap(BoardStagesView.Columns(width: line.bounds.width, height: line.bounds.height).stations.last)
         try press(line, at: NSPoint(x: merge, y: line.bounds.midY), file: file, line: number)
     }
 
     /// A click on the link ending a line's phrase.
     static func pressLink(_ line: BoardStagesLineView, file: StaticString = #filePath, line number: UInt = #line) throws {
+        layOut(line)
         XCTAssertFalse(line.linkLabel.isHidden, "no link on \(line.line.title)", file: file, line: number)
         try press(line, at: NSPoint(x: line.linkLabel.frame.midX, y: line.bounds.midY), file: file, line: number)
+    }
+
+    /// A click on a "Merged today" entry's "Clean up".
+    static func pressCleanUp(_ entry: BoardStagesMergedEntryView, file: StaticString = #filePath, line: UInt = #line) throws {
+        layOut(entry)
+        XCTAssertFalse(entry.linkLabel.isHidden, "no Clean up on \(entry.pullRequest.title)", file: file, line: line)
+        let point = NSPoint(x: entry.linkLabel.frame.midX, y: entry.bounds.midY)
+        XCTAssertEqual(entry.target(at: point), .cleanUp, file: file, line: line)
+        try press(entry, at: point, file: file, line: line)
     }
 
     /// Chooses `title` in `menu`: there, and enabled.
