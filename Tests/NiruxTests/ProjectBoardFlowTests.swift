@@ -543,8 +543,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertTrue(shell.activeWorkspace === gadgetsBoard.workspace, "that space's board comes to the front")
             XCTAssertEqual(widgetsBoard.board.projectID, space.id)
 
+            XCTAssertNotNil(widgetsBoard.board.stagesReadings, "read at a sidebar pass")
             widgetsBoard.board.view.chooseSpace(id: third.id)
             XCTAssertEqual(widgetsBoard.board.projectID, third.id)
+            XCTAssertNil(widgetsBoard.board.stagesReadings, "the other space's tasks: read again")
             XCTAssertEqual(BoardStagesClicks.checkedSpace(widgetsBoard.board), "Tools")
             XCTAssertEqual(widgetsBoard.board.view.stages.content?.header.name, "Tools", "the stages' header too")
 
@@ -659,6 +661,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             let backRepository = GitHubRepository(owner: "acme", name: "back")
             let frontRepository = GitHubRepository(owner: "acme", name: "front")
             XCTAssertEqual(shell.mergeQueue(projectID: space.id, repository: backRepository).selection, [21])
+            XCTAssertEqual(shell.mergeQueue(projectID: space.id, repository: frontRepository).selection, [])
+            // A line held in place under the pointer may show another repository's pull request by now: its number
+            // never goes to this section's queue.
+            shell.performBoardOffer(BoardStages.QueueOffer(change: .add, number: 21), section: sections[0].id, board: board)
             XCTAssertEqual(shell.mergeQueue(projectID: space.id, repository: frontRepository).selection, [])
             let backHeader = try XCTUnwrap(board.view.stages.sectionHeader(section: sections[1].id))
             let frontHeader = try XCTUnwrap(board.view.stages.sectionHeader(section: sections[0].id))

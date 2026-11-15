@@ -163,7 +163,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             runs: ProjectBoardGitHubTests.postMergeRuns
         )
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
-        try withBoard(world: world, boardClient: client, isDryRun: false) { _, board in
+        try withBoard(world: world, boardClient: client, isDryRun: false) { shell, board in
             try waitUntil("#10 reads merged") {
                 (BoardStagesClicks.shownLine("feat/api", in: board)?.line.phrase.link) == .retarget(number: 14, onto: "main")
             }
@@ -186,6 +186,11 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             }
             XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.map(\.what),
                            ["retarget acme/widgets #14 main", "retarget acme/widgets #14 main"])
+            // A pull request none of the section's lines has: not retargeted.
+            let section = try XCTUnwrap(board.view.stages.content?.sections.first?.id)
+            shell.performBoardLink(.retarget(number: 99, onto: "main"), line: nil, section: section, board: board)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            XCTAssertFalse(client.calls.contains { $0.what.contains("#99") })
             XCTAssertFalse(client.calls.contains(where: \.onMainThread), "gh never runs on the main thread")
         }
     }

@@ -205,6 +205,8 @@ final class ProjectBoardController {
         sections = []
         local = nil
         reads = [:]
+        // The old space's tasks: the new one's are read without the sidebar's pass until its next one.
+        stagesReadings = nil
         reload()
     }
 
@@ -560,8 +562,9 @@ final class ProjectBoardController {
     /// through the system's link. Without the disk.
     func comparableRoot(_ root: String) -> String {
         let folder = comparableFolder(root)
-        let unlinked = { (path: String) in path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path }
-        return local?.repositories.lazy.flatMap(\.worktrees).map(\.path).first { unlinked($0) == unlinked(folder) } ?? folder
+        let unlinked = { (path: String) in path.hasPrefix("/private/") ? path.dropFirst("/private".count) : Substring(path) }
+        let key = unlinked(folder)
+        return local?.repositories.lazy.flatMap(\.worktrees).map(\.path).first { unlinked($0) == key } ?? folder
     }
 
     /// What the view shows, with the project's workspaces as they are now.
@@ -589,7 +592,13 @@ final class ProjectBoardController {
                 header.errorTitle = error.title
             }
         }
-        if !header.statusIsError { header.status = readStatus(now: now) }
+        if !header.statusIsError {
+            if let readAt = reads.values.compactMap(\.pullRequestsReadAt).max() {
+                header.status = "Updated \(ProjectBoard.clockTime(readAt, now: now))"
+            } else if readsPullRequests {
+                header.status = "Reading pull requests…"
+            }
+        }
 
         let body: ProjectBoardView.Body
         var notices: [ProjectBoardView.Notice] = []

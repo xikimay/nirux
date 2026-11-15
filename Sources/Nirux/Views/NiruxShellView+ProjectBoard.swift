@@ -181,9 +181,8 @@ extension NiruxShellView {
     ) {
         let snapshot = snapshot ?? ProcessSnapshot()
         let members = projectWorkspaces(of: board.projectID)
-        let inputs = projectBoardWorkspaces(
-            members, of: board, snapshot: snapshot, now: now, foregroundProcesses: pass?.foregroundProcesses
-        )
+        let foreground = pass?.foregroundProcesses ?? foregroundProcesses(of: members, snapshot: snapshot)
+        let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
         // A workspace opened in a folder not listed yet: list them again.
         if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
             board.expireWorktrees()
@@ -198,8 +197,8 @@ extension NiruxShellView {
         }
         // Before the first pass: no hold, no question, the agents in front as the process table says.
         let readings = board.stagesReadings ?? boardReadings(
-            ofSpace: board.projectID, foregroundProcesses: foregroundProcesses(of: members, snapshot: snapshot),
-            approvalHolds: [:], missionQuestions: [:], snapshot: snapshot, now: now, comparable: board.comparableRoot
+            ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
+            now: now, comparable: board.comparableRoot
         )
         let content = board.stagesContent(
             stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),

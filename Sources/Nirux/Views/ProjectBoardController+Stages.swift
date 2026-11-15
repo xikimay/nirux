@@ -41,6 +41,10 @@ extension ProjectBoardController {
         /// A task's line, by its id (its workspace's): Focus on its most
         /// urgent agent column, else on the workspace.
         var focus: [String: ProjectBoardView.Action] = [:]
+        /// The pull requests of each section's lines, by section id: a
+        /// line held in place under the pointer may show another
+        /// repository's by now, and the queue and Retarget act only on the
+        /// section's own.
         /// A repository's line's worktree, by its id, for its "Clean up"
         /// link (a merged pull request's, so never a line without a
         /// repository); a merged task's too, which has left the list for
@@ -49,6 +53,7 @@ extension ProjectBoardController {
         /// Open Main Checkout, by the checkout's path: Focus where a
         /// workspace is open there, else Open a shell there.
         var mainCheckouts: [String: ProjectBoardView.Action] = [:]
+        var pullRequests: [String: Set<Int>] = [:]
     }
 
     /// The id of the section of the workspaces in no repository.
@@ -79,8 +84,7 @@ extension ProjectBoardController {
             return content
         }
         for workspace in inputs.workspaces {
-            let agent = workspace.agent
-            targets.focus[workspace.id] = .focus(workspaceID: workspace.id, columnID: agent.state == .none ? nil : agent.columnID)
+            targets.focus[workspace.id] = Self.focus(workspace.agent, workspaces: [workspace.id])
         }
         let heads = Dictionary(
             local.repositories.flatMap(\.worktrees).compactMap { worktree in worktree.head.map { (worktree.path, $0) } },
@@ -168,6 +172,7 @@ extension ProjectBoardController {
         )
         let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
         Self.noteFolders(of: facts, in: &targets)
+        targets.pullRequests[section.id] = Set(facts.lines.compactMap(\.pullRequest?.number))
         var shown = BoardStagesView.Section(
             // A space without an anchor: its repository's name ("widgets"), `owner/name` beside it.
             id: section.id,
@@ -188,10 +193,14 @@ extension ProjectBoardController {
         if let main = rows.first(where: { $0.group == .main }), let path = main.worktreePath {
             shown.menu.append(.openMainCheckout(path: path))
             // As the table's row of the main checkout: Focus, else Open.
-            targets.mainCheckouts[path] = ProjectBoardView.focusAction(for: main)
+            targets.mainCheckouts[path] = Self.focus(main.agent, workspaces: main.workspaces.map(\.id))
                 ?? .open(path: path, title: main.branch ?? (path as NSString).lastPathComponent)
         }
         return shown
+    }
+
+    private static func focus(_ agent: ProjectBoard.Agent, workspaces: [String]) -> ProjectBoardView.Action? {
+        agent.focusTarget(workspaces: workspaces).map { .focus(workspaceID: $0.workspaceID, columnID: $0.columnID) }
     }
 
     private static func noteFolders(of facts: BoardStages.SectionFacts, in targets: inout StagesTargets) {

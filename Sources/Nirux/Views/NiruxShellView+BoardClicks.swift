@@ -71,6 +71,7 @@ extension NiruxShellView {
     }
 
     func performBoardOffer(_ offer: BoardStages.QueueOffer, section: String, board: ProjectBoardController) {
+        guard isPullRequest(offer.number, of: section, on: board) else { return NSSound.beep() }
         let action: ProjectBoardView.Action = offer.change == .add
             ? .addToQueue(number: offer.number, section: section) : .removeFromQueue(number: offer.number, section: section)
         performProjectBoardAction(action, board: board)
@@ -81,11 +82,18 @@ extension NiruxShellView {
     func performBoardLink(_ link: BoardStages.Link, line: String?, section: String, board: ProjectBoardController) {
         switch link {
         case .retarget(let number, let onto):
+            guard isPullRequest(number, of: section, on: board) else { return NSSound.beep() }
             performProjectBoardAction(.retarget(number: number, base: onto, section: section), board: board)
         case .cleanUp:
             guard let line, let folder = board.stagesTargets.folders[line] else { return }
             performProjectBoardAction(.cleanUp(path: folder.path), board: board)
         }
+    }
+
+    /// One of the section's lines has that pull request: a line held in
+    /// place under the pointer may show another repository's by now.
+    private func isPullRequest(_ number: Int, of section: String, on board: ProjectBoardController) -> Bool {
+        board.stagesTargets.pullRequests[section]?.contains(number) == true
     }
 
     /// `line`: the line's id; nil for an item of "Other worktrees" or
@@ -122,8 +130,8 @@ extension NiruxShellView {
         guard let workspaceIndex = workspaces.firstIndex(where: { $0.id == workspaceID && !$0.isClosing }),
               let columnIndex = workspaces[workspaceIndex].columns.firstIndex(where: { $0.id == resume.column && !$0.isClosing })
         else { return showToast("That agent’s column was closed") }
+        // Its sidebar pass draws the Board.
         resumeDeferredAgent(workspaceIndex: workspaceIndex, columnIndex: columnIndex, columnID: resume.column)
-        renderProjectBoard(board)
     }
 
     /// The table's Resume of a stopped agent: after an error, only that

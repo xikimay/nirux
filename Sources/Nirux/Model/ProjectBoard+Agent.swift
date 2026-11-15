@@ -69,6 +69,14 @@ extension ProjectBoard {
         /// The failed turn a Resume click answers (`stoppedOnError`).
         var failedAt: TimeInterval?
 
+        /// Where Focus goes, as the table's Focus went: this agent's
+        /// workspace and column while an agent is there, else the first of
+        /// `workspaces` (by id), at no column in particular.
+        func focusTarget(workspaces: [String]) -> (workspaceID: String, columnID: UUID?)? {
+            if let workspaceID, state != .none { return (workspaceID, columnID) }
+            return workspaces.first.map { ($0, nil) }
+        }
+
         /// The first of the most urgent, or `.none`.
         static func mostUrgent(_ agents: [Agent]) -> Agent {
             agents.reduce(Agent()) { best, agent in agent.state.urgency > best.state.urgency ? agent : best }
