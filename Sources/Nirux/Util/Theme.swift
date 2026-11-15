@@ -90,6 +90,10 @@ enum Theme {
         static var mono: NSFont { NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) }
         /// Commands to approve, raw context.
         static var code: NSFont { NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) }
+        /// Titles in the glass interface's bars and lists (the command bar's
+        /// task, the inbox's requests): medium, so the hierarchy comes from
+        /// weight rather than colour.
+        static var listTitle: NSFont { NSFont.systemFont(ofSize: 13, weight: .medium) }
         /// The glass interface's buttons (`NiruxButton`), in their two sizes.
         static var button: NSFont { NSFont.systemFont(ofSize: 12, weight: .medium) }
         static var buttonSmall: NSFont { NSFont.systemFont(ofSize: 11, weight: .medium) }
@@ -107,6 +111,9 @@ enum Theme {
     enum Radius {
         /// Chips, badges, key caps.
         static let chip: CGFloat = 4
+        /// A space's colour square in the glass interface: barely rounded,
+        /// so it never reads as a state's dot.
+        static let spaceMark: CGFloat = 2
         /// Buttons, fields, rows.
         static let control: CGFloat = 6
         /// Cards, columns, tiles.
