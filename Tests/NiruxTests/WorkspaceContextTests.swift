@@ -183,6 +183,9 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.effectivePhase, .done)
 
         XCTAssertFalse(workspace.updateGitContext(original))
+        // The root resolved otherwise (a resolution that failed once): the same context, its pull request kept.
+        let resolved = GitIdentity(repositoryRoot: "/repo/one", resolvedRepositoryRoot: "/private/repo/one", head: "head-a")
+        XCTAssertFalse(workspace.updateGitContext(GitContext(branch: "feature/task", identity: resolved)))
         XCTAssertEqual(workspace.prInfo, pullRequest)
         XCTAssertEqual(workspace.diffStats, "1 file changed")
 

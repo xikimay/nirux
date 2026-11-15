@@ -13,10 +13,9 @@ extension NiruxShellView {
     /// reading them again would hand requests back or note hand-offs. The
     /// rows the sidebar just built (`sidebarInfos`, the space on screen's)
     /// are taken as they are. A task's git root is compared with its row's
-    /// worktree resolved, as git lists it; `comparable` gives one that
-    /// couldn't be resolved the rows' form of a path
-    /// (`ProjectBoardController.comparableFolder`). The Lead is
-    /// read too: the space's header says it.
+    /// worktree resolved, as git lists it
+    /// (`GitIdentity.resolvedRepositoryRoot`). The Lead is read too: the
+    /// space's header says it.
     func boardReadings(
         ofSpace spaceID: String,
         sidebarInfos: [WorkspaceInfo] = [],
@@ -24,8 +23,7 @@ extension NiruxShellView {
         approvalHolds: [ObjectIdentifier: PermissionApprovalHold],
         missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         snapshot: ProcessSnapshot,
-        now: TimeInterval,
-        comparable: (String) -> String
+        now: TimeInterval
     ) -> [String: BoardStages.TaskReading] {
         let built = Dictionary(sidebarInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let parents = workspaceStore.activeParents(in: spaceID)
@@ -49,7 +47,7 @@ extension NiruxShellView {
             readings[workspace.id] = BoardStages.TaskReading(
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
-                gitRoot: workspace.gitContext.map { $0.identity.resolvedRepositoryRoot ?? comparable($0.identity.repositoryRoot) },
+                gitRoot: workspace.gitContext?.identity.resolvedRepositoryRoot,
                 reviewsInFlight: Set(workspace.reviewsRunning.map(\.pass)),
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970

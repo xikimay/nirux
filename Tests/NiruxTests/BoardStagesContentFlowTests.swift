@@ -298,7 +298,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
         )
         var readings = shell.boardReadings(
             ofSpace: board.projectID, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:], snapshot: ProcessSnapshot(),
-            now: now, comparable: board.comparableFolder
+            now: now
         )
         change(&readings)
         return board.stagesContent(shell.stagesInputs(of: board, members: members, workspaces: workspaces, readings: readings, order: order)).content

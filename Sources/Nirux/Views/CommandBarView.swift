@@ -20,6 +20,8 @@ final class CommandBarView: NSView {
     }
 
     static let height: CGFloat = 36
+    /// The search segment's: `CommandPalette` knows it opens the palette.
+    static let searchButtonID = NSUserInterfaceItemIdentifier("nirux.commandbar.search")
     /// Left and right of each segment's content.
     private static let inset = Theme.Space.md
     private static let gap = Theme.Space.sm
@@ -118,8 +120,8 @@ final class CommandBarView: NSView {
         }
         searchButton.setAccessibilityLabel("Search, Command P")
         // A press on it while ⌘P shows closes the palette, as the title
-        // bar's Search does (`CommandPalette.isSearchButtonPress`).
-        searchButton.identifier = TitleBarActions.searchButtonID
+        // bar's Search does (`CommandPalette.searchButtonIDs`).
+        searchButton.identifier = Self.searchButtonID
         // Before the first content: no state to show, words to say.
         taskIcon.isHidden = true
         spaceButton.setAccessibilityLabel("Space")

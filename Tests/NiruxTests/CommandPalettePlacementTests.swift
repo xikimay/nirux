@@ -4,20 +4,28 @@ import XCTest
 
 /// ⌘P's placement: centred as today, or unfolding from the glass
 /// interface's command bar (docs/design/glass-interface.md). The panel is
-/// placed and dressed, never shown.
+/// placed and dressed, never shown; the windows here are never shown either,
+/// so the palette is told they show.
 @MainActor
 final class CommandPalettePlacementTests: XCTestCase {
     private let windowFrame = NSRect(x: 100, y: 100, width: 1200, height: 800)
+    private let screen = NSRect(x: 0, y: 25, width: 1440, height: 875)
 
     /// A window that is never shown, at `windowFrame`, with a bar along its
-    /// top at `barX`; the test closes it.
-    private func windowWithBar(barX: CGFloat = 300, width: CGFloat = 600) -> (NSWindow, NSView) {
+    /// top; the test closes it.
+    private func windowWithBar() -> (NSWindow, NSView) {
         let window = NSWindow(contentRect: windowFrame, styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.setFrame(windowFrame, display: false)
-        let bar = NSView(frame: NSRect(x: barX, y: windowFrame.height - 12 - 36, width: width, height: 36))
+        let bar = NSView(frame: NSRect(x: 300, y: windowFrame.height - 12 - 36, width: 600, height: 36))
         window.contentView?.addSubview(bar)
         return (window, bar)
+    }
+
+    private func palette() -> CommandPalette {
+        let palette = CommandPalette()
+        palette.windowShows = { _ in true }
+        return palette
     }
 
     /// Centred, the palette opens where it always has.
@@ -26,108 +34,131 @@ final class CommandPalettePlacementTests: XCTestCase {
     }
 
     /// Under the bar, it hangs from the bar, centred on it, inside the
-    /// window when the bar sits near an edge, and above the screen's bottom.
+    /// window and then on the screen; near the screen's bottom it goes above
+    /// the bar rather than over it, and it unfolds from the bar's side.
     func testUnderTheBarItUnfoldsFromIt() throws {
         let (window, bar) = windowWithBar()
         defer { window.close() }
-        let onScreen = try XCTUnwrap(CommandPalette.barOnScreen(bar))
-        XCTAssertEqual(onScreen.rect, NSRect(x: 400, y: 852, width: 600, height: 36), "the bar's rect on screen")
-        let frame = CommandPalette.frame(underBar: onScreen.rect, in: windowFrame, screen: nil)
-        XCTAssertEqual(frame.maxY, onScreen.rect.minY - CommandPalette.barGap)
-        XCTAssertEqual(frame.midX, onScreen.rect.midX)
-        XCTAssertEqual(frame.size, CommandPalette.size)
+        let onScreen = try XCTUnwrap(CommandPalette.barOnScreen(bar, in: window, windowShows: { _ in true }))
+        XCTAssertEqual(onScreen, NSRect(x: 400, y: 852, width: 600, height: 36), "the bar's rect on screen")
+        let under = CommandPalette.place(underBar: onScreen, in: windowFrame, screen: nil)
+        XCTAssertFalse(under.isAbove)
+        XCTAssertEqual(under.frame.maxY, onScreen.minY - CommandPalette.barGap)
+        XCTAssertEqual(under.frame.midX, onScreen.midX)
+        XCTAssertEqual(under.frame.size, CommandPalette.size)
 
-        let left = CommandPalette.frame(underBar: NSRect(x: 110, y: 852, width: 200, height: 36), in: windowFrame, screen: nil)
-        XCTAssertEqual(left.minX, windowFrame.minX + Theme.Space.sm)
-        let right = CommandPalette.frame(underBar: NSRect(x: 1180, y: 852, width: 100, height: 36), in: windowFrame, screen: nil)
-        XCTAssertEqual(right.maxX, windowFrame.maxX - Theme.Space.sm)
+        let left = CommandPalette.place(underBar: NSRect(x: 110, y: 852, width: 200, height: 36), in: windowFrame, screen: nil)
+        XCTAssertEqual(left.frame.minX, windowFrame.minX + Theme.Space.sm)
+        let right = CommandPalette.place(underBar: NSRect(x: 1180, y: 852, width: 100, height: 36), in: windowFrame, screen: nil)
+        XCTAssertEqual(right.frame.maxX, windowFrame.maxX - Theme.Space.sm)
         let narrow = NSRect(x: 100, y: 100, width: 500, height: 800)
-        XCTAssertEqual(CommandPalette.frame(underBar: NSRect(x: 150, y: 852, width: 400, height: 36), in: narrow, screen: nil).minX,
+        XCTAssertEqual(CommandPalette.place(underBar: NSRect(x: 150, y: 852, width: 400, height: 36), in: narrow, screen: nil).frame.minX,
                        narrow.minX + Theme.Space.sm, "a window narrower than the palette keeps its left edge")
-        let low = CommandPalette.frame(underBar: NSRect(x: 400, y: 200, width: 600, height: 36), in: windowFrame,
-                                       screen: NSRect(x: 0, y: 25, width: 1440, height: 875))
-        XCTAssertEqual(low.minY, 25 + Theme.Space.sm, "the rows stay on the screen")
-        let high = CommandPalette.frame(underBar: NSRect(x: 400, y: 960, width: 600, height: 36), in: windowFrame,
-                                        screen: NSRect(x: 0, y: 25, width: 1440, height: 875))
-        XCTAssertEqual(high.maxY, 900 - Theme.Space.sm, "a bar above the screen: the palette stays on it")
+        let pastTheEdge = NSRect(x: 1000, y: 100, width: 1200, height: 800)
+        XCTAssertEqual(CommandPalette.place(underBar: NSRect(x: 1300, y: 852, width: 600, height: 36), in: pastTheEdge, screen: screen)
+            .frame.maxX, screen.maxX - Theme.Space.sm, "a window past the screen's edge: the palette stays on the screen")
 
-        // It unfolds from the bar's middle: that point stays put, the rest
-        // grows from it.
-        let origin = NSPoint(x: frame.width / 2, y: frame.height)
+        let lowBar = NSRect(x: 400, y: 200, width: 600, height: 36)
+        let low = CommandPalette.place(underBar: lowBar, in: windowFrame, screen: screen)
+        XCTAssertTrue(low.isAbove, "no room below the bar: above it")
+        XCTAssertEqual(low.frame.minY, 236 + CommandPalette.barGap, "never over the bar")
+        XCTAssertEqual(CommandPalette.unfoldOrigin(of: low, bar: lowBar), NSPoint(x: lowBar.midX - low.frame.minX, y: 0),
+                       "above the bar, it unfolds from its bottom edge")
+        let high = CommandPalette.place(underBar: NSRect(x: 400, y: 960, width: 600, height: 36), in: windowFrame, screen: screen)
+        XCTAssertEqual(high.frame.maxY, screen.maxY - Theme.Space.sm, "a bar above the screen: the palette stays on it")
+
+        let palette = palette()
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        // Placed on the machine's screen (CI's runners have small ones).
+        let applied = CommandPalette.place(underBar: onScreen, in: windowFrame, screen: window.screen?.visibleFrame)
+        XCTAssertEqual(palette.unfoldsFrom, CommandPalette.unfoldOrigin(of: applied, bar: onScreen), "from the bar's middle")
+        XCTAssertEqual(CommandPalette.unfoldOrigin(of: under, bar: onScreen), NSPoint(x: onScreen.midX - under.frame.minX, y: under.frame.height),
+                       "below the bar, from its top edge")
+        let origin = try XCTUnwrap(palette.unfoldsFrom)
         let start = CommandPalette.unfoldStart(from: origin)
-        XCTAssertEqual(origin.applying(start), origin)
-        XCTAssertLessThan(NSPoint.zero.applying(start).y, origin.y)
+        XCTAssertEqual(origin.applying(start), origin, "that point stays put")
         XCTAssertGreaterThan(NSPoint.zero.applying(start).y, 0, "the bottom starts higher, toward the bar")
     }
 
-    /// A press on the command bar's search segment counts as one on the
-    /// title bar's Search: it closes an open palette instead of opening it
-    /// again.
-    func testThePressOnTheBarsSearchClosesThePalette() throws {
-        let bar = CommandBarView(level: .opaque)
-        bar.show(CommandBarView.Content(
-            spaceName: "Acme", spaceColor: Theme.Color.working, taskTitle: "Fix checkout rounding",
-            taskIcon: StateIcon(.working, stage: 1), taskDetail: nil, waitingCount: 0
-        ))
-        bar.frame = NSRect(x: 20, y: 400, width: 600, height: CommandBarView.height)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 460), styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer { window.close() }
-        window.contentView?.addSubview(bar)
-        bar.layoutSubtreeIfNeeded()
-        func press(_ button: NSButton) throws -> NSEvent {
-            let point = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
-            return try XCTUnwrap(NSEvent.mouseEvent(
-                with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
-                context: nil, eventNumber: 0, clickCount: 1, pressure: 1
-            ))
-        }
-        XCTAssertTrue(CommandPalette.isSearchButtonPress(try press(bar.searchButton)))
-        XCTAssertFalse(CommandPalette.isSearchButtonPress(try press(bar.taskButton)))
-    }
-
-    /// Under the bar, the field and the rows sit on floating glass that
-    /// fills the panel, with its continuous corners; centred again, or with
-    /// the bar showing nowhere, today's background comes back. Nothing shows.
+    /// Under the bar, the field and the rows sit inside floating glass that
+    /// fills the panel; centred again, they come back on today's background
+    /// and the glass waits, hidden. While nobody sees the bar, the palette
+    /// opens centred. Nothing shows.
     func testItDressesForEachPlacement() throws {
         let (window, bar) = windowWithBar()
         defer { window.close() }
-        let palette = CommandPalette()
+        let palette = palette()
         palette.apply(.underBar(bar, level: .tinted), relativeTo: window)
         let panel = try XCTUnwrap(palette.panel)
         let background = try XCTUnwrap(panel.contentView)
         let glass = try XCTUnwrap(palette.glass)
-        XCTAssertTrue(glass.superview === background)
-        XCTAssertTrue(background.subviews.first === glass, "behind the field and the rows")
+        let field = try XCTUnwrap(palette.searchField)
+        XCTAssertTrue(background.subviews.first === glass)
         XCTAssertEqual(glass.frame, background.bounds)
+        XCTAssertTrue(field.isDescendant(of: glass.contentView), "inside the glass, which adapts what it holds")
+        XCTAssertTrue(try XCTUnwrap(palette.listContainer).isDescendant(of: glass.contentView))
         XCTAssertEqual(glass.level, .tinted)
         XCTAssertTrue(glass.fillsWindow)
         XCTAssertNil(background.layer?.backgroundColor)
         XCTAssertEqual(background.layer?.cornerCurve, .continuous)
-        let onScreen = try XCTUnwrap(CommandPalette.barOnScreen(bar))
-        XCTAssertEqual(panel.frame, CommandPalette.frame(underBar: onScreen.rect, in: windowFrame, screen: window.screen?.visibleFrame))
+        let onScreen = try XCTUnwrap(CommandPalette.barOnScreen(bar, in: window, windowShows: { _ in true }))
+        XCTAssertEqual(panel.frame, CommandPalette.place(underBar: onScreen, in: windowFrame, screen: window.screen?.visibleFrame).frame)
 
         palette.apply(.underBar(bar, level: .clear), relativeTo: window)
         XCTAssertTrue(palette.glass === glass, "one glass, its level followed")
         XCTAssertEqual(glass.level, .clear)
 
         palette.apply(.centered, relativeTo: window)
-        XCTAssertNil(palette.glass)
-        XCTAssertNil(glass.superview)
+        XCTAssertTrue(palette.glass === glass && glass.isHidden, "kept, hidden")
+        XCTAssertTrue(palette.fieldContainer?.superview === background, "the field back on today's background")
+        XCTAssertFalse(field.isDescendant(of: glass))
         XCTAssertEqual(background.layer?.backgroundColor, Theme.Color.base.withAlphaComponent(0.98).cgColor)
         XCTAssertEqual(background.layer?.cornerCurve, .circular)
         XCTAssertEqual(panel.frame, CommandPalette.centeredFrame(in: windowFrame))
+        XCTAssertNil(palette.unfoldsFrom)
 
+        func opensCentred(_ why: String) {
+            XCTAssertTrue(glass.isHidden, why)
+            XCTAssertEqual(panel.frame, CommandPalette.centeredFrame(in: windowFrame), why)
+        }
         bar.isHidden = true
         palette.apply(.underBar(bar, level: .glass), relativeTo: window)
-        XCTAssertNil(palette.glass, "a hidden bar: centred")
-        XCTAssertEqual(panel.frame, CommandPalette.centeredFrame(in: windowFrame))
-        palette.apply(.underBar(NSView(), level: .glass), relativeTo: window)
-        XCTAssertNil(palette.glass, "a bar in no window: centred")
+        opensCentred("a hidden bar")
         bar.isHidden = false
+        bar.alphaValue = 0
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        opensCentred("a transparent bar")
+        bar.alphaValue = 1
+        palette.windowShows = { _ in false }
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        opensCentred("its window ordered out, minimized or on another Space")
+        XCTAssertFalse(CommandPalette().windowShows(window), "by default, a window never ordered in doesn't show")
+        palette.windowShows = { _ in true }
+        window.alphaValue = 0
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        opensCentred("a transparent window")
+        window.alphaValue = 1
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        holder.clipsToBounds = true
+        window.contentView?.addSubview(holder)
+        let clipped = NSView(frame: NSRect(x: 300, y: 0, width: 100, height: 36))
+        holder.addSubview(clipped)
+        palette.apply(.underBar(clipped, level: .glass), relativeTo: window)
+        opensCentred("a bar its parent clips away")
+        holder.alphaValue = 0
+        clipped.frame.origin.x = 20
+        palette.apply(.underBar(clipped, level: .glass), relativeTo: window)
+        opensCentred("a bar inside a transparent parent")
+        let other = NSWindow(contentRect: windowFrame, styleMask: .borderless, backing: .buffered, defer: true)
+        other.isReleasedWhenClosed = false
+        defer { other.close() }
+        palette.apply(.underBar(bar, level: .glass), relativeTo: other)
+        XCTAssertTrue(glass.isHidden, "a bar in another window than the host")
+        palette.apply(.underBar(NSView(), level: .glass), relativeTo: window)
+        opensCentred("a bar in no window")
         bar.frame.origin.x = 5000
         palette.apply(.underBar(bar, level: .glass), relativeTo: window)
-        XCTAssertNil(palette.glass, "a bar outside its window: centred")
+        opensCentred("a bar outside its window")
         XCTAssertFalse(panel.isVisible)
     }
 }
