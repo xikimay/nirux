@@ -87,10 +87,10 @@ extension NiruxShellView {
         // the user's answer (an agent stopped on an error isn't amber); not
         // the column on screen, which ⌘J never goes to.
         let onScreen = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }.map(ObjectIdentifier.init)
-        updateCommandBar(
+        if !ZZ("noPush") { updateCommandBar(
             task: infos.first { $0.index == activeWSIndex },
             waitingCount: Self.commandBarWaitingCount(blockedWaits: blockedWaits, onScreen: onScreen)
-        )
+        ) }
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)

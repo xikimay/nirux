@@ -927,7 +927,7 @@ extension NiruxShellView {
     /// segment while ⌘P shows closes it: `CommandPalette.isSearchButtonPress`);
     /// centred otherwise.
     var commandPalettePlacement: CommandPalette.Placement {
-        commandBarToolbar.map { .underBar($0.bar, level: $0.bar.level) } ?? .centered
+        ZZ("centredPalette") ? .centered : commandBarToolbar.map { .underBar($0.bar, level: $0.bar.level) } ?? .centered
     }
 
     func showCommandPalette(prefilter: String) {

@@ -11,7 +11,7 @@ extension NiruxShellView {
         let toolbar = CommandBarToolbar(bar: bar)
         toolbar.install(in: window)
         commandBarToolbar = toolbar
-        bar.onSpace = { [weak self] in self?.showSpaceMenuFromCommandBar() }
+        bar.onSpace = { [weak self] in if !ZZ("noSpaceMenu") { self?.showSpaceMenuFromCommandBar() } }
         bar.onTask = { [weak self] in self?.showTaskMenuFromCommandBar() }
         bar.onSearch = { [weak self] in self?.showCommandPalette() }
         bar.onWaiting = { [weak self] in self?.jumpToNextWaitingAgent() }
@@ -51,7 +51,7 @@ extension NiruxShellView {
     /// (amber: not an agent stopped on an error or exited, which ⌘J also
     /// visits), leaving out the column on screen, where ⌘J never goes.
     static func commandBarWaitingCount(blockedWaits: [ObjectIdentifier: AgentWait], onScreen: ObjectIdentifier?) -> Int {
-        blockedWaits.filter { $0.key != onScreen && $0.value.reason.signal == .waiting }.count
+        ZZ("noCount") ? 0 : blockedWaits.filter { ($0.key != onScreen || ZZ("countOnScreen")) && $0.value.reason.signal == .waiting }.count
     }
 
     /// What a waiting column waits on, for its icon: a permission the row
