@@ -1288,7 +1288,8 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertTrue(window.makeFirstResponder(far))
         XCTAssertGreaterThan(view.scrollView.contentView.bounds.minY, 0, "scrolled into sight")
         let clip = view.scrollView.contentView
-        XCTAssertTrue(clip.bounds.contains(clip.convert(far.bounds, from: far)), "the whole line in sight: \(clip.bounds) \(clip.convert(far.bounds, from: far))")
+        let farInClip = clip.convert(far.bounds, from: far)
+        XCTAssertTrue(clip.bounds.contains(farInClip), "the whole line in sight: \(clip.bounds) \(farInClip)")
 
         // The pointer away, the line that has the keyboard goes: the line now in its place takes it.
         let held = view.lineViews[5]
