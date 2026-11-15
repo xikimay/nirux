@@ -557,17 +557,17 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     private func addBanner(_ text: String, y: CGFloat, in view: NSView) -> CGFloat {
         let inset: CGFloat = 10
         let width = Self.width - 48
-        bannerLabel.stringValue = text
+        bannerLabel.stringValue = text.asWarning
         bannerLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
-        bannerLabel.textColor = NSColor.systemOrange
+        bannerLabel.textColor = .niruxWarning
         bannerLabel.preferredMaxLayoutWidth = width - 2 * inset
         let height = Self.wrappedHeight(of: bannerLabel, width: width - 2 * inset)
         let box = NSView(frame: NSRect(x: 24, y: y, width: width, height: height + 2 * inset))
         box.wantsLayer = true
         box.layer?.cornerRadius = 6
-        box.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.12).cgColor
+        box.layer?.backgroundColor = Theme.Color.surface.cgColor
         box.layer?.borderWidth = 1
-        box.layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.35).cgColor
+        box.layer?.borderColor = Theme.Color.line.cgColor
         bannerLabel.frame = NSRect(x: inset, y: inset, width: width - 2 * inset, height: height)
         box.addSubview(bannerLabel)
         view.addSubview(box)

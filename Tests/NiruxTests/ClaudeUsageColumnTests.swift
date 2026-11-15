@@ -109,6 +109,24 @@ final class ClaudeUsageColumnTests: XCTestCase {
         XCTAssertEqual(column.usageLabel?.isHidden, true)
     }
 
+    /// A nearly full context in a narrow header keeps its number: its words
+    /// without "⚠︎ " where the warning doesn't fit, rather than nothing.
+    func testANearlyFullContextKeepsItsNumberInANarrowHeader() {
+        let label = ColumnHeaderLabel()
+        label.stringValue = "ctx 85%"
+        let short = label.width(fitting: .greatestFiniteMagnitude)
+        label.stringValue = "⚠︎ ctx 85%"
+        label.shortText = "ctx 85%"
+        let full = label.width(fitting: .greatestFiniteMagnitude)
+        XCTAssertEqual(label.stringValue, "⚠︎ ctx 85%")
+        XCTAssertGreaterThan(full, short)
+        XCTAssertEqual(label.width(fitting: full - 1), short)
+        XCTAssertEqual(label.stringValue, "ctx 85%")
+        XCTAssertEqual(label.width(fitting: short - 1), 0, "no room for either: hidden")
+        XCTAssertEqual(label.width(fitting: full), full)
+        XCTAssertEqual(label.stringValue, "⚠︎ ctx 85%", "room again: the warning")
+    }
+
     func testHeaderShowsTheUsageWhenThereIsRoom() throws {
         let column = ColumnState(cwd: "/tmp")
         column.terminalTitle = "claude"
@@ -120,7 +138,8 @@ final class ClaudeUsageColumnTests: XCTestCase {
         parser.consume(line: Data(TranscriptLine.response(id: "msg_1", cacheRead: 850_000).utf8))
         column.setAgentUsage(parser.usage)
         let label = try? XCTUnwrap(column.usageLabel)
-        XCTAssertEqual(label?.stringValue, "ctx 85%")
+        XCTAssertEqual(label?.stringValue, "⚠︎ ctx 85%", "nearly full: a warning")
+        XCTAssertEqual(label?.textColor, .niruxWarning)
         XCTAssertEqual(label?.isHidden, false)
         let header = try XCTUnwrap(column.header)
         XCTAssertEqual(

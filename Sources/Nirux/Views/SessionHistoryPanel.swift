@@ -162,12 +162,12 @@ final class SessionHistoryPanel: NSObject {
         if !row.isOpen, plan == nil { schedulePlan(for: row.record) }
         let outcome = SessionHistory.outcome(of: row, plan: plan) { $0.abbreviatedPath() }
         actionLabel?.stringValue = outcome.isPossible ? "↩ " + outcome.action : outcome.action
-        detailLabel?.stringValue = outcome.detail ?? ""
+        detailLabel?.stringValue = (outcome.isWarning ? outcome.detail?.asWarning : outcome.detail) ?? ""
         // A long warning is cut: all of it on hover, and in the question.
         detailLabel?.toolTip = outcome.detail
         // A warning, not a wait on the user: never amber.
         detailLabel?.textColor = outcome.isWarning
-            ? .systemOrange
+            ? .niruxWarning
             : outcome.isPossible ? Theme.Color.textSecondary : Theme.Color.error
         resumeButton?.title = row.isOpen ? "Go To" : "Resume"
         resumeButton?.isEnabled = outcome.isPossible
