@@ -251,7 +251,9 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("Board Settings opens") { shell.boardSettingsPanel?.hostView != nil }
+            // The class's first test: the first window, git and Settings window of its process take 10 s on a healthy
+            // runner, and took over 30 s once with eight other test processes beside it.
+            try waitUntil("Board Settings opens", timeout: 90) { shell.boardSettingsPanel?.hostView != nil }
             let form = try XCTUnwrap(shell.boardSettingsPanel)
             XCTAssertEqual(form.spaceID, space.id)
             let message = try XCTUnwrap(board.view.stages.content?.message, "no message")
