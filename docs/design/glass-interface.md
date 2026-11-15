@@ -174,7 +174,9 @@ open palette, as the title bar's Search does. The scopes (tasks, sessions,
 files, actions) come later. For the demo at the end of phase 2: macOS 26's
 glass in a window of its own (that it shows what is behind the window, and
 whether the window's shadow doubles its edge). For phase 3: the level
-follows Settings as the other views' do, set by the host.
+follows Settings as the other views' do, set by the host, and the shell gives
+the palette its `windowShows` from `ShellSideEffects`, so that flow tests,
+whose windows never show, reach the placement under the bar.
 
 ![⌘P under the command bar: Opaque exact, Glass approximated](../images/palette-under-bar.png)
 

@@ -41,7 +41,7 @@ final class CommandPalettePlacementTests: XCTestCase {
         defer { window.close() }
         let onScreen = try XCTUnwrap(CommandPalette.barOnScreen(bar, in: window, windowShows: { _ in true }))
         XCTAssertEqual(onScreen, NSRect(x: 400, y: 852, width: 600, height: 36), "the bar's rect on screen")
-        let under = CommandPalette.place(underBar: onScreen, in: windowFrame, screen: nil)
+        let under = CommandPalette.place(underBar: onScreen, in: windowFrame, screen: window.screen?.visibleFrame)
         XCTAssertFalse(under.isAbove)
         XCTAssertEqual(under.frame.maxY, onScreen.minY - CommandPalette.barGap)
         XCTAssertEqual(under.frame.midX, onScreen.midX)
@@ -128,7 +128,23 @@ final class CommandPalettePlacementTests: XCTestCase {
         palette.windowShows = { _ in false }
         palette.apply(.underBar(bar, level: .glass), relativeTo: window)
         opensCentred("its window ordered out, minimized or on another Space")
+        XCTAssertFalse(CommandPalette().windowShows(window), "by default, a window never ordered in doesn't show")
         palette.windowShows = { _ in true }
+        window.alphaValue = 0
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        opensCentred("a transparent window")
+        window.alphaValue = 1
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        holder.clipsToBounds = true
+        window.contentView?.addSubview(holder)
+        let clipped = NSView(frame: NSRect(x: 300, y: 0, width: 100, height: 36))
+        holder.addSubview(clipped)
+        palette.apply(.underBar(clipped, level: .glass), relativeTo: window)
+        opensCentred("a bar its parent clips away")
+        holder.alphaValue = 0
+        clipped.frame.origin.x = 20
+        palette.apply(.underBar(clipped, level: .glass), relativeTo: window)
+        opensCentred("a bar inside a transparent parent")
         let other = NSWindow(contentRect: windowFrame, styleMask: .borderless, backing: .buffered, defer: true)
         other.isReleasedWhenClosed = false
         defer { other.close() }

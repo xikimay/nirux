@@ -218,7 +218,7 @@ final class CommandPalette: NSObject {
     /// Beside the bar (`bar`, in screen coordinates): centred on it, inside
     /// its window (`windowFrame`) and then on the screen (`screen`, its
     /// visible frame), the left edge first; below the bar, or above it where
-    /// the screen's bottom leaves no room, so that it never covers the bar.
+    /// the screen's bottom leaves no room below but room above.
     static func place(underBar bar: NSRect, in windowFrame: NSRect, screen: NSRect?) -> BarPlace {
         let margin = Theme.Space.sm
         var x = max(min(bar.midX - size.width / 2, windowFrame.maxX - margin - size.width), windowFrame.minX + margin)
@@ -247,11 +247,26 @@ final class CommandPalette: NSObject {
     /// clipped away, or outside its window.
     static func barOnScreen(_ bar: NSView, in host: NSWindow, windowShows: (NSWindow) -> Bool) -> NSRect? {
         guard let window = bar.window, window === host, windowShows(window), window.alphaValue > 0,
-              !bar.isHiddenOrHasHiddenAncestor, !bar.visibleRect.isEmpty,
+              !bar.isHiddenOrHasHiddenAncestor, !isClippedAway(bar),
               sequence(first: bar, next: \.superview).allSatisfy({ $0.alphaValue > 0 }) else { return nil }
         let rect = window.convertToScreen(bar.convert(bar.bounds, to: nil))
         guard window.frame.intersects(rect) else { return nil }
         return rect
+    }
+
+    /// Nothing of `view` left inside an ancestor that clips (a scroll view's
+    /// clip, a view clipping to its bounds). `visibleRect` can't tell: views
+    /// don't clip by default since macOS 14.
+    static func isClippedAway(_ view: NSView) -> Bool {
+        var rect = view.bounds
+        var current = view
+        while let parent = current.superview {
+            rect = parent.convert(rect, from: current)
+            if parent is NSClipView || parent.clipsToBounds { rect = rect.intersection(parent.bounds) }
+            if rect.isEmpty { return true }
+            current = parent
+        }
+        return false
     }
 
     /// Places and dresses the panel for `placement` beside `window` (making
@@ -275,7 +290,10 @@ final class CommandPalette: NSObject {
     /// (macOS 26's glass adapts what it holds); dressed again only when the
     /// placement changes.
     private func dress(underBar: Bool, background: NSView, level: InterfaceTransparency = .opaque) {
-        if underBar { glass?.level = level }
+        if underBar, let glass, glass.level != level {
+            glass.level = level
+            panel?.invalidateShadow()
+        }
         guard underBar != dressedUnderBar else { return }
         dressedUnderBar = underBar
         let content = [fieldContainer, separator, listContainer].compactMap { $0 }
