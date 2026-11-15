@@ -9,13 +9,13 @@ final class ProjectBoardStackTests: XCTestCase {
     private let widgets = GitHubRepository(owner: "acme", name: "widgets")
 
     private func pullRequest(
-        _ number: Int, _ branch: String, base: String = "main", state: String = "OPEN", draft: Bool = false,
+        _ number: Int, _ branch: String, base: String = "main", state: String = "OPEN",
         baseOid: String = String(repeating: "a", count: 40), fork: Bool = false
     ) -> ProjectBoard.PullRequest {
         // Every head is `aaa…`: a base reads untouched since its merge.
         ProjectBoard.PullRequest(
             number: number, state: state, headRefName: branch,
-            headOid: String(repeating: "a", count: 40), baseRefName: base, isDraft: draft, mergeable: "MERGEABLE",
+            headOid: String(repeating: "a", count: 40), baseRefName: base, isDraft: false, mergeable: "MERGEABLE",
             checks: [], url: "https://github.com/acme/widgets/pull/\(number)", isFromConfiguredRepository: !fork,
             baseOid: baseOid
         )

@@ -258,8 +258,9 @@ clicked. The sizes are the mockup's.
   this order: DRY RUN, the queue's words (whole, or cut down to 60 pt), the
   pill (two fifths of the header at most), `owner/name` (from 30 pt); once
   one doesn't fit, none after it shows. What went is said under the pointer
-  on the header. (`BoardStagesView.sectionQueue` says it by the table's
-  rules: a problem's words alone in red, what is queued then on Start.)
+  on the header. (`BoardStagesView.sectionQueue` holds the rules the
+  table's queue line had: a problem's words alone in red, what is queued
+  then on Start.)
 - **A queue that runs**, here or in another Nirux, keeps a line at the
   Board's foot (its repository, what it does, in green as its header says
   it, Stop where it runs here), orphans

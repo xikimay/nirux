@@ -82,9 +82,7 @@ extension NiruxShellView {
             lead: members.first { $0.isLead }?.id,
             readings: readings,
             queues: queues.states,
-            runningQueues: queues.lines.compactMap { line in
-                BoardStagesView.runningQueue(id: line.id, title: line.title, tooltip: line.tooltip, state: line.queue)
-            },
+            runningQueues: queues.running,
             cleaningUp: worktreeCleanupsInFlight,
             order: order
         )

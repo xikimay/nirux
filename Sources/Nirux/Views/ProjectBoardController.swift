@@ -702,7 +702,7 @@ final class ProjectBoardController {
     static func runStatus(_ reads: RepositoryReads, now: Date) -> ColumnHeaderView.Status? {
         guard reads.baseBranch != nil, let workflow = reads.workflow else { return nil }
         switch reads.postMergeRun {
-        case .some(let run): return runStatus(run, workflow: workflow, now: now)
+        case .some(let run): return .postMergeRun(run, workflow: workflow, now: now)
         case nil:
             let label = (workflow as NSString).deletingPathExtension
             return reads.errors[.postMergeRun] == nil
@@ -710,10 +710,26 @@ final class ProjectBoardController {
         }
     }
 
-    /// The post-merge run as a pill: "nightly 09:42", a green check once
-    /// it passed, red when it failed, grey while it runs; the whole summary
-    /// in its tooltip.
-    nonisolated static func runStatus(
+    /// What went wrong reading a section: "GitHub error" and the messages.
+    static func errorText(_ reads: RepositoryReads) -> (title: String, message: String)? {
+        let messages = (ProjectBoard.messages(of: reads.errors) + [reads.retargetFailure].compactMap { $0 }).sorted()
+        guard !messages.isEmpty else { return nil }
+        return ("GitHub error", messages.joined(separator: " "))
+    }
+}
+
+private extension Result {
+    var failureValue: Failure? {
+        if case .failure(let error) = self { return error }
+        return nil
+    }
+}
+
+extension ColumnHeaderView.Status {
+    /// A post-merge run as a repository header's pill: "nightly 09:42", a
+    /// green check once it passed, red when it failed, grey while it runs;
+    /// the whole summary in its tooltip.
+    static func postMergeRun(
         _ run: ProjectBoard.WorkflowRun?, workflow: String, now: Date, timeZone: TimeZone = .current
     ) -> ColumnHeaderView.Status {
         let label = (workflow as NSString).deletingPathExtension
@@ -737,19 +753,5 @@ final class ProjectBoardController {
             // Cancelled, skipped…: said in words, without a color.
             return ColumnHeaderView.Status(text(run.conclusion ?? "completed"), tone: .neutral, toolTip: summary)
         }
-    }
-
-    /// What went wrong reading a section: "GitHub error" and the messages.
-    static func errorText(_ reads: RepositoryReads) -> (title: String, message: String)? {
-        let messages = (ProjectBoard.messages(of: reads.errors) + [reads.retargetFailure].compactMap { $0 }).sorted()
-        guard !messages.isEmpty else { return nil }
-        return ("GitHub error", messages.joined(separator: " "))
-    }
-}
-
-private extension Result {
-    var failureValue: Failure? {
-        if case .failure(let error) = self { return error }
-        return nil
     }
 }

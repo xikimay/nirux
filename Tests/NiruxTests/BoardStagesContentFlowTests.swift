@@ -5,7 +5,7 @@ import XCTest
 /// What the Board as stages shows of a space, built from what the Board
 /// read (docs/design/board-stages.md, sections 5 and 6): a real shell, git
 /// for real in temporary repositories, a fake `gh` (`ProjectBoardFlowTests`).
-/// The column still shows the table; the content is asked for.
+/// The content is asked for directly, beside what the column shows.
 final class BoardStagesContentFlowTests: XCTestCase {
     private var root: String!
 

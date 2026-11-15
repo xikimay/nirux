@@ -239,31 +239,33 @@ extension NiruxShellView {
         }
     }
 
-    /// Each section's queue, by section id, and one line per queue: each
-    /// section's, named after its repository (its anchor's name on a board
-    /// with anchors), then each one left running on a repository no section
-    /// has: the running ones are the stages' foot.
-    func projectBoardQueues(_ board: ProjectBoardController) -> (states: [String: ProjectBoard.QueueState], lines: [ProjectBoard.QueueLine]) {
+    /// Each section's queue, by section id, and the lines of the Board's
+    /// foot: each queue that runs, here or in another Nirux, a section's
+    /// (named after its repository, its anchor's name on a Board with
+    /// anchors), then one left running on a repository no section has.
+    func projectBoardQueues(
+        _ board: ProjectBoardController
+    ) -> (states: [String: ProjectBoard.QueueState], running: [BoardStagesView.RunningQueue]) {
         var states: [String: ProjectBoard.QueueState] = [:]
         for section in board.sections {
             states[section.id] = projectBoardQueueState(board, section: section)
         }
-        let lines = board.sections.compactMap { section in
-            states[section.id].map { state in
+        let running = board.sections.compactMap { section in
+            states[section.id].flatMap { state in
                 let repository = board.repository(of: section)?.name
                 let name = section.anchor == nil ? repository : board.displayNames[section.id]
-                return ProjectBoard.QueueLine(
-                    id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, queue: state
+                return BoardStagesView.runningQueue(
+                    id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, state: state
                 )
             }
-        } + projectBoardOrphanQueues(board).map { orphan in
-            ProjectBoard.QueueLine(
+        } + projectBoardOrphanQueues(board).compactMap { orphan in
+            BoardStagesView.runningQueue(
                 id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
                 tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
-                queue: orphanQueueState(orphan)
+                state: orphanQueueState(orphan)
             )
         }
-        return (states, lines)
+        return (states, running)
     }
 
     /// A worktree was cleaned up: the boards list their worktrees again.
@@ -274,8 +276,9 @@ extension NiruxShellView {
         }
     }
 
-    /// What the Agent column says of one column (see `ProjectBoard.agentState`),
-    /// with the stuck states the sidebar shows.
+    /// What one column's agent does, for the Board's rows and the merge
+    /// queue (see `ProjectBoard.agentState`), with the stuck states the
+    /// sidebar shows.
     func projectBoardAgent(
         of column: ColumnState,
         in workspace: WorkspaceState,

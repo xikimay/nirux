@@ -26,9 +26,9 @@ extension ProjectBoardController {
         var readings: [String: BoardStages.TaskReading] = [:]
         /// Each section's merge queue, by section id.
         var queues: [String: ProjectBoard.QueueState] = [:]
-        /// The queues that run, here or in another Nirux, as the Board's
-        /// queue lines name them (`NiruxShellView.projectBoardQueues`): a
-        /// section's, or one left on a repository no section has.
+        /// The queues that run, here or in another Nirux
+        /// (`NiruxShellView.projectBoardQueues`): a section's, or one left
+        /// on a repository no section has.
         var runningQueues: [BoardStagesView.RunningQueue] = []
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []

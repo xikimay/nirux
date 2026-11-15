@@ -457,7 +457,7 @@ final class ProjectBoardHeaderTests: XCTestCase {
     }
 
     func testRunPillSaysHowThePostMergeRunEnded() {
-        let status = { ProjectBoardController.runStatus($0, workflow: "nightly.yml", now: self.now, timeZone: self.utc) }
+        let status = { ColumnHeaderView.Status.postMergeRun($0, workflow: "nightly.yml", now: self.now, timeZone: self.utc) }
         let passed = status(run("completed", "success"))
         XCTAssertEqual(passed.text, "nightly 08:00")
         XCTAssertEqual(passed.tone, .neutral)
