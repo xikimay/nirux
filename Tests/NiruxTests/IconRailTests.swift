@@ -58,6 +58,7 @@ final class IconRailTests: XCTestCase {
         XCTAssertEqual(order.compactMap { views[$0.id]?.frame.minY }, [4, 40, 68, 96, 124])
 
         let login = try XCTUnwrap(views["login"])
+        XCTAssertTrue(login.trackingAreas.contains { $0.owner === login && $0.options.contains(.mouseEnteredAndExited) }, "it hears the pointer")
         let event = try XCTUnwrap(NSEvent.enterExitEvent(
             with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
             context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
@@ -67,6 +68,9 @@ final class IconRailTests: XCTestCase {
         XCTAssertEqual(login.halo.layer?.backgroundColor, Theme.Color.fillHover.cgColor)
         login.mouseExited(with: event)
         XCTAssertTrue(login.halo.isHidden)
+        login.mouseEntered(with: event)
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+        XCTAssertTrue(login.halo.isHidden, "an inactive app doesn't hear the pointer leave: the halo goes")
 
         let empty = self.rail(IconRail.Content(lead: nil, tasks: []))
         XCTAssertTrue(empty.separator.isHidden && empty.itemViews.isEmpty, "an empty rail draws no line")
@@ -75,22 +79,23 @@ final class IconRailTests: XCTestCase {
     /// A click anywhere on an icon goes to its task, once even in a
     /// double-click; on a waiting task it asks for the request, anchored to
     /// the icon, and a double-click goes to the task, as VoiceOver's "Open
-    /// task" does. A double-click whose first click never came here counts
-    /// as a first click.
+    /// task" does. A double-click whose first click never came here, or came
+    /// long before, counts as a first click.
     func testAClickGoesToATaskOrAsksForItsRequest() throws {
         let rail = rail(content)
         var selected: [String] = [], requested: [(String, NSView)] = []
         rail.onSelect = { selected.append($0) }
         rail.onRequest = { requested.append(($0, $1)) }
-        func click(_ id: String, count: Int) throws {
+        func click(_ id: String, count: Int, at time: TimeInterval = 0) throws {
             let view = try XCTUnwrap(rail.itemViews[id])
             let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
             let target = try XCTUnwrap(rail.hitTest(rail.superview?.convert(point, from: nil) ?? point))
             XCTAssertTrue(target === view, "the click reaches \(id)'s icon, not a drawing on it")
             XCTAssertTrue(target.acceptsFirstMouse(for: nil), "it acts in a window in the background")
+            XCTAssertFalse(target.mouseDownCanMoveWindow)
             func event(_ type: NSEvent.EventType) throws -> NSEvent {
                 try XCTUnwrap(NSEvent.mouseEvent(
-                    with: type, location: point, modifierFlags: [], timestamp: 0,
+                    with: type, location: point, modifierFlags: [], timestamp: time,
                     windowNumber: view.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: count, pressure: 0
                 ))
             }
@@ -103,8 +108,10 @@ final class IconRailTests: XCTestCase {
         try click("export", count: 2)
         try click("login", count: 2)
         try click("lead", count: 1)
+        try click("export", count: 1, at: 10)
+        try click("export", count: 2, at: 60)
         XCTAssertEqual(selected, ["checkout", "export", "login", "lead"])
-        XCTAssertEqual(requested.map(\.0), ["export"])
+        XCTAssertEqual(requested.map(\.0), ["export", "export", "export"])
         XCTAssertTrue(requested.first?.1 === rail.itemViews["export"], "anchored to the icon itself")
 
         let export = try XCTUnwrap(rail.itemViews["export"])
@@ -132,7 +139,7 @@ final class IconRailTests: XCTestCase {
 
     /// A task keeps its view as its state changes; a gone task loses it; an
     /// id listed twice shows once; a long list keeps the task on screen in
-    /// view by itself.
+    /// view by itself, when it shows and when it changes.
     func testViewsLastAndTheRailScrolls() throws {
         let rail = rail(content)
         let checkout = try XCTUnwrap(rail.itemViews["checkout"])
@@ -157,5 +164,10 @@ final class IconRailTests: XCTestCase {
         let last = try XCTUnwrap(long.itemViews["task39"])
         let clip = try XCTUnwrap(last.enclosingScrollView?.contentView)
         XCTAssertTrue(clip.documentVisibleRect.contains(last.frame), "the task on screen is in view")
+        many.selectedID = "task0"
+        long.show(many)
+        long.layoutSubtreeIfNeeded()
+        let first = try XCTUnwrap(long.itemViews["task0"])
+        XCTAssertTrue(clip.documentVisibleRect.contains(first.frame), "and the next one too")
     }
 }

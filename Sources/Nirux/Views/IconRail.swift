@@ -56,9 +56,9 @@ final class IconRail: NSView {
     private(set) var itemViews: [String: RailItemView] = [:]
     /// The selection changed: scroll it into view at the next layout.
     private var revealPending = false
-    /// The task whose first click was handled last: a double-click counts as
-    /// one only on top of it.
-    private var firstClick: String?
+    /// The task whose first click was handled last, and when: a double-click
+    /// counts as one only on top of it.
+    private var firstClick: (id: String, time: TimeInterval)?
     let archivedButton: RailRoundButton
     let newButton: RailRoundButton
 
@@ -111,7 +111,7 @@ final class IconRail: NSView {
         for item in items {
             let view = itemViews[item.id] ?? {
                 let view = RailItemView()
-                view.onPress = { [weak self] id, clicks in self?.press(id, clicks: clicks) }
+                view.onPress = { [weak self] id, clicks, time in self?.press(id, clicks: clicks, at: time) }
                 view.onOpen = { [weak self] id in self?.onSelect?(id) }
                 itemViews[item.id] = view
                 return view
@@ -129,10 +129,10 @@ final class IconRail: NSView {
     /// first click on any other task goes to it. A double-click whose first
     /// click never came here (it closed a callout, say) counts as a first
     /// click.
-    private func press(_ id: String, clicks: Int) {
+    private func press(_ id: String, clicks: Int, at time: TimeInterval) {
         guard (1...2).contains(clicks), let item = items.first(where: { $0.id == id }), let view = itemViews[id] else { return }
-        let isDouble = clicks == 2 && firstClick == id
-        firstClick = isDouble ? nil : id
+        let isDouble = clicks == 2 && firstClick.map { $0.id == id && time - $0.time <= NSEvent.doubleClickInterval } == true
+        firstClick = isDouble ? nil : (id, time)
         switch (item.icon.waitsForUser, isDouble) {
         case (true, false):
             list.scrollToVisible(view.frame)
@@ -192,7 +192,8 @@ extension StateIcon {
 /// colour), a halo when it is on screen or under the pointer, an amber ring
 /// while its agent waits for the user. A button for VoiceOver.
 final class RailItemView: NSView {
-    var onPress: ((String, Int) -> Void)?
+    /// A click: the task's id, the click count, the event's time.
+    var onPress: ((String, Int, TimeInterval) -> Void)?
     /// VoiceOver's "Open task" on a waiting task.
     var onOpen: ((String) -> Void)?
     private(set) var item: IconRail.Item?
@@ -221,6 +222,10 @@ final class RailItemView: NSView {
         leadIcon.cell?.setAccessibilityElement(false)
         addSubview(leadIcon)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+        // An inactive app doesn't hear the pointer leave.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(pointerLost), name: NSApplication.didResignActiveNotification, object: nil
+        )
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
     }
@@ -283,17 +288,31 @@ final class RailItemView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
+    @objc private func pointerLost() { isHovered = false }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        isHovered = false
+    }
+
+    /// The view moved (a task arrived above, the rail scrolled): under the
+    /// pointer or not, from where the pointer is now.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard let window else { return }
+        isHovered = NSApp.isActive && bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
 
     override func mouseUp(with event: NSEvent) {
         guard let item, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        onPress?(item.id, event.clickCount)
+        onPress?(item.id, event.clickCount, event.timestamp)
     }
 
     override func mouseDown(with event: NSEvent) {}
 
     override func accessibilityPerformPress() -> Bool {
         guard let item else { return false }
-        onPress?(item.id, 1)
+        onPress?(item.id, 1, ProcessInfo.processInfo.systemUptime)
         return true
     }
 }
