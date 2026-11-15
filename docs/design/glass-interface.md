@@ -99,6 +99,27 @@ the 36 pt capsule to sit level with the traffic lights.
 
 ![The command bar at three widths and with nothing open: Opaque exact, the other levels approximated](../images/command-bar.png)
 
+## Icon rail
+
+`IconRail` is the folded sidebar: a 38 pt glass capsule with the space's Lead
+first (its sparkle, in its state's colour), a line, then one state icon per
+task in the sidebar's order, 28 pt apart; under it, two round glass buttons
+for the archived tasks and a new task. The task on screen wears a halo and
+stays in view as the list scrolls (without scrollers); the pointer wears a
+fainter one; a task whose agent waits for the user wears an amber ring, apart
+from the icon. A click on an amber icon asks for its request (the callout,
+2.3), anchored to the icon's view so that it follows the icon; a double-click
+goes to the task, and the callout closes as the task opens. A click on any
+other icon goes to the task, even in a window in the background, as today.
+Names show in a tooltip; VoiceOver reads each icon as a button, its name and
+its state, in the rail's order, hears a state change, and offers "Open task"
+on an amber icon. For phase 3: what today's rail does beyond this (its menus,
+dragging, the archived count) comes with the swap, and the demo at the end of
+phase 2 checks whether macOS 26 wants the rail's three glass shapes in one
+`NSGlassEffectContainerView`.
+
+![The rail with a Lead and nine tasks: Opaque exact, the other levels approximated](../images/icon-rail.png)
+
 ## Plan
 
 1. Foundations, nothing on screen: tokens and the transparency levels, the
