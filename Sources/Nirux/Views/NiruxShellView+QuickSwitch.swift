@@ -8,7 +8,10 @@ final class QuickSwitchState {
     /// and the time (see `AgentWait`). Tests set their own: a blocked
     /// agent needs a real `claude` in front.
     var agentWait: @MainActor (ColumnState, ProcessSnapshot, TimeInterval) -> AgentWait? = { column, snapshot, now in
-        column.pty?.agentBlockedWait(now: now, foreground: column.pty?.foregroundProcess(snapshot: snapshot))
+        guard let pty = column.pty,
+              let wait = pty.agentBlockedWait(now: now, foreground: pty.foregroundProcess(snapshot: snapshot)),
+              wait.blocks(whileStatus: pty.cachedAgentState) else { return nil }
+        return wait
     }
     /// The column the user last moved to, then each one ⌘J landed on
     /// since, in order: a press goes on to one the walk hasn't visited.

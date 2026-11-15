@@ -246,12 +246,19 @@ final class CommandPalette: NSObject {
     /// `host`, its window not showing (`windowShows`), hidden, transparent,
     /// clipped away, or outside its window.
     static func barOnScreen(_ bar: NSView, in host: NSWindow, windowShows: (NSWindow) -> Bool) -> NSRect? {
-        guard let window = bar.window, window === host, windowShows(window), window.alphaValue > 0,
+        guard let window = bar.window, window === host || window.parent === host || holdsInToolbar(host, bar),
+              windowShows(window), window.alphaValue > 0,
               !bar.isHiddenOrHasHiddenAncestor, !isClippedAway(bar),
               sequence(first: bar, next: \.superview).allSatisfy({ $0.alphaValue > 0 }) else { return nil }
         let rect = window.convertToScreen(bar.convert(bar.bounds, to: nil))
         guard window.frame.intersects(rect) else { return nil }
         return rect
+    }
+
+    /// `host`'s toolbar holds `bar` (in full screen AppKit moves the toolbar
+    /// into a window of its own): the bar belongs to `host` all the same.
+    static func holdsInToolbar(_ host: NSWindow, _ bar: NSView) -> Bool {
+        host.toolbar?.items.contains { item in item.view.map { bar === $0 || bar.isDescendant(of: $0) } ?? false } == true
     }
 
     /// Nothing of `view` left inside an ancestor that clips (a scroll view's
@@ -345,9 +352,8 @@ final class CommandPalette: NSObject {
         }
     }
 
-    /// The buttons that open the palette: the title bar's Search
-    /// (`TitleBarActions`), the command bar's search segment.
-    static let searchButtonIDs: Set<NSUserInterfaceItemIdentifier> = [TitleBarActions.searchButtonID, CommandBarView.searchButtonID]
+    /// The buttons that open the palette: the command bar's search segment.
+    static let searchButtonIDs: Set<NSUserInterfaceItemIdentifier> = [CommandBarView.searchButtonID]
 
     /// A press on a button that opens the palette while it shows: it
     /// closes the palette here, on mouse-down, and is consumed, or the button

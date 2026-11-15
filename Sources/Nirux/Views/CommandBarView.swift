@@ -3,8 +3,7 @@ import AppKit
 /// The glass interface's command bar (docs/design/glass-interface.md): one
 /// capsule floating at the top of the window with the space, the current
 /// task and its state, ⌘P, and how many agents wait for the user (⌘J).
-/// Built, not shown yet: phase 3 puts it in the window and wires its
-/// actions.
+/// The window's toolbar holds it (`CommandBarToolbar`, step 3.1).
 final class CommandBarView: NSView {
     /// What the bar says, read from the shell by its caller.
     struct Content: Equatable {
@@ -15,7 +14,8 @@ final class CommandBarView: NSView {
         var taskIcon: StateIcon?
         /// Where it stands, after its title: "working 12m".
         var taskDetail: String?
-        /// Agents waiting for the user, across the space.
+        /// Agents waiting for the user's answer in every space, as ⌘J
+        /// reaches them (not the column on screen).
         var waitingCount: Int
     }
 
@@ -119,9 +119,13 @@ final class CommandBarView: NSView {
             host.addSubview(button)
         }
         searchButton.setAccessibilityLabel("Search, Command P")
-        // A press on it while ⌘P shows closes the palette, as the title
-        // bar's Search does (`CommandPalette.searchButtonIDs`).
+        // A press on it while ⌘P shows closes the palette instead of opening
+        // it again (`CommandPalette.searchButtonIDs`).
         searchButton.identifier = Self.searchButtonID
+        spaceButton.toolTip = "Spaces"
+        searchButton.toolTip = "Search (\(NiruxShortcuts.commandPalette.chord.display), "
+            + "\(NiruxShortcuts.commandPaletteAlternate.chord.display) in the editor)"
+        waitingButton.toolTip = "Next agent waiting for you (\(NiruxShortcuts.nextWaitingAgent.chord.display))"
         // Before the first content: no state to show, words to say.
         taskIcon.isHidden = true
         spaceButton.setAccessibilityLabel("Space")
@@ -145,6 +149,9 @@ final class CommandBarView: NSView {
         spaceButton.setAccessibilityLabel("Space: \(content.spaceName)")
         taskLabel.stringValue = content.taskTitle ?? "Nothing open"
         taskLabel.textColor = content.taskTitle == nil ? Theme.Color.textTertiary : Theme.Color.textPrimary
+        // What a click does: the task's menu, or with nothing open, a new task.
+        taskButton.toolTip = content.taskTitle == nil
+            ? "Start a task (\(NiruxShortcuts.newWorkspace.chord.display))" : "The task's menu"
         if let icon = content.taskIcon { taskIcon.icon = icon }
         taskIcon.isHidden = content.taskIcon == nil
         detailLabel.stringValue = content.taskDetail.map { "· \($0)" } ?? ""

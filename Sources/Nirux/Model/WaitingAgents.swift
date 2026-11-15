@@ -18,6 +18,16 @@ struct AgentWait: Equatable, Sendable {
     var isRead = false
 }
 
+extension AgentWait {
+    /// Whether it still blocks the agent on the user while its status is
+    /// `status`: a wait for the user's answer doesn't once the agent works
+    /// again (an answered dialog lingers until its tool ends). ⌘J and the
+    /// spaces' marks read waits through it.
+    func blocks(whileStatus status: AgentStatus) -> Bool {
+        reason.signal != .waiting || status != .working
+    }
+}
+
 extension AgentStatusMachine {
     /// What blocks the agent on the user now, if anything (see
     /// `AgentWait`). `foreground` is the column's foreground process.
