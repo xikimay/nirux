@@ -10,7 +10,8 @@ extension ProjectBoardController {
             var color: NSColor
         }
 
-        /// Nil once the space was deleted.
+        /// Nil only between a space deleted and its Boards following their
+        /// workspaces to General.
         var space: Space?
         /// The space's workspaces, as the Board's rows take them.
         var workspaces: [ProjectBoard.Workspace]
@@ -86,7 +87,7 @@ extension ProjectBoardController {
             header: stagesHeader(inputs), order: inputs.order, sections: [], now: now.timeIntervalSince1970,
             runningQueues: inputs.runningQueues
         )
-        if let message = bodyMessage(projectExists: inputs.space != nil) {
+        if let message = bodyMessage() {
             content.message = BoardStagesView.Message(text: message.text, offersSettings: message.offersSettings)
             return content
         }
@@ -103,11 +104,9 @@ extension ProjectBoardController {
         )
         let others: [ProjectBoard.Row]
         switch listedRows(local: local, workspaces: inputs.workspaces) {
-        case .one(let rows, let repository):
-            guard !rows.isEmpty, let only = sections.first else {
-                content.message = BoardStagesView.Message(text: emptyRepositoryMessage(repository))
-                return content
-            }
+        case .one(let rows, _):
+            // Its rows hold the Board's own workspace at least: a read that failed says so in the section's pill.
+            guard let only = sections.first else { return content }
             others = rows.filter { $0.group == .otherRepository }
             content.sections = [stagesSection(
                 only, rows: rows.filter { $0.group != .otherRepository }, inputs, heads: heads, now: now, targets: &targets
@@ -139,15 +138,6 @@ extension ProjectBoardController {
         return content
     }
 
-    /// Why the one repository lists nothing: what went wrong reading it
-    /// (no section's pill is there to say it), else that it has nothing yet.
-    private func emptyRepositoryMessage(_ repository: String) -> String {
-        guard let reads = sections.first.flatMap({ reads[$0.id] }), let error = Self.errorText(reads) else {
-            return Self.nothingToList(in: repository)
-        }
-        return "Couldn’t read \(reads.name) on GitHub: \(error.message)"
-    }
-
     /// The space: its colour and name, what it holds (its repositories,
     /// anchored or read; its tasks not archived, the Lead apart), its
     /// Lead's state and line, said as a line says a task at rest or at work.
@@ -159,7 +149,7 @@ extension ProjectBoardController {
             "\(tasks) \(tasks == 1 ? "task" : "tasks")"
         ]
         var header = BoardStagesView.Header(
-            name: inputs.space?.name ?? BoardColumnView.deletedSpace, color: inputs.space?.color ?? Theme.Color.textTertiary,
+            name: inputs.space?.name ?? "", color: inputs.space?.color ?? Theme.Color.textTertiary,
             summary: held.compactMap { $0 }.joined(separator: " · ")
         )
         if let lead = inputs.lead {

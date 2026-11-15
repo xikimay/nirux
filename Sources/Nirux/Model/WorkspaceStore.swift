@@ -4,6 +4,18 @@ import Foundation
 final class WorkspaceStore {
     private(set) var workspaces: [WorkspaceState] = []
     private(set) var profiles: [WorkspaceProfile] = [WorkspaceProfile.defaultProfile]
+
+    /// Why workspaces changed space, for whoever follows them (a Board
+    /// shows its workspace's space).
+    enum SpaceChange: Equatable {
+        /// The user moved one.
+        case moved
+        /// Their space was deleted: they went to General.
+        case spaceDeleted
+    }
+
+    /// After workspaces changed space, every way it happens.
+    var onWorkspacesChangedSpace: ((SpaceChange) -> Void)?
     private(set) var activeProfileID: String = WorkspaceProfile.defaultID
     private(set) var activeWorkspaceID: String?
     /// Deleted spaces' ids (see ProjectStore). Shells started in them keep the
@@ -339,6 +351,7 @@ final class WorkspaceStore {
         deletedProfileIDs.insert(id)
         keepTreeOrder(in: WorkspaceProfile.defaultID)
         reconcileSelection(preferActiveProfile: true)
+        onWorkspacesChangedSpace?(.spaceDeleted)
         return true
     }
 
@@ -354,12 +367,7 @@ final class WorkspaceStore {
     /// when that space is left empty.
     @discardableResult
     func moveWorkspace(at index: Int, toProfile profileID: String) -> Bool {
-        guard workspaces.indices.contains(index),
-              profiles.contains(where: { $0.id == profileID }),
-              workspaces[index].profileID != profileID,
-              // A Lead sees only its own space.
-              !workspaces[index].isLead
-        else { return false }
+        guard canMoveWorkspace(at: index, toProfile: profileID) else { return false }
         let workspace = workspaces[index]
         let wasActive = workspace.id == activeWorkspaceID
         // The card above it in the sidebar, else the one below.
@@ -376,7 +384,15 @@ final class WorkspaceStore {
         keepTreeOrder(in: profileID)
         if wasActive { selectWorkspace(id: neighbourID ?? workspace.id) }
         reconcileSelection(preferActiveProfile: true)
+        onWorkspacesChangedSpace?(.moved)
         return true
+    }
+
+    /// The workspace would move there: another space that exists, and not
+    /// the Lead's, which sees only its own space.
+    func canMoveWorkspace(at index: Int, toProfile profileID: String) -> Bool {
+        workspaces.indices.contains(index) && profiles.contains(where: { $0.id == profileID })
+            && workspaces[index].profileID != profileID && !workspaces[index].isLead
     }
 
     /// Organize › Move Out of “<task>”: a sub-task listed under its task is

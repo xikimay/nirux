@@ -143,6 +143,8 @@ extension NiruxShellView {
         if case .folder(let path) = anchor.kind, isTooBroadForAFolderAnchor(path) {
             return showToast(tooBroadFolderMessage(path), tone: .error)
         }
+        // Anchored only where the workspace can go too.
+        if let workspaceID, let refusal = moveRefusal(workspaceID: workspaceID, profileID: spaceID) { return showToast(refusal) }
         guard canChangeAnchors(),
               let space = profiles.first(where: { $0.id == spaceID }),
               confirmTakingAnchor(anchor, intoSpaceNamed: space.name, excluding: spaceID),

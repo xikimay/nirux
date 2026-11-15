@@ -606,6 +606,20 @@ final class ProjectBoardFlowTests: XCTestCase {
             // Gadgets deleted: its workspaces go to General, and its Board shows General.
             shell.deleteSpace(profileID: other.id)
             XCTAssertEqual(gadgets.board.projectID, WorkspaceProfile.defaultID)
+
+            // Another space deleted from Space Settings, General on screen: its Board closes quietly, the user stays.
+            let extra = shell.workspaceStore.createProfile(named: "Extra")
+            try writeConfig(for: extra, workflow: "nightly.yml")
+            shell.addWorkspace(title: "extra", cwd: root, profileID: extra.id)
+            try runPaletteAction("Open Board", in: shell)
+            XCTAssertNotNil(shell.projectBoardLocation(projectID: extra.id))
+            try select("gadgets", in: shell)
+            shell.toast?.removeFromSuperview()
+            shell.toast = nil
+            shell.deleteSpace(profileID: extra.id)
+            XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [WorkspaceProfile.defaultID])
+            XCTAssertEqual(shell.activeWorkspace?.title, "gadgets")
+            XCTAssertNil(shell.toast, "no toast for a deletion")
             let general = try XCTUnwrap(shell.profiles.first { $0.id == WorkspaceProfile.defaultID }?.name)
             XCTAssertEqual(gadgets.board.view.header.titleToolTip, "Board · \(general)")
         }
@@ -629,11 +643,12 @@ final class ProjectBoardFlowTests: XCTestCase {
         var saved = try XCTUnwrap(state)
         let index = try XCTUnwrap(saved.workspaces.firstIndex { $0.title == "widgets" })
         let column = try XCTUnwrap(saved.workspaces[index].columns.first { $0.columnType == .projectBoard })
-        XCTAssertEqual(column.boardProjectID, spaceID)
+        XCTAssertNil(column.boardProjectID, "its workspace's space, which the builds that read one take without it")
         XCTAssertEqual(column.cwd, root, "an older build opens a terminal in the workspace's folder")
-        // A hand-edited state with a second board for the project; the first saved on another space by an older
-        // build, whose header could switch it.
-        saved.workspaces[index].columns.append(column)
+        // An older build's state: a Board switched to another space, then the space's own Board after it.
+        var own = column
+        own.boardProjectID = spaceID
+        saved.workspaces[index].columns.append(own)
         let first = try XCTUnwrap(saved.workspaces[index].columns.firstIndex { $0.columnType == .projectBoard })
         saved.workspaces[index].columns[first].boardProjectID = "another-space"
 
@@ -641,8 +656,9 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(shell.projectBoardLocations.count, 1)
             let workspace = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
             XCTAssertEqual(workspace.columns.filter(\.isProjectBoard).count, 1)
-            XCTAssertEqual(workspace.columns.count, 3, "the second board came back as a terminal")
-            XCTAssertNotNil(workspace.columns.last?.pty)
+            XCTAssertEqual(workspace.columns.count, 3)
+            XCTAssertEqual(workspace.columns.last?.isProjectBoard, true, "the space's own Board stays")
+            XCTAssertNotNil(workspace.columns[1].pty, "the switched one came back as a terminal")
             XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [spaceID], "its workspace's space")
         }
     }

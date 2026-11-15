@@ -686,19 +686,22 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
   what went wrong reading them, under the pointer, and its ⋯ menu: Board
   Settings…, then the column's items. It has no pill: each repository's
   header has its own.
-- **It shows its workspace's space**, with no menu to pick another
-  (`NiruxShellView.boardsFollowTheirWorkspaces`). Its workspace moved to
-  another space, or its space deleted (its workspaces go to General), it
-  shows that space, its tasks read again. The workspace that holds it
-  doesn't move while its space's merge queue runs, as the space isn't
-  deleted then: the Board keeps the queue's line and Stop, and a toast
-  says why. A space keeps
-  one Board: one that comes to a space that has its Board closes, and the
-  space's own comes to the front, with a toast naming that space; alone in
-  its workspace, it leaves a shell there. A Board an older build saved on
-  another space comes back on its workspace's (the space is still written,
-  for that build); where that space had its Board too, the first one saved
-  stays.
+- **It shows its workspace's space**, with no menu to pick another. The
+  store says each time a workspace changes space
+  (`WorkspaceStore.onWorkspacesChangedSpace`), and the Boards follow
+  (`NiruxShellView.boardsFollowTheirWorkspaces`): moved, it shows that
+  space, its tasks read again, and may ask for its settings as one opened
+  there; its space deleted (its workspaces go to General), it shows General.
+  The workspace that holds it doesn't move while its space's merge queue
+  runs, as the space isn't deleted then: the Board keeps the queue's line
+  and Stop, and a toast says why, before any repository is anchored for the
+  move. A space keeps one Board: one that comes to a space that has its
+  Board closes; after a move, the space's own comes to the front, with a
+  toast naming that space; after a deletion, quietly. Alone in its
+  workspace, it leaves a shell there. Its space isn't saved: it is the
+  workspace's, which the builds that read one take without it. A Board an
+  older build saved on another space comes back on its workspace's; where
+  that space's own Board was saved too, that one stays.
 - **Drawn at each sidebar pass** while the Board is shown, with that pass's
   readings of the tasks (`NiruxShellView.SidebarPassReadings`); between two
   passes (a read landing, a click), with the last pass's, kept by the

@@ -7,14 +7,11 @@ import AppKit
 /// workspace's space (`NiruxShellView.boardsFollowTheirWorkspaces`).
 @MainActor
 final class BoardColumnView: NSView {
-    /// What names a space that is gone: in the header of a Board whose space
-    /// went another way than `deleteSpace`, and in a queue's notice left
-    /// after it.
+    /// What names a space that is gone, in a queue's notice left after it.
     static let deletedSpace = "Deleted space"
 
     struct Header: Equatable {
-        /// Nil once the space is gone.
-        var spaceName: String?
+        var spaceName: String
         /// `owner/name` on a Board with one repository.
         var repository: String?
         /// When the pull requests were read, or what went wrong reading
@@ -62,9 +59,8 @@ final class BoardColumnView: NSView {
     func show(header content: Header, stages stagesContent: BoardStagesView.Content) {
         if content != shownHeader {
             shownHeader = content
-            let spaceName = content.spaceName ?? Self.deletedSpace
-            header.context = content.repository ?? spaceName
-            header.titleToolTip = "Board · \(spaceName)"
+            header.context = content.repository ?? content.spaceName
+            header.titleToolTip = "Board · \(content.spaceName)"
             refreshButton.toolTip = ["Refresh", content.status].compactMap { $0 }.joined(separator: " · ")
         }
         stages.show(stagesContent)

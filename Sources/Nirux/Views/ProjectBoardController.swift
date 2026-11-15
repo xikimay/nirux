@@ -142,7 +142,6 @@ final class ProjectBoardController {
     var isShown: () -> Bool = { false }
     /// Whether the board's project still exists: a deleted one's board
     /// reads nothing.
-    var projectExists: () -> Bool = { true }
     /// Something was read: the shell renders the board again.
     var onRead: (() -> Void)?
     /// A board without a repository asks for Board Settings.
@@ -194,12 +193,12 @@ final class ProjectBoardController {
     // MARK: - Reading
 
     /// Shows another space, its workspace's once it moved there: nothing
-    /// read for the previous one stays.
-    func switchProject(to projectID: String) {
+    /// read for the previous one stays. `offersSettings`: as a Board opened
+    /// there, it may ask for the space's settings.
+    func switchProject(to projectID: String, offersSettings: Bool = false) {
         guard projectID != self.projectID else { return }
         self.projectID = projectID
-        // Asked of the space it was opened in only.
-        offersSettings = false
+        self.offersSettings = offersSettings
         generation += 1
         schedule.reset()
         loaded = nil
@@ -391,7 +390,7 @@ final class ProjectBoardController {
     /// Reads what is due. Called on every status refresh (the heartbeat),
     /// which reads only while the board is on screen.
     func tick(now: TimeInterval = ProjectBoard.clock(), onScreen: Bool? = nil) {
-        guard loaded != nil, !isReadingConfig, projectExists() else { return }
+        guard loaded != nil, !isReadingConfig else { return }
         // Shown at last: the remotes that waited for it.
         if let due = remotesDue, due == configRead, isShown() {
             remotesDue = nil
@@ -562,7 +561,7 @@ final class ProjectBoardController {
     /// The column's header: the space, the repository of a Board with one,
     /// and when the pull requests were read, or what went wrong reading
     /// them (Refresh's tooltip); the repository's header has the pill.
-    func columnHeader(spaceName: String?, now: Date = Date()) -> BoardColumnView.Header {
+    func columnHeader(spaceName: String, now: Date = Date()) -> BoardColumnView.Header {
         let single = sections.count == 1 ? sections.first.flatMap { reads[$0.id] } : nil
         return BoardColumnView.Header(
             spaceName: spaceName, repository: single?.name,
@@ -579,11 +578,10 @@ final class ProjectBoardController {
     }
 
     /// What the Board says in place of what it lists, when it lists
-    /// nothing: the space deleted, board.json unreadable, read-only or not
-    /// read yet, no repository set. A message about the settings offers
-    /// them under it. Nil: it lists (or lists its worktrees first).
-    func bodyMessage(projectExists: Bool) -> (text: String, offersSettings: Bool)? {
-        if !projectExists { return ("This Board’s space was deleted.", false) }
+    /// nothing: board.json unreadable, read-only or not read yet, no
+    /// repository set. A message about the settings offers them under it.
+    /// Nil: it lists (or lists its worktrees first).
+    func bodyMessage() -> (text: String, offersSettings: Bool)? {
         if let loaded, loaded.status == .unreadable { return ("board.json can’t be read: open Board Settings… to replace it.", true) }
         // Board Settings can't save it.
         if let loaded, case .readOnly(let reason) = loaded.status, !listsRows { return (reason.message, false) }
@@ -594,10 +592,6 @@ final class ProjectBoardController {
 
     static let listingWorktrees = "Listing worktrees…"
 
-    /// A space with one repository and nothing to list in it.
-    static func nothingToList(in repository: String) -> String {
-        "No worktree and no open pull request yet. Open a workspace in a checkout of \(repository)."
-    }
 
     /// Board Settings is what would show its pull requests: not for a
     /// checkout gone, nor for the repository another section reads.

@@ -46,16 +46,25 @@ extension NiruxShellView {
     /// Its shells keep the old NIRUX_PROFILE_ID until they restart.
     func moveWorkspaceToSpace(workspaceID: String, profileID: String) {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
-        // Its Board would follow it, and leave its space's running queue to the status bar alone: as the space isn't
-        // deleted then, the workspace doesn't move.
-        let space = workspaces[index].profileID
-        if workspaces[index].columns.contains(where: \.isProjectBoard), mergeQueues(of: space).contains(where: \.isRunning) {
-            let name = profiles.first { $0.id == space }?.name ?? "This space"
-            return showToast("The merge queue of \(name) is running: stop it before moving the workspace of its Board")
-        }
+        if let refusal = moveRefusal(workspaceID: workspaceID, profileID: profileID) { return showToast(refusal) }
+        // Its Board follows (`boardsFollowTheirWorkspaces`, from the store).
         guard workspaceStore.moveWorkspace(at: index, toProfile: profileID) else { return }
-        boardsFollowTheirWorkspaces()
         refreshAfterWorkspaceMutation()
+    }
+
+    /// Why the workspace can't move there now, for a toast: its Board would
+    /// follow it and leave its space's running queue to the status bar
+    /// alone, so it stays, as the space isn't deleted then. Nil when it can,
+    /// and for a move the store wouldn't make (nothing to say).
+    func moveRefusal(workspaceID: String, profileID: String) -> String? {
+        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }),
+              workspaceStore.canMoveWorkspace(at: index, toProfile: profileID)
+        else { return nil }
+        let space = workspaces[index].profileID
+        guard workspaces[index].openColumns.contains(where: \.isProjectBoard), mergeQueues(of: space).contains(where: \.isRunning)
+        else { return nil }
+        let name = profiles.first { $0.id == space }?.name ?? "This space"
+        return "The merge queue of \(name) is running: stop it before moving the workspace of its Board"
     }
 
     func deleteSpace(profileID: String) {
@@ -66,8 +75,6 @@ extension NiruxShellView {
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectStore.markDeleted(profileID)
         SpaceDefaultsStore.removeFiles(ofSpace: profileID)
-        // Its workspaces went to General, with their Boards.
-        boardsFollowTheirWorkspaces()
         refreshAfterWorkspaceMutation()
         // Opened while the confirmation was up: its space is gone.
         spaceSettingsSpacesChanged()

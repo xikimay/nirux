@@ -33,6 +33,13 @@ extension NiruxShellView {
 
         workspaceStore.replaceProfiles(loadedProfiles, activeProfileID: state.activeProfileID)
         let validProfileIDs = Set(profiles.map { $0.id })
+        // A Board an older build saved on another space than its workspace's comes back on its workspace's; where that
+        // space's own Board was saved too, that one stays.
+        let spacesWithTheirOwnBoard = Set(state.workspaces.compactMap { persistedWS -> String? in
+            let space = persistedWS.profileID ?? WorkspaceProfile.defaultID
+            let ownsOne = persistedWS.columns.contains { $0.resolvedType == .projectBoard && $0.boardProjectID == space }
+            return validProfileIDs.contains(space) && ownsOne ? space : nil
+        })
 
         let missionChildParents = Self.missionChildParents(in: state.workspaces)
 
@@ -85,6 +92,7 @@ extension NiruxShellView {
                 restoreColumn(
                     persistedColumn,
                     in: workspace,
+                    spacesWithTheirOwnBoard: spacesWithTheirOwnBoard,
                     claimedSessionIDs: &claimedSessionIDs
                 )
             }
@@ -128,6 +136,7 @@ extension NiruxShellView {
     private func restoreColumn(
         _ persistedColumn: PersistedColumn,
         in workspace: WorkspaceState,
+        spacesWithTheirOwnBoard: Set<String>,
         claimedSessionIDs: inout ClaimedSessionIDs
     ) {
         switch persistedColumn.resolvedType {
@@ -182,8 +191,10 @@ extension NiruxShellView {
             // show another). One Board per space: a second one comes back as a
             // terminal, as in an older build.
             let projectID = workspace.profileID
+            let wasSwitched = persistedColumn.boardProjectID.map { $0 != projectID } ?? false
             if projectBoardLocation(projectID: projectID) != nil
-                || workspace.columns.contains(where: { $0.projectBoard?.projectID == projectID }) {
+                || workspace.columns.contains(where: { $0.projectBoard?.projectID == projectID })
+                || wasSwitched && spacesWithTheirOwnBoard.contains(projectID) {
                 workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
             } else {
                 let board = makeProjectBoard(projectID: projectID, offersSettings: false)
@@ -375,11 +386,12 @@ extension NiruxShellView {
         in workspace: WorkspaceState,
         snapshot: ProcessSnapshot
     ) -> PersistedColumn {
-        if let board = col.projectBoard {
-            // The workspace's folder: an older build opens a terminal there.
+        if col.projectBoard != nil {
+            // The workspace's folder: an older build opens a terminal there. No space: it is the workspace's, which the
+            // builds that read one take without it.
             return PersistedColumn(
                 widthPreset: Double(col.widthFraction), cwd: workspace.cwd, columnType: .projectBoard,
-                webViewURL: nil, claudeLaunchMode: nil, codexLaunchMode: nil, boardProjectID: board.projectID
+                webViewURL: nil, claudeLaunchMode: nil, codexLaunchMode: nil
             )
         }
         if let review = col.branchReview {
