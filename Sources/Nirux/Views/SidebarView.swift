@@ -102,7 +102,10 @@ final class SidebarView: NSView {
             // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
             lastFollowedActiveIndex = Int.min
-            if !isExpanded {
+            if isExpanded {
+                // Births the rail played don't start again on the rows.
+                rowOpensAt = rowOpensAt.filter { !railBirthsPlayed.contains($0.key) }
+            } else {
                 // The rail shows none of the rows' moments: none replays
                 // when the list opens again.
                 forgetRowMoments()
@@ -323,7 +326,11 @@ final class SidebarView: NSView {
             return
         }
         let spaceChanged = profiles.first(where: \.isActive)?.id != lastProfiles.first(where: \.isActive)?.id
-        if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
+        if spaceChanged || !workspaces.contains(where: \.isInactive) {
+            isInactiveSectionCollapsed = true
+            // Another space's list, or none: nothing to bring into view.
+            revealsInactiveSectionOnNextBuild = false
+        }
         let spacesChanged = profiles != lastProfiles
         // Before the rows change: what happened to them, in the same space.
         if spaceChanged {

@@ -62,38 +62,30 @@ extension SidebarView {
         iconRail.show(railContent)
     }
 
-    /// The Lead, then the tasks the rail lists (`railWorkspaceInfos`), the
-    /// one on screen chosen, and how many tasks are archived. Each row's
-    /// state is read once: a rebuild runs at every layout pass.
+    /// The Lead, then the tasks the rail lists, the one on screen chosen,
+    /// and how many tasks are archived. The tasks listed: the active ones,
+    /// then of the archived ones those that the folded list shows (the one
+    /// on screen, one whose agent waits on the user or broke) and one with a
+    /// question handed to the user (`railState`). Never the whole archived
+    /// list: folded, it has nowhere to show. Each row's state is read once:
+    /// a rebuild runs at every layout pass.
     var railContent: IconRail.Content {
         var content = IconRail.Content(lead: nil, tasks: [], archivedCount: lastInfos.filter(\.isInactive).count)
         for info in displayedWorkspaceInfos {
             let state = info.railState
-            guard Self.railLists(info, state: state) else { continue }
+            guard !info.isInactive || info.isActive || info.asksUser || state == .waiting else { continue }
             let summary = info.rowSummary
-            let icon = info.railIcon(state: state, summary: summary)
+            let rowIcon = info.stateIcon(summary: summary)
+            let icon = WorkspaceInfo.railIcon(rowIcon, state: state)
             // The row's words, but the branch it prints when nothing goes
             // on, or a row that says less than the amber icon: then the
             // icon's state says more.
-            let saysLess = summary.status.tone == .branch || icon != info.stateIcon(summary: summary)
+            let saysLess = summary.status.tone == .branch || icon != rowIcon
             let item = IconRail.Item(id: info.id, title: info.title, icon: icon, detail: saysLess ? nil : summary.status.text)
             if info.isLead, content.lead == nil { content.lead = item } else if !info.isLead { content.tasks.append(item) }
             if info.isActive { content.selectedID = info.id }
         }
         return content
-    }
-
-    /// The workspaces the rail shows an icon for, top to bottom: the active
-    /// ones, then of the archived ones those that the folded list shows
-    /// (the one on screen, one whose agent waits on the user or broke) and
-    /// one with a question handed to the user (`railState`). Never the whole
-    /// archived list: folded, it has nowhere to show.
-    var railWorkspaceInfos: [WorkspaceInfo] {
-        displayedWorkspaceInfos.filter { Self.railLists($0, state: $0.railState) }
-    }
-
-    private static func railLists(_ info: WorkspaceInfo, state: SidebarCardState) -> Bool {
-        !info.isInactive || info.isActive || info.asksUser || state == .waiting
     }
 }
 
@@ -110,13 +102,11 @@ extension WorkspaceInfo {
     /// The row's state as an icon (`rowSummary`): a wait says its reason,
     /// from the column a click brings up. A question handed to the user
     /// (`railState`) shows amber on the rail even where the row says less.
-    var railIcon: StateIcon { railIcon(state: railState, summary: rowSummary) }
+    var railIcon: StateIcon { Self.railIcon(stateIcon, state: railState) }
 
-    /// `railIcon`, its rail state and row already read.
-    func railIcon(state: SidebarCardState, summary: SidebarRowSummary) -> StateIcon {
-        let icon = stateIcon(summary: summary)
-        if state == .waiting, !icon.waitsForUser { return StateIcon(.needsYou(.question)) }
-        return icon
+    /// `railIcon` from the row's icon and the rail's state.
+    static func railIcon(_ rowIcon: StateIcon, state: SidebarCardState) -> StateIcon {
+        state == .waiting && !rowIcon.waitsForUser ? StateIcon(.needsYou(.question)) : rowIcon
     }
 
     /// The row's mark as an icon, its wait's reason from the column a

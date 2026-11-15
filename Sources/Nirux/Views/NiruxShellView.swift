@@ -352,7 +352,7 @@ final class NiruxShellView: NSView {
             self.goToColumn(colIndex)
         }
         updateSidebar()
-        relayout(animated: false)
+        relayoutForNewSize()
 
         startHeartbeat()
     }
@@ -426,9 +426,6 @@ final class NiruxShellView: NSView {
     // MARK: - Layout
 
     func relayout(animated: Bool) {
-        // Once the sidebar has its width.
-        let unfold = applySidebarAutoFold()
-        defer { unfold?() }
         let sidebarW = sidebarWidth
         // Status bar: only when it has content (update, crash, merge queue)
         statusBar.isHidden = !statusBar.hasContent
@@ -530,7 +527,7 @@ final class NiruxShellView: NSView {
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
-        relayout(animated: false)
+        relayoutForNewSize()
         scheduleRedrawAfterResize()
     }
 

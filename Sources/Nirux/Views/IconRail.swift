@@ -196,16 +196,12 @@ final class IconRail: NSView {
 
     /// A first click on a waiting task asks for its request and a
     /// double-click goes to the task (the callout closes as the task opens); a
-    /// first click on any other task goes to it. A double-click whose first
-    /// click never came here (it closed a callout, say) counts as a first
-    /// click.
+    /// first click on any other task goes to it. A double-click counts only
+    /// on the icon that took the first click: a quick click on the next icon
+    /// down the rail, or one whose first click never came here (it closed a
+    /// callout, say), is a first click.
     private func press(_ id: String, clicks: Int, at time: TimeInterval) {
         guard (1...2).contains(clicks), let item = items.first(where: { $0.id == id }), let view = itemViews[id] else { return }
-        // The first click's icon came into view and another one moved under
-        // the pointer: the double-click is the first icon's, as on the rows.
-        if clicks == 2, let first = firstClick, first.id != id, time - first.time <= NSEvent.doubleClickInterval {
-            return press(first.id, clicks: 2, at: time)
-        }
         let isDouble = clicks == 2 && firstClick.map { $0.id == id && time - $0.time <= NSEvent.doubleClickInterval } == true
         firstClick = isDouble ? nil : (id, time)
         switch (item.icon.waitsForUser, isDouble) {

@@ -177,6 +177,14 @@ final class IconRailSidebarTests: XCTestCase {
         open.showInactiveSection()
         open.isExpanded = false
         XCTAssertFalse(open.isInactiveSectionCollapsed)
+
+        // Another space before the cards came: nothing to bring into view.
+        let switched = self.sidebar(many, width: 260)
+        switched.showInactiveSection()
+        switched.update(profiles: [ProfileInfo(
+            id: "other", name: "Other", colorHex: "#7AA2F7", isActive: true, workspaceCount: 1, taskCount: 1, attention: nil
+        )], workspaces: many)
+        XCTAssertFalse(switched.revealsInactiveSectionOnNextBuild)
     }
 
     /// Faded out for an unfold, the rail stays hidden through rebuilds
@@ -238,7 +246,7 @@ final class IconRailSidebarTests: XCTestCase {
         shell.stopHeartbeat()
         // As saved before the window's width was known.
         shell.sidebarFold = SidebarFold(chosenExpanded: true)
-        shell.relayout(animated: false)
+        shell.relayoutForNewSize()
         XCTAssertFalse(shell.isSidebarExpanded, "narrow: folded")
         shell.decideOnboardingChecklist(persisted: nil, hasUnreadableState: false)
         XCTAssertTrue(shell.isSidebarExpanded, "the checklist shows")
@@ -256,5 +264,34 @@ final class IconRailSidebarTests: XCTestCase {
         shell.setFrameSize(NSSize(width: 1200, height: 600))
         XCTAssertTrue(shell.sidebar.isExpanded, "wide: unfolded")
         XCTAssertGreaterThan(shell.sidebar.listWidth, 200)
+    }
+
+    /// The archived list opened from the rail stays open when ⌘P's
+    /// Show/Hide Archived comes before the cards: the sidebar still shows
+    /// the rail, whatever the choice says.
+    func testShowArchivedWhileTheCardsAreOnTheirWay() {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        shell.sidebar.update(profiles: [], workspaces: [row("a", index: 0, active: true), row("parked", index: 1, archived: true)])
+        shell.sidebarFold.choose(true)
+        shell.sidebar.showInactiveSection()
+        XCTAssertFalse(shell.sidebar.isExpanded, "the cards not in yet")
+        shell.toggleArchivedTasks()
+        XCTAssertFalse(shell.sidebar.isInactiveSectionCollapsed, "still open")
+    }
+
+    /// Only a change of size folds or unfolds the sidebar by itself: not a
+    /// relayout for the status bar or an animated toggle.
+    func testOnlyASizeChangeFoldsTheSidebar() {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        shell.isSidebarExpanded = true
+        shell.sidebar.isExpanded = true
+        // The width a relayout reads, without a resize.
+        shell.setBoundsSize(NSSize(width: 800, height: 600))
+        shell.relayout(animated: true)
+        XCTAssertTrue(shell.sidebar.isExpanded, "a relayout alone decides nothing")
+        shell.relayoutForNewSize()
+        XCTAssertFalse(shell.sidebar.isExpanded)
     }
 }

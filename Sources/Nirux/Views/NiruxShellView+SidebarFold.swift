@@ -44,12 +44,20 @@ struct SidebarFold: Equatable {
 // MARK: - The sidebar folds and unfolds
 
 extension NiruxShellView {
+    /// The shell's size changed (the window resized, full screen, launch):
+    /// the sidebar folds or unfolds by itself, then everything is laid out.
+    func relayoutForNewSize() {
+        let unfold = applySidebarAutoFold()
+        relayout(animated: false)
+        unfold?()
+    }
+
     /// Folds the sidebar when the window just got narrow, unfolds it back
     /// when it widened again: at once, as the window's own resize moves the
     /// columns. The rail comes before the sidebar narrows; the cards only
-    /// once it is wide (`relayout` calls the returned unfold after laying
-    /// the sidebar out), as `toggleSidebar` does, else they would be laid
-    /// out at the rail's width first.
+    /// once it is wide (the caller runs the returned unfold after laying the
+    /// sidebar out), as `toggleSidebar` does, else they would be laid out at
+    /// the rail's width first.
     func applySidebarAutoFold() -> (() -> Void)? {
         guard bounds.width > 0 else { return nil }
         let wasExpanded = isSidebarExpanded
@@ -77,10 +85,10 @@ extension NiruxShellView {
         if !isSidebarExpanded { toggleSidebar() }
     }
 
-    /// View › Show Archived and ⌘P: the list folds or unfolds; folded, the
-    /// sidebar unfolds with it open.
+    /// View › Show Archived and ⌘P: the list folds or unfolds; folded (the
+    /// cards not in yet, unfolding or not), the sidebar unfolds with it open.
     func toggleArchivedTasks() {
-        guard isSidebarExpanded else { return showArchivedTasks() }
+        guard sidebar.isExpanded else { return showArchivedTasks() }
         sidebar.toggleInactiveSection()
     }
 }

@@ -189,6 +189,10 @@ final class TaskBirthTests: UIFlowTestCase {
         unfolded.noteBirth(workspaceID: "second", delay: NiruxShellView.taskBirthRowDelay)
         unfolded.isExpanded = false
         XCTAssertNotNil(unfolded.iconRail.itemViews["second"]?.layer?.animation(forKey: SidebarView.birthKey))
+
+        // Unfolded while the rail plays them: the rows don't play them again.
+        sidebar.isExpanded = true
+        XCTAssertTrue(views(in: sidebar, with: SidebarView.birthKey).isEmpty)
     }
 
     /// Rows that may not move open nothing: not at a birth, and not at a
