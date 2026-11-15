@@ -89,10 +89,6 @@ extension NiruxShellView {
             guard let self, let board else { return }
             self.showBoardSettings(of: board, repository: nil)
         }
-        board.view.onSelectSpace = { [weak self, weak board] projectID in
-            guard let self, let board else { return }
-            self.switchProjectBoard(board, to: projectID)
-        }
         wireBoardStages(board)
         return board
     }
@@ -106,17 +102,32 @@ extension NiruxShellView {
         showBoardSettings(profileID: board.projectID, repository: repository)
     }
 
-    /// The header's ⋯ › Project menu. A project that has a board already
-    /// brings that one to the front, and this one keeps its project.
-    func switchProjectBoard(_ board: ProjectBoardController, to projectID: String) {
-        guard projectID != board.projectID else { return }
-        if let existing = projectBoardLocation(projectID: projectID) {
+    /// A Board shows its workspace's space. One whose workspace went to
+    /// another space (moved there, or its space deleted) shows that one,
+    /// unless it has its Board already: then it closes, and the space's
+    /// own comes to the front. Call before saving the state.
+    func boardsFollowTheirWorkspaces() {
+        for moved in projectBoardLocations where moved.board.projectID != moved.workspace.profileID {
+            let space = moved.workspace.profileID
+            // As the Boards are now: one moved before this one may have taken the space.
+            guard let existing = projectBoardLocations.first(where: { $0.board !== moved.board && $0.board.projectID == space }) else {
+                moved.board.switchProject(to: space)
+                renderProjectBoard(moved.board)
+                continue
+            }
+            closeMovedBoard(moved)
             focusProjectBoard(existing)
-            return
+            showToast("This space has its Board already")
         }
-        board.switchProject(to: projectID)
-        renderProjectBoard(board)
-        saveState()
+    }
+
+    /// A workspace has a column at least: a Board alone in its own leaves a
+    /// shell in its folder.
+    private func closeMovedBoard(_ location: ProjectBoardLocation) {
+        let workspace = location.workspace
+        if workspace.openColumns.count == 1 { workspace.addColumn() }
+        guard let index = workspace.columns.firstIndex(where: { $0 === location.column }) else { return }
+        workspace.closeColumn(at: index)
     }
 
     /// The project's workspaces in sidebar order: active ones, then inactive.
@@ -203,8 +214,8 @@ extension NiruxShellView {
             stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),
             now: Date(timeIntervalSince1970: now)
         )
-        let spaces = profiles.map { BoardColumnView.Space(id: $0.id, name: $0.name) }
-        board.view.show(header: board.columnHeader(spaces: spaces, now: Date(timeIntervalSince1970: now)), stages: content)
+        let spaceName = profiles.first { $0.id == board.projectID }?.name
+        board.view.show(header: board.columnHeader(spaceName: spaceName, now: Date(timeIntervalSince1970: now)), stages: content)
         // What the clicks act on is what the Board shows.
         board.stagesTargets = targets
     }

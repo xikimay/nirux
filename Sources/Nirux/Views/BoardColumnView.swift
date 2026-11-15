@@ -1,31 +1,23 @@
 import AppKit
 
 /// The Board's column: its header (the "Board" title, the repository or the
-/// space, Refresh, the ⋯ menu with the space and Board Settings…), then the
-/// Board as stages (`BoardStagesView`). The header has no pill: each
-/// repository's header says its post-merge run, or what went wrong.
+/// space, Refresh, the ⋯ menu with Board Settings…), then the Board as
+/// stages (`BoardStagesView`). The header has no pill: each repository's
+/// header says its post-merge run, or what went wrong. It shows its
+/// workspace's space (`NiruxShellView.boardsFollowTheirWorkspaces`).
 @MainActor
 final class BoardColumnView: NSView {
-    /// A space the ⋯ menu's Space submenu lists.
-    struct Space: Equatable {
-        let id: String
-        let name: String
-    }
-
-    /// What a Board whose space was deleted names it.
+    /// What names a space that is gone (a queue's notice left after it).
     static let deletedSpace = "Deleted space"
 
     struct Header: Equatable {
-        /// Nil once the space was deleted: the Space submenu says so.
+        /// Nil once the space is gone.
         var spaceName: String?
         /// `owner/name` on a Board with one repository.
         var repository: String?
         /// When the pull requests were read, or what went wrong reading
         /// them: Refresh's tooltip.
         var status: String?
-        /// The Space submenu.
-        var spaces: [Space] = []
-        var spaceID: String
     }
 
     let header = ColumnHeaderView()
@@ -34,7 +26,6 @@ final class BoardColumnView: NSView {
     private(set) var shownHeader: Header?
 
     var onRefresh: (() -> Void)?
-    var onSelectSpace: ((String) -> Void)?
     /// Board Settings… in the ⋯ menu: the repository the form showed last.
     var onBoardSettings: (() -> Void)?
 
@@ -79,46 +70,16 @@ final class BoardColumnView: NSView {
 
     // MARK: - The ⋯ menu
 
-    /// The space, Board Settings, then the column's items. Built as it
-    /// opens: a read landing meanwhile can't change it.
+    /// Board Settings, then the column's items.
     private func headerMenu() -> NSMenu {
         let menu = NSMenu()
-        let spaceItem = menu.addItem(withTitle: "Space", action: nil, keyEquivalent: "")
-        spaceItem.submenu = spaceMenu()
         menu.addItem(withTitle: "Board Settings…", action: #selector(settingsClicked), keyEquivalent: "").target = self
         menu.addItem(.separator())
         ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
         return menu
     }
 
-    /// The spaces, the Board's own checked; a deleted one first, checked.
-    func spaceMenu() -> NSMenu {
-        let menu = NSMenu(title: "Space")
-        guard let content = shownHeader else { return menu }
-        if content.spaceName == nil {
-            menu.addItem(withTitle: Self.deletedSpace, action: nil, keyEquivalent: "").state = .on
-        }
-        for space in content.spaces {
-            let item = menu.addItem(withTitle: space.name, action: #selector(spaceChosen(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = space.id
-            item.state = content.spaceName != nil && space.id == content.spaceID ? .on : .off
-        }
-        return menu
-    }
-
-    /// Picks the space as the menu would.
-    func chooseSpace(id: String) {
-        guard let item = spaceMenu().items.first(where: { $0.representedObject as? String == id }) else { return }
-        spaceChosen(item)
-    }
-
     @objc private func refreshClicked() { onRefresh?() }
 
     @objc private func settingsClicked() { onBoardSettings?() }
-
-    @objc private func spaceChosen(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        onSelectSpace?(id)
-    }
 }

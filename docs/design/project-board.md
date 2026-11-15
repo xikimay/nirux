@@ -71,13 +71,12 @@ the Project view is a dedicated column type.
 - It opens from the command palette ("Open Board") or Space › Board (⌃⌘B)
   in the current workspace, usually the project's main checkout, next to the
   agent that coordinates the work.
-- It stores the id of the project it shows: at first, the space of the
-  workspace it was opened in. Moving that workspace to another space doesn't
-  change it. A menu in the header switches project. There is no "all projects"
-  view.
-- A project has at most one board. Opening a second one, or switching to a
-  project that already has one, focuses the existing board. A board whose
-  project was deleted says so and offers the menu.
+- It shows the space of its workspace, and follows that workspace to another
+  space ([Board Stages](board-stages.md), section 8). There is no menu to pick
+  another, and no "all projects" view.
+- A space has at most one board. Opening a second one focuses the existing
+  board; one whose workspace moves to a space that has its board closes, and
+  that space's comes to the front.
 - Like any column, it is on screen only while its workspace is active. A
   running queue therefore also shows in the status bar (section 3.6).
 - Persistence: `ColumnKind` gains `projectBoard`. An older nightly decodes an

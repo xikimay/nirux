@@ -47,6 +47,7 @@ extension NiruxShellView {
     func moveWorkspaceToSpace(workspaceID: String, profileID: String) {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
         guard workspaceStore.moveWorkspace(at: index, toProfile: profileID) else { return }
+        boardsFollowTheirWorkspaces()
         refreshAfterWorkspaceMutation()
     }
 
@@ -58,6 +59,8 @@ extension NiruxShellView {
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectStore.markDeleted(profileID)
         SpaceDefaultsStore.removeFiles(ofSpace: profileID)
+        // Its workspaces went to General, with their Boards.
+        boardsFollowTheirWorkspaces()
         refreshAfterWorkspaceMutation()
         // Opened while the confirmation was up: its space is gone.
         spaceSettingsSpacesChanged()

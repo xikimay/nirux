@@ -1,14 +1,14 @@
 # Board Stages
 
-> **Design record:** in progress. The Board's column shows the stages; the Board per space isn't built yet.\
-> **Differs today:** one Board per project, its sections today's Board's ([Project Board](project-board.md)), the workspaces in another repository folded under "Other workspaces".\
+> **Design record:** in progress. The Board's column shows the stages of its workspace's space; a section for each repository of the space isn't built yet.\
+> **Differs today:** its sections are today's Board's ([Project Board](project-board.md)), the workspaces in another repository folded under "Other workspaces".\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design validated by the user on 2026-11-11 (study D). The model
 (`BoardStages`: lines, units, sections), the view (`BoardStagesView`) and the
 facts read from today's Board (`BoardStages.sectionFacts`) are implemented,
-and the Board's column shows them in place of the table (section 8); the
-per-space Board follows.
+and the Board's column shows them in place of the table (section 8), for its
+workspace's space; a section for each repository of the space follows.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -665,9 +665,18 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 
 - **The header** keeps the table's: "Board", the repository of a Board with
   one (else the space), Refresh with when the pull requests were read, or
-  what went wrong reading them, under the pointer, and its ⋯ menu: Space ›,
-  Board Settings…, then the column's items. It has no pill: each
-  repository's header has its own.
+  what went wrong reading them, under the pointer, and its ⋯ menu: Board
+  Settings…, then the column's items. It has no pill: each repository's
+  header has its own.
+- **It shows its workspace's space**, with no menu to pick another
+  (`NiruxShellView.boardsFollowTheirWorkspaces`). Its workspace moved to
+  another space, or its space deleted (its workspaces go to General), it
+  shows that space, its tasks read again; that space's queue stays with
+  it, in the status bar too. A space keeps one Board: one that comes to a
+  space that has its Board closes, and the space's own comes to the front,
+  with a toast; alone in its workspace, it leaves a shell there. A Board an
+  older build saved on another space comes back on its workspace's (the
+  space is still written, for that build).
 - **Drawn at each sidebar pass** while the Board is shown, with that pass's
   readings of the tasks (`NiruxShellView.SidebarPassReadings`); between two
   passes (a read landing, a click), with the last pass's, kept by the

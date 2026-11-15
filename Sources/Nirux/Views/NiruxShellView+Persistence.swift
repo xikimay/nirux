@@ -178,9 +178,10 @@ extension NiruxShellView {
                 }
             }
         case .projectBoard:
-            let projectID = persistedColumn.boardProjectID ?? workspace.profileID
-            // One board per project: a second one (a hand-edited state)
-            // comes back as a terminal, as in an older build.
+            // Its workspace's space, whatever an older build saved (it could
+            // show another). One Board per space: a second one comes back as a
+            // terminal, as in an older build.
+            let projectID = workspace.profileID
             if projectBoardLocation(projectID: projectID) != nil
                 || workspace.columns.contains(where: { $0.projectBoard?.projectID == projectID }) {
                 workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)

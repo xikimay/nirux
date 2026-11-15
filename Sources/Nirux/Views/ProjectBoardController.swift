@@ -193,7 +193,8 @@ final class ProjectBoardController {
 
     // MARK: - Reading
 
-    /// Shows another project: nothing read for the previous one stays.
+    /// Shows another space, its workspace's once it moved there: nothing
+    /// read for the previous one stays.
     func switchProject(to projectID: String) {
         guard projectID != self.projectID else { return }
         self.projectID = projectID
@@ -559,15 +560,11 @@ final class ProjectBoardController {
     /// The column's header: the space, the repository of a Board with one,
     /// and when the pull requests were read, or what went wrong reading
     /// them (Refresh's tooltip); the repository's header has the pill.
-    func columnHeader(spaces: [BoardColumnView.Space], now: Date = Date()) -> BoardColumnView.Header {
-        let space = spaces.first { $0.id == projectID }
+    func columnHeader(spaceName: String?, now: Date = Date()) -> BoardColumnView.Header {
         let single = sections.count == 1 ? sections.first.flatMap { reads[$0.id] } : nil
         return BoardColumnView.Header(
-            spaceName: space?.name,
-            repository: single?.name,
-            status: single.flatMap { Self.errorText($0)?.message } ?? readStatus(now: now),
-            spaces: spaces,
-            spaceID: projectID
+            spaceName: spaceName, repository: single?.name,
+            status: single.flatMap { Self.errorText($0)?.message } ?? readStatus(now: now)
         )
     }
 

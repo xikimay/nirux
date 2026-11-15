@@ -480,20 +480,16 @@ final class ProjectBoardHeaderTests: XCTestCase {
     /// The Board's column: the repository of a Board with one, else its
     /// space; Refresh says when the pull requests were read, or what went
     /// wrong; no pill (each repository's header has its own). Its ⋯ menu
-    /// picks the space, opens Board Settings, then the column's items.
-    func testTheBoardColumnsHeaderNamesWhatItShowsAndItsMenuPicksTheSpace() throws {
+    /// opens Board Settings, then has the column's items: no space to pick,
+    /// a Board shows its workspace's.
+    func testTheBoardColumnsHeaderNamesWhatItShows() throws {
         let board = BoardColumnView(frame: NSRect(x: 0, y: 0, width: 700, height: 400))
-        var picked: [String] = []
         var settingsOpened = 0
-        board.onSelectSpace = { picked.append($0) }
         board.onBoardSettings = { settingsOpened += 1 }
         let stages = BoardStagesView.Content(
             header: BoardStagesView.Header(name: "Board", color: .systemGreen, summary: "1 task"), order: .sidebar, sections: [], now: 0
         )
-        var header = BoardColumnView.Header(
-            spaceName: "Board", repository: "acme/widgets", status: "Updated 21:14",
-            spaces: [.init(id: "a", name: "Board"), .init(id: "b", name: "Tools")], spaceID: "a"
-        )
+        var header = BoardColumnView.Header(spaceName: "Board", repository: "acme/widgets", status: "Updated 21:14")
         board.show(header: header, stages: stages)
         XCTAssertEqual(board.header.context, "acme/widgets")
         XCTAssertEqual(board.header.titleToolTip, "Board · Board")
@@ -502,14 +498,10 @@ final class ProjectBoardHeaderTests: XCTestCase {
         XCTAssertEqual(board.stages.content, stages)
 
         let menu = board.header.currentMenu()
-        XCTAssertEqual(menu.items.prefix(2).map(\.title), ["Space", "Board Settings…"])
+        XCTAssertEqual(menu.items.prefix(2).map(\.title), ["Board Settings…", ""])
         XCTAssertEqual(menu.items.suffix(5).map(\.title), ["Move Left", "Move Right", "Cycle Width", "", "Close Column"])
-        let spaces = try XCTUnwrap(menu.items.first?.submenu)
-        XCTAssertEqual(spaces.items.map(\.title), ["Board", "Tools"])
-        XCTAssertEqual(spaces.items.map(\.state), [.on, .off])
-        spaces.performActionForItem(at: 1)
-        XCTAssertEqual(picked, ["b"])
-        menu.performActionForItem(at: 1)
+        XCTAssertFalse(menu.items.contains { $0.submenu != nil }, "no space to pick")
+        menu.performActionForItem(at: 0)
         XCTAssertEqual(settingsOpened, 1)
 
         // Several repositories: the space; what went wrong, under Refresh.
@@ -523,9 +515,5 @@ final class ProjectBoardHeaderTests: XCTestCase {
         header.spaceName = nil
         board.show(header: header, stages: stages)
         XCTAssertEqual(board.header.context, "Deleted space")
-        XCTAssertEqual(board.spaceMenu().items.map(\.title), ["Deleted space", "Board", "Tools"])
-        XCTAssertEqual(board.spaceMenu().items.map(\.state), [.on, .off, .off])
-        board.chooseSpace(id: "b")
-        XCTAssertEqual(picked, ["b", "b"])
     }
 }

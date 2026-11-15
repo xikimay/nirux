@@ -102,12 +102,6 @@ enum BoardStagesClicks {
         return try XCTUnwrap(sections.first { $0.title == title }, "no section “\(title)”: \(sections.map(\.title))", file: file, line: line)
     }
 
-    /// The space the ⋯ menu's Space submenu checks.
-    static func checkedSpace(_ board: ProjectBoardController) -> String? {
-        let checked = board.view.spaceMenu().items.filter { $0.state == .on }
-        return checked.count == 1 ? checked[0].title : nil
-    }
-
     /// Refresh's tooltip says when the Board last read GitHub.
     static func wasUpdated(_ board: ProjectBoardController) -> Bool {
         board.view.refreshButton.toolTip?.hasPrefix("Refresh · Updated ") == true
