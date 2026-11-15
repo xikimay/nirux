@@ -1,7 +1,7 @@
 import AppKit
 
 /// Cup near the trailing end of the main window's title bar (left of the
-/// Claude usage limits and the New / Board / Search buttons) while Nirux
+/// Claude usage limits) while Nirux
 /// keeps the Mac awake (see
 /// `KeepAwakeController`); the tooltip says why. The rest of the time it
 /// takes no room: the controller's `isHidden` only works for top and

@@ -75,6 +75,16 @@ extension NiruxShellView {
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.update(profiles: profileInfos, workspaces: infos)
+        // The command bar: the agents waiting for the user in every space,
+        // the space on screen as its cards say, the others off their columns.
+        let shown = Set(visibleIndices)
+        let waitingHere = infos.reduce(0) { count, info in count + info.columns.filter { $0.attention == .waiting }.count }
+        let waitingElsewhere = workspaces.indices.filter { !shown.contains($0) }.reduce(0) { count, index in
+            count + workspaces[index].columns.filter { column in
+                Self.attention(of: column, foregroundProcesses: foregroundProcesses, missionQuestions: missionQuestions, now: now) == .waiting
+            }.count
+        }
+        updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: waitingHere + waitingElsewhere)
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)
@@ -264,10 +274,25 @@ extension NiruxShellView {
         missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         now: TimeInterval
     ) -> AttentionSignal? {
+        var signals = workspace.columns.compactMap { column in
+            attention(of: column, foregroundProcesses: foregroundProcesses, missionQuestions: missionQuestions, now: now)
+        }
+        if let notification = workspace.notification { signals.append(notification) }
+        return signals.max()
+    }
+
+    /// What a column of a space not on screen asks of the user, read off the
+    /// column itself (its workspace's attention is the most urgent of its
+    /// columns', and its notification).
+    static func attention(
+        of column: ColumnState,
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
+        missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
+        now: TimeInterval
+    ) -> AttentionSignal? {
         var signals: [AttentionSignal] = []
-        for column in workspace.columns {
-            if missionQuestions[ObjectIdentifier(column)]?.handOff != nil { signals.append(.waiting) }
-            guard let pty = column.pty else { continue }
+        if missionQuestions[ObjectIdentifier(column)]?.handOff != nil { signals.append(.waiting) }
+        if let pty = column.pty {
             let status = pty.cachedAgentState
             if let wait = pty.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(column)]),
                wait.reason.signal != .waiting || status != .working {
@@ -275,7 +300,6 @@ extension NiruxShellView {
             }
             if status == .needsAttention { signals.append(AttentionSignal.of(pty.agentAttentionReason)) }
         }
-        if let notification = workspace.notification { signals.append(notification) }
         return signals.max()
     }
 

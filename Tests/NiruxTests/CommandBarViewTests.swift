@@ -108,7 +108,6 @@ final class CommandBarViewTests: XCTestCase {
         }
         XCTAssertTrue(press(bar.searchButton).map(CommandPalette.isSearchButtonPress) == true)
         XCTAssertTrue(press(bar.taskButton).map(CommandPalette.isSearchButtonPress) == false)
-        XCTAssertNotEqual(bar.searchButton.identifier, TitleBarActions.searchButtonID, "its own identifier")
     }
 
     /// VoiceOver finds the four segments, named, and nothing else: it reads

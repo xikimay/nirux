@@ -69,6 +69,12 @@ struct ShellSideEffects {
     /// Nirux is the app in front. Tests set it: an xctest never is.
     var appIsActive: @MainActor () -> Bool = { NSApp.isActive }
 
+    /// Pops `menu` up at `point` in `view` (a test's own records it: a
+    /// real pop-up waits for the user).
+    var popUpMenu: @MainActor (_ menu: NSMenu, _ point: NSPoint, _ view: NSView) -> Void = { menu, point, view in
+        menu.popUp(positioning: nil, at: point, in: view)
+    }
+
     /// Whether any of the window shows on screen: not minimized, not
     /// covered, its display not asleep.
     var windowShows: @MainActor (NSWindow?) -> Bool = { $0?.occlusionState.contains(.visible) ?? false }

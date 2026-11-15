@@ -6,9 +6,9 @@ import AppKit
 /// window's reset. While the option is off or nothing is known it takes
 /// no room: the controller's `isHidden` only works for top and bottom
 /// accessories, so the view hides and shrinks to nothing itself.
-/// It sits left of the title bar's buttons (`TitleBarActions`): the cup,
-/// which comes and goes with every turn, appears to its left without
-/// moving it.
+/// First of the trailing accessories, it keeps the window's edge, at the
+/// right end of the toolbar (`CommandBarToolbar`): the cup, which comes and
+/// goes with every turn, appears to its left without moving it.
 final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     private static let height: CGFloat = 22
     private static let padding: CGFloat = 6

@@ -345,9 +345,8 @@ final class CommandPalette: NSObject {
         }
     }
 
-    /// The buttons that open the palette: the title bar's Search
-    /// (`TitleBarActions`), the command bar's search segment.
-    static let searchButtonIDs: Set<NSUserInterfaceItemIdentifier> = [TitleBarActions.searchButtonID, CommandBarView.searchButtonID]
+    /// The buttons that open the palette: the command bar's search segment.
+    static let searchButtonIDs: Set<NSUserInterfaceItemIdentifier> = [CommandBarView.searchButtonID]
 
     /// A press on a button that opens the palette while it shows: it
     /// closes the palette here, on mouse-down, and is consumed, or the button
