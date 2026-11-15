@@ -515,14 +515,18 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog's answer")
         at = try turn(keys: [("\r", 3), ("and add a test", 3.5)], dialog: true)
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "typed while its tool runs")
+        // An approval takes keys until Enter, Esc, Ctrl-C or a number answers
+        // it: a paste or text in one write is its own (it drops them), Down
+        // moves. A key after its answer may be at the prompt: refused, the
+        // safe side (the user answers at the terminal or with Reply…).
         at = try turn(keys: [("\u{1B}[200~and add a test\u{1B}[201~", 3)], dialog: true)
-        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste, whatever a dialog waits for")
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste is the dialog's")
         at = try turn(keys: [("ok", 3)], dialog: true)
-        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "text in one write")
-        // Several keys into a dialog may leave one at the prompt: refused,
-        // the safe side (the user answers at the terminal or with Reply…).
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "text in one write too")
         at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
-        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a dialog answered with keys")
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "moved through, then answered")
+        at = try turn(keys: [("2", 3), ("\r", 3.2)], dialog: true)
+        XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a key after its answer")
         // Its terminal still draws: a Stop hook's continuation at work.
         at = try ended()
         machine.noteRead(now: Date(timeIntervalSince1970: at + 2))
@@ -1628,7 +1632,8 @@ final class TurnEndClassificationTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertFalse(wheelPty.typeQuickAnswer("yes\r", to: wheelRequest.turnEndedAt, foreground: claude), "a wheel scroll's arrows")
 
-        // Pasted while a dialog waited: text, not the dialog's answer.
+        // Pasted while a dialog waited: the dialog took it (an option's
+        // text), not the prompt.
         let (_, _, dialogColumn, _, _) = try turnEndColumn()
         let dialogPty = try XCTUnwrap(dialogColumn.pty)
         _ = dialogPty.applyAgentHook(event(.permissionRequest, at: 6, tool: "Bash"), isUserFocused: false)
@@ -1636,7 +1641,7 @@ final class TurnEndClassificationTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         _ = dialogPty.applyAgentHook(event(.postToolUse, at: 7, tool: "Bash"), isUserFocused: false)
         let later = try XCTUnwrap(dialogPty.applyAgentHook(event(.stop, at: 8, message: asks), isUserFocused: false).turnEnd)
-        XCTAssertFalse(dialogPty.typeQuickAnswer("yes\r", to: later.turnEndedAt, foreground: claude), "a paste during a dialog")
+        XCTAssertTrue(dialogPty.typeQuickAnswer("yes\r", to: later.turnEndedAt, foreground: claude), "a paste during a dialog")
     }
 
     /// Measured in a real ghostty surface (alternate screen, no mouse
@@ -1644,11 +1649,11 @@ final class TurnEndClassificationTests: XCTestCase {
     /// "ESC[B". Those count; terminal replies and mouse reports don't.
     func testWheelArrowsAreTheOnlyEscapesThatCount() {
         for arrows in ["\u{1B}[A", "\u{1B}[A\u{1B}[A\u{1B}[A", "\u{1B}[B", "\u{1B}OA", "\u{1B}OB\u{1B}OB"] {
-            XCTAssertTrue(PtySession.isUpDownArrows(Data(arrows.utf8)), arrows.debugDescription)
+            XCTAssertTrue(AgentStatusMachine.isUpDownArrows(Data(arrows.utf8)), arrows.debugDescription)
         }
         for other in ["", "\u{1B}[I", "\u{1B}[O", "\u{1B}[C", "\u{1B}[D", "\u{1B}[<64;10;5M", "\u{1B}[A\u{1B}[I",
                       "\u{1B}[?62;22c", "A", "\u{1B}[AB"] {
-            XCTAssertFalse(PtySession.isUpDownArrows(Data(other.utf8)), other.debugDescription)
+            XCTAssertFalse(AgentStatusMachine.isUpDownArrows(Data(other.utf8)), other.debugDescription)
         }
     }
 
