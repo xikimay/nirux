@@ -1164,6 +1164,183 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(view.pointerLocation(), "a Board that isn't on screen doesn't hear the pointer: it asks for none")
     }
 
+    // MARK: - The keyboard
+
+    private func type(_ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], on view: NSView) throws {
+        try BoardStagesClicks.type(characters, code, flags, on: view)
+    }
+
+    /// With Full Keyboard Access, Tab stops on each line and each "Merged
+    /// today" entry, in the Board's order; Space or Return opens the task,
+    /// Control-Return shows the menu. Without it, they aren't stops.
+    func testTheKeyboardReachesEachLineAndEntry() throws {
+        BoardStagesKeyboard.isFullAccess = { true }
+        defer { BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled } }
+        var withMenu = line("b")
+        withMenu.menu = [.openWorktree(path: "/p/b", title: "b")]
+        let merged = [BoardStages.Merged(lineID: "a", title: "Fix 7", number: 7, mergedAt: now - 60, cleanUp: .offered)]
+        let view = board(content([section(units: tasks([line("a"), withMenu]), merged: merged)]))
+        view.layoutSubtreeIfNeeded()
+        let end = NSView()
+        view.keyLoopEnd = end
+        // The loop: the order switch first, the lines in their order, then the entries, back to the column.
+        let walk = { () -> [NSView] in
+            var loop: [NSView] = []
+            var next: NSView? = view.orderSwitch
+            while let current = next, loop.count < 50 {
+                loop.append(current)
+                next = current === end ? nil : current.nextKeyView
+            }
+            return loop
+        }
+        // Linked again on each change: a line that comes, one that goes, a fold unfolded.
+        view.show(content([section(units: tasks([line("c"), line("a")]), withoutTask: tasks([line("p")]), merged: merged)]))
+        let lineIDs = { walk().compactMap { ($0 as? BoardStagesLineView)?.line.id } }
+        XCTAssertEqual(lineIDs(), ["c", "a"], "folded: no stop")
+        view.foldButton(section: "nirux")?.performClick(nil)
+        XCTAssertEqual(lineIDs(), ["c", "a", "p"])
+        view.show(content([section(units: tasks([line("a"), withMenu]), merged: merged)]))
+        view.layoutSubtreeIfNeeded()
+        let loop = walk()
+        XCTAssertTrue(loop.first === view.orderSwitch && loop.last === end)
+        XCTAssertTrue(loop.contains { $0 === view.leadButton })
+        XCTAssertEqual(loop.compactMap { ($0 as? BoardStagesLineView)?.line.id }, ["a", "b"])
+        let entry = try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first)
+        let lastLine = try XCTUnwrap(loop.lastIndex { $0 is BoardStagesLineView })
+        XCTAssertGreaterThan(try XCTUnwrap(loop.firstIndex { $0 === entry }), lastLine, "\"Merged today\" after the lines")
+
+        let a = view.lineViews[0], b = view.lineViews[1]
+        XCTAssertTrue(a.canBecomeKeyView)
+        XCTAssertTrue(entry.canBecomeKeyView)
+        var opened: [String] = []
+        var linked: [String] = []
+        view.onOpen = { opened.append($0) }
+        view.onLink = { section, line, link in linked.append("\(section) \(line) \(link.title)") }
+        try type(" ", 49, on: a)
+        try type("\r", 36, on: a)
+        XCTAssertEqual(opened, ["a", "a"], "Space or Return: as a click")
+        var popped: [String] = []
+        b.popUp = { menu, _, _ in popped = menu.items.map(\.title) }
+        try type("\r", 36, .control, on: b)
+        XCTAssertEqual(popped, ["Open"], "Control-Return: its menu")
+        XCTAssertEqual(opened.count, 2)
+        // An entry: Space opens its task; Control-Return offers Clean up, which acts as its link.
+        try type(" ", 49, on: entry)
+        XCTAssertEqual(opened, ["a", "a", "a"])
+        var entryMenu: NSMenu?
+        entry.popUp = { menu, _, _ in entryMenu = menu }
+        try type("\r", 36, .control, on: entry)
+        XCTAssertEqual(entryMenu?.items.map(\.title), ["Clean up"])
+        entryMenu?.performActionForItem(at: 0)
+        XCTAssertEqual(linked, ["nirux a Clean up"])
+
+        // A key held down opens once, as it comes up: its repeats land on the line, not in the task's terminal.
+        a.keyDown(with: try BoardStagesClicks.key("\r", 36))
+        a.keyDown(with: try BoardStagesClicks.key("\r", 36, isARepeat: true))
+        XCTAssertEqual(opened.count, 3, "nothing yet")
+        a.keyUp(with: try BoardStagesClicks.key("\r", 36, up: true))
+        XCTAssertEqual(opened.count, 4)
+        // A key that went down elsewhere (a terminal) and comes up here does nothing; nor one that went down
+        // before the line or the entry lost the keyboard.
+        a.keyUp(with: try BoardStagesClicks.key("\r", 36, up: true))
+        for view in [a, entry] as [NSView] {
+            view.keyDown(with: try BoardStagesClicks.key(" ", 49))
+            XCTAssertTrue(view.resignFirstResponder())
+            view.keyUp(with: try BoardStagesClicks.key(" ", 49, up: true))
+        }
+        XCTAssertEqual(opened.count, 4)
+        // A click doesn't take the keyboard (from a terminal): a line or a button takes it from the keyboard only.
+        let press = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+            clickCount: 1, pressure: 1
+        ))
+        BoardStagesKeyboard.currentEvent = { press }
+        XCTAssertFalse(a.acceptsFirstResponder)
+        XCTAssertFalse(entry.acceptsFirstResponder)
+        XCTAssertFalse(view.leadButton.acceptsFirstResponder)
+        BoardStagesKeyboard.currentEvent = { nil }
+        defer { BoardStagesKeyboard.currentEvent = { NSApp.currentEvent } }
+        XCTAssertTrue(view.leadButton.acceptsFirstResponder)
+        // An entry that can do nothing (its task not open here, nothing to clean up) is no stop.
+        view.show(content([section(units: tasks([line("a"), withMenu]), merged: [
+            BoardStages.Merged(lineID: nil, title: "Fix 8", number: 8, mergedAt: now - 60)
+        ])]))
+        XCTAssertFalse(try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first).canBecomeKeyView)
+
+        // Without Full Keyboard Access: no stop, as any control.
+        BoardStagesKeyboard.isFullAccess = { false }
+        XCTAssertFalse(a.canBecomeKeyView)
+        XCTAssertFalse(entry.canBecomeKeyView)
+    }
+
+    /// The line the keyboard reaches scrolls into sight; one that goes
+    /// hands the keyboard to the line now in its place, else to the column;
+    /// "+12 more" pressed from the keyboard hands it to the first entry it
+    /// showed that takes it.
+    func testTheKeyboardStaysWhereTheUserCanSeeIt() throws {
+        BoardStagesKeyboard.isFullAccess = { true }
+        BoardStagesKeyboard.currentEvent = { nil }
+        defer {
+            BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+            BoardStagesKeyboard.currentEvent = { NSApp.currentEvent }
+        }
+        let ids = (0..<30).map { "t\($0)" }
+        let merged = (1...30).map { BoardStages.Merged(lineID: "t0", title: "Fix \($0)", number: $0, mergedAt: now - Double($0) * 60) }
+        let view = board(content([section(units: tasks(ids.map { line($0) }), merged: merged)]))
+        let window = try XCTUnwrap(view.window)
+        // In a column, as on the Board.
+        let column = KeyColumn(frame: view.frame)
+        window.contentView = column
+        column.addSubview(view)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(view.scrollView.contentView.bounds.minY, 0)
+        let far = try XCTUnwrap(view.lineViews.last)
+        XCTAssertTrue(window.makeFirstResponder(far))
+        XCTAssertGreaterThan(view.scrollView.contentView.bounds.minY, 0, "scrolled into sight")
+        let clip = view.scrollView.contentView
+        let farInClip = clip.convert(far.bounds, from: far)
+        XCTAssertTrue(clip.bounds.contains(farInClip), "the whole line in sight: \(clip.bounds) \(farInClip)")
+
+        // The pointer away, the line that has the keyboard goes: the line now in its place takes it.
+        let held = view.lineViews[5]
+        XCTAssertTrue(window.makeFirstResponder(held))
+        let kept = ids.filter { $0 != "t5" }
+        view.show(content([section(units: tasks(kept.map { line($0) }), merged: merged)]))
+        XCTAssertEqual((window.firstResponder as? BoardStagesLineView)?.line.id, "t6")
+        // The last one goes: the line now last takes it.
+        XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(view.lineViews.last)))
+        view.show(content([section(units: tasks(kept.dropLast().map { line($0) }), merged: merged)]))
+        XCTAssertEqual((window.firstResponder as? BoardStagesLineView)?.line.id, "t28")
+
+        // "+N more" from the keyboard, in sight once it has it: the first entry it shows that takes the keyboard
+        // takes it.
+        // The first two it would show merged in tasks not open here (a teammate's): no stops.
+        let shown = try XCTUnwrap(view.mergedView(section: "nirux")).entries.filter { !$0.isHidden }.count
+        let teammates = merged.map { entry -> BoardStages.Merged in
+            var entry = entry
+            if (shown..<shown + 2).contains(entry.number - 1) { entry.lineID = nil }
+            return entry
+        }
+        view.show(content([section(units: tasks(kept.dropLast().map { line($0) }), merged: teammates)]))
+        let mergedView = try XCTUnwrap(view.mergedView(section: "nirux"))
+        XCTAssertFalse(mergedView.moreButton.isHidden)
+        XCTAssertEqual(mergedView.entries.filter { !$0.isHidden }.count, shown)
+        XCTAssertTrue(window.makeFirstResponder(mergedView.moreButton))
+        XCTAssertTrue(clip.bounds.contains(clip.convert(mergedView.moreButton.bounds, from: mergedView.moreButton)))
+        mergedView.moreButton.performClick(nil)
+        XCTAssertEqual((window.firstResponder as? BoardStagesMergedEntryView)?.pullRequest.number, shown + 3)
+
+        // No line left to take it: the column has it.
+        XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(view.lineViews.first)))
+        view.show(content([section(units: [], merged: merged)]))
+        XCTAssertTrue(window.firstResponder === column)
+    }
+
+    /// The Board's column, which takes the keyboard.
+    private final class KeyColumn: NSView {
+        override var acceptsFirstResponder: Bool { true }
+    }
+
     /// A line held in place once its task is gone: a click on it says so
     /// (the shell focuses the workspace where it went, else says it was
     /// closed); a pull request's without a task says nothing.
@@ -1194,6 +1371,17 @@ final class BoardStagesViewTests: XCTestCase {
         // Its station offers nothing, its link neither.
         try press(task, at: BoardStagesView.Columns(width: 940).stations[3])
         XCTAssertEqual(gone, ["t", "t"], "the whole line says it")
+        // No Tab stop; Space, where it had the keyboard before it departed: the same.
+        BoardStagesKeyboard.isFullAccess = { true }
+        BoardStagesKeyboard.currentEvent = { nil }
+        defer {
+            BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+            BoardStagesKeyboard.currentEvent = { NSApp.currentEvent }
+        }
+        XCTAssertFalse(task.canBecomeKeyView)
+        XCTAssertTrue(try XCTUnwrap(view.lineViews.first { $0.line.id == "u" }).canBecomeKeyView)
+        try BoardStagesClicks.type(" ", 49, on: task)
+        XCTAssertEqual(gone, ["t", "t", "t"])
     }
 
     func testNothingMovesUnderThePointer() throws {
