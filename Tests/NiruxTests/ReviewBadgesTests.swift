@@ -180,18 +180,33 @@ final class ReviewBadgesTests: XCTestCase {
             note([end], column)
             XCTAssertEqual(running(), [], "\(end.name)")
         }
-        // Run in the background: its Stop lists a subagent at work; it waits for a Stop that lists none, idle or a failure meanwhile
-        // ending nothing; a permission asked mid-review is no end either.
-        var listing = stop
-        listing.backgroundAgents = ["a8216c90441fb4bd9"]
-        var listingNone = stop
-        listingNone.backgroundAgents = []
-        note([event(.postToolUse, ["codeReview"], nil, nil), event(.notification, nil, nil, "permission_prompt"), listing], column)
+        // Run in the background: its Stop lists subagents at work; it waits for those, each gone at its SubagentStop or at a later
+        // Stop that no longer lists it, whichever comes first (a lost SubagentStop can't keep it). One listed later, idle, a failed
+        // turn or a permission asked meanwhile change nothing.
+        let listing = { (ids: [String]) in
+            var made = stop
+            made.backgroundAgents = ids
+            return made
+        }
+        note([event(.postToolUse, ["codeReview"], nil, nil), event(.notification, nil, nil, "permission_prompt"), listing(["a1", "a2"])],
+             column)
         XCTAssertEqual(running(), ["codeReview A"])
-        note([event(.notification, nil, nil, "idle_prompt"), event(.stopFailure, nil, nil, nil), listing], column)
+        note([event(.subagentStop, nil, "a1", nil)], column)
+        XCTAssertEqual(running(), ["codeReview A"], "a2 still at work")
+        // a2 at work, another column's Stop listing none: neither ends the wait.
+        note([event(.postToolUse, nil, "a2", nil)], column)
+        note([listing([])], other)
         XCTAssertEqual(running(), ["codeReview A"])
-        note([listingNone], column)
-        XCTAssertEqual(running(), [], "a Stop listing no subagent")
+        note([event(.notification, nil, nil, "idle_prompt"), event(.stopFailure, nil, nil, nil), listing(["a2", "a3"])], column)
+        XCTAssertEqual(running(), ["codeReview A"])
+        note([listing(["a3"])], column)
+        XCTAssertEqual(running(), [], "a2 no longer listed, its SubagentStop lost; a3 isn't its own")
+        note([event(.postToolUse, ["codeReview"], nil, nil), listing(["a1", "a2"]), event(.subagentStop, nil, "a1", nil)], column)
+        XCTAssertEqual(running(), ["codeReview A"])
+        note([event(.subagentStop, nil, "a2", nil)], column)
+        XCTAssertEqual(running(), [], "both stopped")
+        note([event(.postToolUse, ["codeReview"], nil, nil), listing([])], column)
+        XCTAssertEqual(running(), [], "a Stop listing none ends it")
         // A replayed start says nothing; a replayed end ends all the same (nothing it ends can be newer).
         let replayed = AgentHookEvent(kind: .claude, name: .userPromptSubmit, reviewPasses: ["codeReview"], timestamp: now - 61)
         XCTAssertFalse(workspace.noteReviewPasses(of: replayed, in: column, now: now))

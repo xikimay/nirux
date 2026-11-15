@@ -460,9 +460,11 @@ the Board reads that pass's statuses, approvals and Mission questions.
   failed turn, Claude idle at its prompt); its session's end; the process
   that sent its event exiting (a crash or a quit; a Ctrl-Z leaves it there);
   or its column closing. A review run in the background outlives the turn
-  that started it: a Stop whose `background_tasks` lists a subagent at work
-  (its id, the subagent's `agent_id`) keeps the pass running until a Stop
-  there lists none, which comes once Claude hears the subagent is done. A
+  that started it: a Stop whose `background_tasks` lists subagents at work
+  (their ids are the subagents' `agent_id`) makes the pass wait for those,
+  each gone at its SubagentStop or at a later Stop there that no longer
+  lists it, whichever comes first, so a lost SubagentStop can't keep the
+  pass running (a subagent listed later isn't its own). A
   permission asked mid-review, or a message queued meanwhile, is no end; a
   subagent's events start and end nothing; a pass from before this launch
   isn't running; a running pass reads running on the Board before git gave

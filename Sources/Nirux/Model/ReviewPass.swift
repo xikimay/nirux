@@ -68,9 +68,10 @@ struct RunningPass: Equatable {
     /// The process that sent its event: once the process table no longer
     /// has it, it exited (crashed or quit; a Ctrl-Z leaves it there).
     var emitter: ProcessInstance?
-    /// Its main turn ended while the Stop listed a subagent at work: it
-    /// runs until a Stop there lists none.
-    var waitsOnBackground = false
+    /// Its main turn ended while the Stop listed subagents at work (their
+    /// ids): it runs until each is gone, by its SubagentStop or a later Stop
+    /// there that no longer lists it. Nil while its main turn goes on.
+    var waitingOn: Set<String>?
 }
 
 /// A pass's latest run in a workspace: its HEAD when the pass started.
