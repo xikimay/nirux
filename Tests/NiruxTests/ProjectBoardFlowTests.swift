@@ -589,7 +589,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertFalse(widgets.workspace.columns.contains(where: \.isProjectBoard))
             XCTAssertFalse(widgets.workspace.columns.isEmpty)
             XCTAssertTrue(shell.activeWorkspace === gadgets.workspace)
-            XCTAssertEqual(shell.toast?.message, "This space has its Board already")
+            XCTAssertEqual(shell.toast?.message, "Gadgets has its Board already")
 
             // A Board alone in its workspace leaves a shell there.
             shell.addWorkspace(title: "solo", cwd: root, profileID: third.id)

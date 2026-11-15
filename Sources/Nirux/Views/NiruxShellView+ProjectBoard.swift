@@ -107,17 +107,17 @@ extension NiruxShellView {
     /// unless it has its Board already: then it closes, and the space's
     /// own comes to the front. Call before saving the state.
     func boardsFollowTheirWorkspaces() {
+        // The next sidebar pass draws the one shown.
         for moved in projectBoardLocations where moved.board.projectID != moved.workspace.profileID {
             let space = moved.workspace.profileID
             // As the Boards are now: one moved before this one may have taken the space.
-            guard let existing = projectBoardLocations.first(where: { $0.board !== moved.board && $0.board.projectID == space }) else {
+            if let existing = projectBoardLocation(projectID: space) {
+                closeMovedBoard(moved)
+                focusProjectBoard(existing)
+                showToast("\(profiles.first { $0.id == space }?.name ?? "This space") has its Board already")
+            } else {
                 moved.board.switchProject(to: space)
-                renderProjectBoard(moved.board)
-                continue
             }
-            closeMovedBoard(moved)
-            focusProjectBoard(existing)
-            showToast("This space has its Board already")
         }
     }
 
@@ -125,8 +125,8 @@ extension NiruxShellView {
     /// shell in its folder.
     private func closeMovedBoard(_ location: ProjectBoardLocation) {
         let workspace = location.workspace
-        if workspace.openColumns.count == 1 { workspace.addColumn() }
         guard let index = workspace.columns.firstIndex(where: { $0 === location.column }) else { return }
+        if workspace.openColumns.count == 1 { workspace.addColumn() }
         workspace.closeColumn(at: index)
     }
 

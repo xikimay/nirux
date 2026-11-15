@@ -198,6 +198,8 @@ final class ProjectBoardController {
     func switchProject(to projectID: String) {
         guard projectID != self.projectID else { return }
         self.projectID = projectID
+        // Asked of the space it was opened in only.
+        offersSettings = false
         generation += 1
         schedule.reset()
         loaded = nil
@@ -581,7 +583,7 @@ final class ProjectBoardController {
     /// read yet, no repository set. A message about the settings offers
     /// them under it. Nil: it lists (or lists its worktrees first).
     func bodyMessage(projectExists: Bool) -> (text: String, offersSettings: Bool)? {
-        if !projectExists { return ("This space was deleted. Pick another one in the ⋯ menu above.", false) }
+        if !projectExists { return ("This Board’s space was deleted.", false) }
         if let loaded, loaded.status == .unreadable { return ("board.json can’t be read: open Board Settings… to replace it.", true) }
         // Board Settings can't save it.
         if let loaded, case .readOnly(let reason) = loaded.status, !listsRows { return (reason.message, false) }

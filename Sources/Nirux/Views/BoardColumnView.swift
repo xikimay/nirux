@@ -7,7 +7,9 @@ import AppKit
 /// workspace's space (`NiruxShellView.boardsFollowTheirWorkspaces`).
 @MainActor
 final class BoardColumnView: NSView {
-    /// What names a space that is gone (a queue's notice left after it).
+    /// What names a space that is gone: in the header of a Board whose space
+    /// went another way than `deleteSpace`, and in a queue's notice left
+    /// after it.
     static let deletedSpace = "Deleted space"
 
     struct Header: Equatable {

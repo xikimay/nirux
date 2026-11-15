@@ -168,7 +168,7 @@ Order:
   the base branch as a pill ("nightly 20:27" with a check, a cross or a running
   sign; "nightly: success 20:27, 60e0ff2" in its tooltip), or a red pill with
   what went wrong, and a Refresh button whose tooltip says when the board last
-  read GitHub. Its ⋯ menu holds the project and Board Settings…. The queue
+  read GitHub. Its ⋯ menu holds Board Settings…. The queue
   controls sit on their own line under it.
 - Left for later: Projects' brief preview and pinned URLs (section 7 there).
 

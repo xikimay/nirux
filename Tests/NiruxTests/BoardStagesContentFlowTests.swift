@@ -164,8 +164,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(try stages(of: board, in: shell).header.summary, "1 task", "no repository set: none counted")
             var inputs = shell.stagesInputs(of: board, members: [], workspaces: [], readings: [:], order: .sidebar)
             inputs.space = nil
-            XCTAssertEqual(board.stagesContent(inputs).content.message,
-                           BoardStagesView.Message(text: "This space was deleted. Pick another one in the ⋯ menu above."))
+            XCTAssertEqual(board.stagesContent(inputs).content.message, BoardStagesView.Message(text: "This Board’s space was deleted."))
             XCTAssertEqual(board.stagesContent(inputs).content.header.name, "Deleted space")
         }
     }
@@ -204,20 +203,22 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(start?.title.hasSuffix(" · 1"), false, start?.title ?? "")
             XCTAssertEqual(start?.isEnabled, false)
             XCTAssertEqual(start?.tooltip, "Add pull requests to the queue first.")
-            // A space with that repository and no workspace in a checkout: no section to wear the pill, so the message says
-            // what failed rather than that there is nothing.
+            // A space with that repository and no workspace (a Board's own workspace is one: here the Board is shown the
+            // space by hand): no section to wear the pill, so the message says what failed rather than that there is nothing.
             let empty = shell.workspaceStore.createProfile(named: "Empty")
             try writeConfig(for: empty)
-            shell.switchProjectBoard(board, to: empty.id)
+            let emptyBoard = board
+            emptyBoard.switchProject(to: empty.id)
+            shell.renderProjectBoard(emptyBoard)
             try waitUntil("the read fails again, for that space") {
                 // As a status refresh would, on screen (this window never is).
-                board.tick(onScreen: true)
-                return board.loaded != nil && board.local != nil && board.reads.values.first?.errors.isEmpty == false
+                emptyBoard.tick(onScreen: true)
+                return emptyBoard.loaded != nil && emptyBoard.local != nil && emptyBoard.reads.values.first?.errors.isEmpty == false
             }
             let failedRead = "Couldn’t read acme/widgets on GitHub: \(ProjectBoard.FetchError.notSignedIn(nil).message)"
-            XCTAssertEqual(try stages(of: board, in: shell).message?.text, failedRead)
-            shell.renderProjectBoard(board)
-            XCTAssertEqual(board.view.stages.content?.message?.text, failedRead, "what the column shows")
+            XCTAssertEqual(try stages(of: emptyBoard, in: shell).message?.text, failedRead)
+            shell.renderProjectBoard(emptyBoard)
+            XCTAssertEqual(emptyBoard.view.stages.content?.message?.text, failedRead, "what the column shows")
 
             // Another space, its repository anchored but not saved in Board Settings: read from its remote, read-only.
             let other = shell.workspaceStore.createProfile(named: "Gadgets")

@@ -46,6 +46,12 @@ extension NiruxShellView {
     /// Its shells keep the old NIRUX_PROFILE_ID until they restart.
     func moveWorkspaceToSpace(workspaceID: String, profileID: String) {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+        // Its Board would follow it, and leave its space's running queue to the status bar alone: as the space isn't
+        // deleted then, the workspace doesn't move.
+        let space = workspaces[index].profileID
+        if workspaces[index].columns.contains(where: \.isProjectBoard), mergeQueues(of: space).contains(where: \.isRunning) {
+            return showToast("This space’s merge queue is running: stop it before moving the workspace of its Board")
+        }
         guard workspaceStore.moveWorkspace(at: index, toProfile: profileID) else { return }
         boardsFollowTheirWorkspaces()
         refreshAfterWorkspaceMutation()

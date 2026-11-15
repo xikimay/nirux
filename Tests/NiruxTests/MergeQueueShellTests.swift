@@ -273,6 +273,27 @@ final class MergeQueueShellTests: XCTestCase {
         queue.stop()
     }
 
+    /// Nor does the workspace that holds its Board move: the Board would
+    /// follow it, and leave the queue's line and Stop to the status bar.
+    @MainActor
+    func testTheWorkspaceOfTheBoardOfARunningQueueStays() throws {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        let space = shell.workspaceStore.createProfile(named: "Widgets")
+        let other = shell.workspaceStore.createProfile(named: "Gadgets")
+        shell.addWorkspace(title: "widgets", cwd: root.path, profileID: space.id)
+        let workspace = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
+        // Read nothing: no gh, no Board Settings.
+        workspace.addProjectBoardColumn(shell.makeProjectBoard(projectID: space.id, offersSettings: false))
+        let queue = start(shell, projectID: space.id)
+
+        shell.moveWorkspaceToSpace(workspaceID: workspace.id, profileID: other.id)
+        XCTAssertEqual(workspace.profileID, space.id, "a toast says why (this shell has no window to show it)")
+        queue.stop()
+        shell.moveWorkspaceToSpace(workspaceID: workspace.id, profileID: other.id)
+        XCTAssertEqual(workspace.profileID, other.id, "stopped: it moves, its Board with it")
+        XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [other.id])
+    }
+
     // MARK: - Keep-awake
 
     @MainActor

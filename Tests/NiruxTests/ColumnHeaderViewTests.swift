@@ -445,7 +445,7 @@ final class WebAddressFieldTests: XCTestCase {
 }
 
 /// The Project Board's header: the post-merge run's pill, what went wrong
-/// in its place, the project and Board Settings in ⋯.
+/// in its place, Board Settings in ⋯.
 @MainActor
 final class ProjectBoardHeaderTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)

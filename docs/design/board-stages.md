@@ -689,12 +689,15 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 - **It shows its workspace's space**, with no menu to pick another
   (`NiruxShellView.boardsFollowTheirWorkspaces`). Its workspace moved to
   another space, or its space deleted (its workspaces go to General), it
-  shows that space, its tasks read again; that space's queue stays with
-  it, in the status bar too. A space keeps one Board: one that comes to a
-  space that has its Board closes, and the space's own comes to the front,
-  with a toast; alone in its workspace, it leaves a shell there. A Board an
-  older build saved on another space comes back on its workspace's (the
-  space is still written, for that build).
+  shows that space, its tasks read again. While its space's merge queue
+  runs, the workspace that holds it doesn't move (as the space isn't
+  deleted then): the Board keeps the queue's line and Stop. A space keeps
+  one Board: one that comes to a space that has its Board closes, and the
+  space's own comes to the front, with a toast naming that space; alone in
+  its workspace, it leaves a shell there. A Board an older build saved on
+  another space comes back on its workspace's (the space is still written,
+  for that build); where that space had its Board too, the first one saved
+  stays.
 - **Drawn at each sidebar pass** while the Board is shown, with that pass's
   readings of the tasks (`NiruxShellView.SidebarPassReadings`); between two
   passes (a read landing, a click), with the last pass's, kept by the
@@ -735,7 +738,7 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 - **The column's Refresh and ⋯ are no Tab stops**, as no column header's
   button is: they leave the keyboard to the terminal in every column. The
   Board reads again on its own, and each repository's ⋯ has Board
-  Settings…; the ⋯'s Space menu has no keyboard path.
+  Settings….
 - **Other workspaces offer Focus only**: no agent state and no Resume, which
   the table's row showed; the sidebar shows both. Until the Board has a
   section per repository of the space, where they are lines.
