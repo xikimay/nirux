@@ -60,7 +60,7 @@ final class ProjectBoardController {
         }
 
         /// A check of an open pull request runs: the latest run of each, as
-        /// the Checks column counts them.
+        /// the Checks station counts them.
         var hasPendingChecks: Bool {
             (openPullRequests ?? []).contains { pullRequest in
                 pullRequest.isFromConfiguredRepository

@@ -320,7 +320,7 @@ extension ProjectBoard {
 // MARK: - What the columns say
 
 extension ProjectBoard {
-    /// The checks of a pull request as the Checks column shows them: each
+    /// The checks of a pull request as the Board counts them: each
     /// required check by name, then the others folded.
     struct RequiredCheck: Equatable {
         let name: String

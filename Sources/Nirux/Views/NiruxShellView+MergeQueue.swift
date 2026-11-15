@@ -231,8 +231,8 @@ extension NiruxShellView {
         mergeQueue(projectID: board.projectID, repository: repository).removeFromSelection(number)
     }
 
-    /// Why the queue's list can't change now, if it can't; as the board's
-    /// queue cells say it.
+    /// Why the queue's list can't change now, if it can't; as the Board's
+    /// Merge stations say it.
     private var mergeQueueSelectionBusy: String? {
         if mergeQueueQuit != nil { return "Nirux is stopping the merge queue to quit" }
         if mergeQueueConfirmation != nil { return "The confirmation sheet is open: change the list once it closes" }
@@ -368,7 +368,7 @@ extension NiruxShellView {
         if running.count > 1 { text += " (+\(running.count - 1) other queue\(running.count == 2 ? "" : "s"))" }
         // Stop reaches every running queue, not only the one shown.
         let stopsAll = running.count > 1
-        let project = profiles.first { $0.id == projectID }?.name ?? "Deleted space"
+        let project = profiles.first { $0.id == projectID }?.name ?? BoardColumnView.deletedSpace
         var notice = StatusBarView.QueueNotice(
             text: text,
             isRunning: shown.isRunning,

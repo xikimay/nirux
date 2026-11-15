@@ -106,7 +106,7 @@ final class BoardStagesView: NSView {
         /// longer has.
         let id: String
         var title: String
-        /// Under the pointer: an orphan's repository, as the table says it.
+        /// Under the pointer: an orphan's repository, as the table said it.
         var tooltip: String?
         var status: String
         var tone = QueueTone.working

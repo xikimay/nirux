@@ -63,7 +63,7 @@ extension NiruxShellView {
     /// the Board read: the space, its tasks (`members`, the space's
     /// workspaces in the sidebar's order) with the Lead apart, each
     /// sub-task's parent, each section's queue and the queues that run (the
-    /// table's queue lines), the clean-ups running.
+    /// Board's foot), the clean-ups running.
     func stagesInputs(
         of board: ProjectBoardController, members: [WorkspaceState], workspaces: [ProjectBoard.Workspace],
         readings: [String: BoardStages.TaskReading], order: BoardStages.Order

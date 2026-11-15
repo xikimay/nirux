@@ -110,8 +110,9 @@ final class BoardStagesReadingsTests: XCTestCase {
         info = row([column(0)], pullRequest: pullRequest("MERGED"), cleanup: .available)
         XCTAssertEqual(reading(info).mergedPullRequest, 52)
         XCTAssertEqual(reading(info).mergedPullRequestRepository, GitHubRepository(owner: "acme", name: "widgets"), "from its address")
-        XCTAssertNotEqual(BoardStages.TaskReading.repository(ofPullRequestAt: "https://ghe.example.com/acme/widgets/pull/52"),
-                          GitHubRepository(owner: "acme", name: "widgets"), "another host's acme/widgets is another repository")
+        let enterprise = BoardStages.TaskReading.repository(ofPullRequestAt: "https://ghe.example.com/acme/widgets/pull/52")
+        XCTAssertEqual(enterprise?.host, "ghe.example.com", "another host's address is read too")
+        XCTAssertNotEqual(enterprise, GitHubRepository(owner: "acme", name: "widgets"), "and is another repository")
         XCTAssertEqual(reading(info).cleanUp, .offered)
         XCTAssertEqual(reading(row([column(0)], cleanup: .inProgress)).cleanUp, .running)
         XCTAssertNil(reading(row([column(0)])).cleanUp)
