@@ -31,14 +31,11 @@ final class CommandBarViewTests: XCTestCase {
         XCTAssertEqual(full.detailLabel.stringValue, "· working 12m")
         XCTAssertEqual(full.taskIcon.icon, StateIcon(.working, stage: 1))
         XCTAssertFalse(full.waitingBadge.isHidden)
-        XCTAssertEqual(full.waitingButton.accessibilityLabel(), "2 agents waiting for you, Command J")
-        XCTAssertEqual(full.taskButton.accessibilityLabel(), "Fix checkout rounding, Working, at Code, working 12m")
         full.show(content(waiting: 0))
         full.layoutSubtreeIfNeeded()
         XCTAssertTrue(full.waitingBadge.isHidden && full.waitingButton.isHidden, "nothing waits: no badge")
         let empty = bar(content(waiting: 0, task: nil))
         XCTAssertEqual(empty.taskLabel.stringValue, "Nothing open")
-        XCTAssertEqual(empty.taskButton.accessibilityLabel(), "Nothing open")
         XCTAssertTrue(empty.taskIcon.isHidden)
     }
 
@@ -52,7 +49,16 @@ final class CommandBarViewTests: XCTestCase {
             bar.layoutSubtreeIfNeeded()
             let slots: [(String, NSView)] = [
                 ("detail", bar.detailLabel), ("space name", bar.spaceLabel), ("search key", bar.searchKey),
+                ("waiting key", bar.waitingKey),
             ]
+            func textWidth(_ label: NSTextField) -> CGFloat { ceil(label.attributedStringValue.size().width) + 4 }
+            if !bar.detailLabel.isHidden {
+                XCTAssertGreaterThanOrEqual(bar.detailLabel.frame.width, textWidth(bar.detailLabel), "a shown detail is whole at \(width) pt")
+            }
+            if !bar.detailLabel.isHidden || !bar.spaceLabel.isHidden {
+                XCTAssertGreaterThanOrEqual(bar.taskLabel.frame.width, min(textWidth(bar.taskLabel), 120) - 0.5,
+                                            "the title keeps its floor before anything gives way, at \(width) pt")
+            }
             for (name, view) in slots where view.isHidden && hiddenAt[name] == nil { hiddenAt[name] = CGFloat(width) }
             for (name, view) in slots where hiddenAt[name] != nil {
                 XCTAssertTrue(view.isHidden, "\(name) came back at \(width) pt")
@@ -72,6 +78,8 @@ final class CommandBarViewTests: XCTestCase {
         let key = try XCTUnwrap(hiddenAt["search key"], "the search's key never went")
         XCTAssertGreaterThan(detail, name, "the detail goes before the space's name")
         XCTAssertGreaterThan(name, key, "the space's name goes before the search's key")
+        let waitingKey = try XCTUnwrap(hiddenAt["waiting key"], "the waiting count's key never went")
+        XCTAssertGreaterThan(key, waitingKey, "the search's key goes before the waiting count's key")
     }
 
     /// Each segment acts on its own.
@@ -84,7 +92,20 @@ final class CommandBarViewTests: XCTestCase {
         bar.onWaiting = { pressed.append("waiting") }
         for button in [bar.spaceButton, bar.taskButton, bar.searchButton, bar.waitingButton] { button.performClick(nil) }
         XCTAssertEqual(pressed, ["space", "task", "search", "waiting"])
-        XCTAssertEqual(bar.spaceButton.accessibilityLabel(), "Space: Acme")
-        XCTAssertEqual(bar.searchButton.accessibilityLabel(), "Search, Command P")
+    }
+
+    /// VoiceOver finds the four segments, named, and nothing else: it reads
+    /// what AppKit exposes (a control's cell), not the controls' own labels.
+    func testVoiceOverFindsFourNamedSegments() {
+        func spoken(_ bar: CommandBarView) -> [String] {
+            NSAccessibility.unignoredChildren(from: bar.accessibilityChildren() ?? []).map { element in
+                (element as? NSCell)?.accessibilityLabel() ?? (element as? NSView)?.accessibilityLabel() ?? "?"
+            }
+        }
+        XCTAssertEqual(spoken(bar(content())), [
+            "Space: Acme", "Fix checkout rounding, Working, at Code, working 12m",
+            "Search, Command P", "2 agents waiting for you, Command J",
+        ])
+        XCTAssertEqual(spoken(bar(content(waiting: 0, task: nil))), ["Space: Acme", "Nothing open", "Search, Command P"])
     }
 }

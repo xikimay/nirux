@@ -176,6 +176,13 @@ final class NiruxButton: NSButton {
         layer?.cornerRadius = newSize.height / 2
     }
 
+    /// VoiceOver reads the cell, not the control: what the button is called
+    /// goes to both.
+    override func setAccessibilityLabel(_ label: String?) {
+        super.setAccessibilityLabel(label)
+        cell?.setAccessibilityLabel(label)
+    }
+
     /// The keyboard focus ring follows the capsule.
     override var focusRingMaskBounds: NSRect { bounds }
 

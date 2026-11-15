@@ -19,6 +19,7 @@ final class CountBadge: NSView {
         label.alignment = .center
         // Its host says how many wait, in words.
         label.setAccessibilityElement(false)
+        label.cell?.setAccessibilityElement(false)
         setAccessibilityElement(false)
         addSubview(label)
     }

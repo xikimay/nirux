@@ -17,6 +17,7 @@ final class KeyCap: NSView {
         label.alignment = .center
         // Its host says the shortcut, in words.
         label.setAccessibilityElement(false)
+        label.cell?.setAccessibilityElement(false)
         setAccessibilityElement(false)
         addSubview(label)
     }

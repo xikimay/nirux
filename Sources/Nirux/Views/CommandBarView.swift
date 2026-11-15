@@ -94,7 +94,10 @@ final class CommandBarView: NSView {
             label.setAccessibilityElement(false)
         }
         for view: NSView in [spaceChip, spaceLabel, spaceChevron, taskIcon, taskLabel, detailLabel, searchIcon, searchKey, waitingBadge, waitingKey] {
+            // The segments' buttons say it all; VoiceOver reads a control's
+            // cell, so the cells go quiet too.
             view.setAccessibilityElement(false)
+            (view as? NSControl)?.cell?.setAccessibilityElement(false)
             host.addSubview(view)
         }
         for _ in 0..<3 {
