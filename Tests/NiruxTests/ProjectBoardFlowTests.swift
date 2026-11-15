@@ -757,6 +757,73 @@ final class ProjectBoardFlowTests: XCTestCase {
     /// A queue still running on the repository Board Settings just replaced
     /// keeps its line at the Board's foot, with its Stop, named after its
     /// repository; the repository's header shows the Board's own queue.
+    /// A workspace in a repository that isn't one of the space's: that
+    /// repository's section, read-only, after the space's; a second clone of
+    /// the space's repository stays in its section. The section goes with
+    /// the repository's last workspace, and is no longer read-only once the
+    /// repository is the space's.
+    @MainActor
+    func testEachRepositoryOfAWorkspaceHasItsSection() throws {
+        let client = FakeGitHub(openPullRequests: "[]", runs: "[]")
+        try withShell(client: client) { shell, space in
+            let widgets = root + "/widgets", copy = root + "/widgets-copy", gadgets = root + "/gadgets"
+            try BoardConfigSuggestionsTests.makeRepository(at: widgets, remote: "https://github.com/acme/widgets.git")
+            // Through an SSH host alias: the same repository, by owner and name.
+            try BoardConfigSuggestionsTests.makeRepository(at: copy, remote: "git@github-work:acme/widgets.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
+            var widgetsAnchor = try XCTUnwrap(FolderIdentity.identify(widgets, timeout: 10)).anchor
+            widgetsAnchor.isDefault = true
+            // Without settings: the anchor's section reads its remote, and takes the clone by it all the same.
+            XCTAssertTrue(shell.workspaceStore.setAnchors([widgetsAnchor], forProfile: space.id))
+            shell.addWorkspace(title: "widgets", cwd: widgets, profileID: space.id)
+            shell.addWorkspace(title: "copy", cwd: copy, profileID: space.id)
+            shell.addWorkspace(title: "gadget", cwd: gadgets, profileID: space.id)
+            try select("widgets", in: shell)
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            let titles = { board.view.stages.content?.sections.map(\.title) ?? [] }
+            let section = { (title: String) in board.view.stages.content?.sections.first { $0.title == title } }
+            try waitUntil("gadgets' section is read from its remote") {
+                board.tick(onScreen: true)
+                shell.renderProjectBoard(board)
+                return section("gadgets")?.status?.text == "Read-only"
+            }
+            XCTAssertEqual(titles(), ["widgets", "gadgets"])
+            let lineTitles = { (title: String) in section(title)?.lines.units.flatMap(\.lines).map(\.title) ?? [] }
+            XCTAssertEqual(lineTitles("widgets"), ["widgets", "copy"], "the second clone of the space's repository stays there")
+            XCTAssertEqual(lineTitles("gadgets"), ["gadget"])
+            XCTAssertFalse(section("gadgets")?.menu.contains(.boardSettings) ?? true)
+            XCTAssertEqual(board.view.header.context, "acme/widgets", "a Board with one repository of its own")
+
+            // Its last workspace closed: the section goes.
+            shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "gadget" }))
+            try waitUntil("gadgets' section goes") {
+                board.expireWorktrees()
+                board.tick(onScreen: true)
+                shell.renderProjectBoard(board)
+                return titles() == ["widgets"]
+            }
+
+            // Back, then made one of the space's repositories: no longer read-only, Board Settings… offered there.
+            shell.addWorkspace(title: "gadget", cwd: gadgets, profileID: space.id)
+            try select("widgets", in: shell)
+            try waitUntil("gadgets' section is back") {
+                board.expireWorktrees()
+                board.tick(onScreen: true)
+                shell.renderProjectBoard(board)
+                return section("gadgets")?.status?.text == "Read-only"
+            }
+            let gadgetsAnchor = try XCTUnwrap(FolderIdentity.identify(gadgets, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.setAnchors([widgetsAnchor, gadgetsAnchor], forProfile: space.id))
+            try waitUntil("gadgets is the space's repository") {
+                board.tick(onScreen: true)
+                shell.renderProjectBoard(board)
+                return section("gadgets")?.status?.text == "No settings"
+            }
+            XCTAssertEqual(section("gadgets")?.menu.contains(.boardSettings), true)
+        }
+    }
+
     @MainActor
     func testAQueueLeftOnAnotherRepositoryKeepsItsStop() throws {
         try withShell(client: makeClient()) { shell, space in

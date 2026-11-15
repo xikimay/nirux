@@ -1,7 +1,7 @@
 # Board Stages
 
 > **Design record:** in progress. The Board's column shows the stages of its workspace's space, a section for each of its repositories.\
-> **Differs today:** a repository that isn't one of the space's is read-only, without a merge queue (section 8).\
+> **Differs today:** a repository that isn't one of the space's is read-only, without a merge queue (section 5, Known limits).\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design validated by the user on 2026-11-11 (study D). The model
@@ -340,7 +340,7 @@ clicked. The sizes are the mockup's.
   Retarget), no Board Settings…; its lines count in the space's header. A
   workspace in no repository is a line under "No repository".
 - **Other workspaces** remain only as a fallback: a workspace in a
-  repository that no section has yet (before its listing lands) is one
+  repository git gave no common dir for, so no section can take it, is one
   fold after the repositories, in a repository header's place and type,
   "▸ Other workspaces · N", each entry its folder and Focus on the most
   urgent agent there. Each task is in one place.
@@ -401,8 +401,9 @@ read. Pure; nothing is read again.
   is a pull request without a task: after the tasks, in the rows' order, once,
   named by its title. A main checkout or a worktree with neither is no line.
   The Lead's linked worktree is listed first under "Other worktrees", with
-  Focus; the worktrees of another repository with workspaces of the space are
-  "Other workspaces" (`BoardStages.otherWorkspaces`).
+  Focus. Another repository with workspaces of the space has its own
+  section (section 5); one no section can take is under "Other
+  workspaces" (`BoardStages.otherWorkspaces`).
 - **A task says what its sidebar row read**: what its agents do, its reviews,
   its texts. One the sidebar hasn't read yet is a line at rest. What the
   sidebar read of git in another worktree (the task's focused column is

@@ -97,6 +97,9 @@ final class ProjectBoardController {
     /// listed them: a read-only section each, after the anchors' (no Board
     /// Settings, no merge queue), so every repository of the space shows.
     private(set) var extraRepositories: [SpaceAnchor] = []
+    /// The sections `extraRepositories` made at the last `apply`: the ids
+    /// of the read-only ones (one made an anchor since isn't).
+    private var extraIDs: Set<String> = []
     /// Each section's name, by id, told apart when two share one.
     private(set) var displayNames: [String: String] = [:]
     private(set) var local: ProjectBoard.LocalSnapshot?
@@ -160,7 +163,7 @@ final class ProjectBoardController {
 
     /// The section with this id; with nil, the board's only section.
     func section(id: String?) -> BoardSections.Section? {
-        guard let id else { return sections.count == 1 ? sections.first : nil }
+        guard let id else { return soleSection }
         return sections.first { $0.id == id }
     }
 
@@ -179,20 +182,28 @@ final class ProjectBoardController {
     /// The configured repository of a board with one section: what the
     /// column header names. Nil with several, or none.
     var repository: (name: String, gitHub: GitHubRepository)? {
-        guard sections.count == 1, let only = sections.first else { return nil }
+        guard let only = soleSection else { return nil }
         return repository(of: only)
+    }
+
+    /// The one section that isn't a read-only one of another repository
+    /// (`isExtra`), where it is the only one: a Board "with one repository".
+    var soleSection: BoardSections.Section? {
+        let own = sections.filter { !isExtra($0) }
+        return own.count == 1 ? own.first : nil
     }
 
     /// Some section has a GitHub repository, saved or its remote's: the
     /// board reads pull requests. Only a saved one has a merge queue
     /// (`repository(of:)`).
-    var readsPullRequests: Bool { !reads.isEmpty }
+    var readsPullRequests: Bool { reads.keys.contains { !extraIDs.contains($0) } }
 
     /// The board lists rows: some section reads pull requests, or has an
     /// anchor whose worktrees show without them. Not with an unreadable
-    /// board.json, which the board asks to replace.
+    /// board.json, which the board asks to replace. A repository that is no
+    /// anchor of the space doesn't count: it only comes with the others.
     var listsRows: Bool {
-        loaded?.status != .unreadable && (readsPullRequests || sections.contains { $0.anchor != nil })
+        loaded?.status != .unreadable && (readsPullRequests || sections.contains { $0.anchor != nil && !extraIDs.contains($0.id) })
     }
 
     // MARK: - Reading
@@ -211,6 +222,7 @@ final class ProjectBoardController {
         context = BoardSections.Context()
         sections = []
         extraRepositories = []
+        extraIDs = []
         local = nil
         reads = [:]
         // The old space's tasks: the new one's are read without the sidebar's pass until its next one.
@@ -291,7 +303,9 @@ final class ProjectBoardController {
             if self.configRead == current, let loaded = self.loaded {
                 self.isReadingRemotes = false
                 var context = self.context
+                // What this read didn't cover stays: another read, started meanwhile for other repositories, read it.
                 context.baseRemotes = Self.merged(remotes, keeping: self.context.baseRemotes)
+                    .merging(self.context.baseRemotes) { new, _ in new }
                 self.apply(loaded, context: context, listsWorktreesAgain: false)
             }
             // board.json read again meanwhile: its remotes, now.
@@ -334,11 +348,13 @@ final class ProjectBoardController {
         let entries = newConfig.status == .unreadable ? [] : newConfig.entries
         sections = BoardSections.sections(entries, context: context)
         let anchored = Set(sections.compactMap(\.commonDir))
-        sections += extraRepositories.compactMap { anchor in
+        let extras = extraRepositories.compactMap { anchor in
             BoardSections.commonDir(of: anchor).flatMap { commonDir in
                 anchored.contains(commonDir) ? nil : BoardSections.Section(slot: .anchor(commonDir: commonDir), anchor: anchor, config: nil)
             }
         }
+        sections += extras
+        extraIDs = Set(extras.map(\.id))
         displayNames = BoardSections.displayNames(sections)
         var newReads: [String: RepositoryReads] = [:]
         // Two sections never read one repository, as Board Settings never
@@ -432,9 +448,10 @@ final class ProjectBoardController {
 
     /// The workspaces' folders, then each repository anchor's main checkout
     /// (or its git dir, for a bare repository): its worktrees show even
-    /// with no workspace open there.
+    /// with no workspace open there. Not another repository's
+    /// (`extraRepositories`): it shows while a workspace is in it.
     private var foldersToList: [String] {
-        let anchors = sections.compactMap(\.checkoutFolder)
+        let anchors = sections.filter { !isExtra($0) }.compactMap(\.checkoutFolder)
         let folders = workspaceFolders()
         return folders + anchors.filter { !folders.contains($0) }
     }
@@ -575,7 +592,7 @@ final class ProjectBoardController {
     /// and when the pull requests were read, or what went wrong reading
     /// them (Refresh's tooltip); the repository's header has the pill.
     func columnHeader(spaceName: String, now: Date = Date()) -> BoardColumnView.Header {
-        let single = sections.count == 1 ? sections.first.flatMap { reads[$0.id] } : nil
+        let single = soleSection.flatMap { reads[$0.id] }
         return BoardColumnView.Header(
             spaceName: spaceName, repository: single?.name,
             status: single.flatMap { Self.errorText($0)?.message } ?? readStatus(now: now)
@@ -611,29 +628,39 @@ final class ProjectBoardController {
     /// A section of a repository that is no anchor of the space
     /// (`extraRepositories`): read-only.
     func isExtra(_ section: BoardSections.Section) -> Bool {
-        section.anchor.map(extraRepositories.contains) ?? false
+        extraIDs.contains(section.id)
     }
 
     /// The repositories the worktrees listed that no section has: a section
     /// each from now on, read from their remotes as an anchor without
     /// settings is.
     private func noteExtraRepositories(in snapshot: ProjectBoard.LocalSnapshot) {
-        let anchored = Set(sections.filter { !isExtra($0) }.compactMap(\.commonDir))
-        // Without anchors, the one board.json names takes its repository's checkouts.
-        let named = sections.first { $0.slot == .legacy }.flatMap { reads[$0.id]?.gitHub }
+        let own = sections.filter { !isExtra($0) }
+        let anchored = Set(own.compactMap(\.commonDir))
+        // A section reading a repository takes its other clones by remote (`ProjectBoard.sectionRows`): the one
+        // board.json names without anchors, an anchor's second checkout. Compared as the rows are, owner and name.
+        let read = own.compactMap { reads[$0.id]?.gitHub }
         var seen = Set<String>()
         let found = snapshot.repositories.compactMap { repository -> SpaceAnchor? in
             guard let commonDir = repository.commonDir, !anchored.contains(commonDir), seen.insert(commonDir).inserted,
-                  !repository.remotes.contains(where: { $0 == named })
+                  !repository.remotes.contains(where: { remote in read.contains { $0.owner == remote.owner && $0.name == remote.name } })
             else { return nil }
-            var anchor = SpaceAnchor(kind: .gitRepository(commonDir: commonDir), name: "")
-            anchor.name = ((anchor.folder ?? (commonDir as NSString).deletingLastPathComponent) as NSString).lastPathComponent
-            return anchor
+            return SpaceAnchor(kind: .gitRepository(commonDir: commonDir), name: Self.repositoryName(commonDir: commonDir))
         }
         guard found != extraRepositories, let loaded else { return }
         extraRepositories = found
         apply(loaded, context: context, listsWorktreesAgain: false)
+        isReadingRemotes = true
         readBaseRemotesWhenShown(configRead: configRead)
+    }
+
+    /// A repository's name from its git dir: its main checkout's folder
+    /// ("widgets" of widgets/.git), a bare one's ("app" of app.git), a
+    /// submodule's ("ui" of .git/modules/ui).
+    static func repositoryName(commonDir: String) -> String {
+        let last = (commonDir as NSString).lastPathComponent
+        if last == ".git" { return ((commonDir as NSString).deletingLastPathComponent as NSString).lastPathComponent }
+        return last.hasSuffix(".git") ? String(last.dropLast(4)) : last
     }
 
     func canBeSetUp(_ section: BoardSections.Section) -> Bool {
