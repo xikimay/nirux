@@ -92,7 +92,23 @@ final class CommandBarViewTests: XCTestCase {
         bar.onWaiting = { pressed.append("waiting") }
         for button in [bar.spaceButton, bar.taskButton, bar.searchButton, bar.waitingButton] { button.performClick(nil) }
         XCTAssertEqual(pressed, ["space", "task", "search", "waiting"])
-        XCTAssertEqual(bar.searchButton.identifier, TitleBarActions.searchButtonID, "a press on it closes an open ⌘P")
+        // A press on the search segment while ⌘P shows closes the palette,
+        // as one on the title bar's Search does.
+        bar.frame.origin = NSPoint(x: 20, y: 20)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 100), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView?.addSubview(bar)
+        bar.layoutSubtreeIfNeeded()
+        func press(_ button: NSButton) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: .leftMouseDown, location: button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil),
+                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            )
+        }
+        XCTAssertTrue(press(bar.searchButton).map(CommandPalette.isSearchButtonPress) == true)
+        XCTAssertTrue(press(bar.taskButton).map(CommandPalette.isSearchButtonPress) == false)
+        XCTAssertNotEqual(bar.searchButton.identifier, TitleBarActions.searchButtonID, "its own identifier")
     }
 
     /// VoiceOver finds the four segments, named, and nothing else: it reads

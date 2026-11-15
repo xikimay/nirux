@@ -105,4 +105,14 @@ final class GlassViewTests: XCTestCase {
             XCTAssertFalse(glass(.glass, fillsWindow: false).blendsBehindWindow, "over the work in its window, it blends within it")
         }
     }
+
+    /// A frost's mask stretches from corners as wide as the shape's
+    /// continuous curve, never past half the view.
+    func testTheMaskFitsItsView() {
+        XCTAssertEqual(GlassView.maskCorner(radius: 12, in: NSSize(width: 520, height: 340)), 20)
+        XCTAssertEqual(GlassView.maskCorner(radius: 15, in: NSSize(width: 300, height: 30)), 15, "a 30 pt glass: 15 pt corners")
+        let mask = GlassView.mask(radius: 15, in: NSSize(width: 300, height: 30))
+        XCTAssertEqual(mask.capInsets.top, 15)
+        XCTAssertEqual(mask.size, NSSize(width: 31, height: 31))
+    }
 }
