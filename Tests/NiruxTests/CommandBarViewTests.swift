@@ -38,12 +38,13 @@ final class CommandBarViewTests: XCTestCase {
         XCTAssertTrue(full.waitingBadge.isHidden && full.waitingButton.isHidden, "nothing waits: no badge")
         let empty = bar(content(waiting: 0, task: nil))
         XCTAssertEqual(empty.taskLabel.stringValue, "Nothing open")
+        XCTAssertEqual(empty.taskButton.accessibilityLabel(), "Nothing open")
         XCTAssertTrue(empty.taskIcon.isHidden)
     }
 
     /// As the bar narrows, the task's detail goes first, then the space's
     /// name, then the search's key; the signs stay, and nothing overlaps.
-    func testItGivesWayInOrder() {
+    func testItGivesWayInOrder() throws {
         let bar = bar(width: 640, content(waiting: 12))
         var hiddenAt: [String: CGFloat] = [:]
         for width in stride(from: 640, through: 200, by: -4) {
@@ -64,12 +65,13 @@ final class CommandBarViewTests: XCTestCase {
             for (left, right) in zip(visible, visible.dropFirst()) {
                 XCTAssertLessThanOrEqual(left.frame.maxX, right.frame.minX + 0.5, "overlap at \(width) pt")
             }
-            XCTAssertLessThanOrEqual(bar.waitingKey.frame.maxX, CGFloat(width), "inside the bar at \(width) pt")
+            XCTAssertLessThanOrEqual(visible.last?.frame.maxX ?? 0, CGFloat(width), "inside the bar at \(width) pt")
         }
-        let detail = try? XCTUnwrap(hiddenAt["detail"]), name = try? XCTUnwrap(hiddenAt["space name"])
-        let key = try? XCTUnwrap(hiddenAt["search key"])
-        XCTAssertGreaterThan(detail ?? 0, name ?? 0, "the detail goes before the space's name")
-        XCTAssertGreaterThan(name ?? 0, key ?? 0, "the space's name goes before the search's key")
+        let detail = try XCTUnwrap(hiddenAt["detail"], "the detail never went")
+        let name = try XCTUnwrap(hiddenAt["space name"], "the space's name never went")
+        let key = try XCTUnwrap(hiddenAt["search key"], "the search's key never went")
+        XCTAssertGreaterThan(detail, name, "the detail goes before the space's name")
+        XCTAssertGreaterThan(name, key, "the space's name goes before the search's key")
     }
 
     /// Each segment acts on its own.

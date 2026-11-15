@@ -21,12 +21,20 @@ final class CommandBarView: NSView {
 
     static let height: CGFloat = 36
     /// Left and right of each segment's content.
-    private static let inset: CGFloat = 14
-    private static let gap: CGFloat = 8
+    private static let inset = Theme.Space.md
+    private static let gap = Theme.Space.sm
+    /// Between a name and its chevron, a title and its detail.
+    private static let tight = Theme.Space.xs
+    /// Around each segment's hover capsule, and above and below its
+    /// separator.
+    private static let buttonInset = Theme.Space.xs
+    private static let separatorInset = Theme.Space.sm
     /// The task's title keeps at least this much (or all of a shorter one)
     /// before anything else gives way: its detail, then the space's name,
-    /// then the search's key.
+    /// then the search's key, then the waiting count's key.
     private static let titleMinimum: CGFloat = 120
+    /// A space's name is cut past this.
+    private static let spaceNameMaximum: CGFloat = 160
 
     var onSpace: (() -> Void)?
     var onTask: (() -> Void)?
@@ -106,6 +114,10 @@ final class CommandBarView: NSView {
             host.addSubview(button)
         }
         searchButton.setAccessibilityLabel("Search, Command P")
+        // Before the first content: no state to show, words to say.
+        taskIcon.isHidden = true
+        spaceButton.setAccessibilityLabel("Space")
+        taskButton.setAccessibilityLabel("Nothing open")
     }
 
     @available(*, unavailable)
@@ -128,8 +140,8 @@ final class CommandBarView: NSView {
         if let icon = content.taskIcon { taskIcon.icon = icon }
         taskIcon.isHidden = content.taskIcon == nil
         detailLabel.stringValue = content.taskDetail.map { "· \($0)" } ?? ""
-        taskButton.setAccessibilityLabel([content.taskTitle, content.taskIcon?.accessibilityText, content.taskDetail]
-            .compactMap { $0 }.joined(separator: ", "))
+        let taskWords = [content.taskTitle, content.taskIcon?.accessibilityText, content.taskDetail].compactMap { $0 }
+        taskButton.setAccessibilityLabel(taskWords.isEmpty ? "Nothing open" : taskWords.joined(separator: ", "))
         waitingBadge.count = content.waitingCount
         let waiting = content.waitingCount
         waitingButton.setAccessibilityLabel(
@@ -148,85 +160,105 @@ final class CommandBarView: NSView {
         let waits = (content?.waitingCount ?? 0) > 0
         func textWidth(_ label: NSTextField) -> CGFloat { ceil(label.attributedStringValue.size().width) + 4 }
         let chip: CGFloat = 10, chevron: CGFloat = 10, icon: CGFloat = 13
+        // Each string measured once.
+        let nameWidth = min(textWidth(spaceLabel), Self.spaceNameMaximum)
+        let titleWidth = textWidth(taskLabel)
+        let detailWidth = textWidth(detailLabel)
+        let searchKeyWidth = searchKey.fittingWidth, waitingKeyWidth = waitingKey.fittingWidth
+        let badgeWidth = waitingBadge.fittingWidth
+        let iconSpace = taskIcon.isHidden ? 0 : icon + Self.gap
 
         // The widths each segment wants, then what gives way.
         var showsDetail = !(content?.taskDetail ?? "").isEmpty
         var showsSpaceName = true
         var showsSearchKey = true
+        var showsWaitingKey = true
         func spaceWidth() -> CGFloat {
             showsSpaceName
-                ? Self.inset + chip + Self.gap + textWidth(spaceLabel) + 6 + chevron + Self.inset
+                ? Self.inset + chip + Self.gap + nameWidth + Self.tight + chevron + Self.inset
                 : Self.inset + chip + Self.inset
         }
         func searchWidth() -> CGFloat {
-            12 + icon + (showsSearchKey ? Self.gap + searchKey.fittingWidth : 0) + 12
+            Self.inset + icon + (showsSearchKey ? Self.gap + searchKeyWidth : 0) + Self.inset
         }
-        let waitingWidth = waits ? 10 + waitingBadge.fittingWidth + 7 + waitingKey.fittingWidth + 12 : 0
-        func taskWidth() -> CGFloat { bounds.width - spaceWidth() - searchWidth() - waitingWidth }
+        func waitingWidth() -> CGFloat {
+            guard waits else { return 0 }
+            return Self.inset + badgeWidth + (showsWaitingKey ? Self.gap + waitingKeyWidth : 0) + Self.inset
+        }
+        func taskWidth() -> CGFloat { bounds.width - spaceWidth() - searchWidth() - waitingWidth() }
         func taskNeed() -> CGFloat {
-            let iconSpace = taskIcon.isHidden ? 0 : icon + Self.gap
-            let detail = showsDetail ? 6 + textWidth(detailLabel) : 0
-            return Self.inset + iconSpace + min(textWidth(taskLabel), Self.titleMinimum) + detail + Self.inset
+            Self.inset + iconSpace + min(titleWidth, Self.titleMinimum)
+                + (showsDetail ? Self.tight + detailWidth : 0) + Self.inset
         }
         if taskWidth() < taskNeed() { showsDetail = false }
         if taskWidth() < taskNeed() { showsSpaceName = false }
         if taskWidth() < taskNeed() { showsSearchKey = false }
+        if taskWidth() < taskNeed() { showsWaitingKey = false }
 
         var x: CGFloat = 0
         func center(_ view: NSView, x: CGFloat, width: CGFloat, height viewHeight: CGFloat) {
-            view.frame = NSRect(x: x, y: ((height - viewHeight) / 2).rounded(), width: width, height: viewHeight)
+            view.frame = NSRect(x: x, y: ((height - viewHeight) / 2).rounded(), width: max(0, width), height: viewHeight)
         }
         func place(_ label: NSTextField, x: CGFloat, width: CGFloat) {
-            let lineHeight = ceil(label.font?.boundingRectForFont.height ?? 16)
-            center(label, x: x, width: max(0, width), height: lineHeight)
+            center(label, x: x, width: width, height: ceil(label.font?.boundingRectForFont.height ?? 16))
         }
-        // Space.
+        func capsule(_ button: NSView, x: CGFloat, width: CGFloat) {
+            let inset = Self.buttonInset
+            button.frame = NSRect(x: x + inset, y: inset, width: max(0, width - 2 * inset), height: height - 2 * inset)
+        }
+        func separator(_ index: Int, at x: CGFloat) {
+            separators[index].frame = NSRect(x: x, y: Self.separatorInset, width: 1, height: height - 2 * Self.separatorInset)
+        }
+        // Space: its name cut past a maximum.
         let space = spaceWidth()
         center(spaceChip, x: Self.inset, width: chip, height: chip)
         spaceLabel.isHidden = !showsSpaceName
         spaceChevron.isHidden = !showsSpaceName
         if showsSpaceName {
             let nameX = Self.inset + chip + Self.gap
-            place(spaceLabel, x: nameX, width: textWidth(spaceLabel))
-            center(spaceChevron, x: nameX + textWidth(spaceLabel) + 6, width: chevron, height: chevron)
+            place(spaceLabel, x: nameX, width: nameWidth)
+            center(spaceChevron, x: nameX + nameWidth + Self.tight, width: chevron, height: chevron)
         }
-        spaceButton.frame = NSRect(x: 3, y: 3, width: space - 6, height: height - 6)
+        capsule(spaceButton, x: 0, width: space)
         x = space
-        separators[0].frame = NSRect(x: x, y: 9, width: 1, height: height - 18)
+        separator(0, at: x)
 
-        // Task: what's left, its title cut before anything else of it.
+        // Task: what's left; its detail whole when shown, its title cut.
         let task = max(0, taskWidth())
-        var taskX = x + Self.inset
-        taskIcon.frame.origin = NSPoint(x: taskX, y: ((height - icon) / 2).rounded())
-        if !taskIcon.isHidden { taskX += icon + Self.gap }
-        let taskEnd = x + task - Self.inset
+        let taskX = x + Self.inset + iconSpace
+        taskIcon.frame.origin = NSPoint(x: x + Self.inset, y: ((height - icon) / 2).rounded())
+        let room = max(0, task - 2 * Self.inset - iconSpace)
         detailLabel.isHidden = !showsDetail
-        let detail = showsDetail ? min(textWidth(detailLabel), max(0, taskEnd - taskX) / 2) : 0
-        let title = min(textWidth(taskLabel), max(0, taskEnd - taskX - (showsDetail ? 6 + detail : 0)))
+        let detail = showsDetail ? min(detailWidth, room) : 0
+        let title = min(titleWidth, max(0, room - (showsDetail ? Self.tight + detail : 0)))
         place(taskLabel, x: taskX, width: title)
-        if showsDetail { place(detailLabel, x: taskX + title + 6, width: detail) }
-        taskButton.frame = NSRect(x: x + 3, y: 3, width: max(0, task - 6), height: height - 6)
+        if showsDetail { place(detailLabel, x: taskX + title + Self.tight, width: detail) }
+        capsule(taskButton, x: x, width: task)
         x += task
-        separators[1].frame = NSRect(x: x, y: 9, width: 1, height: height - 18)
+        separator(1, at: x)
 
         // Search.
         let search = searchWidth()
-        center(searchIcon, x: x + 12, width: icon, height: icon)
+        center(searchIcon, x: x + Self.inset, width: icon, height: icon)
         searchKey.isHidden = !showsSearchKey
-        if showsSearchKey { center(searchKey, x: x + 12 + icon + Self.gap, width: searchKey.fittingWidth, height: KeyCap.height) }
-        searchButton.frame = NSRect(x: x + 3, y: 3, width: search - 6, height: height - 6)
+        if showsSearchKey {
+            center(searchKey, x: x + Self.inset + icon + Self.gap, width: searchKeyWidth, height: KeyCap.height)
+        }
+        capsule(searchButton, x: x, width: search)
         x += search
 
         // Waiting: only while an agent waits.
         separators[2].isHidden = !waits
         waitingBadge.isHidden = !waits
-        waitingKey.isHidden = !waits
+        waitingKey.isHidden = !waits || !showsWaitingKey
         waitingButton.isHidden = !waits
         if waits {
-            separators[2].frame = NSRect(x: x, y: 9, width: 1, height: height - 18)
-            center(waitingBadge, x: x + 10, width: waitingBadge.fittingWidth, height: CountBadge.height)
-            center(waitingKey, x: x + 10 + waitingBadge.fittingWidth + 7, width: waitingKey.fittingWidth, height: KeyCap.height)
-            waitingButton.frame = NSRect(x: x + 3, y: 3, width: waitingWidth - 6, height: height - 6)
+            separator(2, at: x)
+            center(waitingBadge, x: x + Self.inset, width: badgeWidth, height: CountBadge.height)
+            if showsWaitingKey {
+                center(waitingKey, x: x + Self.inset + badgeWidth + Self.gap, width: waitingKeyWidth, height: KeyCap.height)
+            }
+            capsule(waitingButton, x: x, width: waitingWidth())
         }
     }
 
@@ -234,67 +266,4 @@ final class CommandBarView: NSView {
     @objc private func taskPressed() { onTask?() }
     @objc private func searchPressed() { onSearch?() }
     @objc private func waitingPressed() { onWaiting?() }
-}
-
-/// A shortcut shown as a key cap: "⌘P".
-final class KeyCap: NSView {
-    static let height: CGFloat = 18
-    private let label: NSTextField
-
-    init(_ text: String) {
-        label = NSTextField(labelWithString: text)
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = Theme.Radius.chip
-        layer?.borderWidth = 1
-        layer?.borderColor = Theme.Color.lineStrong.cgColor
-        label.font = Theme.Font.caption
-        label.textColor = Theme.Color.textSecondary
-        label.alignment = .center
-        addSubview(label)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    var fittingWidth: CGFloat { ceil(label.attributedStringValue.size().width) + 10 }
-
-    override func layout() {
-        super.layout()
-        let lineHeight = ceil(label.font?.boundingRectForFont.height ?? 14)
-        label.frame = NSRect(x: 0, y: ((bounds.height - lineHeight) / 2).rounded(), width: bounds.width, height: lineHeight)
-    }
-}
-
-/// How many agents wait for the user: an amber disc with the count. Amber,
-/// because that is all it says.
-final class CountBadge: NSView {
-    static let height: CGFloat = 18
-    private let label = NSTextField(labelWithString: "")
-
-    var count = 0 {
-        didSet { label.stringValue = "\(count)" }
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = Theme.Color.waiting.cgColor
-        label.font = Theme.Font.captionEmphasized
-        label.textColor = Theme.Color.canvas
-        label.alignment = .center
-        addSubview(label)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    var fittingWidth: CGFloat { max(Self.height, ceil(label.attributedStringValue.size().width) + 10) }
-
-    override func layout() {
-        super.layout()
-        layer?.cornerRadius = bounds.height / 2
-        let lineHeight = ceil(label.font?.boundingRectForFont.height ?? 14)
-        label.frame = NSRect(x: 0, y: ((bounds.height - lineHeight) / 2).rounded(), width: bounds.width, height: lineHeight)
-    }
 }
