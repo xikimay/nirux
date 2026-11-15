@@ -23,7 +23,7 @@ Click the line, grey or amber, to read the whole question and answer it in a pop
 
 ## When Nirux types into a prompt
 
-Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. Otherwise the message waits for the end of that agent's next turn.
+Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. Nothing typed while Claude Code lists a dialog counts, until Esc or Ctrl-C ends it: those keys go to the dialog. A known limit: text typed at the prompt while an approved command still runs doesn't count either, until its dialog leaves the list. Nor do the keys that only move the view or the cursor: Page Up and Down, Ctrl+Home and Ctrl+End, Home, and Left with a modifier (Left alone opens Claude Code's agents view from an empty prompt, so it still counts). Otherwise the message waits for the end of that agent's next turn.
 
 When a message has waited three minutes for an agent that isn't working, the agent's row says so, a Lead's too: `2 messages waiting since 22:21`. Its tooltip says why Nirux doesn't type them, and a click shows the agent's column. Sending the agent a prompt usually lets them in. Nirux writes the reason to the system log, with what it read it from: within half a minute for keys at the prompt or a prompt that looks free, after three minutes for anything else (for a turn at work, only once no hook came for three minutes):
 

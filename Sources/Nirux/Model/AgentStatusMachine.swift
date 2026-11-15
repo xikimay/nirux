@@ -152,6 +152,9 @@ struct AgentStatusMachine {
     /// event's name.
     private(set) var lastDraftKind: String?
     private(set) var lastEventName: String?
+    /// The approval whose option's text field (why not, an amendment) takes
+    /// the keys, by its `requestedAt`.
+    private var approvalTextOpenedFor: TimeInterval?
     /// The agent process seen asking whether to trust its folder, and when
     /// (see AgentTrustPrompt): no hook reports that question.
     var trustPromptSighting: AgentTrustPrompt.Sighting?
@@ -1011,10 +1014,10 @@ struct AgentStatusMachine {
         return (code == 27 && held == 0) || (code == 99 && held == 4)
     }
 
-    /// Whether `dialog` waits for a key yet: none reached it since it
-    /// opened. A question dialog's keys move among its options and answer
-    /// its questions one by one: it ends with its tool's PostToolUse, or
-    /// at Esc or Ctrl-C, which fire no hook.
+    /// Whether `dialog` waits for a key yet: none that answers it reached it
+    /// since it opened (`answersApproval`). A question dialog's keys move
+    /// among its options and answer its questions one by one: it ends with
+    /// its tool's PostToolUse, or at Esc or Ctrl-C, which fire no hook.
     func waitsForKeys(_ dialog: AgentPermissionRequest) -> Bool {
         dialog.requestedAt >= (dialog.waitsPastKeys ? lastCancelKeyAt : lastKeystrokeAt)
     }
@@ -1024,8 +1027,74 @@ struct AgentStatusMachine {
     /// recalled at its prompt now, a draft as any other (`hasDraft`). Not a
     /// keystroke: the user scrolled, typed nothing.
     mutating func notePromptRecall(now: Date) {
+        // Over a listed dialog, they move among its options (out of an
+        // option's text too).
+        guard !openDialogs.contains(where: { $0.requestedAt >= lastCancelKeyAt }) else {
+            approvalTextOpenedFor = nil
+            return
+        }
         lastDraftInputAt = now.timeIntervalSince1970
         lastDraftKind = "wheel"
+    }
+
+    /// Up or Down arrows only: what ghostty turns a wheel scroll into on the
+    /// alternate screen when the program there reports no mouse (Claude Code
+    /// under `CLAUDE_CODE_DISABLE_MOUSE`), and the keys that move among a
+    /// dialog's options. At an agent's prompt, Up recalls an old prompt.
+    static func isUpDownArrows(_ data: Data) -> Bool {
+        guard !data.isEmpty, data.count.isMultiple(of: 3) else { return false }
+        return stride(from: data.startIndex, to: data.endIndex, by: 3).allSatisfy { index in
+            let key = data[index..<index + 3]
+            return key.first == 0x1B && [0x5B, 0x4F].contains(key[index + 1]) && [0x41, 0x42].contains(key[index + 2])
+        }
+    }
+
+    /// Whether `keys` answer an approval or a plan, for its row: Enter, Esc,
+    /// Ctrl-C, or an option's number. Claude Code's dialogs bind no other
+    /// letter (j and k move) and drop a paste; Tab opens the text of an
+    /// option (why not, an amendment), where a number is text, until Enter,
+    /// Esc, Ctrl-C, Up, Down, Ctrl-N, Ctrl-P or Tab again.
+    private mutating func answersApproval(_ keys: Data?, of dialog: AgentPermissionRequest) -> Bool {
+        guard let keys else { return true }
+        let inText = approvalTextOpenedFor == dialog.requestedAt
+        let answers = keys == Self.enterKey || Self.isCancelKey(keys)
+        if answers || (keys == Self.tabKey && inText) || Self.isUpDownArrows(keys) || keys == Data([0x0E]) || keys == Data([0x10]) {
+            approvalTextOpenedFor = nil
+            return answers
+        }
+        if keys == Self.tabKey {
+            approvalTextOpenedFor = dialog.requestedAt
+            return false
+        }
+        return !inText && keys.count == 1 && (0x31...0x39).contains(keys[keys.startIndex])
+    }
+
+    private static let enterKey = Data([0x0D])
+    private static let tabKey = Data([0x09])
+
+    /// Keys that leave the prompt as it was, with Claude Code's default
+    /// bindings: Shift-Tab (the mode), Page Up and Down, Ctrl-Home and
+    /// Ctrl-End (it scrolls its conversation), Home, a modified Left and
+    /// Option-Left (the cursor). Not Up or Down, which recall an old prompt
+    /// (Shift-Down opens a finished task's view), nor Left alone, which
+    /// opens the agents view from an empty prompt, nor Right or End, which
+    /// may take in a suggested prompt.
+    static func leavesPromptAsItWas(_ keys: Data) -> Bool {
+        if keys == modeSwitchKey || keys == Data([0x1B, 0x62]) { return true }
+        guard (3...12).contains(keys.count), keys.first == 0x1B,
+              let text = String(data: keys.dropFirst(), encoding: .ascii), let final = text.last
+        else { return false }
+        if text == "OH" { return true }
+        guard text.hasPrefix("[") else { return false }
+        let fields = text.dropFirst().dropLast().split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+        let modifier = fields.count == 2 && fields[0] == "1" ? Int(fields[1]) : nil
+        switch final {
+        case "H": return fields == [""] || (modifier ?? 0) > 1
+        case "D": return (modifier ?? 0) > 1
+        case "F": return modifier == 5
+        case "~": return ["1", "5", "6"].contains(fields.first ?? "")
+        default: return false
+        }
     }
 
     /// One key's bytes: a character, a short escape sequence, or one
@@ -1068,23 +1137,28 @@ struct AgentStatusMachine {
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date, keys: Data? = nil) {
         let time = now.timeIntervalSince1970
-        // A key answers a dialog only while none reached it yet: answered, it stays
-        // listed until its tool ends (no hook between); later keys reach the prompt.
-        // A question dialog takes keys until Esc or Ctrl-C (`waitsForKeys`).
-        // The dialog in front takes the keys: a question dialog's don't
-        // answer an approval queued behind it.
-        let inFront = openDialogs.first(where: waitsForKeys)
-        let answersDialog = inFront != nil
-        if inFront?.waitsPastKeys != true { lastKeystrokeAt = time }
+        // A listed dialog takes every key until Esc or Ctrl-C ends it, and
+        // none is a draft, nor becomes one when it closes. Its row waits
+        // until a key answers it: a question at its submit's PostToolUse, an
+        // approval or a plan at `answersApproval`. The dialog in front takes
+        // the keys: a question dialog's don't answer an approval behind it.
+        // Known limit: what is typed at the prompt while an approved command
+        // runs, its dialog still listed, is no draft either.
+        let takenByDialog = openDialogs.contains { $0.requestedAt >= lastCancelKeyAt }
+        switch openDialogs.first(where: waitsForKeys) {
+        case nil:
+            lastKeystrokeAt = time
+        case let question? where question.waitsPastKeys:
+            break
+        case let approval?:
+            if answersApproval(keys, of: approval) { lastKeystrokeAt = time }
+        }
         if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
         lastInputAt = time
-        // A mode switch (Shift-Tab) leaves the prompt as it was; any other
-        // key may leave text there, or open a screen no hook tells of (Esc
-        // Esc's rewind picker, Ctrl-O's transcript, a slash command's). A
-        // paste or dictation is text, whatever a dialog waits for: one key
-        // answers a dialog, not a write of several.
-        let oneKey = keys.map(Self.isOneKey) ?? true
-        if !(answersDialog && oneKey), keys != Self.modeSwitchKey {
+        // Any other key may leave text at the prompt, or open a screen no hook
+        // tells of (Esc Esc's rewind picker, Ctrl-O's transcript, a slash
+        // command's), but those that leave it as it was.
+        if !takenByDialog, !(keys.map(Self.leavesPromptAsItWas) ?? false) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
         }
@@ -1339,6 +1413,7 @@ struct AgentStatusMachine {
         lastDraftInputAt = 0
         lastDraftKind = nil
         lastEventName = nil
+        approvalTextOpenedFor = nil
         circling.reset()
     }
 }
