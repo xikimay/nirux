@@ -201,6 +201,26 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(pill.text, "No settings")
             XCTAssertEqual(pill.toolTip, "Read-only, from origin: save Board Settings to use the merge queue.")
             XCTAssertEqual(try stages(of: unsaved, in: shell).sections.first?.menu.first, .boardSettings, "where the settings can set it up")
+
+            // A third space whose board.json a newer Nirux saved: read-only, why under the pointer, no Board Settings… to offer.
+            let locked = shell.workspaceStore.createProfile(named: "Locked")
+            let tools = root + "/tools-app"
+            try BoardConfigSuggestionsTests.makeRepository(at: tools, remote: "https://github.com/acme/tools.git")
+            var toolsAnchor = try XCTUnwrap(FolderIdentity.identify(tools, timeout: 10)).anchor
+            toolsAnchor.isDefault = true
+            XCTAssertTrue(shell.workspaceStore.setAnchors([toolsAnchor], forProfile: locked.id))
+            let store = try XCTUnwrap(BoardConfigStore(spaceID: locked.id))
+            try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(#"{"schemaVersion": 3}"#.utf8).write(to: store.fileURL)
+            shell.addWorkspace(title: "tool", cwd: tools, profileID: locked.id)
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "tool" }))
+            try runPaletteAction("Open Board", in: shell)
+            let readOnly = try XCTUnwrap(shell.projectBoardLocation(projectID: locked.id)?.board)
+            try waitUntil("board.json is read and the worktrees listed") { readOnly.loaded != nil && readOnly.local != nil }
+            let lockedSection = try XCTUnwrap(try stages(of: readOnly, in: shell).sections.first)
+            XCTAssertEqual(lockedSection.status?.text, "Read-only")
+            XCTAssertEqual(lockedSection.status?.toolTip, BoardConfigStore.ReadOnlyReason.newerSchema(3).message)
+            XCTAssertFalse(lockedSection.menu.contains(.boardSettings), "Board Settings can't save it")
         }
     }
 

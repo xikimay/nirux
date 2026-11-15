@@ -175,8 +175,11 @@ extension ProjectBoardController {
             return ColumnHeaderView.Status(error.title, tone: .error, symbol: Theme.Symbol.agentError, toolTip: error.message)
         }
         if let note = setupNote(section) {
-            let words = isReadOnly ? "Read-only" : canBeSetUp(section) ? "No settings" : "Not read"
-            return ColumnHeaderView.Status(words, tone: .neutral, toolTip: note)
+            // Board Settings can't save it: why, as the table's notice says it.
+            if let loaded, case .readOnly(let reason) = loaded.status {
+                return ColumnHeaderView.Status("Read-only", tone: .neutral, toolTip: reason.message)
+            }
+            return ColumnHeaderView.Status(canBeSetUp(section) ? "No settings" : "Not read", tone: .neutral, toolTip: note)
         }
         return reads[section.id].flatMap { Self.runStatus($0, now: now) }
     }

@@ -75,9 +75,10 @@ extension NiruxShellView {
             },
             workspaces: workspaces,
             tasks: members.filter { !$0.isLead }.map(\.id),
-            parents: Dictionary(uniqueKeysWithValues: workspaceStore.activeParents(in: spaceID).map {
+            // Ids as restored: two the same must not trap.
+            parents: Dictionary(workspaceStore.activeParents(in: spaceID).map {
                 (self.workspaces[$0.key].id, self.workspaces[$0.value].id)
-            }),
+            }, uniquingKeysWith: { first, _ in first }),
             lead: members.first { $0.isLead }?.id,
             readings: readings,
             queues: queues.states,
