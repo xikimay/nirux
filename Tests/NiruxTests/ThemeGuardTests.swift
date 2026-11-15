@@ -2,7 +2,7 @@ import XCTest
 
 /// Colors and the dark appearance come from `Theme`: outside it, an
 /// `NSColor`/`CGColor` initializer (or `.init`) with number components, a
-/// hex literal, `niruxAccent` or a forced `.darkAqua` fails this test. Named system colors and white
+/// hex literal, `niruxAccent`, orange or a forced `.darkAqua` fails this test. Other named system colors and white
 /// alphas are left to the redesign PRs.
 final class ThemeGuardTests: XCTestCase {
     private static let advice = """
@@ -10,7 +10,8 @@ final class ThemeGuardTests: XCTestCase {
         sheet → .base; card, column header, active tab, find bar → .surface; menu, popover, toast, hint → .raised; \
         text → .textPrimary/.textSecondary/.textTertiary; \
         agent states → .working/.waiting/.error/.idle (.waiting only when something waits for the user's answer); \
-        merged PR → .done; checks passed → .success; a warning → NSColor.systemOrange, never .waiting; \
+        merged PR → .done; checks passed → .success; \
+        a warning → NSColor.niruxWarning, its words after "⚠︎ " (String.asWarning), never orange (it reads as amber) nor .waiting; \
         NSColor.niruxAccent → .accent; NSAppearance(named: .darkAqua) → Theme.appearance
         """
 
@@ -115,6 +116,12 @@ final class ThemeGuardTests: XCTestCase {
         for (index, line) in text.components(separatedBy: "\n").enumerated() {
             let isAliasDefinition = path == "Util/Extensions.swift" && line.contains("static let niruxAccent")
             if line.contains(".darkAqua") || (line.contains("niruxAccent") && !isAliasDefinition) {
+                lines.append(index + 1)
+            }
+            // Orange reads as amber, which says an agent waits for the user: a warning is `NSColor.niruxWarning`.
+            // Git's mark of a modified file keeps the colour editors give it.
+            let isGitMark = path == "Views/EditorFileTree.swift" && line.contains("case .modified")
+            if line.contains("systemOrange") || line.contains("NSColor.orange"), !isGitMark {
                 lines.append(index + 1)
             }
         }

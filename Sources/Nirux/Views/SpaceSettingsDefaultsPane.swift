@@ -70,7 +70,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         } else {
             banner = nil
         }
-        bannerLabel.stringValue = banner ?? ""
+        bannerLabel.stringValue = banner?.asWarning ?? ""
         bannerLabel.isHidden = banner == nil
         showProblems()
     }
@@ -220,7 +220,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         problemsLabel.stringValue = problems.isEmpty ? "" : (problems + ["Fix them to save the variables."]).joined(separator: "\n")
         problemsLabel.isHidden = problems.isEmpty
         let warnings = draft.environmentWarnings
-        warningsLabel.stringValue = warnings.joined(separator: "\n")
+        warningsLabel.stringValue = warnings.map(\.asWarning).joined(separator: "\n")
         warningsLabel.isHidden = warnings.isEmpty
         updateRemoveButton()
     }
@@ -327,11 +327,11 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         problemsLabel.isSelectable = false
         problemsLabel.preferredMaxLayoutWidth = Self.contentWidth
         warningsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        warningsLabel.textColor = .systemOrange
+        warningsLabel.textColor = .niruxWarning
         warningsLabel.isSelectable = false
         warningsLabel.preferredMaxLayoutWidth = Self.contentWidth
         bannerLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
-        bannerLabel.textColor = .systemOrange
+        bannerLabel.textColor = .niruxWarning
         bannerLabel.isSelectable = false
         bannerLabel.preferredMaxLayoutWidth = Self.contentWidth
 

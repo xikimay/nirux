@@ -204,9 +204,9 @@ final class WorktreeCleanupPanel: NSObject {
         case .failed(let message)?:
             (text, color, toolTip) = (message.replacingOccurrences(of: "\n", with: " "), .systemRed, message)
         case .skipped(let message)?:
-            (text, color) = (message, .systemOrange)
+            (text, color) = (message.asWarning, .niruxWarning)
         case nil:
-            text = candidate.detail
+            if case .blocked = candidate.availability { text = candidate.detail.asWarning } else { text = candidate.detail }
             switch candidate.availability {
             case .checking:
                 color = NSColor.white.withAlphaComponent(0.35)
@@ -214,7 +214,7 @@ final class WorktreeCleanupPanel: NSObject {
                 color = NSColor.white.withAlphaComponent(0.35)
                 toolTip = candidate.report?.problems.joined(separator: "\n")
             case .blocked(let problems):
-                color = NSColor.systemOrange.withAlphaComponent(0.9)
+                color = .niruxWarning
                 toolTip = problems.joined(separator: "\n")
             case .ready, .closeOnly:
                 color = NSColor.white.withAlphaComponent(0.5)

@@ -166,7 +166,7 @@ final class MergeQueueConfirmationPanel: NSObject {
             add(refusal, color: Self.refusalColor, font: .systemFont(ofSize: 12, weight: .medium))
         }
         for warning in confirmation.warnings {
-            add("⚠︎ " + warning, color: Self.warningColor)
+            add(warning.asWarning, color: Self.warningColor)
         }
         if !confirmation.items.isEmpty {
             heading("MERGES, IN THIS ORDER")
@@ -181,7 +181,7 @@ final class MergeQueueConfirmationPanel: NSObject {
                     add(note, color: Self.secondaryText, font: .systemFont(ofSize: 11), indent: 34, trailing: 90, gap: 2)
                 }
                 for warning in item.warnings {
-                    add("⚠︎ " + warning, color: Self.warningColor, font: .systemFont(ofSize: 11), indent: 34, trailing: 90,
+                    add(warning.asWarning, color: Self.warningColor, font: .systemFont(ofSize: 11), indent: 34, trailing: 90,
                         gap: 2)
                 }
                 let up = moveButton("↑", index: index, action: #selector(moveUp(_:)), enabled: index > 0)

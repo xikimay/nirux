@@ -43,8 +43,8 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
             label.stringValue = ""
             return
         }
-        label.stringValue = limits.titleText
-        label.textColor = limits.isNearLimit ? .niruxNearLimit : Self.normalColor
+        label.stringValue = limits.isNearLimit ? limits.titleText.asWarning : limits.titleText
+        label.textColor = limits.isNearLimit ? .niruxWarning : Self.normalColor
         label.setAccessibilityLabel(limits.accessibilityText)
         let tooltip = limits.tooltip(now: now)
         view.toolTip = tooltip

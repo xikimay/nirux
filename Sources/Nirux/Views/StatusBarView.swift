@@ -299,8 +299,8 @@ final class StatusBarView: NSView {
             queueDismissButton?.isHidden = true
             return
         }
+        // A dry run says so in its words ("Queue (dry run) …"): not in amber, which says an agent waits for the user.
         let color: NSColor = queueNotice.isFailure ? Self.crashColor
-            : queueNotice.isDryRun ? NSColor.systemOrange
             : queueNotice.isRunning ? NSColor.white.withAlphaComponent(0.75) : NSColor.white.withAlphaComponent(0.45)
         queueButton?.attributedTitle = NSAttributedString(string: "● " + queueNotice.text, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium), .foregroundColor: color

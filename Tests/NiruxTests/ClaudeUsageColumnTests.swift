@@ -120,7 +120,8 @@ final class ClaudeUsageColumnTests: XCTestCase {
         parser.consume(line: Data(TranscriptLine.response(id: "msg_1", cacheRead: 850_000).utf8))
         column.setAgentUsage(parser.usage)
         let label = try? XCTUnwrap(column.usageLabel)
-        XCTAssertEqual(label?.stringValue, "ctx 85%")
+        XCTAssertEqual(label?.stringValue, "⚠︎ ctx 85%", "nearly full: a warning")
+        XCTAssertEqual(label?.textColor, .niruxWarning)
         XCTAssertEqual(label?.isHidden, false)
         let header = try XCTUnwrap(column.header)
         XCTAssertEqual(

@@ -70,7 +70,7 @@ The setting is **Settings › General › Keep Mac awake while agents work or a 
 
 ## Claude Code context usage
 
-The title bar of a column running Claude Code shows how full the session's context window is, as `ctx 62%`, orange from 80%. Hover it for the exact count, the model and the session's token totals. There is no cost estimate.
+The title bar of a column running Claude Code shows how full the session's context window is, as `ctx 62%`, as a warning from 80% (`⚠︎ ctx 85%`). Hover it for the exact count, the model and the session's token totals. There is no cost estimate.
 
 - Nirux reads the session's transcript without changing it, and keeps token counts and the model ID, never message content.
 - Claude Code uses a 200k or a 1M window, and the transcript doesn't say which. Until a response passes 200k tokens, the label shows the count instead (`ctx 124k`). It always shows the count for `claude-sonnet-4-6` and for model IDs that don't start with `claude-`.
@@ -79,7 +79,7 @@ The title bar of a column running Claude Code shows how full the session's conte
 
 ## Claude plan usage limits
 
-This indicator is off by default. With **Settings › Agents › Claude Code › Show plan usage limits in the title bar** on, the window's title bar shows how much of a Pro or Max plan's 5-hour window and weekly limit is used, as `5h 42% · 7d 18%`, orange from 80% of either. Hover it for the reset times.
+This indicator is off by default. With **Settings › Agents › Claude Code › Show plan usage limits in the title bar** on, the window's title bar shows how much of a Pro or Max plan's 5-hour window and weekly limit is used, as `5h 42% · 7d 18%`, as a warning from 80% of either (`⚠︎ 5h 85%`). Hover it for the reset times.
 
 Claude Code gives these numbers to one place only, the command set as its status line (Claude Code 2.1.80 or later). Turning the option on therefore makes Nirux that command: `~/.claude/settings.json` gains a `statusLine` entry that runs `Nirux --hook claude --statusline`, guarded like the hooks. With the option on:
 
