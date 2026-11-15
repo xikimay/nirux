@@ -13,8 +13,8 @@ extension NiruxShellView {
         guard OnboardingChecklist.shouldExpandSidebarAtLaunch(
             persisted: persisted, hasUnreadableState: hasUnreadableState
         ) else { return }
-        isSidebarExpanded = true
-        sidebar.isExpanded = true
+        sidebarFold.chosenExpanded = true
+        sidebar.isExpanded = isSidebarExpanded
         relayout(animated: false)
     }
 

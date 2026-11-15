@@ -600,11 +600,12 @@ final class AgentLightTests: XCTestCase {
         let row = workspace(0, "checkout", [column(0, status: .working)])
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         sidebar.update(profiles: [], workspaces: [row])
-        XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
+        let breathing = { sidebar.iconRail.itemViews.values.filter { $0.iconView.layer?.animation(forKey: RailItemView.breathKey) != nil }.count }
+        XCTAssertEqual(breathing(), 1)
         sidebar.animates = false
-        XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 0)
+        XCTAssertEqual(breathing(), 0)
         sidebar.animates = true
-        XCTAssertEqual(sidebar.railTileViews.values.filter(\.style.breathes).count, 1)
+        XCTAssertEqual(breathing(), 1)
     }
 }
 

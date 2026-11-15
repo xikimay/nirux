@@ -115,8 +115,8 @@ extension NiruxShellView {
 
     private func restoreSidebarState(_ settings: PersistedSettings?) {
         if let expanded = settings?.sidebarExpanded {
-            isSidebarExpanded = expanded
-            sidebar.isExpanded = expanded
+            sidebarFold.chosenExpanded = expanded
+            sidebar.isExpanded = isSidebarExpanded
         }
     }
 
@@ -321,7 +321,7 @@ extension NiruxShellView {
             Persistence.load()?.settings ?? PersistedSettings(), recording: onboardingState
         )
         // The shell is the source of truth for sidebar state and the Board's order — carry the rest.
-        settings.sidebarExpanded = isSidebarExpanded
+        settings.sidebarExpanded = sidebarFold.chosenExpanded
         settings.boardOrder = boardOrder
         return PersistedState(
             workspaces: workspaces.map { workspace in

@@ -80,7 +80,6 @@ final class ThemeGuardTests: XCTestCase {
         "Views/ProjectMemoryPanel.swift": 1,
         "Views/RaycastPanel.swift": 2,
         "Views/SessionHistoryPanel.swift": 1,
-        "Views/SidebarRail.swift": 3,
         "Views/SidebarShortcutHintView.swift": 4,
         "Views/SidebarView+Drag.swift": 5,
         "Views/SidebarView+Rendering.swift": 1,

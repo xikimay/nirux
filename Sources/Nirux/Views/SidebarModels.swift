@@ -460,17 +460,6 @@ enum SidebarHitRegion {
     /// (a press meant for a button that just moved must not reach the card
     /// below).
     case actionBlock(workspaceIndex: Int)
-    /// A tile of the collapsed rail that isn't a workspace.
-    case railButton(SidebarRailButton)
-}
-
-/// The collapsed rail's tiles that aren't workspaces.
-enum SidebarRailButton: Hashable {
-    /// The project: a menu to switch projects, and its options.
-    case project
-    /// Folds and unfolds the INACTIVE section.
-    case inactiveSection
-    case newWorkspace
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a
@@ -501,8 +490,7 @@ enum WorkspaceSidebarAction {
 }
 
 /// Hover highlight target in the sidebar. Links have their own dedicated
-/// hover treatment; this covers the rest. In the collapsed rail, a
-/// workspace tile is its `workspaceCard`.
+/// hover treatment; this covers the rest.
 enum SidebarHoverTarget: Hashable {
     case spacePicker
     case newTask
@@ -511,13 +499,12 @@ enum SidebarHoverTarget: Hashable {
     case menuBadge(Int)
     case columnRow(workspaceIndex: Int, columnIndex: Int)
     case approvalButton(workspaceIndex: Int, key: String)
-    case railButton(SidebarRailButton)
 
     /// The card containing the target — hovering any sub-region keeps the
     /// whole card lit. Nil for targets outside the workspace list.
     var workspaceIndex: Int? {
         switch self {
-        case .spacePicker, .newTask, .archivedToggle, .railButton: return nil
+        case .spacePicker, .newTask, .archivedToggle: return nil
         case .workspaceCard(let index), .menuBadge(let index): return index
         case .columnRow(let workspaceIndex, _), .approvalButton(let workspaceIndex, _): return workspaceIndex
         }

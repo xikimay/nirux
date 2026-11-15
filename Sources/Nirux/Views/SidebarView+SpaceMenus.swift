@@ -3,7 +3,7 @@ import AppKit
 // MARK: - Space picker menu (see ProjectStore)
 
 extension SidebarView {
-    /// The space picker's menu (and the rail's space tile's): every space,
+    /// The space picker's menu (and the command bar's space segment's): every space,
     /// then New Space…, Space Settings… (one window for the active space:
     /// name, color, repositories, brief, board, templates, memory) and
     /// Delete Space…, which the window doesn't offer.

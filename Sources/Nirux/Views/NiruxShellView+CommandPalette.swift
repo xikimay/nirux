@@ -163,7 +163,7 @@ extension NiruxShellView {
                 icon: .symbol("archivebox"), title: "Show/Hide Archived", subtitle: "Unfold or fold the sidebar's archived list",
                 shortcut: nil
             ) { [weak self] in
-                self?.sidebar.toggleInactiveSection()
+                self?.toggleArchivedTasks()
             },
             PaletteAction(
                 icon: .symbol("pencil"), title: "Rename Workspace",

@@ -18,14 +18,12 @@ extension SidebarView {
         let anchor = scrollAnchor()
         builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })
         resetRenderState()
+        showIconRail()
         guard isExpanded else {
             // Kept across rebuilds, put back by the next expanded one.
             onboardingCardView?.removeFromSuperview()
             approvalButtonArming.removeAll()
             guard !isRailHidden else { return }
-            let docHeight = buildRail()
-            refreshHoverTargetFromMouse()
-            followActiveWorkspace(docHeight: docHeight)
             applyBirthMotion()
             return
         }
@@ -91,6 +89,10 @@ extension SidebarView {
         if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
             revealsOnboardingCardOnNextBuild = false
             revealOnboardingCard()
+        }
+        if revealsInactiveSectionOnNextBuild {
+            revealsInactiveSectionOnNextBuild = false
+            if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }
         }
     }
 
@@ -239,9 +241,7 @@ extension SidebarView {
         archivedRowHoverView = nil
         // The new rows' Archived count, if they have one.
         archivedCountLabel = nil
-        railTileViews.removeAll()
         hoveredTarget = nil
-        hideRailTooltip()
     }
 
     /// Index of the active workspace in `lastInfos`, or -1 if none. Used by
@@ -327,8 +327,7 @@ extension SidebarView {
     }
 
     /// The other spaces where an agent waits on the user: the sidebar
-    /// lists only the active space's, so the picker (and the rail's space
-    /// tile) marks them.
+    /// lists only the active space's, so the picker marks them.
     var spacesWaitingElsewhere: [ProfileInfo] {
         lastProfiles.filter { !$0.isActive && $0.attention == .waiting }
     }

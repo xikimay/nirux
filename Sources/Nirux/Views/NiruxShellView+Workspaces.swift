@@ -536,7 +536,7 @@ extension NiruxShellView {
 
     func toggleSidebar() {
         let expanding = !isSidebarExpanded
-        isSidebarExpanded = expanding
+        sidebarFold.choose(expanding)
         sidebarToggleGeneration += 1
         let generation = sidebarToggleGeneration
         saveState()

@@ -25,10 +25,9 @@ final class SidebarSectionToggleView: NSView {
     }
 }
 
-/// Sidebar: the collapsed rail of workspace tiles (SidebarView+Rail), or
-/// the expanded workspace cards. Both are views in the scrollable document
-/// view, with the same hit areas: click, drag, right-click and hover work
-/// alike.
+/// Sidebar: folded, the icon rail (SidebarView+IconRail); unfolded, the
+/// workspace cards, views in the scrollable document view with their hit
+/// areas for click, drag, right-click and hover.
 final class SidebarView: NSView {
     // Note: card drags don't move the window even so — the drag-reorder
     // tracking loop (SidebarView+Drag) consumes the mouse events before
@@ -88,8 +87,15 @@ final class SidebarView: NSView {
     /// (workspace id, space id). By id: a close that finishes while the menu
     /// is open can leave a card's index stale.
     var onMoveWorkspaceToProfile: ((String, String) -> Void)?
-    /// The rail's "+".
+    /// The Tasks header's "+", the rail's.
     var onNewWorkspace: (() -> Void)?
+    /// The rail's archived tasks: the shell unfolds the sidebar on them
+    /// (`showInactiveSection`).
+    var onShowArchived: (() -> Void)?
+    /// The rail's Board.
+    var onOpenBoard: (() -> Void)?
+    /// Folded, the sidebar is this rail (see SidebarView+IconRail).
+    let iconRail = IconRail(level: .opaque)
     var isExpanded: Bool = false {
         didSet {
             isRailHidden = false
@@ -155,6 +161,8 @@ final class SidebarView: NSView {
     var onboardingCardView: OnboardingChecklistView?
     /// Set by `revealOnboardingCard()` while the card isn't laid out yet.
     var revealsOnboardingCardOnNextBuild = false
+    /// Set by `showInactiveSection()` while the sidebar is folded.
+    var revealsInactiveSectionOnNextBuild = false
     /// Archived (inactive) workspaces are finished work: their list starts
     /// folded at every launch and only `toggleInactiveSection` (the Archived
     /// row, View ▸ Show Archived, ⌘P) unfolds it — not the workspace on
@@ -162,8 +170,7 @@ final class SidebarView: NSView {
     /// this space's list: `update` folds it back on a space switch or once
     /// the list is empty, so it never reappears unfolded. Not saved.
     private(set) var isInactiveSectionCollapsed = true
-    /// The last render's views, the cards' or the rail's: the next one
-    /// tears them down.
+    /// The last render's views, the cards': the next one tears them down.
     var expandedViews: [NSView] = []
     var hitAreas: [SidebarHitArea] = []
 
@@ -212,19 +219,7 @@ final class SidebarView: NSView {
     var archivedRowHoverView: NSView?
     var hoveredTarget: SidebarHoverTarget?
 
-    /// The rail's tiles, by the hover target that lights them.
-    var railTileViews: [SidebarHoverTarget: SidebarRailTileView] = [:]
-    /// The hovered tile's tooltip, laid over the columns while it shows
-    /// (see `updateRailTooltip`), kept for the next one.
-    var railTooltipView: SidebarRailTooltipView?
-    /// A click hid the tooltip: it stays hidden until the pointer moves,
-    /// not to cover the terminal the click brought up.
-    var isRailTooltipSuppressed = false
-    /// The rail lights tiles and shows tooltips only for a live pointer:
-    /// Nirux active, its window key. Tests turn it off: xctest never makes
-    /// the app active, and the real pointer is anywhere.
-    var railHoverNeedsLivePointer = true
-    /// The rail faded out for an expansion: rebuilds leave it empty until
+    /// The rail faded out for an expansion: rebuilds leave it hidden until
     /// the cards come in.
     var isRailHidden = false
     /// Where the drag ghost started, in the document view.
@@ -235,7 +230,7 @@ final class SidebarView: NSView {
 
     static let accentColor: NSColor = Theme.Color.accent
 
-    /// Scrollable container for the rail and the cards.
+    /// Scrollable container for the cards.
     let contentScrollView = SidebarScrollView()
     let contentDocumentView = NSView()
     /// The width the rows were last laid out at: what the clip shows. A
@@ -271,8 +266,8 @@ final class SidebarView: NSView {
         contentScrollView.onScrollerStyleChange = { [weak self] in self?.updateScrollerVisibility() }
         updateScrollerVisibility()
         addSubview(contentScrollView)
+        wireIconRail()
         observeScrollingForApprovalArming()
-        observeRailTooltipDismissals()
         contentScrollView.onScrollWheel = { [weak self] in self?.notePointer(.scroll) }
     }
 
@@ -287,11 +282,11 @@ final class SidebarView: NSView {
         rebuildContent()
     }
 
-    /// The cards show the Mac's scroller. The rail (52 pt) shows an overlay
-    /// one, which takes no width, but no legacy one: it would cover the
-    /// tiles' right edge and their badges. It scrolls all the same.
+    /// The cards show the Mac's scroller. Folded, the cards' scroll view
+    /// goes: the rail scrolls by itself, without scrollers.
     func updateScrollerVisibility() {
-        let shows = isExpanded || contentScrollView.scrollerStyle == .overlay
+        contentScrollView.isHidden = !isExpanded
+        let shows = isExpanded
         guard contentScrollView.hasVerticalScroller != shows else { return }
         isTilingScrollView = true
         contentScrollView.hasVerticalScroller = shows
@@ -305,11 +300,6 @@ final class SidebarView: NSView {
         guard !isTilingScrollView, contentScrollView.frame.size == bounds.size,
               contentScrollView.contentSize.width != listWidth else { return }
         needsLayout = true
-    }
-
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        super.viewWillMove(toWindow: newWindow)
-        if newWindow == nil { hideRailTooltip() }
     }
 
     func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo]) {
@@ -364,6 +354,9 @@ final class SidebarView: NSView {
     /// When a task's row opens (`clock`), by workspace, while its birth
     /// plays: with a spring (see SidebarView+Birth).
     var rowOpensAt: [String: CFTimeInterval] = [:]
+    /// The births the folded rail already plays (its icons outlive
+    /// rebuilds, so each is added once).
+    var railBirthsPlayed: Set<String> = []
 
     /// The clock the rows' movements are timed from; tests set it.
     var clock: () -> CFTimeInterval = { CACurrentMediaTime() }
@@ -442,7 +435,7 @@ final class SidebarView: NSView {
     }
 
     /// The rows move: a line of light under a working one, a check at a
-    /// turn's end, the rail's breathing badges; false: states show steady.
+    /// turn's end, the rail's breathing icons; false: states show steady.
     /// The shell decides (`NiruxShellView.agentLightsMayMove`): Reduce
     /// motion, the setting, a window nobody sees.
     var animates = true {
@@ -487,7 +480,7 @@ final class SidebarView: NSView {
         fadeLayer.contents = bitmapRep.cgImage
         layer?.addSublayer(fadeLayer)
 
-        // Clear the tiles so they don't show behind the fade, nor come back
+        // Hide the rail so it doesn't show behind the fade, nor come back
         // while the sidebar widens.
         isRailHidden = true
         rebuildContent()
@@ -511,14 +504,6 @@ final class SidebarView: NSView {
         lastInfos.filter { !$0.isInactive } + lastInfos.filter { $0.isInactive }
     }
 
-    /// The workspaces the rail shows a tile for, top to bottom: the cards'
-    /// and, in the folded section, an amber one (`railState`).
-    var railWorkspaceInfos: [WorkspaceInfo] {
-        displayedWorkspaceInfos.filter {
-            listsWorkspace(isInactive: $0.isInactive, isActive: $0.isActive, asksUser: $0.asksUser || $0.railState == .waiting)
-        }
-    }
-
     // MARK: - Click handling
 
     override func mouseDown(with event: NSEvent) {
@@ -529,10 +514,6 @@ final class SidebarView: NSView {
         let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
         if Self.isLeftoverPress(clickCount: event.clickCount, at: event.timestamp, after: lastButtonActionAt) {
             return
-        }
-        if !isExpanded {
-            isRailTooltipSuppressed = true
-            hideRailTooltip()
         }
 
         // A double-click renames the row its first click landed on: that
@@ -587,8 +568,6 @@ final class SidebarView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         notePointer(.move)
-        isRailTooltipSuppressed = false
-        defer { if !isExpanded { updateRailTooltip() } }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         // The checklist's buttons track their own hover and cursor.
@@ -647,10 +626,6 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.workspaceCard(workspaceIndex))
             NSCursor.arrow.set()
-        case .railButton(let button):
-            clearHover()
-            setHoverTarget(.railButton(button))
-            NSCursor.pointingHand.set()
         }
     }
 
@@ -697,14 +672,6 @@ final class SidebarView: NSView {
                 .popUp(positioning: nil, at: point, in: self)
         case .permissionDecision, .agentResume, .deferredAgentResume, .turnAnswer, .actionBlock:
             break // buttons go through trackApprovalClick; the block is inert
-        case .railButton(.project):
-            let point = convert(event.locationInWindow, from: nil)
-            setHoverTarget(nil) // the tooltip would stay beside the menu
-            spacePickerMenu().popUp(positioning: nil, at: point, in: self)
-        case .railButton(.inactiveSection):
-            toggleInactiveSection()
-        case .railButton(.newWorkspace):
-            onNewWorkspace?()
         }
     }
 
@@ -729,22 +696,11 @@ final class SidebarView: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         notePointer(.menu)
-        // Right-click on the space picker (or the rail's space tile)
-        // mirrors its left-click menu — every region that advertises a menu
-        // answers both buttons.
+        // Right-click on the space picker mirrors its left-click menu —
+        // every region that advertises a menu answers both buttons.
         let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
-        switch hitArea(at: docLocation)?.region {
-        case .spacePicker?:
-            return spacePickerMenu()
-        case .railButton(.project)?:
-            setHoverTarget(nil)
-            return spacePickerMenu()
-        default:
-            break
-        }
+        if case .spacePicker? = hitArea(at: docLocation)?.region { return spacePickerMenu() }
         guard let target = menuTarget(at: event) else { return super.menu(for: event) }
-        // The rail's tooltip would stay beside the menu.
-        if !isExpanded { setHoverTarget(nil) }
         return workspaceActionMenu(workspaceIndex: target.workspaceIndex, columnIndex: target.columnIndex)
     }
 
@@ -895,7 +851,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spacePicker, .newTask, .archivedToggle, .link, .railButton, .catchUp:
+            case .spacePicker, .newTask, .archivedToggle, .link, .catchUp:
                 continue
             }
         }
@@ -1031,15 +987,27 @@ extension SidebarView {
 
     var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }
 
-    /// The Archived row's hit area (the rail's toggle tile), in document
-    /// coordinates.
+    /// The Archived row's hit area, in document coordinates.
     var inactiveSectionHeaderFrame: NSRect? {
-        hitAreas.first {
-            switch $0.region {
-            case .archivedToggle, .railButton(.inactiveSection): return true
-            default: return false
-            }
-        }?.frame
+        hitAreas.first { if case .archivedToggle = $0.region { true } else { false } }?.frame
+    }
+
+    /// The rail's archived tasks, or Show Archived while the sidebar is
+    /// folded: the list unfolded, its header brought into view as soon as
+    /// the cards are in. No-op without an archived task.
+    func showInactiveSection() {
+        guard hasInactiveWorkspaces else { return }
+        guard isExpanded else {
+            isInactiveSectionCollapsed = false
+            revealsInactiveSectionOnNextBuild = true
+            lastRenderSignature = nil
+            return
+        }
+        if isInactiveSectionCollapsed {
+            toggleInactiveSection()
+        } else if let header = inactiveSectionHeaderFrame {
+            contentDocumentView.scrollToVisible(header)
+        }
     }
 
     /// No-op without an inactive workspace: an unfold nobody sees would
@@ -1056,17 +1024,12 @@ extension SidebarView {
         // Keep the toggle under the pointer for the next click. The
         // Archived row sits at the bottom with its list growing above it:
         // it keeps its distance to the bottom, which the rebuild's own
-        // anchor (the top, or the topmost row) would give up. The rail's
-        // tile has its list below it: it keeps its distance to the top.
+        // anchor (the top, or the topmost row) would give up.
         let clip = contentScrollView.contentView
-        let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
         let originFromBottom = clip.bounds.origin.y
         rebuildContent()
         let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
-        let originY = isExpanded
-            ? originFromBottom
-            : contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originFromBottom), highestOrigin)))
         contentScrollView.reflectScrolledClipView(clip)
         // From the menu or ⌘P the header may be out of view.
         if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }

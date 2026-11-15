@@ -148,36 +148,23 @@ final class TaskBirthTests: UIFlowTestCase {
         XCTAssertTrue(views(in: sidebar, with: SidebarView.birthPushKey("task-5")).isEmpty)
     }
 
-    /// In the rail: the born tile opens, the tile under it gives way by a
-    /// tile, and "+" at the rail's bottom stays.
-    func testTheRailsTilesOpenAndGiveWayToo() throws {
-        let sidebar = sidebar(
-            [row("born", index: 0), row("under", index: 1), row("old", index: 2, archived: true)], expanded: false
-        )
-        sidebar.toggleInactiveSection()
+    /// Folded, the rail plays it: the born icon opens, the icons under it
+    /// give way, and the place it opens at is the icon's. Played once: a
+    /// rebuild doesn't start it again.
+    func testTheRailsIconsOpenAndGiveWayToo() throws {
+        let sidebar = sidebar([row("born", index: 0), row("under", index: 1)], expanded: false)
         sidebar.noteBirth(workspaceID: "born")
-        let born = try XCTUnwrap(sidebar.rowFrame(workspaceID: "born"))
-        let under = try XCTUnwrap(sidebar.rowFrame(workspaceID: "under"))
-        let old = try XCTUnwrap(sidebar.rowFrame(workspaceID: "old"), "the archived tile is listed")
-        XCTAssertFalse(views(in: sidebar, inside: born).isEmpty)
-        XCTAssertTrue(views(in: sidebar, inside: born).allSatisfy { $0.layer?.animation(forKey: SidebarView.birthKey) != nil })
-        let pushKey = SidebarView.birthPushKey("born")
-        let pushed = Set(views(in: sidebar, with: pushKey).map(ObjectIdentifier.init))
-        // Everything laid out under it, the separator and the archived
-        // tiles too, so nothing opens a hole; but "+", laid out from the
-        // rail's bottom, the lowest view of all.
-        let frame = { (view: NSView) in sidebar.convert(view.frame, from: view.superview) }
-        let laidOutUnder = sidebar.expandedViews.filter { frame($0).maxY <= born.minY + 1 }
-        let add = try XCTUnwrap(laidOutUnder.min { frame($0).minY < frame($1).minY })
-        let flowing = laidOutUnder.filter { $0 !== add }
-        let tiles = views(in: sidebar, inside: under).count + views(in: sidebar, inside: old).count
-        XCTAssertGreaterThan(flowing.count, tiles, "the separator and the Archived tile as well")
-        XCTAssertEqual(pushed, Set(flowing.map(ObjectIdentifier.init)))
-        XCTAssertNil(add.layer?.animation(forKey: pushKey), "\"+\" stays")
-        let push = try XCTUnwrap(
-            views(in: sidebar, with: pushKey).first?.layer?.animation(forKey: pushKey) as? CASpringAnimation
+        let rail = sidebar.iconRail
+        let born = try XCTUnwrap(rail.itemViews["born"]?.layer)
+        let appear = try XCTUnwrap(born.animation(forKey: SidebarView.birthKey))
+        XCTAssertNotNil(born.animation(forKey: SidebarView.birthSpringKey))
+        XCTAssertNotNil(rail.itemViews["under"]?.layer?.animation(forKey: SidebarView.birthPushKey("born")))
+        XCTAssertEqual(
+            try XCTUnwrap(sidebar.rowFrame(workspaceID: "born")),
+            sidebar.convert(try XCTUnwrap(rail.iconFrame(of: "born")), from: rail), "the icon's place"
         )
-        XCTAssertEqual((push.fromValue as? NSNumber)?.doubleValue, Double(born.height), "a tile's area holds its gap")
+        sidebar.update(profiles: [], workspaces: [row("born", index: 0), row("under", index: 1), row("new", index: 2)])
+        XCTAssertTrue(born.animation(forKey: SidebarView.birthKey) === appear, "not started again")
     }
 
     /// Rows that may not move open nothing: not at a birth, and not at a

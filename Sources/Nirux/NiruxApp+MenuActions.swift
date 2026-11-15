@@ -148,9 +148,10 @@ extension NiruxApp {
     }
 
     /// Same toggle as the sidebar's Archived row (also in the ⌘P
-    /// palette), for the menu bar and Help search.
+    /// palette), for the menu bar and Help search; folded, the sidebar
+    /// unfolds with the list open.
     @objc func toggleInactiveWorkspaces(_ sender: Any?) {
-        shell?.sidebar.toggleInactiveSection()
+        shell?.toggleArchivedTasks()
     }
 
     // Not `toggleSidebar(_:)`: NSWindow answers that AppKit selector first,

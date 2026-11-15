@@ -123,13 +123,15 @@ final class IconRailTests: XCTestCase {
     }
 
     /// VoiceOver finds the Lead, each task by name and state in the rail's
-    /// order, even after one arrives above the others, then the two buttons
+    /// order, even after one arrives above the others, then the buttons
     /// under the rail.
     func testVoiceOverFindsEveryTask() {
-        let rail = rail(content)
+        var archived = content
+        archived.archivedCount = 2
+        let rail = rail(archived)
         XCTAssertEqual(spoken(rail), [
             "Lead, Working, at Reviews", "Checkout, Working, at Code", "Export, Needs you: a permission",
-            "Login, Failed", "Filters, Merged", "Archived tasks", "New task",
+            "Login, Failed", "Filters, Merged", "Archived tasks, 2", "New task", "Board",
         ])
         var arrived = content
         arrived.tasks.insert(item("audit", StateIcon(.idle)), at: 0)
@@ -169,5 +171,119 @@ final class IconRailTests: XCTestCase {
         long.layoutSubtreeIfNeeded()
         let first = try XCTUnwrap(long.itemViews["task0"])
         XCTAssertTrue(clip.documentVisibleRect.contains(first.frame), "and the next one too")
+    }
+
+    private func button(in view: NSView) throws -> NSButton {
+        func find(_ view: NSView) -> NSButton? { (view as? NSButton) ?? view.subviews.lazy.compactMap(find).first }
+        return try XCTUnwrap(find(view))
+    }
+
+    /// Under the capsule, top to bottom: the archived tasks while there are
+    /// some, a new task, then the Board at the rail's foot; each press
+    /// reaches its callback, and the tooltips say the chords.
+    func testTheButtonsUnderTheCapsule() throws {
+        let rail = rail(content)
+        XCTAssertTrue(rail.archivedButton.isHidden, "no archived task: no button")
+        XCTAssertEqual(rail.boardButton.frame.maxY, rail.bounds.maxY, "the Board at the foot")
+        XCTAssertEqual(rail.newButton.frame.maxY + Theme.Space.sm, rail.boardButton.frame.minY)
+        var archived = content
+        archived.archivedCount = 3
+        rail.show(archived)
+        rail.layoutSubtreeIfNeeded()
+        XCTAssertFalse(rail.archivedButton.isHidden)
+        XCTAssertEqual(rail.archivedButton.frame.maxY + Theme.Space.sm, rail.newButton.frame.minY)
+        XCTAssertEqual(rail.boardButton.frame.maxY, rail.bounds.maxY)
+        XCTAssertEqual(rail.archivedButton.toolTip, "Archived tasks (3)")
+        XCTAssertEqual(rail.newButton.toolTip, "New task (\(NiruxShortcuts.newWorkspaceDisplay))")
+        XCTAssertEqual(rail.boardButton.toolTip, "Board (\(NiruxShortcuts.board.chord.display))")
+
+        var pressed: [String] = []
+        rail.onArchived = { pressed.append("archived") }
+        rail.onNew = { pressed.append("new") }
+        rail.onBoard = { pressed.append("board") }
+        for round in [rail.archivedButton, rail.newButton, rail.boardButton] { try button(in: round).performClick(nil) }
+        XCTAssertEqual(pressed, ["archived", "new", "board"])
+    }
+
+    /// A working agent's icon breathes, at most 15 frames a second, the
+    /// Lead's sign too; nothing else does, and nothing does while icons may
+    /// not move. A breath keeps its beat across refreshes.
+    func testWorkingIconsBreathe() throws {
+        let rail = rail(content)
+        func breath(_ view: NSView?) -> CABasicAnimation? {
+            view?.layer?.animation(forKey: RailItemView.breathKey) as? CABasicAnimation
+        }
+        let checkout = try XCTUnwrap(rail.itemViews["checkout"])
+        let lead = try XCTUnwrap(rail.itemViews["lead"])
+        let beat = try XCTUnwrap(breath(checkout.iconView), "working")
+        XCTAssertEqual(beat.preferredFrameRateRange.maximum, 15)
+        XCTAssertEqual(beat.preferredFrameRateRange.minimum, 8)
+        XCTAssertEqual(beat.preferredFrameRateRange.preferred, 12)
+        XCTAssertNotNil(breath(lead.leadIcon), "the Lead's sign, which shows")
+        XCTAssertNil(breath(lead.iconView), "not its hidden icon")
+        for id in ["export", "login", "filters"] { XCTAssertNil(breath(rail.itemViews[id]?.iconView), id) }
+
+        var refreshed = content
+        refreshed.selectedID = "login"
+        rail.show(refreshed)
+        XCTAssertTrue(breath(checkout.iconView) === beat, "the same breath, its beat kept")
+        rail.animates = false
+        XCTAssertNil(breath(checkout.iconView))
+        XCTAssertNil(breath(lead.leadIcon))
+        rail.animates = true
+        XCTAssertNotNil(breath(checkout.iconView))
+        refreshed.tasks[0].icon = StateIcon(.idle)
+        rail.show(refreshed)
+        XCTAssertNil(breath(checkout.iconView), "its agent stopped")
+    }
+
+    /// A right-click on an icon opens its task's menu; an icon's frame is
+    /// found by its task.
+    func testAnIconsMenuAndFrame() throws {
+        let rail = rail(content)
+        rail.menuForTask = { NSMenu(title: $0) }
+        let login = try XCTUnwrap(rail.itemViews["login"])
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+        ))
+        XCTAssertEqual(login.menu(for: event)?.title, "login")
+        XCTAssertEqual(rail.iconFrame(of: "login"), rail.convert(login.bounds, from: login))
+        XCTAssertNil(rail.iconFrame(of: "gone"))
+    }
+
+    /// A born task's icon opens with a spring from just above its place, and
+    /// the icons under it give way by one place, up the screen in the
+    /// flipped list; nothing above moves, nor the buttons. A list that
+    /// scrolls pushes nothing; icons that may not move stop their birth.
+    func testABornIconOpensAndTheIconsUnderItGiveWay() throws {
+        let rail = rail(content)
+        let opens = CACurrentMediaTime() + 0.2
+        rail.playBirth(of: "export", opens: opens)
+        let born = try XCTUnwrap(rail.itemViews["export"]?.layer)
+        let appear = try XCTUnwrap(born.animation(forKey: SidebarView.birthKey) as? CABasicAnimation)
+        XCTAssertEqual(appear.beginTime, opens, accuracy: 0.001)
+        let spring = try XCTUnwrap(born.animation(forKey: SidebarView.birthSpringKey) as? CASpringAnimation)
+        XCTAssertEqual((spring.fromValue as? NSNumber)?.doubleValue, -8, "from above, in a flipped list")
+        let key = SidebarView.birthPushKey("export")
+        for id in ["login", "filters"] {
+            let push = try XCTUnwrap(rail.itemViews[id]?.layer?.animation(forKey: key) as? CASpringAnimation, id)
+            XCTAssertEqual((push.fromValue as? NSNumber)?.doubleValue, -Double(IconRail.pitch), id)
+        }
+        for id in ["lead", "checkout"] { XCTAssertNil(rail.itemViews[id]?.layer?.animation(forKey: key), id) }
+        XCTAssertNil(rail.separator.layer?.animation(forKey: key), "the line is above it")
+        for round in [rail.archivedButton, rail.newButton, rail.boardButton] { XCTAssertNil(round.layer?.animation(forKey: key)) }
+
+        rail.animates = false
+        XCTAssertNil(born.animation(forKey: SidebarView.birthKey))
+        XCTAssertNil(rail.itemViews["login"]?.layer?.animation(forKey: key))
+
+        var many = content
+        many.tasks = (0..<40).map { item("task\($0)", StateIcon(.idle)) }
+        many.selectedID = "task0"
+        let long = self.rail(many, height: 400)
+        long.playBirth(of: "task0", opens: opens)
+        XCTAssertNotNil(long.itemViews["task0"]?.layer?.animation(forKey: SidebarView.birthKey))
+        XCTAssertNil(long.itemViews["task1"]?.layer?.animation(forKey: SidebarView.birthPushKey("task0")), "the list scrolls")
     }
 }
