@@ -344,10 +344,12 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(machine), .dialog)
     }
 
-    /// A listed dialog takes every key, a paste too, until Esc or Ctrl-C:
-    /// none is a draft at the prompt, nor becomes one when it closes, and
-    /// once its turn is over a message goes in. A wheel scroll's arrows move
-    /// among its options. Once it closed, or after Esc, a key may be a draft.
+    /// A dialog takes the keys while it waits for one, a paste too: none is a
+    /// draft at the prompt, nor becomes one when it closes, and once its turn
+    /// is over a message goes in. A question waits until its submit; an
+    /// approval or a plan until Enter, Esc, Ctrl-C or a number answers it. A
+    /// wheel scroll's arrows move among its options. Once it is answered, a
+    /// key may be a draft.
     func testPromptIsFreeAfterADialogAnsweredWithItsKeys() {
         let down = "\u{1B}[B", up = "\u{1B}[A", esc = "\u{1B}"
         func dialog(_ tool: String, keys: [String], scrolls: Bool = false) -> AgentStatusMachine {
@@ -372,7 +374,7 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(dialog("ExitPlanMode", keys: [down, down, up, "\r"])))
         XCTAssertNil(refusal(dialog("Bash", keys: ["2"])), "an option's number")
         XCTAssertNil(refusal(dialog("Bash", keys: ["n", "2"])), "a letter out of habit, then the number")
-        XCTAssertNil(refusal(dialog("Bash", keys: [down, down, "\t", "u", "s", "e", " ", "v", "2", "\u{7F}", "\r"])), "why not")
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, down, "\t", "u", "s", "e", " ", "r", "g", "\u{7F}", "\r"])), "why not")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, "\u{1B}[200~/tmp/x\u{1B}[201~", "\r"])), "a paste, which an approval drops")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, down])), "answered with a click")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, down, esc])), "denied with Esc after moving")
@@ -380,6 +382,9 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(dialog("AskUserQuestion", keys: ["\r"], scrolls: true)), "a wheel scroll in the dialog")
         XCTAssertNil(refusal(dialog("Bash", keys: [], scrolls: true)))
 
+        XCTAssertEqual(refusal(dialog("Bash", keys: [down, "\r", "x"])), .draft, "typed while the approved call ran")
+        XCTAssertEqual(refusal(dialog("Bash", keys: [down, "\t", "v", "2", "x", "\r"])), .draft,
+                       "known limit: a number in an amendment reads as the answer")
         var typedAfter = dialog("Bash", keys: [down, "\r"])
         typedAfter.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 70), keys: Data("x".utf8))
         XCTAssertEqual(refusal(typedAfter), .draft, "typed once it closed")
