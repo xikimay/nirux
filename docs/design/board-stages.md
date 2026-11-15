@@ -168,10 +168,13 @@ progress; a pull request lands and leaves the list; a turn, a check, the
 sidebar move others):
 
 - a line still there stays where it was, in its new state;
-- a line gone stays there too, faded and inert (no click, a press already
-  under way included, no station, no link, no hand, no menu, nothing for
-  VoiceOver), so that nothing below it moves up; a repository gone leaves its
-  lines so, under a header that does nothing (no queue, no Start, no menu);
+- a line gone stays there too, faded, offering nothing (no station, no link,
+  no hand, no menu, nothing for VoiceOver, a press already under way
+  included), so that nothing below it moves up; a click on a task's says
+  where it went, as the table's Focus did: its workspace, focused where it
+  is now, else "That workspace was closed"; a pull request's without a task
+  says nothing. A repository gone leaves its lines so, under a header that
+  does nothing (no queue, no Start, no menu);
 - a running queue's line at the Board's foot that ends stays there too,
   faded, without Stop: the list above would grow and, scrolled to its end,
   move; a queue that starts waits for its line, as its header says it runs;

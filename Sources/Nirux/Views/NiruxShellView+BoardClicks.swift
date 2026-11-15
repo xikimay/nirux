@@ -43,6 +43,12 @@ extension NiruxShellView {
             guard let self, let board, let focus = board.stagesTargets.focus[line] else { return }
             self.performProjectBoardAction(focus, board: board)
         }
+        stages.onTaskGone = { [weak self, weak board] workspaceID in
+            // As the table's Focus: the workspace where it went (another space, another repository), else "That workspace
+            // was closed".
+            guard let self, let board else { return }
+            self.performProjectBoardAction(.focus(workspaceID: workspaceID, columnID: nil), board: board)
+        }
         stages.onOffer = { [weak self, weak board] section, offer in
             guard let self, let board else { return }
             self.performBoardOffer(offer, section: section, board: board)

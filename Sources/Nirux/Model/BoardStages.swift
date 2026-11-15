@@ -236,6 +236,9 @@ extension BoardStages {
         var tooltips = Tooltips()
         /// Its menu, in order; empty where it offers nothing.
         var menu: [MenuItem] = []
+        /// A task's line, its id its workspace's; else a pull request's
+        /// without a task.
+        var hasTask = true
     }
 }
 
@@ -477,7 +480,8 @@ extension BoardStages {
             since: reading.since,
             offer: offer,
             tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
-            menu: menu(of: facts, rail: rail, offer: offer)
+            menu: menu(of: facts, rail: rail, offer: offer),
+            hasTask: facts.hasTask
         )
     }
 

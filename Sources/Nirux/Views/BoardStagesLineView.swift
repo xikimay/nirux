@@ -48,6 +48,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     let pullRequestLabel = NSTextField(labelWithString: "")
     let timeLabel = NSTextField(labelWithString: "")
     var onClick: (() -> Void)?
+    /// A click on the line once it departed (faded in its place): what
+    /// it showed is gone from the Board.
+    var onGone: (() -> Void)?
     var onOffer: ((BoardStages.QueueOffer) -> Void)?
     var onLink: ((BoardStages.Link) -> Void)?
     /// An item of its menu was chosen, while the line still offered it.
@@ -483,9 +486,9 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     // MARK: Clicks
 
     /// The line takes the mouse for all it holds: its words don't. A
-    /// departed one takes none.
+    /// departed one takes it only to say its task is gone (`onGone`).
     override func hitTest(_ point: NSPoint) -> NSView? {
-        isDeparted || super.hitTest(point) == nil ? nil : self
+        super.hitTest(point) == nil ? nil : self
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -519,7 +522,12 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
             onPointer?(event.locationInWindow)
         }
         let point = convert(event.locationInWindow, from: nil)
-        guard let pressed, !isDeparted, rectInSight.contains(point), target(at: point) == pressed else { return }
+        guard let pressed, rectInSight.contains(point), target(at: point) == pressed else { return }
+        // Departed, it offers nothing: a click on it is about what it showed, which went.
+        guard !isDeparted else {
+            if pressed == .line { onGone?() }
+            return
+        }
         switch pressed {
         case .line: onClick?()
         case .offer(let offer): onOffer?(offer)
