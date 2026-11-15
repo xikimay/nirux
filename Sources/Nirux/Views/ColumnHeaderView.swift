@@ -591,7 +591,8 @@ final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
     }
 
     /// What it says, then shorter words for a narrow header (a warning's
-    /// without "⚠︎ "): it shows the first that fits.
+    /// without "⚠︎ "): it shows the first that fits. Empty, it says its
+    /// `stringValue`, or nothing.
     var texts: [String] = [] {
         didSet { stringValue = texts.first ?? "" }
     }
@@ -600,12 +601,13 @@ final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
     var accessoryInset: CGFloat { ColumnHeaderView.labelInset }
 
     func width(fitting maxWidth: CGFloat) -> CGFloat {
-        for text in texts where !text.isEmpty {
+        let choices = texts.isEmpty ? [stringValue] : texts
+        for text in choices where !text.isEmpty {
             stringValue = text
             let width = ColumnHeaderView.textWidth(self)
             if width <= maxWidth { return width }
         }
-        stringValue = texts.first ?? ""
+        stringValue = choices.first ?? ""
         return 0
     }
 }
