@@ -786,12 +786,13 @@ final class ProjectBoardFlowTests: XCTestCase {
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             let titles = { board.view.stages.content?.sections.map(\.title) ?? [] }
             let section = { (title: String) in board.view.stages.content?.sections.first { $0.title == title } }
-            try waitUntil("gadgets' section is read from its remote") {
+            // Once widgets' remote is read too, the clone is its: no section of its own (it would stay one a minute,
+            // until the next listing, if the remote read placed nothing again).
+            try waitUntil("gadgets' section is read from its remote, the clone placed in widgets'") {
                 board.tick(onScreen: true)
                 shell.renderProjectBoard(board)
-                return section("gadgets")?.status?.text == "Read-only"
+                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "gadgets"]
             }
-            XCTAssertEqual(titles(), ["widgets", "gadgets"])
             let lineTitles = { (title: String) in section(title)?.lines.units.flatMap(\.lines).map(\.title) ?? [] }
             XCTAssertEqual(lineTitles("widgets"), ["widgets", "copy"], "the second clone of the space's repository stays there")
             XCTAssertEqual(lineTitles("gadgets"), ["gadget"])
