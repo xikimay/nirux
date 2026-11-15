@@ -31,6 +31,10 @@ final class BoardColumnView: NSView {
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    /// It takes the keyboard from a click on the Board, but Tab passes it
+    /// by: it only ends the Board's loop, so that Shift-Tab from it goes
+    /// back to the last stop.
+    override var canBecomeKeyView: Bool { false }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -44,6 +48,10 @@ final class BoardColumnView: NSView {
         header.trailingButtons = [refreshButton]
         header.menuProvider = { [weak self] in self?.headerMenu() ?? NSMenu() }
         [header, stages].forEach(addSubview)
+        // Tab, from the column: the Board's stops, back to the column (Full Keyboard Access). Refresh and ⋯ are none:
+        // a column header's buttons leave the keyboard where it is (`ColumnHeaderButton`).
+        nextKeyView = stages.orderSwitch
+        stages.keyLoopEnd = self
     }
 
     @available(*, unavailable)

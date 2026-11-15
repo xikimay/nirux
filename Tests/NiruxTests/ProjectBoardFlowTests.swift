@@ -175,6 +175,32 @@ final class ProjectBoardFlowTests: XCTestCase {
                 client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
             }
 
+            // From the keyboard (Full Keyboard Access): Tab from the column reaches the lines in their order; Space opens
+            // the task.
+            BoardStagesKeyboard.isFullAccess = { true }
+            defer { BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled } }
+            let window = try XCTUnwrap(board.view.window)
+            // Shift-Tab from the column, which a click on the Board gives the keyboard: the last line.
+            window.makeFirstResponder(board.view)
+            XCTAssertEqual(try BoardStagesClicks.tabToNextLine(in: window, backward: true).line.title, "login")
+            window.makeFirstResponder(board.view)
+            XCTAssertEqual(try BoardStagesClicks.tabToNextLine(in: window).line.title, "widgets")
+            let focused = try BoardStagesClicks.tabToNextLine(in: window)
+            XCTAssertEqual(focused.line.title, "login")
+            // Round the loop back to the first line: the column, where it ends, is no stop.
+            var steps = 0
+            repeat {
+                window.selectNextKeyView(nil)
+                steps += 1
+                XCTAssertFalse(window.firstResponder === board.view, "the column is no stop")
+            } while (window.firstResponder as? BoardStagesLineView)?.line.title != "widgets" && steps < 30
+            XCTAssertLessThan(steps, 30)
+            try BoardStagesClicks.type(" ", 49, on: focused)
+            XCTAssertEqual(shell.activeWorkspace?.title, "login")
+            try select("widgets", in: shell)
+            dropWorkspaceSnapshots(shell)
+            BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+
             // A click on the line opens its task.
             try BoardStagesClicks.open(try BoardStagesClicks.line("login", in: board))
             XCTAssertEqual(shell.activeWorkspace?.title, "login")
@@ -225,7 +251,9 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("Board Settings opens") { shell.boardSettingsPanel?.hostView != nil }
+            // The class's first test: the first window, git and Settings window of its process take 10 s on a healthy
+            // runner, and took over 30 s once with eight other test processes beside it.
+            try waitUntil("Board Settings opens", timeout: 90) { shell.boardSettingsPanel?.hostView != nil }
             let form = try XCTUnwrap(shell.boardSettingsPanel)
             XCTAssertEqual(form.spaceID, space.id)
             let message = try XCTUnwrap(board.view.stages.content?.message, "no message")

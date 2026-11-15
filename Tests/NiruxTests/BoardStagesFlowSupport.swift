@@ -65,6 +65,35 @@ enum BoardStagesClicks {
         try press(entry, at: point, file: file, line: line)
     }
 
+    /// A key going down, or coming up, as the keyboard sends it.
+    static func key(
+        _ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], isARepeat: Bool = false, up: Bool = false
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: up ? .keyUp : .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: isARepeat, keyCode: code
+        ))
+    }
+
+    /// A key pressed on `view`: down, then up.
+    static func type(_ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], on view: NSView) throws {
+        view.keyDown(with: try key(characters, code, flags))
+        view.keyUp(with: try key(characters, code, flags, up: true))
+    }
+
+    /// Tab (Shift-Tab: `backward`), as the window takes it, until a line
+    /// has the keyboard: the controls on the way are stops only where Full
+    /// Keyboard Access is on in the system.
+    static func tabToNextLine(
+        in window: NSWindow, backward: Bool = false, file: StaticString = #filePath, line: UInt = #line
+    ) throws -> BoardStagesLineView {
+        for _ in 0..<30 {
+            if backward { window.selectPreviousKeyView(nil) } else { window.selectNextKeyView(nil) }
+            if let focused = window.firstResponder as? BoardStagesLineView { return focused }
+        }
+        return try XCTUnwrap(nil as BoardStagesLineView?, "Tab reached no line", file: file, line: line)
+    }
+
     /// Chooses `title` in `menu`: there, and enabled.
     static func choose(_ title: String, in menu: NSMenu?, file: StaticString = #filePath, line: UInt = #line) throws {
         let menu = try XCTUnwrap(menu, "no menu", file: file, line: line)

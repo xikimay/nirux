@@ -67,6 +67,8 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
+    /// The key that went down on it, which acts as it comes up.
+    private var held = BoardStagesKeyboard.Held()
     /// The pointer is on the Merge station, as the Board follows it. The
     /// station says what a click does only while one acts.
     var isStationHovered = false {
@@ -597,11 +599,48 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         onMenu?(item)
     }
 
-    /// VoiceOver's "show menu": the same menu, under the line's title.
+    /// VoiceOver's "show menu", or Control-Return: the same menu, under
+    /// the line's title.
     override func accessibilityPerformShowMenu() -> Bool {
         guard let menu = contextMenu() else { return false }
         popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
         return true
+    }
+
+    // MARK: The keyboard
+
+    /// Tab stops on it while Full Keyboard Access is on, unless it departed.
+    override var acceptsFirstResponder: Bool { !isDeparted && BoardStagesKeyboard.takesKeyboard() }
+    override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
+
+    /// The list scrolls it into sight.
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { scrollToVisible(bounds) }
+        return took
+    }
+
+    override func resignFirstResponder() -> Bool {
+        held.reset()
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !held.keyDown(event) { super.keyDown(with: event) }
+    }
+
+    /// Space or Return opens the task, as a click on the line (departed
+    /// since it took the keyboard, it says where its task went); Control-
+    /// Return shows its menu, where the Merge station and the link are too.
+    /// As the key comes up (`BoardStagesKeyboard.Held`).
+    override func keyUp(with event: NSEvent) {
+        switch held.keyUp(event) {
+        case .press?: isDeparted ? onGone?() : onClick?()
+        case .menu?: if isDeparted || !accessibilityPerformShowMenu() { NSSound.beep() }
+        default: super.keyUp(with: event)
+        }
     }
 
     // MARK: Under the pointer
@@ -658,7 +697,7 @@ final class BoardStagesAim {
 /// A button that acts only where the pointer aimed: the keyboard and
 /// VoiceOver press it as any.
 @MainActor
-final class BoardStagesButton: NSButton {
+final class BoardStagesButton: BoardStagesKeyButton {
     var aim = BoardStagesAim()
     /// Follows the press to its release. (The tests give their own.)
     var track: ((NSEvent) -> Void)?

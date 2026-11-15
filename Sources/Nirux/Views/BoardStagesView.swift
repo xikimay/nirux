@@ -254,6 +254,10 @@ final class BoardStagesView: NSView {
     private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
+    /// Where Tab goes after the Board's last stop: the column's first.
+    weak var keyLoopEnd: NSView? {
+        didSet { linkKeyViews() }
+    }
     private var sectionHeaders: [String: BoardStagesSectionHeaderView] = [:]
     private var foldButtons: [String: NSButton] = [:]
     private var worktreeFolds: [String: NSButton] = [:]
@@ -374,6 +378,8 @@ final class BoardStagesView: NSView {
         self.content = content
         guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
             || content.runningQueues != previous?.runningQueues || content.message != previous?.message else { return showTimes() }
+        let focus = keyboardFocus()
+        defer { viewsChanged(focus: focus) }
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
@@ -687,6 +693,29 @@ final class BoardStagesView: NSView {
         self.items = items
     }
 
+    /// Tab's way through the Board (Full Keyboard Access): the order switch,
+    /// the Lead, then each repository's header, lines, folds, other
+    /// worktrees and "Merged today" in their order, then the foot's Stops;
+    /// then `keyLoopEnd`. What can't take the keyboard (hidden, departed, or
+    /// Full Keyboard Access off) is passed over (`nextValidKeyView`).
+    private func linkKeyViews() {
+        var views: [NSView] = [orderSwitch, leadButton]
+        for item in items {
+            switch item {
+            case .sectionHeader(let header): views += [header.startButton, header.stopButton, header.moreButton]
+            case .line(let line): views.append(line)
+            case .fold(let button), .sectionFold(let button): views.append(button)
+            case .worktree(let worktree): views += [worktree.openButton, worktree.cleanUpButton]
+            case .merged(let merged): views += merged.entries + [merged.moreButton]
+            case .message(let message): views.append(message.settingsButton)
+            case .caption: break
+            }
+        }
+        views += runningQueueViews.map(\.stopButton)
+        for (view, next) in zip(views, views.dropFirst()) { view.nextKeyView = next }
+        views.last?.nextKeyView = keyLoopEnd
+    }
+
     /// "▸ Other workspaces · 2", in a repository's title's type: a section
     /// of its own, not a fold of the one above.
     private static func sectionFoldTitle(_ title: String, count: Int, isUnfolded: Bool) -> NSAttributedString {
@@ -708,7 +737,7 @@ final class BoardStagesView: NSView {
     }
 
     private func makeFold(section id: String, action: Selector = #selector(foldClicked(_:))) -> NSButton {
-        let fold = NSButton(title: "", target: self, action: action)
+        let fold = BoardStagesKeyButton(title: "", target: self, action: action)
         fold.identifier = NSUserInterfaceItemIdentifier(id)
         fold.isBordered = false
         fold.alignment = .left
@@ -1170,6 +1199,8 @@ final class BoardStagesView: NSView {
     /// The content as it is, where it was held.
     private func showContent() {
         guard let content else { return }
+        let focus = keyboardFocus()
+        defer { viewsChanged(focus: focus) }
         if runningQueueViews.map(\.queue) != content.runningQueues {
             departedQueues = []
             showRunningQueues(content.runningQueues)
@@ -1177,7 +1208,7 @@ final class BoardStagesView: NSView {
         }
         guard content.sections != shownSections || !departed.isEmpty else { return }
         (shownSections, departed) = (content.sections, [])
-        rebuild()
+        rebuildViews()
     }
 
     /// The hover, from where the pointer is now; none on a Board that
@@ -1235,14 +1266,46 @@ final class BoardStagesView: NSView {
     }
 
     private func unfoldMerged(section id: String) {
+        // "+12 more" had the keyboard: the first entry it showed that takes it (one whose task is open here), not what
+        // comes after the merges.
+        let merged = mergedViews[id]
+        let shown = merged?.entries.filter { !$0.isHidden }.count
+        let hadKeyboard = merged.map { window?.firstResponder === $0.moreButton } ?? false
         unfoldedMerged.insert(id)
         rebuild()
+        if hadKeyboard, let shown, let next = mergedViews[id]?.entries.dropFirst(shown).first(where: \.canBecomeKeyView) {
+            window?.makeFirstResponder(next)
+        }
     }
 
     private func rebuild() {
+        let focus = keyboardFocus()
+        rebuildViews()
+        viewsChanged(focus: focus)
+    }
+
+    private func rebuildViews() {
         buildItems()
         showTimes()
         layoutContent()
+    }
+
+    /// What has the keyboard in the Board, a line by its place.
+    private func keyboardFocus() -> (view: NSView, line: Int?)? {
+        guard let focused = window?.firstResponder as? NSView, focused.isDescendant(of: self) else { return nil }
+        return (focused, lineViews.firstIndex { $0 === focused })
+    }
+
+    /// The views changed: Tab's loop again; and what had the keyboard and is
+    /// gone hands it to the line now in its place, else to the column.
+    private func viewsChanged(focus: (view: NSView, line: Int?)?) {
+        linkKeyViews()
+        guard let focus, focus.view.window == nil else { return }
+        if let index = focus.line, !lineViews.isEmpty, lineViews[min(index, lineViews.count - 1)].canBecomeKeyView {
+            window?.makeFirstResponder(lineViews[min(index, lineViews.count - 1)])
+        } else {
+            window?.makeFirstResponder(superview)
+        }
     }
 
     /// The fold of a section's pull requests without a task, when it has some.
@@ -1284,7 +1347,7 @@ final class BoardStagesSectionHeaderView: NSView {
         didSet { [startButton, stopButton].forEach { $0.aim = aim } }
     }
     /// "⋯": the repository's menu.
-    let moreButton = NSButton(title: "", target: nil, action: nil)
+    let moreButton = BoardStagesKeyButton(title: "", target: nil, action: nil)
     var onStart: (() -> Void)?
     var onStop: (() -> Void)?
     var onMenu: ((BoardStagesView.SectionMenuItem) -> Void)?

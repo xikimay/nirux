@@ -71,6 +71,7 @@ One Explain runs at a time in the whole app, and **Cancel** stops it. Explain is
 
 - Each line shows the task's state, a rail of four stations (Code, Reviews, Checks, Merge), a phrase saying what the task waits for, its pull request and a time. A sub-task sits under its task; a stack of pull requests shares a numbered rail.
 - A click on a line opens the task. A right click shows its menu: Open Pull Request, Add to Queue, Retarget, Resume, Clean Up…, Open.
+- With Full Keyboard Access on (System Settings › Keyboard), Tab moves from line to line; Space or Return opens the task, Control-Return shows its menu.
 - Pull requests without a task and other worktrees are folded at the end of each repository, then the pull requests merged today.
 - The switch at the top orders the lines as the sidebar does, or by progress.
 - The Board belongs to its workspace's space: move that workspace to another space and the Board follows. A space has one Board: if it has its own already, the moved one closes and that one comes forward.
