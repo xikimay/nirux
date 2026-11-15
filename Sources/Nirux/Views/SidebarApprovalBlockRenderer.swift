@@ -125,8 +125,8 @@ struct SidebarApprovalBlockRenderer {
             x: x + metrics.approvalBoxPaddingX, y: top - textHeight,
             width: width - metrics.approvalBoxPaddingX * 2 + 4, height: textHeight
         )
-        text.toolTip = "\(approval.toolName): \(approval.text) — answer in the terminal for more options"
-        text.setAccessibilityLabel("\(approval.toolName) permission request: \(approval.text)")
+        text.toolTip = RequestChoices.permissionToolTip(approval)
+        text.setAccessibilityLabel(RequestChoices.permissionRequestLabel(approval))
         return text
     }
 

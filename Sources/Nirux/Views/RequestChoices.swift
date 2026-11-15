@@ -52,6 +52,16 @@ enum RequestChoices {
         ]
     }
 
+    /// The command's tooltip: the terminal has more answers.
+    static func permissionToolTip(_ approval: SidebarPermissionApproval) -> String {
+        "\(approval.toolName): \(approval.text) — answer in the terminal for more options"
+    }
+
+    /// What VoiceOver says of the command.
+    static func permissionRequestLabel(_ approval: SidebarPermissionApproval) -> String {
+        "\(approval.toolName) permission request: \(approval.text)"
+    }
+
     /// What stands in for the buttons while a decision travels or after it
     /// failed; nil while the request is open.
     static func permissionStatus(_ display: PermissionApprovalTicket.Display) -> String? {
@@ -119,5 +129,20 @@ final class RequestArming {
 
     func isArmed(_ key: String) -> Bool {
         arming[key].map { now() >= $0.armedAt } ?? false
+    }
+
+    /// Where `button` is: on screen while it has a window, so that a move of
+    /// its panel or its window counts; else in `container`.
+    static func place(of button: NSView, in container: NSView) -> NSRect {
+        guard let window = button.window else { return container.convert(button.bounds, from: button) }
+        return window.convertToScreen(button.convert(button.bounds, to: nil))
+    }
+
+    /// Has `observer` hear `window` move (and nothing else's): its answers
+    /// slide with it.
+    static func observeMoves(of window: NSWindow?, by observer: NSObject, selector: Selector) {
+        NotificationCenter.default.removeObserver(observer, name: NSWindow.didMoveNotification, object: nil)
+        guard let window else { return }
+        NotificationCenter.default.addObserver(observer, selector: selector, name: NSWindow.didMoveNotification, object: window)
     }
 }

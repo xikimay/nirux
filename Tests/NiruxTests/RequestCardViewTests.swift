@@ -6,9 +6,11 @@ import XCTest
 /// (docs/design/glass-interface.md).
 @MainActor
 final class RequestCardViewTests: XCTestCase {
-    static func approval(_ text: String, sent: PermissionApproval.Behavior? = nil, now: TimeInterval = 11) -> SidebarPermissionApproval? {
+    static func approval(
+        _ text: String, id: String? = nil, sent: PermissionApproval.Behavior? = nil, now: TimeInterval = 11
+    ) -> SidebarPermissionApproval? {
         var request = AgentPermissionRequest(toolName: "Bash", summary: text, key: "k", agentID: nil, sessionID: "s", requestedAt: 0)
-        var ticket = PermissionApprovalTicket(requestID: "r-\(text)", deadline: 100, text: text)
+        var ticket = PermissionApprovalTicket(requestID: id ?? "r-\(text)", deadline: 100, text: text)
         ticket.sent = sent
         ticket.sentAt = sent.map { _ in 10 }
         request.approval = ticket
@@ -55,6 +57,25 @@ final class RequestCardViewTests: XCTestCase {
         XCTAssertEqual(answers(asks), ["Dismiss", "Reply…", "No", "Yes"])
         XCTAssertEqual(asks.textLabel.accessibilityLabel(), "Claude asks: Shall I merge it?")
         XCTAssertEqual(answers(card(.question(open))), ["Dismiss", "Reply…"])
+        var listed = open
+        listed.choices = (1...5).map { TurnEndChoice(marker: "\($0).", text: "Option \($0)") }
+        let options = card(.question(listed))
+        let labels = options.choicesView.subviews.compactMap { $0 as? NSTextField }
+        XCTAssertEqual(labels.compactMap(\.toolTip), (1...5).map { "\($0). Option \($0)" }, "every choice, under its marker, as the row lists them")
+        XCTAssertTrue(labels.allSatisfy { options.choicesView.bounds.contains($0.frame) }, "inside their place")
+        XCTAssertEqual(labels.map(\.frame.minY), labels.map(\.frame.minY).sorted(by: >), "top down")
+        XCTAssertGreaterThan(options.frame.height, card(.question(open)).frame.height)
+        let width = options.frame.width
+        let fewer = options.fittingHeight(width: width)
+        let more = SidebarTurnQuestion(
+            text: "Which one first?", turnEndedAt: 6, isYesNo: false, columnID: UUID(),
+            choices: (1...6).map { TurnEndChoice(marker: "\($0).", text: "Option \($0)") }
+        )
+        options.show(Self.request(.question(more)))
+        XCTAssertGreaterThan(options.fittingHeight(width: width), fewer, "a new question is measured again")
+        options.frame.size.height = options.fittingHeight(width: width)
+        options.layoutSubtreeIfNeeded()
+        XCTAssertEqual(options.choicesView.subviews.count, 6, "its choices laid out again at the same width")
         let reply = card(.mission(mission))
         XCTAssertEqual(answers(reply), ["Reply…"])
         XCTAssertEqual(reply.textLabel.accessibilityLabel(), "The agent asks: Which base?")
@@ -105,6 +126,24 @@ final class RequestCardViewTests: XCTestCase {
         card.show(later)
         XCTAssertTrue(card.answerButtons[.permission(.allow)] === allow, "the minute ticks, the buttons stay")
         XCTAssertEqual(card.terminalButton.acceptsPress?(try event(.leftMouseDown, 2)), false)
+
+        // Pressed on one request, released after another (the same buttons)
+        // took the card: nothing answers.
+        XCTAssertEqual(allow.acceptsPress?(try event(.leftMouseDown, 1)), true)
+        card.show(Self.request(.permission(try XCTUnwrap(Self.approval("npm test", id: "other"))), task: "b"))
+        allow.performClick(nil)
+        XCTAssertEqual(answered.count, 1, "the press was on the first request")
+        XCTAssertEqual(allow.acceptsPress?(try event(.leftMouseDown, 1)), true)
+        allow.performClick(nil)
+        XCTAssertEqual(answered.count, 2, "pressed and released on the same one")
+
+        // A press released off the button answers nothing, and is over: a
+        // later VoiceOver press on another request answers it.
+        XCTAssertEqual(allow.acceptsPress?(try event(.leftMouseDown, 1)), true)
+        allow.pressEnded?()
+        card.show(Self.request(.permission(try XCTUnwrap(Self.approval("npm test", id: "third"))), task: "c"))
+        allow.performClick(nil)
+        XCTAssertEqual(answered.count, 3)
     }
 
     /// The command shows whole, every character, wrapped to fit its box; a

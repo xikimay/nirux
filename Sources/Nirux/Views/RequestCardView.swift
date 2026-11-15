@@ -77,8 +77,9 @@ final class RequestCardView: NSView {
     static let padding = Theme.Space.md
     private static let gap = Theme.Space.sm
     private static let headerHeight: CGFloat = 18
-    private static let textMaximumLines = 8
-    private static let choicesMaximumLines = 4
+    typealias Metrics = SidebarExpandedMetrics
+    /// One character of the command's font: the box's lines are cut by it.
+    private static let characterWidth = ("0" as NSString).size(withAttributes: [.font: Metrics.approvalFont]).width
 
     /// A click on an answer, with its button to anchor what it opens (Reply…).
     var onAnswer: ((RequestChoice, NSView) -> Void)?
@@ -105,10 +106,14 @@ final class RequestCardView: NSView {
     /// The command, exact, in its box.
     let box = NSView()
     let commandLabel = NSTextField(labelWithString: "")
-    /// The question, a dialog's or a prompt's text.
-    let textLabel = NSTextField(wrappingLabelWithString: "")
-    /// What a question chooses between, as its message lists it.
-    let choicesLabel = NSTextField(wrappingLabelWithString: "")
+    /// The question, a dialog's or a prompt's text, as a row wraps it.
+    let textLabel = SidebarWrappedText.label(NSAttributedString(), lineHeight: Metrics.questionLineHeight, maxLines: Metrics.questionMaxLines)
+    /// What a question chooses between, as its message lists it: the row's
+    /// items under their markers.
+    let choicesView = NSView()
+    private var choices = SidebarQuestionText.choices([])
+    /// The width the choices' labels were made for.
+    private var choicesWidth: CGFloat?
     /// Where to answer, or the decision on its way.
     let noteLabel = NSTextField(labelWithString: "")
     private(set) var answerButtons: [RequestChoice: NiruxButton] = [:]
@@ -120,6 +125,12 @@ final class RequestCardView: NSView {
     /// The answers shown: the buttons stay while they don't change (a
     /// press, a hover survive the wait's minute ticking).
     private var shownButtons: [RequestButton]?
+    /// The request an answer's press was on: its release answers that one,
+    /// or nothing if another took the card meanwhile.
+    private var pressedRequestID: String?
+    /// The heights measured, by width (the inbox measures at two beside a
+    /// legacy scroller), until the content changes.
+    private var measured: [CGFloat: CGFloat] = [:]
 
     init(trailing: Trailing) {
         self.trailing = trailing
@@ -151,20 +162,9 @@ final class RequestCardView: NSView {
         box.layer?.borderWidth = 1
         box.layer?.borderColor = Theme.Color.line.cgColor
         box.addSubview(commandLabel)
-        for label in [textLabel, choicesLabel] {
-            label.font = Theme.Font.body
-            // Wrapped, the last line cut: a truncating break mode would keep
-            // it to one line.
-            label.lineBreakMode = .byWordWrapping
-            label.cell?.truncatesLastVisibleLine = true
-        }
-        textLabel.maximumNumberOfLines = Self.textMaximumLines
-        choicesLabel.maximumNumberOfLines = Self.choicesMaximumLines
-        textLabel.textColor = Theme.Color.textPrimary
-        choicesLabel.textColor = Theme.Color.textSecondary
         noteLabel.font = Theme.Font.caption
         noteLabel.lineBreakMode = .byTruncatingTail
-        let views: [NSView] = [iconView, titleLabel, verbLabel, waitedLabel, openButton, box, choicesLabel, textLabel, noteLabel, terminalButton]
+        let views: [NSView] = [iconView, titleLabel, verbLabel, waitedLabel, openButton, box, choicesView, textLabel, noteLabel, terminalButton]
         for view in views {
             addSubview(view)
         }
@@ -180,6 +180,7 @@ final class RequestCardView: NSView {
     func show(_ request: WaitingRequest) {
         guard request != self.request else { return }
         self.request = request
+        measured = [:]
         iconView.icon = request.icon
         titleLabel.stringValue = request.taskTitle
         verbLabel.stringValue = request.verb
@@ -190,42 +191,42 @@ final class RequestCardView: NSView {
         terminalButton.setAccessibilityLabel("Open \(request.taskTitle) to answer in the terminal")
         setAccessibilityLabel([request.taskTitle, request.verb, request.waited.map { "waiting \($0)" }].compactMap { $0 }.joined(separator: ", "))
 
-        var text: String?, choices: [TurnEndChoice] = [], note: (String, NSColor)?, buttons: [RequestButton] = []
+        let text = requestText
+        var choices: [TurnEndChoice] = [], note: (String, NSColor)?, buttons: [RequestButton] = []
         box.isHidden = true
         switch request.kind {
         case .permission(let approval):
             box.isHidden = false
-            commandLabel.setAccessibilityLabel("\(approval.toolName) permission request: \(approval.text)")
+            commandLabel.setAccessibilityLabel(RequestChoices.permissionRequestLabel(approval))
             if let status = RequestChoices.permissionStatus(approval.display) {
                 note = (status, approval.display == .undelivered ? Theme.Color.textSecondary : Theme.Color.textTertiary)
             } else {
                 buttons = RequestChoices.permission(approval)
             }
         case .question(let question):
-            text = question.text
             choices = question.choices
             buttons = [RequestChoices.dismiss(question)] + RequestChoices.turn(question)
-        case let .dialog(question, more):
-            text = question
+        case let .dialog(_, more):
             note = (SidebarDialogLayout.hint(more: more), Theme.Color.textSecondary)
         case .mission(let question):
-            text = question.text
             buttons = [RequestChoices.missionReply(question)]
-        case .terminal(let prompt):
-            text = prompt
+        case .terminal:
             note = (SidebarDialogLayout.hint(more: 0), Theme.Color.textSecondary)
         }
-        textLabel.stringValue = text.map(AgentText.withoutMarks) ?? ""
+        textLabel.attributedStringValue = SidebarWrappedText.wrapping(
+            SidebarQuestionText.question(text ?? ""), lineHeight: Metrics.questionLineHeight
+        )
         // On the card: off its buttons, the pointer is the card's.
         if case .permission(let approval) = request.kind {
-            toolTip = "\(approval.toolName): \(approval.text) — answer in the terminal for more options"
+            toolTip = RequestChoices.permissionToolTip(approval)
         } else {
             toolTip = text
         }
         textLabel.isHidden = text == nil
         textLabel.setAccessibilityLabel(text.map { "\(request.asker): \($0)" })
-        choicesLabel.stringValue = choices.map { "\($0.marker ?? "•") \(AgentText.withoutMarks($0.text))" }.joined(separator: "\n")
-        choicesLabel.isHidden = choices.isEmpty
+        self.choices = SidebarQuestionText.choices(choices)
+        choicesWidth = nil
+        choicesView.isHidden = choices.isEmpty
         noteLabel.stringValue = note?.0 ?? ""
         noteLabel.textColor = note?.1
         noteLabel.isHidden = note == nil
@@ -250,17 +251,26 @@ final class RequestCardView: NSView {
             button.setAccessibilityLabel(answer.accessibilityLabel)
             button.toolTip = answer.toolTip
             let choice = answer.choice
-            // A single click, on a button its container armed.
+            // A single click, on a button its container armed; its release
+            // answers the request it pressed.
             button.acceptsPress = { [weak self] event in
-                event.clickCount == 1 && self?.canAnswer?(choice) == true
+                guard let self, event.clickCount == 1, self.canAnswer?(choice) == true else { return false }
+                self.pressedRequestID = self.request?.id
+                return true
             }
+            // Released elsewhere, the press answered nothing: it is over.
+            button.pressEnded = { [weak self] in self?.pressedRequestID = nil }
             answerButtons[choice] = button
             addSubview(button)
         }
     }
 
     @objc private func answered(_ sender: NiruxButton) {
+        let pressed = pressedRequestID
+        pressedRequestID = nil
         guard let choice = answerButtons.first(where: { $0.value === sender })?.key, canAnswer?(choice) == true else { return }
+        // Pressed on one request, released on another in its place.
+        if let pressed, pressed != request?.id { return }
         onAnswer?(choice, sender)
     }
 
@@ -268,9 +278,12 @@ final class RequestCardView: NSView {
 
     // MARK: - Layout
 
-    /// The card's height at `width`, its content shown.
+    /// The card's height at `width`, its content shown: measured once.
     func fittingHeight(width: CGFloat) -> CGFloat {
-        place(width: width, apply: false)
+        if let height = measured[width] { return height }
+        let height = place(width: width, apply: false)
+        measured[width] = height
+        return height
     }
 
     override func layout() {
@@ -323,9 +336,8 @@ final class RequestCardView: NSView {
         let padding = Self.padding
         var y = top
         if !box.isHidden, case .permission(let approval)? = request?.kind {
-            let metrics = SidebarExpandedMetrics.self
-            let characterWidth = ("0" as NSString).size(withAttributes: [.font: metrics.approvalFont]).width
-            let perLine = Int((inner - 2 * metrics.approvalBoxPaddingX - 4) / max(characterWidth, 1))
+            let metrics = Metrics.self
+            let perLine = Int((inner - 2 * metrics.approvalBoxPaddingX - 4) / max(Self.characterWidth, 1))
             let lines = SidebarExpandedMetrics.approvalLines(approval.text, perLine: perLine)
             // Measuring leaves the box as it is.
             if apply, lines != commandLines {
@@ -342,20 +354,36 @@ final class RequestCardView: NSView {
             ), apply)
             y += boxHeight + Self.gap
         }
-        for label in [choicesLabel, textLabel] where !label.isHidden {
-            let height = Self.height(of: label, width: inner)
-            set(label, NSRect(x: padding, y: y, width: inner, height: height), apply)
+        if !choicesView.isHidden {
+            let height = choices.height(width: inner)
+            if apply {
+                choicesView.frame = NSRect(x: padding, y: y, width: inner, height: height)
+                if choicesWidth != inner {
+                    // The row's labels, stacked down from the top of an
+                    // unflipped view, as the row stacks them.
+                    choicesWidth = inner
+                    choicesView.subviews = choices.labels(x: 0, width: inner, top: height)
+                }
+            }
+            y += height + Self.gap
+        }
+        if !textLabel.isHidden, case let text? = requestText {
+            let height = SidebarQuestionText.questionHeight(text, width: inner)
+            set(textLabel, NSRect(x: padding, y: y, width: inner, height: height), apply)
             y += height + Self.gap
         }
         return y
     }
 
-    /// `label`'s height at `width`, its lines capped, without touching it.
-    private static func height(of label: NSTextField, width: CGFloat) -> CGFloat {
-        let font = label.font ?? Theme.Font.body
-        let whole = label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height ?? 0
-        let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
-        return ceil(min(whole, CGFloat(label.maximumNumberOfLines) * lineHeight))
+    /// The question, the dialog's or the prompt's text.
+    private var requestText: String? {
+        switch request?.kind {
+        case .question(let question)?: return question.text
+        case .dialog(let question, _)?: return question
+        case .mission(let question)?: return question.text
+        case .terminal(let prompt)?: return prompt
+        case .permission?, nil: return nil
+        }
     }
 
     /// The answers on the right, a quiet one on the left; or the note.
@@ -395,9 +423,4 @@ final class RequestCardView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) { onClick?() }
-}
-
-/// Content that counts y down, on a glass panel's unflipped content view.
-final class FlippedContentView: NSView {
-    override var isFlipped: Bool { true }
 }

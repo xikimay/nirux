@@ -135,6 +135,17 @@ final class NiruxButtonTests: XCTestCase {
         XCTAssertEqual(asked, 1)
         XCTAssertNotNil(release, "nothing took the release")
         XCTAssertEqual(target.presses, 0)
+
+        // An accepted press tells when it is over, whether it acted or not
+        // (disabled, the button tracks nothing: a synthetic release can't
+        // drive its tracking reliably here).
+        var ended = 0
+        button.acceptsPress = { _ in true }
+        button.pressEnded = { ended += 1 }
+        button.isEnabled = false
+        button.mouseDown(with: try event(.leftMouseDown))
+        XCTAssertEqual(ended, 1)
+        XCTAssertEqual(target.presses, 0)
         window.close()
     }
 }
