@@ -18,73 +18,52 @@ extension WorkspaceState {
 
     /// What a hook event in `column` says of the passes running, in the
     /// order events come:
-    /// - a pass's event (the prompt that typed it, the Skill call that runs
-    ///   it, a subagent's included) starts it there; a replayed one (a
-    ///   minute old) starts nothing;
-    /// - the main turn's end there (Stop, its failed turn, Claude idle at
-    ///   its prompt) ends the main thread's passes, once the subagents seen
-    ///   at work there since have stopped (a review run in the background
-    ///   outlives the turn that started it);
-    /// - a subagent's stop ends the passes it ran itself;
+    /// - a main-thread event that types a pass (UserPromptSubmit) or runs it
+    ///   (a Skill call's PostToolUse) starts it there; a replayed one (a
+    ///   minute old) starts nothing, a subagent's event nothing at all;
+    /// - the main turn's end there (Stop, a failed turn, Claude idle at its
+    ///   prompt) ends its passes; a Stop that lists a subagent still at work
+    ///   keeps them until a Stop there lists none (a review run in the
+    ///   background outlives the turn that started it, and only a Stop ends
+    ///   that wait);
     /// - the session's end ends every pass there.
     /// True when something changed.
     @discardableResult
     func noteReviewPasses(of event: AgentHookEvent, in column: UUID, now: TimeInterval) -> Bool {
+        guard event.agentID == nil else { return false }
         let before = reviewsRunning
-        let isMain = event.agentID == nil
-        let endsTurn = isMain && (event.name == .stop || event.name == .stopFailure
-            || event.name == .notification && event.notificationType == "idle_prompt")
-        if event.name == .sessionEnd, isMain {
+        switch event.name {
+        case .sessionEnd:
             reviewsRunning.removeAll { $0.column == column }
-        } else if endsTurn {
-            for index in reviewsRunning.indices where reviewsRunning[index].column == column && reviewsRunning[index].agentID == nil {
-                if event.name == .stopFailure, let failed = event.promptID, let own = reviewsRunning[index].promptID, failed != own { continue }
-                reviewsRunning[index].isMainTurnOver = true
+        case .stop:
+            let waits = !(event.backgroundAgents ?? []).isEmpty
+            reviewsRunning = reviewsRunning.compactMap { running in
+                guard running.column == column else { return running }
+                guard waits else { return nil }
+                var waiting = running
+                waiting.waitsOnBackground = true
+                return waiting
             }
-        } else if event.name == .subagentStop, let agent = event.agentID {
-            reviewsRunning.removeAll { $0.column == column && $0.agentID == agent }
-            for index in reviewsRunning.indices where reviewsRunning[index].column == column {
-                reviewsRunning[index].subagents.remove(agent)
-            }
-        } else if let agent = event.agentID, [.preToolUse, .postToolUse, .permissionRequest].contains(event.name) {
-            // At work: a late failed turn or a resolved request, after its stop, isn't.
-            for index in reviewsRunning.indices where reviewsRunning[index].column == column {
-                reviewsRunning[index].subagents.insert(agent)
-            }
-        }
-        reviewsRunning.removeAll { $0.isMainTurnOver && $0.subagents.isEmpty }
-        if now - event.timestamp < 60 {
+        case .stopFailure:
+            reviewsRunning.removeAll { $0.column == column && !$0.waitsOnBackground }
+        case .notification where event.notificationType == "idle_prompt":
+            reviewsRunning.removeAll { $0.column == column && !$0.waitsOnBackground }
+        default:
+            guard now - event.timestamp < 60 else { break }
             for pass in event.passes {
-                // Started again there (a Skill call's end after its start): what it waited on and its prompt stay.
-                let earlier = reviewsRunning.first { $0.pass == pass && $0.column == column }
                 reviewsRunning.removeAll { $0.pass == pass && $0.column == column }
-                var running = RunningPass(
-                    pass: pass, column: column, agentID: event.agentID, promptID: event.promptID ?? earlier?.promptID,
-                    emitter: event.emitterProcess ?? earlier?.emitter
-                )
-                running.subagents = earlier?.subagents ?? []
-                reviewsRunning.append(running)
+                reviewsRunning.append(RunningPass(pass: pass, column: column, emitter: event.emitterProcess))
             }
         }
         return reviewsRunning != before
     }
 
-    /// What the process table says of each running pass (`RunningPass.Front`):
-    /// it ends once its process exited, nothing runs in its column, or the
-    /// column closed; without a process named, once another process is in
-    /// front after `claude` was seen there. True when one ended.
+    /// Ends the passes whose process `isAlive` says exited (or that named
+    /// none), or whose column closed. True when one ended.
     @discardableResult
-    func followReviewPasses(_ front: (RunningPass) -> RunningPass.Front) -> Bool {
+    func followReviewPasses(_ isAlive: (RunningPass) -> Bool) -> Bool {
         let before = reviewsRunning.count
-        reviewsRunning = reviewsRunning.compactMap { running in
-            var running = running
-            switch front(running) {
-            case .claude: running.isClaudeSeen = true
-            case .other where running.isClaudeSeen, .gone: return nil
-            case .other, .unknown: break
-            }
-            return running
-        }
+        reviewsRunning.removeAll { !isAlive($0) }
         return reviewsRunning.count != before
     }
 

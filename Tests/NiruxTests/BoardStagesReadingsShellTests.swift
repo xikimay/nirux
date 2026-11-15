@@ -56,8 +56,8 @@ final class BoardStagesReadingsShellTests: XCTestCase {
     }
 
     /// A review pass runs from its own hook event until its turn ends (in
-    /// the drain's order), or until no `claude` is in front of its column.
-    func testAPassRunsUntilItsTurnEndsOrClaudeLeavesTheFront() throws {
+    /// the drain's order), or until the process that sent it exits.
+    func testAPassRunsUntilItsTurnEndsOrItsProcessExits() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let task = try XCTUnwrap(shell.activeWorkspace)
@@ -65,61 +65,50 @@ final class BoardStagesReadingsShellTests: XCTestCase {
             let pty = try XCTUnwrap(column.pty)
             harness.waitUntil("its shell starts") { pty.shellPID != nil }
             let shellPID = try XCTUnwrap(pty.shellPID)
+            // The column's own shell stands in for its claude: a process the real table has.
+            let emitter = try XCTUnwrap(ProcessInstance.running(pid: shellPID))
             let resolution = AgentHookCenter.Resolution(
                 workspace: task, column: column, columnIndex: 0, isUserFocused: false, approvalHold: .never
             )
             let now = Date().timeIntervalSince1970
             let event = { (name: AgentHookEvent.Name, passes: [String]?) in
                 AgentHookCenter.AppliedEvent(
-                    event: AgentHookEvent(kind: .claude, name: name, reviewPasses: passes, timestamp: now), resolution: resolution
+                    event: AgentHookEvent(kind: .claude, name: name, emitterProcess: emitter, reviewPasses: passes, timestamp: now),
+                    resolution: resolution
                 )
             }
             shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"]), event(.stop, nil), event(.userPromptSubmit, nil)])
             XCTAssertEqual(task.reviewsRunning, [], "one drain: the pass, its turn's end, the next prompt")
             shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"])])
             XCTAssertEqual(task.reviewsRunning.map(\.column), [column.id], "no HEAD needed: the event says it runs")
-            // claude in front of the column's shell, as the process table would show it; then the shell back in front.
-            let claude: pid_t = 99_997
-            let table = { (front: pid_t) in
-                ProcessSnapshot(entries: [
-                    ProcessSnapshot.Entry(
-                        pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: front,
-                        name: "zsh", startedAt: now - 800, arguments: ["zsh"]
-                    ),
-                    ProcessSnapshot.Entry(
-                        pid: claude, parentPID: shellPID, processGroupID: claude, terminalForegroundProcessGroupID: front,
-                        name: "claude", startedAt: now - 700, arguments: ["claude"]
-                    )
-                ])
-            }
-            shell.updateSidebar(snapshot: table(claude))
-            XCTAssertEqual(task.reviewsRunning.first?.isClaudeSeen, true)
-            shell.updateSidebar(snapshot: table(claude))
-            XCTAssertEqual(task.reviewsRunning.count, 1)
-            shell.updateSidebar(snapshot: table(shellPID))
-            XCTAssertEqual(task.reviewsRunning, [], "claude left the front: it exited, crashed or was quit")
-            // An event naming its process: running while the table has it, whoever is in front; gone once it doesn't.
-            let emitter = ProcessInstance(pid: claude, startedAt: now - 700)
-            task.noteReviewPasses(
-                of: AgentHookEvent(kind: .claude, name: .userPromptSubmit, emitterProcess: emitter, reviewPasses: ["codeReview"], timestamp: now),
-                in: column.id, now: now
-            )
-            shell.updateSidebar(snapshot: table(shellPID))
-            XCTAssertEqual(task.reviewsRunning.count, 1, "a Ctrl-Z: the shell in front, its claude still there")
-            let shellAlone = ProcessSnapshot(entries: [ProcessSnapshot.Entry(
+            // The process table: its process there, then not.
+            let shellEntry = ProcessSnapshot.Entry(
                 pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: shellPID,
-                name: "zsh", startedAt: now - 800, arguments: ["zsh"]
-            )])
-            shell.updateSidebar(snapshot: shellAlone)
-            XCTAssertEqual(task.reviewsRunning, [], "its process exited")
-            // Without a process named, nothing at all in its column: gone.
-            shell.applyAgentHookEvents([event(.userPromptSubmit, ["codeReview"])])
-            let unrelated = ProcessSnapshot(entries: [ProcessSnapshot.Entry(
+                name: "zsh", startedAt: emitter.startedAt, arguments: ["zsh"]
+            )
+            shell.updateSidebar(snapshot: ProcessSnapshot(entries: [shellEntry]))
+            XCTAssertEqual(task.reviewsRunning.count, 1)
+            shell.updateSidebar(snapshot: ProcessSnapshot(entries: []))
+            XCTAssertEqual(task.reviewsRunning.count, 1, "an empty process table says nothing")
+            let unrelated = ProcessSnapshot.Entry(
                 pid: 99_996, parentPID: 1, processGroupID: 99_996, terminalForegroundProcessGroupID: 99_996,
                 name: "launchd", startedAt: now - 900, arguments: []
-            )])
-            shell.updateSidebar(snapshot: unrelated)
-            XCTAssertEqual(task.reviewsRunning, [], "no process in its column")
+            )
+            shell.updateSidebar(snapshot: ProcessSnapshot(entries: [unrelated]))
+            XCTAssertEqual(task.reviewsRunning, [], "its process exited")
+            // An event naming no process: nothing to follow, gone at the next look.
+            task.noteReviewPasses(
+                of: AgentHookEvent(kind: .claude, name: .userPromptSubmit, reviewPasses: ["codeReview"], timestamp: now), in: column.id, now: now
+            )
+            shell.updateSidebar(snapshot: ProcessSnapshot(entries: [shellEntry]))
+            XCTAssertEqual(task.reviewsRunning, [])
+            // Its column closed, its process still there: gone.
+            task.noteReviewPasses(
+                of: AgentHookEvent(kind: .claude, name: .userPromptSubmit, emitterProcess: emitter, reviewPasses: ["codeReview"], timestamp: now),
+                in: UUID(), now: now
+            )
+            shell.updateSidebar(snapshot: ProcessSnapshot(entries: [shellEntry]))
+            XCTAssertEqual(task.reviewsRunning, [])
         }
     }
 }

@@ -453,27 +453,24 @@ the Board reads that pass's statuses, approvals and Mission questions.
 - **Its texts** are the row's; beside them, the user's own summary, the
   worktree its git facts were read in, and the pull request its own
   detection found merged (at the HEAD it merged at).
-- **A review pass runs** from its own hook event (the prompt that typed it,
-  the start of the Skill call that runs it, a subagent's own call), whatever
-  git finds, until events in its column end it, in the order they come
-  (`WorkspaceState.reviewsRunning`): the main turn's end (Stop, its own
-  failed turn, Claude idle at its prompt) once the subagents seen at work
-  there since have stopped, as a review run in the background outlives the
-  turn that started it; the stop of the subagent that ran it; its session's
-  end; the process that sent its event exiting (a crash or a quit, not a
-  Ctrl-Z; without one named, `claude` leaving the front once seen there); or
-  its column closing. A permission asked mid-review, a message queued
-  meanwhile, a subagent's or an earlier prompt's failed turn, is no end; a
-  pass from before this launch isn't running; a running pass reads running
-  on the Board before git gave its run a HEAD. Known limits: a Stop hook that
-  keeps the turn going ends it at that Stop; an Esc leaves it running until
-  Claude reads idle at its prompt, about a minute, or until the next turn's
-  end when a prompt follows; a Skill call that fails reads running until its
-  turn ends; a subagent at work there for something else keeps it running
-  until it stops; and a review run in the background often reads done at
-  the main turn's end, since Nirux hears of a subagent only from its first
-  tool call, which mostly comes after that Stop (the Stop's list of
-  background tasks, or a SubagentStart hook, would tell it sooner).
+- **A review pass runs** from its own main-thread hook event (the prompt
+  that typed it, or the Skill call that ran it, where its badge records its
+  run), whatever git finds, until events in its column end it, in the order
+  they come (`WorkspaceState.reviewsRunning`): the main turn's end (a Stop, a
+  failed turn, Claude idle at its prompt); its session's end; the process
+  that sent its event exiting (a crash or a quit; a Ctrl-Z leaves it there);
+  or its column closing. A review run in the background outlives the turn
+  that started it: a Stop whose `background_tasks` lists a subagent at work
+  (its id, the subagent's `agent_id`) keeps the pass running until a Stop
+  there lists none, which comes once Claude hears the subagent is done. A
+  permission asked mid-review, or a message queued meanwhile, is no end; a
+  subagent's events start and end nothing; a pass from before this launch
+  isn't running; a running pass reads running on the Board before git gave
+  its run a HEAD. Known limits: a Stop hook that keeps the turn going ends
+  it at that Stop; an Esc leaves it running until Claude reads idle at its
+  prompt, about a minute, or until the next turn's end when a prompt
+  follows; a forked Skill call that waits for its review starts the pass
+  only once done.
 - **Resume** is the sidebar's: an agent stopped on an error first, held back
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").

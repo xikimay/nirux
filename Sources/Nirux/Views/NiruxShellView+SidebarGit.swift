@@ -12,7 +12,7 @@ extension NiruxShellView {
         let parents = workspaceStore.activeParents(in: activeProfileID)
         let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
-        followReviewPasses(snapshot: snapshot, foregroundProcesses: foregroundProcesses)
+        followReviewPasses(snapshot: snapshot)
         // The user is there to read: Nirux in front, and nothing the
         // catch-up card counts as away (a shell that doesn't follow the
         // system, a test's, goes by the first).
@@ -82,19 +82,15 @@ extension NiruxShellView {
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }
 
-    /// What the process table says of each running pass
-    /// (`WorkspaceState.followReviewPasses`): the process that sent its
-    /// event runs or exited (a Ctrl-Z leaves it there, a crash or a quit
-    /// doesn't); without one named, who is in front of its column. An empty
-    /// process table says nothing.
-    private func followReviewPasses(snapshot: ProcessSnapshot, foregroundProcesses: [ObjectIdentifier: ForegroundProcess]) {
+    /// A running pass ends once the process that sent its event exited (a
+    /// Ctrl-Z leaves it there), it named none, or its column closed. An
+    /// empty process table says nothing.
+    private func followReviewPasses(snapshot: ProcessSnapshot) {
         for workspace in workspaces where !workspace.reviewsRunning.isEmpty {
             workspace.followReviewPasses { running in
-                guard let column = workspace.columns.first(where: { $0.id == running.column }) else { return .gone }
-                guard !snapshot.isEmpty else { return .unknown }
-                if let emitter = running.emitter { return snapshot.contains(emitter) ? .claude : .gone }
-                guard let foreground = foregroundProcesses[ObjectIdentifier(column)] else { return .gone }
-                return foreground.name == "claude" ? .claude : .other
+                guard workspace.columns.contains(where: { $0.id == running.column }) else { return false }
+                guard !snapshot.isEmpty else { return true }
+                return running.emitter.map(snapshot.contains) ?? false
             }
         }
     }
@@ -452,7 +448,7 @@ extension NiruxShellView {
     /// ran on can't be known any more.
     private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState, now: TimeInterval) {
         let passes = event.passes
-        guard !passes.isEmpty, event.recordsReviewRun, let cwd = event.cwd, now - event.timestamp < 60 else { return }
+        guard !passes.isEmpty, let cwd = event.cwd, now - event.timestamp < 60 else { return }
         // Only the HEAD and its branch count here; a detached HEAD has none.
         GitDetect.contextAsync(at: cwd, startFolder: nil) { [weak self, weak workspace] result in
             guard case .observed(let context) = result, let head = context.identity.head,
