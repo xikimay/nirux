@@ -1,13 +1,15 @@
 import Foundation
 
-/// The Project Board (docs/design/project-board.md): one table per project of the
+/// The Project Board (docs/design/project-board.md): per space, the
 /// branches its agents work on, with their workspaces, agents, pull
-/// requests and checks. It only reads, but for Retarget (docs/design/pr-stacks.md).
+/// requests and checks. It only reads, but for Retarget (docs/design/pr-stacks.md)
+/// and its merge queue.
 ///
 /// This file holds the pure types and the row builder (section 2). The
 /// `gh` client and its parsers, the refresh schedule and the agent states
 /// are in the other `ProjectBoard+` files; `ProjectBoardController` reads,
-/// `ProjectBoardView` draws.
+/// `BoardStages` makes the rows stages and `BoardStagesView` draws them
+/// (docs/design/board-stages.md).
 enum ProjectBoard {}
 
 // MARK: - What GitHub says

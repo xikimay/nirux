@@ -282,8 +282,8 @@ extension BoardStages {
         return reading.mergedPullRequest
     }
 
-    /// Where a row's work is on disk, as the table's buttons use it
-    /// (`ProjectBoardView.actions`): Clean Up… where the row can be
+    /// Where a row's work is on disk, as the table's buttons used it:
+    /// Clean Up… where the row can be
     /// cleaned up, Open where no workspace is open in its worktree.
     private static func folder(of row: ProjectBoard.Row, in repository: RepositoryReading) -> Folder? {
         guard let path = row.worktreePath ?? row.folder else { return nil }

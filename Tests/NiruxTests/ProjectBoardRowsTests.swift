@@ -130,10 +130,7 @@ final class ProjectBoardRowsTests: XCTestCase {
         XCTAssertEqual(summary(result), ["main main [main]", "otherRepository gone [gone]"])
         XCTAssertEqual(result[0].agent.state, .none, "the main checkout doesn't take its agent")
         XCTAssertTrue(result[1].folderIsGone)
-        XCTAssertTrue(result[1].canCleanUp)
-        XCTAssertEqual(ProjectBoardView.subtitle(for: result[1]), "/.../worktrees/fix · folder is gone")
-        XCTAssertEqual(ProjectBoardView.actions(for: result[1]).last?.action,
-                       .cleanUp(path: "/p/widgets/.claude/worktrees/fix"), "the clean-up closes its workspace")
+        XCTAssertTrue(result[1].canCleanUp, "the clean-up closes its workspace")
     }
 
     func testSeveralWorkspacesShareTheirWorktreeRowWithItsMostUrgentAgent() {
@@ -149,7 +146,6 @@ final class ProjectBoardRowsTests: XCTestCase {
         XCTAssertEqual(result[1].workspaces.map(\.id), ["one", "two", "three"])
         XCTAssertEqual(result[1].agent.state, .waiting(.permission(tool: "Bash", summary: nil)))
         XCTAssertEqual(result[1].agent.workspaceID, "two", "Focus goes to the agent that waits")
-        XCTAssertEqual(ProjectBoardView.subtitle(for: result[1]), "fix · /p/widgets.fix", "one of them is active")
     }
 
     // MARK: - Listing entries

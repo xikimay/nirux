@@ -243,7 +243,7 @@ extension NiruxShellView {
     /// section's, named after its repository (its anchor's name on a board
     /// with anchors), then each one left running on a repository no section
     /// has: the running ones are the stages' foot.
-    func projectBoardQueues(_ board: ProjectBoardController) -> (states: [String: ProjectBoard.QueueState], lines: [ProjectBoardView.QueueLine]) {
+    func projectBoardQueues(_ board: ProjectBoardController) -> (states: [String: ProjectBoard.QueueState], lines: [ProjectBoard.QueueLine]) {
         var states: [String: ProjectBoard.QueueState] = [:]
         for section in board.sections {
             states[section.id] = projectBoardQueueState(board, section: section)
@@ -252,12 +252,12 @@ extension NiruxShellView {
             states[section.id].map { state in
                 let repository = board.repository(of: section)?.name
                 let name = section.anchor == nil ? repository : board.displayNames[section.id]
-                return ProjectBoardView.QueueLine(
+                return ProjectBoard.QueueLine(
                     id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, queue: state
                 )
             }
         } + projectBoardOrphanQueues(board).map { orphan in
-            ProjectBoardView.QueueLine(
+            ProjectBoard.QueueLine(
                 id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
                 tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
                 queue: orphanQueueState(orphan)
@@ -303,7 +303,7 @@ extension NiruxShellView {
 
     // MARK: Buttons
 
-    func performProjectBoardAction(_ action: ProjectBoardView.Action, board: ProjectBoardController) {
+    func performProjectBoardAction(_ action: ProjectBoard.Action, board: ProjectBoardController) {
         switch action {
         case .focus(let workspaceID, let columnID):
             guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }) else {

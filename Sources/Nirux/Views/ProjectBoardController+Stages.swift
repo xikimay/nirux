@@ -12,7 +12,7 @@ extension ProjectBoardController {
 
         /// Nil once the space was deleted.
         var space: Space?
-        /// The space's workspaces, as the table's rows take them.
+        /// The space's workspaces, as the Board's rows take them.
         var workspaces: [ProjectBoard.Workspace]
         /// The space's tasks by workspace id, in the sidebar's order, the
         /// Lead left out.
@@ -26,7 +26,7 @@ extension ProjectBoardController {
         var readings: [String: BoardStages.TaskReading] = [:]
         /// Each section's merge queue, by section id.
         var queues: [String: ProjectBoard.QueueState] = [:]
-        /// The queues that run, here or in another Nirux, as the table's
+        /// The queues that run, here or in another Nirux, as the Board's
         /// queue lines name them (`NiruxShellView.projectBoardQueues`): a
         /// section's, or one left on a repository no section has.
         var runningQueues: [BoardStagesView.RunningQueue] = []
@@ -40,7 +40,7 @@ extension ProjectBoardController {
     struct StagesTargets: Equatable {
         /// A task's line, by its id (its workspace's): Focus on its most
         /// urgent agent column, else on the workspace.
-        var focus: [String: ProjectBoardView.Action] = [:]
+        var focus: [String: ProjectBoard.Action] = [:]
         /// A repository's line's worktree, by its id, for its "Clean up"
         /// link (a merged pull request's, so never a line without a
         /// repository); a merged task's too, which has left the list for
@@ -48,7 +48,7 @@ extension ProjectBoardController {
         var folders: [String: BoardStages.Folder] = [:]
         /// Open Main Checkout, by the checkout's path: Focus where a
         /// workspace is open there, else Open a shell there.
-        var mainCheckouts: [String: ProjectBoardView.Action] = [:]
+        var mainCheckouts: [String: ProjectBoard.Action] = [:]
         /// The pull requests of each section's lines, by section id: a
         /// line held in place under the pointer may show another
         /// repository's by now, and the queue and Retarget act only on the
@@ -59,9 +59,9 @@ extension ProjectBoardController {
     /// The id of the section of the workspaces in no repository.
     static let noRepositoryID = "no-repository"
 
-    /// What the Board as stages shows of the space: what the table lists,
-    /// as stages. Its message in place of the sections is the table's in
-    /// place of its rows; the running queues' lines stay at its foot. With
+    /// What the Board as stages shows of the space: its rows (`listedRows`),
+    /// as stages. Its message (`bodyMessage`) takes the sections' place;
+    /// the running queues' lines stay at its foot. With
     /// it, what its clicks act on (whoever shows it keeps them:
     /// `stagesTargets`).
     func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> (content: BoardStagesView.Content, targets: StagesTargets) {
@@ -200,7 +200,7 @@ extension ProjectBoardController {
         return shown
     }
 
-    private static func focus(_ agent: ProjectBoard.Agent, workspaces: [String]) -> ProjectBoardView.Action? {
+    private static func focus(_ agent: ProjectBoard.Agent, workspaces: [String]) -> ProjectBoard.Action? {
         agent.focusTarget(workspaces: workspaces).map { .focus(workspaceID: $0.workspaceID, columnID: $0.columnID) }
     }
 

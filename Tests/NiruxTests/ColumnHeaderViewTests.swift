@@ -457,7 +457,7 @@ final class ProjectBoardHeaderTests: XCTestCase {
     }
 
     func testRunPillSaysHowThePostMergeRunEnded() {
-        let status = { ProjectBoardView.runStatus($0, workflow: "nightly.yml", now: self.now, timeZone: self.utc) }
+        let status = { ProjectBoardController.runStatus($0, workflow: "nightly.yml", now: self.now, timeZone: self.utc) }
         let passed = status(run("completed", "success"))
         XCTAssertEqual(passed.text, "nightly 08:00")
         XCTAssertEqual(passed.tone, .neutral)
@@ -475,36 +475,6 @@ final class ProjectBoardHeaderTests: XCTestCase {
 
         XCTAssertEqual(status(run("completed", "cancelled")).text, "nightly cancelled 08:00")
         XCTAssertEqual(status(nil).text, "nightly: no run yet")
-    }
-
-    func testHeaderMenuPicksTheProjectAndOpensSettings() throws {
-        let board = ProjectBoardView(frame: NSRect(x: 0, y: 0, width: 700, height: 400))
-        var picked: [String] = []
-        var settingsOpened = 0
-        board.onSelectProject = { picked.append($0) }
-        board.onBoardSettings = { _ in settingsOpened += 1 }
-        let header = ProjectBoardView.Header(
-            projectName: "Board", repository: "acme/widgets", status: "Updated 21:14",
-            projects: [.init(id: "a", name: "Board"), .init(id: "b", name: "Tools")], projectID: "a"
-        )
-        board.show(.init(header: header, body: .message("…")))
-        XCTAssertEqual(board.header.context, "acme/widgets")
-        XCTAssertEqual(board.refreshButton.toolTip, "Refresh · Updated 21:14")
-
-        let menu = board.header.currentMenu()
-        let projects = try XCTUnwrap(menu.items.first { $0.title == "Space" }?.submenu)
-        XCTAssertEqual(projects.items.map(\.title), ["Board", "Tools"])
-        XCTAssertEqual(projects.items.map(\.state), [.on, .off])
-        projects.performActionForItem(at: 1)
-        XCTAssertEqual(picked, ["b"])
-        menu.performActionForItem(at: try XCTUnwrap(menu.items.firstIndex { $0.title == "Board Settings…" }))
-        XCTAssertEqual(settingsOpened, 1)
-
-        var deleted = header
-        deleted.projectIsMissing = true
-        board.show(.init(header: deleted, body: .message("…")))
-        XCTAssertEqual(board.projectMenu().items.map(\.title), ["Deleted space", "Board", "Tools"])
-        XCTAssertEqual(board.projectMenu().items.map(\.state), [.on, .off, .off])
     }
 
     /// The Board's column: the repository of a Board with one, else its
@@ -557,28 +527,5 @@ final class ProjectBoardHeaderTests: XCTestCase {
         XCTAssertEqual(board.spaceMenu().items.map(\.state), [.on, .off, .off])
         board.chooseSpace(id: "b")
         XCTAssertEqual(picked, ["b", "b"])
-    }
-
-    /// What went wrong takes the run's place as a red pill: the rows under
-    /// the header never move.
-    func testAnErrorShowsInTheHeaderWithoutMovingTheRows() throws {
-        let board = ProjectBoardView(frame: NSRect(x: 0, y: 0, width: 700, height: 400))
-        var header = ProjectBoardView.Header(
-            projectName: "Board", repository: "acme/widgets",
-            postMergeRun: ProjectBoardView.runStatus(run("completed", "success"), workflow: "nightly.yml", now: now),
-            status: "Updated 21:14", projects: [.init(id: "a", name: "Board")], projectID: "a"
-        )
-        board.show(.init(header: header, body: .message("…")))
-        let rowsTop = try XCTUnwrap(board.subviews.compactMap { $0 as? NSScrollView }.first).frame.minY
-
-        header.status = "Retarget #14: gh: HTTP 422"
-        header.statusIsError = true
-        board.show(.init(header: header, body: .message("…")))
-        let pill = try XCTUnwrap(board.header.status)
-        XCTAssertEqual(pill.tone, .error)
-        XCTAssertEqual(pill.text, "GitHub error")
-        XCTAssertEqual(pill.toolTip, "Retarget #14: gh: HTTP 422")
-        XCTAssertEqual(board.refreshButton.toolTip, "Refresh")
-        XCTAssertEqual(board.subviews.compactMap { $0 as? NSScrollView }.first?.frame.minY, rowsTop)
     }
 }

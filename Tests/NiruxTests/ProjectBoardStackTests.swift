@@ -144,34 +144,4 @@ final class ProjectBoardStackTests: XCTestCase {
                           baseBranch: nil)
         XCTAssertEqual(result.compactMap(\.stack), [])
     }
-
-    // MARK: - The Queue column
-
-    private func cell(_ row: ProjectBoard.Row, dryRun: Bool = false) -> ProjectBoardView.QueueCell? {
-        ProjectBoardView.queueCell(for: row, queue: ProjectBoard.QueueState(isDryRun: dryRun), baseBranch: "main")
-    }
-
-    func testAPullRequestOnAnOpenOneWaitsForIt() throws {
-        let result = rows(open: [pullRequest(52, "stack/a"), pullRequest(53, "stack/b", base: "stack/a")])
-        XCTAssertEqual(cell(try row(53, in: result))?.text, "after #52")
-        XCTAssertNil(cell(try row(53, in: result))?.button)
-        XCTAssertEqual(cell(try row(52, in: result))?.button?.title, "Add to Queue")
-    }
-
-    func testAMergedBaseOffersRetargetExceptInADryRun() throws {
-        let result = rows(open: [pullRequest(53, "stack/b", base: "stack/a", draft: true)],
-                          merged: [pullRequest(52, "stack/a", state: "MERGED")])
-        let live = try XCTUnwrap(cell(try row(53, in: result)))
-        XCTAssertEqual(live.button?.title, "Retarget to main")
-        XCTAssertEqual(live.button?.isEnabled, true)
-        XCTAssertEqual(live.action, .retarget(number: 53, base: "main"))
-        XCTAssertEqual(live.detail, "draft", "a draft can be retargeted, and still says why it can't join")
-
-        let dryRun = try XCTUnwrap(cell(try row(53, in: result), dryRun: true))
-        XCTAssertEqual(dryRun.button?.isEnabled, false)
-        XCTAssertTrue(dryRun.button?.tooltip?.hasPrefix("Dry run: ") == true)
-
-        let ready = rows(open: [pullRequest(53, "stack/b", base: "stack/a")], merged: [pullRequest(52, "stack/a", state: "MERGED")])
-        XCTAssertEqual(cell(try row(53, in: ready))?.detail, "base #52 merged")
-    }
 }

@@ -2,8 +2,8 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// The queue as the board shows it (its Queue column and its header line),
-/// the next Start's list, and what the confirmation sheet reads.
+/// The queue's next Start's list, and what the confirmation sheet reads.
+/// What the Board says of the queue is in `BoardStagesFactsTests`.
 final class MergeQueueBoardTests: XCTestCase {
     private var root: URL!
 
@@ -18,181 +18,6 @@ final class MergeQueueBoardTests: XCTestCase {
         MergeQueueController.waitForFiles()
         if let root { try? FileManager.default.removeItem(at: root) }
         super.tearDown()
-    }
-
-    private func row(
-        _ number: Int, isDraft: Bool = false, base: String = "main", mergeable: String = "MERGEABLE", state: String = "OPEN",
-        agent: ProjectBoard.AgentState = .idle
-    ) -> ProjectBoard.Row {
-        ProjectBoard.Row(
-            group: .active, worktreePath: "/tmp/app.feat-\(number)", branch: "feat/\(number)", detachedHead: nil,
-            workspaces: [], pullRequest: ProjectBoard.PullRequest(
-                number: number, state: state, headRefName: "feat/\(number)", headOid: MQ.sha("a"), baseRefName: base,
-                isDraft: isDraft, mergeable: mergeable, checks: [], url: "https://github.com/acme/widgets/pull/\(number)",
-                isFromConfiguredRepository: true
-            ),
-            agent: ProjectBoard.Agent(state: agent), folder: nil
-        )
-    }
-
-    private func entry(_ number: Int, _ step: MergeQueue.Step) -> MergeQueue.Entry {
-        var entry = MergeQueue.Entry(MQ.entry(number, head: MQ.sha("a")))
-        entry.step = step
-        return entry
-    }
-
-    private func cell(_ row: ProjectBoard.Row, _ queue: ProjectBoard.QueueState) -> ProjectBoardView.QueueCell? {
-        ProjectBoardView.queueCell(for: row, queue: queue, baseBranch: "main")
-    }
-
-    // MARK: - The Queue column
-
-    func testAReadyPullRequestOffersAddToQueueAndOtherRowsSayWhyNot() {
-        let queue = ProjectBoard.QueueState(isDryRun: false)
-
-        let ready = cell(row(1), queue)
-        XCTAssertEqual(ready?.button?.title, "Add to Queue")
-        XCTAssertEqual(ready?.action, .addToQueue(number: 1))
-        XCTAssertEqual(ready?.text, "")
-        XCTAssertEqual(cell(row(2, isDraft: true), queue)?.text, "draft")
-        XCTAssertEqual(cell(row(3, base: "dev"), queue)?.text, "targets dev")
-        XCTAssertEqual(cell(row(4, mergeable: "CONFLICTING"), queue)?.text, "conflict")
-        XCTAssertEqual(cell(row(5, agent: .working(duration: "3m")), queue)?.text, "agent working")
-        XCTAssertEqual(cell(row(6, agent: .waiting(.permission(tool: "Bash", summary: nil))), queue)?.text, "agent waiting (permission · Bash)")
-        XCTAssertNil(cell(row(7, isDraft: true), queue)?.button, "no button where the queue would refuse it")
-        XCTAssertNil(cell(row(8, state: "MERGED"), queue), "a merged pull request has nothing to queue")
-        var noPullRequest = row(9)
-        noPullRequest = ProjectBoard.Row(group: .active, worktreePath: "/tmp/x", branch: "x", detachedHead: nil, workspaces: [],
-                                         pullRequest: nil, agent: ProjectBoard.Agent(), folder: nil)
-        XCTAssertNil(cell(noPullRequest, queue))
-    }
-
-    func testAQueuedPullRequestShowsItsPlaceWithRemoveUntilTheQueueRuns() {
-        var queue = ProjectBoard.QueueState(isDryRun: false)
-        queue.selection = [7, 3]
-
-        let queued = cell(row(3), queue)
-        XCTAssertEqual(queued?.text, "queued · 2")
-        XCTAssertEqual(queued?.button?.title, "✕")
-        XCTAssertEqual(queued?.button?.tooltip, "Remove #3 from the queue")
-        XCTAssertEqual(queued?.action, .removeFromQueue(number: 3))
-        XCTAssertEqual(queued?.button?.isEnabled, true)
-
-        queue.isConfirming = true
-        XCTAssertEqual(cell(row(1), queue)?.button?.isEnabled, false, "the sheet shows the list as it opened")
-        XCTAssertEqual(cell(row(3), queue)?.button?.isEnabled, false)
-        queue.isConfirming = false
-        queue.run = .elsewhere
-        XCTAssertEqual(cell(row(1), queue)?.button?.isEnabled, false, "read-only while another Nirux runs the queue")
-        XCTAssertEqual(cell(row(3), queue)?.button?.isEnabled, false)
-    }
-
-    func testARunningQueueShowsEachPlaceAndStepWithoutButtons() {
-        var queue = ProjectBoard.QueueState(isDryRun: false)
-        queue.run = .running(isStopping: false)
-        queue.workflow = "nightly.yml"
-        queue.selection = [1, 2, 3, 4]
-        queue.entries = [
-            entry(1, .done),
-            entry(2, .waitingForPostMerge(MQ.sha("m"))),
-            entry(3, .waiting),
-            entry(4, .stopped(MergeQueue.StopReason(kind: .conflict, message: "#4 conflicts with main."))),
-        ]
-
-        XCTAssertEqual(cell(row(1), queue), ProjectBoardView.QueueCell(text: "merged ✓", tone: .success))
-        XCTAssertEqual(cell(row(2), queue), ProjectBoardView.QueueCell(text: "2 of 4 · waiting for nightly", tone: .active))
-        XCTAssertEqual(cell(row(3), queue)?.text, "3 of 4 · waiting")
-        XCTAssertEqual(cell(row(4), queue)?.text, "stopped: conflict")
-        XCTAssertEqual(cell(row(4), queue)?.tooltip, "#4 conflicts with main.")
-        XCTAssertEqual(cell(row(4), queue)?.tone, .failure)
-        XCTAssertEqual(cell(row(5), queue)?.button?.isEnabled, false, "nothing joins a running queue")
-    }
-
-    func testAfterAQueueStopsItsLastWordShowsNextToTheNextStart() {
-        var queue = ProjectBoard.QueueState(isDryRun: false)
-        queue.run = .ended
-        let conflict = MergeQueue.StopReason(kind: .conflict, message: "#4 conflicts with main.")
-        queue.entries = [entry(1, .done), entry(4, .stopped(conflict)), entry(5, .waiting)]
-        queue.selection = [4, 5]
-
-        XCTAssertEqual(cell(row(1), queue)?.text, "merged ✓")
-        XCTAssertEqual(cell(row(4), queue)?.text, "queued · 1")
-        XCTAssertEqual(cell(row(4), queue)?.detail, "last: conflict")
-        XCTAssertEqual(cell(row(4), queue)?.detailTone, .failure)
-        XCTAssertEqual(cell(row(4), queue)?.tooltip, "Last queue: #4 conflicts with main.")
-        XCTAssertEqual(cell(row(4), queue)?.button?.isEnabled, true)
-        XCTAssertEqual(cell(row(5), queue)?.text, "queued · 2")
-        queue.selection = [5]
-        XCTAssertEqual(cell(row(4, mergeable: "CONFLICTING"), queue)?.text, "conflict")
-        XCTAssertEqual(cell(row(4, mergeable: "CONFLICTING"), queue)?.detail, "last: conflict")
-        XCTAssertEqual(cell(row(4), queue)?.text, "")
-        XCTAssertEqual(cell(row(4), queue)?.detail, "last: conflict")
-        XCTAssertEqual(cell(row(4), queue)?.button?.title, "Add to Queue")
-    }
-
-    // MARK: - The header's queue line
-
-    func testTheHeaderOffersStartOnlyWithAValidConfigAndAList() {
-        var queue = ProjectBoard.QueueState(isDryRun: false)
-        var header = ProjectBoardView.queueHeader(queue)
-        XCTAssertEqual(header.text, "Queue: add pull requests with Add to Queue, then Start")
-        XCTAssertEqual(header.start?.isEnabled, false)
-        XCTAssertEqual(header.start?.tooltip, "Add pull requests to the queue first.")
-        XCTAssertNil(header.stop)
-
-        queue.selection = [3]
-        header = ProjectBoardView.queueHeader(queue)
-        XCTAssertEqual(header.text, "Queue: 1 pull request queued")
-        XCTAssertEqual(header.start, ProjectBoardView.QueueButton(
-            title: "Start…", isEnabled: true,
-            tooltip: "Read the queued pull requests on GitHub, then confirm what the queue will do"
-        ))
-
-        queue.startProblems = ["Choose the post-merge workflow in Board Settings…, or None."]
-        XCTAssertEqual(ProjectBoardView.queueHeader(queue).start?.isEnabled, false)
-        XCTAssertEqual(ProjectBoardView.queueHeader(queue).start?.tooltip, queue.startProblems[0])
-        queue.startProblems = []
-        queue.isConfirming = true
-        XCTAssertEqual(ProjectBoardView.queueHeader(queue).start?.isEnabled, false)
-    }
-
-    func testARunningQueueShowsStopAndADryRunSaysSoEverywhere() {
-        var queue = ProjectBoard.QueueState(isDryRun: true)
-        queue.selection = [3]
-        XCTAssertEqual(ProjectBoardView.queueHeader(queue).start?.title, "Start Dry Run…")
-        XCTAssertTrue(ProjectBoardView.queueHeader(queue).isDryRun)
-
-        queue.run = .running(isStopping: false)
-        queue.status = "#3 waiting for the checks of #3, 1 of 1"
-        var header = ProjectBoardView.queueHeader(queue)
-        XCTAssertEqual(header.text, "Queue: #3 waiting for the checks of #3, 1 of 1")
-        XCTAssertNil(header.start)
-        XCTAssertEqual(header.stop?.title, "Stop")
-        XCTAssertEqual(header.stop?.isEnabled, true)
-
-        queue.run = .running(isStopping: true)
-        header = ProjectBoardView.queueHeader(queue)
-        XCTAssertEqual(header.stop?.title, "Stopping…")
-        XCTAssertEqual(header.stop?.isEnabled, false)
-    }
-
-    func testAnInterruptedQueueAndOneRunningElsewhereSaySo() {
-        var queue = ProjectBoard.QueueState(isDryRun: false)
-        queue.run = .ended
-        queue.status = "Stopped: Interrupted while waiting for the nightly of #52: Nirux quit."
-        queue.statusIsFailure = true
-        queue.selection = [52]
-        var header = ProjectBoardView.queueHeader(queue)
-        XCTAssertEqual(header.text, "Queue: Stopped: Interrupted while waiting for the nightly of #52: Nirux quit. · 1 pull request queued")
-        XCTAssertEqual(header.tone, .failure)
-        XCTAssertEqual(header.start?.isEnabled, true, "Start opens a new confirmation")
-
-        queue.run = .elsewhere
-        queue.status = "waiting for the nightly of #52, 1 of 2"
-        header = ProjectBoardView.queueHeader(queue)
-        XCTAssertEqual(header.text, "Queue: running in another Nirux, read-only here · waiting for the nightly of #52, 1 of 2")
-        XCTAssertEqual(header.start?.isEnabled, false)
-        XCTAssertNil(header.stop, "only the Nirux that runs it stops it")
     }
 
     // MARK: - The next Start's list
@@ -477,32 +302,6 @@ final class MergeQueueBoardTests: XCTestCase {
         MergeQueueController.waitForFiles()
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         XCTAssertNil(answered.value, "a closed sheet hears no answer")
-    }
-
-    @MainActor
-    func testAQueueChangeThatLeavesTheCellsAloneKeepsTheRows() throws {
-        let view = ProjectBoardView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
-        var queue = ProjectBoard.QueueState(isDryRun: false)
-        queue.run = .running(isStopping: false)
-        queue.status = "#1 checking, 1 of 1"
-        queue.entries = [entry(1, .preflight)]
-        queue.selection = [1]
-        var content = ProjectBoardView.Content(
-            header: ProjectBoardView.Header(projectName: "Board", projectID: "board"),
-            body: .rows([row(1), row(2)]), requiredChecks: ["test"], baseBranch: "main", queue: queue
-        )
-        view.show(content)
-        let first = try XCTUnwrap(view.rowViews.first?.queue)
-        XCTAssertEqual(first.stringValue, "1 of 1 · checking")
-
-        content.queue?.status = "#1 checking, 1 of 1 (paused by GitHub’s rate limit)"
-        view.show(content)
-        XCTAssertTrue(view.rowViews.first?.queue === first, "only the header changed: the rows stay")
-        XCTAssertEqual(view.queueLabel.stringValue, "Queue: #1 checking, 1 of 1 (paused by GitHub’s rate limit)")
-
-        content.queue?.entries = [entry(1, .waitingForChecks(MQ.sha("a")))]
-        view.show(content)
-        XCTAssertEqual(view.rowViews.first?.queue.stringValue, "1 of 1 · waiting for checks", "a changed cell redraws")
     }
 
     // MARK: - The details read

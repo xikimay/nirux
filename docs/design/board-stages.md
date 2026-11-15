@@ -689,7 +689,6 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
   merged task's folder, the main checkout's workspace) the Board keeps as it
   last showed it (`ProjectBoardController.stagesTargets`). What does
   nothing for now (`blocked`) does nothing there either.
-- **The table's code stays** until it is removed, unused.
 
 ## Known limits
 

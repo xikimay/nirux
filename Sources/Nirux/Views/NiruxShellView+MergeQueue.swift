@@ -380,7 +380,7 @@ extension NiruxShellView {
         )
         notice.tooltip = "\(project) · \(engine.settings.repository) into \(engine.settings.baseBranch)\n\(text)\n"
             + "Click to show the space’s board."
-            + (shown.isDryRun ? "\n" + ProjectBoardView.dryRunTooltip(reason: shown.dryRunReason) : "")
+            + (shown.isDryRun ? "\n" + MergeQueue.dryRunTooltip(reason: shown.dryRunReason) : "")
         statusBar.onQueueClick = { [weak self] in self?.showProjectBoard(projectID: projectID) }
         statusBar.onQueueStop = { [weak self] in
             guard let self else { return }

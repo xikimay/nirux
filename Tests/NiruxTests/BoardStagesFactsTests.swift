@@ -647,12 +647,15 @@ final class BoardStagesFactsTests: XCTestCase {
         rest.isConfirming = true
         XCTAssertEqual(start(rest, 2).start?.isEnabled, false)
         XCTAssertEqual(start(rest, 0).start?.tooltip, "The confirmation sheet is open.", "the sheet open says why first")
+        rest.selection = []
+        XCTAssertEqual(start(rest, 0).start?.tooltip, "Add pull requests to the queue first.", "but an empty list before it")
+        rest.selection = [12, 13]
         // A dry run: the badge, with why.
         var dry = queue(.none, selection: [12])
         dry.isDryRun = true
         dry.dryRunReason = "not the notarized release"
         XCTAssertEqual(start(dry, 1).start?.title, "Start Dry Run… · 1")
-        XCTAssertEqual(start(dry, 1).dryRun, ProjectBoardView.dryRunTooltip(reason: "not the notarized release"))
+        XCTAssertEqual(start(dry, 1).dryRun, MergeQueue.dryRunTooltip(reason: "not the notarized release"))
         XCTAssertNil(start(rest, 1).dryRun)
         // Ended: what it did, then what is queued; red when a problem stopped it.
         var ended = queue(.ended, [entry(12, step: stopped(.checks))], selection: [13])
@@ -687,6 +690,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertEqual(far.status, "Running in another Nirux · #12 merging")
         XCTAssertNil(far.stop)
         XCTAssertEqual(far.start?.isEnabled, false)
+        XCTAssertEqual(far.start?.tooltip, "Another Nirux runs this repository’s queue: Start once it ends there.")
         other.selection = [20, 21, 22]
         XCTAssertEqual(start(other, 3).start?.title, "Start… · 3", "Start keeps its width when the other's queue ends")
 

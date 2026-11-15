@@ -72,7 +72,7 @@ extension NiruxShellView {
 
     func performBoardOffer(_ offer: BoardStages.QueueOffer, section: String, board: ProjectBoardController) {
         guard isPullRequest(offer.number, of: section, on: board) else { return NSSound.beep() }
-        let action: ProjectBoardView.Action = offer.change == .add
+        let action: ProjectBoard.Action = offer.change == .add
             ? .addToQueue(number: offer.number, section: section) : .removeFromQueue(number: offer.number, section: section)
         performProjectBoardAction(action, board: board)
     }
@@ -138,7 +138,7 @@ extension NiruxShellView {
     /// failed turn (none named, nothing); after an exit, its conversation.
     /// Nil for an agent restored at launch, which the sidebar's Resume
     /// starts.
-    nonisolated static func resumeAction(_ resume: BoardStages.Resume, workspaceID: String) -> ProjectBoardView.Action? {
+    nonisolated static func resumeAction(_ resume: BoardStages.Resume, workspaceID: String) -> ProjectBoard.Action? {
         switch resume.kind {
         case .afterError: return resume.failedAt.map { .resumeFailed(workspaceID: workspaceID, columnID: resume.column, failedAt: $0) }
         case .afterExit: return .resumeExited(workspaceID: workspaceID, columnID: resume.column)
