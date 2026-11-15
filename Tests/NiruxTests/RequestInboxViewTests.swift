@@ -78,6 +78,8 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertEqual(inbox.chosenID, id("c"), "nothing after it: the nearest before")
         inbox.opened()
         XCTAssertEqual(inbox.chosenID, id("c"), "the inbox opens on the oldest")
+        inbox.show(try requests(["f"]))
+        XCTAssertEqual(inbox.chosenID, id("f"), "none of them left: the first")
 
         var closed = 0
         inbox.onClose = { closed += 1 }
@@ -180,20 +182,28 @@ final class RequestInboxViewTests: XCTestCase {
         clock += delay
 
         clock += delay
+        window.setFrameOrigin(NSPoint(x: 300, y: 200))
         NotificationCenter.default.post(name: NSWindow.didMoveNotification, object: window)
+        inbox.layoutSubtreeIfNeeded()
         try allow("b").performClick(nil)
         XCTAssertEqual(answered.count, 3, "its window moved")
         clock += delay
-        inbox.setFrameOrigin(NSPoint(x: 40, y: 0))
+        let resting = inbox.frame
+        inbox.frame = NSRect(x: resting.minX, y: resting.minY - 50, width: resting.width, height: resting.height + 50)
+        inbox.layoutSubtreeIfNeeded()
         try allow("b").performClick(nil)
-        XCTAssertEqual(answered.count, 3, "it moved in its window")
+        XCTAssertEqual(answered.count, 4, "grown from its top: nothing slid on screen, nothing waits")
+        inbox.setFrameOrigin(NSPoint(x: 40, y: inbox.frame.minY))
+        inbox.layoutSubtreeIfNeeded()
+        try allow("b").performClick(nil)
+        XCTAssertEqual(answered.count, 4, "it moved in its window")
         clock += delay
 
         let replacing = try requests(["e"], task: "b")
         show(replacing + (try requests(["c"])), in: inbox)
         XCTAssertNil(inbox.cards[id("b")])
         try allow("e").performClick(nil)
-        XCTAssertEqual(answered.count, 3, "another request in b's place: its own card, unarmed")
+        XCTAssertEqual(answered.count, 4, "another request in b's place: its own card, unarmed")
     }
 
     /// VoiceOver hears how many wait, then each request: its task, what it
@@ -259,6 +269,7 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertEqual(answered.count, 1, "the callout just opened beside its icon")
         clock += SidebarView.approvalArmingDelay
         callout.setFrameOrigin(NSPoint(x: 0, y: 30))
+        callout.layoutSubtreeIfNeeded()
         deny.performClick(nil)
         XCTAssertEqual(answered.count, 1, "it followed its icon")
         clock += SidebarView.approvalArmingDelay

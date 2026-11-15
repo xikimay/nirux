@@ -131,6 +131,13 @@ final class RequestArming {
         arming[key].map { now() >= $0.armedAt } ?? false
     }
 
+    /// Where `button` is: on screen while it has a window, so that a move of
+    /// its panel or its window counts; else in `container`.
+    static func place(of button: NSView, in container: NSView) -> NSRect {
+        guard let window = button.window else { return container.convert(button.bounds, from: button) }
+        return window.convertToScreen(button.convert(button.bounds, to: nil))
+    }
+
     /// Has `observer` hear `window` move (and nothing else's): its answers
     /// slide with it.
     static func observeMoves(of window: NSWindow?, by observer: NSObject, selector: Selector) {

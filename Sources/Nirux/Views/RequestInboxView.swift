@@ -128,6 +128,7 @@ final class RequestInboxView: NSView {
         needsLayout = true
         if !seen.contains(chosenID ?? ""), let gone = before.firstIndex(of: chosenID ?? "") {
             chosenID = before[(gone + 1)...].first(where: seen.contains) ?? before[..<gone].last(where: seen.contains)
+                ?? requests.first?.id
         } else if !seen.contains(chosenID ?? "") {
             chosenID = requests.first?.id
         }
@@ -174,8 +175,8 @@ final class RequestInboxView: NSView {
     }
 
     /// The host shows the inbox (⌘J, the badge): the oldest chosen, and
-    /// every answer waits again before it takes a click. It also calls
-    /// `restartArming` whenever it moves the inbox.
+    /// every answer waits again before it takes a click. Moving it needs no
+    /// call: the answers that slid on screen wait again by themselves.
     func opened() {
         choose(requests.first?.id)
         restartArming()
@@ -187,22 +188,22 @@ final class RequestInboxView: NSView {
         if window != nil { restartArming() }
     }
 
-    /// Moved in its window, or its window moved: the answers slid under a
-    /// still pointer.
+    /// Moved in its window, or its window moved: the next layout finds which
+    /// answers slid on screen (a resize from the top moves none of them).
     override func setFrameOrigin(_ newOrigin: NSPoint) {
         let moved = newOrigin != frame.origin
         super.setFrameOrigin(newOrigin)
-        if moved { restartArming() }
+        if moved { needsLayout = true }
     }
 
-    @objc private func windowMoved() { restartArming() }
+    @objc private func windowMoved() { needsLayout = true }
 
     override func viewDidUnhide() {
         super.viewDidUnhide()
         restartArming()
     }
 
-    /// The answers slid under a still pointer (the host moved the inbox).
+    /// Every answer waits again before it takes a click.
     func restartArming() { arming.restartAll() }
 
     // MARK: - Layout
@@ -255,7 +256,7 @@ final class RequestInboxView: NSView {
             card.needsLayout = true
             card.layoutSubtreeIfNeeded()
             for (choice, button) in card.answerButtons {
-                frames[Self.armingKey(request.id, choice)] = list.convert(button.bounds, from: button)
+                frames[Self.armingKey(request.id, choice)] = RequestArming.place(of: button, in: list)
             }
             y += cardHeight
         }

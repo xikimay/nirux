@@ -140,10 +140,11 @@ answer goes to the receiver the rows use. The rows' click rule holds too: a
 single click, on a button that has sat still for 0.6 s (`RequestArming`,
 the same rearming as the rows'), so that a request arriving, moving up or
 taking another's place never takes a click aimed at what was there; a
-scroll, the panel opening (the host calls `opened()`, which also chooses the
-oldest), or the panel or its window moving restarts the wait; and a release
-answers the request its press was on, never another that took the card
-meanwhile. A chosen request answered elsewhere leaves the choice to the next
+scroll or the panel opening (the host calls `opened()`, which also chooses
+the oldest) restarts the wait, and the answers that slid on screen as the
+panel or its window moved wait again (a resize from the top moves none); a
+release answers the request its press was on, never another that took the
+card meanwhile. A chosen request answered elsewhere leaves the choice to the next
 one still listed, and the list stays where it is. The question and its
 choices take the rows' text and items (`SidebarQuestionText`), so a row and
 a card show the same lines. A card belongs to its request, never to its task: its id comes

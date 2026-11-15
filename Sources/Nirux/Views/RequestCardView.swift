@@ -128,8 +128,9 @@ final class RequestCardView: NSView {
     /// The request an answer's press was on: its release answers that one,
     /// or nothing if another took the card meanwhile.
     private var pressedRequestID: String?
-    /// The last height measured, for its width, until the content changes.
-    private var measured: (width: CGFloat, height: CGFloat)?
+    /// The heights measured, by width (the inbox measures at two beside a
+    /// legacy scroller), until the content changes.
+    private var measured: [CGFloat: CGFloat] = [:]
 
     init(trailing: Trailing) {
         self.trailing = trailing
@@ -179,7 +180,7 @@ final class RequestCardView: NSView {
     func show(_ request: WaitingRequest) {
         guard request != self.request else { return }
         self.request = request
-        measured = nil
+        measured = [:]
         iconView.icon = request.icon
         titleLabel.stringValue = request.taskTitle
         verbLabel.stringValue = request.verb
@@ -190,7 +191,8 @@ final class RequestCardView: NSView {
         terminalButton.setAccessibilityLabel("Open \(request.taskTitle) to answer in the terminal")
         setAccessibilityLabel([request.taskTitle, request.verb, request.waited.map { "waiting \($0)" }].compactMap { $0 }.joined(separator: ", "))
 
-        var text: String?, choices: [TurnEndChoice] = [], note: (String, NSColor)?, buttons: [RequestButton] = []
+        let text = requestText
+        var choices: [TurnEndChoice] = [], note: (String, NSColor)?, buttons: [RequestButton] = []
         box.isHidden = true
         switch request.kind {
         case .permission(let approval):
@@ -202,17 +204,13 @@ final class RequestCardView: NSView {
                 buttons = RequestChoices.permission(approval)
             }
         case .question(let question):
-            text = question.text
             choices = question.choices
             buttons = [RequestChoices.dismiss(question)] + RequestChoices.turn(question)
-        case let .dialog(question, more):
-            text = question
+        case let .dialog(_, more):
             note = (SidebarDialogLayout.hint(more: more), Theme.Color.textSecondary)
         case .mission(let question):
-            text = question.text
             buttons = [RequestChoices.missionReply(question)]
-        case .terminal(let prompt):
-            text = prompt
+        case .terminal:
             note = (SidebarDialogLayout.hint(more: 0), Theme.Color.textSecondary)
         }
         textLabel.attributedStringValue = SidebarWrappedText.wrapping(
@@ -260,6 +258,8 @@ final class RequestCardView: NSView {
                 self.pressedRequestID = self.request?.id
                 return true
             }
+            // Released elsewhere, the press answered nothing: it is over.
+            button.pressEnded = { [weak self] in self?.pressedRequestID = nil }
             answerButtons[choice] = button
             addSubview(button)
         }
@@ -280,9 +280,9 @@ final class RequestCardView: NSView {
 
     /// The card's height at `width`, its content shown: measured once.
     func fittingHeight(width: CGFloat) -> CGFloat {
-        if let measured, measured.width == width { return measured.height }
+        if let height = measured[width] { return height }
         let height = place(width: width, apply: false)
-        measured = (width, height)
+        measured[width] = height
         return height
     }
 
