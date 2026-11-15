@@ -55,7 +55,9 @@ final class BranchReviewSendTests: XCTestCase {
         // A paste that waited would take 0.7 s at least (the reader starts
         // a second after the terminal); a busy machine takes some too.
         XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "the app isn't held while the agent doesn't read")
-        let done = try await waitUntil { outcome != nil }
+        // A byte at a time as the terminal frees one: a slow runner takes more than 10 s for these 192 KB. Whatever
+        // happens, the paste ends by its own deadline, so its outcome comes before this wait does.
+        let done = try await waitUntil(timeout: PtySession.pasteTimeout + 5) { outcome != nil }
         XCTAssertTrue(done)
         XCTAssertEqual(outcome, .pasted)
         let received = try await waitUntil { (try? Data(contentsOf: file))?.count == text.utf8.count }
