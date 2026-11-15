@@ -99,6 +99,22 @@ the 36 pt capsule to sit level with the traffic lights.
 
 ![The command bar at three widths and with nothing open: Opaque exact, the other levels approximated](../images/command-bar.png)
 
+## Icon rail
+
+`IconRail` is the folded sidebar: a 38 pt glass capsule with the space's Lead
+first (its sparkle), a line, then one state icon per task in the sidebar's
+order, 28 pt apart; under it, two round glass buttons for the archived tasks
+and a new task. The task on screen wears a halo; a task whose agent waits for
+the user wears an amber ring, apart from the icon. A click on an amber icon
+asks for its request (the callout, 2.3), anchored to the icon; its second
+click goes to the task, and the callout closes as the task opens. A click on
+any other icon goes to the task. A long list scrolls without scrollers. Names
+show in a tooltip; VoiceOver reads each icon as a button, its name and its
+state. For phase 3: the rail scrolls the task on screen into view when it
+changes (`revealSelection`), and unfolds into the sidebar.
+
+![The rail with a Lead and nine tasks: Opaque exact, the other levels approximated](../images/icon-rail.png)
+
 ## Plan
 
 1. Foundations, nothing on screen: tokens and the transparency levels, the
