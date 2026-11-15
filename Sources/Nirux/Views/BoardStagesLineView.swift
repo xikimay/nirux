@@ -597,11 +597,30 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
         onMenu?(item)
     }
 
-    /// VoiceOver's "show menu": the same menu, under the line's title.
+    /// VoiceOver's "show menu", or Control-Return: the same menu, under
+    /// the line's title.
     override func accessibilityPerformShowMenu() -> Bool {
         guard let menu = contextMenu() else { return false }
         popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
         return true
+    }
+
+    // MARK: The keyboard
+
+    /// Tab stops on it while Full Keyboard Access is on, unless it departed.
+    override var acceptsFirstResponder: Bool { !isDeparted && BoardStagesKeyboard.isFullAccess() }
+    override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
+
+    /// Space or Return opens the task, as a click on the line; Control-Return
+    /// shows its menu, where the Merge station and the link are too.
+    override func keyDown(with event: NSEvent) {
+        switch BoardStagesKeyboard.key(event) {
+        case .press where !isDeparted: onClick?()
+        case .menu where !isDeparted: if !accessibilityPerformShowMenu() { NSSound.beep() }
+        default: super.keyDown(with: event)
+        }
     }
 
     // MARK: Under the pointer

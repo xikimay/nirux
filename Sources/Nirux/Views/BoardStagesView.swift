@@ -254,6 +254,10 @@ final class BoardStagesView: NSView {
     private let documentView = BoardStagesFlippedView()
     /// What the scrolling area holds, from the top.
     private var items: [Item] = []
+    /// Where Tab goes after the Board's last stop: back to the column.
+    weak var keyLoopEnd: NSView? {
+        didSet { linkKeyViews() }
+    }
     private var sectionHeaders: [String: BoardStagesSectionHeaderView] = [:]
     private var foldButtons: [String: NSButton] = [:]
     private var worktreeFolds: [String: NSButton] = [:]
@@ -514,6 +518,7 @@ final class BoardStagesView: NSView {
             return view
         }
         kept.values.forEach { $0.removeFromSuperview() }
+        linkKeyViews()
     }
 
     private func showTimes() {
@@ -538,6 +543,7 @@ final class BoardStagesView: NSView {
             worktreeFolds = [:]
             mergedViews = [:]
             captions = []
+            linkKeyViews()
             return
         }
         let sections = shownSections
@@ -685,6 +691,30 @@ final class BoardStagesView: NSView {
         // not taken out and put back.
         documentView.subviews = items.map(\.view)
         self.items = items
+        linkKeyViews()
+    }
+
+    /// Tab's way through the Board (Full Keyboard Access): the order switch,
+    /// the Lead, then each repository's header, lines, folds, other
+    /// worktrees and "Merged today" in their order, then the foot's Stops;
+    /// then `keyLoopEnd`. What can't take the keyboard (hidden, departed, or
+    /// Full Keyboard Access off) is passed over (`nextValidKeyView`).
+    private func linkKeyViews() {
+        var views: [NSView] = [orderSwitch, leadButton]
+        for item in items {
+            switch item {
+            case .sectionHeader(let header): views += [header.startButton, header.stopButton, header.moreButton]
+            case .line(let line): views.append(line)
+            case .fold(let button), .sectionFold(let button): views.append(button)
+            case .worktree(let worktree): views += [worktree.openButton, worktree.cleanUpButton]
+            case .merged(let merged): views += merged.entries + [merged.moreButton]
+            case .message(let message): views.append(message.settingsButton)
+            case .caption: break
+            }
+        }
+        views += runningQueueViews.map(\.stopButton)
+        for (view, next) in zip(views, views.dropFirst()) { view.nextKeyView = next }
+        views.last?.nextKeyView = keyLoopEnd
     }
 
     /// "▸ Other workspaces · 2", in a repository's title's type: a section

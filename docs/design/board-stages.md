@@ -654,6 +654,14 @@ what each click runs.
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
   refuses, the line's help says why.
+- **The keyboard** (Full Keyboard Access): Tab goes from the column through
+  Refresh, the order switch, the Lead, then each repository's header, its
+  lines, folds, other worktrees and "Merged today" in their order, then the
+  foot's Stops, and back to the column (`BoardStagesView.linkKeyViews`).
+  A line or an entry draws the focus ring. Space or Return opens the task;
+  Control-Return, macOS's own key for a contextual menu, shows the line's
+  menu (the Merge station and the link are in it), an entry's "Clean up". A
+  departed line is no stop; without Full Keyboard Access, neither is any.
 - **A hand** shows where a click does something of its own: on a station
   that acts, on a link, as far as the line is in sight. A line or an entry
   asks AppKit for its places again whenever they are no longer those it
@@ -701,11 +709,6 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
   as GitHub gives it.** A repository renamed since board.json was saved
   reads the detection as another repository's, until the Board's merged
   list has the merge.
-
-- **Full Keyboard Access doesn't stop on a line.** VoiceOver reaches each
-  line, its Merge station and its link by name, but Tab doesn't: the
-  table's row buttons were key views. A line's menu is reached with the
-  pointer or VoiceOver only.
 
 - **Reviews count by branch name.** A run recorded before Nirux kept the
   branch has none and doesn't count; a branch name reused after its pull

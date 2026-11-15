@@ -175,6 +175,21 @@ final class ProjectBoardFlowTests: XCTestCase {
                 client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
             }
 
+            // From the keyboard (Full Keyboard Access): Tab from the column reaches the lines in their order; Space opens
+            // the task.
+            BoardStagesKeyboard.isFullAccess = { true }
+            defer { BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled } }
+            let window = try XCTUnwrap(board.view.window)
+            window.makeFirstResponder(board.view)
+            XCTAssertEqual(try BoardStagesClicks.tabToNextLine(in: window).line.title, "widgets")
+            let focused = try BoardStagesClicks.tabToNextLine(in: window)
+            XCTAssertEqual(focused.line.title, "login")
+            focused.keyDown(with: try BoardStagesClicks.key(" ", 49))
+            XCTAssertEqual(shell.activeWorkspace?.title, "login")
+            try select("widgets", in: shell)
+            dropWorkspaceSnapshots(shell)
+            BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+
             // A click on the line opens its task.
             try BoardStagesClicks.open(try BoardStagesClicks.line("login", in: board))
             XCTAssertEqual(shell.activeWorkspace?.title, "login")

@@ -151,6 +151,10 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
     let linkLabel = NSTextField(labelWithString: "")
     var onClick: (() -> Void)?
     var onCleanUp: (() -> Void)?
+    /// Shows the keyboard's menu. (The tests give their own.)
+    var popUp: (NSMenu, NSPoint, NSView) -> Void = { menu, location, view in
+        menu.popUp(positioning: nil, at: location, in: view)
+    }
     /// Its "Clean up" acts only where the pointer aimed.
     var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
@@ -348,6 +352,40 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
         guard pullRequest.lineID != nil, isShown else { return false }
         onClick?()
         return true
+    }
+
+    // MARK: The keyboard
+
+    /// Tab stops on it while Full Keyboard Access is on.
+    override var acceptsFirstResponder: Bool { BoardStagesKeyboard.isFullAccess() }
+    override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
+
+    /// Space or Return opens its task, as a click; Control-Return shows
+    /// "Clean up", while it is offered.
+    override func keyDown(with event: NSEvent) {
+        switch BoardStagesKeyboard.key(event) {
+        case .press: if !accessibilityPerformPress() { NSSound.beep() }
+        case .menu:
+            guard let menu = contextMenu() else { return NSSound.beep() }
+            popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
+        case .other: super.keyDown(with: event)
+        }
+    }
+
+    /// The keyboard's menu: "Clean up", while it is offered.
+    func contextMenu() -> NSMenu? {
+        guard offersCleanUp, isShown else { return nil }
+        let menu = NSMenu()
+        menu.addItem(withTitle: BoardStages.Link.cleanUp.title, action: #selector(cleanUpChosen), keyEquivalent: "").target = self
+        return menu
+    }
+
+    /// Chosen in a menu shown before: only while still offered.
+    @objc private func cleanUpChosen() {
+        guard offersCleanUp, isShown else { return }
+        onCleanUp?()
     }
 
     /// "Clean up" by name, and as a click: only while it is offered, on

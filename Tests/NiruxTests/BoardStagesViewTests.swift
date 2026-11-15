@@ -1164,6 +1164,73 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(view.pointerLocation(), "a Board that isn't on screen doesn't hear the pointer: it asks for none")
     }
 
+    // MARK: - The keyboard
+
+    private func key(_ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code
+        ))
+    }
+
+    /// With Full Keyboard Access, Tab stops on each line and each "Merged
+    /// today" entry, in the Board's order; Space or Return opens the task,
+    /// Control-Return shows the menu. Without it, they aren't stops.
+    func testTheKeyboardReachesEachLineAndEntry() throws {
+        BoardStagesKeyboard.isFullAccess = { true }
+        defer { BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled } }
+        var withMenu = line("b")
+        withMenu.menu = [.openWorktree(path: "/p/b", title: "b")]
+        let merged = [BoardStages.Merged(lineID: "a", title: "Fix 7", number: 7, mergedAt: now - 60, cleanUp: .offered)]
+        let view = board(content([section(units: tasks([line("a"), withMenu]), merged: merged)]))
+        view.layoutSubtreeIfNeeded()
+        let end = NSView()
+        view.keyLoopEnd = end
+        // The loop: the order switch first, the lines in their order, then the entries, back to the column.
+        var loop: [NSView] = []
+        var next: NSView? = view.orderSwitch
+        while let current = next, loop.count < 50 {
+            loop.append(current)
+            next = current === end ? nil : current.nextKeyView
+        }
+        XCTAssertTrue(loop.first === view.orderSwitch && loop.last === end)
+        XCTAssertTrue(loop.contains { $0 === view.leadButton })
+        XCTAssertEqual(loop.compactMap { ($0 as? BoardStagesLineView)?.line.id }, ["a", "b"])
+        let entry = try XCTUnwrap(view.mergedView(section: "nirux")?.entries.first)
+        let lastLine = try XCTUnwrap(loop.lastIndex { $0 is BoardStagesLineView })
+        XCTAssertGreaterThan(try XCTUnwrap(loop.firstIndex { $0 === entry }), lastLine, "\"Merged today\" after the lines")
+
+        let a = view.lineViews[0], b = view.lineViews[1]
+        XCTAssertTrue(a.canBecomeKeyView)
+        XCTAssertTrue(entry.canBecomeKeyView)
+        var opened: [String] = []
+        var linked: [String] = []
+        view.onOpen = { opened.append($0) }
+        view.onLink = { section, line, link in linked.append("\(section) \(line) \(link.title)") }
+        a.keyDown(with: try key(" ", 49))
+        a.keyDown(with: try key("\r", 36))
+        XCTAssertEqual(opened, ["a", "a"], "Space or Return: as a click")
+        var popped: [String] = []
+        b.popUp = { menu, _, _ in popped = menu.items.map(\.title) }
+        b.keyDown(with: try key("\r", 36, .control))
+        XCTAssertEqual(popped, ["Open"], "Control-Return: its menu")
+        XCTAssertEqual(opened.count, 2)
+        // An entry: Space opens its task; Control-Return offers Clean up, which acts as its link.
+        entry.keyDown(with: try key(" ", 49))
+        XCTAssertEqual(opened, ["a", "a", "a"])
+        var entryMenu: NSMenu?
+        entry.popUp = { menu, _, _ in entryMenu = menu }
+        entry.keyDown(with: try key("\r", 36, .control))
+        XCTAssertEqual(entryMenu?.items.map(\.title), ["Clean up"])
+        entryMenu?.performActionForItem(at: 0)
+        XCTAssertEqual(linked, ["nirux a Clean up"])
+
+        // Without Full Keyboard Access: no stop, as any control.
+        BoardStagesKeyboard.isFullAccess = { false }
+        XCTAssertFalse(a.canBecomeKeyView)
+        XCTAssertFalse(entry.canBecomeKeyView)
+    }
+
     /// A line held in place once its task is gone: a click on it says so
     /// (the shell focuses the workspace where it went, else says it was
     /// closed); a pull request's without a task says nothing.
