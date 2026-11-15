@@ -10,7 +10,7 @@ final class BoardStagesMergedView: NSView {
     /// One per pull request, in the order shown.
     private(set) var entries: [BoardStagesMergedEntryView] = []
     /// "+12 more": shows every pull request merged today.
-    let moreButton = NSButton(title: "", target: nil, action: nil)
+    let moreButton = BoardStagesKeyButton(title: "", target: nil, action: nil)
     var onOpen: ((String) -> Void)?
     /// "Clean up" was clicked on an entry: its task's line.
     var onCleanUp: ((String) -> Void)?
@@ -356,11 +356,21 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
 
     // MARK: The keyboard
 
-    /// Tab stops on it while Full Keyboard Access is on.
-    override var acceptsFirstResponder: Bool { BoardStagesKeyboard.isFullAccess() }
+    /// Tab stops on it while Full Keyboard Access is on, where it does
+    /// something: opens its task, or offers Clean up.
+    override var acceptsFirstResponder: Bool {
+        (pullRequest.lineID != nil || offersCleanUp) && BoardStagesKeyboard.takesKeyboard()
+    }
     override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
     override var focusRingMaskBounds: NSRect { bounds }
     override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
+
+    /// The list scrolls it into sight.
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { scrollToVisible(bounds) }
+        return took
+    }
 
     /// Space or Return opens its task, as a click; Control-Return shows
     /// "Clean up", while it is offered.
@@ -370,6 +380,7 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
         case .menu:
             guard let menu = contextMenu() else { return NSSound.beep() }
             popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
+        case .repeated: break
         case .other: super.keyDown(with: event)
         }
     }

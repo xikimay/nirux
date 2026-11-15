@@ -53,10 +53,11 @@ final class BoardColumnView: NSView {
         header.trailingButtons = [refreshButton]
         header.menuProvider = { [weak self] in self?.headerMenu() ?? NSMenu() }
         [header, stages].forEach(addSubview)
-        // Tab, from the column: Refresh, then the Board's stops, back to the column (Full Keyboard Access).
+        // Tab, from the column: Refresh, ⋯, then the Board's stops, back to Refresh (Full Keyboard Access).
         nextKeyView = refreshButton
-        refreshButton.nextKeyView = stages.orderSwitch
-        stages.keyLoopEnd = self
+        refreshButton.nextKeyView = header.menuButton
+        header.menuButton.nextKeyView = stages.orderSwitch
+        stages.keyLoopEnd = refreshButton
     }
 
     @available(*, unavailable)

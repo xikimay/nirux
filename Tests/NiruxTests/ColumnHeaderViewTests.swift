@@ -500,10 +500,11 @@ final class ProjectBoardHeaderTests: XCTestCase {
         XCTAssertNil(board.header.status)
         XCTAssertEqual(board.refreshButton.toolTip, "Refresh · Updated 21:14")
         XCTAssertEqual(board.stages.content, stages)
-        // Tab, from the column: Refresh, the Board's stops, back to the column.
+        // Tab, from the column: Refresh, ⋯, the Board's stops, back to Refresh.
         XCTAssertTrue(board.nextKeyView === board.refreshButton)
-        XCTAssertTrue(board.refreshButton.nextKeyView === board.stages.orderSwitch)
-        XCTAssertTrue(board.stages.keyLoopEnd === board)
+        XCTAssertTrue(board.refreshButton.nextKeyView === board.header.menuButton)
+        XCTAssertTrue(board.header.menuButton.nextKeyView === board.stages.orderSwitch)
+        XCTAssertTrue(board.stages.keyLoopEnd === board.refreshButton)
 
         let menu = board.header.currentMenu()
         XCTAssertEqual(menu.items.prefix(2).map(\.title), ["Space", "Board Settings…"])

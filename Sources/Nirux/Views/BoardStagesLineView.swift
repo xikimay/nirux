@@ -608,17 +608,26 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     // MARK: The keyboard
 
     /// Tab stops on it while Full Keyboard Access is on, unless it departed.
-    override var acceptsFirstResponder: Bool { !isDeparted && BoardStagesKeyboard.isFullAccess() }
+    override var acceptsFirstResponder: Bool { !isDeparted && BoardStagesKeyboard.takesKeyboard() }
     override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
     override var focusRingMaskBounds: NSRect { bounds }
     override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
 
-    /// Space or Return opens the task, as a click on the line; Control-Return
-    /// shows its menu, where the Merge station and the link are too.
+    /// The list scrolls it into sight.
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { scrollToVisible(bounds) }
+        return took
+    }
+
+    /// Space or Return opens the task, as a click on the line (departed
+    /// since it took the keyboard, it says where its task went); Control-
+    /// Return shows its menu, where the Merge station and the link are too.
     override func keyDown(with event: NSEvent) {
         switch BoardStagesKeyboard.key(event) {
-        case .press where !isDeparted: onClick?()
+        case .press: isDeparted ? onGone?() : onClick?()
         case .menu where !isDeparted: if !accessibilityPerformShowMenu() { NSSound.beep() }
+        case .repeated: break
         default: super.keyDown(with: event)
         }
     }
@@ -677,7 +686,7 @@ final class BoardStagesAim {
 /// A button that acts only where the pointer aimed: the keyboard and
 /// VoiceOver press it as any.
 @MainActor
-final class BoardStagesButton: NSButton {
+final class BoardStagesButton: BoardStagesKeyButton {
     var aim = BoardStagesAim()
     /// Follows the press to its release. (The tests give their own.)
     var track: ((NSEvent) -> Void)?

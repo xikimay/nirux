@@ -655,13 +655,21 @@ what each click runs.
   "Retarget to main"), and do what a click then does. Where the station
   refuses, the line's help says why.
 - **The keyboard** (Full Keyboard Access): Tab goes from the column through
-  Refresh, the order switch, the Lead, then each repository's header, its
+  Refresh, ⋯, the order switch, the Lead, then each repository's header, its
   lines, folds, other worktrees and "Merged today" in their order, then the
-  foot's Stops, and back to the column (`BoardStagesView.linkKeyViews`).
-  A line or an entry draws the focus ring. Space or Return opens the task;
-  Control-Return, macOS's own key for a contextual menu, shows the line's
-  menu (the Merge station and the link are in it), an entry's "Clean up". A
-  departed line is no stop; without Full Keyboard Access, neither is any.
+  foot's Stops, and back to Refresh (`BoardStagesView.linkKeyViews`, linked
+  again whenever the views change). A line or an entry draws the focus ring,
+  and the list scrolls what takes the keyboard into sight. Space or Return
+  opens the task; Control-Return, macOS's own key for a contextual menu,
+  shows the line's menu (the Merge station and the link are in it), an
+  entry's "Clean up"; a key held down acts once. A click takes the keyboard
+  from nowhere (a terminal keeps it), as a button's click doesn't. A
+  departed line is no stop, but one that had the keyboard says where its
+  task went on Space; one that goes hands the keyboard to the line now in
+  its place, else to the column; "+12 more" pressed hands it to the first
+  entry it showed. An entry that does nothing (its task not open here,
+  nothing to clean up) is no stop; without Full Keyboard Access, neither is
+  anything.
 - **A hand** shows where a click does something of its own: on a station
   that acts, on a link, as far as the line is in sight. A line or an entry
   asks AppKit for its places again whenever they are no longer those it

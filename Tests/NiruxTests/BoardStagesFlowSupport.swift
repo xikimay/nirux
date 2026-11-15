@@ -66,10 +66,10 @@ enum BoardStagesClicks {
     }
 
     /// A key going down, as the keyboard sends it.
-    static func key(_ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+    static func key(_ characters: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], isARepeat: Bool = false) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
-            characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: isARepeat, keyCode: code
         ))
     }
 
