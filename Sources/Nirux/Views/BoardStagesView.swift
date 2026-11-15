@@ -220,6 +220,8 @@ final class BoardStagesView: NSView {
 
     private(set) var content: Content?
     /// The lines drawn, from the top, for the tests to click through.
+    /// Tab's loop, as last linked (`linkKeyViews`).
+    private var keyViews: [NSView] = []
     private(set) var lineViews: [BoardStagesLineView] = []
     /// The sections whose pull requests without a task are unfolded, and
     /// those whose "Merged today" shows every pull request. Both start
@@ -378,7 +380,7 @@ final class BoardStagesView: NSView {
         self.content = content
         guard content.header != previous?.header || content.order != previous?.order || content.sections != previous?.sections
             || content.runningQueues != previous?.runningQueues || content.message != previous?.message else { return showTimes() }
-        let focus = keyboardFocus()
+        let focus = viewsWillChange()
         defer { viewsChanged(focus: focus) }
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
@@ -714,6 +716,8 @@ final class BoardStagesView: NSView {
         views += runningQueueViews.map(\.stopButton)
         for (view, next) in zip(views, views.dropFirst()) { view.nextKeyView = next }
         views.last?.nextKeyView = keyLoopEnd
+        keyLoopEnd?.nextKeyView = views.first
+        keyViews = views
     }
 
     /// "▸ Other workspaces · 2", in a repository's title's type: a section
@@ -1199,7 +1203,7 @@ final class BoardStagesView: NSView {
     /// The content as it is, where it was held.
     private func showContent() {
         guard let content else { return }
-        let focus = keyboardFocus()
+        let focus = viewsWillChange()
         defer { viewsChanged(focus: focus) }
         if runningQueueViews.map(\.queue) != content.runningQueues {
             departedQueues = []
@@ -1266,22 +1270,14 @@ final class BoardStagesView: NSView {
     }
 
     private func unfoldMerged(section id: String) {
-        // "+12 more" had the keyboard: the first entry it showed that takes it (one whose task is open here), not what
-        // comes after the merges.
-        let merged = mergedViews[id]
-        let shown = merged?.entries.filter { !$0.isHidden }.count
-        let hadKeyboard = merged.map { window?.firstResponder === $0.moreButton } ?? false
         unfoldedMerged.insert(id)
         rebuild()
-        if hadKeyboard, let shown, let next = mergedViews[id]?.entries.dropFirst(shown).first(where: \.canBecomeKeyView) {
-            window?.makeFirstResponder(next)
-        }
     }
 
     private func rebuild() {
-        let focus = keyboardFocus()
+        let focus = viewsWillChange()
+        defer { viewsChanged(focus: focus) }
         rebuildViews()
-        viewsChanged(focus: focus)
     }
 
     private func rebuildViews() {
@@ -1290,22 +1286,60 @@ final class BoardStagesView: NSView {
         layoutContent()
     }
 
-    /// What has the keyboard in the Board, a line by its place.
-    private func keyboardFocus() -> (view: NSView, line: Int?)? {
-        guard let focused = window?.firstResponder as? NSView, focused.isDescendant(of: self) else { return nil }
-        return (focused, lineViews.firstIndex { $0 === focused })
+    /// What has the keyboard in the Board: "+12 more"'s hidden entries,
+    /// where it goes first (the first that "+12 more" shows), and its
+    /// neighbours in Tab's loop, nearest first, by which it is found again
+    /// if it went (`nearestStop`).
+    private struct KeyboardFocus {
+        let view: NSView
+        let revealed: [NSView]
+        let neighbours: [NSView]
     }
 
-    /// The views changed: Tab's loop again; and what had the keyboard and is
-    /// gone hands it to the line now in its place, else to the column.
-    private func viewsChanged(focus: (view: NSView, line: Int?)?) {
+    /// The views are about to change: what has the keyboard, and AppKit's
+    /// own handoffs scroll nothing until `viewsChanged`.
+    private func viewsWillChange() -> KeyboardFocus? {
+        BoardStagesKeyboard.rebuilds += 1
+        guard let focused = window?.firstResponder as? NSView, focused.isDescendant(of: self) else { return nil }
+        let revealed = mergedViews.values.first { $0.moreButton === focused }?.entries.filter(\.isHidden) ?? []
+        let neighbours = keyViews.firstIndex { $0 === focused }.map { Self.nearestFirst(keyViews, from: $0, to: focused) } ?? []
+        return KeyboardFocus(view: focused, revealed: revealed, neighbours: neighbours)
+    }
+
+    /// The views changed: Tab's loop again; and what had the keyboard and
+    /// went, or hid, hands it on. From the keyboard, or a change the Board
+    /// made by itself, to the nearest stop (`nearestStop`); from the pointer
+    /// (a fold clicked), to the column, without a ring: no stop takes the
+    /// keyboard then.
+    private func viewsChanged(focus: KeyboardFocus?) {
+        BoardStagesKeyboard.rebuilds -= 1
         linkKeyViews()
-        guard let focus, focus.view.window == nil else { return }
-        if let index = focus.line, !lineViews.isEmpty, lineViews[min(index, lineViews.count - 1)].canBecomeKeyView {
-            window?.makeFirstResponder(lineViews[min(index, lineViews.count - 1)])
-        } else {
-            window?.makeFirstResponder(superview)
+        guard let focus, let window, focus.view.window == nil || focus.view.isHiddenOrHasHiddenAncestor else { return }
+        let isStop = { (view: NSView) in view.window === window && view.canBecomeKeyView }
+        window.makeFirstResponder(focus.revealed.first(where: isStop) ?? nearestStop(to: focus, isStop) ?? superview)
+    }
+
+    /// The stop of Tab's loop nearest where `focus` is, or was: itself
+    /// still listed, else its nearest neighbour that stayed. From a line,
+    /// the nearest line that takes the keyboard, or none (the column).
+    private func nearestStop(to focus: KeyboardFocus, _ isStop: (NSView) -> Bool) -> NSView? {
+        let stayed = { (view: NSView) in self.keyViews.firstIndex { $0 === view } }
+        if let index = stayed(focus.view) {
+            return Self.nearestFirst(keyViews, from: index, to: focus.view).first(where: isStop)
         }
+        guard let index = focus.neighbours.lazy.compactMap(stayed).first else { return nil }
+        return ([keyViews[index]] + Self.nearestFirst(keyViews, from: index, to: focus.view)).first(where: isStop)
+    }
+
+    /// The loop's views around `index`, nearest first, the one after before
+    /// the one before; only lines around a line (`view`).
+    private static func nearestFirst(_ loop: [NSView], from index: Int, to view: NSView) -> [NSView] {
+        var nearest: [NSView] = []
+        for distance in 1..<max(loop.count, 1) {
+            if index + distance < loop.count { nearest.append(loop[index + distance]) }
+            if index - distance >= 0 { nearest.append(loop[index - distance]) }
+        }
+        return view is BoardStagesLineView ? nearest.filter { $0 is BoardStagesLineView } : nearest
     }
 
     /// The fold of a section's pull requests without a task, when it has some.

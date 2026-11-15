@@ -138,7 +138,7 @@ final class BoardStagesMergedView: NSView {
 /// gives way; a click opens its task while that one is open here, but on
 /// "Clean up", a link of its own.
 @MainActor
-final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
+final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
     /// What a press and its release on an entry do, by where both land.
     enum Target: Equatable {
         case entry, cleanUp
@@ -159,8 +159,6 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
     var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
-    /// The key that went down on it, which acts as it comes up.
-    private var held = BoardStagesKeyboard.Held()
     /// What the entry says under the pointer, by where.
     private var toolTips = BoardStagesToolTips()
     var hints: [(rect: NSRect, text: String)] { toolTips.places }
@@ -326,6 +324,7 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
 
     override func mouseDown(with event: NSEvent) {
         aim.onUse()
+        BoardStagesKeyboard.clicked(self)
         let target = target(at: convert(event.locationInWindow, from: nil))
         // A link that came under a still pointer isn't what it aimed at.
         pressed = event.clickCount == 1 && (target != .cleanUp || !aim.isStale) ? target : nil
@@ -358,41 +357,19 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
 
     // MARK: The keyboard
 
-    /// Tab stops on it while Full Keyboard Access is on, where it does
-    /// something: opens its task, or offers Clean up.
-    override var acceptsFirstResponder: Bool {
-        pullRequest.lineID != nil && BoardStagesKeyboard.takesKeyboard()
-    }
-    override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
-    override var focusRingMaskBounds: NSRect { bounds }
-    override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
-
-    /// The list scrolls it into sight.
-    override func becomeFirstResponder() -> Bool {
-        let took = super.becomeFirstResponder()
-        if took { scrollToVisible(bounds) }
-        return took
-    }
-
-    override func resignFirstResponder() -> Bool {
-        held.reset()
-        return super.resignFirstResponder()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if !held.keyDown(event) { super.keyDown(with: event) }
-    }
+    /// A stop where it does something: its task is open here, to open,
+    /// and to clean up when that is offered.
+    override var isKeyStop: Bool { pullRequest.lineID != nil }
 
     /// Space or Return opens its task, as a click; Control-Return shows
-    /// "Clean up", while it is offered. As the key comes up
-    /// (`BoardStagesKeyboard.Held`).
-    override func keyUp(with event: NSEvent) {
-        switch held.keyUp(event) {
-        case .press?: if !accessibilityPerformPress() { NSSound.beep() }
-        case .menu?:
+    /// "Clean up", while it is offered.
+    override func pressed(_ key: BoardStagesKeyboard.Key) {
+        switch key {
+        case .press: if !accessibilityPerformPress() { NSSound.beep() }
+        case .menu:
             guard let menu = contextMenu() else { return NSSound.beep() }
             popUp(menu, NSPoint(x: titleLabel.frame.minX, y: bounds.maxY), self)
-        default: super.keyUp(with: event)
+        case .repeated, .other: break
         }
     }
 

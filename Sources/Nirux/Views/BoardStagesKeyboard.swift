@@ -13,13 +13,36 @@ enum BoardStagesKeyboard {
     /// The event being handled. (The tests give their own.)
     static var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
-    /// A line or an entry takes the keyboard from the keyboard only: a
-    /// click on it takes none, as a button's doesn't (the click gives the
-    /// keyboard to the Board's column), so it draws no ring.
+    /// A stop of the Board takes the keyboard from the keyboard only (a
+    /// key, or no event: a change the Board made by itself), as a button
+    /// does: not from a click, a drag, nor a rebuild a click's action ran.
+    /// A click on a line or an entry gives the keyboard to the Board's
+    /// column (`clicked`): no ring.
     static func takesKeyboard() -> Bool {
         guard isFullAccess() else { return false }
-        let pointerPresses: Set<NSEvent.EventType> = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        return currentEvent().map { !pointerPresses.contains($0.type) } ?? true
+        let keys: Set<NSEvent.EventType> = [.keyDown, .keyUp, .flagsChanged]
+        return currentEvent().map { keys.contains($0.type) } ?? true
+    }
+
+    /// While the Board rebuilds its views, a stop AppKit hands the keyboard
+    /// to (the one it had went, or hid) doesn't scroll the list: the Board
+    /// picks where it goes once done (`BoardStagesView.viewsChanged`).
+    static var rebuilds = 0
+
+    /// A stop took the keyboard: the list scrolls it into sight.
+    static func tookKeyboard(_ view: NSView) {
+        if rebuilds == 0 { view.scrollToVisible(view.bounds) }
+    }
+
+    /// A click on a line or an entry: whatever of the Board had the keyboard
+    /// gives it to the column, as a click in a column does, so that the next
+    /// Space doesn't open the line that had it.
+    static func clicked(_ view: NSView) {
+        guard let window = view.window, let responder = window.firstResponder as? NSView, responder !== view,
+              let stages = sequence(first: view, next: \.superview).first(where: { $0 is BoardStagesView }),
+              responder.isDescendant(of: stages), let column = stages.superview
+        else { return }
+        window.makeFirstResponder(column)
     }
 
     enum Key: Equatable {
@@ -89,7 +112,47 @@ class BoardStagesKeyButton: NSButton {
 
     override func becomeFirstResponder() -> Bool {
         let took = super.becomeFirstResponder()
-        if took { scrollToVisible(bounds) }
+        if took { BoardStagesKeyboard.tookKeyboard(self) }
         return took
+    }
+}
+
+/// A line or a "Merged today" entry from the keyboard: a stop while Full
+/// Keyboard Access is on and it does something (`isKeyStop`), with a
+/// rounded ring; Space, Return and Control-Return act as the key comes up
+/// (`BoardStagesKeyboard.Held`), on `pressed`.
+@MainActor
+class BoardStagesKeyView: NSView {
+    /// The key that went down on it, which acts as it comes up.
+    private var held = BoardStagesKeyboard.Held()
+
+    /// It does something from the keyboard now.
+    var isKeyStop: Bool { true }
+
+    /// Space or Return (`.press`), Control-Return (`.menu`).
+    func pressed(_ key: BoardStagesKeyboard.Key) {}
+
+    override var acceptsFirstResponder: Bool { isKeyStop && BoardStagesKeyboard.takesKeyboard() }
+    override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
+
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { BoardStagesKeyboard.tookKeyboard(self) }
+        return took
+    }
+
+    override func resignFirstResponder() -> Bool {
+        held.reset()
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !held.keyDown(event) { super.keyDown(with: event) }
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if let key = held.keyUp(event) { pressed(key) } else { super.keyUp(with: event) }
     }
 }

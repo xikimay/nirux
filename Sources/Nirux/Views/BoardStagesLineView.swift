@@ -7,7 +7,7 @@ import AppKit
 /// where that changes the queue's list, and on the link ending its phrase
 /// (docs/design/board-stages.md, section 7).
 @MainActor
-final class BoardStagesLineView: NSView, NSViewToolTipOwner {
+final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
     /// What joins a line to those around it.
     enum Link: Equatable {
         case none
@@ -67,8 +67,6 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
     var aim = BoardStagesAim()
     /// What the mouse went down on: its release on the same is a click.
     private var pressed: Target?
-    /// The key that went down on it, which acts as it comes up.
-    private var held = BoardStagesKeyboard.Held()
     /// The pointer is on the Merge station, as the Board follows it. The
     /// station says what a click does only while one acts.
     var isStationHovered = false {
@@ -495,6 +493,7 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     override func mouseDown(with event: NSEvent) {
         aim.onUse()
+        BoardStagesKeyboard.clicked(self)
         let target = target(at: convert(event.locationInWindow, from: nil))
         // A station or a link that came under a still pointer isn't what it aimed at.
         if target != .line, aim.isStale {
@@ -609,37 +608,17 @@ final class BoardStagesLineView: NSView, NSViewToolTipOwner {
 
     // MARK: The keyboard
 
-    /// Tab stops on it while Full Keyboard Access is on, unless it departed.
-    override var acceptsFirstResponder: Bool { !isDeparted && BoardStagesKeyboard.takesKeyboard() }
-    override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
-    override var focusRingMaskBounds: NSRect { bounds }
-    override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
-
-    /// The list scrolls it into sight.
-    override func becomeFirstResponder() -> Bool {
-        let took = super.becomeFirstResponder()
-        if took { scrollToVisible(bounds) }
-        return took
-    }
-
-    override func resignFirstResponder() -> Bool {
-        held.reset()
-        return super.resignFirstResponder()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if !held.keyDown(event) { super.keyDown(with: event) }
-    }
+    /// A stop unless it departed.
+    override var isKeyStop: Bool { !isDeparted }
 
     /// Space or Return opens the task, as a click on the line (departed
     /// since it took the keyboard, it says where its task went); Control-
     /// Return shows its menu, where the Merge station and the link are too.
-    /// As the key comes up (`BoardStagesKeyboard.Held`).
-    override func keyUp(with event: NSEvent) {
-        switch held.keyUp(event) {
-        case .press?: isDeparted ? onGone?() : onClick?()
-        case .menu?: if isDeparted || !accessibilityPerformShowMenu() { NSSound.beep() }
-        default: super.keyUp(with: event)
+    override func pressed(_ key: BoardStagesKeyboard.Key) {
+        switch key {
+        case .press: isDeparted ? onGone?() : onClick?()
+        case .menu: if isDeparted || !accessibilityPerformShowMenu() { NSSound.beep() }
+        case .repeated, .other: break
         }
     }
 
