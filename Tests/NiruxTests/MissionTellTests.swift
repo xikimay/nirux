@@ -373,7 +373,7 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(refusal(dialog("Bash", keys: ["2"])), "an option's number")
         XCTAssertNil(refusal(dialog("Bash", keys: ["n", "2"])), "a letter out of habit, then the number")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, down, "\t", "u", "s", "e", " ", "v", "2", "\u{7F}", "\r"])), "why not")
-        XCTAssertNil(refusal(dialog("Bash", keys: [down, "\u{1B}[200~/tmp/x\u{1B}[201~", "2", "\r"])), "a paste opens its text")
+        XCTAssertNil(refusal(dialog("Bash", keys: [down, "\u{1B}[200~/tmp/x\u{1B}[201~", "\r"])), "a paste, which an approval drops")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, down])), "answered with a click")
         XCTAssertNil(refusal(dialog("Bash", keys: [down, down, esc])), "denied with Esc after moving")
         XCTAssertNil(refusal(dialog("AskUserQuestion", keys: [down, "\u{1B}[200~yes\u{1B}[201~", "\r"])), "a paste in a question's text")

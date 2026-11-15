@@ -133,11 +133,11 @@ final class WaitingAgentTests: XCTestCase {
         XCTAssertEqual(wait(at: 7.5)?.since, t0 + 5, "saying why not")
         machine.noteKeystroke(now: at(8), keys: Data("\r".utf8))
         XCTAssertNil(wait(at: 9))
-        // Down leaves the text: a number answers again.
+        // Down or Ctrl-N leaves the text: a number answers again.
         machine = AgentStatusMachine()
         startTurn()
         apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
-        for keys in ["\t", "x", esc + "[B"] { machine.noteKeystroke(now: at(6), keys: Data(keys.utf8)) }
+        for keys in ["\t", "x", esc + "[B", "\t", "y", "\u{0E}"] { machine.noteKeystroke(now: at(6), keys: Data(keys.utf8)) }
         XCTAssertEqual(wait(at: 7)?.since, t0 + 5)
         machine.noteKeystroke(now: at(8), keys: Data("1".utf8))
         XCTAssertNil(wait(at: 9))

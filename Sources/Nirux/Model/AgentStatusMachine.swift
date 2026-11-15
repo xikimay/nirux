@@ -1051,18 +1051,18 @@ struct AgentStatusMachine {
 
     /// Whether `keys` answer an approval or a plan, for its row: Enter, Esc,
     /// Ctrl-C, or an option's number. Claude Code's dialogs bind no other
-    /// letter (j and k move); Tab, or a paste, opens the text of an option
-    /// (why not, an amendment), where a number is text, until Enter, Esc,
-    /// Ctrl-C, Up, Down or Tab again.
+    /// letter (j and k move) and drop a paste; Tab opens the text of an
+    /// option (why not, an amendment), where a number is text, until Enter,
+    /// Esc, Ctrl-C, Up, Down, Ctrl-N, Ctrl-P or Tab again.
     private mutating func answersApproval(_ keys: Data?, of dialog: AgentPermissionRequest) -> Bool {
         guard let keys else { return true }
         let inText = approvalTextOpenedFor == dialog.requestedAt
         let answers = keys == Self.enterKey || Self.isCancelKey(keys)
-        if answers || (keys == Self.tabKey && inText) || Self.isUpDownArrows(keys) {
+        if answers || (keys == Self.tabKey && inText) || Self.isUpDownArrows(keys) || keys == Data([0x0E]) || keys == Data([0x10]) {
             approvalTextOpenedFor = nil
             return answers
         }
-        if keys == Self.tabKey || !Self.isOneKey(keys) {
+        if keys == Self.tabKey {
             approvalTextOpenedFor = dialog.requestedAt
             return false
         }

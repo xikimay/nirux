@@ -517,10 +517,10 @@ final class TurnEndClassificationTests: XCTestCase {
         // still listed, it is no draft either.
         at = try turn(keys: [("\r", 3), ("and add a test", 3.5)], dialog: true)
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "typed while its tool runs")
-        // A listed dialog takes every key: a paste or text in one write goes
-        // to an option's text, Down moves, a number answers.
+        // A listed dialog takes every key: a paste or text in one write is
+        // its own (an approval drops it), Down moves, a number answers.
         at = try turn(keys: [("\u{1B}[200~and add a test\u{1B}[201~", 3)], dialog: true)
-        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste goes to an option's text")
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a paste is the dialog's")
         at = try turn(keys: [("ok", 3)], dialog: true)
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "text in one write too")
         at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
