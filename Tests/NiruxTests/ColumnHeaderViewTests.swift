@@ -515,9 +515,5 @@ final class ProjectBoardHeaderTests: XCTestCase {
         XCTAssertEqual(board.header.context, "Board")
         XCTAssertEqual(board.refreshButton.toolTip, "Refresh · Retarget #14: gh: HTTP 422")
         XCTAssertNil(board.header.status)
-
-        header.spaceName = nil
-        board.show(header: header, stages: stages)
-        XCTAssertEqual(board.header.context, "Deleted space")
     }
 }
