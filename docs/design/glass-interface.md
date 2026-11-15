@@ -70,6 +70,18 @@ shadow: step 2.4 adds that if it does.
 
 ![The glass at each level: Opaque exact, the others approximated](../images/glass-levels.png)
 
+## Button
+
+`NiruxButton` is the one button: a capsule, 24 or 20 pt, primary (a light
+slab for the one action a view is for), secondary, quiet, danger, and glass
+(macOS 26's own glass bezel; the secondary look on 14 and 15). It is never
+amber. A click leaves the keyboard where it was unless the button is created
+`focusable` (a sheet's, Settings' buttons). For the rows (3.4): the sidebar's
+drawn Allow / Deny / Yes / No take their colours from `NiruxButton.look` and
+its small size, so the rows, the inbox and the callout show the same buttons;
+a button that just moved under the pointer ignores clicks for a moment, as
+the rows' buttons do today.
+
 ## Plan
 
 1. Foundations, nothing on screen: tokens and the transparency levels, the
