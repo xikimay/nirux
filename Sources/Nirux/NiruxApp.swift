@@ -364,7 +364,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         }
         if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
             guard let shell else { return false }
-            menuItem.state = shell.sidebar.isInactiveSectionCollapsed ? .off : .on
+            // Folded, the list doesn't show, whatever its state.
+            menuItem.state = shell.isSidebarExpanded && !shell.sidebar.isInactiveSectionCollapsed ? .on : .off
             return shell.sidebar.hasInactiveWorkspaces
         }
         return validateMenuItemForUpdate(menuItem)

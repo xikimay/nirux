@@ -3,13 +3,15 @@ import AppKit
 /// Whether the sidebar is unfolded: the user's choice (⌃⌘S, View › Toggle
 /// Sidebar, ⌘P, saved with the state), unless the window is narrow. Below
 /// `narrowWidth` the sidebar folds by itself, and it unfolds again when the
-/// window widens if the user had it unfolded. A toggle while the window is
-/// narrow is the user's choice again, until the window crosses the width
-/// once more.
+/// window is `hysteresis` wider if the user had it unfolded: a window
+/// dragged about the width doesn't make the columns jump at each pixel. A
+/// toggle while the window is narrow is the user's choice again, until the
+/// window gets wide and narrow again.
 struct SidebarFold: Equatable {
     /// Under it, an unfolded sidebar (260 pt) leaves the columns less than
     /// about 640 pt.
     static let narrowWidth: CGFloat = 900
+    static let hysteresis: CGFloat = 40
 
     /// The user's choice, saved.
     var chosenExpanded = false
@@ -26,7 +28,7 @@ struct SidebarFold: Equatable {
     /// The window's width changed: crossing `narrowWidth` folds the sidebar,
     /// or gives it back to the user's choice.
     mutating func windowResized(to width: CGFloat) {
-        let narrow = width < Self.narrowWidth
+        let narrow = width < Self.narrowWidth + (isNarrow ? Self.hysteresis : 0)
         guard narrow != isNarrow else { return }
         isNarrow = narrow
         autoFolded = narrow

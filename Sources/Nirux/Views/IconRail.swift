@@ -13,6 +13,9 @@ final class IconRail: NSView {
         var id: String
         var title: String
         var icon: StateIcon
+        /// What the task's row says (its status line), for the tooltip;
+        /// nil: the icon's state.
+        var detail: String?
     }
 
     struct Content: Equatable {
@@ -198,6 +201,9 @@ final class IconRail: NSView {
     /// click.
     private func press(_ id: String, clicks: Int, at time: TimeInterval) {
         guard (1...2).contains(clicks), let item = items.first(where: { $0.id == id }), let view = itemViews[id] else { return }
+        // The first click's icon came into view and another one moved under
+        // the pointer: the second click is not meant for it.
+        if clicks == 2, let first = firstClick, first.id != id, time - first.time <= NSEvent.doubleClickInterval { return }
         let isDouble = clicks == 2 && firstClick.map { $0.id == id && time - $0.time <= NSEvent.doubleClickInterval } == true
         firstClick = isDouble ? nil : (id, time)
         switch (item.icon.waitsForUser, isDouble) {
@@ -325,7 +331,7 @@ final class RailItemView: NSView {
         updateHalo()
         updateBreath()
         let name = isLead ? "Lead" : item.title
-        toolTip = "\(name) · \(item.icon.accessibilityText)"
+        toolTip = "\(name) · \(item.detail ?? item.icon.accessibilityText)"
         let label = "\(name), \(item.icon.accessibilityText)"
         if label != accessibilityLabel() {
             let isChange = accessibilityLabel() != nil
@@ -446,7 +452,8 @@ final class RailRoundButton: NSView {
         button.setAccessibilityLabel(label)
         button.target = self
         button.action = #selector(pressed)
-        button.frame = bounds.insetBy(dx: Theme.Space.xs, dy: Theme.Space.xs)
+        // The whole disc takes the click; the button is as round.
+        button.frame = bounds
         button.autoresizingMask = [.width, .height]
         glass.contentView.addSubview(button)
     }

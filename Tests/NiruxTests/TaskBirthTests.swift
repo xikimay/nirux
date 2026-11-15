@@ -166,6 +166,12 @@ final class TaskBirthTests: UIFlowTestCase {
         sidebar.update(profiles: [], workspaces: [row("born", index: 0), row("under", index: 1), row("new", index: 2)])
         XCTAssertTrue(born.animation(forKey: SidebarView.birthKey) === appear, "not started again")
 
+        // From the ⌘N sheet: it opens as the picture lands, on the layers'
+        // clock.
+        sidebar.noteBirth(workspaceID: "under", delay: NiruxShellView.taskBirthRowDelay)
+        let delayed = try XCTUnwrap(rail.itemViews["under"]?.layer?.animation(forKey: SidebarView.birthKey))
+        XCTAssertEqual(delayed.beginTime, CACurrentMediaTime() + NiruxShellView.taskBirthRowDelay, accuracy: 0.05)
+
         // Born before its row is listed: it plays once the rail shows it.
         sidebar.noteBirth(workspaceID: "late")
         sidebar.update(profiles: [], workspaces: [row("born", index: 0), row("under", index: 1), row("late", index: 2)])

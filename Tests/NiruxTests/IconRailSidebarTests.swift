@@ -83,6 +83,13 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertEqual(icons["asks"], StateIcon(.needsYou(.question)))
         XCTAssertEqual(icons["handed"], StateIcon(.needsYou(.question)), "handed to the user")
         XCTAssertEqual(sidebar(rows).iconRail.content.lead?.icon, StateIcon(.working))
+
+        // The tooltip says what the row says; the icon's state where the
+        // row would print the branch.
+        let rail = sidebar(rows + [row("audit", index: 6)]).iconRail
+        XCTAssertEqual(rail.itemViews["export"]?.toolTip, "Export · Needs you · Bash: npm run migrate")
+        XCTAssertEqual(rail.itemViews["checkout"]?.toolTip, "Checkout · Working")
+        XCTAssertEqual(rail.itemViews["audit"]?.toolTip, "Audit · Idle")
     }
 
     /// A click on an icon does what a click on its row does: a task whose
@@ -163,6 +170,12 @@ final class IconRailSidebarTests: XCTestCase {
         cancelled.isExpanded = false
         XCTAssertTrue(cancelled.isInactiveSectionCollapsed)
         XCTAssertFalse(cancelled.revealsInactiveSectionOnNextBuild)
+        // Already open: it stays open.
+        let open = self.sidebar(many, width: 260)
+        open.toggleInactiveSection()
+        open.showInactiveSection()
+        open.isExpanded = false
+        XCTAssertFalse(open.isInactiveSectionCollapsed)
     }
 
     /// Faded out for an unfold, the rail stays hidden through rebuilds
@@ -172,6 +185,7 @@ final class IconRailSidebarTests: XCTestCase {
         var done = false
         sidebar.fadeOutRail { done = true }
         XCTAssertTrue(sidebar.iconRail.isHidden)
+        XCTAssertEqual(sidebar.layer?.sublayers?.last?.backgroundColor, Theme.Color.canvas.cgColor, "the picture fades from the rail's colour")
         sidebar.update(profiles: [], workspaces: rows.reversed())
         XCTAssertTrue(sidebar.iconRail.isHidden, "a refresh doesn't bring it back")
         sidebar.isExpanded = true
@@ -183,9 +197,10 @@ final class IconRailSidebarTests: XCTestCase {
 
     // MARK: - Folding by itself
 
-    /// Below 900 pt the sidebar folds by itself and widening gives it back
-    /// to the user's choice, which is what is saved; a toggle while narrow
-    /// is the user's choice until the window crosses the width again.
+    /// Below 900 pt the sidebar folds by itself and widening past 940 pt
+    /// gives it back to the user's choice, which is what is saved; a toggle
+    /// while narrow is the user's choice until the window gets wide and
+    /// narrow again.
     func testANarrowWindowFoldsTheSidebar() {
         var fold = SidebarFold(chosenExpanded: true)
         fold.windowResized(to: 1200)
@@ -193,8 +208,12 @@ final class IconRailSidebarTests: XCTestCase {
         fold.windowResized(to: 899)
         XCTAssertFalse(fold.isExpanded, "narrow: folded")
         XCTAssertTrue(fold.chosenExpanded, "the choice stays")
-        fold.windowResized(to: 900)
+        fold.windowResized(to: 939)
+        XCTAssertFalse(fold.isExpanded, "back about the width: still folded")
+        fold.windowResized(to: 940)
         XCTAssertTrue(fold.isExpanded, "wide again: unfolded")
+        fold.windowResized(to: 900)
+        XCTAssertTrue(fold.isExpanded, "900 isn't narrow")
 
         fold.windowResized(to: 700)
         fold.choose(true)
@@ -209,5 +228,19 @@ final class IconRailSidebarTests: XCTestCase {
         folded.windowResized(to: 700)
         folded.windowResized(to: 1400)
         XCTAssertFalse(folded.isExpanded, "folded by the user: it stays folded")
+    }
+
+    /// A first launch in a narrow window still shows the Getting Started
+    /// checklist, which lives in the sidebar: it unfolds whatever the width.
+    func testAFirstLaunchUnfoldsEvenNarrow() {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        shell.stopHeartbeat()
+        // As saved before the window's width was known.
+        shell.sidebarFold = SidebarFold(chosenExpanded: true)
+        shell.relayout(animated: false)
+        XCTAssertFalse(shell.isSidebarExpanded, "narrow: folded")
+        shell.decideOnboardingChecklist(persisted: nil, hasUnreadableState: false)
+        XCTAssertTrue(shell.isSidebarExpanded, "the checklist shows")
+        XCTAssertTrue(shell.sidebar.isExpanded)
     }
 }

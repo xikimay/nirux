@@ -120,6 +120,13 @@ final class IconRailTests: XCTestCase {
         XCTAssertEqual(open.handler?(), true)
         XCTAssertEqual(selected.last, "export")
         XCTAssertNil(rail.itemViews["checkout"]?.accessibilityCustomActions(), "only a waiting task needs it")
+
+        // The first click's icon scrolled into view and another one came
+        // under the pointer: the second click opens nothing.
+        let before = selected.count
+        try click("checkout", count: 1, at: 100)
+        try click("login", count: 2, at: 100.1)
+        XCTAssertEqual(Array(selected.dropFirst(before)), ["checkout"], "not the neighbour")
     }
 
     /// VoiceOver finds the Lead, each task by name and state in the rail's
@@ -199,6 +206,10 @@ final class IconRailTests: XCTestCase {
         XCTAssertEqual(rail.newButton.toolTip, "New task (\(NiruxShortcuts.newWorkspaceDisplay))")
         XCTAssertEqual(rail.boardButton.toolTip, "Board (\(NiruxShortcuts.board.chord.display))")
 
+        let board = try button(in: rail.boardButton)
+        let ring = try XCTUnwrap(rail.superview).convert(NSPoint(x: 2, y: rail.boardButton.frame.midY), from: rail)
+        XCTAssertTrue(rail.hitTest(ring) === board, "the disc's edge takes the click too")
+
         var pressed: [String] = []
         rail.onArchived = { pressed.append("archived") }
         rail.onNew = { pressed.append("new") }
@@ -274,7 +285,7 @@ final class IconRailTests: XCTestCase {
         }
         for id in ["lead", "checkout"] { XCTAssertNil(rail.itemViews[id]?.layer?.animation(forKey: key), id) }
         XCTAssertNil(rail.separator.layer?.animation(forKey: key), "the line is above it")
-        for round in [rail.archivedButton, rail.newButton, rail.boardButton] { XCTAssertNil(round.layer?.animation(forKey: key)) }
+        // (The buttons under the capsule aren't in the list: nothing moves them.)
 
         rail.animates = false
         XCTAssertNil(born.animation(forKey: SidebarView.birthKey))

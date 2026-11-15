@@ -27,8 +27,14 @@ final class IconRailFlowTests: XCTestCase {
             XCTAssertFalse(rail.isHidden)
             shell.toggleArchivedTasks()
             XCTAssertFalse(shell.isSidebarExpanded, "nothing archived: nothing to unfold for")
+            // No repository yet: the Board asks for one, and runs no gh.
+            let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            shell.projectBoardClient = client
             try self.press(rail.boardButton)
             XCTAssertTrue(shell.activeWorkspace?.columns.contains(where: \.isProjectBoard) == true, "the Board opened")
+            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.hostView != nil }
+            shell.spaceSettings?.close()
+            XCTAssertEqual(client.calls, [])
 
             let repo = try XCTUnwrap(shell.activeWorkspace)
             shell.addWorkspace(title: "parked", cwd: harness.worktree)
@@ -46,6 +52,13 @@ final class IconRailFlowTests: XCTestCase {
             harness.waitUntil("the cards to come in") { shell.sidebar.isExpanded }
             XCTAssertFalse(shell.sidebar.isInactiveSectionCollapsed, "the archived list is open")
             XCTAssertNotNil(shell.sidebar.rowFrame(workspaceID: parked.id), "and lists the archived task")
+
+            // Folded again, ⌘P's Show/Hide Archived unfolds it with the list.
+            shell.toggleSidebar()
+            harness.runPaletteCommand("Show/Hide Archived")
+            XCTAssertTrue(shell.isSidebarExpanded, "it unfolds")
+            harness.waitUntil("the cards to come in again") { shell.sidebar.isExpanded }
+            XCTAssertFalse(shell.sidebar.isInactiveSectionCollapsed, "with the list open")
         }
     }
 
@@ -64,7 +77,8 @@ final class IconRailFlowTests: XCTestCase {
             resize(800)
             XCTAssertFalse(shell.sidebar.isExpanded, "narrow: folded")
             XCTAssertEqual(shell.sidebar.frame.width, SidebarView.foldedWidth)
-            XCTAssertTrue(shell.sidebarFold.chosenExpanded, "the saved choice")
+            XCTAssertTrue(shell.sidebarFold.chosenExpanded)
+            XCTAssertEqual(shell.persistedState().settings?.sidebarExpanded, true, "what is saved: the user's choice")
             resize(1200)
             XCTAssertTrue(shell.sidebar.isExpanded, "wide again: unfolded")
             XCTAssertEqual(shell.sidebar.frame.width, 260)

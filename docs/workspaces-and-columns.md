@@ -25,7 +25,7 @@ In a row's `⋯` menu:
 - `View/Edit Context…` holds notes on the work: purpose, phase, latest summary, next step, blocker. They are saved with the workspace.
 - `Organize › Archive` puts a finished workspace away. Archived workspaces wait behind the **Archived** row at the bottom of the sidebar and don't poll GitHub.
 
-`Ctrl+Cmd+S` folds the sidebar into a rail of icons: the space's Lead, then one state icon per task, ringed in amber only when an agent is waiting for you, and a working one breathes. Hover an icon for its name and state. A click goes where a click on its row goes (a task whose agent waits for you opens on that agent), and a right-click opens the task's menu; drag and double-click to rename stay in the unfolded sidebar. Under the rail: the archived tasks (unfolds the sidebar with the Archived list open), a new task, and the Board. The sidebar also folds by itself when the window is narrower than 900 points, and unfolds again when it widens if you had it unfolded.
+`Ctrl+Cmd+S` folds the sidebar into a rail of icons: the space's Lead, then one state icon per task, ringed in amber only when an agent is waiting for you, and a working one breathes. Hover an icon for its name and what its row says. A click goes where a click on its row goes (a task whose agent waits for you opens on that agent), and a right-click opens the task's menu; drag and double-click to rename stay in the unfolded sidebar. Under the rail: the archived tasks (unfolds the sidebar with the Archived list open), a new task, and the Board. The sidebar also folds by itself when the window is narrower than 900 points, and unfolds again from 940 points if you had it unfolded.
 
 ## Columns
 

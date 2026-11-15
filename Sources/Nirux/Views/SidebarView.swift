@@ -110,10 +110,10 @@ final class SidebarView: NSView {
                 // part-way.
                 railBirthsPlayed.formUnion(rowOpensAt.keys)
                 // An unfold asked for with the archived list open didn't
-                // come (folded again meanwhile): the list stays as it was.
+                // come (folded again meanwhile): the list goes back as it was.
                 if revealsInactiveSectionOnNextBuild {
                     revealsInactiveSectionOnNextBuild = false
-                    isInactiveSectionCollapsed = true
+                    if inactiveSectionOpenedForUnfold { isInactiveSectionCollapsed = true }
                 }
             }
             // Before the rebuild: it lays the rows out at the width left.
@@ -172,8 +172,11 @@ final class SidebarView: NSView {
     var onboardingCardView: OnboardingChecklistView?
     /// Set by `revealOnboardingCard()` while the card isn't laid out yet.
     var revealsOnboardingCardOnNextBuild = false
-    /// Set by `showInactiveSection()` while the sidebar is folded.
+    /// Set by `showInactiveSection()` while the sidebar is folded; and
+    /// whether that opened the list, which a fold before the cards come
+    /// closes again.
     var revealsInactiveSectionOnNextBuild = false
+    var inactiveSectionOpenedForUnfold = false
     /// Archived (inactive) workspaces are finished work: their list starts
     /// folded at every launch and only `toggleInactiveSection` (the Archived
     /// row, View ▸ Show Archived, ⌘P) unfolds it — not the workspace on
@@ -489,6 +492,9 @@ final class SidebarView: NSView {
         let fadeLayer = CALayer()
         fadeLayer.frame = bounds
         fadeLayer.contents = bitmapRep.cgImage
+        // The picture may leave out the sidebar's own colour (the window's,
+        // behind the rail), which the cards' takes over at once.
+        fadeLayer.backgroundColor = layer?.backgroundColor
         layer?.addSublayer(fadeLayer)
 
         // Hide the rail so it doesn't show behind the fade, nor come back
@@ -1009,6 +1015,7 @@ extension SidebarView {
     func showInactiveSection() {
         guard hasInactiveWorkspaces else { return }
         guard isExpanded else {
+            if !revealsInactiveSectionOnNextBuild { inactiveSectionOpenedForUnfold = isInactiveSectionCollapsed }
             isInactiveSectionCollapsed = false
             revealsInactiveSectionOnNextBuild = true
             lastRenderSignature = nil

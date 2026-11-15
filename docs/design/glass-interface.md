@@ -144,15 +144,20 @@ click does what a click on the row does: a task whose agent waits goes to
 that column, until the callout of 3.3 takes the amber icons. A right-click
 opens the task's menu, which holds Rename; dragging and renaming in place
 stay in the unfolded sidebar, and the rail of initials' rich tooltip goes for
-the short "name · state". The archived button unfolds the sidebar with the
+a short one: the name and what the row says ("Needs you · Bash: npm run
+migrate", "Stuck? · …"), or the icon's state where the row prints its
+branch. The archived button unfolds the sidebar with the
 Archived list open and its header in view (as View › Show Archived and ⌘P do
 while folded); its tooltip counts them. The space tile went: the command
 bar's space segment opens the same menu. The sidebar folds by itself below a
 900 pt window (`SidebarFold`: 260 pt of sidebar would leave the columns less
-than about 640 pt) and unfolds back above it if the user's choice, which is
-what is saved, is unfolded; a toggle while narrow is the user's choice until
-the window crosses the width again. The fold that follows a resize doesn't
-animate: the window's own resize moves the columns. Folded, the sidebar takes
+than about 640 pt) and unfolds back from 940 pt (a window dragged about the
+width doesn't make the columns jump) if the user's choice, which is what is
+saved, is unfolded; a toggle while narrow is the user's choice until the
+window gets wide and narrow again, and a first launch unfolds it for the
+Getting Started checklist whatever the width. The fold that follows a resize
+doesn't animate: the window's own resize moves the columns, and the cards
+come in once the sidebar is wide. Folded, the sidebar takes
 the window's colour, on which the capsule reads at Opaque (its colour is the
 unfolded sidebar's).
 

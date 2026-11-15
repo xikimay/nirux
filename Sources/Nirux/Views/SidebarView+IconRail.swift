@@ -35,6 +35,7 @@ extension SidebarView {
         iconRail.onNew = { [weak self] in self?.onNewWorkspace?() }
         iconRail.onBoard = { [weak self] in self?.onOpenBoard?() }
         iconRail.menuForTask = { [weak self] id in
+            self?.notePointer(.menu)
             guard let self, let index = lastInfos.first(where: { $0.id == id })?.index else { return nil }
             return workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
         }
@@ -42,6 +43,7 @@ extension SidebarView {
 
     /// A click on an icon: what a click on its row does (`clickRow`).
     private func selectFromRail(_ id: String) {
+        notePointer(.press)
         guard let index = lastInfos.first(where: { $0.id == id })?.index else { return }
         clickRow(index)
     }
@@ -68,7 +70,13 @@ extension SidebarView {
         for info in displayedWorkspaceInfos {
             let state = info.railState
             guard Self.railLists(info, state: state) else { continue }
-            let item = IconRail.Item(id: info.id, title: info.title, icon: info.railIcon(state: state))
+            let summary = info.rowSummary
+            // The row's words, but the branch it prints when nothing goes
+            // on: then the icon's state says more.
+            let item = IconRail.Item(
+                id: info.id, title: info.title, icon: info.railIcon(state: state, summary: summary),
+                detail: summary.status.tone == .branch ? nil : summary.status.text
+            )
             if info.isLead, content.lead == nil { content.lead = item } else if !info.isLead { content.tasks.append(item) }
             if info.isActive { content.selectedID = info.id }
         }
@@ -102,19 +110,20 @@ extension WorkspaceInfo {
     /// The row's state as an icon (`rowSummary`): a wait says its reason,
     /// from the column a click brings up. A question handed to the user
     /// (`railState`) shows amber on the rail even where the row says less.
-    var railIcon: StateIcon { railIcon(state: railState) }
+    var railIcon: StateIcon { railIcon(state: railState, summary: rowSummary) }
 
-    /// `railIcon`, its rail state already read.
-    func railIcon(state: SidebarCardState) -> StateIcon {
-        let icon = stateIcon
+    /// `railIcon`, its rail state and row already read.
+    func railIcon(state: SidebarCardState, summary: SidebarRowSummary) -> StateIcon {
+        let icon = stateIcon(summary: summary)
         if state == .waiting, !icon.waitsForUser { return StateIcon(.needsYou(.question)) }
         return icon
     }
 
     /// The row's mark as an icon, its wait's reason from the column a
     /// click brings up (the command bar's task, the rail).
-    var stateIcon: StateIcon {
-        let summary = rowSummary
+    var stateIcon: StateIcon { stateIcon(summary: rowSummary) }
+
+    func stateIcon(summary: SidebarRowSummary) -> StateIcon {
         let column = columns.first { $0.index == summary.focusColumn ?? focusedColumn }
         return StateIcon(mark: summary.mark, reason: summary.mark == .needsYou ? column.map(Self.waitReason) : nil)
     }
