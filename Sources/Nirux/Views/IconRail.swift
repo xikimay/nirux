@@ -202,8 +202,10 @@ final class IconRail: NSView {
     private func press(_ id: String, clicks: Int, at time: TimeInterval) {
         guard (1...2).contains(clicks), let item = items.first(where: { $0.id == id }), let view = itemViews[id] else { return }
         // The first click's icon came into view and another one moved under
-        // the pointer: the second click is not meant for it.
-        if clicks == 2, let first = firstClick, first.id != id, time - first.time <= NSEvent.doubleClickInterval { return }
+        // the pointer: the double-click is the first icon's, as on the rows.
+        if clicks == 2, let first = firstClick, first.id != id, time - first.time <= NSEvent.doubleClickInterval {
+            return press(first.id, clicks: 2, at: time)
+        }
         let isDouble = clicks == 2 && firstClick.map { $0.id == id && time - $0.time <= NSEvent.doubleClickInterval } == true
         firstClick = isDouble ? nil : (id, time)
         switch (item.icon.waitsForUser, isDouble) {
