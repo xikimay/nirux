@@ -140,11 +140,16 @@ answer goes to the receiver the rows use. The rows' click rule holds too: a
 single click, on a button that has sat still for 0.6 s (`RequestArming`,
 the same rearming as the rows'), so that a request arriving, moving up or
 taking another's place never takes a click aimed at what was there; a
-scroll restarts the wait. Answers stay clicks; the keyboard only moves the
-inbox's choice. For phase 3: the hosting (a popover or a child window, the
-arrow) and the order (`WaitingAgentQueue`, which doesn't know Missions
-questions yet), and where `onAnswer` lands (`decidePermission`,
-`answerFromCard`, `showMissionReplyPopover`).
+scroll, the panel opening, or its host moving it (`restartArming`) restarts
+the wait. A card belongs to its request, never to its task: its id comes
+from the request (the permission's id, the question's column and time), so a
+request that takes another's place gets a new card. Answers stay clicks; the
+keyboard only moves the inbox's choice. For phase 3: the hosting (a popover
+or a child window, the arrow), the order (`WaitingAgentQueue`, which doesn't
+know Missions questions yet), and where `onAnswer` lands
+(`decidePermission`, `answerFromCard`, `showMissionReplyPopover`) with the
+request's column; the Missions reply panel should check the question's id,
+as it opens whatever question its column holds.
 
 ![The inbox with three requests: Opaque exact, Glass approximated](../images/request-inbox.png)
 

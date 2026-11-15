@@ -4,7 +4,8 @@ import AppKit
 /// icon shows that task's request beside it, with its answers (the inbox's
 /// card, the rows' answers), "Open task", and how many more wait (⌘J).
 /// Escape or a click elsewhere closes it. Built, not shown yet: phase 3
-/// hosts it at the icon `IconRail.onRequest` gives.
+/// hosts it at the icon `IconRail.onRequest` gives, and calls
+/// `restartArming` whenever it moves it with its icon.
 final class RequestCalloutView: NSView {
     static let width: CGFloat = 330
 
@@ -20,15 +21,16 @@ final class RequestCalloutView: NSView {
 
     private(set) var request: WaitingRequest?
     private let glass: GlassView
-    private let content = FlippedCalloutView()
+    private let content = FlippedContentView()
     let card = RequestCardView(trailing: .openTask)
     /// "1 more · ⌘J".
     let moreLabel = NSTextField(labelWithString: "")
-    let arming: RequestArming
+    private let arming: RequestArming
 
-    init(level: InterfaceTransparency, arming: RequestArming = RequestArming()) {
+    /// `now`: the clock the answers' arming reads (a test's own).
+    init(level: InterfaceTransparency, now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel)
-        self.arming = arming
+        arming = RequestArming(now: now)
         super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 120))
         glass.autoresizingMask = [.width, .height]
         glass.frame = bounds
@@ -88,10 +90,25 @@ final class RequestCalloutView: NSView {
             width: bounds.width - 2 * RequestCardView.padding, height: 16
         )
         guard let id = request?.id else { return arming.refresh([:]) }
+        // From the top: the "more" line below can come and go.
         arming.refresh(card.answerButtons.reduce(into: [:]) { frames, entry in
-            frames[RequestInboxView.armingKey(id, entry.key)] = convert(entry.value.bounds, from: entry.value)
+            frames[RequestInboxView.armingKey(id, entry.key)] = content.convert(entry.value.bounds, from: entry.value)
         })
     }
+
+    /// It opens: every answer waits before it takes a click.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { restartArming() }
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        restartArming()
+    }
+
+    /// The answers slid under a still pointer (the host moved the callout).
+    func restartArming() { arming.restartAll() }
 
     // MARK: - Keys
 
@@ -102,8 +119,4 @@ final class RequestCalloutView: NSView {
     }
 
     override func cancelOperation(_ sender: Any?) { onClose?() }
-}
-
-private final class FlippedCalloutView: NSView {
-    override var isFlipped: Bool { true }
 }

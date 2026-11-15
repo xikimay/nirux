@@ -15,15 +15,45 @@ struct WaitingRequest: Equatable {
         case terminal(String)
     }
 
-    /// Unique among the requests shown.
-    var id: String
     /// The task to go to.
     var taskID: String
+    /// The column whose agent asks: the receivers find it there.
+    var columnID: UUID
     var taskTitle: String
     var icon: StateIcon
     /// How long it has waited ("4m"), worded by the caller.
     var waited: String?
     var kind: Kind
+
+    /// The request itself, never its task: a request that takes another's
+    /// place gets a card of its own, its buttons unarmed.
+    var id: String {
+        switch kind {
+        case .permission(let approval): return "permission \(approval.requestID)"
+        case .question(let question): return "question \(question.columnID) \(question.turnEndedAt)"
+        case let .dialog(question, _): return "dialog \(columnID) \(question)"
+        case .mission(let question): return "mission \(question.questionID)"
+        case .terminal(let prompt): return "terminal \(columnID) \(prompt)"
+        }
+    }
+
+    /// What VoiceOver says before the request's text.
+    var asker: String {
+        switch kind {
+        case .question, .dialog: return "Claude asks"
+        case .mission: return "The agent asks"
+        case .permission, .terminal: return "The terminal asks"
+        }
+    }
+
+    /// Only the terminal answers it: the inbox leads there.
+    var answersInTerminal: Bool {
+        switch kind {
+        case .dialog, .terminal: return true
+        case .permission(let approval): return approval.display == .undelivered
+        case .question, .mission: return false
+        }
+    }
 
     /// What the agent does, after the task's title.
     var verb: String {
@@ -48,6 +78,7 @@ final class RequestCardView: NSView {
     private static let gap = Theme.Space.sm
     private static let headerHeight: CGFloat = 18
     private static let textMaximumLines = 8
+    private static let choicesMaximumLines = 4
 
     /// A click on an answer, with its button to anchor what it opens (Reply…).
     var onAnswer: ((RequestChoice, NSView) -> Void)?
@@ -86,6 +117,9 @@ final class RequestCardView: NSView {
     private var buttonOrder: [RequestChoice] = []
     /// The command's lines as its box shows them.
     private(set) var commandLines: [String] = []
+    /// The answers shown: the buttons stay while they don't change (a
+    /// press, a hover survive the wait's minute ticking).
+    private var shownButtons: [RequestButton]?
 
     init(trailing: Trailing) {
         self.trailing = trailing
@@ -107,6 +141,9 @@ final class RequestCardView: NSView {
         for button in [openButton, terminalButton] {
             button.target = self
             button.action = #selector(openTask)
+            // A double-click's second press lands on whatever took the
+            // place of what its first press answered.
+            button.acceptsPress = { $0.clickCount == 1 }
         }
         box.wantsLayer = true
         box.layer?.cornerRadius = Theme.Radius.control
@@ -121,6 +158,8 @@ final class RequestCardView: NSView {
             label.lineBreakMode = .byWordWrapping
             label.cell?.truncatesLastVisibleLine = true
         }
+        textLabel.maximumNumberOfLines = Self.textMaximumLines
+        choicesLabel.maximumNumberOfLines = Self.choicesMaximumLines
         textLabel.textColor = Theme.Color.textPrimary
         choicesLabel.textColor = Theme.Color.textSecondary
         noteLabel.font = Theme.Font.caption
@@ -180,22 +219,20 @@ final class RequestCardView: NSView {
         textLabel.stringValue = text.map(AgentText.withoutMarks) ?? ""
         textLabel.toolTip = text
         textLabel.isHidden = text == nil
-        textLabel.setAccessibilityLabel(text.map { "Claude asks: \($0)" })
+        textLabel.setAccessibilityLabel(text.map { "\(request.asker): \($0)" })
         choicesLabel.stringValue = choices.map { "\($0.marker ?? "•") \(AgentText.withoutMarks($0.text))" }.joined(separator: "\n")
         choicesLabel.isHidden = choices.isEmpty
         noteLabel.stringValue = note?.0 ?? ""
         noteLabel.textColor = note?.1
         noteLabel.isHidden = note == nil
-        switch request.kind {
-        case .dialog, .terminal: terminalButton.isHidden = trailing != .waited
-        default: terminalButton.isHidden = true
-        }
+        terminalButton.isHidden = trailing != .waited || !request.answersInTerminal
         showButtons(buttons)
-        commandLines = []
         needsLayout = true
     }
 
     private func showButtons(_ buttons: [RequestButton]) {
+        guard buttons != shownButtons else { return }
+        shownButtons = buttons
         answerButtons.values.forEach { $0.removeFromSuperview() }
         answerButtons = [:]
         buttonOrder = buttons.map(\.choice)
@@ -286,7 +323,8 @@ final class RequestCardView: NSView {
             let characterWidth = ("0" as NSString).size(withAttributes: [.font: metrics.approvalFont]).width
             let perLine = Int((inner - 2 * metrics.approvalBoxPaddingX - 4) / max(characterWidth, 1))
             let lines = SidebarExpandedMetrics.approvalLines(approval.text, perLine: perLine)
-            if lines != commandLines {
+            // Measuring leaves the box as it is.
+            if apply, lines != commandLines {
                 commandLines = lines
                 commandLabel.attributedStringValue = SidebarApprovalBlockRenderer.attributedLines(lines)
                 commandLabel.maximumNumberOfLines = lines.count
@@ -301,13 +339,19 @@ final class RequestCardView: NSView {
             y += boxHeight + Self.gap
         }
         for label in [choicesLabel, textLabel] where !label.isHidden {
-            label.maximumNumberOfLines = label === textLabel ? Self.textMaximumLines : 4
-            label.preferredMaxLayoutWidth = inner
-            let height = ceil(label.intrinsicContentSize.height)
+            let height = Self.height(of: label, width: inner)
             set(label, NSRect(x: padding, y: y, width: inner, height: height), apply)
             y += height + Self.gap
         }
         return y
+    }
+
+    /// `label`'s height at `width`, its lines capped, without touching it.
+    private static func height(of label: NSTextField, width: CGFloat) -> CGFloat {
+        let font = label.font ?? Theme.Font.body
+        let whole = label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height ?? 0
+        let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
+        return ceil(min(whole, CGFloat(label.maximumNumberOfLines) * lineHeight))
     }
 
     /// The answers on the right, a quiet one on the left; or the note.
@@ -347,4 +391,9 @@ final class RequestCardView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) { onClick?() }
+}
+
+/// Content that counts y down, on a glass panel's unflipped content view.
+final class FlippedContentView: NSView {
+    override var isFlipped: Bool { true }
 }

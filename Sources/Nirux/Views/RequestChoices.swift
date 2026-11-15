@@ -11,6 +11,15 @@ enum RequestChoice: Hashable {
     case turn(SidebarTurnAnswer)
     /// A task agent's question (Missions): the reply panel.
     case missionReply
+
+    /// Names the answer in arming keys.
+    var key: String {
+        switch self {
+        case .permission(let behavior): return "permission.\(behavior.rawValue)"
+        case .turn(let answer): return "turn.\(answer.rawValue)"
+        case .missionReply: return "missionReply"
+        }
+    }
 }
 
 /// One answer's button.

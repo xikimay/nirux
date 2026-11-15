@@ -15,8 +15,11 @@ final class RequestCardViewTests: XCTestCase {
         return SidebarPermissionApproval(request, now: now)
     }
 
-    static func request(_ kind: WaitingRequest.Kind, id: String = "a", title: String = "Add CSV export") -> WaitingRequest {
-        WaitingRequest(id: id, taskID: "task-\(id)", taskTitle: title, icon: StateIcon(.needsYou(.command), stage: 1), waited: "1m", kind: kind)
+    static func request(_ kind: WaitingRequest.Kind, task: String = "a", title: String? = nil, waited: String = "1m") -> WaitingRequest {
+        WaitingRequest(
+            taskID: "task-\(task)", columnID: UUID(), taskTitle: title ?? "Task \(task)",
+            icon: StateIcon(.needsYou(.command), stage: 1), waited: waited, kind: kind
+        )
     }
 
     private func card(_ kind: WaitingRequest.Kind, trailing: RequestCardView.Trailing = .waited, width: CGFloat = 372) -> RequestCardView {
@@ -27,81 +30,99 @@ final class RequestCardViewTests: XCTestCase {
         return card
     }
 
+    /// The answers in VoiceOver's order (the views'), which is also left to
+    /// right.
     private func answers(_ card: RequestCardView) -> [String] {
-        card.subviews.compactMap { $0 as? NiruxButton }
-            .filter { !$0.isHidden && card.answerButtons.values.contains($0) }
-            .sorted { $0.frame.minX < $1.frame.minX }
-            .map(\.title)
+        let buttons = card.subviews.compactMap { $0 as? NiruxButton }.filter { card.answerButtons.values.contains($0) }
+        XCTAssertEqual(buttons.map(\.frame.minX), buttons.map(\.frame.minX).sorted(), "read left to right")
+        return buttons.map(\.title)
     }
 
     /// Each kind shows the rows' answers in their order, or what stands in
-    /// for them: the decision on its way, where to answer.
+    /// for them and the way to the terminal; VoiceOver names who asks.
     func testEachKindShowsItsAnswers() throws {
         let question = SidebarTurnQuestion(text: "Shall I merge it?", turnEndedAt: 5, isYesNo: true, columnID: UUID())
         let open = SidebarTurnQuestion(text: "Which branch?", turnEndedAt: 5, isYesNo: false, columnID: UUID())
         let mission = SidebarMissionQuestion(questionID: "q", parentTitle: "Lead", text: "Which base?", handOff: .parentClosed)
-        let permission = try XCTUnwrap(Self.approval("npm test"))
 
-        let allow = card(.permission(permission))
+        let allow = card(.permission(try XCTUnwrap(Self.approval("npm test"))))
         XCTAssertEqual(answers(allow), ["Deny", "Allow"])
         XCTAssertEqual(allow.answerButtons[.permission(.allow)]?.kind, .primary)
         XCTAssertEqual(allow.answerButtons[.permission(.allow)]?.cell?.accessibilityLabel(), "Allow once Bash: npm test")
         XCTAssertEqual(allow.verbLabel.stringValue, "wants to run")
-        XCTAssertEqual(answers(card(.question(question))), ["Dismiss", "Reply…", "No", "Yes"])
+        XCTAssertTrue(allow.terminalButton.isHidden)
+        let asks = card(.question(question))
+        XCTAssertEqual(answers(asks), ["Dismiss", "Reply…", "No", "Yes"])
+        XCTAssertEqual(asks.textLabel.accessibilityLabel(), "Claude asks: Shall I merge it?")
         XCTAssertEqual(answers(card(.question(open))), ["Dismiss", "Reply…"])
         XCTAssertEqual(answers(card(.mission(mission))), ["Reply…"])
 
         let sending = card(.permission(try XCTUnwrap(Self.approval("npm test", sent: .allow))))
         XCTAssertTrue(sending.answerButtons.isEmpty)
         XCTAssertEqual(sending.noteLabel.stringValue, "Allowing…")
+        XCTAssertTrue(sending.terminalButton.isHidden)
+        let lost = card(.permission(try XCTUnwrap(Self.approval("npm test", sent: .allow, now: 16))))
+        XCTAssertEqual(lost.noteLabel.stringValue, "Not delivered — answer in the terminal")
+        XCTAssertFalse(lost.terminalButton.isHidden, "the inbox leads to the terminal")
         let dialog = card(.dialog(question: "Which model?", more: 1))
         XCTAssertTrue(dialog.answerButtons.isEmpty)
         XCTAssertEqual(dialog.noteLabel.stringValue, "1 more question in the terminal")
-        XCTAssertFalse(dialog.terminalButton.isHidden, "the inbox leads to the terminal")
+        XCTAssertFalse(dialog.terminalButton.isHidden)
         XCTAssertTrue(card(.dialog(question: "Which model?", more: 0), trailing: .openTask).terminalButton.isHidden, "the callout has it on top")
-        XCTAssertEqual(card(.terminal("Trust this folder?")).noteLabel.stringValue, "Answer in the terminal")
+        let trust = card(.terminal("Trust this folder?"))
+        XCTAssertEqual(trust.noteLabel.stringValue, "Answer in the terminal")
+        XCTAssertEqual(trust.textLabel.accessibilityLabel(), "The terminal asks: Trust this folder?")
     }
 
     /// An answer takes a single click on a button its container armed, and
-    /// says which answer it was.
+    /// says which; the buttons stay while the wait ticks; "Open task"
+    /// ignores a double-click's second press too.
     func testAnAnswerTakesOneArmedClick() throws {
         let card = card(.permission(try XCTUnwrap(Self.approval("npm test"))))
         var armed = false, answered: [RequestChoice] = []
         card.canAnswer = { _ in armed }
         card.onAnswer = { choice, _ in answered.append(choice) }
         let allow = try XCTUnwrap(card.answerButtons[.permission(.allow)])
-        func press(_ count: Int) throws -> Bool {
-            let event = try XCTUnwrap(NSEvent.mouseEvent(
-                with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+        func event(_ type: NSEvent.EventType, _ count: Int) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
                 context: nil, eventNumber: 0, clickCount: count, pressure: 1
             ))
-            return allow.acceptsPress?(event) ?? true
         }
-        XCTAssertFalse(try press(1), "not armed yet")
+        XCTAssertEqual(allow.acceptsPress?(try event(.leftMouseDown, 1)), false, "not armed: the press does nothing")
         allow.performClick(nil)
-        XCTAssertEqual(answered, [], "nor on its release")
+        XCTAssertEqual(answered, [], "nor the release")
         armed = true
-        XCTAssertTrue(try press(1))
-        XCTAssertFalse(try press(2), "the second press of a double-click does nothing")
+        XCTAssertEqual(allow.acceptsPress?(try event(.leftMouseDown, 1)), true)
+        XCTAssertEqual(allow.acceptsPress?(try event(.leftMouseDown, 2)), false, "the second press of a double-click does nothing")
         allow.performClick(nil)
         XCTAssertEqual(answered, [.permission(.allow)])
+
+        var later = try XCTUnwrap(card.request)
+        later.waited = "2m"
+        card.show(later)
+        XCTAssertTrue(card.answerButtons[.permission(.allow)] === allow, "the minute ticks, the buttons stay")
+        XCTAssertEqual(card.terminalButton.acceptsPress?(try event(.leftMouseDown, 2)), false)
     }
 
-    /// The command shows whole, every character, wrapped at the box's
-    /// width; a long question wraps; the header gives way without
-    /// overlapping.
+    /// The command shows whole, every character, wrapped to fit its box; a
+    /// long question wraps; the header gives way without overlapping.
     func testTheCommandIsWholeAndTheHeaderGivesWay() throws {
         let command = "rm -rf ./build && npm ci && npm run build -- --mode production --out ./dist/apps/web"
         let narrow = card(.permission(try XCTUnwrap(Self.approval(command))), width: 300)
-        XCTAssertGreaterThan(narrow.commandLines.count, 1)
+        _ = narrow.fittingHeight(width: 500)
+        XCTAssertGreaterThan(narrow.commandLines.count, 1, "measuring wider leaves the box as laid out")
         XCTAssertEqual(narrow.commandLines.joined(), command)
+        let characterWidth = ("0" as NSString).size(withAttributes: [.font: SidebarExpandedMetrics.approvalFont]).width
+        let widest = CGFloat(narrow.commandLines.map(\.count).max() ?? 0) * characterWidth
+        XCTAssertLessThanOrEqual(widest, narrow.commandLabel.frame.width - 4, "no character cut at the edge")
         XCTAssertGreaterThanOrEqual(narrow.box.frame.height, CGFloat(narrow.commandLines.count) * SidebarExpandedMetrics.approvalLineHeight)
 
         let asks = card(.question(SidebarTurnQuestion(
             text: String(repeating: "Shall I switch the invoices to the receipts' font stack? ", count: 3),
             turnEndedAt: 5, isYesNo: true, columnID: UUID()
         )), width: 300)
-        let lineHeight = ceil(try XCTUnwrap(asks.textLabel.font).boundingRectForFont.height)
+        let lineHeight = NSLayoutManager().defaultLineHeight(for: try XCTUnwrap(asks.textLabel.font))
         XCTAssertGreaterThan(asks.textLabel.frame.height, 2 * lineHeight, "a long question wraps")
 
         let long = RequestCardView(trailing: .waited)

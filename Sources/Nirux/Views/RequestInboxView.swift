@@ -2,10 +2,10 @@ import AppKit
 
 /// The glass interface's inbox (docs/design/glass-interface.md): under the
 /// command bar, every request waiting for the user, in the order it is
-/// given (oldest first), each with its answers. ⌘J or the badge opens it
-/// with the oldest chosen; ↑ ↓ move the choice, and ⌘J again goes to the
-/// chosen task (`chosenRequest`); Escape closes it. Answers are clicks only.
-/// Built, not shown yet: phase 3 hosts it and feeds it.
+/// given (oldest first), each with its answers. It opens with the oldest
+/// chosen; ↑ ↓ move the choice, and ⌘J again goes to the chosen task
+/// (`chosenRequest`); Escape closes it. Answers are clicks only. Built, not
+/// shown yet: phase 3 hosts it and feeds it.
 final class RequestInboxView: NSView {
     static let width: CGFloat = 372
     static let headerHeight: CGFloat = 34
@@ -32,17 +32,20 @@ final class RequestInboxView: NSView {
     private let headerLine = NSView()
     let emptyLabel = NSTextField(labelWithString: "No agent waits for you")
     /// Everything on the glass, counting y down.
-    private let content = FlippedInboxView()
+    private let content = FlippedContentView()
     private let scroll = NSScrollView()
-    private let list = FlippedInboxView()
+    private let list = FlippedContentView()
     /// One card per request, reused by id.
     private(set) var cards: [String: RequestCardView] = [:]
     private var lines: [NSView] = []
-    let arming: RequestArming
+    private let arming: RequestArming
+    /// The choice changed: bring it into view at the next layout.
+    private var revealPending = false
 
-    init(level: InterfaceTransparency, arming: RequestArming = RequestArming()) {
+    /// `now`: the clock the answers' arming reads (a test's own).
+    init(level: InterfaceTransparency, now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel)
-        self.arming = arming
+        arming = RequestArming(now: now)
         super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 200))
         glass.autoresizingMask = [.width, .height]
         glass.frame = bounds
@@ -71,6 +74,10 @@ final class RequestInboxView: NSView {
         NotificationCenter.default.addObserver(
             self, selector: #selector(listScrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView
         )
+        // "Show scroll bars" changed: the cards take the clip's new width.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(scrollerStyleChanged), name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil
+        )
         for view in [titleLabel, countLabel, key, headerLine, emptyLabel, scroll] as [NSView] {
             content.addSubview(view)
         }
@@ -83,9 +90,9 @@ final class RequestInboxView: NSView {
 
     override var isFlipped: Bool { true }
 
-    /// Shows `requests` in their order, reusing each card by its id. The
-    /// choice stays on its request; a new inbox, or a choice whose request
-    /// went, chooses the first.
+    /// Shows `requests` in their order, each once, reusing each card by its
+    /// request's id. The choice stays on its request; a choice whose request
+    /// went falls to the first.
     func show(_ requests: [WaitingRequest]) {
         var seen = Set<String>()
         let requests = requests.filter { seen.insert($0.id).inserted }
@@ -96,8 +103,7 @@ final class RequestInboxView: NSView {
             cards[id] = nil
         }
         for request in requests {
-            let card = cards[request.id] ?? makeCard(id: request.id)
-            card.show(request)
+            (cards[request.id] ?? makeCard(id: request.id)).show(request)
         }
         // VoiceOver reads the cards in their views' order.
         lines.forEach { $0.removeFromSuperview() }
@@ -112,8 +118,12 @@ final class RequestInboxView: NSView {
         emptyLabel.isHidden = !requests.isEmpty
         let count = requests.count
         setAccessibilityLabel(count == 0 ? "No agent waits for you" : "\(count) \(count == 1 ? "request" : "requests") waiting for you")
-        choose(requests.contains { $0.id == chosenID } ? chosenID : requests.first?.id)
         needsLayout = true
+        if !requests.contains(where: { $0.id == chosenID }) {
+            choose(requests.first?.id)
+        } else {
+            markChoice()
+        }
     }
 
     private func makeCard(id: String) -> RequestCardView {
@@ -132,18 +142,20 @@ final class RequestInboxView: NSView {
         return card
     }
 
-    static func armingKey(_ requestID: String, _ choice: RequestChoice) -> String { "\(requestID)|\(choice)" }
+    static func armingKey(_ requestID: String, _ choice: RequestChoice) -> String { "\(requestID)\u{1F}\(choice.key)" }
 
     /// Chooses the request with `id`, and brings it into view.
     func choose(_ id: String?) {
         chosenID = id
+        markChoice()
+        revealPending = id != nil
+        needsLayout = true
+    }
+
+    private func markChoice() {
         for (cardID, card) in cards {
-            card.isChosen = cardID == id
-            card.setAccessibilitySelected(cardID == id)
-        }
-        if let id, let card = cards[id] {
-            layoutSubtreeIfNeeded()
-            list.scrollToVisible(card.frame)
+            card.isChosen = cardID == chosenID
+            card.setAccessibilitySelected(cardID == chosenID)
         }
     }
 
@@ -153,14 +165,47 @@ final class RequestInboxView: NSView {
         choose(requests[min(max(index + step, 0), requests.count - 1)].id)
     }
 
-    /// Its height for its requests, scrolling past `maximum`.
+    /// The inbox opens (⌘J, the badge): the oldest chosen, and every answer
+    /// waits again before it takes a click. The host also calls
+    /// `restartArming` whenever it moves the inbox.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        choose(requests.first?.id)
+        restartArming()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        choose(requests.first?.id)
+        restartArming()
+    }
+
+    /// The answers slid under a still pointer (the host moved the inbox).
+    func restartArming() { arming.restartAll() }
+
+    // MARK: - Layout
+
+    /// Its height for its requests at `Self.width`, scrolling past `maximum`.
     func fittingHeight(maximum: CGFloat) -> CGFloat {
-        let content = requests.isEmpty ? Self.headerHeight + 1 + 44 : Self.headerHeight + 1 + listHeight(width: Self.width)
-        return min(content, maximum)
+        let list = requests.isEmpty ? 44 : listHeight(width: Self.width)
+        return min(Self.headerHeight + 1 + list, maximum)
     }
 
     private func listHeight(width: CGFloat) -> CGFloat {
         requests.reduce(CGFloat(0)) { $0 + (cards[$1.id]?.fittingHeight(width: width) ?? 0) } + CGFloat(max(requests.count - 1, 0))
+    }
+
+    /// The cards' width: the scroll view's, less a legacy scroller when they
+    /// overflow (the system's "Show scroll bars" decides; AppKit sets each
+    /// scroll view's style from it).
+    private func cardWidth() -> CGFloat {
+        let full = scroll.frame.width
+        guard listHeight(width: full) > scroll.frame.height else { return full }
+        return NSScrollView.contentSize(
+            forFrameSize: scroll.frame.size, horizontalScrollerClass: nil, verticalScrollerClass: NSScroller.self,
+            borderType: .noBorder, controlSize: .regular, scrollerStyle: scroll.scrollerStyle
+        ).width
     }
 
     override func layout() {
@@ -175,7 +220,7 @@ final class RequestInboxView: NSView {
         scroll.frame = NSRect(x: 0, y: header + 1, width: width, height: max(0, bounds.height - header - 1))
         emptyLabel.frame = NSRect(x: padding, y: scroll.frame.midY - 8, width: width - 2 * padding, height: 16)
 
-        let cardWidth = scroll.contentSize.width
+        let cardWidth = cardWidth()
         var y: CGFloat = 0
         var frames: [String: NSRect] = [:]
         for (index, request) in requests.enumerated() {
@@ -193,11 +238,17 @@ final class RequestInboxView: NSView {
             }
             y += cardHeight
         }
-        list.frame = NSRect(x: 0, y: 0, width: cardWidth, height: max(y, scroll.contentSize.height))
+        list.frame = NSRect(x: 0, y: 0, width: cardWidth, height: max(y, scroll.frame.height))
         arming.refresh(frames)
+        if revealPending, let id = chosenID, let card = cards[id] {
+            revealPending = false
+            list.scrollToVisible(card.frame)
+        }
     }
 
     @objc private func listScrolled() { arming.restartAll() }
+
+    @objc private func scrollerStyleChanged() { needsLayout = true }
 
     // MARK: - Keys
 
@@ -214,8 +265,4 @@ final class RequestInboxView: NSView {
 
     /// ⌘. and the key bindings' Escape.
     override func cancelOperation(_ sender: Any?) { onClose?() }
-}
-
-private final class FlippedInboxView: NSView {
-    override var isFlipped: Bool { true }
 }
