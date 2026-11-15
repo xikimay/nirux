@@ -17,7 +17,7 @@ final class CommandBarFlowTests: XCTestCase {
             shell.installCommandBar(in: harness.window)
             let bar = try XCTUnwrap(shell.commandBarToolbar?.bar)
             let task = try XCTUnwrap(shell.activeWorkspace)
-            func refresh(_ snapshot: ProcessSnapshot? = nil) {
+            @MainActor func refresh(_ snapshot: ProcessSnapshot? = nil) {
                 shell.updateSidebar(snapshot: snapshot)
                 bar.layoutSubtreeIfNeeded()
             }
