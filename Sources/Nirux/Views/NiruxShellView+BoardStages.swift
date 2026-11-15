@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // MARK: - What the Board as stages reads of a space (docs/design/board-stages.md, section 6)
 
@@ -56,5 +56,37 @@ extension NiruxShellView {
             )
         }
         return readings
+    }
+
+    /// What the shell holds of a Board's space for its stages, beside what
+    /// the Board read: the space, its tasks (`members`, the space's
+    /// workspaces in the sidebar's order) with the Lead apart, each
+    /// sub-task's parent, each section's queue and the queues that run (the
+    /// table's queue lines), the clean-ups running.
+    func stagesInputs(
+        of board: ProjectBoardController, members: [WorkspaceState], workspaces: [ProjectBoard.Workspace],
+        readings: [String: BoardStages.TaskReading], order: BoardStages.Order
+    ) -> ProjectBoardController.StagesInputs {
+        let spaceID = board.projectID
+        let queues = projectBoardQueues(board)
+        return ProjectBoardController.StagesInputs(
+            space: profiles.first { $0.id == spaceID }.map { profile in
+                ProjectBoardController.StagesInputs.Space(name: profile.name, color: NSColor.niruxColor(hex: profile.colorHex) ?? Theme.Color.accent)
+            },
+            workspaces: workspaces,
+            tasks: members.filter { !$0.isLead }.map(\.id),
+            // Ids as restored: two the same must not trap.
+            parents: Dictionary(workspaceStore.activeParents(in: spaceID).map {
+                (self.workspaces[$0.key].id, self.workspaces[$0.value].id)
+            }, uniquingKeysWith: { first, _ in first }),
+            lead: members.first { $0.isLead }?.id,
+            readings: readings,
+            queues: queues.states,
+            runningQueues: queues.lines.compactMap { line in
+                BoardStagesView.runningQueue(id: line.id, title: line.title, tooltip: line.tooltip, state: line.queue)
+            },
+            cleaningUp: worktreeCleanupsInFlight,
+            order: order
+        )
     }
 }

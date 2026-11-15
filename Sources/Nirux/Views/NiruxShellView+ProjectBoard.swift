@@ -178,7 +178,25 @@ extension NiruxShellView {
     ) {
         let snapshot = snapshot ?? ProcessSnapshot()
         let members = projectWorkspaces(of: board.projectID)
-        let inputs = members.map { workspace in
+        let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+        // A workspace opened in a folder not listed yet: list them again.
+        if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
+            board.expireWorktrees()
+        }
+        board.reloadIfAnchorsChanged()
+        let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
+        var content = board.content(workspaces: inputs, projects: projects)
+        addQueues(to: &content, board: board)
+        board.view.show(content)
+    }
+
+    /// The space's workspaces as the Board's rows take them: their folder
+    /// as the worktrees were listed, and their most urgent agent column.
+    func projectBoardWorkspaces(
+        _ members: [WorkspaceState], of board: ProjectBoardController, snapshot: ProcessSnapshot, now: TimeInterval,
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
+    ) -> [ProjectBoard.Workspace] {
+        members.map { workspace in
             ProjectBoard.Workspace(
                 id: workspace.id,
                 title: workspace.title,
@@ -193,15 +211,6 @@ extension NiruxShellView {
                 })
             )
         }
-        // A workspace opened in a folder not listed yet: list them again.
-        if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
-            board.expireWorktrees()
-        }
-        board.reloadIfAnchorsChanged()
-        let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
-        var content = board.content(workspaces: inputs, projects: projects)
-        addQueues(to: &content, board: board)
-        board.view.show(content)
     }
 
     /// Each section's queue for its rows, and the queue lines: one line on a
@@ -210,19 +219,27 @@ extension NiruxShellView {
     /// don't depend on the rows: a board showing a message keeps every Stop
     /// in reach.
     private func addQueues(to content: inout ProjectBoardView.Content, board: ProjectBoardController) {
-        let orphans = projectBoardOrphanQueues(board)
+        let queues = projectBoardQueues(board)
+        if case .sections(var sections, let others) = content.body {
+            for index in sections.indices { sections[index].queue = queues.states[sections[index].id] }
+            content.body = .sections(sections, others: others)
+        }
+        // A one-repository board's cells read its own queue, whatever runs elsewhere.
+        content.queue = board.section(id: nil).flatMap { queues.states[$0.id] }
+        guard board.sections.count > 1 || queues.lines.count > queues.states.count else { return }
+        content.queueLines = queues.lines
+    }
+
+    /// Each section's queue, by section id, and one line per queue: each
+    /// section's, named after its repository (its anchor's name on a board
+    /// with anchors), then each one left running on a repository no section
+    /// has. The table's queue lines and the stages' foot say them alike.
+    func projectBoardQueues(_ board: ProjectBoardController) -> (states: [String: ProjectBoard.QueueState], lines: [ProjectBoardView.QueueLine]) {
         var states: [String: ProjectBoard.QueueState] = [:]
         for section in board.sections {
             states[section.id] = projectBoardQueueState(board, section: section)
         }
-        if case .sections(var sections, let others) = content.body {
-            for index in sections.indices { sections[index].queue = states[sections[index].id] }
-            content.body = .sections(sections, others: others)
-        }
-        // A one-repository board's cells read its own queue, whatever runs elsewhere.
-        content.queue = board.section(id: nil).flatMap { states[$0.id] }
-        guard board.sections.count > 1 || !orphans.isEmpty else { return }
-        content.queueLines = board.sections.compactMap { section in
+        let lines = board.sections.compactMap { section in
             states[section.id].map { state in
                 let repository = board.repository(of: section)?.name
                 let name = section.anchor == nil ? repository : board.displayNames[section.id]
@@ -230,13 +247,14 @@ extension NiruxShellView {
                     id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, queue: state
                 )
             }
-        } + orphans.map { orphan in
+        } + projectBoardOrphanQueues(board).map { orphan in
             ProjectBoardView.QueueLine(
                 id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
                 tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
                 queue: orphanQueueState(orphan)
             )
         }
+        return (states, lines)
     }
 
     /// A worktree was cleaned up: the boards list their worktrees again.

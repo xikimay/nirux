@@ -480,6 +480,34 @@ the Board reads that pass's statuses, approvals and Mission questions.
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").
 
+**The content** (`ProjectBoardController.stagesContent`) is what the table
+lists, as stages, from what the Board read and what the shell holds of the
+space (`NiruxShellView.stagesInputs`):
+
+- **Sections**: one per repository of today's Board, from the table's own
+  rows (`listedRows`); a space without an anchor titles its repository by
+  its name ("widgets"), `owner/name` beside it. Each header's pill says what
+  went wrong reading it; else, without saved settings, the table's sentence
+  under the pointer and a word for it: "No settings" where Board Settings
+  can set it up, "Read-only" when board.json can't be saved, "Not read"
+  otherwise (its checkout gone, another section reading its repository);
+  else its post-merge run. Its queue says Start… · N, N the next Start's
+  list without the pull requests known merged (by the queue, the merged
+  list, a task's line), listed on the Board or not (not read yet, closed);
+  its menu has Board Settings… where the settings can act, and Open Main
+  Checkout where the repository has one. Then "No repository" (the
+  workspaces in no repository, as lines; a folder gone is one, its line says
+  so) and "Other workspaces".
+- **The header**: the space's name and colour, what it holds ("1 repository
+  · 4 tasks": the repositories anchored or read, none said while there is
+  none; the tasks not archived, the Lead apart), and the Lead: "Lead · " and
+  what a line would say of it, in its state's colour.
+- **The foot**: every queue that runs, here or in another Nirux, a
+  repository's or one left on a repository no section has, named as the
+  table's queue lines (`NiruxShellView.projectBoardQueues`, which both read).
+- **The message** in place of the sections is the table's in place of its
+  rows (`bodyMessage`), word for word, Board Settings… where it offers it.
+
 For the wiring: the Board is drawn outside the sidebar's pass too (a read
 landing, a click), so it draws from the readings of the last pass, never
 from that pass's approval holds or Mission questions kept for later (their
