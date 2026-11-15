@@ -86,9 +86,10 @@ final class IconRailFlowTests: XCTestCase {
 
             resize(800)
             shell.toggleSidebar()
+            XCTAssertTrue(shell.isSidebarExpanded, "unfolded while narrow")
             harness.waitUntil("the sidebar to unfold while narrow") { shell.sidebar.isExpanded }
             resize(700)
-            XCTAssertTrue(shell.sidebar.isExpanded, "narrower still: the user's choice holds")
+            XCTAssertTrue(shell.isSidebarExpanded && shell.sidebar.isExpanded, "narrower still: the user's choice holds")
             resize(1200)
             resize(800)
             XCTAssertFalse(shell.sidebar.isExpanded, "narrow again: folded")
