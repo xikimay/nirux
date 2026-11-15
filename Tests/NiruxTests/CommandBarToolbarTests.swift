@@ -45,6 +45,8 @@ final class CommandBarToolbarTests: XCTestCase {
         XCTAssertTrue(item.view === toolbar.bar)
         XCTAssertFalse(item.isBordered, "no bordered background behind the bar's own glass")
         if #available(macOS 26, *) { XCTAssertEqual(item.style, .plain) }
+        let again = toolbar.toolbar(toolbar.toolbar, itemForItemIdentifier: CommandBarToolbar.barItemID, willBeInsertedIntoToolbar: true)
+        XCTAssertTrue(again === item && item.view === toolbar.bar, "one item: asked again (full screen), it keeps the bar")
         XCTAssertEqual(toolbar.toolbar.items.map(\.itemIdentifier), [CommandBarToolbar.barItemID], "nothing else")
         // What macOS 14's strip menu offers (AppKit itself refuses label
         // only on a unified toolbar).
@@ -55,6 +57,28 @@ final class CommandBarToolbarTests: XCTestCase {
         let bar = toolbar.bar.convert(toolbar.bar.bounds, to: nil)
         XCTAssertEqual(bar.midX, window.frame.width / 2, accuracy: 1, "centred")
         XCTAssertGreaterThan(window.frame.height - window.contentLayoutRect.height, 40, "a title bar tall enough for the bar")
+    }
+
+    /// At the minimum width, the cup coming after the bar was laid out makes
+    /// the bar give it room, and its going gives the room back.
+    func testTheBarMakesRoomWhenTheCupComes() throws {
+        let (window, toolbar, cup) = window(width: 600, indicators: true)
+        defer { window.close() }
+        let indicator = try XCTUnwrap(cup)
+        let frameView = try XCTUnwrap(window.contentView?.superview)
+        indicator.update(isActive: false, workingAgentCount: 0)
+        frameView.layoutSubtreeIfNeeded()
+        let wide = toolbar.bar.frame.width
+        indicator.update(isActive: true, workingAgentCount: 2)
+        frameView.layoutSubtreeIfNeeded()
+        let bar = toolbar.bar.convert(toolbar.bar.bounds, to: nil)
+        let cupFrame = indicator.view.convert(indicator.view.bounds, to: nil)
+        XCTAssertGreaterThan(cupFrame.width, 0)
+        XCTAssertLessThanOrEqual(bar.maxX, cupFrame.minX, "the cup came: the bar made room")
+        XCTAssertTrue(toolbar.toolbar.visibleItems?.contains { $0.itemIdentifier == CommandBarToolbar.barItemID } == true)
+        indicator.update(isActive: false, workingAgentCount: 0)
+        frameView.layoutSubtreeIfNeeded()
+        XCTAssertEqual(toolbar.bar.frame.width, wide, accuracy: 0.5, "it went: the room came back")
     }
 
     /// The usage limits keep the window's edge, the cup on their left, and

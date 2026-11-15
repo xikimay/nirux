@@ -37,6 +37,9 @@ final class CommandBarViewTests: XCTestCase {
         let empty = bar(content(waiting: 0, task: nil))
         XCTAssertEqual(empty.taskLabel.stringValue, "Nothing open")
         XCTAssertTrue(empty.taskIcon.isHidden)
+        XCTAssertEqual(full.taskButton.toolTip, "The task's menu")
+        XCTAssertEqual(empty.taskButton.toolTip, "Start a task (\(NiruxShortcuts.newWorkspace.chord.display))", "what a click does there")
+        XCTAssertEqual(full.searchButton.toolTip, "Search (⌘P, ⇧⌘P in the editor)")
     }
 
     /// As the bar narrows, the task's detail goes first, then the space's

@@ -46,12 +46,12 @@ extension NiruxShellView {
         return content
     }
 
-    /// The bar's count: of what blocks the live columns on the user
-    /// (`blockedWaits`, ⌘J's own rule), what waits for the user's answer
-    /// (amber: not an agent stopped on an error or exited, which ⌘J also
-    /// visits), leaving out the column on screen, where ⌘J never goes.
-    static func commandBarWaitingCount(blockedWaits: [ObjectIdentifier: AgentWait], onScreen: ObjectIdentifier?) -> Int {
-        blockedWaits.filter { $0.key != onScreen && $0.value.reason.signal == .waiting }.count
+    /// The bar's count: of what ⌘J would visit (`queue`, as
+    /// `WaitingAgentQueue.collect` gives it), what waits for the user's
+    /// answer (amber: not an agent stopped on an error or exited, which ⌘J
+    /// also visits), leaving out the column on screen, where ⌘J never goes.
+    static func commandBarWaitingCount(queue: [WaitingAgent], onScreen: UUID?) -> Int {
+        queue.filter { $0.columnID != onScreen && $0.wait.reason.signal == .waiting }.count
     }
 
     /// What a waiting column waits on, for its icon: a permission the row

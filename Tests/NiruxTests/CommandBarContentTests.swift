@@ -63,20 +63,30 @@ final class CommandBarContentTests: XCTestCase {
         XCTAssertEqual(failed.taskIcon, StateIcon(.error))
     }
 
-    /// The count: what waits for the user's answer, not an agent stopped on
-    /// an error or exited (which ⌘J also visits), nor the column on screen.
+    /// The count: of what ⌘J would visit, what waits for the user's answer,
+    /// not an agent stopped on an error or exited (which ⌘J also visits),
+    /// nor the column on screen.
     func testTheCountIsWhatWaitsForAnAnswerOffScreen() {
-        final class Column {}
-        let (asks, failed, exited, shown) = (Column(), Column(), Column(), Column())
-        let waits: [ObjectIdentifier: AgentWait] = [
-            ObjectIdentifier(asks): AgentWait(reason: .permission(tool: "Bash", summary: nil), since: 1),
-            ObjectIdentifier(failed): AgentWait(reason: .apiError(kind: nil, detail: nil), since: 2),
-            ObjectIdentifier(exited): AgentWait(reason: .exitedMidTurn, since: 3),
-            ObjectIdentifier(shown): AgentWait(reason: .question("Which base?"), since: 4),
+        let shown = UUID()
+        func agent(_ reason: AgentAttentionReason, column: UUID = UUID()) -> WaitingAgent {
+            WaitingAgent(workspaceID: "ws", columnID: column, wait: AgentWait(reason: reason, since: 1))
+        }
+        let queue = [
+            agent(.permission(tool: "Bash", summary: nil)), agent(.apiError(kind: nil, detail: nil)), agent(.exitedMidTurn),
+            agent(.question("Which base?"), column: shown),
         ]
-        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(blockedWaits: waits, onScreen: ObjectIdentifier(shown)), 1)
-        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(blockedWaits: waits, onScreen: nil), 2)
-        withExtendedLifetime((asks, failed, exited, shown)) {}
+        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(queue: queue, onScreen: shown), 1)
+        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(queue: queue, onScreen: nil), 2)
+    }
+
+    /// A wait for the user's answer stops blocking once the agent works
+    /// again (an answered dialog lingers until its tool ends); an error
+    /// still blocks. ⌘J and the spaces' marks read waits so.
+    func testAnAnsweredDialogDoesNotBlockAWorkingAgent() {
+        let asks = AgentWait(reason: .permission(tool: "Bash", summary: nil), since: 1)
+        XCTAssertTrue(asks.blocks(whileStatus: .needsAttention))
+        XCTAssertFalse(asks.blocks(whileStatus: .working), "approved, its tool runs: nobody waits")
+        XCTAssertTrue(AgentWait(reason: .apiError(kind: nil, detail: nil), since: 1).blocks(whileStatus: .working))
     }
 
     /// A space with nothing open says so; a colour that doesn't read falls

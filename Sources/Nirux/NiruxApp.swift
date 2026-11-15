@@ -157,6 +157,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         window.contentView = shellView
         shell = shellView
         shellView.installCommandBar(in: window)
+        // The frame the screen leaves, now that the toolbar set the title
+        // bar's height: even margins all round.
+        window.setFrame(rect, display: false)
         setUpUsageLimits(window: window)
         setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()

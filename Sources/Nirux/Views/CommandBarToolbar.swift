@@ -1,5 +1,15 @@
 import AppKit
 
+extension NSTitlebarAccessoryViewController {
+    /// A trailing accessory changed its width: the title bar lays out again,
+    /// so the toolbar's centred item (the command bar) makes room or takes
+    /// it back.
+    func relayOutTitleBar() {
+        view.superview?.needsLayout = true
+        view.window?.contentView?.superview?.needsLayout = true
+    }
+}
+
 /// The main window's toolbar in the glass interface
 /// (docs/design/glass-interface.md, step 3.1): empty and unified, with the
 /// command bar as its centred item. AppKit sets it level with the window's
@@ -15,6 +25,10 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
 
     let bar: CommandBarView
     let toolbar: NSToolbar
+    /// Made once: a second item handed the same bar would take it from the
+    /// live one (full screen in or out, a toolbar sync), leaving an empty
+    /// strip.
+    private(set) lazy var barItem = Self.barItem(bar)
     private var displayModeObservation: NSKeyValueObservation?
 
     init(bar: CommandBarView) {
@@ -54,7 +68,7 @@ final class CommandBarToolbar: NSObject, NSToolbarDelegate {
         _ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
         guard itemIdentifier == Self.barItemID else { return nil }
-        return Self.barItem(bar)
+        return barItem
     }
 
     /// The bar's item. On macOS 26 a toolbar item may sit on the system's

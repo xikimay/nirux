@@ -35,6 +35,7 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     }
 
     func update(limits: ClaudeUsageLimits?, now: TimeInterval) {
+        defer { relayOutTitleBar() }
         guard let limits else {
             view.isHidden = true
             view.frame.size.width = 0

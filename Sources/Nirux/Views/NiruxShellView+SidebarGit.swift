@@ -52,17 +52,17 @@ extension NiruxShellView {
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead
         )
-        updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
-        // What blocks each live column on the user (⌘J's own rule), read
-        // once for the spaces' marks and the command bar's count.
+        // What blocks each column on the user, read once for the terminal
+        // headers and the other spaces' marks.
         var blockedWaits: [ObjectIdentifier: AgentWait] = [:]
-        for workspace in workspaces where !workspace.isClosing {
+        for workspace in workspaces {
             for column in workspace.columns {
                 if let wait = column.pty?.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(column)]) {
                     blockedWaits[ObjectIdentifier(column)] = wait
                 }
             }
         }
+        updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
             return ProfileInfo(
@@ -83,13 +83,14 @@ extension NiruxShellView {
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.update(profiles: profileInfos, workspaces: infos)
-        // The command bar: what ⌘J reaches, in every space, that waits for
-        // the user's answer (an agent stopped on an error isn't amber); not
-        // the column on screen, which ⌘J never goes to.
-        let onScreen = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }.map(ObjectIdentifier.init)
+        // The command bar counts what ⌘J would visit, through ⌘J's own
+        // queue, that waits for the user's answer.
+        let queue = WaitingAgentQueue.collect(from: workspaces) { self.quickSwitch.agentWait($0, snapshot, now) }
         updateCommandBar(
             task: infos.first { $0.index == activeWSIndex },
-            waitingCount: Self.commandBarWaitingCount(blockedWaits: blockedWaits, onScreen: onScreen)
+            waitingCount: Self.commandBarWaitingCount(
+                queue: queue, onScreen: activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
+            )
         )
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
@@ -225,15 +226,12 @@ extension NiruxShellView {
 
     /// The terminal headers show their agent as the sidebar reads it, and
     /// what blocks it on the user as ⌘J does.
-    private func updateColumnHeaders(
-        infos: [WorkspaceInfo], foregroundProcesses: [ObjectIdentifier: ForegroundProcess], now: TimeInterval
-    ) {
+    private func updateColumnHeaders(infos: [WorkspaceInfo], blockedWaits: [ObjectIdentifier: AgentWait], now: TimeInterval) {
         for info in infos {
             guard let workspace = workspaces[safe: info.index] else { continue }
             for column in info.columns {
                 guard let state = workspace.columns[safe: column.index], state.pty != nil else { continue }
-                let wait = state.pty?.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(state)])
-                state.updateHeaderAgentState(column, wait: wait, now: now)
+                state.updateHeaderAgentState(column, wait: blockedWaits[ObjectIdentifier(state)], now: now)
             }
         }
     }
@@ -284,7 +282,7 @@ extension NiruxShellView {
             if missionQuestions[ObjectIdentifier(column)]?.handOff != nil { signals.append(.waiting) }
             guard let pty = column.pty else { continue }
             let status = pty.cachedAgentState
-            if let wait = blockedWaits[ObjectIdentifier(column)], wait.reason.signal != .waiting || status != .working {
+            if let wait = blockedWaits[ObjectIdentifier(column)], wait.blocks(whileStatus: status) {
                 signals.append(wait.reason.signal)
             }
             if status == .needsAttention { signals.append(AttentionSignal.of(pty.agentAttentionReason)) }

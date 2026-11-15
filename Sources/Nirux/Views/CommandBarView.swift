@@ -123,9 +123,9 @@ final class CommandBarView: NSView {
         // it again (`CommandPalette.searchButtonIDs`).
         searchButton.identifier = Self.searchButtonID
         spaceButton.toolTip = "Spaces"
-        taskButton.toolTip = "The task's menu"
-        searchButton.toolTip = "Search (⌘P)"
-        waitingButton.toolTip = "Next agent waiting for you (⌘J)"
+        searchButton.toolTip = "Search (\(NiruxShortcuts.commandPalette.chord.display), "
+            + "\(NiruxShortcuts.commandPaletteAlternate.chord.display) in the editor)"
+        waitingButton.toolTip = "Next agent waiting for you (\(NiruxShortcuts.nextWaitingAgent.chord.display))"
         // Before the first content: no state to show, words to say.
         taskIcon.isHidden = true
         spaceButton.setAccessibilityLabel("Space")
@@ -149,6 +149,9 @@ final class CommandBarView: NSView {
         spaceButton.setAccessibilityLabel("Space: \(content.spaceName)")
         taskLabel.stringValue = content.taskTitle ?? "Nothing open"
         taskLabel.textColor = content.taskTitle == nil ? Theme.Color.textTertiary : Theme.Color.textPrimary
+        // What a click does: the task's menu, or with nothing open, a new task.
+        taskButton.toolTip = content.taskTitle == nil
+            ? "Start a task (\(NiruxShortcuts.newWorkspace.chord.display))" : "The task's menu"
         if let icon = content.taskIcon { taskIcon.icon = icon }
         taskIcon.isHidden = content.taskIcon == nil
         detailLabel.stringValue = content.taskDetail.map { "· \($0)" } ?? ""
