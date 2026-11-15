@@ -750,12 +750,11 @@ final class SidebarWorkspaceCardRenderer {
                 region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.profileID), label: label)
             ))
         case let .waitingMessages(columnIndex, waiting):
-            let line = waiting.line(now: Date().timeIntervalSince1970)
-            let label = NSTextField.sidebarLine(NSAttributedString(string: line, attributes: [
+            let label = NSTextField.sidebarLine(NSAttributedString(string: waiting.line, attributes: [
                 .font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary
             ]))
             label.toolTip = waiting.tooltip
-            label.setAccessibilityLabel(line)
+            label.setAccessibilityLabel(waiting.line)
             label.frame = NSRect(
                 x: layout.indentX, y: top - Metrics.actionLineHeight,
                 width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight

@@ -88,13 +88,11 @@ extension NiruxShellView {
         defer { missionParentWatch = missionParentWatch.filter { waiting.contains($0.key) } }
         let store = MissionStore.shared
         for mission in store.missions where mission.status == .active {
-            guard let workspace = workspaces.first(where: { $0.id == mission.childWorkspaceID }),
-                  workspace.carriesMissions,
-                  let column = workspace.columns.first(where: { $0.agentUUID == mission.childAgentUUID }),
-                  result[ObjectIdentifier(column)] == nil
+            guard let (workspace, childColumn) = missionEnd(mission, parent: false), workspace.carriesMissions,
+                  let column = childColumn, result[ObjectIdentifier(column)] == nil
             else { continue }
-            let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
-            let parentTitle = parentWorkspace?.title ?? "the parent agent"
+            let parentEnd = missionEnd(mission, parent: true)
+            let parentTitle = parentEnd?.workspace.title ?? "the parent agent"
             guard let question = store.waitingQuestion(
                 childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID
             )?.event else {
@@ -110,7 +108,7 @@ extension NiruxShellView {
                 continue
             }
             waiting.insert(question.id)
-            let parent = parentWorkspace?.columns.first { $0.agentUUID == mission.parentAgentUUID }
+            let parent = parentEnd?.column
             var parentState: SidebarMissionQuestion.Parent
             var foregroundKnown = true
             if let parent {

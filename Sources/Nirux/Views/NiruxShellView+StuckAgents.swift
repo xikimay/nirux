@@ -92,7 +92,7 @@ extension NiruxShellView {
         // A child's question nobody answered comes to the user away too.
         noteMissionQuestionHandOffs(missionQuestions(foreground: { $0.pty?.foregroundProcess(snapshot: snapshot) }, now: now))
         // The log, and one more try, away too.
-        _ = waitingMissionMessages(snapshot: snapshot, now: now)
+        checkMissionWaits(snapshot: snapshot, now: now)
     }
 
     /// What the column's row shows of a stuck agent.

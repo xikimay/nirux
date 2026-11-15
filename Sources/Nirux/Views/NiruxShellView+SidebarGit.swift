@@ -19,7 +19,6 @@ extension NiruxShellView {
             && (!catchUpState.followsSystem || awayConditionsNow().subtracting([.appActive]).isEmpty)
         let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
         noteMissionQuestionHandOffs(missionQuestions)
-        let waitingMessages = waitingMissionMessages(snapshot: snapshot, now: now)
         let appIsActive = sideEffects.appIsActive()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
@@ -42,7 +41,7 @@ extension NiruxShellView {
                     // The dialog the user is looking at needs no copy on
                     // its row: its one line, as for any dialog.
                     showsDialog: !(isUserFocused && appIsActive), snapshot: snapshot, now: now,
-                    waitingMessages: waitingMessages[col.id]
+                    waitingMessages: missionWaits.shown[col.id]
                 )
             }
             return sidebarWorkspaceInfo(
