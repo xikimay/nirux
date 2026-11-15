@@ -337,7 +337,11 @@ clicked. The sizes are the mockup's.
   its remote's pull requests as an anchor without settings does, and is
   read-only: a "Read-only" pill whose tooltip says it isn't one of the
   space's repositories, no merge queue (no Merge station offer, no
-  Retarget), no Board Settings…; its lines count in the space's header. A
+  Retarget), no Board Settings…; it counts among the space's repositories
+  in its header. A section reading a repository keeps its other clones
+  (another folder, the same owner and name, through any host alias): no
+  section of their own. A repository's section goes with its last
+  workspace, and becomes the space's own once its repository is added. A
   workspace in no repository is a line under "No repository".
 - **Other workspaces** remain only as a fallback: a workspace in a
   repository git gave no common dir for, so no section can take it, is one

@@ -179,13 +179,6 @@ final class ProjectBoardController {
         loaded?.view(for: section.slot)
     }
 
-    /// The configured repository of a board with one section: what the
-    /// column header names. Nil with several, or none.
-    var repository: (name: String, gitHub: GitHubRepository)? {
-        guard let only = soleSection else { return nil }
-        return repository(of: only)
-    }
-
     /// The one section that isn't a read-only one of another repository
     /// (`isExtra`), where it is the only one: a Board "with one repository".
     var soleSection: BoardSections.Section? {
@@ -301,12 +294,15 @@ final class ProjectBoardController {
                 self.runningRemoteRead = nil
             }
             if self.configRead == current, let loaded = self.loaded {
-                self.isReadingRemotes = false
+                // Another read, started meanwhile for other repositories, still reads theirs.
+                self.isReadingRemotes = self.runningRemoteRead != nil
                 var context = self.context
-                // What this read didn't cover stays: another read, started meanwhile for other repositories, read it.
+                // What this read didn't cover stays: that other read read it.
                 context.baseRemotes = Self.merged(remotes, keeping: self.context.baseRemotes)
                     .merging(self.context.baseRemotes) { new, _ in new }
                 self.apply(loaded, context: context, listsWorktreesAgain: false)
+                // An anchor read from its remote takes its other clones by it now: placed again, at once.
+                if let local = self.local { self.noteExtraRepositories(in: local) }
             }
             // board.json read again meanwhile: its remotes, now.
             if let due = self.remotesDue, due == self.configRead {
@@ -649,8 +645,9 @@ final class ProjectBoardController {
         }
         guard found != extraRepositories, let loaded else { return }
         extraRepositories = found
-        apply(loaded, context: context, listsWorktreesAgain: false)
+        // Before the render `apply` makes: a new section says it reads its remote.
         isReadingRemotes = true
+        apply(loaded, context: context, listsWorktreesAgain: false)
         readBaseRemotesWhenShown(configRead: configRead)
     }
 

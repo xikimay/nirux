@@ -760,9 +760,6 @@ final class ProjectBoardFlowTests: XCTestCase {
         }
     }
 
-    /// A queue still running on the repository Board Settings just replaced
-    /// keeps its line at the Board's foot, with its Stop, named after its
-    /// repository; the repository's header shows the Board's own queue.
     /// A workspace in a repository that isn't one of the space's: that
     /// repository's section, read-only, after the space's; a second clone of
     /// the space's repository stays in its section. The section goes with
@@ -830,6 +827,9 @@ final class ProjectBoardFlowTests: XCTestCase {
         }
     }
 
+    /// A queue still running on the repository Board Settings just replaced
+    /// keeps its line at the Board's foot, with its Stop, named after its
+    /// repository; the repository's header shows the Board's own queue.
     @MainActor
     func testAQueueLeftOnAnotherRepositoryKeepsItsStop() throws {
         try withShell(client: makeClient()) { shell, space in

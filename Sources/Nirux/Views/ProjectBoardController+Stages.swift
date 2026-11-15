@@ -142,7 +142,8 @@ extension ProjectBoardController {
     /// anchored or read; its tasks not archived, the Lead apart), its
     /// Lead's state and line, said as a line says a task at rest or at work.
     private func stagesHeader(_ inputs: StagesInputs) -> BoardStagesView.Header {
-        let repositories = sections.filter { $0.anchor != nil || reads[$0.id] != nil }.count
+        // Another repository's read-only section only counts beside the Board's own rows (no message in their place).
+        let repositories = sections.filter { ($0.anchor != nil || reads[$0.id] != nil) && (listsRows || !isExtra($0)) }.count
         let tasks = inputs.workspaces.filter { !$0.isInactive && $0.id != inputs.lead }.count
         let held = [
             repositories == 0 ? nil : "\(repositories) \(repositories == 1 ? "repository" : "repositories")",
