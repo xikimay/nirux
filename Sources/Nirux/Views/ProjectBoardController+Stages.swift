@@ -49,15 +49,22 @@ extension ProjectBoardController {
         /// Open Main Checkout, by the checkout's path: Focus where a
         /// workspace is open there, else Open a shell there.
         var mainCheckouts: [String: ProjectBoard.Action] = [:]
-        /// The pull requests of each section's lines, by section id: a
-        /// line held in place under the pointer may show another
-        /// repository's by now, and the queue and Retarget act only on the
-        /// section's own.
-        var pullRequests: [String: Set<Int>] = [:]
         /// What each section's lines offer the queue's list now, by section
         /// id and pull request: a click acts only on an offer still made,
         /// and not refused (a draft since, a queue started).
         var offers: [String: [Int: BoardStages.QueueOffer]] = [:]
+        /// The Retarget each section's lines offer now, by section id and
+        /// pull request: as the offers, a click acts only on one still
+        /// offered (not once the queue's list holds it), and not refused
+        /// (a queue started since).
+        var retargets: [String: [Int: Retarget]] = [:]
+
+        struct Retarget: Equatable {
+            /// The branch it bases the pull request on.
+            var onto: String
+            /// Why it does nothing for now; nil when it acts.
+            var blocked: String?
+        }
     }
 
     /// The id of the section of the workspaces in no repository.
@@ -186,7 +193,6 @@ extension ProjectBoardController {
         )
         let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
         Self.noteFolders(of: facts, in: &targets)
-        targets.pullRequests[section.id] = Set(facts.lines.compactMap(\.pullRequest?.number))
         var shown = BoardStagesView.Section(
             // A space without an anchor: its repository's name ("widgets"), `owner/name` beside it.
             id: section.id,
@@ -197,6 +203,10 @@ extension ProjectBoardController {
         )
         for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {
             if let offer = line.offer { targets.offers[section.id, default: [:]][offer.number] = offer }
+            // The menu's item: the phrase's link is only there while it acts.
+            for case .retarget(.retarget(let number, let onto), let blocked) in line.menu {
+                targets.retargets[section.id, default: [:]][number] = StagesTargets.Retarget(onto: onto, blocked: blocked)
+            }
         }
         if let state = inputs.queues[section.id] {
             // The next Start's list, a merged one for none (as the queue, GitHub's lists or a task's line knows it),

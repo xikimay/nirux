@@ -808,6 +808,13 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(board.view.stages.content?.order, .progress)
             XCTAssertEqual(orderSwitch.selectedSegment, 1)
             XCTAssertEqual(Persistence.load()?.settings?.boardOrder, .progress)
+            // Hidden while another Board's switch went back, it still shows the old order: its switch on the order set
+            // draws it in it at once.
+            shell.boardOrder = .sidebar
+            orderSwitch.selectedSegment = 0
+            _ = (orderSwitch.target as? NSObject)?.perform(orderSwitch.action, with: orderSwitch)
+            XCTAssertEqual(board.view.stages.content?.order, .sidebar)
+            XCTAssertEqual(orderSwitch.selectedSegment, 0)
         }
     }
 

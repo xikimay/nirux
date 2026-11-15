@@ -191,14 +191,13 @@ extension NiruxShellView {
         if let pass {
             board.stagesReadings = boardReadings(
                 ofSpace: board.projectID, sidebarInfos: pass.infos, foregroundProcesses: pass.foregroundProcesses,
-                approvalHolds: pass.approvalHolds, missionQuestions: pass.missionQuestions, snapshot: snapshot, now: now,
-                comparable: board.comparableFolder
+                approvalHolds: pass.approvalHolds, missionQuestions: pass.missionQuestions, snapshot: snapshot, now: now
             )
         }
         // Before the first pass: no hold, no question, the agents in front as the process table says.
         let readings = board.stagesReadings ?? boardReadings(
             ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
-            now: now, comparable: board.comparableFolder
+            now: now
         )
         let (content, targets) = board.stagesContent(
             stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),

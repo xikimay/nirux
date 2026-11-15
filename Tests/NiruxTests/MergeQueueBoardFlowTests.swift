@@ -194,6 +194,24 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             shell.performBoardLink(.retarget(number: 99, onto: "main"), line: nil, section: section, board: board)
             RunLoop.main.run(until: Date().addingTimeInterval(1))
             XCTAssertFalse(client.calls.contains { $0.what.contains("#99") })
+
+            // The confirmation sheet locks the list: the link held under the pointer, or the offer of a line held so,
+            // changes nothing, and says why.
+            try BoardStagesClicks.pressMerge(try line("login", in: board))
+            try waitUntil("#12 is queued") { (BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change) == .remove }
+            try BoardStagesClicks.click(header.startButton)
+            XCTAssertNotNil(shell.mergeQueueConfirmation)
+            try waitUntil("the link goes") { (BoardStagesClicks.shownLine("feat/api", in: board)?.line.phrase.link) == nil }
+            let locked = "The confirmation sheet is open: change the list once it closes."
+            shell.performBoardLink(.retarget(number: 14, onto: "main"), line: nil, section: section, board: board)
+            XCTAssertEqual(shell.toast?.message, locked)
+            shell.toast?.removeFromSuperview()
+            shell.toast = nil
+            shell.performBoardOffer(BoardStages.QueueOffer(change: .remove, number: 12), section: section, board: board)
+            XCTAssertEqual(shell.toast?.message, locked)
+            XCTAssertEqual(shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets).selection, [12])
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.count, 2, "no third retarget")
             XCTAssertFalse(client.calls.contains(where: \.onMainThread), "gh never runs on the main thread")
         }
     }

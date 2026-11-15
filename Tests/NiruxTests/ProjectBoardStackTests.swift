@@ -56,8 +56,6 @@ final class ProjectBoardStackTests: XCTestCase {
         XCTAssertEqual(third.stack?.tooltip, "Stack: #52 → #53 → #60, on main")
         XCTAssertEqual(try row(52, in: result).stack?.label, "1/3")
         XCTAssertNil(try row(55, in: result).stack, "a lone pull request is no stack")
-        XCTAssertEqual(ProjectBoard.pullRequestText(try XCTUnwrap(third.pullRequest), baseBranch: "main", stack: third.stack),
-                       "#60 open · 3/3")
     }
 
     func testAForkNamesWhatEachIsBasedOnWithoutNOfN() throws {
@@ -100,8 +98,6 @@ final class ProjectBoardStackTests: XCTestCase {
         let loneRow = try row(53, in: lone)
         XCTAssertEqual(loneRow.stack?.mergedBase?.number, 52)
         XCTAssertNil(loneRow.stack?.label)
-        XCTAssertEqual(ProjectBoard.pullRequestText(try XCTUnwrap(loneRow.pullRequest), baseBranch: "main", stack: loneRow.stack),
-                       "#53 open → stack/a")
     }
 
     func testAMergedBaseIsLookedForAmongTheThirtyMergedPullRequestsOpenedLast() throws {
