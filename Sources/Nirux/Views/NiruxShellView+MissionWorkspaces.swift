@@ -309,11 +309,20 @@ extension NiruxShellView {
     /// The column a Mission message is typed into: the parent's for a
     /// question or a completion, the child's for the rest.
     func missionRecipient(of delivery: MissionStore.AcceptedEvent) -> ColumnState? {
-        let mission = delivery.mission
-        let toParent = delivery.event.kind == .question || delivery.event.kind == .completed
-        let workspace = workspaces.first { $0.id == (toParent ? mission.parentWorkspaceID : mission.childWorkspaceID) }
-        let agentUUID = toParent ? mission.parentAgentUUID : mission.childAgentUUID
-        return workspace?.columns.first { $0.agentUUID == agentUUID }
+        missionEnd(delivery.mission, parent: Self.goesToParent(delivery.event))?.column
+    }
+
+    nonisolated static func goesToParent(_ event: MissionEvent) -> Bool {
+        event.kind == .question || event.kind == .completed
+    }
+
+    /// A Mission's parent or child: its workspace, and the column its agent
+    /// runs in, if it still has one.
+    func missionEnd(_ mission: Mission, parent: Bool) -> (workspace: WorkspaceState, column: ColumnState?)? {
+        guard let workspace = workspaces.first(where: { $0.id == (parent ? mission.parentWorkspaceID : mission.childWorkspaceID) })
+        else { return nil }
+        let agentUUID = parent ? mission.parentAgentUUID : mission.childAgentUUID
+        return (workspace, workspace.columns.first { $0.agentUUID == agentUUID })
     }
 
     /// A `tell` goes only to the `claude` that ran when it was sent. The

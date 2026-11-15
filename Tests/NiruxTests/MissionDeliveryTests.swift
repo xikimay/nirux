@@ -438,8 +438,10 @@ final class MissionDeliveryTests: XCTestCase {
     func testMessagesWaitingTooLongForAPromptGetALineThatShowsTheColumn() throws {
         _ = NSApplication.shared
         let since = try XCTUnwrap(Calendar.current.date(bySettingHour: 22, minute: 21, second: 0, of: Date()))
-        let waiting = SidebarWaitingMessages(count: 2, since: since.timeIntervalSince1970, refusal: .draft)
-        XCTAssertEqual(waiting.line(now: since.timeIntervalSince1970 + 600), "2 messages waiting since 22:21")
+        let waiting = SidebarWaitingMessages(count: 2, since: since.timeIntervalSince1970, refusal: .draft, now: since.timeIntervalSince1970 + 600)
+        XCTAssertEqual(waiting.line, "2 messages waiting since 22:21")
+        let nextDay = SidebarWaitingMessages(count: 2, since: since.timeIntervalSince1970, refusal: .draft, now: since.timeIntervalSince1970 + 86_400)
+        XCTAssertTrue(nextDay.line.hasSuffix(" 22:21") && nextDay.line != waiting.line, "the day, once it is another: \(nextDay.line)")
         var info = column(nil)
         info.waitingMessages = waiting
         var lead = workspace([info], index: 2)
