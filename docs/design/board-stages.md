@@ -332,16 +332,23 @@ clicked. The sizes are the mockup's.
 - **Every repository of the space has its section**: after the space's
   repositories (its anchors), one for each other repository a workspace of
   the space is in, as the worktrees listed them
-  (`ProjectBoardController.extraRepositories`). Without anchors, the one
-  board.json names takes its repository's checkouts. Such a section reads
-  its remote's pull requests as an anchor without settings does, and is
+  (`ProjectBoardController.extraRepositories`), named as adding it to the
+  space would. Without anchors, the one board.json names takes its
+  repository's checkouts. A section reading a repository keeps its other
+  clones (another folder, the same owner and name, through any host
+  alias), an outside repository's first clone listed its others: no
+  section of their own. They are placed once board.json and the space's
+  own remotes are read, so an anchor's clone never shows as another
+  repository for a moment. Such a section reads its remote's pull requests
+  as an anchor without settings does (each new one alone), and is
   read-only: a "Read-only" pill whose tooltip says it isn't one of the
   space's repositories, no merge queue (no Merge station offer, no
-  Retarget), no Board Settings…; it counts among the space's repositories
-  in its header. A section reading a repository keeps its other clones
-  (another folder, the same owner and name, through any host alias): no
-  section of their own. A repository's section goes with its last
-  workspace, and becomes the space's own once its repository is added. A
+  Retarget), no Board Settings…. It lists this space's workspaces there and
+  nothing else of that repository: no other worktree (another space's,
+  with its Clean Up…), no pull request without a task, no merge but its
+  tasks'. It counts among the space's repositories in its header. It goes
+  with its last workspace (the Board lists again when a workspace it listed
+  is gone), and becomes the space's own once its repository is added. A
   workspace in no repository is a line under "No repository".
 - **Other workspaces** remain only as a fallback: a workspace in a
   repository git gave no common dir for, so no section can take it, is one

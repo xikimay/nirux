@@ -102,18 +102,11 @@ extension ProjectBoardController {
             local.repositories.flatMap(\.worktrees).compactMap { worktree in worktree.head.map { (worktree.path, $0) } },
             uniquingKeysWith: { first, _ in first }
         )
-        let others: [ProjectBoard.Row]
-        switch listedRows(local: local, workspaces: inputs.workspaces) {
-        case .one(let rows, _):
-            // Its rows hold the Board's own workspace at least: a read that failed says so in the section's pill.
-            guard let only = sections.first else { return content }
-            others = rows.filter { $0.group == .otherRepository }
-            content.sections = [stagesSection(
-                only, rows: rows.filter { $0.group != .otherRepository }, inputs, heads: heads, now: now, targets: &targets
-            )]
-        case .sections(let bySection, let rest):
-            others = rest
-            content.sections = sections.map { stagesSection($0, rows: bySection[$0.id] ?? [], inputs, heads: heads, now: now, targets: &targets) }
+        // A section with no rows still shows: a read that failed says so in its pill.
+        let listed = listedRows(local: local, workspaces: inputs.workspaces)
+        let others = listed.others
+        content.sections = sections.map { section in
+            stagesSection(section, rows: listed.bySection[section.id] ?? [], inputs, heads: heads, now: now, targets: &targets)
         }
         // A workspace in no repository is a line there; one in another repository is no line (`sectionFacts`), but under
         // Other workspaces.
@@ -175,6 +168,10 @@ extension ProjectBoardController {
         _ section: BoardSections.Section, rows: [ProjectBoard.Row], _ inputs: StagesInputs, heads: [String: String], now: Date,
         targets: inout StagesTargets
     ) -> BoardStagesView.Section {
+        // Another repository's section lists this space's workspaces there, and nothing else of that repository: no
+        // other worktree (another space's, with its Clean Up…), no pull request without a task, no stranger's merge.
+        let isExtra = isExtra(section)
+        let rows = isExtra ? rows.filter { !$0.workspaces.isEmpty } : rows
         let reads = reads[section.id]
         let reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
@@ -192,6 +189,7 @@ extension ProjectBoardController {
             status: stagesStatus(section, now: now),
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
+        if isExtra { shown.lines.merged.removeAll { $0.lineID == nil } }
         for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {
             if let offer = line.offer { targets.offers[section.id, default: [:]][offer.number] = offer }
             // The menu's item: the phrase's link is only there while it acts.
