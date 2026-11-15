@@ -71,12 +71,12 @@ extension SidebarView {
             let state = info.railState
             guard Self.railLists(info, state: state) else { continue }
             let summary = info.rowSummary
+            let icon = info.railIcon(state: state, summary: summary)
             // The row's words, but the branch it prints when nothing goes
-            // on: then the icon's state says more.
-            let item = IconRail.Item(
-                id: info.id, title: info.title, icon: info.railIcon(state: state, summary: summary),
-                detail: summary.status.tone == .branch ? nil : summary.status.text
-            )
+            // on, or a row that says less than the amber icon: then the
+            // icon's state says more.
+            let saysLess = summary.status.tone == .branch || icon != info.stateIcon(summary: summary)
+            let item = IconRail.Item(id: info.id, title: info.title, icon: icon, detail: saysLess ? nil : summary.status.text)
             if info.isLead, content.lead == nil { content.lead = item } else if !info.isLead { content.tasks.append(item) }
             if info.isActive { content.selectedID = info.id }
         }

@@ -108,7 +108,7 @@ final class SidebarView: NSView {
                 forgetRowMoments()
                 // Births the rows played don't start again on the rail,
                 // part-way.
-                railBirthsPlayed.formUnion(rowOpensAt.keys)
+                railBirthsPlayed.formUnion(rowOpensAt.filter { $0.value <= clock() }.keys)
                 // An unfold asked for with the archived list open didn't
                 // come (folded again meanwhile): the list goes back as it was.
                 if revealsInactiveSectionOnNextBuild {

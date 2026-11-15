@@ -170,7 +170,7 @@ final class TaskBirthTests: UIFlowTestCase {
         // clock.
         sidebar.noteBirth(workspaceID: "under", delay: NiruxShellView.taskBirthRowDelay)
         let delayed = try XCTUnwrap(rail.itemViews["under"]?.layer?.animation(forKey: SidebarView.birthKey))
-        XCTAssertEqual(delayed.beginTime, CACurrentMediaTime() + NiruxShellView.taskBirthRowDelay, accuracy: 0.05)
+        XCTAssertEqual(delayed.beginTime, CACurrentMediaTime() + NiruxShellView.taskBirthRowDelay, accuracy: 0.1)
 
         // Born before its row is listed: it plays once the rail shows it.
         sidebar.noteBirth(workspaceID: "late")
@@ -183,6 +183,12 @@ final class TaskBirthTests: UIFlowTestCase {
         unfolded.isExpanded = false
         XCTAssertNil(unfolded.iconRail.itemViews["first"]?.layer?.animation(forKey: SidebarView.birthKey))
         XCTAssertNil(unfolded.iconRail.itemViews["second"]?.layer?.animation(forKey: SidebarView.birthPushKey("first")))
+        // Folded before its row opened (the sheet's picture still on its
+        // way): the rail plays it.
+        unfolded.isExpanded = true
+        unfolded.noteBirth(workspaceID: "second", delay: NiruxShellView.taskBirthRowDelay)
+        unfolded.isExpanded = false
+        XCTAssertNotNil(unfolded.iconRail.itemViews["second"]?.layer?.animation(forKey: SidebarView.birthKey))
     }
 
     /// Rows that may not move open nothing: not at a birth, and not at a

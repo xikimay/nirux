@@ -35,7 +35,7 @@ final class IconRailSidebarTests: XCTestCase {
             row("export", index: 2, columns: [column(0, .idle), column(1, .needsAttention, reason: .permission(tool: "Bash", summary: "npm run migrate"))]),
             row("parked", index: 3, archived: true),
             row("asks", index: 4, archived: true, columns: [column(0, .needsAttention, reason: .question("Which date?"))]),
-            row("handed", index: 5, archived: true, notification: .waiting),
+            row("handed", index: 5, archived: true, columns: [column(0, .working)], notification: .waiting),
         ]
     }
 
@@ -90,6 +90,7 @@ final class IconRailSidebarTests: XCTestCase {
         XCTAssertEqual(rail.itemViews["export"]?.toolTip, "Export · Needs you · Bash: npm run migrate")
         XCTAssertEqual(rail.itemViews["checkout"]?.toolTip, "Checkout · Working")
         XCTAssertEqual(rail.itemViews["audit"]?.toolTip, "Audit · Idle")
+        XCTAssertEqual(rail.itemViews["handed"]?.toolTip, "Handed · Needs you: a question", "as amber as its icon")
     }
 
     /// A click on an icon does what a click on its row does: a task whose
@@ -242,5 +243,18 @@ final class IconRailSidebarTests: XCTestCase {
         shell.decideOnboardingChecklist(persisted: nil, hasUnreadableState: false)
         XCTAssertTrue(shell.isSidebarExpanded, "the checklist shows")
         XCTAssertTrue(shell.sidebar.isExpanded)
+    }
+
+    /// Unfolded back by a widening window, the cards are laid out at the
+    /// sidebar's width, not the rail's.
+    func testAnAutomaticUnfoldLaysTheCardsOutWide() {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        shell.sidebarFold = SidebarFold(chosenExpanded: true)
+        shell.setFrameSize(NSSize(width: 800, height: 600))
+        XCTAssertFalse(shell.sidebar.isExpanded, "narrow: folded")
+        shell.setFrameSize(NSSize(width: 1200, height: 600))
+        XCTAssertTrue(shell.sidebar.isExpanded, "wide: unfolded")
+        XCTAssertGreaterThan(shell.sidebar.listWidth, 200)
     }
 }

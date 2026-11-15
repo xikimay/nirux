@@ -123,10 +123,13 @@ final class IconRailTests: XCTestCase {
 
         // The first click's icon scrolled into view and another one came
         // under the pointer: the second click opens nothing.
+        // A double-click is the first icon's, as on the rows.
         let before = selected.count
         try click("checkout", count: 1, at: 100)
         try click("login", count: 2, at: 100.1)
-        XCTAssertEqual(Array(selected.dropFirst(before)), ["checkout"], "not the neighbour")
+        try click("export", count: 1, at: 200)
+        try click("login", count: 2, at: 200.1)
+        XCTAssertEqual(Array(selected.dropFirst(before)), ["checkout", "export"], "not the neighbour")
     }
 
     /// VoiceOver finds the Lead, each task by name and state in the rail's
