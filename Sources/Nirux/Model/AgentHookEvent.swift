@@ -90,6 +90,8 @@ struct AgentHookEvent: Codable, Equatable {
     /// an app older than its receiver skips a pass it doesn't know, not
     /// the whole event.
     let reviewPasses: [String]?
+    /// `reviewPasses`, as the passes Nirux knows.
+    var passes: [ReviewPass] { reviewPasses?.compactMap(ReviewPass.init(rawValue:)) ?? [] }
     /// On UserPromptSubmit, the header line of a Branch Review message the
     /// prompt holds ("Review comments on … from Nirux:"): the comments
     /// pasted went to Claude (docs/design/branch-review.md, section 6.2). Only
@@ -114,6 +116,11 @@ struct AgentHookEvent: Codable, Equatable {
     /// Stop hook blocked its end, and this is the end of that continuation
     /// (the end of the turn, unless a hook blocks again).
     let stopHookActive: Bool?
+    /// On a Stop, the subagents its `background_tasks` still lists at work
+    /// (their ids, the subagents' `agent_id`: measured on Claude 2.1.325),
+    /// empty once none is: a review run in the background outlives the turn
+    /// that started it. Nil from older receivers and on other events.
+    var backgroundAgents: [String]?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -203,6 +210,9 @@ struct AgentHookEvent: Codable, Equatable {
                 ? (payload["last_assistant_message"] as? String).flatMap { TurnEndText.excerpt($0) }
                 : nil
             stopHookActive = name == .stop ? payload["stop_hook_active"] as? Bool : nil
+            backgroundAgents = name == .stop ? (payload["background_tasks"] as? [[String: Any]])?.compactMap { task in
+                task["type"] as? String == "subagent" ? task["id"] as? String : nil
+            } : nil
             reviewPasses = switch name {
             case .userPromptSubmit:
                 (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)

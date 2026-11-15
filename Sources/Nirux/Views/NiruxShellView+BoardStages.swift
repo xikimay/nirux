@@ -13,7 +13,8 @@ extension NiruxShellView {
     /// reading them again would hand requests back or note hand-offs. The
     /// rows the sidebar just built (`sidebarInfos`, the space on screen's)
     /// are taken as they are. `comparable` gives a git root the rows' form
-    /// of a path, without the disk where the Board knows it. The Lead is
+    /// of a path: the Board's own, which knows its paths without the disk
+    /// (`ProjectBoardController.comparableFolder`). The Lead is
     /// read too: the space's header says it.
     func boardReadings(
         ofSpace spaceID: String,
@@ -23,7 +24,7 @@ extension NiruxShellView {
         missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         snapshot: ProcessSnapshot,
         now: TimeInterval,
-        comparable: (String) -> String = NiruxShellView.comparablePath
+        comparable: (String) -> String
     ) -> [String: BoardStages.TaskReading] {
         let built = Dictionary(sidebarInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let parents = workspaceStore.activeParents(in: spaceID)
@@ -48,38 +49,12 @@ extension NiruxShellView {
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
                 gitRoot: workspace.gitContext.map { comparable($0.identity.repositoryRoot) },
-                reviewsInFlight: Self.reviewsInFlight(of: workspace, columns: info.columns),
+                reviewsInFlight: Set(workspace.reviewsRunning.map(\.pass)),
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970
                 }
             )
         }
         return readings
-    }
-
-    /// The review passes running: each while the turn it runs in goes on
-    /// in its column (that turn's start unchanged), whatever its agent
-    /// waits on meanwhile: a permission asked mid-review is no end. A pass
-    /// whose turn ended, or whose column's agent died mid-turn (`live`
-    /// leaves it out), is done.
-    nonisolated static func reviewsInFlight(turns: [ReviewPass: ReviewTurn], live: [UUID: TimeInterval]) -> Set<ReviewPass> {
-        Set(turns.compactMap { pass, turn in live[turn.column].map { abs($0 - turn.startedAt) < 1 } == true ? pass : nil })
-    }
-
-    /// Each column's turn in flight (`starts`), but where its agent exited
-    /// mid-turn: no hook ends that turn.
-    nonisolated static func liveTurns(_ starts: [UUID: TimeInterval], columns: [ColumnInfo]) -> [UUID: TimeInterval] {
-        starts.filter { id, _ in
-            !columns.contains { column in
-                guard column.id == id, case .exitedMidTurn? = column.stuck else { return false }
-                return true
-            }
-        }
-    }
-
-    private static func reviewsInFlight(of workspace: WorkspaceState, columns: [ColumnInfo]) -> Set<ReviewPass> {
-        var starts: [UUID: TimeInterval] = [:]
-        for column in workspace.columns { starts[column.id] = column.pty?.agentTurnStartedAt?.timeIntervalSince1970 }
-        return reviewsInFlight(turns: workspace.reviewTurns, live: liveTurns(starts, columns: columns))
     }
 }

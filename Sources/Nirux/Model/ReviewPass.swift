@@ -61,15 +61,20 @@ enum ReviewPass: String, Codable, CaseIterable {
     }
 }
 
-/// A pass's latest run in a workspace: its HEAD when the pass started.
-/// The agent turn a review pass runs in: its column, and the start that
-/// turn had when the pass's event came (typed with the prompt, or a Skill
-/// the agent called later in the turn).
-struct ReviewTurn: Hashable {
+/// A pass running now, in one column (`WorkspaceState.noteReviewPasses`).
+struct RunningPass: Equatable {
+    let pass: ReviewPass
     let column: UUID
-    let startedAt: TimeInterval
+    /// The process that sent its event: once the process table no longer
+    /// has it, it exited (crashed or quit; a Ctrl-Z leaves it there).
+    var emitter: ProcessInstance?
+    /// Its main turn ended while the Stop listed subagents at work (their
+    /// ids): it runs until each is gone, by its SubagentStop or a later Stop
+    /// there that no longer lists it. Nil while its main turn goes on.
+    var waitingOn: Set<String>?
 }
 
+/// A pass's latest run in a workspace: its HEAD when the pass started.
 struct ReviewRun: Codable, Hashable {
     let head: String
     let at: TimeInterval

@@ -61,6 +61,29 @@ final class ReviewBadgesTests: XCTestCase {
             now: 1
         )
         XCTAssertEqual(skill?.reviewPasses, ["premortem"])
+        XCTAssertEqual(skill?.passes, [.premortem])
+        // Its start says nothing: a failed call ran nothing.
+        let start = AgentHookEvent(
+            kind: .claude, payload: ["hook_event_name": "PreToolUse", "tool_name": "Skill", "tool_input": ["skill": "premortem"]],
+            env: env, now: 1
+        )
+        XCTAssertNil(start?.reviewPasses)
+        // A main-thread Stop lists the subagents still at work (as Claude 2.1.325 sends `background_tasks`), not its shells.
+        let stop = AgentHookEvent(
+            kind: .claude,
+            payload: ["hook_event_name": "Stop", "stop_hook_active": false, "background_tasks": [
+                ["id": "a8216c90441fb4bd9", "type": "subagent", "status": "running", "description": "wait", "agent_type": "general-purpose"],
+                ["id": "b00onxsi1", "type": "shell", "status": "running", "description": "Sleep", "command": "sleep 25"]
+            ]],
+            env: env, now: 1
+        )
+        XCTAssertEqual(stop?.backgroundAgents, ["a8216c90441fb4bd9"])
+        let done = AgentHookEvent(
+            kind: .claude, payload: ["hook_event_name": "Stop", "stop_hook_active": false, "background_tasks": [[String: Any]]()],
+            env: env, now: 1
+        )
+        XCTAssertEqual(done?.backgroundAgents, [], "none at work any more")
+        XCTAssertNil(skill?.backgroundAgents)
 
         let bash = AgentHookEvent(
             kind: .claude,
@@ -115,14 +138,92 @@ final class ReviewBadgesTests: XCTestCase {
 
     func testOlderReplayedEventDoesNotReplaceANewerRun() {
         let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
-        let turn = ReviewTurn(column: UUID(), startedAt: 18)
-        workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20, turn: turn)
-        XCTAssertEqual(workspace.reviewTurns[.codeReview], turn, "the turn it runs in, with it")
-        XCTAssertFalse(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10, turn: ReviewTurn(column: UUID(), startedAt: 9)))
+        workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20)
+        XCTAssertFalse(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10))
         XCTAssertEqual(workspace.reviewRuns[.codeReview], ReviewRun(head: "bbb", at: 20))
-        XCTAssertEqual(workspace.reviewTurns[.codeReview], turn)
-        workspace.recordReviewPasses([.codeReview], head: "ccc", at: 30)
-        XCTAssertNil(workspace.reviewTurns[.codeReview], "a run whose turn wasn't known runs in none")
+    }
+
+    /// A pass runs from its own main-thread event until its column's main
+    /// turn ends (a Stop that lists subagents at work makes it wait for
+    /// each until its SubagentStop or a later Stop that no longer lists it),
+    /// its session ends, or (`followReviewPasses`) its process exits: in the
+    /// order events come, whatever git finds.
+    func testAPassRunsFromItsEventUntilItsColumnsTurnEnds() {
+        let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
+        let column = UUID(), other = UUID()
+        let now: TimeInterval = 1_000
+        let event = { (name: AgentHookEvent.Name, passes: [String]?, agent: String?, notification: String?) in
+            AgentHookEvent(kind: .claude, name: name, agentID: agent, notificationType: notification, reviewPasses: passes, timestamp: now - 1)
+        }
+        let typed = event(.userPromptSubmit, ["codeReview"], nil, nil)
+        let stop = event(.stop, nil, nil, nil)
+        let note = { (events: [AgentHookEvent], id: UUID) in
+            for event in events { workspace.noteReviewPasses(of: event, in: id, now: now) }
+        }
+        let running = { workspace.reviewsRunning.map { "\($0.pass) \($0.column == column ? "A" : "B")" }.sorted() }
+        // One drain: the pass, its turn's end, the next prompt.
+        note([typed, stop, event(.userPromptSubmit, nil, nil, nil)], column)
+        XCTAssertEqual(running(), [], "its turn ended within the drain")
+        // Typed, then a message queued mid-turn: it still runs. Another column's end changes nothing.
+        note([typed, event(.userPromptSubmit, nil, nil, nil)], column)
+        note([stop], other)
+        XCTAssertEqual(running(), ["codeReview A"])
+        // The same pass in another column runs there too; each ends with its own column's turn.
+        note([event(.postToolUse, ["codeReview"], nil, nil)], other)
+        XCTAssertEqual(running(), ["codeReview A", "codeReview B"])
+        note([stop], other)
+        XCTAssertEqual(running(), ["codeReview A"])
+        // Any failed turn there ends it, as do idle and the session's end; a subagent's events end and start nothing.
+        note([event(.stopFailure, nil, "sub", nil), event(.postToolUse, ["premortem"], "sub", nil), event(.stop, nil, "sub", nil),
+              event(.subagentStop, nil, "sub", nil)], column)
+        XCTAssertEqual(running(), ["codeReview A"], "a subagent stopping mid-turn ends nothing")
+        for end in [event(.stopFailure, nil, nil, nil), event(.notification, nil, nil, "idle_prompt"), event(.sessionEnd, nil, nil, nil)] {
+            note([typed], column)
+            note([end], column)
+            XCTAssertEqual(running(), [], "\(end.name)")
+        }
+        // Run in the background: its Stop lists subagents at work; it waits for those, each gone at its SubagentStop or at a later
+        // Stop that no longer lists it, whichever comes first (a lost SubagentStop can't keep it). One listed later, idle, a failed
+        // turn or a permission asked meanwhile change nothing.
+        let listing = { (ids: [String]) in
+            var made = stop
+            made.backgroundAgents = ids
+            return made
+        }
+        note([event(.postToolUse, ["codeReview"], nil, nil), event(.notification, nil, nil, "permission_prompt"), listing(["a1", "a2"])],
+             column)
+        XCTAssertEqual(running(), ["codeReview A"])
+        note([event(.subagentStop, nil, "a1", nil)], column)
+        XCTAssertEqual(running(), ["codeReview A"], "a2 still at work")
+        // a2 at work, another column's Stop listing none: neither ends the wait.
+        note([event(.postToolUse, nil, "a2", nil)], column)
+        note([listing([])], other)
+        XCTAssertEqual(running(), ["codeReview A"])
+        note([event(.notification, nil, nil, "idle_prompt"), event(.stopFailure, nil, nil, nil), listing(["a2", "a3"])], column)
+        XCTAssertEqual(running(), ["codeReview A"])
+        note([listing(["a3"])], column)
+        XCTAssertEqual(running(), [], "a2 no longer listed, its SubagentStop lost; a3 isn't its own")
+        note([event(.postToolUse, ["codeReview"], nil, nil), listing(["a1", "a2"]), event(.subagentStop, nil, "a1", nil)], column)
+        XCTAssertEqual(running(), ["codeReview A"])
+        note([event(.subagentStop, nil, "a2", nil)], column)
+        XCTAssertEqual(running(), [], "both stopped")
+        note([event(.postToolUse, ["codeReview"], nil, nil), listing([])], column)
+        XCTAssertEqual(running(), [], "a Stop listing none ends it")
+        // A replayed start says nothing; a replayed end ends all the same (nothing it ends can be newer).
+        let replayed = AgentHookEvent(kind: .claude, name: .userPromptSubmit, reviewPasses: ["codeReview"], timestamp: now - 61)
+        XCTAssertFalse(workspace.noteReviewPasses(of: replayed, in: column, now: now))
+        note([typed], column)
+        XCTAssertTrue(workspace.noteReviewPasses(of: AgentHookEvent(kind: .claude, name: .stop, timestamp: now - 120), in: column, now: now))
+        // Its process: kept with it, then what the table says of it.
+        let emitter = ProcessInstance(pid: 42, startedAt: 7)
+        workspace.noteReviewPasses(
+            of: AgentHookEvent(kind: .claude, name: .userPromptSubmit, emitterProcess: emitter, reviewPasses: ["codeReview"], timestamp: now),
+            in: column, now: now
+        )
+        XCTAssertEqual(workspace.reviewsRunning, [RunningPass(pass: .codeReview, column: column, emitter: emitter)])
+        XCTAssertFalse(workspace.followReviewPasses { _ in true })
+        XCTAssertTrue(workspace.followReviewPasses { _ in false })
+        XCTAssertEqual(running(), [])
     }
 
     func testRunsDecodeAsReadAndLegacyWorkspacesHaveNone() throws {

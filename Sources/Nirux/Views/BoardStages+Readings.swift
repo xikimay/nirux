@@ -38,7 +38,7 @@ extension BoardStages.TaskReading {
     @MainActor
     private static func activity(of info: WorkspaceInfo, turnStartedAt: (UUID) -> TimeInterval?) -> BoardStages.Activity {
         switch info.agentStep {
-        case .needsYou(_, let words)?: return .needsYou(words)
+        case .needsYou(_, let words, _)?: return .needsYou(words)
         case .broken(_, let sentence)?: return .failed(sentence)
         case .asking(_, let question)?: return .asking(question.parentTitle)
         case .working(let working)?:
@@ -46,7 +46,7 @@ extension BoardStages.TaskReading {
             let clocks = info.circlingColumn.map { [$0] } ?? working
             let clock = clocks.first { $0.elapsedDisplay != nil } ?? clocks[0]
             return .working(since: clock.id.flatMap(turnStartedAt))
-        case nil: return .idle
+        case .answered?, nil: return .idle
         }
     }
 

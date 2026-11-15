@@ -453,14 +453,29 @@ the Board reads that pass's statuses, approvals and Mission questions.
 - **Its texts** are the row's; beside them, the user's own summary, the
   worktree its git facts were read in, and the pull request its own
   detection found merged (at the HEAD it merged at).
-- **A review pass runs** while the turn it runs in goes on in its column:
-  the turn its event found (the prompt that typed it, or the turn in which
-  the agent called the Skill), its start unchanged, whatever its agent waits
-  on meanwhile (a permission asked mid-review is no end). A pass whose turn
-  ended, or whose agent exited mid-turn, is done; so is one recorded before
-  this launch. Known limits: a Stop hook that keeps the turn going starts a
-  new turn for Nirux, so the pass reads done; an Esc that ends a turn without
-  a Stop leaves it in flight until the prompt reads idle, about a minute.
+- **A review pass runs** from its own main-thread hook event (the prompt
+  that typed it, or the Skill call that ran it, where its badge records its
+  run), whatever git finds, until events in its column end it, in the order
+  they come (`WorkspaceState.reviewsRunning`): the main turn's end (a Stop, a
+  failed turn, Claude idle at its prompt); its session's end; the process
+  that sent its event exiting (a crash or a quit; a Ctrl-Z leaves it there);
+  or its column closing. A review run in the background outlives the turn
+  that started it: a Stop whose `background_tasks` lists subagents at work
+  (their ids are the subagents' `agent_id`) makes the pass wait for those,
+  each gone at its SubagentStop or at a later Stop there that no longer
+  lists it, whichever comes first, so a lost SubagentStop can't keep the
+  pass running (a subagent listed later isn't its own). A
+  permission asked mid-review, or a message queued meanwhile, is no end; a
+  subagent's events start nothing; a pass from before this launch
+  isn't running; a running pass reads running on the Board before git gave
+  its run a HEAD. Known limits: a Stop hook that keeps the turn going ends
+  it at that Stop; an Esc leaves it running until Claude reads idle at its
+  prompt, about a minute, or until the next turn's end when a prompt
+  follows; a forked Skill call that waits for its review starts the pass
+  only once done; any background subagent its Stop lists counts as its own
+  (an earlier review's, an unrelated agent's), keeping it until that one is
+  done; and one killed without a SubagentStop keeps it until a later Stop
+  there no longer lists it, the session ends or Claude exits.
 - **Resume** is the sidebar's: an agent stopped on an error first, held back
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").

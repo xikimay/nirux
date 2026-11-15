@@ -12,6 +12,7 @@ extension NiruxShellView {
         let parents = workspaceStore.activeParents(in: activeProfileID)
         let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
+        followReviewPasses(snapshot: snapshot)
         // The user is there to read: Nirux in front, and nothing the
         // catch-up card counts as away (a shell that doesn't follow the
         // system, a test's, goes by the first).
@@ -79,6 +80,19 @@ extension NiruxShellView {
         closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+    }
+
+    /// A running pass ends once the process that sent its event exited (a
+    /// Ctrl-Z leaves it there), it named none, or its column closed. An
+    /// empty process table says nothing.
+    private func followReviewPasses(snapshot: ProcessSnapshot) {
+        for workspace in workspaces where !workspace.reviewsRunning.isEmpty {
+            workspace.followReviewPasses { running in
+                guard workspace.columns.contains(where: { $0.id == running.column }) else { return false }
+                guard !snapshot.isEmpty else { return true }
+                return running.emitter.map(snapshot.contains) ?? false
+            }
+        }
     }
 
     /// A column's facts for its task's row, its agent's status for this
@@ -379,6 +393,7 @@ extension NiruxShellView {
 
     func applyAgentHookEvents(_ events: [AgentHookCenter.AppliedEvent]) {
         let snapshot = ProcessSnapshot()
+        let now = Date().timeIntervalSince1970
         var changed = false
         for appliedEvent in events {
             let event = appliedEvent.event
@@ -396,7 +411,9 @@ extension NiruxShellView {
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
                 changed = true
             }
-            recordReviewPasses(of: event, in: appliedEvent.resolution.workspace, column: appliedEvent.resolution.column)
+            // In the drain's order: a pass, then its turn's end, ends it.
+            appliedEvent.resolution.workspace.noteReviewPasses(of: event, in: appliedEvent.resolution.column.id, now: now)
+            recordReviewPasses(of: event, in: appliedEvent.resolution.workspace, now: now)
         }
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
@@ -429,18 +446,14 @@ extension NiruxShellView {
     /// workspace's git context follows its focused column, and pauses while
     /// Nirux is in the background. An event replayed at launch is skipped, since the HEAD it
     /// ran on can't be known any more.
-    private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState, column: ColumnState) {
-        guard let passes = event.reviewPasses?.compactMap(ReviewPass.init(rawValue:)), !passes.isEmpty,
-              let cwd = event.cwd,
-              Date().timeIntervalSince1970 - event.timestamp < 60
-        else { return }
-        // The turn it runs in, as the event left it, before the turn can end.
-        let turn = column.pty?.agentTurnStartedAt.map { ReviewTurn(column: column.id, startedAt: $0.timeIntervalSince1970) }
+    private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState, now: TimeInterval) {
+        let passes = event.passes
+        guard !passes.isEmpty, let cwd = event.cwd, now - event.timestamp < 60 else { return }
         // Only the HEAD and its branch count here; a detached HEAD has none.
         GitDetect.contextAsync(at: cwd, startFolder: nil) { [weak self, weak workspace] result in
             guard case .observed(let context) = result, let head = context.identity.head,
                   let self, let workspace,
-                  workspace.recordReviewPasses(passes, head: head, branch: context.branchName, at: event.timestamp, turn: turn)
+                  workspace.recordReviewPasses(passes, head: head, branch: context.branchName, at: event.timestamp)
             else { return }
             self.updateSidebar()
             self.saveState()

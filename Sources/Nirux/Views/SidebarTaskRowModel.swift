@@ -120,9 +120,9 @@ extension WorkspaceInfo {
         }
 
         let step = agentStep
-        if case .needsYou(let waiting, let words)? = step {
+        if case .needsYou(let waiting, let words, let isHandedOff)? = step {
             var summary: SidebarRowSummary
-            if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
+            if isHandedOff {
                 // The question itself: a click on it opens the reply popover.
                 summary = row(.needsYou, "Needs you · \(words)", .needsYou, .missionQuestion(columnIndex: waiting.index))
             } else {
@@ -151,7 +151,6 @@ extension WorkspaceInfo {
         // A child that asked ended its turn to wait (a Codex one blocks):
         // asking comes before work. An answer waiting to be typed comes
         // after: a Claude restarted since works through the user's prompt.
-        let question = Self.questionColumn(in: columns)
         if case .asking(let asking, let pending)? = step {
             return row(.asking, "Asking \(pending.parentTitle)", .neutral, .missionQuestion(columnIndex: asking.index))
         }
@@ -168,7 +167,7 @@ extension WorkspaceInfo {
                 focusColumn: circling?.index
             )
         }
-        if let answered = question?.missionQuestion {
+        if case .answered(let answered)? = step {
             return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)
         }
         // A restored agent that hasn't resumed: selecting the row resumes it
@@ -209,32 +208,39 @@ extension WorkspaceInfo {
     /// What its agents do, the most pressing first: the agents' steps of
     /// `rowSummary`'s ladder, which the Board as stages reads too
     /// (`BoardStages.TaskReading`). Nil when no agent waits, stopped, asks
-    /// or works.
+    /// or works, and no answer waits to be typed.
     enum AgentStep {
-        /// A column waits on the user: the row's words after "Needs you · ".
-        case needsYou(ColumnInfo, words: String)
+        /// A column waits on the user: the row's words after "Needs you · ";
+        /// a Mission question come to the user is its own question, which a
+        /// click answers.
+        case needsYou(ColumnInfo, words: String, isHandedOff: Bool)
         /// A column stopped: "Stopped on an API error".
         case broken(ColumnInfo, sentence: String)
         /// A column asked the agent that started it, which hasn't answered.
         case asking(ColumnInfo, SidebarMissionQuestion)
         case working([ColumnInfo])
+        /// An answer to a column's question waits to be typed: no agent
+        /// waits or works meanwhile.
+        case answered(SidebarMissionQuestion)
     }
 
     var agentStep: AgentStep? {
         if let waiting = columns.first(where: { $0.attention == .waiting }) {
             if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
-                return .needsYou(waiting, words: question.needsYouDetail)
+                return .needsYou(waiting, words: question.needsYouDetail, isHandedOff: true)
             }
-            return .needsYou(waiting, words: Self.needsYouDetail(waiting))
+            return .needsYou(waiting, words: Self.needsYouDetail(waiting), isHandedOff: false)
         }
         if let broken = columns.first(where: { $0.attention == .error }), let headline = broken.attentionSummary?.headline {
             return .broken(broken, sentence: Self.sentence(headline))
         }
-        if let asking = Self.questionColumn(in: columns), let pending = asking.missionQuestion, !pending.isAnswered {
+        let question = Self.questionColumn(in: columns)
+        if let asking = question, let pending = asking.missionQuestion, !pending.isAnswered {
             return .asking(asking, pending)
         }
         let working = columns.filter { $0.agentStatus == .working }
-        return working.isEmpty ? nil : .working(working)
+        if !working.isEmpty { return .working(working) }
+        return question?.missionQuestion.map(AgentStep.answered)
     }
 
     /// The working column that may be going in circles, if any.

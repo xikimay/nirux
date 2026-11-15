@@ -626,10 +626,10 @@ extension BoardStages {
     private static func reviewsTooltip(_ facts: Facts, rules: Rules) -> String {
         ReviewPass.allCases.compactMap { pass -> String? in
             let name = pass.displayName
+            if facts.reviewsInFlight.contains(pass) { return "\(name) running" }
             guard let reviews = facts.reviews, reviews.counted[pass] != nil else {
                 return rules.requiredReviews.contains(pass) ? "No \(name.lowercased()) yet" : nil
             }
-            if facts.reviewsInFlight.contains(pass) { return "\(name) running" }
             // While HEAD isn't known, nothing says which commit it ran on.
             if reviews.head == nil { return "\(name) ran" }
             // Another commit, not an earlier one: HEAD may have moved back.
@@ -797,14 +797,15 @@ extension BoardStages {
     private static func reviewGaps(_ facts: Facts, rules: Rules) -> [(pass: ReviewPass, gap: ReviewGap)] {
         ReviewPass.allCases.compactMap { pass in
             guard rules.requiredReviews.contains(pass) else { return nil }
-            guard let reviews = facts.reviews, reviews.counted[pass] != nil else { return (pass, .never) }
+            // Running, whether or not git gave its run a HEAD yet.
             if facts.reviewsInFlight.contains(pass) { return (pass, .running) }
+            guard let reviews = facts.reviews, reviews.counted[pass] != nil else { return (pass, .never) }
             return rules.reviewsMustBeOnHead && reviews.head != nil && !reviews.isFresh(pass) ? (pass, .earlier) : nil
         }
     }
 
     private static func hasEnteredReview(_ facts: Facts, rules: Rules) -> Bool {
-        rules.requiredReviews.contains { facts.reviews?.counted[$0] != nil }
+        rules.requiredReviews.contains { facts.reviews?.counted[$0] != nil || facts.reviewsInFlight.contains($0) }
     }
 
     private static func reviewsAreDone(_ facts: Facts, rules: Rules) -> Bool {
