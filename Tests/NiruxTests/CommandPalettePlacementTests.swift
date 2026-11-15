@@ -80,6 +80,28 @@ final class CommandPalettePlacementTests: XCTestCase {
         XCTAssertGreaterThan(NSPoint.zero.applying(start).y, 0, "the bottom starts higher, toward the bar")
     }
 
+    /// In full screen AppKit moves the toolbar into a window of its own: a
+    /// bar the host's toolbar holds counts as the host's, wherever it shows.
+    func testABarTheHostsToolbarHoldsCountsFromAnotherWindow() throws {
+        let host = NiruxApp.makeMainWindow(contentRect: windowFrame)
+        host.isReleasedWhenClosed = false
+        defer { host.close() }
+        let toolbar = CommandBarToolbar(bar: CommandBarView(level: .opaque))
+        toolbar.install(in: host)
+        host.contentView?.superview?.layoutSubtreeIfNeeded()
+        XCTAssertTrue(toolbar.toolbar.items.contains { $0.view === toolbar.bar })
+        let other = NSWindow(contentRect: windowFrame, styleMask: .borderless, backing: .buffered, defer: true)
+        other.isReleasedWhenClosed = false
+        defer { other.close() }
+        other.setFrame(windowFrame, display: false)
+        let bar = toolbar.bar
+        bar.removeFromSuperview()
+        other.contentView?.addSubview(bar)
+        bar.frame = NSRect(x: 300, y: windowFrame.height - 48, width: 600, height: 36)
+        XCTAssertNotNil(CommandPalette.barOnScreen(bar, in: host, windowShows: { _ in true }), "held by the host's toolbar")
+        XCTAssertNil(CommandPalette.barOnScreen(NSView(frame: bar.frame), in: host, windowShows: { _ in true }))
+    }
+
     /// Under the bar, the field and the rows sit inside floating glass that
     /// fills the panel; centred again, they come back on today's background
     /// and the glass waits, hidden. While nobody sees the bar, the palette
@@ -159,6 +181,19 @@ final class CommandPalettePlacementTests: XCTestCase {
         bar.frame.origin.x = 5000
         palette.apply(.underBar(bar, level: .glass), relativeTo: window)
         opensCentred("a bar outside its window")
+        bar.frame.origin.x = 300
+        let child = NSWindow(contentRect: windowFrame, styleMask: .borderless, backing: .buffered, defer: true)
+        child.isReleasedWhenClosed = false
+        defer { child.close() }
+        child.setFrame(windowFrame, display: false)
+        bar.removeFromSuperview()
+        child.contentView?.addSubview(bar)
+        window.addChildWindow(child, ordered: .above)
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        XCTAssertFalse(glass.isHidden, "a bar in a window of the host's own: under it")
+        window.removeChildWindow(child)
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        XCTAssertTrue(glass.isHidden, "a bar in an unrelated window")
         XCTAssertFalse(panel.isVisible)
     }
 }

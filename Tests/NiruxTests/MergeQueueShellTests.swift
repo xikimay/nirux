@@ -86,6 +86,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertTrue(running.text.hasPrefix("Queue (dry run): "), running.text)
         XCTAssertTrue(running.isRunning)
         XCTAssertTrue(running.isDryRun)
+        XCTAssertEqual(shell.statusBar.queueDryRunBadge?.isHidden, false, "a badge, beside the words: a real queue looks otherwise")
         XCTAssertFalse(try XCTUnwrap(shell.statusBar.queueStopButton).isHidden)
         XCTAssertTrue(try XCTUnwrap(shell.statusBar.queueDismissButton).isHidden)
         XCTAssertTrue(shell.statusBar.hasContent, "the bar shows while a queue runs")
@@ -185,9 +186,9 @@ final class MergeQueueShellTests: XCTestCase {
     func testTheQueueComesFirstAndACrashNoticeFollowsIt() throws {
         let bar = StatusBarView(frame: NSRect(x: 0, y: 0, width: 1200, height: StatusBarView.height))
         bar.showUpdate(version: "nightly-2026.09.29")
-        bar.showQueue(StatusBarView.QueueNotice(text: "Queue: #52 waiting for the nightly, 3 of 7", isRunning: true,
-                                                isDryRun: false))
+        bar.showQueue(StatusBarView.QueueNotice(text: "Queue: #52 waiting for the nightly, 3 of 7", isRunning: true))
         bar.layoutSubtreeIfNeeded()
+        XCTAssertEqual(bar.queueDryRunBadge?.isHidden, true, "a real queue: no DRY RUN")
         let queue = try XCTUnwrap(bar.queueButton)
         let stop = try XCTUnwrap(bar.queueStopButton)
         let update = try XCTUnwrap(bar.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("● Update") })
@@ -212,8 +213,7 @@ final class MergeQueueShellTests: XCTestCase {
                                 date: Date(timeIntervalSince1970: 1_790_500_488), reportCount: 1)
         let bar = StatusBarView(frame: NSRect(x: 0, y: 0, width: 600, height: StatusBarView.height))
         bar.showCrash(crash)
-        bar.showQueue(StatusBarView.QueueNotice(text: "Queue: #52 waiting for the checks of #52, 3 of 7", isRunning: true,
-                                                isDryRun: false))
+        bar.showQueue(StatusBarView.QueueNotice(text: "Queue: #52 waiting for the checks of #52, 3 of 7", isRunning: true))
         for width in stride(from: CGFloat(600), through: 900, by: 50) {
             bar.setFrameSize(NSSize(width: width, height: StatusBarView.height))
             bar.layoutSubtreeIfNeeded()

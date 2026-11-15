@@ -1,7 +1,7 @@
 # Glass interface
 
-> **Design record:** in progress. Phases 1 and 2 add tokens and views that nothing shows yet.\
-> **Differs today:** the window has the sidebar, the collapsed rail of initials and the title bar buttons described in [Workspaces and columns](../workspaces-and-columns.md).
+> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window, the command bar first (3.1).\
+> **Differs today:** the window has the sidebar and the collapsed rail of initials described in [Workspaces and columns](../workspaces-and-columns.md); the rail, the inbox and the callout come with 3.2 and 3.3.
 
 Status: design validated by the user on 2026-11-14, after six rounds of
 studies (renders of today's app, mockups and the plan:
@@ -94,10 +94,25 @@ segment is a quiet `NiruxButton` underneath, for its hover, its click and
 what VoiceOver says. When the bar narrows, the task's title keeps 120 pt
 before anything goes: first its detail, then the space's name (cut past
 160 pt before that), then the search's key, then the waiting count's key; the
-signs always stay. For phase 3: the segments' buttons don't drag the window,
-so the bar keeps a strip to drag by (or the task segment drags after a short
-move), and the window needs a taller title bar (an empty unified toolbar) for
-the 36 pt capsule to sit level with the traffic lights.
+signs always stay. In the window (3.1, `CommandBarToolbar`), the bar is the
+centred item of an empty unified toolbar: the title bar grows from 32 to
+52 pt and sets it level with the traffic lights, the empty strip on either
+side drags the window (the segments' buttons don't), and the toolbar stays
+in full screen. The space segment opens the space menu, the task segment the
+task's menu (its row's ⋯), the search ⌘P under the bar, and the count goes to
+the next agent waiting (⌘J) until 3.3 brings the inbox; with nothing open,
+the task segment opens the New sheet. The count is what ⌘J reaches, in every
+space, that waits for the user's answer (amber): not the agents stopped on an
+error or exited, which ⌘J also visits, nor the column on screen, which it
+never goes to. The task's detail is its row's status as the row says it
+("Working 12m", the turn's time only while it works). In full screen AppKit
+moves the toolbar into a window of its own, which ⌘P's placement accepts. On macOS 26 the bar's toolbar item asks for no glass of the
+system's (not bordered, the plain style): the bar draws its own. The usage
+limits and the cup stay at the toolbar's right end. The title bar's New,
+Board and Search buttons went: New is in the sidebar and ⌘N, the Board comes
+back as an icon at the bottom of the rail (3.2).
+
+![The title bar before 3.1, after it, and in full screen (simulated): real windows captured off screen, invented data](../images/window-command-bar.png)
 
 ![The command bar at three widths and with nothing open: Opaque exact, the other levels approximated](../images/command-bar.png)
 

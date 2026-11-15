@@ -6,9 +6,21 @@ extension NSColor {
     /// the tokens still build; ThemeGuardTests then points them to the token.
     @available(*, deprecated, message: "Use Theme.Color.accent")
     static let niruxAccent = Theme.Color.accent
-    /// A usage close to its limit: a Claude column's context ("ctx 92%"),
-    /// the plan usage limits in the title bar.
-    static let niruxNearLimit = NSColor.systemOrange.withAlphaComponent(0.9)
+    /// A warning, a usage close to its limit among them: the text's own
+    /// colour, its words after "⚠︎ " (`String.asWarning`). Orange would read
+    /// as amber, which says something waits for the user's answer
+    /// (`Theme.Color.waiting`).
+    static let niruxWarning = Theme.Color.textPrimary
+    /// Old name of `niruxWarning`, kept so branches written before it still
+    /// build: give the words "⚠︎ " too (`String.asWarning`).
+    @available(*, deprecated, message: "Use niruxWarning, with String.asWarning")
+    static let niruxNearLimit = niruxWarning
+}
+
+extension String {
+    /// The words of a warning, as `NSColor.niruxWarning` draws them:
+    /// "⚠︎ Couldn’t read the file."
+    var asWarning: String { "⚠︎ " + self }
 }
 
 extension Collection {

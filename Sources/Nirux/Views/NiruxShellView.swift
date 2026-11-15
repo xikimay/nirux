@@ -155,6 +155,9 @@ final class NiruxShellView: NSView {
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?
     var commandPalette: CommandPalette?
+    /// The window's toolbar holding the command bar (step 3.1 of the glass
+    /// interface), once `installCommandBar` gave the window one.
+    var commandBarToolbar: CommandBarToolbar?
     var urlPanel: URLInputPanel?
     /// A cookie import is under way, from reading the profiles to its
     /// result: one at a time (see importBrowserCookies).
@@ -827,17 +830,9 @@ extension NiruxShellView {
                     }
                 }
 
-                if self.commandPalette == nil {
-                    self.commandPalette = CommandPalette()
-                    self.commandPalette?.onURLSubmit = { [weak self] url in
-                        self?.openWebView(url: url)
-                    }
-                    self.commandPalette?.onDismiss = { [weak self] in
-                        self?.focusActiveTerminal(in: self?.window)
-                    }
-                }
+                self.makeCommandPaletteIfNeeded()
                 self.commandPalette?.actions = actions
-                self.commandPalette?.show(relativeTo: window)
+                self.commandPalette?.show(relativeTo: window, placement: self.commandPalettePlacement)
             }
         }
     }
@@ -910,31 +905,31 @@ extension NiruxShellView {
             return
         }
 
-        if commandPalette == nil {
-            commandPalette = CommandPalette()
-            commandPalette?.onURLSubmit = { [weak self] url in
-                self?.openWebView(url: url)
-            }
-            commandPalette?.onDismiss = { [weak self] in
-                self?.focusActiveTerminal(in: self?.window)
-            }
-        }
-
+        makeCommandPaletteIfNeeded()
         commandPalette?.actions = columnPaletteActions() + agentPaletteActions() + workspacePaletteActions()
-        commandPalette?.show(relativeTo: window, sections: paletteSections())
+        commandPalette?.show(relativeTo: window, sections: paletteSections(), placement: commandPalettePlacement)
     }
 
-    /// A title bar button: New…, Board (a beep where no workspace can
-    /// hold it, an empty space), Search (the palette; a press while it
-    /// shows closes it: `CommandPalette.isSearchButtonPress`).
-    func performTitleBarAction(_ action: TitleBarActions.Action) {
-        switch action {
-        case .new: showNewPanel()
-        case .board:
-            guard activeWorkspace != nil else { return NSSound.beep() }
-            openProjectBoard()
-        case .search: showCommandPalette()
+    private func makeCommandPaletteIfNeeded() {
+        guard commandPalette == nil else { return }
+        let palette = CommandPalette()
+        palette.onURLSubmit = { [weak self] url in
+            self?.openWebView(url: url)
         }
+        palette.onDismiss = { [weak self] in
+            self?.focusActiveTerminal(in: self?.window)
+        }
+        // Whether the window with the bar shows, as the shell sees it (a
+        // flow test's window never shows on screen).
+        palette.windowShows = { [weak self] window in self?.sideEffects.windowShows(window) ?? false }
+        commandPalette = palette
+    }
+
+    /// Under the command bar once the window has one (a press on its search
+    /// segment while ⌘P shows closes it: `CommandPalette.isSearchButtonPress`);
+    /// centred otherwise.
+    var commandPalettePlacement: CommandPalette.Placement {
+        commandBarToolbar.map { .underBar($0.bar, level: $0.bar.level) } ?? .centered
     }
 
     func showCommandPalette(prefilter: String) {

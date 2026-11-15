@@ -88,8 +88,9 @@ extension ColumnState {
         agentUsage = usage
         if let usage, let text = usage.headerText {
             let label = usageLabel ?? makeUsageLabel()
-            label.stringValue = text
-            label.textColor = usage.isNearlyFull ? .niruxNearLimit : Theme.Color.textTertiary
+            label.stringValue = usage.isNearlyFull ? text.asWarning : text
+            label.shortText = usage.isNearlyFull ? text : nil
+            label.textColor = usage.isNearlyFull ? .niruxWarning : Theme.Color.textTertiary
             label.toolTip = usage.tooltip
         } else {
             usageLabel?.stringValue = ""

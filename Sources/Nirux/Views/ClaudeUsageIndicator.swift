@@ -1,14 +1,14 @@
 import AppKit
 
 /// "5h 42% · 7d 18%" at the trailing end of the main window's title bar:
-/// the Claude plan usage limits (see `ClaudeUsageLimits`), orange from 80%
-/// of either window like a nearly full context. The tooltip gives each
+/// the Claude plan usage limits (see `ClaudeUsageLimits`), a warning from
+/// 80% of either window like a nearly full context. The tooltip gives each
 /// window's reset. While the option is off or nothing is known it takes
 /// no room: the controller's `isHidden` only works for top and bottom
 /// accessories, so the view hides and shrinks to nothing itself.
-/// It sits left of the title bar's buttons (`TitleBarActions`): the cup,
-/// which comes and goes with every turn, appears to its left without
-/// moving it.
+/// First of the trailing accessories, it keeps the window's edge, at the
+/// right end of the toolbar (`CommandBarToolbar`): the cup, which comes and
+/// goes with every turn, appears to its left without moving it.
 final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     private static let height: CGFloat = 22
     private static let padding: CGFloat = 6
@@ -35,6 +35,7 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     }
 
     func update(limits: ClaudeUsageLimits?, now: TimeInterval) {
+        defer { relayOutTitleBar() }
         guard let limits else {
             view.isHidden = true
             view.frame.size.width = 0
@@ -43,8 +44,8 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
             label.stringValue = ""
             return
         }
-        label.stringValue = limits.titleText
-        label.textColor = limits.isNearLimit ? .niruxNearLimit : Self.normalColor
+        label.stringValue = limits.isNearLimit ? limits.titleText.asWarning : limits.titleText
+        label.textColor = limits.isNearLimit ? .niruxWarning : Self.normalColor
         label.setAccessibilityLabel(limits.accessibilityText)
         let tooltip = limits.tooltip(now: now)
         view.toolTip = tooltip

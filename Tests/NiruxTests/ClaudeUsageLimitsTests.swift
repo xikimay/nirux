@@ -257,11 +257,13 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         indicator.update(limits: ClaudeUsageLimits(fiveHour: window(42, resetsAt: now + hour)), now: now)
         XCTAssertTrue(indicator.isShowing)
         XCTAssertEqual(indicator.label.stringValue, "5h 42%")
-        XCTAssertNotEqual(indicator.label.textColor, .niruxNearLimit)
+        XCTAssertNotEqual(indicator.label.textColor, .niruxWarning)
         XCTAssertGreaterThanOrEqual(indicator.view.frame.width, indicator.label.frame.maxX)
 
         indicator.update(limits: ClaudeUsageLimits(fiveHour: window(85, resetsAt: now + hour)), now: now)
-        XCTAssertEqual(indicator.label.textColor, .niruxNearLimit)
+        // Near the limit: a warning, in the text's colour, never orange (it reads as amber).
+        XCTAssertEqual(indicator.label.stringValue, "⚠︎ 5h 85%")
+        XCTAssertEqual(indicator.label.textColor, .niruxWarning)
 
         // The controller's isHidden does nothing for a trailing accessory:
         // the view itself must take no room and show nothing.

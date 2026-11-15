@@ -102,7 +102,7 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
             setStatus("")
         case .unreadable(let reason):
             baseline = ""
-            setStatus(reason, color: .systemOrange)
+            setStatus(reason.asWarning, color: .niruxWarning)
         }
         textView.string = baseline
         textView.isEditable = isWritable
@@ -175,7 +175,7 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         let current = source.read()
         guard current != contents else { return }
         if isDirty {
-            setStatus("The \(documentName) changed on disk: Save replaces it, Revert shows it.", color: .systemOrange)
+            setStatus("The \(documentName) changed on disk: Save replaces it, Revert shows it.".asWarning, color: .niruxWarning)
         } else {
             load(current)
             setStatus("Updated: the file changed on disk.")

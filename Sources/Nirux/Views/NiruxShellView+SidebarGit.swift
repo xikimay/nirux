@@ -52,7 +52,17 @@ extension NiruxShellView {
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead
         )
-        updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
+        // What blocks each column on the user, read once for the terminal
+        // headers and the other spaces' marks.
+        var blockedWaits: [ObjectIdentifier: AgentWait] = [:]
+        for workspace in workspaces {
+            for column in workspace.columns {
+                if let wait = column.pty?.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(column)]) {
+                    blockedWaits[ObjectIdentifier(column)] = wait
+                }
+            }
+        }
+        updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
             return ProfileInfo(
@@ -67,14 +77,21 @@ extension NiruxShellView {
                 attention: profile.id == activeProfileID
                     ? infos.compactMap(\.attention).max()
                     : profileWorkspaces.compactMap {
-                        Self.attention(
-                            of: $0, foregroundProcesses: foregroundProcesses, missionQuestions: missionQuestions, now: now
-                        )
+                        Self.attention(of: $0, blockedWaits: blockedWaits, missionQuestions: missionQuestions)
                     }.max()
             )
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.update(profiles: profileInfos, workspaces: infos)
+        // The command bar counts what ⌘J would visit, through ⌘J's own
+        // queue, that waits for the user's answer.
+        let queue = WaitingAgentQueue.collect(from: workspaces) { self.quickSwitch.agentWait($0, snapshot, now) }
+        updateCommandBar(
+            task: infos.first { $0.index == activeWSIndex },
+            waitingCount: Self.commandBarWaitingCount(
+                queue: queue, onScreen: activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
+            )
+        )
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)
@@ -209,15 +226,12 @@ extension NiruxShellView {
 
     /// The terminal headers show their agent as the sidebar reads it, and
     /// what blocks it on the user as ⌘J does.
-    private func updateColumnHeaders(
-        infos: [WorkspaceInfo], foregroundProcesses: [ObjectIdentifier: ForegroundProcess], now: TimeInterval
-    ) {
+    private func updateColumnHeaders(infos: [WorkspaceInfo], blockedWaits: [ObjectIdentifier: AgentWait], now: TimeInterval) {
         for info in infos {
             guard let workspace = workspaces[safe: info.index] else { continue }
             for column in info.columns {
                 guard let state = workspace.columns[safe: column.index], state.pty != nil else { continue }
-                let wait = state.pty?.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(state)])
-                state.updateHeaderAgentState(column, wait: wait, now: now)
+                state.updateHeaderAgentState(column, wait: blockedWaits[ObjectIdentifier(state)], now: now)
             }
         }
     }
@@ -255,22 +269,20 @@ extension NiruxShellView {
     }
 
     /// `WorkspaceInfo.attention` for a workspace of another space, which
-    /// has no card: what blocks its agents (a dialog on screen, a failed
-    /// turn, an exit mid-turn), their attention, and what happened while
-    /// the user was away.
+    /// has no card: what blocks its agents (`blockedWaits`: a dialog on
+    /// screen, a failed turn, an exit mid-turn), their attention, and what
+    /// happened while the user was away.
     private static func attention(
         of workspace: WorkspaceState,
-        foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
-        missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
-        now: TimeInterval
+        blockedWaits: [ObjectIdentifier: AgentWait],
+        missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]
     ) -> AttentionSignal? {
         var signals: [AttentionSignal] = []
         for column in workspace.columns {
             if missionQuestions[ObjectIdentifier(column)]?.handOff != nil { signals.append(.waiting) }
             guard let pty = column.pty else { continue }
             let status = pty.cachedAgentState
-            if let wait = pty.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(column)]),
-               wait.reason.signal != .waiting || status != .working {
+            if let wait = blockedWaits[ObjectIdentifier(column)], wait.blocks(whileStatus: status) {
                 signals.append(wait.reason.signal)
             }
             if status == .needsAttention { signals.append(AttentionSignal.of(pty.agentAttentionReason)) }

@@ -77,7 +77,7 @@ final class ReviewSendPanel: NSObject {
     private(set) var lines: [String] = []
 
     private static let size = NSSize(width: 720, height: 620)
-    private static let warningColor = NSColor.systemOrange
+    private static let warningColor = NSColor.niruxWarning
 
     init(content: Content) {
         self.content = content
@@ -209,7 +209,7 @@ final class ReviewSendPanel: NSObject {
             add(refusal, color: Theme.Color.error, font: Theme.Font.bodyEmphasized)
         }
         for warning in (target?.warnings ?? []) + content.warnings {
-            add("⚠︎ " + warning, color: Self.warningColor)
+            add(warning.asWarning, color: Self.warningColor)
         }
         for note in content.notes {
             add(note, color: Theme.Color.textSecondary)

@@ -177,8 +177,13 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             // From the keyboard (Full Keyboard Access): Tab from the column reaches the lines in their order; Space opens
             // the task.
+            // Not the process's last event: a click sent earlier would refuse the keyboard.
             BoardStagesKeyboard.isFullAccess = { true }
-            defer { BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled } }
+            BoardStagesKeyboard.currentEvent = { nil }
+            defer {
+                BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+                BoardStagesKeyboard.currentEvent = { NSApp.currentEvent }
+            }
             let window = try XCTUnwrap(board.view.window)
             // Shift-Tab from the column, which a click on the Board gives the keyboard: the last line.
             window.makeFirstResponder(board.view)
@@ -200,6 +205,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("widgets", in: shell)
             dropWorkspaceSnapshots(shell)
             BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled }
+            BoardStagesKeyboard.currentEvent = { NSApp.currentEvent }
 
             // A click on the line opens its task.
             try BoardStagesClicks.open(try BoardStagesClicks.line("login", in: board))

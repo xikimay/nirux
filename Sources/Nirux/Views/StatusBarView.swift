@@ -23,7 +23,8 @@ final class StatusBarView: NSView {
         var tooltip: String?
         var isRunning: Bool
         var isStopping = false
-        var isDryRun: Bool
+        /// It changes nothing on GitHub: a DRY RUN badge says so.
+        var isDryRun = false
         /// Stopped by a problem, not by the user.
         var isFailure = false
         /// Several queues run: Stop stops them all.
@@ -43,6 +44,9 @@ final class StatusBarView: NSView {
     private var dismissButton: NSButton?
     /// The queue's text, a button: a click shows its board.
     private(set) var queueButton: NSButton?
+    /// Before a dry run's text: a badge, not a colour (amber is an agent
+    /// waiting for the user), as on the Board's queue line.
+    private(set) var queueDryRunBadge: NSTextField?
     private(set) var queueStopButton: NSButton?
     private(set) var queueDismissButton: NSButton?
     private(set) var queueNotice: QueueNotice?
@@ -111,6 +115,18 @@ final class StatusBarView: NSView {
         queue.isHidden = true
         addSubview(queue)
         queueButton = queue
+        let badge = NSTextField(labelWithString: "DRY RUN")
+        badge.font = Theme.Font.label
+        badge.textColor = Theme.Color.textSecondary
+        badge.alignment = .center
+        badge.wantsLayer = true
+        badge.layer?.borderWidth = 1
+        badge.layer?.borderColor = Theme.Color.textTertiary.cgColor
+        badge.layer?.cornerRadius = Theme.Radius.chip
+        badge.toolTip = "A dry run: this build’s queue changes nothing on GitHub"
+        badge.isHidden = true
+        addSubview(badge)
+        queueDryRunBadge = badge
         queueStopButton = actionButton("Stop", action: #selector(queueStopClicked))
         queueStopButton?.contentTintColor = Self.crashColor
         queueStopButton?.toolTip = "Stop the queue before its next command; a call already sent to GitHub finishes"
@@ -192,8 +208,15 @@ final class StatusBarView: NSView {
                 let noticeMinW: CGFloat = 80 + noticeButtonsW + 26
                 limit = min(limit, versionMinX - 4 - noticeMinW - 18 - pad - trailingW)
             }
+            var textX = pad
+            if let badge = queueDryRunBadge, !badge.isHidden {
+                let badgeW = ceil(badge.attributedStringValue.size().width) + 10
+                badge.frame = NSRect(x: pad, y: (height - 14) / 2, width: badgeW, height: 14)
+                textX += badgeW + 6
+                limit -= badgeW + 6
+            }
             let textW = min(ceil(queueButton.attributedTitle.size().width) + 6, max(40, limit))
-            queueButton.frame = NSRect(x: pad, y: (height - 18) / 2, width: textW, height: 18)
+            queueButton.frame = NSRect(x: textX, y: (height - 18) / 2, width: textW, height: 18)
             var queueX = queueButton.frame.maxX
             for button in trailing {
                 queueX += 6
@@ -295,12 +318,13 @@ final class StatusBarView: NSView {
     private func renderQueue() {
         guard let queueNotice else {
             queueButton?.isHidden = true
+            queueDryRunBadge?.isHidden = true
             queueStopButton?.isHidden = true
             queueDismissButton?.isHidden = true
             return
         }
+        queueDryRunBadge?.isHidden = !queueNotice.isDryRun
         let color: NSColor = queueNotice.isFailure ? Self.crashColor
-            : queueNotice.isDryRun ? NSColor.systemOrange
             : queueNotice.isRunning ? NSColor.white.withAlphaComponent(0.75) : NSColor.white.withAlphaComponent(0.45)
         queueButton?.attributedTitle = NSAttributedString(string: "● " + queueNotice.text, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium), .foregroundColor: color

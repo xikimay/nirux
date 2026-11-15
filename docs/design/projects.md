@@ -763,7 +763,7 @@ The field filters like ⌘P, each part ranked the same way; two switches filter
 by pull request (with, without) and by agent. Under the list, what Return does
 on the selected row: go to its column, or resume it and where, from the plan
 Resume uses (read off the main thread, after any Resume of the same repository,
-a moment after the selection settles), its warning in orange, "(asks first)"
+a moment after the selection settles), its warning after ⚠︎, "(asks first)"
 when the alert will come. Return, the button or a double click goes through
 Resume, which looks again for a column that holds the session.
 

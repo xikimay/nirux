@@ -13,14 +13,56 @@ enum BoardStagesKeyboard {
     /// The event being handled. (The tests give their own.)
     static var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
-    /// A line or an entry takes the keyboard from the keyboard only: a
-    /// click on it takes none, as a button's doesn't (the click gives the
-    /// keyboard to the Board's column), so it draws no ring.
+    /// A stop of the Board takes the keyboard as a button does: not from
+    /// the pointer's buttons (a click, a drag, a rebuild a click's action
+    /// ran); from a key, no event, or a change the Board made by itself
+    /// (AppKit keeps the last event: a timer's change runs under a pointer
+    /// that moved, or left). A click on a line or an entry gives the
+    /// keyboard to the Board's column (`clicked`): no ring.
     static func takesKeyboard() -> Bool {
         guard isFullAccess() else { return false }
-        let pointerPresses: Set<NSEvent.EventType> = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        return currentEvent().map { !pointerPresses.contains($0.type) } ?? true
+        let buttons: Set<NSEvent.EventType> = [
+            .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+            .otherMouseDown, .otherMouseUp, .otherMouseDragged
+        ]
+        return currentEvent().map { !buttons.contains($0.type) } ?? true
     }
+
+    /// While the Board rebuilds its views, a stop AppKit hands the keyboard
+    /// to (the one it had went, or hid) doesn't scroll the list: the Board
+    /// picks where it goes once done (`BoardStagesView.viewsChanged`).
+    static var rebuilds = 0
+
+    /// A stop took the keyboard: the list scrolls it into sight.
+    static func tookKeyboard(_ view: NSView) {
+        if rebuilds == 0 { view.scrollToVisible(view.bounds) }
+    }
+
+    /// A click on a line or an entry, or its menu asked with the pointer:
+    /// whatever of the Board had the keyboard, that one too, gives it to the
+    /// column, as a click in a column does, so that the next Space doesn't
+    /// open the line that had it, and no ring stays.
+    static func clicked(_ view: NSView) {
+        guard let window = view.window, let responder = window.firstResponder as? NSView,
+              let stages = sequence(first: view, next: \.superview).first(where: { $0 is BoardStagesView }),
+              responder.isDescendant(of: stages), let column = stages.superview
+        else { return }
+        window.makeFirstResponder(column)
+    }
+
+    /// Shows or hides `view`, a stop: one that had the keyboard and hides
+    /// hands it to `next` (Start to Stop, Clean Up… to Open), not to the
+    /// stop AppKit's loop has after it.
+    static func setHidden(_ view: NSView, _ hidden: Bool, handingTo next: NSView?) {
+        let hadKeyboard = hidden && !view.isHidden && view.window?.firstResponder === view
+        view.isHidden = hidden
+        guard hadKeyboard, let next, !next.isHiddenOrHasHiddenAncestor, next.acceptsFirstResponder else { return }
+        if view.window?.makeFirstResponder(next) == true { handedOff = next }
+    }
+
+    /// Where `setHidden` handed the keyboard during the Board's change: the
+    /// Board keeps it there (`BoardStagesView.viewsChanged`).
+    static weak var handedOff: NSView?
 
     enum Key: Equatable {
         /// Space or Return: as a click.
@@ -89,7 +131,54 @@ class BoardStagesKeyButton: NSButton {
 
     override func becomeFirstResponder() -> Bool {
         let took = super.becomeFirstResponder()
-        if took { scrollToVisible(bounds) }
+        if took { BoardStagesKeyboard.tookKeyboard(self) }
         return took
+    }
+}
+
+/// The order switch: it takes the keyboard as the Board's buttons do, so a
+/// drag (a window resized) that leaves no other stop doesn't hand it there.
+@MainActor
+final class BoardStagesKeySwitch: NSSegmentedControl {
+    override var acceptsFirstResponder: Bool { isEnabled && BoardStagesKeyboard.takesKeyboard() }
+}
+
+/// A line or a "Merged today" entry from the keyboard: a stop while Full
+/// Keyboard Access is on and it does something (`isKeyStop`), with a
+/// rounded ring; Space, Return and Control-Return act as the key comes up
+/// (`BoardStagesKeyboard.Held`), on `keyPressed`.
+@MainActor
+class BoardStagesKeyView: NSView {
+    /// The key that went down on it, which acts as it comes up.
+    private var held = BoardStagesKeyboard.Held()
+
+    /// It does something from the keyboard now.
+    var isKeyStop: Bool { true }
+
+    /// Space or Return (`.press`), Control-Return (`.menu`).
+    func keyPressed(_ key: BoardStagesKeyboard.Key) {}
+
+    override var acceptsFirstResponder: Bool { isKeyStop && BoardStagesKeyboard.takesKeyboard() }
+    override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { BoardStagesKeyboard.ring(bounds).fill() }
+
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { BoardStagesKeyboard.tookKeyboard(self) }
+        return took
+    }
+
+    override func resignFirstResponder() -> Bool {
+        held.reset()
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !held.keyDown(event) { super.keyDown(with: event) }
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if let key = held.keyUp(event) { keyPressed(key) } else { super.keyUp(with: event) }
     }
 }

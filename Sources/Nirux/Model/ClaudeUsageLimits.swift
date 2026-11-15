@@ -40,7 +40,7 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
     var fiveHour: Window?
     var sevenDay: Window?
 
-    /// From 80% of either window, the indicator turns orange.
+    /// From 80% of either window, the indicator says it as a warning.
     static let nearLimitPercent = 80
 
     /// The latest reset Claude Code itself accepts: a year out.
