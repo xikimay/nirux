@@ -78,9 +78,10 @@ slab for the one action a view is for), secondary, quiet, danger, and glass
 amber. A click leaves the keyboard where it was unless the button is created
 `focusable` (a sheet's, Settings' buttons). For the rows (3.4): the sidebar's
 drawn Allow / Deny / Yes / No take their colours from `NiruxButton.look` and
-its small size, so the rows, the inbox and the callout show the same buttons;
-a button that just moved under the pointer ignores clicks for a moment, as
-the rows' buttons do today.
+its small size, so the rows, the inbox and the callout show the same buttons.
+A button can refuse a press (`acceptsPress`): the inbox's answers ignore
+clicks for a moment after they move under the pointer, as the rows' buttons
+do.
 
 ## Command bar
 
@@ -119,6 +120,42 @@ phase 2 checks whether macOS 26 wants the rail's three glass shapes in one
 `NSGlassEffectContainerView`.
 
 ![The rail with a Lead and nine tasks: Opaque exact, the other levels approximated](../images/icon-rail.png)
+
+## Inbox and callout
+
+The requests of agents waiting for the user, in two places: `RequestInboxView`
+under the command bar (⌘J or the badge; every request, oldest first, the
+oldest chosen; ↑ ↓ move the choice and ⌘J again goes to its task) and
+`RequestCalloutView` beside a rail icon (one request, "Open task", how many
+more wait). Both close on Escape and show the same `RequestCardView`: the
+task (its state icon, its title, what the agent wants, how long it has
+waited), the request (the exact command in its box, wrapped at its width;
+the question), then its answers. A request only the terminal answers (a
+question dialog, a folder's trust) says so, and the inbox adds "Open task".
+
+One code answers: `RequestChoices` gives each request its buttons, their
+words, their order and what stands in for them ("Allowing…", "Not delivered
+— answer in the terminal"), for the rows' blocks as for the cards, and every
+answer goes to the receiver the rows use. The rows' click rule holds too: a
+single click, on a button that has sat still for 0.6 s (`RequestArming`,
+the same rearming as the rows'), so that a request arriving, moving up or
+taking another's place never takes a click aimed at what was there; a
+scroll, the panel opening (the host calls `opened()`, which also chooses the
+oldest), or its host moving it (`restartArming`) restarts the wait. A
+request answered elsewhere leaves its place to the next one, and the list
+stays where it is. A card belongs to its request, never to its task: its id comes
+from the request (the permission's id, the question's column and time), so a
+request that takes another's place gets a new card. Answers stay clicks; the
+keyboard only moves the inbox's choice. For phase 3: the hosting (a popover
+or a child window, the arrow), the order (`WaitingAgentQueue`, which doesn't
+know Missions questions yet), and where `onAnswer` lands
+(`decidePermission`, `answerFromCard`, `showMissionReplyPopover`) with the
+request's column; the Missions reply panel should check the question's id,
+as it opens whatever question its column holds.
+
+![The inbox with three requests: Opaque exact, Glass approximated](../images/request-inbox.png)
+
+![The rail's callout: Opaque exact, Glass approximated](../images/request-callout.png)
 
 ## Plan
 
