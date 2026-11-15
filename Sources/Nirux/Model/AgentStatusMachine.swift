@@ -1044,9 +1044,9 @@ struct AgentStatusMachine {
 
     /// Whether `keys` answer an approval or a plan: Enter, Esc, Ctrl-C, or an
     /// option's number. Claude Code's dialogs bind no other letter (j and k
-    /// move) and drop a paste. Known limit: a number typed in an option's
+    /// move) and drop a paste. Known limits: a number typed in an option's
     /// text (Tab's amendment) reads as its answer, and what follows as a
-    /// draft.
+    /// draft; so does the number after an Esc that only left that text.
     static func answersApproval(_ keys: Data) -> Bool {
         keys == Data([0x0D]) || isCancelKey(keys) || (keys.count == 1 && (0x31...0x39).contains(keys[keys.startIndex]))
     }
