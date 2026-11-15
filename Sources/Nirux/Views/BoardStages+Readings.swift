@@ -34,13 +34,13 @@ extension BoardStages.TaskReading {
         mergedPullRequestRepository = info.prInfo.flatMap { $0.state == "MERGED" ? Self.repository(ofPullRequestAt: $0.url) : nil }
     }
 
-    /// `owner/name` of a pull request's address on github.com:
+    /// The repository of a pull request's address, its host included:
     /// "https://github.com/owner/name/pull/52".
     static func repository(ofPullRequestAt address: String) -> GitHubRepository? {
-        guard let url = URL(string: address), url.host?.lowercased() == "github.com" else { return nil }
+        guard let url = URL(string: address), let host = url.host else { return nil }
         let parts = url.pathComponents.filter { $0 != "/" }
         guard parts.count >= 4, parts[2] == "pull" else { return nil }
-        return GitHubRepository(owner: parts[0], name: parts[1])
+        return GitHubRepository(host: host, owner: parts[0], name: parts[1])
     }
 
     /// The agents' steps of the row's ladder (`WorkspaceInfo.agentStep`),

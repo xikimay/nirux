@@ -54,6 +54,10 @@ extension ProjectBoardController {
         /// repository's by now, and the queue and Retarget act only on the
         /// section's own.
         var pullRequests: [String: Set<Int>] = [:]
+        /// What each section's lines offer the queue's list now, by section
+        /// id and pull request: a click acts only on an offer still made,
+        /// and not refused (a draft since, a queue started).
+        var offers: [String: [Int: BoardStages.QueueOffer]] = [:]
     }
 
     /// The id of the section of the workspaces in no repository.
@@ -148,7 +152,7 @@ extension ProjectBoardController {
             "\(tasks) \(tasks == 1 ? "task" : "tasks")"
         ]
         var header = BoardStagesView.Header(
-            name: inputs.space?.name ?? "Deleted space", color: inputs.space?.color ?? Theme.Color.textTertiary,
+            name: inputs.space?.name ?? BoardColumnView.deletedSpace, color: inputs.space?.color ?? Theme.Color.textTertiary,
             summary: held.compactMap { $0 }.joined(separator: " · ")
         )
         if let lead = inputs.lead {
@@ -186,11 +190,14 @@ extension ProjectBoardController {
         var shown = BoardStagesView.Section(
             // A space without an anchor: its repository's name ("widgets"), `owner/name` beside it.
             id: section.id,
-            title: (section.anchor == nil ? reads?.gitHub.name : nil) ?? displayNames[section.id] ?? section.name ?? "Repository",
+            title: (section.anchor == nil ? reads.flatMap(Self.savedName) : nil) ?? displayNames[section.id] ?? section.name ?? "Repository",
             detail: reads?.name,
             status: stagesStatus(section, now: now),
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
+        for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {
+            if let offer = line.offer { targets.offers[section.id, default: [:]][offer.number] = offer }
+        }
         if let state = inputs.queues[section.id] {
             // The next Start's list, a merged one for none (as the queue, GitHub's lists or a task's line knows it),
             // whether or not the Board lists it (not read yet, closed, beyond the open pull requests read).
@@ -219,6 +226,12 @@ extension ProjectBoardController {
         }
     }
 
+    /// A repository's name as saved ("WidgetKit" of "Acme/WidgetKit"), not
+    /// as compared (`GitHubRepository` lowercases it).
+    private static func savedName(_ reads: RepositoryReads) -> String? {
+        reads.name.split(separator: "/").last.map(String.init)
+    }
+
     private var isReadOnly: Bool {
         if let loaded, case .readOnly = loaded.status { return true }
         return false
@@ -235,7 +248,7 @@ extension ProjectBoardController {
             return ColumnHeaderView.Status(error.title, tone: .error, symbol: Theme.Symbol.agentError, toolTip: error.message)
         }
         if let note = setupNote(section) {
-            // Board Settings can't save it: why, as the table's notice says it.
+            // Board Settings can't save it: why, as board.json's state says it.
             if let loaded, case .readOnly(let reason) = loaded.status {
                 return ColumnHeaderView.Status("Read-only", tone: .neutral, toolTip: reason.message)
             }

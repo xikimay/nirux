@@ -317,7 +317,7 @@ extension MergeQueue {
     }
 
     /// What keeps a pull request out that the board knows too, from its
-    /// `gh pr list` row: the board's Queue column and the sheet share it.
+    /// `gh pr list` row: the Board's Merge station and the sheet share it.
     enum OpenExclusion: Equatable, Sendable {
         /// "merged", "closed".
         case notOpen(String)

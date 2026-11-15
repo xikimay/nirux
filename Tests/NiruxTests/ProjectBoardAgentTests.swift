@@ -42,7 +42,6 @@ final class ProjectBoardAgentTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: true, now: date(3)), .idle,
                        "the status alone reads idle while the user looks at the dialog")
         XCTAssertEqual(boardState(), .waiting(.permission(tool: "Bash", summary: nil)))
-        XCTAssertEqual(boardState().label, "waiting (permission · Bash)")
     }
 
     func testADialogDeniedWithEscapeNoLongerReadsAsWaiting() {
@@ -79,8 +78,7 @@ final class ProjectBoardAgentTests: XCTestCase {
         apply(.userPromptSubmit, at: 1, focused: false)
         apply(.stop, at: 9, focused: false)
         XCTAssertEqual(machine.state, .needsAttention)
-        XCTAssertEqual(boardState(), .idle)
-        XCTAssertEqual(boardState().label, "idle", "not “done”: that is a merged or closed pull request")
+        XCTAssertEqual(boardState(), .idle, "not “done”: that is a merged or closed pull request")
     }
 
     func testDialogsLeftByAnAgentNoLongerInFrontDontReadAsWaiting() {
@@ -95,10 +93,8 @@ final class ProjectBoardAgentTests: XCTestCase {
             ProjectBoard.agentState(stuck: stuck, hasAgent: true, agentInFront: true, status: .working, openDialog: nil)
         }
         XCTAssertEqual(state(.waiting(permission, duration: "12m")), .waitingLong(permission, duration: "12m"))
-        XCTAssertEqual(state(.waiting(permission, duration: "12m")).label, "waiting 12m (permission · Bash)")
         let failed = state(.stoppedOnError(kind: "overloaded", detail: "529", failedAt: 5, resume: .offered))
         XCTAssertEqual(failed, .stoppedOnError(kind: "overloaded", resume: .offered))
-        XCTAssertEqual(failed.label, "stopped on error (overloaded)")
         XCTAssertEqual(
             ProjectBoard.agentState(
                 stuck: .exitedMidTurn(processName: "claude"), hasAgent: false, agentInFront: false,

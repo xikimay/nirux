@@ -46,8 +46,8 @@ extension ProjectBoard {
         var isLocked: Bool { isRunning || run == .elsewhere }
     }
 
-    /// Why a row's pull request can't be added to the queue, for its Queue
-    /// column: what the board knows without a call. The confirmation sheet
+    /// Why a row's pull request can't be added to the queue, for its Merge
+    /// station: what the board knows without a call. The confirmation sheet
     /// checks the rest (section 4). Nil: it can.
     static func queueRefusal(_ row: Row, baseBranch: String?) -> String? {
         guard let pullRequest = row.pullRequest else { return "no pull request" }
@@ -67,7 +67,7 @@ extension ProjectBoard {
         return nil
     }
 
-    /// A step as the Queue column says it: "waiting for nightly".
+    /// A step in a word or two: "waiting for nightly".
     static func queueStepLabel(_ step: MergeQueue.Step, workflow: String?) -> String {
         switch step {
         case .waiting: return "waiting"

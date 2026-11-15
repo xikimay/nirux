@@ -520,8 +520,9 @@ For the wiring: the Board is drawn outside the sidebar's pass too (a read
 landing, a click), so it draws from the readings of the last pass, never
 from that pass's approval holds or Mission questions kept for later (their
 keys are columns' addresses). A task's git root is compared with its row's
-worktree in the worktrees' own spelling (`comparableRoot`): git lists one
-under `/private/var` where the workspace's git context says `/var`.
+worktree with every link resolved, as git lists a worktree
+(`GitIdentity.resolvedRepositoryRoot`, read once with the git context): a
+symlinked folder, `/private/var` where the context says `/var`.
 
 ## 7. What a line offers
 

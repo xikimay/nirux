@@ -59,6 +59,10 @@ struct GitHubRepository: Hashable, Sendable {
 
 struct GitIdentity: Hashable, Sendable {
     let repositoryRoot: String
+    /// The root with every link resolved, as `git worktree list` gives a
+    /// worktree's (a symlinked folder, /var for /private/var); nil when it
+    /// can't be resolved.
+    let resolvedRepositoryRoot: String?
     let head: String?
     /// Changed or untracked files, Nirux's handovers and Claude Code's
     /// local settings aside (`WorktreeCleanup.isDisposable`). An untracked
@@ -66,8 +70,9 @@ struct GitIdentity: Hashable, Sendable {
     /// settings in it too.
     let isDirty: Bool
 
-    init(repositoryRoot: String, head: String?, isDirty: Bool = false) {
+    init(repositoryRoot: String, resolvedRepositoryRoot: String? = nil, head: String?, isDirty: Bool = false) {
         self.repositoryRoot = repositoryRoot
+        self.resolvedRepositoryRoot = resolvedRepositoryRoot
         self.head = head
         self.isDirty = isDirty
     }
@@ -240,6 +245,7 @@ enum GitDetect {
             branch: branch,
             identity: GitIdentity(
                 repositoryRoot: canonicalRepositoryRoot,
+                resolvedRepositoryRoot: repositoryRoot.realPath,
                 head: head,
                 isDirty: Self.isDirty(status: status.standardOutput, startFolder: startFolder)
             ),

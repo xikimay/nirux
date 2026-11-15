@@ -556,17 +556,6 @@ final class ProjectBoardController {
         local?.folders[folder] ?? URL(fileURLWithPath: folder).standardizedFileURL.path
     }
 
-    /// A workspace's git root in the form the worktrees were listed in, to
-    /// compare with a row's worktree: git lists one under `/private/var`
-    /// where the workspace's git context says `/var`, the same folder
-    /// through the system's link. Without the disk.
-    func comparableRoot(_ root: String) -> String {
-        let folder = comparableFolder(root)
-        let unlinked = { (path: String) in path.hasPrefix("/private/") ? path.dropFirst("/private".count) : Substring(path) }
-        let key = unlinked(folder)
-        return local?.repositories.lazy.flatMap(\.worktrees).map(\.path).first { unlinked($0) == key } ?? folder
-    }
-
     /// The column's header: the space, the repository of a Board with one,
     /// and when the pull requests were read, or what went wrong reading
     /// them (Refresh's tooltip); the repository's header has the pill.
@@ -574,12 +563,11 @@ final class ProjectBoardController {
         let space = spaces.first { $0.id == projectID }
         let single = sections.count == 1 ? sections.first.flatMap { reads[$0.id] } : nil
         return BoardColumnView.Header(
-            spaceName: space?.name ?? "Deleted space",
+            spaceName: space?.name,
             repository: single?.name,
             status: single.flatMap { Self.errorText($0)?.message } ?? readStatus(now: now),
             spaces: spaces,
-            spaceID: projectID,
-            spaceIsMissing: space == nil
+            spaceID: projectID
         )
     }
 

@@ -67,17 +67,25 @@ extension NiruxShellView {
         }
     }
 
-    /// The order switch: every Board takes it, and it is saved with the
-    /// shell's state, which holds it (`persistedState`).
+    /// The order switch: every Board takes it (a hidden one when it shows
+    /// next), and it is saved with the shell's state, which holds it
+    /// (`persistedState`).
     func setBoardOrder(_ order: BoardStages.Order) {
         guard order != boardOrder else { return }
         boardOrder = order
         saveState()
-        for location in projectBoardLocations { renderProjectBoard(location.board) }
+        let snapshot = ProcessSnapshot()
+        for location in projectBoardLocations where isProjectBoardShown(location.board) {
+            renderProjectBoard(location.board, snapshot: snapshot)
+        }
     }
 
+    /// As the Board shows that pull request now: a line held under the
+    /// pointer may still show an offer since refused (a draft, a queue
+    /// started), or another repository's number.
     func performBoardOffer(_ offer: BoardStages.QueueOffer, section: String, board: ProjectBoardController) {
-        guard isPullRequest(offer.number, of: section, on: board) else { return NSSound.beep() }
+        guard let current = board.stagesTargets.offers[section]?[offer.number], current.change == offer.change, current.blocked == nil
+        else { return NSSound.beep() }
         let action: ProjectBoard.Action = offer.change == .add
             ? .addToQueue(number: offer.number, section: section) : .removeFromQueue(number: offer.number, section: section)
         performProjectBoardAction(action, board: board)

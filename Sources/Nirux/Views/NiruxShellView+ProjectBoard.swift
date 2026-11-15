@@ -192,13 +192,13 @@ extension NiruxShellView {
             board.stagesReadings = boardReadings(
                 ofSpace: board.projectID, sidebarInfos: pass.infos, foregroundProcesses: pass.foregroundProcesses,
                 approvalHolds: pass.approvalHolds, missionQuestions: pass.missionQuestions, snapshot: snapshot, now: now,
-                comparable: board.comparableRoot
+                comparable: board.comparableFolder
             )
         }
         // Before the first pass: no hold, no question, the agents in front as the process table says.
         let readings = board.stagesReadings ?? boardReadings(
             ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
-            now: now, comparable: board.comparableRoot
+            now: now, comparable: board.comparableFolder
         )
         let (content, targets) = board.stagesContent(
             stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),
@@ -210,7 +210,8 @@ extension NiruxShellView {
         board.stagesTargets = targets
     }
 
-    private func foregroundProcesses(of members: [WorkspaceState], snapshot: ProcessSnapshot) -> [ObjectIdentifier: ForegroundProcess] {
+    /// What runs in front in each open column of `members`, as the process table says.
+    func foregroundProcesses(of members: [WorkspaceState], snapshot: ProcessSnapshot) -> [ObjectIdentifier: ForegroundProcess] {
         Dictionary(members.flatMap(\.openColumns).compactMap { column in
             column.pty?.foregroundProcess(snapshot: snapshot).map { (ObjectIdentifier(column), $0) }
         }, uniquingKeysWith: { first, _ in first })
@@ -218,9 +219,11 @@ extension NiruxShellView {
 
     /// The space's workspaces as the Board's rows take them: their folder
     /// as the worktrees were listed, and their most urgent agent column.
+    /// `foregroundProcesses`: the sidebar pass's, by column, else the
+    /// process table's (`foregroundProcesses(of:snapshot:)`).
     func projectBoardWorkspaces(
         _ members: [WorkspaceState], of board: ProjectBoardController, snapshot: ProcessSnapshot, now: TimeInterval,
-        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]
     ) -> [ProjectBoard.Workspace] {
         members.map { workspace in
             ProjectBoard.Workspace(
@@ -231,9 +234,9 @@ extension NiruxShellView {
                 folderIsGone: board.local?.missingFolders.contains(workspace.cwd) ?? false,
                 isInactive: workspace.isInactive,
                 agent: .mostUrgent(workspace.openColumns.map { column in
-                    let foreground = foregroundProcesses.map { $0[ObjectIdentifier(column)] }
-                        ?? column.pty?.foregroundProcess(snapshot: snapshot)
-                    return projectBoardAgent(of: column, in: workspace, foreground: foreground, snapshot: snapshot, now: now)
+                    projectBoardAgent(
+                        of: column, in: workspace, foreground: foregroundProcesses[ObjectIdentifier(column)], snapshot: snapshot, now: now
+                    )
                 })
             )
         }

@@ -12,9 +12,10 @@ extension NiruxShellView {
     /// `approvalHolds` and `missionQuestions` are the sidebar's pass's:
     /// reading them again would hand requests back or note hand-offs. The
     /// rows the sidebar just built (`sidebarInfos`, the space on screen's)
-    /// are taken as they are. `comparable` gives a git root the rows' form
-    /// of a path: the Board's own, which knows its paths without the disk
-    /// (`ProjectBoardController.comparableRoot`). The Lead is
+    /// are taken as they are. A task's git root is compared with its row's
+    /// worktree resolved, as git lists it; `comparable` gives one that
+    /// couldn't be resolved the rows' form of a path
+    /// (`ProjectBoardController.comparableFolder`). The Lead is
     /// read too: the space's header says it.
     func boardReadings(
         ofSpace spaceID: String,
@@ -48,7 +49,7 @@ extension NiruxShellView {
             readings[workspace.id] = BoardStages.TaskReading(
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
-                gitRoot: workspace.gitContext.map { comparable($0.identity.repositoryRoot) },
+                gitRoot: workspace.gitContext.map { $0.identity.resolvedRepositoryRoot ?? comparable($0.identity.repositoryRoot) },
                 reviewsInFlight: Set(workspace.reviewsRunning.map(\.pass)),
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970

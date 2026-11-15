@@ -533,12 +533,17 @@ final class BoardStagesFactsTests: XCTestCase {
 
         // Why the queue's own rule keeps a pull request out of the list, as far as the Board knows without a call.
         let place = ProjectBoard.StackPlace(parent: 11, chain: [11, 12], rootBase: "main", mergedBase: nil, root: 11, order: 1)
+        let onMerged = ProjectBoard.StackPlace(
+            parent: nil, chain: [12], rootBase: "feat/base", mergedBase: ProjectBoard.MergedBase(number: 11, onto: "main"), root: 12, order: 0
+        )
         var busy = row(workspaces: ["task"], pullRequest: pullRequest(12))
         busy.agent = ProjectBoard.Agent(state: .working(duration: nil))
         let refusals: [(ProjectBoard.Row, String?)] = [
             (row(workspaces: ["task"], pullRequest: pullRequest(12)), nil),
             (row(workspaces: ["task"], pullRequest: pullRequest(12, draft: true)), "draft"),
             (row(workspaces: ["task"], pullRequest: pullRequest(12, base: "feat/base"), stack: place), "after #11"),
+            (row(workspaces: ["task"], pullRequest: pullRequest(12, base: "feat/base"), stack: onMerged), "base #11 merged"),
+            (row(workspaces: ["task"], pullRequest: pullRequest(12, base: "feat/base", draft: true), stack: onMerged), "draft"),
             (row(workspaces: ["task"], pullRequest: pullRequest(12, base: "release")), "targets release"),
             (row(workspaces: ["task"], pullRequest: pullRequest(12, mergeable: "CONFLICTING")), "conflict"),
             (busy, "agent working")
@@ -638,7 +643,7 @@ final class BoardStagesFactsTests: XCTestCase {
         XCTAssertNil(none.status, "nothing queued: nothing to say")
         XCTAssertEqual(none.start, BoardStagesView.QueueButton(title: "Start…", isEnabled: false, tooltip: "Add pull requests to the queue first."),
                        "only merged ones left in the list: nothing to start")
-        // What the table says holds Start back, as it says it.
+        // What holds Start back, said as the table's queue line said it.
         rest.startProblems = ["board.json names no base branch."]
         XCTAssertEqual(start(rest, 2).start,
                        BoardStagesView.QueueButton(title: "Start… · 2", isEnabled: false, tooltip: "board.json names no base branch."))
@@ -663,6 +668,7 @@ final class BoardStagesFactsTests: XCTestCase {
         ended.statusIsFailure = true
         XCTAssertEqual(start(ended, 1).status, "Stopped: test failed on #12", "a problem's words alone: what is queued is on Start")
         XCTAssertEqual(start(ended, 1).start?.title, "Start… · 1")
+        XCTAssertEqual(start(ended, 1).start?.isEnabled, true, "a new Start opens a new sheet")
         XCTAssertEqual(start(ended, 1).tone, .failed)
         ended.statusIsFailure = false
         ended.status = "Merged 2 pull requests"
@@ -775,7 +781,7 @@ final class BoardStagesFactsTests: XCTestCase {
         // With an open pull request: its entry says it, and the pull request is a line without a task (the Lead is no task).
         let open = facts([row("feat/lead-fix", workspaces: ["lead"], pullRequest: pullRequest(61, "feat/lead-fix"), path: "/p/widgets.fix")],
                          tasks: [], lead: "lead")
-        XCTAssertEqual(open.otherWorktrees.map(\.pullRequest), ["#61 open"], "as the table says it")
+        XCTAssertEqual(open.otherWorktrees.map(\.pullRequest), ["#61 open"], "as the table said it")
         XCTAssertEqual(open.otherWorktrees.map(\.url), [url(61)])
         XCTAssertEqual(open.lines.map(\.id), ["widgets#61"])
 
@@ -803,7 +809,7 @@ final class BoardStagesFactsTests: XCTestCase {
         var other = row("feat/site", workspaces: ["site", "docs"], group: .otherRepository, path: "/p/site.feat")
         other.agent = ProjectBoard.Agent(state: .waiting(.question(nil)), workspaceID: "docs", columnID: column)
         var resting = row("main", workspaces: ["blog", "news"], group: .otherRepository, path: "/p/blog")
-        // An agent column the table wouldn't focus: no agent in it.
+        // An agent column the table didn't focus: no agent in it.
         resting.agent = ProjectBoard.Agent(state: .none, workspaceID: "news", columnID: column)
         let outside = row(nil, workspaces: ["notes"], group: .otherRepository, path: nil, folder: "/p/notes")
         XCTAssertEqual(BoardStages.otherWorkspaces([row("feat/x", workspaces: ["task"]), other, resting, outside]), [
