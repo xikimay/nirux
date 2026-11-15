@@ -12,7 +12,7 @@ extension ProjectBoardController {
 
         /// Nil once the space was deleted.
         var space: Space?
-        /// The space's workspaces, as the table's rows take them.
+        /// The space's workspaces, as the Board's rows take them.
         var workspaces: [ProjectBoard.Workspace]
         /// The space's tasks by workspace id, in the sidebar's order, the
         /// Lead left out.
@@ -26,9 +26,9 @@ extension ProjectBoardController {
         var readings: [String: BoardStages.TaskReading] = [:]
         /// Each section's merge queue, by section id.
         var queues: [String: ProjectBoard.QueueState] = [:]
-        /// The queues that run, here or in another Nirux, as the table's
-        /// queue lines name them (`NiruxShellView.projectBoardQueues`): a
-        /// section's, or one left on a repository no section has.
+        /// The queues that run, here or in another Nirux
+        /// (`NiruxShellView.projectBoardQueues`): a section's, or one left
+        /// on a repository no section has.
         var runningQueues: [BoardStagesView.RunningQueue] = []
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []
@@ -40,7 +40,7 @@ extension ProjectBoardController {
     struct StagesTargets: Equatable {
         /// A task's line, by its id (its workspace's): Focus on its most
         /// urgent agent column, else on the workspace.
-        var focus: [String: ProjectBoardView.Action] = [:]
+        var focus: [String: ProjectBoard.Action] = [:]
         /// A repository's line's worktree, by its id, for its "Clean up"
         /// link (a merged pull request's, so never a line without a
         /// repository); a merged task's too, which has left the list for
@@ -48,20 +48,31 @@ extension ProjectBoardController {
         var folders: [String: BoardStages.Folder] = [:]
         /// Open Main Checkout, by the checkout's path: Focus where a
         /// workspace is open there, else Open a shell there.
-        var mainCheckouts: [String: ProjectBoardView.Action] = [:]
-        /// The pull requests of each section's lines, by section id: a
-        /// line held in place under the pointer may show another
-        /// repository's by now, and the queue and Retarget act only on the
-        /// section's own.
-        var pullRequests: [String: Set<Int>] = [:]
+        var mainCheckouts: [String: ProjectBoard.Action] = [:]
+        /// What each section's lines offer the queue's list now, by section
+        /// id and pull request: a click acts only on an offer still made,
+        /// and not refused (a draft since, a queue started).
+        var offers: [String: [Int: BoardStages.QueueOffer]] = [:]
+        /// The Retarget each section's lines offer now, by section id and
+        /// pull request: as the offers, a click acts only on one still
+        /// offered (not once the queue's list holds it), and not refused
+        /// (a queue started since).
+        var retargets: [String: [Int: Retarget]] = [:]
+
+        struct Retarget: Equatable {
+            /// The branch it bases the pull request on.
+            var onto: String
+            /// Why it does nothing for now; nil when it acts.
+            var blocked: String?
+        }
     }
 
     /// The id of the section of the workspaces in no repository.
     static let noRepositoryID = "no-repository"
 
-    /// What the Board as stages shows of the space: what the table lists,
-    /// as stages. Its message in place of the sections is the table's in
-    /// place of its rows; the running queues' lines stay at its foot. With
+    /// What the Board as stages shows of the space: its rows (`listedRows`),
+    /// as stages. Its message (`bodyMessage`) takes the sections' place;
+    /// the running queues' lines stay at its foot. With
     /// it, what its clicks act on (whoever shows it keeps them:
     /// `stagesTargets`).
     func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> (content: BoardStagesView.Content, targets: StagesTargets) {
@@ -148,7 +159,7 @@ extension ProjectBoardController {
             "\(tasks) \(tasks == 1 ? "task" : "tasks")"
         ]
         var header = BoardStagesView.Header(
-            name: inputs.space?.name ?? "Deleted space", color: inputs.space?.color ?? Theme.Color.textTertiary,
+            name: inputs.space?.name ?? BoardColumnView.deletedSpace, color: inputs.space?.color ?? Theme.Color.textTertiary,
             summary: held.compactMap { $0 }.joined(separator: " · ")
         )
         if let lead = inputs.lead {
@@ -182,15 +193,21 @@ extension ProjectBoardController {
         )
         let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
         Self.noteFolders(of: facts, in: &targets)
-        targets.pullRequests[section.id] = Set(facts.lines.compactMap(\.pullRequest?.number))
         var shown = BoardStagesView.Section(
             // A space without an anchor: its repository's name ("widgets"), `owner/name` beside it.
             id: section.id,
-            title: (section.anchor == nil ? reads?.gitHub.name : nil) ?? displayNames[section.id] ?? section.name ?? "Repository",
+            title: (section.anchor == nil ? reads.flatMap(Self.savedName) : nil) ?? displayNames[section.id] ?? section.name ?? "Repository",
             detail: reads?.name,
             status: stagesStatus(section, now: now),
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
+        for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {
+            if let offer = line.offer { targets.offers[section.id, default: [:]][offer.number] = offer }
+            // The menu's item: the phrase's link is only there while it acts.
+            for case .retarget(.retarget(let number, let onto), let blocked) in line.menu {
+                targets.retargets[section.id, default: [:]][number] = StagesTargets.Retarget(onto: onto, blocked: blocked)
+            }
+        }
         if let state = inputs.queues[section.id] {
             // The next Start's list, a merged one for none (as the queue, GitHub's lists or a task's line knows it),
             // whether or not the Board lists it (not read yet, closed, beyond the open pull requests read).
@@ -209,7 +226,7 @@ extension ProjectBoardController {
         return shown
     }
 
-    private static func focus(_ agent: ProjectBoard.Agent, workspaces: [String]) -> ProjectBoardView.Action? {
+    private static func focus(_ agent: ProjectBoard.Agent, workspaces: [String]) -> ProjectBoard.Action? {
         agent.focusTarget(workspaces: workspaces).map { .focus(workspaceID: $0.workspaceID, columnID: $0.columnID) }
     }
 
@@ -217,6 +234,12 @@ extension ProjectBoardController {
         for line in facts.lines {
             if let folder = line.folder { targets.folders[line.id] = folder }
         }
+    }
+
+    /// A repository's name as saved ("WidgetKit" of "Acme/WidgetKit"), not
+    /// as compared (`GitHubRepository` lowercases it).
+    private static func savedName(_ reads: RepositoryReads) -> String? {
+        reads.name.split(separator: "/").last.map(String.init)
     }
 
     private var isReadOnly: Bool {
@@ -235,7 +258,7 @@ extension ProjectBoardController {
             return ColumnHeaderView.Status(error.title, tone: .error, symbol: Theme.Symbol.agentError, toolTip: error.message)
         }
         if let note = setupNote(section) {
-            // Board Settings can't save it: why, as the table's notice says it.
+            // Board Settings can't save it: why, as board.json's state says it.
             if let loaded, case .readOnly(let reason) = loaded.status {
                 return ColumnHeaderView.Status("Read-only", tone: .neutral, toolTip: reason.message)
             }

@@ -261,8 +261,9 @@ clicked. The sizes are the mockup's.
   this order: DRY RUN, the queue's words (whole, or cut down to 60 pt), the
   pill (two fifths of the header at most), `owner/name` (from 30 pt); once
   one doesn't fit, none after it shows. What went is said under the pointer
-  on the header. (`BoardStagesView.sectionQueue` says it by the table's
-  rules: a problem's words alone in red, what is queued then on Start.)
+  on the header. (`BoardStagesView.sectionQueue` holds the rules the
+  table's queue line had: a problem's words alone in red, what is queued
+  then on Start.)
 - **A queue that runs**, here or in another Nirux, keeps a line at the
   Board's foot (its repository, what it does, in green as its header says
   it, Stop where it runs here), orphans
@@ -519,8 +520,9 @@ For the wiring: the Board is drawn outside the sidebar's pass too (a read
 landing, a click), so it draws from the readings of the last pass, never
 from that pass's approval holds or Mission questions kept for later (their
 keys are columns' addresses). A task's git root is compared with its row's
-worktree in the worktrees' own spelling (`comparableRoot`): git lists one
-under `/private/var` where the workspace's git context says `/var`.
+worktree with every link resolved, as git lists a worktree
+(`GitIdentity.resolvedRepositoryRoot`, read once with the git context): a
+symlinked folder, `/private/var` where the context says `/var`.
 
 ## 7. What a line offers
 
@@ -692,7 +694,6 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
   merged task's folder, the main checkout's workspace) the Board keeps as it
   last showed it (`ProjectBoardController.stagesTargets`). What does
   nothing for now (`blocked`) does nothing there either.
-- **The table's code stays** until it is removed, unused.
 
 ## Known limits
 

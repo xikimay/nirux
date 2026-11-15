@@ -12,10 +12,10 @@ extension NiruxShellView {
     /// `approvalHolds` and `missionQuestions` are the sidebar's pass's:
     /// reading them again would hand requests back or note hand-offs. The
     /// rows the sidebar just built (`sidebarInfos`, the space on screen's)
-    /// are taken as they are. `comparable` gives a git root the rows' form
-    /// of a path: the Board's own, which knows its paths without the disk
-    /// (`ProjectBoardController.comparableRoot`). The Lead is
-    /// read too: the space's header says it.
+    /// are taken as they are. A task's git root is compared with its row's
+    /// worktree resolved, as git lists it
+    /// (`GitIdentity.resolvedRepositoryRoot`). The Lead is read too: the
+    /// space's header says it.
     func boardReadings(
         ofSpace spaceID: String,
         sidebarInfos: [WorkspaceInfo] = [],
@@ -23,8 +23,7 @@ extension NiruxShellView {
         approvalHolds: [ObjectIdentifier: PermissionApprovalHold],
         missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         snapshot: ProcessSnapshot,
-        now: TimeInterval,
-        comparable: (String) -> String
+        now: TimeInterval
     ) -> [String: BoardStages.TaskReading] {
         let built = Dictionary(sidebarInfos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let parents = workspaceStore.activeParents(in: spaceID)
@@ -48,7 +47,7 @@ extension NiruxShellView {
             readings[workspace.id] = BoardStages.TaskReading(
                 info,
                 summary: workspace.lastSummaryIsManual ? WorkspaceInfo.oneRunOfWords(workspace.lastSummary) : nil,
-                gitRoot: workspace.gitContext.map { comparable($0.identity.repositoryRoot) },
+                gitRoot: workspace.gitContext?.identity.resolvedRepositoryRoot,
                 reviewsInFlight: Set(workspace.reviewsRunning.map(\.pass)),
                 turnStartedAt: { id in
                     workspace.columns.first { $0.id == id }?.pty?.agentTurnStartedAt?.timeIntervalSince1970
@@ -62,7 +61,7 @@ extension NiruxShellView {
     /// the Board read: the space, its tasks (`members`, the space's
     /// workspaces in the sidebar's order) with the Lead apart, each
     /// sub-task's parent, each section's queue and the queues that run (the
-    /// table's queue lines), the clean-ups running.
+    /// Board's foot), the clean-ups running.
     func stagesInputs(
         of board: ProjectBoardController, members: [WorkspaceState], workspaces: [ProjectBoard.Workspace],
         readings: [String: BoardStages.TaskReading], order: BoardStages.Order
@@ -82,9 +81,7 @@ extension NiruxShellView {
             lead: members.first { $0.isLead }?.id,
             readings: readings,
             queues: queues.states,
-            runningQueues: queues.lines.compactMap { line in
-                BoardStagesView.runningQueue(id: line.id, title: line.title, tooltip: line.tooltip, state: line.queue)
-            },
+            runningQueues: queues.running,
             cleaningUp: worktreeCleanupsInFlight,
             order: order
         )

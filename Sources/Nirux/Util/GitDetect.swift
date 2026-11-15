@@ -59,6 +59,12 @@ struct GitHubRepository: Hashable, Sendable {
 
 struct GitIdentity: Hashable, Sendable {
     let repositoryRoot: String
+    /// The root with every link resolved, as `git worktree list` gives a
+    /// worktree's (a symlinked folder, /var for /private/var); the root as
+    /// it is when it can't be resolved. Derived: out of equality and
+    /// hashing, so a resolution that changes or fails once changes no
+    /// context (`WorkspaceState` would read its pull request again).
+    let resolvedRepositoryRoot: String
     let head: String?
     /// Changed or untracked files, Nirux's handovers and Claude Code's
     /// local settings aside (`WorktreeCleanup.isDisposable`). An untracked
@@ -66,10 +72,21 @@ struct GitIdentity: Hashable, Sendable {
     /// settings in it too.
     let isDirty: Bool
 
-    init(repositoryRoot: String, head: String?, isDirty: Bool = false) {
+    init(repositoryRoot: String, resolvedRepositoryRoot: String? = nil, head: String?, isDirty: Bool = false) {
         self.repositoryRoot = repositoryRoot
+        self.resolvedRepositoryRoot = resolvedRepositoryRoot ?? repositoryRoot
         self.head = head
         self.isDirty = isDirty
+    }
+
+    static func == (lhs: GitIdentity, rhs: GitIdentity) -> Bool {
+        lhs.repositoryRoot == rhs.repositoryRoot && lhs.head == rhs.head && lhs.isDirty == rhs.isDirty
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(repositoryRoot)
+        hasher.combine(head)
+        hasher.combine(isDirty)
     }
 }
 
@@ -230,16 +247,18 @@ enum GitDetect {
         let canonicalRepositoryRoot = URL(
             fileURLWithPath: repositoryRoot
         ).standardizedFileURL.path
+        let resolvedRepositoryRoot = repositoryRoot.realPath
         // A task's handover and local settings get written where its agent
         // starts.
         let startFolder = startFolderPath?.realPath.flatMap { folder -> String? in
-            guard let root = repositoryRoot.realPath, folder.hasPrefix(root + "/") else { return nil }
+            guard let root = resolvedRepositoryRoot, folder.hasPrefix(root + "/") else { return nil }
             return String(folder.dropFirst(root.count + 1))
         }
         return .observed(GitContext(
             branch: branch,
             identity: GitIdentity(
                 repositoryRoot: canonicalRepositoryRoot,
+                resolvedRepositoryRoot: resolvedRepositoryRoot ?? canonicalRepositoryRoot,
                 head: head,
                 isDirty: Self.isDirty(status: status.standardOutput, startFolder: startFolder)
             ),

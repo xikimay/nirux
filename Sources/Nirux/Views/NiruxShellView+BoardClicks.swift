@@ -10,7 +10,10 @@ import AppKit
 extension NiruxShellView {
     func wireBoardStages(_ board: ProjectBoardController) {
         let stages = board.view.stages
-        stages.onOrder = { [weak self] order in self?.setBoardOrder(order) }
+        stages.onOrder = { [weak self, weak board] order in
+            guard let self, let board else { return }
+            self.setBoardOrder(order, from: board)
+        }
         stages.onStart = { [weak self, weak board] id in
             guard let self, let board else { return }
             self.requestMergeQueueStart(board: board, section: id)
@@ -67,18 +70,31 @@ extension NiruxShellView {
         }
     }
 
-    /// The order switch: every Board takes it, and it is saved with the
-    /// shell's state, which holds it (`persistedState`).
-    func setBoardOrder(_ order: BoardStages.Order) {
-        guard order != boardOrder else { return }
-        boardOrder = order
-        saveState()
-        for location in projectBoardLocations { renderProjectBoard(location.board) }
+    /// `board`'s order switch: every Board takes it (a hidden one when it
+    /// shows next), and it is saved with the shell's state, which holds it
+    /// (`persistedState`). `board` draws in it even when it is the order
+    /// set already: hidden while another Board's switch changed it, it
+    /// still showed the old one.
+    func setBoardOrder(_ order: BoardStages.Order, from board: ProjectBoardController) {
+        let isNew = order != boardOrder
+        if isNew {
+            boardOrder = order
+            saveState()
+        }
+        let snapshot = ProcessSnapshot()
+        for location in projectBoardLocations where location.board === board || (isNew && isProjectBoardShown(location.board)) {
+            renderProjectBoard(location.board, snapshot: snapshot)
+        }
     }
 
+    /// As the Board shows that pull request now: a line held under the
+    /// pointer may still show an offer since refused (a draft, a queue
+    /// started), or another repository's number. A refused one says why.
     func performBoardOffer(_ offer: BoardStages.QueueOffer, section: String, board: ProjectBoardController) {
-        guard isPullRequest(offer.number, of: section, on: board) else { return NSSound.beep() }
-        let action: ProjectBoardView.Action = offer.change == .add
+        guard let current = board.stagesTargets.offers[section]?[offer.number], current.change == offer.change
+        else { return NSSound.beep() }
+        if let blocked = current.blocked { return showToast(blocked) }
+        let action: ProjectBoard.Action = offer.change == .add
             ? .addToQueue(number: offer.number, section: section) : .removeFromQueue(number: offer.number, section: section)
         performProjectBoardAction(action, board: board)
     }
@@ -88,18 +104,15 @@ extension NiruxShellView {
     func performBoardLink(_ link: BoardStages.Link, line: String?, section: String, board: ProjectBoardController) {
         switch link {
         case .retarget(let number, let onto):
-            guard isPullRequest(number, of: section, on: board) else { return NSSound.beep() }
+            // As the Board offers it now: a line held under the pointer may still show it once a queue started, or
+            // once the queue's list holds it, or another repository's number.
+            guard let current = board.stagesTargets.retargets[section]?[number], current.onto == onto else { return NSSound.beep() }
+            if let blocked = current.blocked { return showToast(blocked) }
             performProjectBoardAction(.retarget(number: number, base: onto, section: section), board: board)
         case .cleanUp:
             guard let line, let folder = board.stagesTargets.folders[line] else { return }
             performProjectBoardAction(.cleanUp(path: folder.path), board: board)
         }
-    }
-
-    /// One of the section's lines has that pull request: a line held in
-    /// place under the pointer may show another repository's by now.
-    private func isPullRequest(_ number: Int, of section: String, on board: ProjectBoardController) -> Bool {
-        board.stagesTargets.pullRequests[section]?.contains(number) == true
     }
 
     /// `line`: the line's id; nil for an item of "Other worktrees" or
@@ -144,7 +157,7 @@ extension NiruxShellView {
     /// failed turn (none named, nothing); after an exit, its conversation.
     /// Nil for an agent restored at launch, which the sidebar's Resume
     /// starts.
-    nonisolated static func resumeAction(_ resume: BoardStages.Resume, workspaceID: String) -> ProjectBoardView.Action? {
+    nonisolated static func resumeAction(_ resume: BoardStages.Resume, workspaceID: String) -> ProjectBoard.Action? {
         switch resume.kind {
         case .afterError: return resume.failedAt.map { .resumeFailed(workspaceID: workspaceID, columnID: resume.column, failedAt: $0) }
         case .afterExit: return .resumeExited(workspaceID: workspaceID, columnID: resume.column)

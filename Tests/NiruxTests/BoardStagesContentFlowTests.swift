@@ -5,7 +5,7 @@ import XCTest
 /// What the Board as stages shows of a space, built from what the Board
 /// read (docs/design/board-stages.md, sections 5 and 6): a real shell, git
 /// for real in temporary repositories, a fake `gh` (`ProjectBoardFlowTests`).
-/// The column still shows the table; the content is asked for.
+/// The content is asked for directly, beside what the column shows.
 final class BoardStagesContentFlowTests: XCTestCase {
     private var root: String!
 
@@ -59,7 +59,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
             try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
             let folder = root + "/release-notes"
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-            try writeConfig(for: space)
+            // Saved with its own capitals: the section is named as saved.
+            try writeConfig(for: space, repository: "Acme/Widgets")
 
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
             shell.addWorkspace(title: "login", cwd: login, profileID: space.id)
@@ -86,7 +87,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             var withAgent = shell.stagesInputs(
                 of: board, members: shell.projectWorkspaces(of: board.projectID),
                 workspaces: shell.projectBoardWorkspaces(shell.projectWorkspaces(of: board.projectID), of: board, snapshot: ProcessSnapshot(),
-                                                         now: Date().timeIntervalSince1970),
+                                                         now: Date().timeIntervalSince1970, foregroundProcesses: [:]),
                 readings: [:], order: .sidebar
             )
             let loginIndex = try XCTUnwrap(withAgent.workspaces.firstIndex { $0.id == ids("login") })
@@ -108,7 +109,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
 
             // The repository: its name and owner/name, its post-merge pill, its queue at rest, its menu.
             let widgets = try XCTUnwrap(content.sections.first)
-            XCTAssertEqual([widgets.title, widgets.detail], ["widgets", "acme/widgets"])
+            XCTAssertEqual([widgets.title, widgets.detail], ["Widgets", "Acme/Widgets"])
             XCTAssertEqual(widgets.status?.text.hasPrefix("nightly "), true, widgets.status?.text ?? "")
             XCTAssertEqual(widgets.status?.symbol, Theme.Symbol.checksPassed, "the run read: green")
             XCTAssertEqual(widgets.queue?.start?.title.hasPrefix("Start"), true, "Start…, or Start Dry Run… in a build that can't change GitHub")
@@ -291,10 +292,13 @@ final class BoardStagesContentFlowTests: XCTestCase {
     ) throws -> BoardStagesView.Content {
         let now = Date().timeIntervalSince1970
         let members = shell.projectWorkspaces(of: board.projectID)
-        let workspaces = shell.projectBoardWorkspaces(members, of: board, snapshot: ProcessSnapshot(), now: now)
+        let snapshot = ProcessSnapshot()
+        let workspaces = shell.projectBoardWorkspaces(
+            members, of: board, snapshot: snapshot, now: now, foregroundProcesses: shell.foregroundProcesses(of: members, snapshot: snapshot)
+        )
         var readings = shell.boardReadings(
             ofSpace: board.projectID, foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:], snapshot: ProcessSnapshot(),
-            now: now, comparable: board.comparableRoot
+            now: now
         )
         change(&readings)
         return board.stagesContent(shell.stagesInputs(of: board, members: members, workspaces: workspaces, readings: readings, order: order)).content
@@ -327,10 +331,10 @@ final class BoardStagesContentFlowTests: XCTestCase {
         try body(shell, shell.workspaceStore.createProfile(named: "Board"))
     }
 
-    private func writeConfig(for space: WorkspaceProfile) throws {
+    private func writeConfig(for space: WorkspaceProfile, repository: String = "acme/widgets") throws {
         let store = try XCTUnwrap(BoardConfigStore(spaceID: space.id))
         let config = BoardConfig(
-            repository: "acme/widgets", baseBranch: "main", requiredChecks: ["test"], postMergeWorkflow: .workflow("nightly.yml")
+            repository: repository, baseBranch: "main", requiredChecks: ["test"], postMergeWorkflow: .workflow("nightly.yml")
         )
         if case .failure(let error) = store.save(config) { XCTFail(error.message) }
     }

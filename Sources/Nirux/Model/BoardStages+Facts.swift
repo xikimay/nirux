@@ -181,7 +181,7 @@ extension BoardStages {
 
     /// A worktree the table listed under "Other worktrees" (a linked one,
     /// with no workspace and no open pull request), with its buttons: Open,
-    /// named as the table names it (its branch, or its folder), and Clean
+    /// named as the table named it (its branch, or its folder), and Clean
     /// Up…, held back while one runs there.
     private static func otherWorktree(_ row: ProjectBoard.Row, in repository: RepositoryReading) -> OtherWorktree? {
         guard row.group == .otherWorktree, let path = row.worktreePath else { return nil }
@@ -282,8 +282,8 @@ extension BoardStages {
         return reading.mergedPullRequest
     }
 
-    /// Where a row's work is on disk, as the table's buttons use it
-    /// (`ProjectBoardView.actions`): Clean Up… where the row can be
+    /// Where a row's work is on disk, as the table's buttons used it:
+    /// Clean Up… where the row can be
     /// cleaned up, Open where no workspace is open in its worktree.
     private static func folder(of row: ProjectBoard.Row, in repository: RepositoryReading) -> Folder? {
         guard let path = row.worktreePath ?? row.folder else { return nil }

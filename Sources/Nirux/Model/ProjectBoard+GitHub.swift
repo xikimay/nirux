@@ -320,7 +320,7 @@ extension ProjectBoard {
 // MARK: - What the columns say
 
 extension ProjectBoard {
-    /// The checks of a pull request as the Checks column shows them: each
+    /// The checks of a pull request as the Board counts them: each
     /// required check by name, then the others folded.
     struct RequiredCheck: Equatable {
         let name: String
@@ -407,9 +407,8 @@ extension ProjectBoard {
     }
 
     /// "#52 open", "#52 draft", "#52 conflict", "#52 draft · conflict",
-    /// "#52 merged". A base other than the configured one is named ("→ dev"),
-    /// or its place in a stack ("· 2/4", "· on #52").
-    static func pullRequestText(_ pullRequest: PullRequest, baseBranch: String?, stack: StackPlace? = nil) -> String {
+    /// "#52 merged". A base other than the configured one is named ("→ dev").
+    static func pullRequestText(_ pullRequest: PullRequest, baseBranch: String?) -> String {
         var text = "#\(pullRequest.number) "
         if pullRequest.isOpen {
             switch (pullRequest.isDraft, pullRequest.isConflicting) {
@@ -421,10 +420,7 @@ extension ProjectBoard {
         } else {
             text += pullRequest.state.lowercased()
         }
-        if let label = stack?.label {
-            // The stack says what it is based on; its tooltip names the branch.
-            text += " · \(label)"
-        } else if pullRequest.isOpen, let base = pullRequest.baseRefName, let baseBranch, base != baseBranch {
+        if pullRequest.isOpen, let base = pullRequest.baseRefName, let baseBranch, base != baseBranch {
             text += " → \(base)"
         }
         return text

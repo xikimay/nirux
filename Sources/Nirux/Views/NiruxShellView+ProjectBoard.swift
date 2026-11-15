@@ -191,14 +191,13 @@ extension NiruxShellView {
         if let pass {
             board.stagesReadings = boardReadings(
                 ofSpace: board.projectID, sidebarInfos: pass.infos, foregroundProcesses: pass.foregroundProcesses,
-                approvalHolds: pass.approvalHolds, missionQuestions: pass.missionQuestions, snapshot: snapshot, now: now,
-                comparable: board.comparableRoot
+                approvalHolds: pass.approvalHolds, missionQuestions: pass.missionQuestions, snapshot: snapshot, now: now
             )
         }
         // Before the first pass: no hold, no question, the agents in front as the process table says.
         let readings = board.stagesReadings ?? boardReadings(
             ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
-            now: now, comparable: board.comparableRoot
+            now: now
         )
         let (content, targets) = board.stagesContent(
             stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),
@@ -210,7 +209,8 @@ extension NiruxShellView {
         board.stagesTargets = targets
     }
 
-    private func foregroundProcesses(of members: [WorkspaceState], snapshot: ProcessSnapshot) -> [ObjectIdentifier: ForegroundProcess] {
+    /// What runs in front in each open column of `members`, as the process table says.
+    func foregroundProcesses(of members: [WorkspaceState], snapshot: ProcessSnapshot) -> [ObjectIdentifier: ForegroundProcess] {
         Dictionary(members.flatMap(\.openColumns).compactMap { column in
             column.pty?.foregroundProcess(snapshot: snapshot).map { (ObjectIdentifier(column), $0) }
         }, uniquingKeysWith: { first, _ in first })
@@ -218,9 +218,11 @@ extension NiruxShellView {
 
     /// The space's workspaces as the Board's rows take them: their folder
     /// as the worktrees were listed, and their most urgent agent column.
+    /// `foregroundProcesses`: the sidebar pass's, by column, else the
+    /// process table's (`foregroundProcesses(of:snapshot:)`).
     func projectBoardWorkspaces(
         _ members: [WorkspaceState], of board: ProjectBoardController, snapshot: ProcessSnapshot, now: TimeInterval,
-        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]
     ) -> [ProjectBoard.Workspace] {
         members.map { workspace in
             ProjectBoard.Workspace(
@@ -231,39 +233,41 @@ extension NiruxShellView {
                 folderIsGone: board.local?.missingFolders.contains(workspace.cwd) ?? false,
                 isInactive: workspace.isInactive,
                 agent: .mostUrgent(workspace.openColumns.map { column in
-                    let foreground = foregroundProcesses.map { $0[ObjectIdentifier(column)] }
-                        ?? column.pty?.foregroundProcess(snapshot: snapshot)
-                    return projectBoardAgent(of: column, in: workspace, foreground: foreground, snapshot: snapshot, now: now)
+                    projectBoardAgent(
+                        of: column, in: workspace, foreground: foregroundProcesses[ObjectIdentifier(column)], snapshot: snapshot, now: now
+                    )
                 })
             )
         }
     }
 
-    /// Each section's queue, by section id, and one line per queue: each
-    /// section's, named after its repository (its anchor's name on a board
-    /// with anchors), then each one left running on a repository no section
-    /// has: the running ones are the stages' foot.
-    func projectBoardQueues(_ board: ProjectBoardController) -> (states: [String: ProjectBoard.QueueState], lines: [ProjectBoardView.QueueLine]) {
+    /// Each section's queue, by section id, and the lines of the Board's
+    /// foot: each queue that runs, here or in another Nirux, a section's
+    /// (named after its repository, its anchor's name on a Board with
+    /// anchors), then one left running on a repository no section has.
+    func projectBoardQueues(
+        _ board: ProjectBoardController
+    ) -> (states: [String: ProjectBoard.QueueState], running: [BoardStagesView.RunningQueue]) {
         var states: [String: ProjectBoard.QueueState] = [:]
         for section in board.sections {
             states[section.id] = projectBoardQueueState(board, section: section)
         }
-        let lines = board.sections.compactMap { section in
-            states[section.id].map { state in
+        let running = board.sections.compactMap { section in
+            states[section.id].flatMap { state in
                 let repository = board.repository(of: section)?.name
                 let name = section.anchor == nil ? repository : board.displayNames[section.id]
-                return ProjectBoardView.QueueLine(
-                    id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, queue: state
+                return BoardStagesView.runningQueue(
+                    id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, state: state
                 )
             }
-        } + projectBoardOrphanQueues(board).map { orphan in
-            ProjectBoardView.QueueLine(
+        } + projectBoardOrphanQueues(board).compactMap { orphan in
+            BoardStagesView.runningQueue(
                 id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
                 tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
-                queue: orphanQueueState(orphan)
+                state: orphanQueueState(orphan)
             )
         }
-        return (states, lines)
+        return (states, running)
     }
 
     /// A worktree was cleaned up: the boards list their worktrees again.
@@ -274,8 +278,9 @@ extension NiruxShellView {
         }
     }
 
-    /// What the Agent column says of one column (see `ProjectBoard.agentState`),
-    /// with the stuck states the sidebar shows.
+    /// What one column's agent does, for the Board's rows and the merge
+    /// queue (see `ProjectBoard.agentState`), with the stuck states the
+    /// sidebar shows.
     func projectBoardAgent(
         of column: ColumnState,
         in workspace: WorkspaceState,
@@ -303,7 +308,7 @@ extension NiruxShellView {
 
     // MARK: Buttons
 
-    func performProjectBoardAction(_ action: ProjectBoardView.Action, board: ProjectBoardController) {
+    func performProjectBoardAction(_ action: ProjectBoard.Action, board: ProjectBoardController) {
         switch action {
         case .focus(let workspaceID, let columnID):
             guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }) else {

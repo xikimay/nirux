@@ -427,3 +427,14 @@ extension MergeQueue {
         let problem: Problem?
     }
 }
+
+extension MergeQueue {
+    /// What a dry run is, for the DRY RUN badge and the status bar.
+    static let dryRunTooltip = "This build can’t change GitHub: its queue reads GitHub, then stops before its first "
+        + "branch update, rerun or merge. Only the notarized release, on the real state, runs a real queue."
+
+    /// The tooltip, with why this build is a dry run when it is known.
+    static func dryRunTooltip(reason: String?) -> String {
+        dryRunTooltip + (reason.map { "\nThis build: \($0)." } ?? "")
+    }
+}

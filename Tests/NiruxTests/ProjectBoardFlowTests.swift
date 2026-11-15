@@ -155,6 +155,11 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertTrue(loginLine.tooltips.stations[.checks]?.contains("test") == true, "\(loginLine.tooltips.stations)")
             XCTAssertEqual(widgets.lines.withoutTask.flatMap(\.lines).map(\.pullRequest), ["#13"], "no worktree for #13")
             XCTAssertEqual(widgets.lines.otherWorktrees.map(\.title), ["scratch"])
+            // A click acts on what the Board shows now: an offer held under the pointer since refused (#13 is a draft)
+            // changes nothing.
+            shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
+            shell.performBoardOffer(BoardStages.QueueOffer(change: .add, number: 13), section: widgets.id, board: board)
+            XCTAssertEqual(shell.mergeQueue(projectID: space.id, repository: GitHubRepository(owner: "acme", name: "widgets")).selection, [])
 
             XCTAssertFalse(client.calls.isEmpty)
             XCTAssertFalse(client.calls.contains(where: \.onMainThread), "gh never runs on the main thread")
@@ -793,7 +798,8 @@ final class ProjectBoardFlowTests: XCTestCase {
             board.view.stages.onTaskGone?("a workspace closed since")
             XCTAssertEqual(shell.toast?.message, "That workspace was closed")
 
-            // The order switch: every Board takes it, and it is saved.
+            // The order switch: every Board shown takes it (a hidden one when it shows next), and it is saved.
+            try select("login", in: shell)
             XCTAssertEqual(board.view.stages.content?.order, .sidebar)
             let orderSwitch = board.view.stages.orderSwitch
             orderSwitch.selectedSegment = 1
@@ -802,6 +808,13 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(board.view.stages.content?.order, .progress)
             XCTAssertEqual(orderSwitch.selectedSegment, 1)
             XCTAssertEqual(Persistence.load()?.settings?.boardOrder, .progress)
+            // Hidden while another Board's switch went back, it still shows the old order: its switch on the order set
+            // draws it in it at once.
+            shell.boardOrder = .sidebar
+            orderSwitch.selectedSegment = 0
+            _ = (orderSwitch.target as? NSObject)?.perform(orderSwitch.action, with: orderSwitch)
+            XCTAssertEqual(board.view.stages.content?.order, .sidebar)
+            XCTAssertEqual(orderSwitch.selectedSegment, 0)
         }
     }
 

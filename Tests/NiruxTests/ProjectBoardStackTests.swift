@@ -9,13 +9,13 @@ final class ProjectBoardStackTests: XCTestCase {
     private let widgets = GitHubRepository(owner: "acme", name: "widgets")
 
     private func pullRequest(
-        _ number: Int, _ branch: String, base: String = "main", state: String = "OPEN", draft: Bool = false,
+        _ number: Int, _ branch: String, base: String = "main", state: String = "OPEN",
         baseOid: String = String(repeating: "a", count: 40), fork: Bool = false
     ) -> ProjectBoard.PullRequest {
         // Every head is `aaa…`: a base reads untouched since its merge.
         ProjectBoard.PullRequest(
             number: number, state: state, headRefName: branch,
-            headOid: String(repeating: "a", count: 40), baseRefName: base, isDraft: draft, mergeable: "MERGEABLE",
+            headOid: String(repeating: "a", count: 40), baseRefName: base, isDraft: false, mergeable: "MERGEABLE",
             checks: [], url: "https://github.com/acme/widgets/pull/\(number)", isFromConfiguredRepository: !fork,
             baseOid: baseOid
         )
@@ -56,8 +56,6 @@ final class ProjectBoardStackTests: XCTestCase {
         XCTAssertEqual(third.stack?.tooltip, "Stack: #52 → #53 → #60, on main")
         XCTAssertEqual(try row(52, in: result).stack?.label, "1/3")
         XCTAssertNil(try row(55, in: result).stack, "a lone pull request is no stack")
-        XCTAssertEqual(ProjectBoard.pullRequestText(try XCTUnwrap(third.pullRequest), baseBranch: "main", stack: third.stack),
-                       "#60 open · 3/3")
     }
 
     func testAForkNamesWhatEachIsBasedOnWithoutNOfN() throws {
@@ -100,8 +98,6 @@ final class ProjectBoardStackTests: XCTestCase {
         let loneRow = try row(53, in: lone)
         XCTAssertEqual(loneRow.stack?.mergedBase?.number, 52)
         XCTAssertNil(loneRow.stack?.label)
-        XCTAssertEqual(ProjectBoard.pullRequestText(try XCTUnwrap(loneRow.pullRequest), baseBranch: "main", stack: loneRow.stack),
-                       "#53 open → stack/a")
     }
 
     func testAMergedBaseIsLookedForAmongTheThirtyMergedPullRequestsOpenedLast() throws {
@@ -143,35 +139,5 @@ final class ProjectBoardStackTests: XCTestCase {
         let result = rows(open: [pullRequest(53, "feat/x")], merged: [pullRequest(40, "main", base: "release", state: "MERGED")],
                           baseBranch: nil)
         XCTAssertEqual(result.compactMap(\.stack), [])
-    }
-
-    // MARK: - The Queue column
-
-    private func cell(_ row: ProjectBoard.Row, dryRun: Bool = false) -> ProjectBoardView.QueueCell? {
-        ProjectBoardView.queueCell(for: row, queue: ProjectBoard.QueueState(isDryRun: dryRun), baseBranch: "main")
-    }
-
-    func testAPullRequestOnAnOpenOneWaitsForIt() throws {
-        let result = rows(open: [pullRequest(52, "stack/a"), pullRequest(53, "stack/b", base: "stack/a")])
-        XCTAssertEqual(cell(try row(53, in: result))?.text, "after #52")
-        XCTAssertNil(cell(try row(53, in: result))?.button)
-        XCTAssertEqual(cell(try row(52, in: result))?.button?.title, "Add to Queue")
-    }
-
-    func testAMergedBaseOffersRetargetExceptInADryRun() throws {
-        let result = rows(open: [pullRequest(53, "stack/b", base: "stack/a", draft: true)],
-                          merged: [pullRequest(52, "stack/a", state: "MERGED")])
-        let live = try XCTUnwrap(cell(try row(53, in: result)))
-        XCTAssertEqual(live.button?.title, "Retarget to main")
-        XCTAssertEqual(live.button?.isEnabled, true)
-        XCTAssertEqual(live.action, .retarget(number: 53, base: "main"))
-        XCTAssertEqual(live.detail, "draft", "a draft can be retargeted, and still says why it can't join")
-
-        let dryRun = try XCTUnwrap(cell(try row(53, in: result), dryRun: true))
-        XCTAssertEqual(dryRun.button?.isEnabled, false)
-        XCTAssertTrue(dryRun.button?.tooltip?.hasPrefix("Dry run: ") == true)
-
-        let ready = rows(open: [pullRequest(53, "stack/b", base: "stack/a")], merged: [pullRequest(52, "stack/a", state: "MERGED")])
-        XCTAssertEqual(cell(try row(53, in: ready))?.detail, "base #52 merged")
     }
 }

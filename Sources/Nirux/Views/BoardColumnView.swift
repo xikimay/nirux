@@ -12,8 +12,12 @@ final class BoardColumnView: NSView {
         let name: String
     }
 
+    /// What a Board whose space was deleted names it.
+    static let deletedSpace = "Deleted space"
+
     struct Header: Equatable {
-        var spaceName: String
+        /// Nil once the space was deleted: the Space submenu says so.
+        var spaceName: String?
         /// `owner/name` on a Board with one repository.
         var repository: String?
         /// When the pull requests were read, or what went wrong reading
@@ -22,8 +26,6 @@ final class BoardColumnView: NSView {
         /// The Space submenu.
         var spaces: [Space] = []
         var spaceID: String
-        /// The Board's space was deleted: the submenu says so.
-        var spaceIsMissing = false
     }
 
     let header = ColumnHeaderView()
@@ -59,7 +61,7 @@ final class BoardColumnView: NSView {
     func show(header content: Header, stages stagesContent: BoardStagesView.Content) {
         if content != shownHeader {
             shownHeader = content
-            let spaceName = content.spaceIsMissing ? "Deleted space" : content.spaceName
+            let spaceName = content.spaceName ?? Self.deletedSpace
             header.context = content.repository ?? spaceName
             header.titleToolTip = "Board · \(spaceName)"
             refreshButton.toolTip = ["Refresh", content.status].compactMap { $0 }.joined(separator: " · ")
@@ -93,14 +95,14 @@ final class BoardColumnView: NSView {
     func spaceMenu() -> NSMenu {
         let menu = NSMenu(title: "Space")
         guard let content = shownHeader else { return menu }
-        if content.spaceIsMissing {
-            menu.addItem(withTitle: "Deleted space", action: nil, keyEquivalent: "").state = .on
+        if content.spaceName == nil {
+            menu.addItem(withTitle: Self.deletedSpace, action: nil, keyEquivalent: "").state = .on
         }
         for space in content.spaces {
             let item = menu.addItem(withTitle: space.name, action: #selector(spaceChosen(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = space.id
-            item.state = !content.spaceIsMissing && space.id == content.spaceID ? .on : .off
+            item.state = content.spaceName != nil && space.id == content.spaceID ? .on : .off
         }
         return menu
     }

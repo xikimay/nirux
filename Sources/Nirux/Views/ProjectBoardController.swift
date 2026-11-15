@@ -60,7 +60,7 @@ final class ProjectBoardController {
         }
 
         /// A check of an open pull request runs: the latest run of each, as
-        /// the Checks column counts them.
+        /// the Checks station counts them.
         var hasPendingChecks: Bool {
             (openPullRequests ?? []).contains { pullRequest in
                 pullRequest.isFromConfiguredRepository
@@ -556,71 +556,6 @@ final class ProjectBoardController {
         local?.folders[folder] ?? URL(fileURLWithPath: folder).standardizedFileURL.path
     }
 
-    /// A workspace's git root in the form the worktrees were listed in, to
-    /// compare with a row's worktree: git lists one under `/private/var`
-    /// where the workspace's git context says `/var`, the same folder
-    /// through the system's link. Without the disk.
-    func comparableRoot(_ root: String) -> String {
-        let folder = comparableFolder(root)
-        let unlinked = { (path: String) in path.hasPrefix("/private/") ? path.dropFirst("/private".count) : Substring(path) }
-        let key = unlinked(folder)
-        return local?.repositories.lazy.flatMap(\.worktrees).map(\.path).first { unlinked($0) == key } ?? folder
-    }
-
-    /// What the view shows, with the project's workspaces as they are now.
-    /// The shell adds each queue.
-    func content(
-        workspaces: [ProjectBoard.Workspace],
-        projects: [ProjectBoardView.Project],
-        now: Date = Date()
-    ) -> ProjectBoardView.Content {
-        let project = projects.first { $0.id == projectID }
-        let single = sections.count == 1 ? sections.first : nil
-        let singleReads = single.flatMap { reads[$0.id] }
-        var header = ProjectBoardView.Header(
-            projectName: project?.name ?? "Deleted space",
-            repository: single == nil ? nil : singleReads?.name,
-            projects: projects,
-            projectID: projectID,
-            projectIsMissing: project == nil
-        )
-        if let singleReads {
-            header.postMergeRun = Self.runStatus(singleReads, now: now)
-            if let error = Self.errorText(singleReads) {
-                header.status = error.message
-                header.statusIsError = true
-                header.errorTitle = error.title
-            }
-        }
-        if !header.statusIsError {
-            if let readAt = reads.values.compactMap(\.pullRequestsReadAt).max() {
-                header.status = "Updated \(ProjectBoard.clockTime(readAt, now: now))"
-            } else if readsPullRequests {
-                header.status = "Reading pull requests…"
-            }
-        }
-
-        let body: ProjectBoardView.Body
-        var notices: [ProjectBoardView.Notice] = []
-        var messageOffersSettings = false
-        if let message = bodyMessage(projectExists: project != nil) {
-            body = .message(message.text)
-            messageOffersSettings = message.offersSettings
-        } else {
-            notices = self.notices()
-            body = local.map { self.body(local: $0, workspaces: workspaces, now: now) } ?? .message(Self.listingWorktrees)
-        }
-        var content = ProjectBoardView.Content(
-            header: header,
-            body: body,
-            requiredChecks: single?.config?.requiredChecks ?? [],
-            baseBranch: singleReads?.baseBranch ?? single?.config?.baseBranch
-        )
-        content.notices = notices
-        if case .message = body { content.messageOffersSettings = messageOffersSettings }
-        return content
-    }
-
     /// The column's header: the space, the repository of a Board with one,
     /// and when the pull requests were read, or what went wrong reading
     /// them (Refresh's tooltip); the repository's header has the pill.
@@ -628,12 +563,11 @@ final class ProjectBoardController {
         let space = spaces.first { $0.id == projectID }
         let single = sections.count == 1 ? sections.first.flatMap { reads[$0.id] } : nil
         return BoardColumnView.Header(
-            spaceName: space?.name ?? "Deleted space",
+            spaceName: space?.name,
             repository: single?.name,
             status: single.flatMap { Self.errorText($0)?.message } ?? readStatus(now: now),
             spaces: spaces,
-            spaceID: projectID,
-            spaceIsMissing: space == nil
+            spaceID: projectID
         )
     }
 
@@ -666,45 +600,6 @@ final class ProjectBoardController {
         "No worktree and no open pull request yet. Open a workspace in a checkout of \(repository)."
     }
 
-    /// The lines under the header: what went wrong reading GitHub, in plain
-    /// words, one line per message; then why a repository has no saved
-    /// settings, with Board Settings… on that repository.
-    private func notices() -> [ProjectBoardView.Notice] {
-        let several = sections.count > 1
-        let name = { (section: BoardSections.Section) in self.displayNames[section.id] ?? section.name ?? "Repository" }
-        var errors: [(message: String, names: [String])] = []
-        for section in sections {
-            guard let reads = reads[section.id], let message = Self.lastingError(reads) else { continue }
-            if let index = errors.firstIndex(where: { $0.message == message }) {
-                errors[index].names.append(name(section))
-            } else {
-                errors.append((message, [name(section)]))
-            }
-        }
-        var notices = errors.map { error in
-            ProjectBoardView.Notice(
-                text: (several ? error.names.joined(separator: ", ") + ": " : "") + error.message, isError: true
-            )
-        }
-        let unsaved = sections.filter { repository(of: $0) == nil }
-        if let loaded, case .readOnly(let reason) = loaded.status {
-            // Board Settings can't save it: why, without the button.
-            if !unsaved.isEmpty { notices.append(ProjectBoardView.Notice(text: reason.message)) }
-        } else if several {
-            // One that shares another's repository can't be saved with it.
-            let settable = unsaved.filter { canBeSetUp($0) && setupNote($0) != nil }
-            if let first = settable.first {
-                notices.append(ProjectBoardView.Notice(
-                    text: "Not set up in Board Settings, so no merge queue: \(settable.map(name).joined(separator: ", ")).",
-                    settingsSection: first.id
-                ))
-            }
-        } else if let only = unsaved.first, let note = setupNote(only) {
-            notices.append(ProjectBoardView.Notice(text: note, settingsSection: canBeSetUp(only) ? only.id : nil))
-        }
-        return notices
-    }
-
     /// Board Settings is what would show its pull requests: not for a
     /// checkout gone, nor for the repository another section reads.
     func canBeSetUp(_ section: BoardSections.Section) -> Bool {
@@ -712,20 +607,6 @@ final class ProjectBoardController {
             return false
         }
         return sectionSharingRemote(with: section) == nil
-    }
-
-    /// What went wrong reading a section's open pull requests that the next
-    /// read won't mend, or that leaves it without any: gh missing or signed
-    /// out, or any error before the first answer. A failure after a good
-    /// read stays in its pill, as a failed Retarget or merged read does:
-    /// the rows don't move for a blip, and the line goes with the next good
-    /// read of the open ones, a minute at most.
-    private static func lastingError(_ reads: RepositoryReads) -> String? {
-        guard let error = reads.errors[.openPullRequests] else { return nil }
-        switch error {
-        case .ghMissing, .notSignedIn: return error.message
-        case .failed, .unreadable: return reads.openPullRequests == nil ? error.message : nil
-        }
     }
 
     /// The other section reading the GitHub repository this one's remote
@@ -771,7 +652,7 @@ final class ProjectBoardController {
         }
     }
 
-    /// The rows of the Board's repositories, as the table lists them.
+    /// The rows of the Board's repositories, which the stages are made of.
     enum ListedRows {
         /// A space without a repository anchor: its one repository, found
         /// by remote, as before anchors; the workspaces in another
@@ -805,41 +686,11 @@ final class ProjectBoardController {
         return .sections(bySection, others: others)
     }
 
-    private func body(local: ProjectBoard.LocalSnapshot, workspaces: [ProjectBoard.Workspace], now: Date) -> ProjectBoardView.Body {
-        let bySection: [String: [ProjectBoard.Row]], others: [ProjectBoard.Row]
-        switch listedRows(local: local, workspaces: workspaces) {
-        case .one(let rows, let repository):
-            return rows.isEmpty ? .message(Self.nothingToList(in: repository)) : .rows(rows)
-        case .sections(let rows, let rest):
-            (bySection, others) = (rows, rest)
-        }
-        if sections.count == 1, let only = sections.first {
-            return .rows((bySection[only.id] ?? []) + others)
-        }
-        return .sections(sections.map { section in
-            var content = ProjectBoardView.Section(
-                id: section.id,
-                title: displayNames[section.id] ?? section.name ?? "Repository",
-                rows: bySection[section.id] ?? [],
-                requiredChecks: section.config?.requiredChecks ?? [],
-                baseBranch: reads[section.id]?.baseBranch ?? section.config?.baseBranch
-            )
-            if let repository = reads[section.id] {
-                content.repository = repository.name
-                content.status = Self.errorText(repository).map {
-                    ColumnHeaderView.Status($0.title, tone: .error, symbol: Theme.Symbol.agentError, toolTip: $0.message)
-                } ?? Self.runStatus(repository, now: now)
-            }
-            content.note = setupNote(section)
-            return content
-        }, others: others)
-    }
-
     /// The post-merge run as a pill, while there is one to read.
     static func runStatus(_ reads: RepositoryReads, now: Date) -> ColumnHeaderView.Status? {
         guard reads.baseBranch != nil, let workflow = reads.workflow else { return nil }
         switch reads.postMergeRun {
-        case .some(let run): return ProjectBoardView.runStatus(run, workflow: workflow, now: now)
+        case .some(let run): return .postMergeRun(run, workflow: workflow, now: now)
         case nil:
             let label = (workflow as NSString).deletingPathExtension
             return reads.errors[.postMergeRun] == nil

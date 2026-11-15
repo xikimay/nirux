@@ -1,10 +1,10 @@
 import Foundation
 
-// MARK: - The Agent column
+// MARK: - What an agent does, as the merge queue and the Board's rows read it
 
 extension ProjectBoard {
-    /// What the Agent column says of one agent column, or of a row: its
-    /// most urgent agent column (docs/design/project-board.md, section 2).
+    /// What one agent column does, or a row's most urgent agent column
+    /// (docs/design/project-board.md, section 2).
     enum AgentState: Equatable, Sendable {
         /// No agent in the column (or no workspace in the row).
         case none
@@ -37,27 +37,6 @@ extension ProjectBoard {
             }
         }
 
-        var label: String {
-            switch self {
-            case .none: return "—"
-            case .idle: return "idle"
-            case .working(let duration): return duration.map { "working \($0)" } ?? "working"
-            case .waiting(let reason): return "waiting (\(reason.shortLabel))"
-            case .waitingLong(let reason, let duration): return "waiting \(duration) (\(reason.shortLabel))"
-            case .exitedMidTurn: return "exited mid-turn"
-            case .stoppedOnError(let kind, _): return kind.map { "stopped on error (\($0))" } ?? "stopped on error"
-            }
-        }
-
-        /// The dialog's or the error's details, for a tooltip.
-        var detail: String? {
-            switch self {
-            case .waiting(let reason), .waitingLong(let reason, _): return reason.detailLine
-            case .stoppedOnError(_, let resume): return resume.status
-            case .exitedMidTurn(let name): return "\(name) exited without ending its session."
-            case .none, .idle, .working: return nil
-            }
-        }
     }
 
     /// An agent column's state and where it is: Focus goes to it, Resume
