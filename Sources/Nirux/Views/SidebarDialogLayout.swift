@@ -58,7 +58,10 @@ struct SidebarDialogLayout {
     }
 
     /// Where the answers go, and how many questions only the terminal shows.
-    var hint: String {
+    var hint: String { Self.hint(more: more) }
+
+    /// The row's hint, and the inbox's for a dialog.
+    static func hint(more: Int) -> String {
         switch more {
         case 0: return "Answer in the terminal"
         case 1: return "1 more question in the terminal"

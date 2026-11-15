@@ -38,15 +38,22 @@ struct SidebarApprovalBlockRenderer {
         let buttonsY = top - height
         switch approval.display {
         case .open:
-            // macOS order, the approving action last, at the right edge.
-            let description = "\(approval.toolName): \(approval.text)"
-            let allow = SidebarActionButton.primary("Allow", label: "Allow once \(description)")
-            let allowWidth = max(allow.fittingWidth, 56)
-            allow.frame = NSRect(x: x + width - allowWidth, y: buttonsY, width: allowWidth, height: metrics.buttonHeight)
-            let deny = SidebarActionButton.secondary("Deny", label: "Deny \(description)")
-            let denyWidth = max(deny.fittingWidth, 56)
-            deny.frame = NSRect(x: allow.frame.minX - metrics.buttonGap - denyWidth, y: buttonsY, width: denyWidth, height: metrics.buttonHeight)
-            for (button, behavior) in [(deny, PermissionApproval.Behavior.deny), (allow, .allow)] {
+            // macOS order (`RequestChoices`), the approving action last, at
+            // the right edge.
+            var right = x + width
+            var placed: [(SidebarBadgeView, PermissionApproval.Behavior)] = []
+            for choice in RequestChoices.permission(approval).reversed() {
+                guard case .permission(let behavior) = choice.choice else { continue }
+                let button = choice.role == .primary
+                    ? SidebarActionButton.primary(choice.title, label: choice.accessibilityLabel)
+                    : SidebarActionButton.secondary(choice.title, label: choice.accessibilityLabel)
+                let buttonWidth = max(button.fittingWidth, 56)
+                button.frame = NSRect(x: right - buttonWidth, y: buttonsY, width: buttonWidth, height: metrics.buttonHeight)
+                right = button.frame.minX - metrics.buttonGap
+                placed.insert((button, behavior), at: 0)
+            }
+            // Read left to right: Deny, then Allow.
+            for (button, behavior) in placed {
                 views.append(button)
                 buttons[SidebarHoverTarget.approvalButtonKey(requestID: approval.requestID, behavior: behavior)] = button
                 hitAreas.append(SidebarHitArea(
@@ -57,10 +64,10 @@ struct SidebarApprovalBlockRenderer {
                     )
                 ))
             }
-        case .sending(let behavior):
-            views.append(status(behavior == .allow ? "Allowing…" : "Denying…", y: buttonsY, color: Theme.Color.textTertiary))
+        case .sending:
+            views.append(status(RequestChoices.permissionStatus(approval.display) ?? "", y: buttonsY, color: Theme.Color.textTertiary))
         case .undelivered:
-            views.append(status("Not delivered — answer in the terminal", y: buttonsY, color: Theme.Color.textSecondary))
+            views.append(status(RequestChoices.permissionStatus(approval.display) ?? "", y: buttonsY, color: Theme.Color.textSecondary))
         }
         hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
         return Result(views: views, hitAreas: hitAreas, buttons: buttons)
@@ -76,7 +83,7 @@ struct SidebarApprovalBlockRenderer {
             text.append(SidebarColumnChip.spacer(6))
         }
         // Short: the tool's name must survive a long agent name.
-        let what = approval.toolName == "Bash" ? "wants to run" : "wants \(approval.toolName)"
+        let what = RequestChoices.permissionVerb(toolName: approval.toolName)
         text.append(NSAttributedString(string: "\(agent) \(what)", attributes: [
             .font: font, .foregroundColor: Theme.Color.textSecondary
         ]))

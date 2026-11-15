@@ -139,12 +139,12 @@ struct SidebarTurnQuestionBlockRenderer {
         asked.setAccessibilityLabel("Claude asks: \(question.text)")
         views.append(asked)
 
-        var answers: [(SidebarTurnAnswer, SidebarBadgeView)] = [
-            (.reply, SidebarActionButton.secondary("Reply…", label: "Reply to: \(question.text)")),
-        ]
-        if question.isYesNo {
-            answers.append((.no, SidebarActionButton.secondary("No", label: "Answer no to: \(question.text)")))
-            answers.append((.yes, SidebarActionButton.primary("Yes", label: "Answer yes to: \(question.text)")))
+        // Their words and order: `RequestChoices`, as the inbox's.
+        let answers: [(SidebarTurnAnswer, SidebarBadgeView)] = RequestChoices.turn(question).compactMap { choice in
+            guard case .turn(let answer) = choice.choice else { return nil }
+            return (answer, choice.role == .primary
+                ? SidebarActionButton.primary(choice.title, label: choice.accessibilityLabel)
+                : SidebarActionButton.secondary(choice.title, label: choice.accessibilityLabel))
         }
         var right = x + width
         for (answer, button) in answers.reversed() {
@@ -159,8 +159,9 @@ struct SidebarTurnQuestionBlockRenderer {
             hitAreas.append(SidebarHitArea(frame: button.frame.insetBy(dx: -3, dy: -3), region: region))
         }
         // Its word starts where the question's lines do.
-        let dismiss = SidebarActionButton.quiet("Dismiss", label: "Dismiss this question without answering it")
-        dismiss.toolTip = "Take this question off the row without answering it. Claude still waits at its prompt."
+        let dismissChoice = RequestChoices.dismiss(question)
+        let dismiss = SidebarActionButton.quiet(dismissChoice.title, label: dismissChoice.accessibilityLabel)
+        dismiss.toolTip = dismissChoice.toolTip
         dismiss.frame = NSRect(
             x: x + 2 - metrics.buttonPaddingX, y: top - height, width: dismiss.fittingWidth, height: metrics.buttonHeight
         )
