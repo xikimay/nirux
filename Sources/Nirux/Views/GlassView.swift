@@ -27,6 +27,10 @@ final class GlassView: NSView {
     }
 
     let role: Role
+    /// The glass is its window's background (⌘P's panel): the frost blends
+    /// what is behind the window, and the window casts the shadow, which a
+    /// layer would have cut at the window's edge.
+    let fillsWindow: Bool
     /// Where callers put what the glass holds: above the glass, or inside
     /// macOS 26's glass, which adapts it to what shows through.
     let contentView = NSView()
@@ -56,10 +60,11 @@ final class GlassView: NSView {
     private let shadowMask = CAShapeLayer()
 
     init(
-        role: Role, level: InterfaceTransparency, cornerRadius: CGFloat,
+        role: Role, level: InterfaceTransparency, cornerRadius: CGFloat, fillsWindow: Bool = false,
         resolveLevel: @escaping @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
     ) {
         self.role = role
+        self.fillsWindow = fillsWindow
         self.level = level
         self.cornerRadius = cornerRadius
         self.resolveLevel = resolveLevel
@@ -155,7 +160,7 @@ final class GlassView: NSView {
         case .frosted:
             let frost = NSVisualEffectView(frame: bounds)
             frost.material = role == .floating ? .popover : .sidebar
-            frost.blendingMode = .withinWindow
+            frost.blendingMode = fillsWindow ? .behindWindow : .withinWindow
             frost.state = .active
             frost.wantsLayer = true
             frost.layer?.masksToBounds = true
@@ -174,6 +179,9 @@ final class GlassView: NSView {
 
     /// Whether the floating shadow shows (for the tests).
     var castsShadow: Bool { !shadowLayer.isHidden && shadowLayer.shadowOpacity > 0 }
+
+    /// Whether the frost blends what is behind the window (for the tests).
+    var blendsBehindWindow: Bool { (backingView as? NSVisualEffectView)?.blendingMode == .behindWindow }
 
     /// The view holding the keyboard: a text field rather than the field
     /// editor that edits it for the moment.
@@ -220,7 +228,7 @@ final class GlassView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        guard role == .floating, backing != .glass, bounds.width > 0, bounds.height > 0 else {
+        guard role == .floating, backing != .glass, !fillsWindow, bounds.width > 0, bounds.height > 0 else {
             shadowLayer.isHidden = true
             return
         }

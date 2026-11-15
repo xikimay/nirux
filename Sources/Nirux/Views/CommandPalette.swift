@@ -117,13 +117,33 @@ final class CommandPalette: NSObject {
     static var detectedURLsProvider: (() -> [String])?
     var detectedURLs: Set<String> = []
 
+    /// Where the palette opens.
+    enum Placement: Equatable {
+        /// Today's: over the window's middle, its bottom at 55 % of the
+        /// window's height.
+        case centered
+        /// The glass interface's (docs/design/glass-interface.md; phase 3
+        /// opens it so): unfolding from the command bar (`bar`, in screen
+        /// coordinates), on floating glass at `level`.
+        case underBar(NSRect, level: InterfaceTransparency)
+    }
+
+    static let size = NSSize(width: 520, height: 340)
+    /// Between the command bar and the palette below it.
+    static let barGap = Theme.Space.sm
+    /// Today's background, under the centred palette.
+    private static var restingBackground: NSColor { Theme.Color.base.withAlphaComponent(0.98) }
+    private(set) var placement = Placement.centered
+    /// The glass under the bar, behind the field and the rows.
+    private(set) var glass: GlassView?
+
     private var keyMonitor: Any?
     private var clickMonitor: Any?
     private var moveMonitor: Any?
     private var scrollMonitor: Any?
 
-    func show(relativeTo window: NSWindow, sections: [PaletteSection] = []) {
-        if panel == nil { createPanel() }
+    func show(relativeTo window: NSWindow, sections: [PaletteSection] = [], placement: Placement = .centered) {
+        apply(placement, in: window.frame)
         guard let panel, let searchField else { return }
 
         self.sections = sections
@@ -133,13 +153,6 @@ final class CommandPalette: NSObject {
         // URL mode: it would read the next commands typed as a URL.
         mode = .actions
         searchField.placeholderString = actionsPlaceholder
-
-        let windowFrame = window.frame
-        let panelWidth: CGFloat = 520
-        let panelHeight: CGFloat = 340
-        let xPos = windowFrame.origin.x + (windowFrame.width - panelWidth) / 2
-        let yPos = windowFrame.origin.y + windowFrame.height * 0.55
-        panel.setFrame(NSRect(x: xPos, y: yPos, width: panelWidth, height: panelHeight), display: true)
 
         searchField.stringValue = ""
         filterActions(query: "")
@@ -156,6 +169,50 @@ final class CommandPalette: NSObject {
             panel.animator().alphaValue = 1
             panel.contentView?.layer?.setAffineTransform(.identity)
         }
+    }
+
+    /// The panel's frame for `placement`, beside a window at `windowFrame`
+    /// (screen coordinates). Under the bar: centred on it, inside the window.
+    static func frame(for placement: Placement, in windowFrame: NSRect) -> NSRect {
+        switch placement {
+        case .centered:
+            return NSRect(
+                x: windowFrame.origin.x + (windowFrame.width - size.width) / 2, y: windowFrame.origin.y + windowFrame.height * 0.55,
+                width: size.width, height: size.height
+            )
+        case .underBar(let bar, _):
+            let margin = Theme.Space.sm
+            let x = min(max(bar.midX - size.width / 2, windowFrame.minX + margin), windowFrame.maxX - margin - size.width)
+            return NSRect(x: x, y: bar.minY - barGap - size.height, width: size.width, height: size.height)
+        }
+    }
+
+    /// Places and dresses the panel for `placement` (making it the first
+    /// time), without showing it.
+    func apply(_ placement: Placement, in windowFrame: NSRect) {
+        if panel == nil { createPanel() }
+        guard let panel, let background = panel.contentView else { return }
+        self.placement = placement
+        switch placement {
+        case .centered:
+            glass?.removeFromSuperview()
+            glass = nil
+            background.layer?.backgroundColor = Self.restingBackground.cgColor
+        case let .underBar(_, level):
+            let glass = self.glass ?? {
+                let glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel, fillsWindow: true)
+                glass.frame = background.bounds
+                glass.autoresizingMask = [.width, .height]
+                background.addSubview(glass, positioned: .below, relativeTo: nil)
+                self.glass = glass
+                return glass
+            }()
+            glass.level = level
+            background.layer?.backgroundColor = nil
+        }
+        panel.setFrame(Self.frame(for: placement, in: windowFrame), display: true)
+        // The window's shadow follows what it now draws.
+        panel.invalidateShadow()
     }
 
     /// Apply a prefilter to an already-visible palette without re-showing
@@ -219,7 +276,7 @@ final class CommandPalette: NSObject {
         let background = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 340))
         background.wantsLayer = true
         background.layer?.cornerRadius = 12
-        background.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.98).cgColor
+        background.layer?.backgroundColor = Self.restingBackground.cgColor
         background.layer?.borderWidth = 1
         background.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
         background.layer?.masksToBounds = true
