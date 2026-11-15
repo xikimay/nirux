@@ -144,9 +144,10 @@ final class ReviewBadgesTests: XCTestCase {
     }
 
     /// A pass runs from its own main-thread event until its column's main
-    /// turn ends (a Stop that lists a subagent at work makes it wait for a
-    /// Stop that lists none), its session ends, or (`followReviewPasses`)
-    /// its process exits: in the order events come, whatever git finds.
+    /// turn ends (a Stop that lists subagents at work makes it wait for
+    /// each until its SubagentStop or a later Stop that no longer lists it),
+    /// its session ends, or (`followReviewPasses`) its process exits: in the
+    /// order events come, whatever git finds.
     func testAPassRunsFromItsEventUntilItsColumnsTurnEnds() {
         let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
         let column = UUID(), other = UUID()
@@ -173,8 +174,9 @@ final class ReviewBadgesTests: XCTestCase {
         note([stop], other)
         XCTAssertEqual(running(), ["codeReview A"])
         // Any failed turn there ends it, as do idle and the session's end; a subagent's events end and start nothing.
-        note([event(.stopFailure, nil, "sub", nil), event(.postToolUse, ["premortem"], "sub", nil), event(.stop, nil, "sub", nil)], column)
-        XCTAssertEqual(running(), ["codeReview A"])
+        note([event(.stopFailure, nil, "sub", nil), event(.postToolUse, ["premortem"], "sub", nil), event(.stop, nil, "sub", nil),
+              event(.subagentStop, nil, "sub", nil)], column)
+        XCTAssertEqual(running(), ["codeReview A"], "a subagent stopping mid-turn ends nothing")
         for end in [event(.stopFailure, nil, nil, nil), event(.notification, nil, nil, "idle_prompt"), event(.sessionEnd, nil, nil, nil)] {
             note([typed], column)
             note([end], column)

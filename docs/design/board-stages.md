@@ -466,13 +466,16 @@ the Board reads that pass's statuses, approvals and Mission questions.
   lists it, whichever comes first, so a lost SubagentStop can't keep the
   pass running (a subagent listed later isn't its own). A
   permission asked mid-review, or a message queued meanwhile, is no end; a
-  subagent's events start and end nothing; a pass from before this launch
+  subagent's events start nothing; a pass from before this launch
   isn't running; a running pass reads running on the Board before git gave
   its run a HEAD. Known limits: a Stop hook that keeps the turn going ends
   it at that Stop; an Esc leaves it running until Claude reads idle at its
   prompt, about a minute, or until the next turn's end when a prompt
   follows; a forked Skill call that waits for its review starts the pass
-  only once done.
+  only once done; any background subagent its Stop lists counts as its own
+  (an earlier review's, an unrelated agent's), keeping it until that one is
+  done; and one killed without a SubagentStop keeps it until a later Stop
+  there no longer lists it, the session ends or Claude exits.
 - **Resume** is the sidebar's: an agent stopped on an error first, held back
   with why, else a `claude` that exited mid-turn, else an agent restored at
   launch that hasn't resumed ("Paused · Resume").
