@@ -654,24 +654,24 @@ what each click runs.
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
   refuses, the line's help says why.
-- **The keyboard** (Full Keyboard Access): Tab goes from the column through
-  Refresh, ⋯, the order switch, the Lead, then each repository's header, its
-  lines, folds, other worktrees and "Merged today" in their order, then the
-  foot's Stops, and back to Refresh (`BoardStagesView.linkKeyViews`, linked
-  again whenever the views change). A line or an entry draws the focus ring,
+- **The keyboard** (Full Keyboard Access): Tab goes from the column to the
+  order switch, the Lead, then each repository's header, its lines, folds,
+  other worktrees and "Merged today" in their order, then the foot's Stops,
+  and back to the column, which is no stop itself; Shift-Tab goes the other
+  way (`BoardStagesView.linkKeyViews`, linked again whenever the views
+  change). A line or an entry draws the focus ring,
   and the list scrolls what takes the keyboard into sight. Space or Return
   opens the task; Control-Return shows the line's menu (the Merge station
   and the link are in it), an entry's "Clean up". Each acts once, as its
   key comes up: the repeats of a key held down stay on the line, never in
   the terminal the task opens, where a Return would answer its agent
-  (`BoardStagesKeyboard.Held`). A click takes the keyboard
-  from nowhere (a terminal keeps it), as a button's click doesn't. A
+  (`BoardStagesKeyboard.Held`). A click on a line or an entry gives the
+  keyboard to the column, not to it, as a button's click does: no ring. A
   departed line is no stop, but one that had the keyboard says where its
   task went on Space; one that goes hands the keyboard to the line now in
   its place, else to the column; "+12 more" pressed hands it to the first
-  entry it showed. An entry that does nothing (its task not open here,
-  nothing to clean up) is no stop; without Full Keyboard Access, neither is
-  anything.
+  entry it showed that takes it. An entry that does nothing (its task not
+  open here) is no stop; without Full Keyboard Access, neither is anything.
 - **A hand** shows where a click does something of its own: on a station
   that acts, on a link, as far as the line is in sight. A line or an entry
   asks AppKit for its places again whenever they are no longer those it
@@ -723,6 +723,10 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 - **Reviews count by branch name.** A run recorded before Nirux kept the
   branch has none and doesn't count; a branch name reused after its pull
   request merged keeps the first one's reviews.
+- **The column's Refresh and ⋯ are no Tab stops**, as no column header's
+  button is: they leave the keyboard to the terminal in every column. The
+  Board reads again on its own, and each repository's ⋯ has Board
+  Settings…; the ⋯'s Space menu has no keyboard path.
 - **Other workspaces offer Focus only**: no agent state and no Resume, which
   the table's row showed; the sidebar shows both. Until the Board has a
   section per repository of the space, where they are lines.

@@ -81,12 +81,14 @@ enum BoardStagesClicks {
         view.keyUp(with: try key(characters, code, flags, up: true))
     }
 
-    /// Tab, as the window takes it, until a line has the keyboard: the
-    /// column's controls before it are stops only where Full Keyboard
-    /// Access is on in the system.
-    static func tabToNextLine(in window: NSWindow, file: StaticString = #filePath, line: UInt = #line) throws -> BoardStagesLineView {
+    /// Tab (Shift-Tab: `backward`), as the window takes it, until a line
+    /// has the keyboard: the controls on the way are stops only where Full
+    /// Keyboard Access is on in the system.
+    static func tabToNextLine(
+        in window: NSWindow, backward: Bool = false, file: StaticString = #filePath, line: UInt = #line
+    ) throws -> BoardStagesLineView {
         for _ in 0..<30 {
-            window.selectNextKeyView(nil)
+            if backward { window.selectPreviousKeyView(nil) } else { window.selectNextKeyView(nil) }
             if let focused = window.firstResponder as? BoardStagesLineView { return focused }
         }
         return try XCTUnwrap(nil as BoardStagesLineView?, "Tab reached no line", file: file, line: line)

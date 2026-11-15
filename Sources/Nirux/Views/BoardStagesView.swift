@@ -1266,13 +1266,16 @@ final class BoardStagesView: NSView {
     }
 
     private func unfoldMerged(section id: String) {
-        // "+12 more" had the keyboard: the first entry it showed takes it, not what comes after the merges.
+        // "+12 more" had the keyboard: the first entry it showed that takes it (one whose task is open here), not what
+        // comes after the merges.
         let merged = mergedViews[id]
         let shown = merged?.entries.filter { !$0.isHidden }.count
         let hadKeyboard = merged.map { window?.firstResponder === $0.moreButton } ?? false
         unfoldedMerged.insert(id)
         rebuild()
-        if hadKeyboard, let shown, let next = mergedViews[id]?.entries.dropFirst(shown).first { window?.makeFirstResponder(next) }
+        if hadKeyboard, let shown, let next = mergedViews[id]?.entries.dropFirst(shown).first(where: \.canBecomeKeyView) {
+            window?.makeFirstResponder(next)
+        }
     }
 
     private func rebuild() {

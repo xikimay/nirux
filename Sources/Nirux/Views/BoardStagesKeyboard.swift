@@ -14,8 +14,8 @@ enum BoardStagesKeyboard {
     static var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
     /// A line or an entry takes the keyboard from the keyboard only: a
-    /// click on it leaves the keyboard where it was (a terminal), as a
-    /// button's does.
+    /// click on it takes none, as a button's doesn't (the click gives the
+    /// keyboard to the Board's column), so it draws no ring.
     static func takesKeyboard() -> Bool {
         guard isFullAccess() else { return false }
         let pointerPresses: Set<NSEvent.EventType> = [.leftMouseDown, .rightMouseDown, .otherMouseDown]

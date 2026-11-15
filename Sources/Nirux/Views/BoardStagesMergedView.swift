@@ -361,7 +361,7 @@ final class BoardStagesMergedEntryView: NSView, NSViewToolTipOwner {
     /// Tab stops on it while Full Keyboard Access is on, where it does
     /// something: opens its task, or offers Clean up.
     override var acceptsFirstResponder: Bool {
-        (pullRequest.lineID != nil || offersCleanUp) && BoardStagesKeyboard.takesKeyboard()
+        pullRequest.lineID != nil && BoardStagesKeyboard.takesKeyboard()
     }
     override var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
     override var focusRingMaskBounds: NSRect { bounds }

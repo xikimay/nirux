@@ -180,10 +180,21 @@ final class ProjectBoardFlowTests: XCTestCase {
             BoardStagesKeyboard.isFullAccess = { true }
             defer { BoardStagesKeyboard.isFullAccess = { NSApp.isFullKeyboardAccessEnabled } }
             let window = try XCTUnwrap(board.view.window)
+            // Shift-Tab from the column, which a click on the Board gives the keyboard: the last line.
+            window.makeFirstResponder(board.view)
+            XCTAssertEqual(try BoardStagesClicks.tabToNextLine(in: window, backward: true).line.title, "login")
             window.makeFirstResponder(board.view)
             XCTAssertEqual(try BoardStagesClicks.tabToNextLine(in: window).line.title, "widgets")
             let focused = try BoardStagesClicks.tabToNextLine(in: window)
             XCTAssertEqual(focused.line.title, "login")
+            // Round the loop back to the first line: the column, where it ends, is no stop.
+            var steps = 0
+            repeat {
+                window.selectNextKeyView(nil)
+                steps += 1
+                XCTAssertFalse(window.firstResponder === board.view, "the column is no stop")
+            } while (window.firstResponder as? BoardStagesLineView)?.line.title != "widgets" && steps < 30
+            XCTAssertLessThan(steps, 30)
             try BoardStagesClicks.type(" ", 49, on: focused)
             XCTAssertEqual(shell.activeWorkspace?.title, "login")
             try select("widgets", in: shell)
