@@ -1,14 +1,14 @@
 # Board Stages
 
-> **Design record:** in progress. The Board's column shows the stages; the Board per space isn't built yet.\
-> **Differs today:** one Board per project, its sections today's Board's ([Project Board](project-board.md)), the workspaces in another repository folded under "Other workspaces".\
+> **Design record:** in progress. The Board's column shows the stages of its workspace's space; a section for each repository of the space isn't built yet.\
+> **Differs today:** its sections are today's Board's ([Project Board](project-board.md)), the workspaces in another repository folded under "Other workspaces".\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design validated by the user on 2026-11-11 (study D). The model
 (`BoardStages`: lines, units, sections), the view (`BoardStagesView`) and the
 facts read from today's Board (`BoardStages.sectionFacts`) are implemented,
-and the Board's column shows them in place of the table (section 8); the
-per-space Board follows.
+and the Board's column shows them in place of the table (section 8), for its
+workspace's space; a section for each repository of the space follows.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -693,9 +693,25 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 
 - **The header** keeps the table's: "Board", the repository of a Board with
   one (else the space), Refresh with when the pull requests were read, or
-  what went wrong reading them, under the pointer, and its ⋯ menu: Space ›,
-  Board Settings…, then the column's items. It has no pill: each
-  repository's header has its own.
+  what went wrong reading them, under the pointer, and its ⋯ menu: Board
+  Settings…, then the column's items. It has no pill: each repository's
+  header has its own.
+- **It shows its workspace's space**, with no menu to pick another. The
+  store says each time a workspace changes space
+  (`WorkspaceStore.onWorkspacesChangedSpace`), and the Boards follow
+  (`NiruxShellView.boardsFollowTheirWorkspaces`): moved, it shows that
+  space, its tasks read again, and may ask for its settings as one opened
+  there; its space deleted (its workspaces go to General), it shows General.
+  The workspace that holds it doesn't move while its space's merge queue
+  runs, as the space isn't deleted then: the Board keeps the queue's line
+  and Stop, and a toast says why, before any repository is anchored for the
+  move. A space keeps one Board: one that comes to a space that has its
+  Board closes; after a move, the space's own comes to the front, with a
+  toast naming that space; after a deletion, quietly. Alone in its
+  workspace, it leaves a shell there. Its space isn't saved: it is the
+  workspace's, which the builds that read one take without it. A Board an
+  older build saved on another space comes back on its workspace's; where
+  that space's own Board was saved too, that one stays.
 - **Drawn at each sidebar pass** while the Board is shown, with that pass's
   readings of the tasks (`NiruxShellView.SidebarPassReadings`); between two
   passes (a read landing, a click), with the last pass's, kept by the
@@ -736,7 +752,7 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
 - **The column's Refresh and ⋯ are no Tab stops**, as no column header's
   button is: they leave the keyboard to the terminal in every column. The
   Board reads again on its own, and each repository's ⋯ has Board
-  Settings…; the ⋯'s Space menu has no keyboard path.
+  Settings….
 - **Other workspaces offer Focus only**: no agent state and no Resume, which
   the table's row showed; the sidebar shows both. Until the Board has a
   section per repository of the space, where they are lines.

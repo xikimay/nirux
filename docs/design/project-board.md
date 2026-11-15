@@ -71,13 +71,12 @@ the Project view is a dedicated column type.
 - It opens from the command palette ("Open Board") or Space › Board (⌃⌘B)
   in the current workspace, usually the project's main checkout, next to the
   agent that coordinates the work.
-- It stores the id of the project it shows: at first, the space of the
-  workspace it was opened in. Moving that workspace to another space doesn't
-  change it. A menu in the header switches project. There is no "all projects"
-  view.
-- A project has at most one board. Opening a second one, or switching to a
-  project that already has one, focuses the existing board. A board whose
-  project was deleted says so and offers the menu.
+- It shows the space of its workspace, and follows that workspace to another
+  space ([Board Stages](board-stages.md), section 8). There is no menu to pick
+  another, and no "all projects" view.
+- A space has at most one board. Opening a second one focuses the existing
+  board; one whose workspace moves to a space that has its board closes, and
+  that space's comes to the front.
 - Like any column, it is on screen only while its workspace is active. A
   running queue therefore also shows in the status bar (section 3.6).
 - Persistence: `ColumnKind` gains `projectBoard`. An older nightly decodes an
@@ -169,7 +168,7 @@ Order:
   the base branch as a pill ("nightly 20:27" with a check, a cross or a running
   sign; "nightly: success 20:27, 60e0ff2" in its tooltip), or a red pill with
   what went wrong, and a Refresh button whose tooltip says when the board last
-  read GitHub. Its ⋯ menu holds the project and Board Settings…. The queue
+  read GitHub. Its ⋯ menu holds Board Settings…. The queue
   controls sit on their own line under it.
 - Left for later: Projects' brief preview and pinned URLs (section 7 there).
 
@@ -744,8 +743,9 @@ pull request.
   sheet once confirmed.
 - **The local checks keep the project's folders at Start**, plus those opened
   since: a workspace closed or moved mid-queue doesn't turn them off. A space
-  whose queue runs can't be deleted: stop it first. The board keeps its queue
-  line, and Stop, while a queue runs, even when board.json can't be read.
+  whose queue runs can't be deleted, nor can the workspace of its board move:
+  stop it first. The board keeps its queue line, and Stop, while a queue runs,
+  even when board.json can't be read.
 - **Warnings and refusals.** Besides section 4's: a post-merge run going on the
   base (the first merge waits for it), a red check that isn't required (the
   queue never merges with one), a required check that ended skipped or neutral,

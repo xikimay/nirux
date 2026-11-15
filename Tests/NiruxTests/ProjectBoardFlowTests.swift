@@ -140,7 +140,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             XCTAssertEqual(board.view.header.context, "acme/widgets")
             XCTAssertNil(board.view.header.status, "the repository's header has the pill")
-            XCTAssertEqual(BoardStagesClicks.checkedSpace(board), "Board")
+            XCTAssertEqual(board.view.header.titleToolTip, "Board · Board")
             let widgets = try BoardStagesClicks.section("widgets", in: board)
             XCTAssertEqual(widgets.detail, "acme/widgets")
             let run = try XCTUnwrap(board.view.stages.sectionHeader(section: widgets.id)?.pill.status)
@@ -558,44 +558,76 @@ final class ProjectBoardFlowTests: XCTestCase {
         }
     }
 
-    /// Switching space from the header: one that has a board brings it to
-    /// the front; another one is shown in place. A deleted space says so.
+    /// A Board shows its workspace's space: moved, it shows the new one;
+    /// moved into a space that has its Board, it closes (a shell stays where
+    /// it was alone) and that one comes to the front; its space deleted, it
+    /// goes to General with its workspace.
     @MainActor
-    func testTheProjectMenuSwitchesOrFocusesAndADeletedProjectSaysSo() throws {
+    func testABoardShowsItsWorkspacesSpace() throws {
         let client = makeClient()
         try withShell(client: client) { shell, space in
             let other = shell.workspaceStore.createProfile(named: "Gadgets")
             let third = shell.workspaceStore.createProfile(named: "Tools")
             // Configured: no Board Settings sheet opens by itself.
-            try writeConfig(for: space, workflow: "nightly.yml")
-            try writeConfig(for: other, workflow: "nightly.yml")
+            for configured in [space, other, third] { try writeConfig(for: configured, workflow: "nightly.yml") }
             shell.addWorkspace(title: "gadgets", cwd: root, profileID: other.id)
             try runPaletteAction("Open Board", in: shell)
-            let gadgetsBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: other.id))
-
+            let gadgets = try XCTUnwrap(shell.projectBoardLocation(projectID: other.id))
             shell.addWorkspace(title: "widgets", cwd: root, profileID: space.id)
             try runPaletteAction("Open Board", in: shell)
-            let widgetsBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id))
-            XCTAssertEqual(shell.projectBoardLocations.count, 2)
+            let widgets = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id))
+            XCTAssertFalse(widgets.board.view.header.currentMenu().items.contains { $0.title == "Space" }, "no space to pick")
 
-            widgetsBoard.board.view.chooseSpace(id: other.id)
-            XCTAssertTrue(shell.activeWorkspace === gadgetsBoard.workspace, "that space's board comes to the front")
-            XCTAssertEqual(widgetsBoard.board.projectID, space.id)
+            // To Tools, which has no Board: the Board shows Tools, its tasks.
+            shell.addWorkspace(title: "tools task", cwd: root, profileID: third.id)
+            let toolsTask = try XCTUnwrap(shell.workspaces.first { $0.title == "tools task" })
+            try select("widgets", in: shell)
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [widgets.workspace.id])
+            shell.moveWorkspaceToSpace(workspaceID: widgets.workspace.id, profileID: third.id)
+            XCTAssertEqual(widgets.board.projectID, third.id)
+            XCTAssertEqual(widgets.board.stagesReadings.map { Set($0.keys) }, [toolsTask.id, widgets.workspace.id])
+            XCTAssertEqual(widgets.board.view.stages.content?.header.name, "Tools")
+            XCTAssertEqual(widgets.board.view.header.titleToolTip, "Board · Tools")
 
-            XCTAssertNotNil(widgetsBoard.board.stagesReadings, "read at a sidebar pass")
-            widgetsBoard.board.view.chooseSpace(id: third.id)
-            XCTAssertEqual(widgetsBoard.board.projectID, third.id)
-            XCTAssertNil(widgetsBoard.board.stagesReadings, "the other space's tasks: read again")
-            XCTAssertEqual(BoardStagesClicks.checkedSpace(widgetsBoard.board), "Tools")
-            XCTAssertEqual(widgetsBoard.board.view.stages.content?.header.name, "Tools", "the stages' header too")
+            // To Gadgets, which has its Board: this one closes, that one comes to the front.
+            shell.moveWorkspaceToSpace(workspaceID: widgets.workspace.id, profileID: other.id)
+            XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [other.id])
+            XCTAssertFalse(widgets.workspace.columns.contains(where: \.isProjectBoard))
+            XCTAssertFalse(widgets.workspace.columns.isEmpty)
+            XCTAssertTrue(shell.activeWorkspace === gadgets.workspace)
+            XCTAssertEqual(shell.toast?.message, "Gadgets has its Board already")
 
-            _ = shell.workspaceStore.deleteProfile(id: third.id)
-            shell.updateSidebar()
-            shell.renderProjectBoard(widgetsBoard.board)
-            XCTAssertEqual(BoardStagesClicks.checkedSpace(widgetsBoard.board), "Deleted space")
-            let message = try XCTUnwrap(widgetsBoard.board.view.stages.content?.message, "no message")
-            XCTAssertTrue(message.text.contains("deleted"), message.text)
-            XCTAssertEqual(widgetsBoard.board.view.stages.content?.header.name, "Deleted space")
+            // A Board alone in its workspace leaves a shell there.
+            shell.addWorkspace(title: "solo", cwd: root, profileID: third.id)
+            try runPaletteAction("Open Board", in: shell)
+            let solo = try XCTUnwrap(shell.projectBoardLocation(projectID: third.id))
+            let shellColumn = try XCTUnwrap(solo.workspace.columns.firstIndex { !$0.isProjectBoard })
+            solo.workspace.closeColumn(at: shellColumn)
+            XCTAssertEqual(solo.workspace.columns.count, 1)
+            shell.moveWorkspaceToSpace(workspaceID: solo.workspace.id, profileID: other.id)
+            XCTAssertEqual(solo.workspace.columns.count, 1)
+            XCTAssertNotNil(solo.workspace.columns.first?.pty, "a shell in its folder")
+            XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [other.id])
+
+            // Gadgets deleted: its workspaces go to General, and its Board shows General.
+            shell.deleteSpace(profileID: other.id)
+            XCTAssertEqual(gadgets.board.projectID, WorkspaceProfile.defaultID)
+
+            // Another space deleted from Space Settings, General on screen: its Board closes quietly, the user stays.
+            let extra = shell.workspaceStore.createProfile(named: "Extra")
+            try writeConfig(for: extra, workflow: "nightly.yml")
+            shell.addWorkspace(title: "extra", cwd: root, profileID: extra.id)
+            try runPaletteAction("Open Board", in: shell)
+            XCTAssertNotNil(shell.projectBoardLocation(projectID: extra.id))
+            try select("gadgets", in: shell)
+            shell.toast?.removeFromSuperview()
+            shell.toast = nil
+            shell.deleteSpace(profileID: extra.id)
+            XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [WorkspaceProfile.defaultID])
+            XCTAssertEqual(shell.activeWorkspace?.title, "gadgets")
+            XCTAssertNil(shell.toast, "no toast for a deletion")
+            let general = try XCTUnwrap(shell.profiles.first { $0.id == WorkspaceProfile.defaultID }?.name)
+            XCTAssertEqual(gadgets.board.view.header.titleToolTip, "Board · \(general)")
         }
     }
 
@@ -617,18 +649,23 @@ final class ProjectBoardFlowTests: XCTestCase {
         var saved = try XCTUnwrap(state)
         let index = try XCTUnwrap(saved.workspaces.firstIndex { $0.title == "widgets" })
         let column = try XCTUnwrap(saved.workspaces[index].columns.first { $0.columnType == .projectBoard })
-        XCTAssertEqual(column.boardProjectID, spaceID)
+        XCTAssertNil(column.boardProjectID, "its workspace's space, which the builds that read one take without it")
         XCTAssertEqual(column.cwd, root, "an older build opens a terminal in the workspace's folder")
-        // A hand-edited state with a second board for the project.
-        saved.workspaces[index].columns.append(column)
+        // An older build's state: a Board switched to another space, then the space's own Board after it.
+        var own = column
+        own.boardProjectID = spaceID
+        saved.workspaces[index].columns.append(own)
+        let first = try XCTUnwrap(saved.workspaces[index].columns.firstIndex { $0.columnType == .projectBoard })
+        saved.workspaces[index].columns[first].boardProjectID = "another-space"
 
         try withShell(client: client, restoring: saved) { shell, _ in
             XCTAssertEqual(shell.projectBoardLocations.count, 1)
             let workspace = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
             XCTAssertEqual(workspace.columns.filter(\.isProjectBoard).count, 1)
-            XCTAssertEqual(workspace.columns.count, 3, "the second board came back as a terminal")
-            XCTAssertNotNil(workspace.columns.last?.pty)
-            XCTAssertEqual(shell.projectBoardLocation(projectID: spaceID)?.board.projectID, spaceID)
+            XCTAssertEqual(workspace.columns.count, 3)
+            XCTAssertEqual(workspace.columns.last?.isProjectBoard, true, "the space's own Board stays")
+            XCTAssertNotNil(workspace.columns[1].pty, "the switched one came back as a terminal")
+            XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [spaceID], "its workspace's space")
         }
     }
 

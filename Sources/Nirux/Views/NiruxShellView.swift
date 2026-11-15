@@ -252,6 +252,8 @@ final class NiruxShellView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
+        // A Board shows its workspace's space, every way a workspace changes space.
+        workspaceStore.onWorkspacesChangedSpace = { [weak self] change in self?.boardsFollowTheirWorkspaces(change) }
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.canvas.cgColor
         divider.boxType = .separator

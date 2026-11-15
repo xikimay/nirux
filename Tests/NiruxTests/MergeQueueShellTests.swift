@@ -273,6 +273,43 @@ final class MergeQueueShellTests: XCTestCase {
         queue.stop()
     }
 
+    /// Nor does the workspace that holds its Board move: the Board would
+    /// follow it, and leave the queue's line and Stop to the status bar.
+    @MainActor
+    func testTheWorkspaceOfTheBoardOfARunningQueueStays() throws {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        let space = shell.workspaceStore.createProfile(named: "Widgets")
+        let other = shell.workspaceStore.createProfile(named: "Gadgets")
+        shell.addWorkspace(title: "widgets", cwd: root.path, profileID: space.id)
+        shell.addWorkspace(title: "notes", cwd: root.path, profileID: space.id)
+        let workspace = try XCTUnwrap(shell.workspaces.first { $0.title == "widgets" })
+        let notes = try XCTUnwrap(shell.workspaces.first { $0.title == "notes" })
+        // A Board not reloaded yet: it reads nothing until it follows its workspace.
+        let board = shell.makeProjectBoard(projectID: space.id, offersSettings: false)
+        workspace.addProjectBoardColumn(board)
+        let queue = start(shell, projectID: space.id)
+
+        shell.moveWorkspaceToSpace(workspaceID: workspace.id, profileID: other.id)
+        XCTAssertEqual(workspace.profileID, space.id, "a toast says why (this shell has no window to show it)")
+        XCTAssertNotNil(shell.moveRefusal(workspaceID: workspace.id, profileID: other.id))
+        XCTAssertNil(shell.moveRefusal(workspaceID: workspace.id, profileID: space.id), "a move that would do nothing says nothing")
+        // Anchoring a repository there while moving the workspace: neither.
+        let anchor = SpaceAnchor(kind: .gitRepository(commonDir: root.appendingPathComponent("gadgets/.git").path), name: "gadgets")
+        shell.addAnchor(anchor, toSpace: other.id, moving: workspace.id)
+        XCTAssertEqual(shell.profiles.first { $0.id == other.id }?.anchors, [], "not anchored where the workspace can't go")
+        shell.moveWorkspaceToSpace(workspaceID: notes.id, profileID: other.id)
+        XCTAssertEqual(notes.profileID, other.id, "one without the Board moves")
+        queue.stop()
+        shell.moveWorkspaceToSpace(workspaceID: workspace.id, profileID: other.id)
+        XCTAssertEqual(workspace.profileID, other.id, "stopped: it moves, its Board with it")
+        XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [other.id])
+        // It reads the new space now (let that read land within the test), and asks for its settings, as a Board
+        // opened there.
+        waitUntil("Gadgets' board.json is read") { board.loaded != nil }
+        XCTAssertNotNil(shell.spaceSettings)
+        shell.spaceSettings?.close()
+    }
+
     // MARK: - Keep-awake
 
     @MainActor

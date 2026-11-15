@@ -785,8 +785,9 @@ struct PersistedColumn: Codable {
     var claudeSessionIsUnprompted: Bool?
     /// Stable hook-routing identity (NIRUX_AGENT_UUID) for terminal columns.
     var agentUUID: String?
-    /// The project (space id) a Project Board column shows. An older build
-    /// ignores it and restores the column as a terminal in `cwd`.
+    /// The space a Board column shows: its workspace's, written for the
+    /// builds that read it (a Board could show another space then). A build
+    /// older still restores the column as a terminal in `cwd`.
     var boardProjectID: String?
     /// The branch a Branch Review column reviews, in the worktree at `cwd`.
     /// An older build restores the column as a terminal there.
