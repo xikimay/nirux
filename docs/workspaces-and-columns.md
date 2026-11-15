@@ -57,7 +57,7 @@ A browser column keeps its URL history, downloads files to `~/Downloads`, and op
 - `Option+Cmd+F`, Search Everywhere, finds text in the scrollback of every terminal, in every workspace and space, then in the transcripts of your Claude sessions. Picking a terminal match opens that terminal's find bar on it. Picking a transcript match resumes the session or goes to its column.
 - `Shift+Cmd+F` searches the files of the current workspace.
 
-The command bar sits at the top of the window, level with its buttons. It shows the space (click for the space menu), the task on screen and where it stands (click for the task's menu), the search (`Cmd+P`, which opens under the bar), and how many agents wait for you in every space (click or `Cmd+J` to go to the next one). New is in the sidebar and `Cmd+N`, the [Board](pull-requests.md#the-board) is `Ctrl+Cmd+B`, in the View menu and in the command palette.
+The command bar sits at the top of the window, level with its buttons. It shows the space (click for the space menu), the task on screen and where it stands (click for the task's menu), the search (`Cmd+P`, which opens under the bar), and how many agents wait for you in every space (click or `Cmd+J` to go to the next one). New is in the sidebar and `Cmd+N` (and a click on the task part when nothing is open), the [Board](pull-requests.md#the-board) is `Ctrl+Cmd+B`, in the Space menu and in the command palette.
 
 ## After a restart
 

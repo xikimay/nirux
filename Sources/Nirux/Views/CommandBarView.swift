@@ -3,8 +3,7 @@ import AppKit
 /// The glass interface's command bar (docs/design/glass-interface.md): one
 /// capsule floating at the top of the window with the space, the current
 /// task and its state, ⌘P, and how many agents wait for the user (⌘J).
-/// Built, not shown yet: phase 3 puts it in the window and wires its
-/// actions.
+/// The window's toolbar holds it (`CommandBarToolbar`, step 3.1).
 final class CommandBarView: NSView {
     /// What the bar says, read from the shell by its caller.
     struct Content: Equatable {
@@ -15,7 +14,7 @@ final class CommandBarView: NSView {
         var taskIcon: StateIcon?
         /// Where it stands, after its title: "working 12m".
         var taskDetail: String?
-        /// Agents waiting for the user, across the space.
+        /// Agents waiting for the user, in every space (what ⌘J reaches).
         var waitingCount: Int
     }
 
@@ -119,9 +118,13 @@ final class CommandBarView: NSView {
             host.addSubview(button)
         }
         searchButton.setAccessibilityLabel("Search, Command P")
-        // A press on it while ⌘P shows closes the palette, as the title
-        // bar's Search does (`CommandPalette.searchButtonIDs`).
+        // A press on it while ⌘P shows closes the palette instead of opening
+        // it again (`CommandPalette.searchButtonIDs`).
         searchButton.identifier = Self.searchButtonID
+        spaceButton.toolTip = "Spaces"
+        taskButton.toolTip = "The task's menu"
+        searchButton.toolTip = "Search (⌘P)"
+        waitingButton.toolTip = "Next agent waiting for you (⌘J)"
         // Before the first content: no state to show, words to say.
         taskIcon.isHidden = true
         spaceButton.setAccessibilityLabel("Space")

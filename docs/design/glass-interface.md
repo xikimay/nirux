@@ -100,9 +100,13 @@ centred item of an empty unified toolbar: the title bar grows from 32 to
 side drags the window (the segments' buttons don't), and the toolbar stays
 in full screen. The space segment opens the space menu, the task segment the
 task's menu (its row's ⋯), the search ⌘P under the bar, and the count goes to
-the next agent waiting (⌘J) until 3.3 brings the inbox. The count is every
-space's agents waiting for the user (amber), not the failed or exited ones
-⌘J also visits. On macOS 26 the bar's toolbar item asks for no glass of the
+the next agent waiting (⌘J) until 3.3 brings the inbox; with nothing open,
+the task segment opens the New sheet. The count is what ⌘J reaches, in every
+space, that waits for the user's answer (amber): not the agents stopped on an
+error or exited, which ⌘J also visits, nor the column on screen, which it
+never goes to. The task's detail is its row's status as the row says it
+("Working 12m", the turn's time only while it works). In full screen AppKit
+moves the toolbar into a window of its own, which ⌘P's placement accepts. On macOS 26 the bar's toolbar item asks for no glass of the
 system's (not bordered, the plain style): the bar draws its own. The usage
 limits and the cup stay at the toolbar's right end. The title bar's New,
 Board and Search buttons went: New is in the sidebar and ⌘N, the Board comes

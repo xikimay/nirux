@@ -118,6 +118,25 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         app.run()
     }
 
+    /// The main window as Nirux configures it, before its shell and its
+    /// toolbar (`NiruxShellView.installCommandBar`); the tests build theirs
+    /// with it.
+    static func makeMainWindow(contentRect: NSRect) -> NSWindow {
+        let window = NSWindow(
+            contentRect: contentRect,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = false
+        window.backgroundColor = Theme.Color.canvas
+        window.minSize = NSSize(width: 600, height: 400)
+        window.title = "Nirux"
+        window.appearance = Theme.appearance
+        return window
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MergeQueue.checkSignatureAtLaunch()
         if ProcessInfo.processInfo.environment["NIRUX_TERM_DEBUG"] != nil {
@@ -129,18 +148,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         setupMenus()
 
         let rect = Self.initialMainWindowFrame()
-        let window = NSWindow(
-            contentRect: rect,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered, defer: false
-        )
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = false
-        window.backgroundColor = Theme.Color.canvas
-        window.minSize = NSSize(width: 600, height: 400)
-        window.title = "Nirux"
-        window.appearance = Theme.appearance
+        let window = Self.makeMainWindow(contentRect: rect)
         // Its close button quits Nirux: a running merge queue asks first.
         window.delegate = self
 

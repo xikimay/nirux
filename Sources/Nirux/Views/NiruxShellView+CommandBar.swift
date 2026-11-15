@@ -27,8 +27,9 @@ extension NiruxShellView {
 
     /// What the bar shows: the space's name and colour; the task's title,
     /// its row's state as an icon (the station waits for a follow-up: an
-    /// empty ring) and its status ("working 12m": the turn's time only while
-    /// it works); and how many agents wait for the user.
+    /// empty ring) and its status as the row says it ("Working 12m": the
+    /// turn's time only while it works); and how many agents wait for the
+    /// user.
     static func commandBarContent(space: WorkspaceProfile, task: WorkspaceInfo?, waitingCount: Int) -> CommandBarView.Content {
         var content = CommandBarView.Content(
             spaceName: space.name, spaceColor: NSColor.niruxColor(hex: space.colorHex) ?? Theme.Color.accent,
@@ -37,14 +38,20 @@ extension NiruxShellView {
         guard let task else { return content }
         let summary = task.rowSummary
         let column = task.columns.first { $0.index == summary.focusColumn ?? task.focusedColumn }
-        let reason = summary.mark == .needsYou ? StateIcon.Reason(column?.attentionReason) : nil
         content.taskTitle = task.title
-        content.taskIcon = StateIcon(mark: summary.mark, reason: reason)
+        content.taskIcon = StateIcon(mark: summary.mark, reason: summary.mark == .needsYou ? column.map(Self.waitReason) : nil)
         var detail = summary.status.text
-        if let first = detail.first { detail = first.lowercased() + detail.dropFirst() }
         if case .turn(let time)? = summary.trailing { detail += " \(time)" }
         content.taskDetail = detail
         return content
+    }
+
+    /// What a waiting column waits on, for its icon: a permission the row
+    /// offers, else the dialog on screen (focusing the column clears its
+    /// attention, not the dialog), else its attention's reason.
+    static func waitReason(of column: ColumnInfo) -> StateIcon.Reason {
+        if column.permissionApproval != nil { return .command }
+        return StateIcon.Reason(column.openDialog ?? column.attentionReason) ?? .question
     }
 
     /// The space menu, as the sidebar's picker has it, under the bar's space
@@ -54,9 +61,14 @@ extension NiruxShellView {
         popUpUnder(bar.spaceButton, sidebar.spacePickerMenu())
     }
 
-    /// The task's menu, as its row's ⋯ has it, under the bar's task segment.
+    /// The task's menu, as its row's ⋯ has it, under the bar's task segment;
+    /// with nothing open, the New sheet.
     private func showTaskMenuFromCommandBar() {
-        guard let bar = commandBarToolbar?.bar, activeWorkspace != nil else { return }
+        guard let bar = commandBarToolbar?.bar else { return }
+        guard activeWorkspace != nil else {
+            _ = showNewPanel()
+            return
+        }
         popUpUnder(bar.taskButton, sidebar.workspaceActionMenu(workspaceIndex: activeWSIndex, columnIndex: nil))
     }
 

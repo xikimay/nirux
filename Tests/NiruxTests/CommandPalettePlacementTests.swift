@@ -159,6 +159,17 @@ final class CommandPalettePlacementTests: XCTestCase {
         bar.frame.origin.x = 5000
         palette.apply(.underBar(bar, level: .glass), relativeTo: window)
         opensCentred("a bar outside its window")
+        bar.frame.origin.x = 300
+        let child = NSWindow(contentRect: windowFrame, styleMask: .borderless, backing: .buffered, defer: true)
+        child.isReleasedWhenClosed = false
+        defer { child.close() }
+        child.setFrame(windowFrame, display: false)
+        bar.removeFromSuperview()
+        child.contentView?.addSubview(bar)
+        window.addChildWindow(child, ordered: .above)
+        palette.apply(.underBar(bar, level: .glass), relativeTo: window)
+        XCTAssertFalse(glass.isHidden, "a bar in a window of the host's own: under it")
+        window.removeChildWindow(child)
         XCTAssertFalse(panel.isVisible)
     }
 }

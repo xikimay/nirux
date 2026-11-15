@@ -28,15 +28,16 @@ final class CommandBarContentTests: XCTestCase {
     }
 
     /// The space by name and colour; the task's title, its row's state as
-    /// an icon (no station yet: an empty ring) and its status, with the
-    /// turn's time only while it works; the count as given.
+    /// an icon (no station yet: an empty ring) and its status as the row
+    /// says it, with the turn's time only while it works; the count as
+    /// given.
     func testItSaysWhatTheRowSays() {
         let working = NiruxShellView.commandBarContent(space: space, task: task([column(0, .working, elapsed: 720)]), waitingCount: 2)
         XCTAssertEqual(working.spaceName, "Acme")
         XCTAssertEqual(working.spaceColor, NSColor.niruxColor(hex: "#9ECE6A"))
         XCTAssertEqual(working.taskTitle, "Fix checkout rounding")
         XCTAssertEqual(working.taskIcon, StateIcon(.working))
-        XCTAssertEqual(working.taskDetail, "working 12m")
+        XCTAssertEqual(working.taskDetail, "Working 12m")
         XCTAssertEqual(working.waitingCount, 2)
 
         let asks = NiruxShellView.commandBarContent(
@@ -44,9 +45,20 @@ final class CommandBarContentTests: XCTestCase {
             waitingCount: 1
         )
         XCTAssertEqual(asks.taskIcon, StateIcon(.needsYou(.command)), "the waiting column's reason, not the focused one's")
-        XCTAssertEqual(asks.taskDetail, "needs you · Bash: npm run migrate", "the row's words, no time: it waits")
+        XCTAssertEqual(asks.taskDetail, "Needs you · Bash: npm run migrate", "the row's words, no time: it waits")
         let question = NiruxShellView.commandBarContent(space: space, task: task([column(0, .needsAttention, reason: .question("One date or a range?"))]), waitingCount: 1)
         XCTAssertEqual(question.taskIcon, StateIcon(.needsYou(.question)))
+        // Focused, the column's attention is cleared, not its dialog; a
+        // permission the row offers is a command whatever the attention says.
+        var dialog = column(0, .idle)
+        dialog.openDialog = .permission(tool: "Bash", summary: "git push")
+        XCTAssertEqual(NiruxShellView.waitReason(of: dialog), .command)
+        var offered = column(0, .idle)
+        var request = AgentPermissionRequest(toolName: "Bash", summary: "git push", key: "k", agentID: nil, sessionID: "s", requestedAt: 0)
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: "git push")
+        offered.permissionApproval = SidebarPermissionApproval(request, now: 1)
+        XCTAssertEqual(NiruxShellView.waitReason(of: offered), .command)
+        XCTAssertEqual(NiruxShellView.waitReason(of: column(0, .needsAttention, reason: .question("?"))), .question)
         let failed = NiruxShellView.commandBarContent(space: space, task: task([column(0, .needsAttention, reason: .apiError(kind: nil, detail: nil))]), waitingCount: 0)
         XCTAssertEqual(failed.taskIcon, StateIcon(.error))
     }

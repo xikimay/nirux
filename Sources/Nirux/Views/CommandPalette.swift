@@ -246,12 +246,20 @@ final class CommandPalette: NSObject {
     /// `host`, its window not showing (`windowShows`), hidden, transparent,
     /// clipped away, or outside its window.
     static func barOnScreen(_ bar: NSView, in host: NSWindow, windowShows: (NSWindow) -> Bool) -> NSRect? {
-        guard let window = bar.window, window === host, windowShows(window), window.alphaValue > 0,
+        guard let window = bar.window, window === host || window.parent === host || isFullScreenToolbar(window, of: host),
+              windowShows(window), window.alphaValue > 0,
               !bar.isHiddenOrHasHiddenAncestor, !isClippedAway(bar),
               sequence(first: bar, next: \.superview).allSatisfy({ $0.alphaValue > 0 }) else { return nil }
         let rect = window.convertToScreen(bar.convert(bar.bounds, to: nil))
         guard window.frame.intersects(rect) else { return nil }
         return rect
+    }
+
+    /// In full screen AppKit moves a window's toolbar into a window of its
+    /// own on the same screen: the bar there belongs to `host` all the same.
+    static func isFullScreenToolbar(_ window: NSWindow, of host: NSWindow) -> Bool {
+        host.styleMask.contains(.fullScreen) && window !== host && window.screen === host.screen
+            && String(describing: type(of: window)).contains("FullScreen")
     }
 
     /// Nothing of `view` left inside an ancestor that clips (a scroll view's
