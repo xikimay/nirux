@@ -56,3 +56,7 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the flake gate of a new UI test class.
+      - name: Repeat BoardStagesContentFlowTests
+        run: scripts/repeat-class.sh NiruxTests.BoardStagesContentFlowTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.ProjectBoardFlowTests
