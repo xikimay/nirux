@@ -246,6 +246,20 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertFalse(relative.startedFolderTask)
     }
 
+    /// The Board's order is saved only once it isn't the sidebar's; one
+    /// this build doesn't know reads as the sidebar's.
+    func testTheBoardOrderIsSavedAndReadTolerantly() throws {
+        let encoded = { (settings: PersistedSettings) in try XCTUnwrap(String(data: JSONEncoder().encode(settings), encoding: .utf8)) }
+        XCTAssertFalse(try encoded(PersistedSettings()).contains("boardOrder"))
+        var settings = PersistedSettings()
+        settings.boardOrder = .progress
+        XCTAssertTrue(try encoded(settings).contains(#""boardOrder":"progress""#))
+        XCTAssertEqual(try JSONDecoder().decode(PersistedSettings.self, from: JSONEncoder().encode(settings)).boardOrder, .progress)
+        for json in [#"{}"#, #"{ "boardOrder": "byAge" }"#, #"{ "boardOrder": 3 }"#] {
+            XCTAssertEqual(try JSONDecoder().decode(PersistedSettings.self, from: Data(json.utf8)).boardOrder, .sidebar, json)
+        }
+    }
+
     func testUnknownWorkspacePhaseSurvivesReencoding() throws {
         let json = Data("""
         {

@@ -14,7 +14,7 @@ extension NiruxShellView {
     /// rows the sidebar just built (`sidebarInfos`, the space on screen's)
     /// are taken as they are. `comparable` gives a git root the rows' form
     /// of a path: the Board's own, which knows its paths without the disk
-    /// (`ProjectBoardController.comparableFolder`). The Lead is
+    /// (`ProjectBoardController.comparableRoot`). The Lead is
     /// read too: the space's header says it.
     func boardReadings(
         ofSpace spaceID: String,

@@ -435,6 +435,9 @@ struct PersistedSettings: Codable {
     /// A task without a repository started once: the ⌘N sheet no longer
     /// says that Claude Code asks to trust each new folder.
     var startedFolderTask: Bool = false
+    /// The order of the Board's lines, the Board's switch's. Missing, or
+    /// one this build doesn't know, reads as the sidebar's.
+    var boardOrder = BoardStages.Order.sidebar
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
@@ -477,6 +480,7 @@ struct PersistedSettings: Codable {
         case explainEffort
         case tasksFolder
         case startedFolderTask
+        case boardOrder
         case claudeBypassPermissions // legacy
     }
 
@@ -523,6 +527,8 @@ struct PersistedSettings: Codable {
             $0.hasPrefix("/") ? $0 : nil
         }
         startedFolderTask = (try? container.decodeIfPresent(Bool.self, forKey: .startedFolderTask)) ?? false
+        boardOrder = (try? container.decodeIfPresent(String.self, forKey: .boardOrder)).flatMap { $0 }
+            .flatMap(BoardStages.Order.init(rawValue:)) ?? .sidebar
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -556,6 +562,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(explainEffort, forKey: .explainEffort)
         try container.encodeIfPresent(tasksFolder, forKey: .tasksFolder)
         if startedFolderTask { try container.encode(true, forKey: .startedFolderTask) }
+        if boardOrder != .sidebar { try container.encode(boardOrder.rawValue, forKey: .boardOrder) }
     }
 
     /// What applies: the saved settings, else the defaults (nothing saved

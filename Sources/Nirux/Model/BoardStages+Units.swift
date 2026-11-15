@@ -89,6 +89,9 @@ extension BoardStages {
         var merged: [MergedFacts] = []
         /// The Lead's first, then by title.
         var otherWorktrees: [OtherWorktree] = []
+        /// The pull requests known merged: GitHub's lists say so, or only a
+        /// task's line knows it (`BoardStages.nextStartList`).
+        var knownMerged: Set<Int> = []
     }
 
     enum Order: String, Sendable {

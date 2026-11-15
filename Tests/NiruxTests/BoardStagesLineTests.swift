@@ -246,6 +246,10 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertNil(line(folder).rail)
         XCTAssertEqual(line(folder).pullRequest, "")
         XCTAssertEqual(line(folder).phrase.text, "No activity yet")
+        XCTAssertTrue(line(folder).hasTask, "a task's line")
+        var withoutTask = facts(pullRequest(52))
+        withoutTask.hasTask = false
+        XCTAssertFalse(line(withoutTask).hasTask, "a pull request's without a task")
     }
 
     // MARK: - State and phrase

@@ -1,13 +1,14 @@
 # Board Stages
 
-> **Design record:** in progress. The model, the view and what fills them are in the app; the Board's column doesn't show them yet.\
-> **Differs today:** the Board is still the table of [Project Board](project-board.md), one per project.\
+> **Design record:** in progress. The Board's column shows the stages; the Board per space isn't built yet.\
+> **Differs today:** one Board per project, its sections today's Board's ([Project Board](project-board.md)), the workspaces in another repository folded under "Other workspaces".\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design validated by the user on 2026-11-11 (study D). The model
 (`BoardStages`: lines, units, sections), the view (`BoardStagesView`) and the
-facts read from today's Board (`BoardStages.sectionFacts`) are implemented;
-the Board's column still shows the table, and the per-space Board follows.
+facts read from today's Board (`BoardStages.sectionFacts`) are implemented,
+and the Board's column shows them in place of the table (section 8); the
+per-space Board follows.
 
 The Board was a table built for the merge queue: one row per branch, with
 Agent, PR, Checks and Queue columns. It didn't say where a task stands, nor
@@ -167,10 +168,13 @@ progress; a pull request lands and leaves the list; a turn, a check, the
 sidebar move others):
 
 - a line still there stays where it was, in its new state;
-- a line gone stays there too, faded and inert (no click, a press already
-  under way included, no station, no link, no hand, no menu, nothing for
-  VoiceOver), so that nothing below it moves up; a repository gone leaves its
-  lines so, under a header that does nothing (no queue, no Start, no menu);
+- a line gone stays there too, faded, offering nothing (no station, no link,
+  no hand, no menu, nothing for VoiceOver, a press already under way
+  included), so that nothing below it moves up; a click on a task's says
+  where it went, as the table's Focus did: its workspace, focused where it
+  is now, else "That workspace was closed"; a pull request's without a task
+  says nothing. A repository gone leaves its lines so, under a header that
+  does nothing (no queue, no Start, no menu);
 - a running queue's line at the Board's foot that ends stays there too,
   faded, without Stop: the list above would grow and, scrolled to its end,
   move; a queue that starts waits for its line, as its header says it runs;
@@ -239,7 +243,7 @@ clicked. The sizes are the mockup's.
   since the header isn't held, a Lead that comes or grows under the pointer,
   or another space's, acts only once the pointer moves, even one still
   aiming (nothing else then waits: the list is held). A press that ends once
-  the Lead went does nothing (`onLead` has no owner yet).
+  the Lead went does nothing.
   The order switch shows the content's order: it moves once the owner shows
   the order asked.
 - **A section per repository** scrolls below: its name, `owner/name`, its
@@ -486,14 +490,17 @@ space (`NiruxShellView.stagesInputs`):
 
 - **Sections**: one per repository of today's Board, from the table's own
   rows (`listedRows`); a space without an anchor titles its repository by
-  its name ("widgets"), `owner/name` beside it. Each header's pill says what
-  went wrong reading it; else, without saved settings, the table's sentence
-  under the pointer and a word for it: "No settings" where Board Settings
-  can set it up, "Read-only" when board.json can't be saved, "Not read"
-  otherwise (its checkout gone, another section reading its repository);
-  else its post-merge run. Its queue says Start… · N, N the next Start's
-  list without the pull requests known merged (by the queue, the merged
-  list, a task's line), listed on the Board or not (not read yet, closed);
+  its name ("widgets"), `owner/name` beside it; one not read yet is named as
+  the table names it. Each header's pill says what went wrong reading it;
+  else, without saved settings, the table's sentence under the pointer and a
+  word for it: "No settings" where Board Settings can set it up, "Invalid
+  settings" where they name no valid GitHub repository, "Read-only" when
+  board.json can't be saved, "Not read" otherwise (its checkout gone,
+  another section reading its repository); else its post-merge run. Its
+  queue says Start… · N, N the next Start's list without the pull requests
+  known merged (by the queue, GitHub's lists, a task's line: one definition,
+  `BoardStages.nextStartList`, which the Merge stations' numbers use too),
+  listed on the Board or not (not read yet, closed);
   its menu has Board Settings… where the settings can act, and Open Main
   Checkout where the repository has one. Then "No repository" (the
   workspaces in no repository, as lines; a folder gone is one, its line says
@@ -511,14 +518,16 @@ space (`NiruxShellView.stagesInputs`):
 For the wiring: the Board is drawn outside the sidebar's pass too (a read
 landing, a click), so it draws from the readings of the last pass, never
 from that pass's approval holds or Mission questions kept for later (their
-keys are columns' addresses).
+keys are columns' addresses). A task's git root is compared with its row's
+worktree in the worktrees' own spelling (`comparableRoot`): git lists one
+under `/private/var` where the workspace's git context says `/var`.
 
 ## 7. What a line offers
 
 The model says what a click does and what shows under the pointer
 (`Line.offer`, `Phrase.link`, `Line.tooltips`), and the line draws it and
-says what was clicked (`BoardStagesView.onOffer`, `onLink`). Nothing is wired
-to the queue yet.
+says what was clicked (`BoardStagesView.onOffer`, `onLink`); section 8 says
+what each click runs.
 
 ![A line's Merge station under the pointer: a plus in a bright ring](../images/board-stages-hover.png)
 
@@ -639,7 +648,6 @@ to the queue yet.
   and "Other workspaces" have Focus (`MenuItem.focus`): the Lead's workspace,
   at its own agent column when that one is the row's most urgent; under
   "Other workspaces", the most urgent agent's workspace and column.
-  `BoardStagesView.onMenu` and `onWorktree` have no owner yet.
 - **VoiceOver** reads a line as one button, which opens the task; the Merge
   station's click and the link are its actions, by name ("Add to Queue",
   "Retarget to main"), and do what a click then does. Where the station
@@ -649,7 +657,54 @@ to the queue yet.
   asks AppKit for its places again whenever they are no longer those it
   gave.
 
+## 8. The column
+
+The Board's column (`BoardColumnView`) is its header, then the stages.
+
+- **The header** keeps the table's: "Board", the repository of a Board with
+  one (else the space), Refresh with when the pull requests were read, or
+  what went wrong reading them, under the pointer, and its ⋯ menu: Space ›,
+  Board Settings…, then the column's items. It has no pill: each
+  repository's header has its own.
+- **Drawn at each sidebar pass** while the Board is shown, with that pass's
+  readings of the tasks (`NiruxShellView.SidebarPassReadings`); between two
+  passes (a read landing, a click), with the last pass's, kept by the
+  Board (`ProjectBoardController.stagesReadings`). A render costs about
+  0.7 ms in a debug build for thirteen lines; a sidebar pass with the Board
+  shown, 1.3 ms against 0.3 ms without.
+- **The order switch** is one setting for every Board, saved with the
+  others (`PersistedSettings.boardOrder`, written only once it isn't the
+  sidebar's order; one this build doesn't know reads as the sidebar's).
+- **Each click runs what the table's buttons ran**
+  (`NiruxShellView+BoardClicks.swift`, `performProjectBoardAction`): a line
+  opens its task at its most urgent agent column (a pull request without a
+  task opens nothing: its menu has what it offers); the Merge station and
+  the menu's Add to or Remove from Queue change the next Start's list; the
+  Retarget link and item retarget on GitHub, never from a dry run; Clean
+  up, on a line, on "Merged today" or under "Other worktrees", is "Clean Up
+  Worktree…" of that folder; Resume is the sidebar's (after an error only
+  for the failed turn shown, after an exit, or an agent restored at launch);
+  Open and Open Main Checkout open a shell where no workspace is open, else
+  focus it; Open Pull Request opens a github.com address; Start… and Stop,
+  in a repository's header or on the foot's line, are the queue's; Board
+  Settings… opens on that repository; the Lead focuses the Lead's
+  workspace. What a line and a menu don't carry (a task's agent column, a
+  merged task's folder, the main checkout's workspace) the Board keeps as it
+  last showed it (`ProjectBoardController.stagesTargets`). What does
+  nothing for now (`blocked`) does nothing there either.
+- **The table's code stays** until it is removed, unused.
+
 ## Known limits
+
+- **A merge only a task's detection knows counts in its repository's name
+  as GitHub gives it.** A repository renamed since board.json was saved
+  reads the detection as another repository's, until the Board's merged
+  list has the merge.
+
+- **Full Keyboard Access doesn't stop on a line.** VoiceOver reaches each
+  line, its Merge station and its link by name, but Tab doesn't: the
+  table's row buttons were key views. A line's menu is reached with the
+  pointer or VoiceOver only.
 
 - **Reviews count by branch name.** A run recorded before Nirux kept the
   branch has none and doesn't count; a branch name reused after its pull

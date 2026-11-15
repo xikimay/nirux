@@ -72,12 +72,13 @@ final class BoardStagesFactsTests: XCTestCase {
         _ rows: [ProjectBoard.Row], tasks: [String] = ["task"], reading: BoardStages.TaskReading? = nil,
         readings: [String: BoardStages.TaskReading] = [:], parents: [String: String] = [:], required: [String] = [],
         queue: ProjectBoard.QueueState? = nil, merged: [ProjectBoard.PullRequest] = [], heads: [String: String] = [:],
-        readsPullRequests: Bool = true, baseBranch: String? = "main", cleaningUp: Set<String> = [], lead: String? = nil
+        readsPullRequests: Bool = true, baseBranch: String? = "main", cleaningUp: Set<String> = [], lead: String? = nil,
+        gitHub: GitHubRepository? = nil
     ) -> BoardStages.SectionFacts {
         BoardStages.sectionFacts(
             BoardStages.RepositoryReading(
                 id: "widgets", rows: rows, readsPullRequests: readsPullRequests, requiredChecks: required, baseBranch: baseBranch,
-                queue: queue, merged: merged, heads: heads, cleaningUp: cleaningUp
+                queue: queue, merged: merged, heads: heads, cleaningUp: cleaningUp, gitHub: gitHub
             ),
             tasks: tasks, readings: reading.map { ["task": $0] } ?? readings, parents: parents, lead: lead
         )
@@ -574,6 +575,17 @@ final class BoardStagesFactsTests: XCTestCase {
         let found = facts([row(workspaces: ["task"])] + rows.dropFirst(), tasks: ["task", "next"], reading: detected, queue: listed)
         XCTAssertEqual(found.lines.map(\.pullRequest?.number), [12, 13, 14])
         XCTAssertEqual(found.lines.map(\.queue.order), [nil, 1, 2])
+        XCTAssertEqual(found.knownMerged, [12], "the next Start's list has no place for it")
+        // Found in another repository (a fork, where gh looked): its #12 isn't this repository's.
+        let widgets = GitHubRepository(owner: "acme", name: "widgets")
+        detected.mergedPullRequestRepository = GitHubRepository(owner: "me", name: "widgets")
+        let inFork = facts([row(workspaces: ["task"])] + rows.dropFirst(), tasks: ["task", "next"], reading: detected, queue: listed, gitHub: widgets)
+        XCTAssertEqual(inFork.lines.map(\.queue.order), [nil, 2, 3])
+        XCTAssertEqual(inFork.knownMerged, [])
+        detected.mergedPullRequestRepository = GitHubRepository(owner: "Acme", name: "Widgets")
+        let here = facts([row(workspaces: ["task"])] + rows.dropFirst(), tasks: ["task", "next"], reading: detected, queue: listed, gitHub: widgets)
+        XCTAssertEqual(here.knownMerged, [12], "its own repository, however spelled")
+        detected.mergedPullRequestRepository = nil
         // A detection is one task's word: it gives a pull request no place, and doesn't make an open one merged.
         detected.mergedPullRequest = 13
         let disputed = facts([row(workspaces: ["task"])] + rows.dropFirst(), tasks: ["task", "next"], reading: detected, queue: listed)

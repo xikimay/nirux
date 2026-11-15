@@ -109,6 +109,8 @@ final class BoardStagesReadingsTests: XCTestCase {
         // Merged, as its own detection found it at its head; and the clean-up its row offers.
         info = row([column(0)], pullRequest: pullRequest("MERGED"), cleanup: .available)
         XCTAssertEqual(reading(info).mergedPullRequest, 52)
+        XCTAssertEqual(reading(info).mergedPullRequestRepository, GitHubRepository(owner: "acme", name: "widgets"), "from its address")
+        XCTAssertNil(BoardStages.TaskReading.repository(ofPullRequestAt: "https://ghe.example.com/acme/widgets/pull/52"), "github.com only")
         XCTAssertEqual(reading(info).cleanUp, .offered)
         XCTAssertEqual(reading(row([column(0)], cleanup: .inProgress)).cleanUp, .running)
         XCTAssertNil(reading(row([column(0)])).cleanUp)

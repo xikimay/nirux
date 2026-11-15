@@ -1164,6 +1164,38 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertNil(view.pointerLocation(), "a Board that isn't on screen doesn't hear the pointer: it asks for none")
     }
 
+    /// A line held in place once its task is gone: a click on it says so
+    /// (the shell focuses the workspace where it went, else says it was
+    /// closed); a pull request's without a task says nothing.
+    func testAClickOnADepartedTasksLineSaysItIsGone() throws {
+        var pullRequest = line("p")
+        pullRequest.hasTask = false
+        let shown = [section(units: tasks([line("t"), line("u")]), withoutTask: [.task(pullRequest, subtasks: [])])]
+        let view = board(content(shown))
+        view.foldButton(section: "nirux")?.performClick(nil)
+        view.layoutSubtreeIfNeeded()
+        // The pointer rests on the Board: what goes stays, departed.
+        view.pointerLocation = { view.convert(NSPoint(x: 400, y: 300), to: nil) }
+        view.mouseMoved(with: try moved(to: view.convert(NSPoint(x: 400, y: 300), to: nil), in: view))
+        view.show(content([section(units: tasks([line("u")]))]))
+        view.layoutSubtreeIfNeeded()
+        let task = try XCTUnwrap(view.lineViews.first { $0.line.id == "t" })
+        let departedPullRequest = try XCTUnwrap(view.lineViews.first { $0.line.id == "p" })
+        XCTAssertEqual(view.departed, ["t", "p"])
+        var opened: [String] = []
+        var gone: [String] = []
+        view.onOpen = { opened.append($0) }
+        view.onTaskGone = { gone.append($0) }
+        XCTAssertTrue(task.hitTest(NSPoint(x: task.frame.minX + 40, y: task.frame.midY)) === task, "it takes the click")
+        try press(task, at: 40)
+        try press(departedPullRequest, at: 40)
+        XCTAssertEqual(gone, ["t"])
+        XCTAssertEqual(opened, [], "nothing opens from a departed line")
+        // Its station offers nothing, its link neither.
+        try press(task, at: BoardStagesView.Columns(width: 940).stations[3])
+        XCTAssertEqual(gone, ["t", "t"], "the whole line says it")
+    }
+
     func testNothingMovesUnderThePointer() throws {
         let units = { (ids: [String]) in self.tasks(ids.map { self.line($0) }) }
         let merged = { (numbers: [Int]) in
@@ -1190,7 +1222,7 @@ final class BoardStagesViewTests: XCTestCase {
         pointer = inside
 
         // Another order, a line gone, a line come, a sub-task come, a day's new merge: each line stays where it was,
-        // in its new state; the one gone stays there, faded and inert; what comes waits.
+        // in its new state; the one gone stays there, faded, offering nothing; what comes waits.
         let b = view.lineViews[1]
         let c = view.lineViews[2]
         view.show(content([section(
@@ -1204,8 +1236,8 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(view.departed, ["b"])
         XCTAssertTrue(view.lineViews[1] === b && b.isDeparted)
         XCTAssertEqual(b.alphaValue, 0.4, accuracy: 0.01)
-        XCTAssertNil(b.hitTest(NSPoint(x: b.frame.midX, y: b.frame.midY)), "a departed line takes no click")
         XCTAssertFalse(b.isAccessibilityElement())
+        XCTAssertNil(b.contextMenu(), "nor a menu")
         XCTAssertFalse(c.isDeparted)
         XCTAssertEqual(c.alphaValue, 1)
         XCTAssertEqual(try XCTUnwrap(view.mergedView(section: "nirux")).entries.map(\.pullRequest.number), [7], "a new merge waits")

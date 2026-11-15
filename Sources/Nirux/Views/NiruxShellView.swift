@@ -101,6 +101,8 @@ final class NiruxShellView: NSView {
     /// The card of what happened while the user was away (Settings →
     /// Notifications; see `SidebarCatchUp`).
     var catchUpEnabled = PersistedSettings().showCatchUp
+    /// The order of the Board's lines (its switch; saved in the settings).
+    var boardOrder = PersistedSettings().boardOrder
     var catchUpState = CatchUpState(tracker: AwayTracker(now: Date().timeIntervalSince1970))
     let catchUpObservers = ObserverBag()
     /// Mission questions handed to the user (the child's card turned

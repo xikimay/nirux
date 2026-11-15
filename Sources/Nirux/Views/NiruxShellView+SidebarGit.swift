@@ -80,7 +80,9 @@ extension NiruxShellView {
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)
         closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
-        refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+        refreshProjectBoards(snapshot: snapshot, now: now, pass: SidebarPassReadings(
+            infos: infos, foregroundProcesses: foregroundProcesses, approvalHolds: approvalHolds, missionQuestions: missionQuestions
+        ))
     }
 
     /// A running pass ends once the process that sent its event exited (a

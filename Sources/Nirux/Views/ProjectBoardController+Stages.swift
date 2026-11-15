@@ -35,13 +35,42 @@ extension ProjectBoardController {
         var order: BoardStages.Order = .sidebar
     }
 
+    /// What the Board's clicks act on, as it last showed them: what the
+    /// lines and the menus don't carry.
+    struct StagesTargets: Equatable {
+        /// A task's line, by its id (its workspace's): Focus on its most
+        /// urgent agent column, else on the workspace.
+        var focus: [String: ProjectBoardView.Action] = [:]
+        /// A repository's line's worktree, by its id, for its "Clean up"
+        /// link (a merged pull request's, so never a line without a
+        /// repository); a merged task's too, which has left the list for
+        /// "Merged today".
+        var folders: [String: BoardStages.Folder] = [:]
+        /// Open Main Checkout, by the checkout's path: Focus where a
+        /// workspace is open there, else Open a shell there.
+        var mainCheckouts: [String: ProjectBoardView.Action] = [:]
+        /// The pull requests of each section's lines, by section id: a
+        /// line held in place under the pointer may show another
+        /// repository's by now, and the queue and Retarget act only on the
+        /// section's own.
+        var pullRequests: [String: Set<Int>] = [:]
+    }
+
     /// The id of the section of the workspaces in no repository.
     static let noRepositoryID = "no-repository"
 
     /// What the Board as stages shows of the space: what the table lists,
     /// as stages. Its message in place of the sections is the table's in
-    /// place of its rows; the running queues' lines stay at its foot.
-    func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> BoardStagesView.Content {
+    /// place of its rows; the running queues' lines stay at its foot. With
+    /// it, what its clicks act on (whoever shows it keeps them:
+    /// `stagesTargets`).
+    func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> (content: BoardStagesView.Content, targets: StagesTargets) {
+        var targets = StagesTargets()
+        let content = stagesContent(inputs, now: now, targets: &targets)
+        return (content, targets)
+    }
+
+    private func stagesContent(_ inputs: StagesInputs, now: Date, targets: inout StagesTargets) -> BoardStagesView.Content {
         var content = BoardStagesView.Content(
             header: stagesHeader(inputs), order: inputs.order, sections: [], now: now.timeIntervalSince1970,
             runningQueues: inputs.runningQueues
@@ -54,6 +83,9 @@ extension ProjectBoardController {
             content.message = BoardStagesView.Message(text: Self.listingWorktrees)
             return content
         }
+        for workspace in inputs.workspaces {
+            targets.focus[workspace.id] = Self.focus(workspace.agent, workspaces: [workspace.id])
+        }
         let heads = Dictionary(
             local.repositories.flatMap(\.worktrees).compactMap { worktree in worktree.head.map { (worktree.path, $0) } },
             uniquingKeysWith: { first, _ in first }
@@ -62,14 +94,16 @@ extension ProjectBoardController {
         switch listedRows(local: local, workspaces: inputs.workspaces) {
         case .one(let rows, let repository):
             guard !rows.isEmpty, let only = sections.first else {
-                content.message = BoardStagesView.Message(text: Self.nothingToList(in: repository))
+                content.message = BoardStagesView.Message(text: emptyRepositoryMessage(repository))
                 return content
             }
             others = rows.filter { $0.group == .otherRepository }
-            content.sections = [stagesSection(only, rows: rows.filter { $0.group != .otherRepository }, inputs, heads: heads, now: now)]
+            content.sections = [stagesSection(
+                only, rows: rows.filter { $0.group != .otherRepository }, inputs, heads: heads, now: now, targets: &targets
+            )]
         case .sections(let bySection, let rest):
             others = rest
-            content.sections = sections.map { stagesSection($0, rows: bySection[$0.id] ?? [], inputs, heads: heads, now: now) }
+            content.sections = sections.map { stagesSection($0, rows: bySection[$0.id] ?? [], inputs, heads: heads, now: now, targets: &targets) }
         }
         // A workspace in no repository is a line there; one in another repository is no line (`sectionFacts`), but under
         // Other workspaces.
@@ -92,6 +126,15 @@ extension ProjectBoardController {
             ))
         }
         return content
+    }
+
+    /// Why the one repository lists nothing: what went wrong reading it
+    /// (no section's pill is there to say it), else that it has nothing yet.
+    private func emptyRepositoryMessage(_ repository: String) -> String {
+        guard let reads = sections.first.flatMap({ reads[$0.id] }), let error = Self.errorText(reads) else {
+            return Self.nothingToList(in: repository)
+        }
+        return "Couldn’t read \(reads.name) on GitHub: \(error.message)"
     }
 
     /// The space: its colour and name, what it holds (its repositories,
@@ -127,37 +170,53 @@ extension ProjectBoardController {
     /// One repository: its lines from what it read and what the tasks
     /// read, its header's pill, queue and menu.
     private func stagesSection(
-        _ section: BoardSections.Section, rows: [ProjectBoard.Row], _ inputs: StagesInputs, heads: [String: String], now: Date
+        _ section: BoardSections.Section, rows: [ProjectBoard.Row], _ inputs: StagesInputs, heads: [String: String], now: Date,
+        targets: inout StagesTargets
     ) -> BoardStagesView.Section {
         let reads = reads[section.id]
         let reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
             requiredChecks: section.config?.requiredChecks ?? [], baseBranch: reads?.baseBranch ?? section.config?.baseBranch,
-            queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp
+            queue: inputs.queues[section.id], merged: reads?.mergedPullRequests ?? [], heads: heads, cleaningUp: inputs.cleaningUp,
+            gitHub: reads?.gitHub
         )
         let facts = BoardStages.sectionFacts(reading, tasks: inputs.tasks, readings: inputs.readings, parents: inputs.parents, lead: inputs.lead)
+        Self.noteFolders(of: facts, in: &targets)
+        targets.pullRequests[section.id] = Set(facts.lines.compactMap(\.pullRequest?.number))
         var shown = BoardStagesView.Section(
             // A space without an anchor: its repository's name ("widgets"), `owner/name` beside it.
             id: section.id,
-            title: section.anchor == nil ? reads?.gitHub.name ?? "Repository" : displayNames[section.id] ?? section.name ?? "Repository",
+            title: (section.anchor == nil ? reads?.gitHub.name : nil) ?? displayNames[section.id] ?? section.name ?? "Repository",
             detail: reads?.name,
             status: stagesStatus(section, now: now),
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
         if let state = inputs.queues[section.id] {
-            // The next Start's list, a merged one for none (as the queue, the merged list or a task's line knows it),
+            // The next Start's list, a merged one for none (as the queue, GitHub's lists or a task's line knows it),
             // whether or not the Board lists it (not read yet, closed, beyond the open pull requests read).
-            let merged = Set(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
-                .union((reads?.mergedPullRequests ?? []).filter { $0.state == "MERGED" }.map(\.number))
-                .union(facts.lines.compactMap { $0.pullRequest?.isMerged == true ? $0.pullRequest?.number : nil })
-            let proposed = state.isLocked ? 0 : state.selection.filter { !merged.contains($0) }.count
+            let proposed = state.isLocked ? 0 : BoardStages.nextStartList(state, knownMerged: facts.knownMerged).count
             shown.queue = BoardStagesView.sectionQueue(state, proposed: proposed)
         }
         // Board Settings… where it can set the repository up and save it, as the table offered it.
         let offersSettings = !isReadOnly && canBeSetUp(section)
-        shown.menu = (offersSettings ? [.boardSettings] : [])
-            + (rows.first { $0.group == .main }?.worktreePath.map { [.openMainCheckout(path: $0)] } ?? [])
+        shown.menu = offersSettings ? [.boardSettings] : []
+        if let main = rows.first(where: { $0.group == .main }), let path = main.worktreePath {
+            shown.menu.append(.openMainCheckout(path: path))
+            // As the table's row of the main checkout: Focus, else Open.
+            targets.mainCheckouts[path] = Self.focus(main.agent, workspaces: main.workspaces.map(\.id))
+                ?? .open(path: path, title: main.branch ?? (path as NSString).lastPathComponent)
+        }
         return shown
+    }
+
+    private static func focus(_ agent: ProjectBoard.Agent, workspaces: [String]) -> ProjectBoardView.Action? {
+        agent.focusTarget(workspaces: workspaces).map { .focus(workspaceID: $0.workspaceID, columnID: $0.columnID) }
+    }
+
+    private static func noteFolders(of facts: BoardStages.SectionFacts, in targets: inout StagesTargets) {
+        for line in facts.lines {
+            if let folder = line.folder { targets.folders[line.id] = folder }
+        }
     }
 
     private var isReadOnly: Bool {
@@ -167,7 +226,8 @@ extension ProjectBoardController {
 
     /// The header's pill: what went wrong reading the repository, else why
     /// it has no saved settings, the table's sentence under the pointer:
-    /// "Read-only" when board.json can't be saved, "No settings" where Board
+    /// "Read-only" when board.json can't be saved, "Invalid settings" when
+    /// they name no valid GitHub repository, "No settings" where Board
     /// Settings can set it up, else "Not read" (its checkout gone, another
     /// section reading its repository); else its post-merge run.
     private func stagesStatus(_ section: BoardSections.Section, now: Date) -> ColumnHeaderView.Status? {
@@ -179,7 +239,8 @@ extension ProjectBoardController {
             if let loaded, case .readOnly(let reason) = loaded.status {
                 return ColumnHeaderView.Status("Read-only", tone: .neutral, toolTip: reason.message)
             }
-            return ColumnHeaderView.Status(canBeSetUp(section) ? "No settings" : "Not read", tone: .neutral, toolTip: note)
+            let word = section.config != nil && reads[section.id] == nil ? "Invalid settings" : canBeSetUp(section) ? "No settings" : "Not read"
+            return ColumnHeaderView.Status(word, tone: .neutral, toolTip: note)
         }
         return reads[section.id].flatMap { Self.runStatus($0, now: now) }
     }

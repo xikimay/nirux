@@ -29,6 +29,9 @@ extension BoardStages {
         /// merged, at the HEAD it merged at: known before the Board's
         /// merged list is read again, and for one that list doesn't reach.
         var mergedPullRequest: Int?
+        /// The repository that pull request is in, from its address: gh
+        /// may find one in a fork, whose number means nothing here.
+        var mergedPullRequestRepository: GitHubRepository?
     }
 
     /// One repository as today's Board holds it, or the workspaces in none.
@@ -49,6 +52,9 @@ extension BoardStages {
         var heads: [String: String] = [:]
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []
+        /// The GitHub repository its pull requests are read from; nil
+        /// without one.
+        var gitHub: GitHubRepository?
     }
 
     /// The facts of a section's lines.
@@ -117,7 +123,8 @@ extension BoardStages {
             },
             otherWorktrees: (lead.map { lead in repository.rows.compactMap { leadWorktree($0, lead: lead, in: repository) } } ?? [])
                 + repository.rows.compactMap { otherWorktree($0, in: repository) }
-                    .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                    .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending },
+            knownMerged: merged.known
         )
     }
 
@@ -269,7 +276,10 @@ extension BoardStages {
            }) {
             return entry.number
         }
-        return reading.gitRoot == nil || reading.gitRoot == row.worktreePath ? reading.mergedPullRequest : nil
+        guard reading.gitRoot == nil || reading.gitRoot == row.worktreePath else { return nil }
+        // Another repository's (a fork's, where gh looked): its number isn't one of this repository's.
+        if let theirs = reading.mergedPullRequestRepository, let ours = repository.gitHub, theirs != ours { return nil }
+        return reading.mergedPullRequest
     }
 
     /// Where a row's work is on disk, as the table's buttons use it
@@ -412,8 +422,7 @@ extension BoardStages {
     ///   shows the list as it was when it opened.
     static func queue(of number: Int, head: String?, in state: ProjectBoard.QueueState?, merged: Set<Int> = []) -> Queue {
         guard let state else { return Queue() }
-        let merged = merged.union(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
-        let proposed = state.selection.filter { !merged.contains($0) }.firstIndex(of: number).map { $0 + 1 }
+        let proposed = nextStartList(state, knownMerged: merged).firstIndex(of: number).map { $0 + 1 }
         var queue = Queue(list: listLock(state).map(QueueList.locked) ?? .open, order: state.isLocked ? nil : proposed)
         if state.isDryRun {
             queue.dryRun = "Dry run: this build doesn’t change GitHub." + (state.dryRunReason.map { " This build: \($0)." } ?? "")
@@ -440,6 +449,14 @@ extension BoardStages {
             }
         }
         return queue
+    }
+
+    /// The next Start's list as the Board shows it, a place for each: the
+    /// queue's list without the pull requests known merged (`knownMerged`,
+    /// a section's `SectionFacts.knownMerged`) or that the queue merged.
+    static func nextStartList(_ state: ProjectBoard.QueueState, knownMerged: Set<Int>) -> [Int] {
+        let merged = knownMerged.union(state.entries.filter { $0.mergeCommit != nil }.map(\.number))
+        return state.selection.filter { !merged.contains($0) }
     }
 
     /// What the queue says of a row's pull request, and, of an open

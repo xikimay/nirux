@@ -8,6 +8,7 @@ extension NiruxShellView {
         circlingHintEnabled = PersistedSettings.effective(persisted?.settings).agentCirclingHint
         turnStatusEnabled = PersistedSettings.effective(persisted?.settings).showTurnStatus
         catchUpEnabled = PersistedSettings.effective(persisted?.settings).showCatchUp
+        boardOrder = PersistedSettings.effective(persisted?.settings).boardOrder
         // Before anything saves: the decision needs this launch's starting point.
         decideOnboardingChecklist(
             persisted: persisted,
@@ -319,8 +320,9 @@ extension NiruxShellView {
         var settings = OnboardingChecklist.settings(
             Persistence.load()?.settings ?? PersistedSettings(), recording: onboardingState
         )
-        // The shell is the source of truth for sidebar state — carry the rest.
+        // The shell is the source of truth for sidebar state and the Board's order — carry the rest.
         settings.sidebarExpanded = isSidebarExpanded
+        settings.boardOrder = boardOrder
         return PersistedState(
             workspaces: workspaces.map { workspace in
                 PersistedWorkspace(

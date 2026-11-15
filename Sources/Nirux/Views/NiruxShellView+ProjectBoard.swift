@@ -85,30 +85,25 @@ extension NiruxShellView {
             self.showBoardSettings(profileID: board.projectID)
         }
         board.view.onRefresh = { [weak board] in board?.reload() }
-        board.view.onBoardSettings = { [weak self, weak board] section in
+        board.view.onBoardSettings = { [weak self, weak board] in
             guard let self, let board else { return }
-            guard self.profiles.contains(where: { $0.id == board.projectID }) else {
-                return self.showToast("This board’s space was deleted")
-            }
-            self.showBoardSettings(profileID: board.projectID, repository: section)
+            self.showBoardSettings(of: board, repository: nil)
         }
-        board.view.onSelectProject = { [weak self, weak board] projectID in
+        board.view.onSelectSpace = { [weak self, weak board] projectID in
             guard let self, let board else { return }
             self.switchProjectBoard(board, to: projectID)
         }
-        board.view.onAction = { [weak self, weak board] action in
-            guard let self, let board else { return }
-            self.performProjectBoardAction(action, board: board)
-        }
-        board.view.onStartQueue = { [weak self, weak board] section in
-            guard let self, let board else { return }
-            self.requestMergeQueueStart(board: board, section: section)
-        }
-        board.view.onStopQueue = { [weak self, weak board] section in
-            guard let self, let board else { return }
-            self.stopMergeQueue(board: board, section: section)
-        }
+        wireBoardStages(board)
         return board
+    }
+
+    /// Board Settings… of the board's space, on `repository` (a section's
+    /// id) when given.
+    func showBoardSettings(of board: ProjectBoardController, repository: String?) {
+        guard profiles.contains(where: { $0.id == board.projectID }) else {
+            return showToast("This board’s space was deleted")
+        }
+        showBoardSettings(profileID: board.projectID, repository: repository)
     }
 
     /// The header's ⋯ › Project menu. A project that has a board already
@@ -154,40 +149,71 @@ extension NiruxShellView {
 
     // MARK: Drawing
 
+    /// What one sidebar pass read, which the Board's readings take as they
+    /// are (`boardReadings`): reading them again would hand requests back,
+    /// or note hand-offs twice.
+    struct SidebarPassReadings {
+        /// The rows the pass built: the space on screen's.
+        var infos: [WorkspaceInfo]
+        var foregroundProcesses: [ObjectIdentifier: ForegroundProcess]
+        var approvalHolds: [ObjectIdentifier: PermissionApprovalHold]
+        var missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]
+    }
+
     /// At each status refresh: the boards shown draw their agents as they
     /// are now, and read what is due if they are on screen.
-    /// `foregroundProcesses` is the sidebar's, by column.
-    func refreshProjectBoards(
-        snapshot: ProcessSnapshot,
-        now: TimeInterval,
-        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
-    ) {
+    func refreshProjectBoards(snapshot: ProcessSnapshot, now: TimeInterval, pass: SidebarPassReadings) {
         let inFront = isInFront
         refreshMergeQueuesElsewhere()
         for location in projectBoardLocations where isProjectBoardShown(location) {
             location.board.tick(onScreen: inFront)
-            renderProjectBoard(location.board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+            renderProjectBoard(location.board, snapshot: snapshot, now: now, pass: pass)
         }
     }
 
+    /// Draws the board: its tasks as the sidebar's pass read them (`pass`),
+    /// else as the last pass did (a read landing, a click between two).
     func renderProjectBoard(
         _ board: ProjectBoardController,
         snapshot: ProcessSnapshot? = nil,
         now: TimeInterval = Date().timeIntervalSince1970,
-        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
+        pass: SidebarPassReadings? = nil
     ) {
         let snapshot = snapshot ?? ProcessSnapshot()
         let members = projectWorkspaces(of: board.projectID)
-        let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+        let foreground = pass?.foregroundProcesses ?? foregroundProcesses(of: members, snapshot: snapshot)
+        let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
         // A workspace opened in a folder not listed yet: list them again.
         if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
             board.expireWorktrees()
         }
         board.reloadIfAnchorsChanged()
-        let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
-        var content = board.content(workspaces: inputs, projects: projects)
-        addQueues(to: &content, board: board)
-        board.view.show(content)
+        if let pass {
+            board.stagesReadings = boardReadings(
+                ofSpace: board.projectID, sidebarInfos: pass.infos, foregroundProcesses: pass.foregroundProcesses,
+                approvalHolds: pass.approvalHolds, missionQuestions: pass.missionQuestions, snapshot: snapshot, now: now,
+                comparable: board.comparableRoot
+            )
+        }
+        // Before the first pass: no hold, no question, the agents in front as the process table says.
+        let readings = board.stagesReadings ?? boardReadings(
+            ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
+            now: now, comparable: board.comparableRoot
+        )
+        let (content, targets) = board.stagesContent(
+            stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),
+            now: Date(timeIntervalSince1970: now)
+        )
+        let spaces = profiles.map { BoardColumnView.Space(id: $0.id, name: $0.name) }
+        board.view.show(header: board.columnHeader(spaces: spaces, now: Date(timeIntervalSince1970: now)), stages: content)
+        // What the clicks act on is what the Board shows.
+        board.stagesTargets = targets
+    }
+
+    private func foregroundProcesses(of members: [WorkspaceState], snapshot: ProcessSnapshot) -> [ObjectIdentifier: ForegroundProcess] {
+        Dictionary(members.flatMap(\.openColumns).compactMap { column in
+            column.pty?.foregroundProcess(snapshot: snapshot).map { (ObjectIdentifier(column), $0) }
+        }, uniquingKeysWith: { first, _ in first })
     }
 
     /// The space's workspaces as the Board's rows take them: their folder
@@ -213,27 +239,10 @@ extension NiruxShellView {
         }
     }
 
-    /// Each section's queue for its rows, and the queue lines: one line on a
-    /// board with one repository, else one per repository with a queue and
-    /// one per queue left running on a repository no section has. The lines
-    /// don't depend on the rows: a board showing a message keeps every Stop
-    /// in reach.
-    private func addQueues(to content: inout ProjectBoardView.Content, board: ProjectBoardController) {
-        let queues = projectBoardQueues(board)
-        if case .sections(var sections, let others) = content.body {
-            for index in sections.indices { sections[index].queue = queues.states[sections[index].id] }
-            content.body = .sections(sections, others: others)
-        }
-        // A one-repository board's cells read its own queue, whatever runs elsewhere.
-        content.queue = board.section(id: nil).flatMap { queues.states[$0.id] }
-        guard board.sections.count > 1 || queues.lines.count > queues.states.count else { return }
-        content.queueLines = queues.lines
-    }
-
     /// Each section's queue, by section id, and one line per queue: each
     /// section's, named after its repository (its anchor's name on a board
     /// with anchors), then each one left running on a repository no section
-    /// has. The table's queue lines and the stages' foot say them alike.
+    /// has: the running ones are the stages' foot.
     func projectBoardQueues(_ board: ProjectBoardController) -> (states: [String: ProjectBoard.QueueState], lines: [ProjectBoardView.QueueLine]) {
         var states: [String: ProjectBoard.QueueState] = [:]
         for section in board.sections {

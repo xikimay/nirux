@@ -76,7 +76,14 @@ final class ProjectBoardController {
     }
 
     private(set) var projectID: String
-    let view = ProjectBoardView(frame: .zero)
+    let view = BoardColumnView(frame: .zero)
+    /// What each task's sidebar row read at the last sidebar pass
+    /// (`NiruxShellView.boardReadings`): a render between two passes (a
+    /// read landing, a click) draws with it.
+    var stagesReadings: [String: BoardStages.TaskReading]?
+    /// What the Board's clicks act on, as it last showed them
+    /// (`stagesContent`).
+    var stagesTargets = StagesTargets()
     private let client: any ProjectBoardGitHub
 
     /// board.json as last read; nil until it is.
@@ -198,6 +205,8 @@ final class ProjectBoardController {
         sections = []
         local = nil
         reads = [:]
+        // The old space's tasks: the new one's are read without the sidebar's pass until its next one.
+        stagesReadings = nil
         reload()
     }
 
@@ -547,6 +556,17 @@ final class ProjectBoardController {
         local?.folders[folder] ?? URL(fileURLWithPath: folder).standardizedFileURL.path
     }
 
+    /// A workspace's git root in the form the worktrees were listed in, to
+    /// compare with a row's worktree: git lists one under `/private/var`
+    /// where the workspace's git context says `/var`, the same folder
+    /// through the system's link. Without the disk.
+    func comparableRoot(_ root: String) -> String {
+        let folder = comparableFolder(root)
+        let unlinked = { (path: String) in path.hasPrefix("/private/") ? path.dropFirst("/private".count) : Substring(path) }
+        let key = unlinked(folder)
+        return local?.repositories.lazy.flatMap(\.worktrees).map(\.path).first { unlinked($0) == key } ?? folder
+    }
+
     /// What the view shows, with the project's workspaces as they are now.
     /// The shell adds each queue.
     func content(
@@ -599,6 +619,30 @@ final class ProjectBoardController {
         content.notices = notices
         if case .message = body { content.messageOffersSettings = messageOffersSettings }
         return content
+    }
+
+    /// The column's header: the space, the repository of a Board with one,
+    /// and when the pull requests were read, or what went wrong reading
+    /// them (Refresh's tooltip); the repository's header has the pill.
+    func columnHeader(spaces: [BoardColumnView.Space], now: Date = Date()) -> BoardColumnView.Header {
+        let space = spaces.first { $0.id == projectID }
+        let single = sections.count == 1 ? sections.first.flatMap { reads[$0.id] } : nil
+        return BoardColumnView.Header(
+            spaceName: space?.name ?? "Deleted space",
+            repository: single?.name,
+            status: single.flatMap { Self.errorText($0)?.message } ?? readStatus(now: now),
+            spaces: spaces,
+            spaceID: projectID,
+            spaceIsMissing: space == nil
+        )
+    }
+
+    /// When the pull requests were last read, or that they are being read.
+    private func readStatus(now: Date) -> String? {
+        if let readAt = reads.values.compactMap(\.pullRequestsReadAt).max() {
+            return "Updated \(ProjectBoard.clockTime(readAt, now: now))"
+        }
+        return readsPullRequests ? "Reading pull requests…" : nil
     }
 
     /// What the Board says in place of what it lists, when it lists
