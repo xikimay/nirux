@@ -35,6 +35,11 @@ enum SidebarExpandedMetrics {
     static let chipGap = Theme.Space.xs
     static let chipPaddingX: CGFloat = 6
     static let stateDotSize: CGFloat = 8
+    /// The row's state icon, centred where the dot was: the title keeps its
+    /// place.
+    static let stateIconSize: CGFloat = 14
+    /// The Lead's, at the end of its one line: smaller, beside its sign.
+    static let leadStateIconSize: CGFloat = 12
     /// Where row text starts, past the state dot: titles, status lines,
     /// columns, the space picker's name, the Archived row's.
     static var textX: CGFloat { workspaceInsetX + cardPaddingX + stateDotSize + Theme.Space.sm }
@@ -58,8 +63,9 @@ enum SidebarExpandedMetrics {
     static let quietBlockGap: CGFloat = 6
     static let actionRowGap: CGFloat = 6
     static let actionLineHeight: CGFloat = 14
-    static let buttonHeight: CGFloat = 22
-    static let buttonPaddingX: CGFloat = 10
+    /// The action blocks' buttons: `NiruxButton`'s small size.
+    static let buttonHeight = NiruxButton.Size.small.height
+    static let buttonPaddingX = NiruxButton.Size.small.padding
     static let buttonGap: CGFloat = 6
 
     // Allow / Deny: the request text is printable ASCII in a monospaced

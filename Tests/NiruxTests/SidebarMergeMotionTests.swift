@@ -93,10 +93,13 @@ final class SidebarMergeMotionTests: XCTestCase {
         XCTAssertEqual(turn.beginTime, now - now.truncatingRemainder(dividingBy: pass), accuracy: 0.001, "from the clock")
         XCTAssertNil(turning.lineDashPattern)
         XCTAssertLessThan(turning.strokeEnd, 1, "an arc")
-        let still = try XCTUnwrap(ring(false))
-        XCTAssertNil(still.animationKeys())
-        XCTAssertNotNil(still.lineDashPattern)
-        XCTAssertEqual(still.strokeEnd, 1, "a whole ring, dashed")
+        // Still: the state icons' own dashed ring.
+        let stillIcon = { (workspace: WorkspaceInfo) -> StateIcon? in
+            let view = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, yOffset: 500, animates: false, now: now)
+                .render().views.first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID }
+            return (view?.subviews.first as? StateIconView)?.icon
+        }
+        XCTAssertEqual(stillIcon(running), StateIcon(.waiting), "a whole ring, dashed")
 
         let passed = SidebarWorkspaceCardRenderer(
             workspace: row("pr", index: 0, pr: pullRequest(ci: "SUCCESS")), sidebarWidth: 260, yOffset: 500, now: now
@@ -109,10 +112,9 @@ final class SidebarMergeMotionTests: XCTestCase {
         XCTAssertFalse(archived.showsCompactRow)
         let archivedRing = try XCTUnwrap(
             SidebarWorkspaceCardRenderer(workspace: archived, sidebarWidth: 260, yOffset: 500, now: now).render().views
-                .first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID }?.layer?.sublayers?.first as? CAShapeLayer
+                .first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID }
         )
-        XCTAssertNil(archivedRing.animationKeys())
-        XCTAssertNotNil(archivedRing.lineDashPattern)
+        XCTAssertEqual((archivedRing.subviews.first as? StateIconView)?.icon, StateIcon(.waiting), "still, dashed")
     }
 
     /// A turn that ends while the checks its push started run draws its

@@ -218,8 +218,14 @@ extension SidebarView {
             NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: Self.tickPeriod)
         }
         contentDocumentView.autoscroll(with: event)
-        dragGhostView?.frame.origin.y = dragGhostOriginY + (point.y - drag.startPoint.y)
-        let slot = SidebarDragMath.insertionSlot(forY: point.y, rowMidYs: drag.groupRowFrames.map(\.midY))
+        // Where the pointer is once the list has scrolled, kept to the part
+        // of the list in view: over the foot, the row goes to the last slot
+        // the user sees, its ghost and the line stay in view. (Autoscroll
+        // reveals the pointer's place at once; this holds if it stops short.)
+        let visible = contentScrollView.documentVisibleRect
+        let y = min(max(contentDocumentView.convert(event.locationInWindow, from: nil).y, visible.minY), visible.maxY)
+        dragGhostView?.frame.origin.y = dragGhostOriginY + (y - drag.startPoint.y)
+        let slot = SidebarDragMath.insertionSlot(forY: y, rowMidYs: drag.groupRowFrames.map(\.midY))
         drag.currentSlot = slot
         updateInsertionIndicator(slot: slot, drag: drag)
     }

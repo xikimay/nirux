@@ -313,6 +313,7 @@ final class NiruxShellView: NSView {
         sidebar.onNewWorkspace = { [weak self] in self?.showNewPanel() }
         sidebar.onShowArchived = { [weak self] in self?.showArchivedTasks() }
         sidebar.onOpenBoard = { [weak self] in self?.openProjectBoard() }
+        sidebar.onShowHistory = { [weak self] in self?.showSessionHistory() }
         sidebar.onRailRequest = { [weak self] taskID, icon in self?.openCallout(taskID: taskID, anchor: icon) ?? false }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in

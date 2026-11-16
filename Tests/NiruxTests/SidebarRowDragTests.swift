@@ -334,9 +334,9 @@ final class SidebarRowDragTests: XCTestCase {
 
         XCTAssertEqual([waited.rebuild, waited.update], [true, true], "the press was tracked: both waited for its end")
         XCTAssertNil(sidebar.workspaceDrag)
-        let still = try XCTUnwrap(ring())
-        XCTAssertNil(still.animationKeys(), "the rows were rebuilt for what may move now")
-        XCTAssertNotNil(still.lineDashPattern)
+        XCTAssertNil(ring(), "the rows were rebuilt for what may move now: no arc")
+        let stillRing = sidebar.expandedViews.first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID }
+        XCTAssertEqual((stillRing?.subviews.first as? StateIconView)?.icon, StateIcon(.waiting), "the still, dashed ring")
         XCTAssertFalse(sidebar.rebuildSkippedDuringDrag, "the rebuild was made: the next press owes none")
     }
 }

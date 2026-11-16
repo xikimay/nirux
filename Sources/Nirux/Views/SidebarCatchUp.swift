@@ -26,6 +26,31 @@ struct SidebarCatchUp: Hashable {
         let title: String
         let kind: Kind
         let text: String
+        /// The icon by the row (`icon(for:row:)`): only what it shows, so
+        /// the card changes, and its presses wait again, only when the user
+        /// can see it change.
+        let icon: StateIcon
+
+        /// `icon` nil: its kind's.
+        init(workspaceID: String, title: String, kind: Kind, text: String, icon: StateIcon? = nil) {
+            self.workspaceID = workspaceID
+            self.title = title
+            self.kind = kind
+            self.text = text
+            self.icon = icon ?? SidebarCatchUp.icon(for: kind, row: nil)
+        }
+    }
+
+    /// The icon a row of `kind` shows: its task row's (`row`) while it asks
+    /// or is blocked, a grey check once its turn is over.
+    static func icon(for kind: Kind, row: StateIcon?) -> StateIcon {
+        switch kind {
+        case .done: StateIcon(.finished)
+        case .asks: row.flatMap { $0.waitsForUser ? $0 : nil } ?? StateIcon(.needsYou(.question))
+        case .broken: StateIcon(.error)
+        case .quiet: row ?? StateIcon(.idle)
+        case .working: StateIcon(.working)
+        }
     }
 
     /// Tasks of another space the list holds: shown there.
@@ -65,7 +90,10 @@ struct SidebarCatchUp: Hashable {
         case .idle, .finished, .readyToMerge, .merged, .checksRunning: .done
         }
         let text = kind == .done ? info.turnStatusLine ?? "Done" : summary.status.text
-        return Row(workspaceID: info.id, title: info.title, kind: kind, text: text)
+        return Row(
+            workspaceID: info.id, title: info.title, kind: kind, text: text,
+            icon: icon(for: kind, row: info.stateIcon(summary: summary))
+        )
     }
 
     /// "since 12:40", in the user's clock format: it doesn't age on screen
@@ -156,7 +184,10 @@ struct SidebarCatchUpCardRenderer {
         for row in catchUp.shownRows {
             y -= Metrics.rowHeight
             let frame = NSRect(x: card.minX, y: y, width: card.width, height: Metrics.rowHeight)
-            views.append(mark(row.kind, centerY: y + Metrics.rowHeight - 10))
+            views.append(SidebarWorkspaceCardRenderer.stateIconView(
+                row.icon, size: SidebarExpandedMetrics.stateIconSize,
+                center: NSPoint(x: SidebarExpandedMetrics.markCenterX, y: y + Metrics.rowHeight - 10)
+            ))
             let title = label(row.title, font: Theme.Font.body, color: Theme.Color.textPrimary)
             title.frame = NSRect(x: textX, y: y + 16, width: textWidth, height: 16)
             views.append(title)
@@ -199,30 +230,6 @@ struct SidebarCatchUpCardRenderer {
         case .broken: Theme.Color.error
         case .done, .quiet, .working: Theme.Color.textSecondary
         }
-    }
-
-    /// The row's sign, in the state marks' column, as its row's: amber,
-    /// red, green or grey dots, a grey check for a finished turn.
-    private func mark(_ kind: SidebarCatchUp.Kind, centerY: CGFloat) -> NSView {
-        let centerX = SidebarExpandedMetrics.markCenterX
-        let color: NSColor
-        switch kind {
-        case .done:
-            let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.checksPassed, color: Theme.Color.idle, pointSize: 11))
-            icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
-            icon.setAccessibilityElement(false)
-            return icon
-        case .asks: color = Theme.Color.waiting
-        case .broken: color = Theme.Color.error
-        case .working: color = Theme.Color.working
-        case .quiet: color = Theme.Color.idle
-        }
-        let size = SidebarExpandedMetrics.stateDotSize
-        let dot = SidebarBackgroundView(frame: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = size / 2
-        dot.layer?.backgroundColor = color.cgColor
-        return dot
     }
 
     /// What VoiceOver presses; clicks go through the hit areas.

@@ -154,7 +154,8 @@ final class SidebarRowMotionTests: XCTestCase {
         let over = views(standing, turnEndedAt: now)
         XCTAssertEqual(checks(in: over).count, 1, "over the grey check of a finished turn's line")
         let greyCheck = over.filter { $0.layer?.animation(forKey: "wait") != nil }
-        XCTAssertTrue(greyCheck.count == 1 && greyCheck.first is SidebarImageView, "the grey check waits its turn")
+        XCTAssertEqual(greyCheck.count, 1)
+        XCTAssertEqual((greyCheck.first?.subviews.first as? StateIconView)?.icon, StateIcon(.finished), "the grey check waits its turn")
 
         let stillWorking = row([finished, column(.working)])
         XCTAssertEqual(checks(in: views(stillWorking, turnEndedAt: now)).count, 0)

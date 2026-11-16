@@ -24,6 +24,10 @@ enum Theme {
         static let fillHover = NSColor.white.withAlphaComponent(0.05)
         static let fillPressed = NSColor.white.withAlphaComponent(0.09)
         static let fillSelected = accent.withAlphaComponent(0.16)
+        /// The glass interface's selection (3.4): a pane of glass laid on the
+        /// sidebar (the selected row, the footer's current list), rimmed
+        /// with `line`, with `lineStrong` along its top edge.
+        static let selectionGlass = NSColor.white.withAlphaComponent(0.10)
         static let line = NSColor.white.withAlphaComponent(0.07)
         static let lineStrong = NSColor.white.withAlphaComponent(0.12)
 
@@ -186,8 +190,6 @@ enum Theme {
         static let keepAwake = "cup.and.saucer.fill"
         static let permission = "hand.raised"
         static let question = "bubble.left"
-        /// A task row's blocker (macOS 12+).
-        static let blocked = "circle.slash"
         static let prFeedback = "bubble.left"
         static let botFeedback = "cpu"
         static let agentError = "exclamationmark.triangle.fill"

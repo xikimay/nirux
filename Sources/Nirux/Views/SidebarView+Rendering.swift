@@ -36,7 +36,7 @@ extension SidebarView {
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let catchUpHeight = catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0
         // At the width the clip shows for the list's height.
-        let fitted = contentScrollView.documentWidth(frameSize: bounds.size) { width in
+        let fitted = contentScrollView.documentWidth(frameSize: listFrame.size) { width in
             let archived = archivedListHeight(listedInactiveInfos, width: width)
             let height = expandedContentHeight(
                 hasPicker: activeProfile != nil,
@@ -52,7 +52,7 @@ extension SidebarView {
         let (archivedHeight, contentH) = fitted.measured
         let onboardingCard = preparedOnboardingCard()
 
-        let docHeight = max(bounds.height, contentH)
+        let docHeight = max(listFrame.height, contentH)
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: docHeight)
 
         var yOffset = docHeight - SidebarExpandedMetrics.topPadding
