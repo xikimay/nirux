@@ -301,6 +301,9 @@ final class RequestsTests: XCTestCase {
         let (panel, _) = shownPanel(over: parent)
         var pressed = 1
         panel.pressedMouseButtons = { pressed }
+        // The window behind took the keyboard on the press.
+        panel.hasKeyboard = { _ in false }
+        panel.keyWindow = { parent }
         panel.noteKeptClick()
         NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: panel.panel)
         RunLoop.main.run(until: Date().addingTimeInterval(0.4))

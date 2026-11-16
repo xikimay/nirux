@@ -39,8 +39,12 @@ final class RequestPanel {
     /// A window of the host's that belongs with it (a reply popover one of
     /// its cards opened): taking the keyboard there doesn't close it.
     var ownsWindow: ((NSWindow) -> Bool)?
-    /// Whether the mouse's button is down; tests say.
+    /// Whether the mouse's button is down, whether a window has the
+    /// keyboard, and which one has it; tests say (CI's app is active,
+    /// a local run's isn't).
     var pressedMouseButtons: () -> Int = { NSEvent.pressedMouseButtons }
+    var hasKeyboard: (NSWindow) -> Bool = { $0.isKeyWindow }
+    var keyWindow: () -> NSWindow? = { NSApp.keyWindow }
     /// Another window whose clicks close it, besides the one it sits over
     /// (the toolbar's own window in full screen). Clicks in any other
     /// window (a reply popover a card opened, Settings) leave it open.
@@ -155,7 +159,7 @@ final class RequestPanel {
         keyObservers = []
         guard isOpen else { return }
         isOpen = false
-        let hadKeyboard = panel.isKeyWindow
+        let hadKeyboard = hasKeyboard(panel)
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
         onClose?(closing, hadKeyboard)
@@ -199,8 +203,8 @@ final class RequestPanel {
     /// closes, so that no key meant for it reaches a terminal while it
     /// still shows.
     private func closeIfKeyboardElsewhere() {
-        guard isOpen, !panel.isKeyWindow else { return }
-        if let key = NSApp.keyWindow, owns(key) { return }
+        guard isOpen, !hasKeyboard(panel) else { return }
+        if let key = keyWindow(), owns(key) { return }
         close(.byClickElsewhere)
     }
 
