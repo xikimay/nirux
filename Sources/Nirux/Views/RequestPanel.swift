@@ -24,12 +24,19 @@ final class RequestPanel {
     }
 
     let panel: NSPanel
-    /// Called once each time it closes.
-    var onClose: ((Closing) -> Void)?
+    /// Called once each time it closes: how, and whether it had the
+    /// keyboard then (only then does the host give it back).
+    var onClose: ((Closing, _ hadKeyboard: Bool) -> Void)?
     /// A click there leaves it open: its host acts on it (the bar's badge,
-    /// which toggles the inbox).
+    /// which toggles the inbox; the callout's own icon).
     var keepsOpen: ((NSEvent) -> Bool)?
+    /// Another window whose clicks close it, besides the one it sits over
+    /// (the toolbar's own window in full screen). Clicks in any other
+    /// window (a reply popover a card opened, Settings) leave it open.
+    var closesOnClicks: ((NSWindow) -> Bool)?
     private var clickMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
+    private(set) var isOpen = false
 
     init(content: NSView) {
         panel = Panel(contentRect: content.bounds, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -38,10 +45,11 @@ final class RequestPanel {
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
+        // It closes instead (`close` on the app's deactivation): hidden
+        // behind AppKit's back, it would come back stale.
+        panel.hidesOnDeactivate = false
         panel.contentView = content
     }
-
-    var isOpen: Bool { panel.isVisible }
 
     /// Shows it at `frame` (screen coordinates) over `window`, `responder`
     /// taking the keyboard.
@@ -53,22 +61,37 @@ final class RequestPanel {
         }
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(responder)
-        guard clickMonitor == nil else { return }
-        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            guard let self, self.isOpen, event.window !== self.panel, self.keepsOpen?(event) != true else { return event }
-            self.close(.byClickElsewhere)
-            // The click goes on to what it landed on.
-            return event
+        isOpen = true
+        if clickMonitor == nil {
+            clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+                guard let self, self.isOpen, let window = event.window, window !== self.panel,
+                      window === self.panel.parent || self.closesOnClicks?(window) == true,
+                      self.keepsOpen?(event) != true else { return event }
+                self.close(.byClickElsewhere)
+                // The click goes on to what it landed on.
+                return event
+            }
+        }
+        if resignObserver == nil {
+            resignObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.close(.byClickElsewhere) }
+            }
         }
     }
 
     func close(_ closing: Closing = .byHost) {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         clickMonitor = nil
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
         guard isOpen else { return }
+        isOpen = false
+        let hadKeyboard = panel.isKeyWindow
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
-        onClose?(closing)
+        onClose?(closing, hadKeyboard)
     }
 
     /// Moves it, keeping it open.

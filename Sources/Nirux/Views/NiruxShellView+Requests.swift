@@ -42,18 +42,27 @@ extension NiruxShellView {
                 quickSwitch.agentWait(column, snapshot, now).map { WaitingAgent(workspaceID: workspace.id, columnID: column.id, wait: $0) }
             }
         }
-        let blocked = Set(agents.map(\.columnID))
-        let columns = Set(open.flatMap { $0.columns.map(\.id) })
+        // An agent waiting on the user's answer already (a permission, a
+        // dialog) asks that first; one stopped on an error still has its
+        // question for the user.
+        let asking = Set(agents.filter { $0.wait.reason.signal == .waiting }.map(\.columnID))
+        let columns = Set(open.flatMap { $0.columns.filter { !$0.isClosing }.map(\.id) })
         agents += requestsState.handedOff
-            .filter { !blocked.contains($0.key) && columns.contains($0.key) }
+            .filter { !asking.contains($0.key) && columns.contains($0.key) }
             .sorted { ($0.value.question.askedAt, $0.key.uuidString) < ($1.value.question.askedAt, $1.key.uuidString) }
             .map { columnID, handed in
                 WaitingAgent(
                     workspaceID: handed.workspaceID, columnID: columnID,
-                    wait: AgentWait(reason: .question(handed.question.text), since: handed.question.askedAt)
+                    wait: Self.handedOffWait(handed.question)
                 )
             }
         return WaitingAgentQueue.ordered(agents)
+    }
+
+    /// The wait a Mission question handed to the user stands for in ⌘J's
+    /// queue.
+    static func handedOffWait(_ question: SidebarMissionQuestion) -> AgentWait {
+        AgentWait(reason: .question(question.text), since: question.askedAt)
     }
 
     /// Of ⌘J's queue, what waits for the user's answer (amber: not an
@@ -85,12 +94,14 @@ extension NiruxShellView {
         foregroundProcesses: [ObjectIdentifier: ForegroundProcess]
     ) -> [WaitingRequest] {
         agents.compactMap { agent in
-            guard let workspace = workspaces.first(where: { $0.id == agent.workspaceID }),
-                  let column = workspace.columns.first(where: { $0.id == agent.columnID }) else { return nil }
+            guard let workspace = workspaces.first(where: { $0.id == agent.workspaceID && !$0.isClosing }),
+                  let column = workspace.columns.first(where: { $0.id == agent.columnID && !$0.isClosing }) else { return nil }
             let foreground = foregroundProcesses[ObjectIdentifier(column)]
             let approval = sidebarApproval(for: column, hold: approvalHolds[ObjectIdentifier(column)])
+            // The question's own entry, not a wait of the agent's.
+            let handed = requestsState.handedOff[column.id].map(\.question).flatMap { agent.wait == Self.handedOffWait($0) ? $0 : nil }
             let kind = Self.requestKind(
-                mission: requestsState.handedOff[column.id]?.question, approval: approval,
+                mission: handed, approval: approval,
                 turnQuestion: Self.sidebarTurnQuestion(of: column, status: column.pty?.cachedAgentState ?? .idle, foreground: foreground),
                 dialog: column.pty?.agentVisibleDialog(foreground: foreground)?.dialog, reason: agent.wait.reason
             )

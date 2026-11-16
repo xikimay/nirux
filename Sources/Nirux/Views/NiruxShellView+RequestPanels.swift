@@ -29,9 +29,10 @@ extension NiruxShellView {
         }
         inbox.onClose = { [weak self] in self?.closeInbox() }
         let panel = RequestPanel(content: inbox)
-        panel.onClose = { [weak self] closing in if closing == .byHost { self?.giveKeyboardBack() } }
+        panel.onClose = { [weak self] closing, hadKeyboard in if closing == .byHost, hadKeyboard { self?.giveKeyboardBack() } }
         // The badge acts on the open inbox (⌘J again).
         panel.keepsOpen = { [weak self] event in self?.isOnWaitingSegment(event) == true }
+        panel.closesOnClicks = { [weak self] window in window === self?.commandBarToolbar?.bar.window }
         requestsState.inbox = inbox
         requestsState.inboxPanel = panel
         return inbox
@@ -46,10 +47,10 @@ extension NiruxShellView {
             let screen = (barWindow.screen ?? window.screen)?.visibleFrame
             return CommandPalette.place(underBar: barRect, in: window.frame, screen: screen, size: size).frame
         }
-        return NSRect(
-            x: window.frame.midX - size.width / 2, y: window.frame.maxY - CommandBarView.height - size.height - Theme.Space.lg,
-            width: size.width, height: size.height
-        )
+        // No bar: hung from the window's top, inside the window and then
+        // the screen, as under the bar.
+        let top = NSRect(x: window.frame.midX - 1, y: window.frame.maxY - CommandBarView.height, width: 2, height: 0)
+        return CommandPalette.place(underBar: top, in: window.frame, screen: window.screen?.visibleFrame, size: size).frame
     }
 
     private func isOnWaitingSegment(_ event: NSEvent) -> Bool {
@@ -63,6 +64,11 @@ extension NiruxShellView {
     /// when the task has none to show (its waiting column is on screen):
     /// the click then goes to the task.
     func openCallout(taskID: String, anchor: NSView) -> Bool {
+        // Its own icon again: it closes.
+        if requestsState.isCalloutOpen, requestsState.calloutTaskID == taskID {
+            closeCallout()
+            return true
+        }
         guard let window, let request = requestsState.requests.first(where: { $0.taskID == taskID }) else { return false }
         closeInbox(.toTask)
         let callout = requestsState.callout ?? makeCallout()
@@ -88,12 +94,18 @@ extension NiruxShellView {
         }
         callout.onClose = { [weak self] in self?.closeCallout() }
         let panel = RequestPanel(content: callout)
-        panel.onClose = { [weak self] closing in
+        panel.onClose = { [weak self] closing, hadKeyboard in
             guard let self else { return }
             if let observer = requestsState.calloutScrollObserver { NotificationCenter.default.removeObserver(observer) }
             requestsState.calloutScrollObserver = nil
             requestsState.calloutTaskID = nil
-            if closing == .byHost { giveKeyboardBack() }
+            if closing == .byHost, hadKeyboard { giveKeyboardBack() }
+        }
+        // A click on its own icon closes it there (`openCallout`), not here
+        // and then open again.
+        panel.keepsOpen = { [weak self] event in
+            guard let anchor = self?.requestsState.calloutAnchor, event.window === anchor.window else { return false }
+            return anchor.bounds.contains(anchor.convert(event.locationInWindow, from: nil))
         }
         requestsState.callout = callout
         requestsState.calloutPanel = panel
@@ -178,17 +190,19 @@ extension NiruxShellView {
     func goToRequest(_ request: WaitingRequest) {
         closeInbox(.toTask)
         closeCallout(.toTask)
-        guard let (workspaceIndex, columnIndex) = indexOfColumn(request.columnID) else { return giveKeyboardBack() }
-        focusWorkspace(id: workspaces[workspaceIndex].id, column: columnIndex)
+        guard let place = liveColumn(where: { $0.id == request.columnID }) else { return giveKeyboardBack() }
+        // The panel had the keyboard: the window takes it back first.
+        window?.makeKey()
+        focusWorkspace(id: place.workspace.id, column: place.columnIndex)
         // Where ⌘J's walk goes on from.
         quickSwitch.noteWalk([request.columnID])
     }
 
+    /// The column with `id`, open and not closing, by its indexes.
     private func indexOfColumn(_ id: UUID) -> (Int, Int)? {
-        for (workspaceIndex, workspace) in workspaces.enumerated() {
-            if let columnIndex = workspace.columns.firstIndex(where: { $0.id == id }) { return (workspaceIndex, columnIndex) }
-        }
-        return nil
+        guard let place = liveColumn(where: { $0.id == id }),
+              let workspaceIndex = workspaces.firstIndex(where: { $0 === place.workspace }) else { return nil }
+        return (workspaceIndex, place.columnIndex)
     }
 
     /// The panel that had the keyboard closed: the terminal on screen takes

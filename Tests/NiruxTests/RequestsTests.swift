@@ -61,10 +61,43 @@ final class RequestsTests: XCTestCase {
         XCTAssertEqual(requests.first?.icon, StateIcon(.needsYou(.question)))
         XCTAssertEqual(requests.last?.icon, StateIcon(.needsYou(.command)))
 
+        // Its agent waits on a permission meanwhile: that is what it asks.
         shell.quickSwitch.agentWait = { candidate, _, _ in
-            candidate === column ? AgentWait(reason: .question("Pick one"), since: 80) : nil
+            candidate === column ? AgentWait(reason: .permission(tool: "Bash", summary: "ls"), since: 80) : nil
         }
-        XCTAssertEqual(shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100).map(\.columnID), [column.id], "once")
+        let permission = shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100)
+        XCTAssertEqual(permission.map(\.columnID), [column.id], "once")
+        XCTAssertEqual(
+            shell.waitingRequests(permission, approvalHolds: [:], foregroundProcesses: [:]).map(\.kind), [.terminal("Bash: ls")],
+            "the permission, not the question behind it"
+        )
+        // Its agent stopped on an error: its question for the user stays.
+        shell.quickSwitch.agentWait = { candidate, _, _ in
+            candidate === column ? AgentWait(reason: .exitedMidTurn, since: 80) : nil
+        }
+        let stopped = NiruxShellView.requestedAgents(in: shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100), onScreen: nil)
+        XCTAssertEqual(shell.waitingRequests(stopped, approvalHolds: [:], foregroundProcesses: [:]).map(\.kind), [.mission(asked)])
+    }
+
+    /// A panel closes when Nirux stops being the active app, as a click
+    /// elsewhere closes it: the keyboard isn't given back.
+    func testAPanelClosesWhenNiruxIsLeft() {
+        let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: .titled, backing: .buffered, defer: true)
+        parent.isReleasedWhenClosed = false
+        defer { parent.close() }
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let panel = RequestPanel(content: content)
+        var closings: [RequestPanel.Closing] = []
+        panel.onClose = { closing, _ in closings.append(closing) }
+        panel.show(frame: NSRect(x: 10, y: 10, width: 100, height: 100), over: parent, responder: content)
+        XCTAssertTrue(panel.isOpen)
+        XCTAssertTrue(panel.panel.parent === parent, "over its window")
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+        XCTAssertFalse(panel.isOpen)
+        XCTAssertEqual(closings, [.byClickElsewhere])
+        XCTAssertNil(panel.panel.parent)
+        panel.close()
+        XCTAssertEqual(closings.count, 1, "once")
     }
 
     /// The callout sits right of its icon, centred on it, inside the window

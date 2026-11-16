@@ -110,6 +110,10 @@ final class RequestFlowTests: XCTestCase {
             shell.closeInbox()
 
             rail.onRequest?(there.id, icon)
+            XCTAssertTrue(shell.requestsState.isCalloutOpen)
+            rail.onRequest?(there.id, icon)
+            XCTAssertFalse(shell.requestsState.isCalloutOpen, "its own icon again: it closes")
+            rail.onRequest?(there.id, icon)
             callout.onOpenTask?(there.id)
             XCTAssertFalse(shell.requestsState.isCalloutOpen)
             XCTAssertIdentical(shell.activeWorkspace, there, "Open task")
