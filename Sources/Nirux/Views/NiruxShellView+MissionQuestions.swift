@@ -136,7 +136,8 @@ extension NiruxShellView {
             )
             missionParentWatch[question.id] = watch
             result[ObjectIdentifier(column)] = SidebarMissionQuestion(
-                questionID: question.id, parentTitle: parentTitle, text: question.message, handOff: handOff
+                questionID: question.id, parentTitle: parentTitle, text: question.message, handOff: handOff,
+                askedAt: question.timestamp
             )
         }
         return result
@@ -208,15 +209,17 @@ extension NiruxShellView {
     }
 
     /// The card's question row was clicked: the whole question and a reply
-    /// field, anchored to the row.
-    func showMissionReplyPopover(workspaceIndex: Int, columnIndex: Int, anchor: NSView) {
+    /// field, anchored to the row. `questionID`, from the inbox or the
+    /// callout: the question the card showed, which another may have
+    /// replaced in the column meanwhile.
+    func showMissionReplyPopover(workspaceIndex: Int, columnIndex: Int, anchor: NSView, questionID: String? = nil) {
         let snapshot = ProcessSnapshot()
         guard let workspace = workspaces[safe: workspaceIndex],
               let column = workspace.columns[safe: columnIndex],
               let question = missionQuestions(
                   foreground: { $0.pty?.foregroundProcess(snapshot: snapshot) },
                   now: Date().timeIntervalSince1970
-              )[ObjectIdentifier(column)], !question.isAnswered
+              )[ObjectIdentifier(column)], !question.isAnswered, questionID.map({ $0 == question.questionID }) ?? true
         else { return showToast("That question was already answered") }
         closeMissionReply()
         let controller = MissionReplyViewController(

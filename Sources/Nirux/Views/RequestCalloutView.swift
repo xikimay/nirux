@@ -3,9 +3,10 @@ import AppKit
 /// The rail's callout (docs/design/glass-interface.md): a click on an amber
 /// icon shows that task's request beside it, with its answers (the inbox's
 /// card, the rows' answers), "Open task", and how many more wait (⌘J).
-/// Escape or a click elsewhere closes it. Built, not shown yet: phase 3
-/// hosts it at the icon `IconRail.onRequest` gives; as it follows the icon,
-/// the answers that slid on screen wait again by themselves.
+/// Escape or a click elsewhere closes it. The shell hosts it beside the
+/// icon `IconRail.onRequest` gives (`openCallout`, a `RequestPanel`); as it
+/// follows the icon, the answers that slid on screen wait again by
+/// themselves.
 final class RequestCalloutView: NSView {
     static let width: CGFloat = 330
 

@@ -75,8 +75,8 @@ final class CommandBarContentTests: XCTestCase {
             agent(.permission(tool: "Bash", summary: nil)), agent(.apiError(kind: nil, detail: nil)), agent(.exitedMidTurn),
             agent(.question("Which base?"), column: shown),
         ]
-        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(queue: queue, onScreen: shown), 1)
-        XCTAssertEqual(NiruxShellView.commandBarWaitingCount(queue: queue, onScreen: nil), 2)
+        XCTAssertEqual(NiruxShellView.requestedAgents(in: queue, onScreen: shown).count, 1)
+        XCTAssertEqual(NiruxShellView.requestedAgents(in: queue, onScreen: nil).count, 2)
     }
 
     /// A wait for the user's answer stops blocking once the agent works

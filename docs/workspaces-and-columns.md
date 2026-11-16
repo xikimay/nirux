@@ -52,12 +52,12 @@ A browser column keeps its URL history, downloads files to `~/Downloads`, and op
 ## Finding your way
 
 - `Cmd+P` opens the command palette (`Shift+Cmd+P` from the editor). It lists the current space's workspaces and its five most recent sessions, then the actions. Type a workspace's name, branch, space or folder and press Return to go to it, in any space, archived ones included. Each row shows its agents' state.
-- `Cmd+J` goes to the agent that has waited for you longest, those you have not seen yet first.
+- `Cmd+J` goes to the agent that has waited for you longest, those you have not seen yet first. With the sidebar folded, it opens the requests under the command bar instead: each with its answers (Allow, Yes, Reply…); press `Cmd+J` again to go to the one chosen (`↑` `↓` choose). A click on an amber icon of the rail shows its task's request beside it.
 - `Session History…` (command palette, Space menu) lists every past Claude Code and Codex session of the space, including those whose worktree was cleaned up. Return resumes one, in its workspace or in a new one, and brings its worktree back if needed.
 - `Option+Cmd+F`, Search Everywhere, finds text in the scrollback of every terminal, in every workspace and space, then in the transcripts of your Claude sessions. Picking a terminal match opens that terminal's find bar on it. Picking a transcript match resumes the session or goes to its column.
 - `Shift+Cmd+F` searches the files of the current workspace.
 
-The command bar sits at the top of the window, level with its buttons. It shows the space (click for the space menu), the task on screen and where it stands (click for the task's menu), the search (`Cmd+P`, which opens under the bar), and how many agents wait for you in every space (click or `Cmd+J` to go to the next one). New is in the sidebar and `Cmd+N` (and a click on the task part when nothing is open), the [Board](pull-requests.md#the-board) is `Ctrl+Cmd+B`, in the Space menu and in the command palette.
+The command bar sits at the top of the window, level with its buttons. It shows the space (click for the space menu), the task on screen and where it stands (click for the task's menu), the search (`Cmd+P`, which opens under the bar), and how many requests wait for you in every space (click or `Cmd+J`: the requests with the sidebar folded, the next agent with it unfolded). New is in the sidebar and `Cmd+N` (and a click on the task part when nothing is open), the [Board](pull-requests.md#the-board) is `Ctrl+Cmd+B`, in the Space menu and in the command palette.
 
 ## After a restart
 

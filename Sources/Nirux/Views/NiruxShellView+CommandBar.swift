@@ -45,14 +45,6 @@ extension NiruxShellView {
         return content
     }
 
-    /// The bar's count: of what ⌘J would visit (`queue`, as
-    /// `WaitingAgentQueue.collect` gives it), what waits for the user's
-    /// answer (amber: not an agent stopped on an error or exited, which ⌘J
-    /// also visits), leaving out the column on screen, where ⌘J never goes.
-    static func commandBarWaitingCount(queue: [WaitingAgent], onScreen: UUID?) -> Int {
-        queue.filter { $0.columnID != onScreen && $0.wait.reason.signal == .waiting }.count
-    }
-
     /// The space menu, as the sidebar's picker has it, under the bar's space
     /// segment.
     private func showSpaceMenuFromCommandBar() {

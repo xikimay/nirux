@@ -121,15 +121,28 @@ extension NiruxShellView {
 
     static let noWaitingAgentHint = "No agent is waiting on you"
 
-    /// Next Waiting Agent (⌘J): to the agent blocked on the user that
-    /// they have not seen yet, the longest wait first, then on through
-    /// every other one at each press (see `WaitingAgentQueue.next`),
-    /// whatever its workspace or space. With
-    /// none, a hint says so, without a beep.
+    /// Next Waiting Agent (⌘J, the command bar's badge). The sidebar
+    /// folded, requests waiting: the inbox opens under the bar (over a
+    /// callout, which closes), and ⌘J again goes to the request chosen in
+    /// it. Else, as the sidebar unfolded, where the requests stay in the
+    /// rows: to the agent blocked on the user that they have not seen yet,
+    /// the longest wait first, then on through every other one at each
+    /// press (see `WaitingAgentQueue.next`), whatever its workspace or
+    /// space, the agents stopped on an error or exited too. With none, a
+    /// hint says so, without a beep.
     func jumpToNextWaitingAgent() {
+        if requestsState.isInboxOpen {
+            if let chosen = requestsState.inbox?.chosenRequest { goToRequest(chosen) } else { closeInbox() }
+            return
+        }
+        if !sidebar.isExpanded {
+            // The requests as they are now, not at the last refresh.
+            updateSidebar()
+            if !requestsState.requests.isEmpty { return openInbox() }
+        }
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
-        let queue = WaitingAgentQueue.collect(from: workspaces) { self.quickSwitch.agentWait($0, snapshot, now) }
+        let queue = waitingQueue(snapshot: snapshot, now: now)
         let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
         // ⌘J with the palette open: the hint would show under it.
         if commandPalette?.isVisible == true { commandPalette?.dismiss() }

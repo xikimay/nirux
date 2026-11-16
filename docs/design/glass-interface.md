@@ -1,7 +1,7 @@
 # Glass interface
 
-> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), then the icon rail as the folded sidebar (3.2).\
-> **Differs today:** a click on an amber rail icon goes to its task; the inbox and the callout come with 3.3, the rows on glass after it.
+> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3).\
+> **Differs today:** M3's edge pill still shows (it goes in the PR after 3.3); the rows on glass come after it.
 
 Status: design validated by the user on 2026-11-14, after six rounds of
 studies (renders of today's app, mockups and the plan:
@@ -215,6 +215,31 @@ know Missions questions yet), and where `onAnswer` lands
 (`decidePermission`, `answerFromCard`, `showMissionReplyPopover`) with the
 request's column; the Missions reply panel should check the question's id,
 as it opens whatever question its column holds.
+
+In the window (3.3), decided with the Lead on 2026-11-16: the requests are
+what ⌘J's queue (`WaitingAgentQueue`, through `waitingQueue`) holds that
+waits for an answer (amber), the column on screen left out, and the Mission
+questions handed to the user, which the queue now holds at their time; the
+command bar's count is their number. The order is the queue's: the waits not
+seen yet first, then the standing questions, oldest first in each, so that
+⌘J again lands where ⌘J lands while the sidebar is unfolded. An agent
+stopped on an error or exited (red) stays out: ⌘J walks to it as before when
+no amber request waits. A request is built at each sidebar refresh from what
+the rows read (`requestKind`: a handed-off Mission question, a permission
+the rows answer, the turn's question, a question dialog, else a prompt only
+the terminal answers). With the sidebar folded, ⌘J and the badge open the
+inbox (over a callout, which closes); ⌘J again goes to the chosen request's
+column; with it unfolded they go straight to the task, as before. Both
+panels are borderless child windows of the main window (`RequestPanel`),
+the inbox placed under the bar as ⌘P is, the callout right of its icon,
+which it follows as the rail scrolls: while one has the keyboard, keys typed
+reach no terminal (the key interceptor routes only the main window's), a
+click elsewhere closes it, and Escape or the last answer gives the keyboard
+back to the terminal. The inbox follows the refresh and closes once no
+request is left; the callout closes once its request is gone (answered, or
+its column on screen) or its icon is. Answers go to the rows' receivers
+(`decidePermission`, `answerFromCard`, `showMissionReplyPopover`, which now
+checks the question's id); "Open task" and ⌘J go to the request's column.
 
 ![The inbox with three requests: Opaque exact, Glass approximated](../images/request-inbox.png)
 

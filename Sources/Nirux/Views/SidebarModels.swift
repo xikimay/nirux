@@ -170,6 +170,9 @@ struct SidebarMissionQuestion: Hashable {
     /// `claude` restarted since takes it only after one prompt.
     /// `parentTitle` then names who answered ("you" for the user).
     var isAnswered = false
+    /// When the child asked (epoch seconds): its place in ⌘J's queue and
+    /// the inbox once handed to the user.
+    var askedAt: TimeInterval = 0
 
     /// Whether a question asked at `askedAt` now waits on the user: at once
     /// when its parent can't take it, else once nobody answered within

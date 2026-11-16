@@ -4,8 +4,9 @@ import AppKit
 /// command bar, every request waiting for the user, in the order it is
 /// given (oldest first), each with its answers. It opens with the oldest
 /// chosen; ↑ ↓ move the choice, and ⌘J again goes to the chosen task
-/// (`chosenRequest`); Escape closes it. Answers are clicks only. Built, not
-/// shown yet: phase 3 hosts it and feeds it.
+/// (`chosenRequest`); Escape closes it. Answers are clicks only. The shell
+/// hosts it under the command bar (`openInbox`, a `RequestPanel`) and feeds
+/// it at each sidebar refresh.
 final class RequestInboxView: NSView {
     static let width: CGFloat = 372
     static let headerHeight: CGFloat = 34

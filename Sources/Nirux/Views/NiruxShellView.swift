@@ -5,6 +5,9 @@ import GhosttyTerminal
 final class NiruxShellView: NSView {
     private static let collapsedSidebarWidth = SidebarView.foldedWidth
     private static let expandedSidebarWidth: CGFloat = 260
+    /// The requests waiting for the user, the inbox and the callout (see
+    /// NiruxShellView+Requests).
+    let requestsState = RequestsState()
     /// The user's choice and the window's width (see `SidebarFold`).
     var sidebarFold = SidebarFold()
     /// Whether the sidebar is unfolded; set, the user's choice.
@@ -310,6 +313,7 @@ final class NiruxShellView: NSView {
         sidebar.onNewWorkspace = { [weak self] in self?.showNewPanel() }
         sidebar.onShowArchived = { [weak self] in self?.showArchivedTasks() }
         sidebar.onOpenBoard = { [weak self] in self?.openProjectBoard() }
+        sidebar.onRailRequest = { [weak self] taskID, icon in self?.openCallout(taskID: taskID, anchor: icon) ?? false }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in
             self?.moveWorkspaceToSpace(workspaceID: workspaceID, profileID: profileID)
