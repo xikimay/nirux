@@ -65,9 +65,7 @@ extension SidebarView {
     func refreshHoverTargetFromMouse() {
         guard let window else { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
-        // Over the status bar or the title bar, document points still fall
-        // on rows scrolled out of view.
-        guard bounds.contains(convert(windowPoint, from: nil)) else { return }
+        guard isOnList(windowPoint) else { return }
         let point = contentDocumentView.convert(windowPoint, from: nil)
         guard let area = hitArea(at: point) else { return }
         switch area.region {

@@ -57,6 +57,8 @@ extension SidebarView {
     /// Fading out, the picture of the rail fades over the cards' colour.
     func showIconRail() {
         iconRail.isHidden = isExpanded || isRailHidden
+        // Folded, the window's colour (the rail's capsule reads on it);
+        // unfolded, the sidebar's glass draws its own.
         layer?.backgroundColor = (iconRail.isHidden ? Theme.Color.base : Theme.Color.canvas).cgColor
         // Hidden, its icons stop breathing.
         iconRail.animates = animates && !iconRail.isHidden

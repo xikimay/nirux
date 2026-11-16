@@ -4,9 +4,9 @@ import AppKit
 /// an action block's button. Clicks go through the sidebar's hit areas.
 final class SidebarBadgeView: NSView {
     private let text: String
-    private let textColor: NSColor
-    private let fillColor: NSColor
-    private let font: NSFont
+    let textColor: NSColor
+    let fillColor: NSColor
+    let font: NSFont
 
     /// Colors drawn while `isHovered` — nil keeps the base colors, so only
     /// badges that opt in (the "⋯" action button) react to hover.

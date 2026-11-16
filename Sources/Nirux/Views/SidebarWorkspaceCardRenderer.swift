@@ -67,13 +67,7 @@ final class SidebarWorkspaceCardRenderer {
         let frame = NSRect(
             x: layout.cardX, y: yOffset - layout.height, width: layout.cardWidth, height: layout.height
         )
-        if workspace.isActive {
-            let selected = SidebarBackgroundView(frame: frame)
-            selected.wantsLayer = true
-            selected.layer?.cornerRadius = Theme.Radius.card
-            selected.layer?.backgroundColor = Theme.Color.fillSelected.cgColor
-            append(selected)
-        }
+        if workspace.isActive { append(Self.selectionGlass(frame: frame)) }
         let cardHover = SidebarBackgroundView(frame: frame)
         cardHover.wantsLayer = true
         cardHover.layer?.cornerRadius = layout.isCompact ? Theme.Radius.control : Theme.Radius.card
@@ -205,52 +199,54 @@ final class SidebarWorkspaceCardRenderer {
         return lines.joined(separator: "\n")
     }
 
-    /// The sign in the state marks' column: amber for the user, red for
-    /// something broken, a green dot for work, a speech bubble for a
-    /// question to the parent, a slashed circle for a blocker, a check,
-    /// the merge sign, a grey check for a finished turn, else grey. Returns
-    /// the dot, or the grey check, which a turn's end draws over.
+    /// The row's state as the glass interface's state icon (`StateIcon`,
+    /// as on the rail, the command bar and the inbox): a wait's amber disc
+    /// with its reason, from the column that waits; a failure's "!"; work's
+    /// ring with its station; a finished turn's grey check; checks passed,
+    /// merged, blocked, asking its parent. The ring of checks that run
+    /// (the family's dashed ring) turns while rows may move. Returns the
+    /// icon a turn's end draws its check over (the grey ring, the grey
+    /// check, the ring of checks).
     @discardableResult
     private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) -> NSView? {
-        let centerX = (Metrics.markCenterX + layout.nestIndent)
-        // The status line says it to VoiceOver.
-        func symbol(_ name: String, _ color: NSColor, _ label: String?) -> NSView? {
-            let icon = SidebarImageView(image: SidebarRenderer.symbol(name, color: color, pointSize: 11))
-            icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
-            icon.setAccessibilityElement(false)
-            // A layer of its own: a check drawn over it hides it meanwhile.
-            icon.wantsLayer = true
-            append(icon)
-            return nil
-        }
-        let color: NSColor
-        switch mark {
-        case .asking: return symbol(Theme.Symbol.question, Theme.Color.textSecondary, nil)
-        case .blocked: return symbol(Theme.Symbol.blocked, Theme.Color.textSecondary, nil)
-        case .readyToMerge:
-            _ = symbol(Theme.Symbol.checksPassed, Theme.Color.success, nil)
-            // Drawn once, when the checks pass in front of the user.
-            if let icon = views.last { buildCheck(over: icon, startedAt: readyAt, holds: false) }
-            return nil
-        case .merged: return symbol(Theme.Symbol.merged, Theme.Color.done, nil)
-        case .finished:
-            _ = symbol(Theme.Symbol.checksPassed, Theme.Color.idle, nil)
-            // The green check of a turn's end draws over it, as over the dot.
-            return views.last
-        case .checksRunning:
-            return buildChecksRing(center: NSPoint(x: centerX, y: centerY))
-        case .needsYou: color = Theme.Color.waiting
-        case .error: color = Theme.Color.error
-        case .working: color = Theme.Color.working
-        case .idle: color = Theme.Color.idle
-        }
-        let size = Metrics.stateDotSize
-        let dot = SidebarBackgroundView(frame: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = size / 2
-        dot.layer?.backgroundColor = color.cgColor
-        append(dot)
-        return dot
+        let center = NSPoint(x: Metrics.markCenterX + layout.nestIndent, y: centerY)
+        if mark == .checksRunning { return buildChecksRing(center: center) }
+        let size = Metrics.stateIconSize
+        // Takes no click, as the dot didn't; a layer of its own: a check
+        // drawn over it hides it meanwhile. The status line says it to
+        // VoiceOver.
+        let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
+        host.wantsLayer = true
+        // Only the row's own mark waits for the user: a compact row's is
+        // merged or grey.
+        let icon = StateIconView(mark == .needsYou ? workspace.stateIcon(summary: layout.summary) : StateIcon(mark: mark), size: size)
+        icon.frame = host.bounds
+        host.addSubview(icon)
+        append(host)
+        // Drawn once, when the checks pass in front of the user.
+        if mark == .readyToMerge { buildCheck(over: host, startedAt: readyAt, holds: false) }
+        return Self.drawsTurnEnd(over: mark) ? host : nil
+    }
+
+    /// The selected row's pane of glass (the glass interface, 3.4): a
+    /// translucent fill, a light rim, and the light on its top edge, at
+    /// every transparency level, Opaque included.
+    static let selectionGlassID = NSUserInterfaceItemIdentifier("nirux.sidebar.selection")
+    static func selectionGlass(frame: NSRect) -> NSView {
+        let pane = SidebarBackgroundView(frame: frame)
+        pane.identifier = selectionGlassID
+        pane.wantsLayer = true
+        let radius = Theme.Radius.card
+        pane.layer?.cornerRadius = radius
+        pane.layer?.backgroundColor = Theme.Color.selectionGlass.cgColor
+        pane.layer?.borderWidth = 1
+        pane.layer?.borderColor = Theme.Color.line.cgColor
+        let light = CALayer()
+        // The layer's y goes up: its top edge, inside the rounded corners.
+        light.frame = CGRect(x: radius, y: frame.height - 2, width: max(0, frame.width - 2 * radius), height: 1)
+        light.backgroundColor = Theme.Color.selectionHighlight.cgColor
+        pane.layer?.addSublayer(light)
+        return pane
     }
 
     /// Whether a turn's end can show on this workspace's row: a task's
@@ -342,16 +338,19 @@ final class SidebarWorkspaceCardRenderer {
     /// rows may not move, and for an archived task, whose pull request
     /// isn't read again: nothing turns there for ever.
     private func buildChecksRing(center: NSPoint) -> NSView {
-        let size: CGFloat = 12
+        // The state icons' ring (`StateIcon`, on its 16-unit grid: radius
+        // 6.25, line 1.5), in their grey.
+        let size = Metrics.stateIconSize
+        let unit = size / 16
         let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
         host.identifier = Self.checksRingID
         host.wantsLayer = true
         let ring = CAShapeLayer()
         ring.frame = host.bounds
-        ring.path = CGPath(ellipseIn: host.bounds.insetBy(dx: 1.5, dy: 1.5), transform: nil)
+        ring.path = CGPath(ellipseIn: host.bounds.insetBy(dx: 1.75 * unit, dy: 1.75 * unit), transform: nil)
         ring.fillColor = nil
-        ring.strokeColor = Theme.Color.textSecondary.cgColor
-        ring.lineWidth = 1.5
+        ring.strokeColor = StateIcon(.waiting).color.cgColor
+        ring.lineWidth = 1.5 * unit
         ring.lineCap = .round
         if animates, !workspace.isInactive {
             // One arc going round.
@@ -370,7 +369,9 @@ final class SidebarWorkspaceCardRenderer {
             turn.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
             ring.add(turn, forKey: Self.checksRingKey)
         } else {
-            ring.lineDashPattern = [2, 2.7]
+            // The family's ten dashes.
+            let period = 2 * CGFloat.pi * 6.25 * unit / 10
+            ring.lineDashPattern = [NSNumber(value: Double(period * 0.56)), NSNumber(value: Double(period * 0.44))]
         }
         host.layer?.addSublayer(ring)
         append(host)
@@ -887,8 +888,8 @@ final class SidebarWorkspaceCardRenderer {
     // MARK: - Lead row
 
     /// The space's Lead (docs/design/spaces.md, "The Lead"): its sign, its title,
-    /// and a dot for its state (green while it works, amber when it needs
-    /// you, red once it broke); then the action block, as any row.
+    /// and its state icon, small, while it works, needs you or broke; then
+    /// the action block, as any row.
     private func buildLeadRow(frame: NSRect) {
         let rowY = frame.maxY - Metrics.leadRowHeight
         let midY = rowY + Metrics.leadRowHeight / 2
@@ -898,20 +899,14 @@ final class SidebarWorkspaceCardRenderer {
         append(icon)
 
         var maxX = layout.contentMaxX
-        let state: NSColor? = switch layout.summary.mark {
-        case .working: Theme.Color.working
-        case .needsYou: Theme.Color.waiting
-        case .error: Theme.Color.error
-        default: nil
-        }
-        if let state {
-            let size: CGFloat = 7
-            let dot = SidebarBackgroundView(frame: NSRect(x: maxX - size, y: midY - size / 2, width: size, height: size))
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = size / 2
-            dot.layer?.backgroundColor = state.cgColor
-            append(dot)
-            maxX = dot.frame.minX - Theme.Space.sm
+        if [.working, .needsYou, .error].contains(layout.summary.mark) {
+            let size = Metrics.leadStateIconSize
+            let host = SidebarBackgroundView(frame: NSRect(x: maxX - size, y: midY - size / 2, width: size, height: size))
+            let icon = StateIconView(workspace.stateIcon(summary: layout.summary), size: size)
+            icon.frame = host.bounds
+            host.addSubview(icon)
+            append(host)
+            maxX = host.frame.minX - Theme.Space.sm
         }
         let badge = menuButton(frame: NSRect(
             x: maxX - Metrics.menuButtonWidth, y: midY - Metrics.menuButtonHeight / 2,
@@ -1030,42 +1025,41 @@ final class SidebarImageView: NSView {
     }
 }
 
-/// The action block's buttons.
+/// The action block's buttons: drawn, but in `NiruxButton`'s looks and
+/// small size (the glass interface, 3.4), so that a row, the inbox and the
+/// callout show the same buttons.
 @MainActor
 enum SidebarActionButton {
     /// Allow: the one action the block recommends.
     static func primary(_ title: String, label: String) -> SidebarBadgeView {
-        let button = SidebarBadgeView(
-            text: title, textColor: Theme.Color.canvas, fillColor: Theme.Color.accent,
-            font: NSFont.systemFont(ofSize: Theme.Font.caption.pointSize, weight: .semibold)
-        )
-        button.hoverFillColor = Theme.Color.tint(Theme.Color.textPrimary, 0.18, over: Theme.Color.accent)
-        return configured(button, label: label)
+        configured(looking(.primary, title), label: label)
     }
 
     static func secondary(_ title: String, symbol: String? = nil, label: String) -> SidebarBadgeView {
-        let button = SidebarBadgeView(
-            text: title, textColor: Theme.Color.textPrimary, fillColor: Theme.Color.fillHover,
-            font: NSFont.systemFont(ofSize: Theme.Font.caption.pointSize, weight: .medium)
-        )
+        let button = looking(.secondary, title)
         button.symbolName = symbol
-        button.borderColor = Theme.Color.lineStrong
-        button.hoverFillColor = Theme.Color.fillPressed
         return configured(button, label: label)
     }
 
     /// Dismiss: a grey word without a frame, lit under the pointer.
     static func quiet(_ title: String, label: String) -> SidebarBadgeView {
-        let button = SidebarBadgeView(
-            text: title, textColor: Theme.Color.textTertiary, fillColor: .clear, font: Theme.Font.caption
-        )
-        button.hoverTextColor = Theme.Color.textPrimary
-        button.hoverFillColor = Theme.Color.fillHover
-        return configured(button, label: label)
+        configured(looking(.quiet, title), label: label)
+    }
+
+    /// A drawn button in `kind`'s look, at rest and under the pointer.
+    private static func looking(_ kind: NiruxButton.Kind, _ title: String) -> SidebarBadgeView {
+        let rest = NiruxButton.look(kind, hovered: false, pressed: false, enabled: true)
+        let hover = NiruxButton.look(kind, hovered: true, pressed: false, enabled: true)
+        let button = SidebarBadgeView(text: title, textColor: rest.text, fillColor: rest.fill, font: NiruxButton.Size.small.font)
+        button.borderColor = rest.border
+        button.hoverFillColor = hover.fill
+        button.hoverTextColor = hover.text
+        return button
     }
 
     private static func configured(_ button: SidebarBadgeView, label: String) -> SidebarBadgeView {
-        button.cornerRadius = Theme.Radius.control
+        // A capsule, as `NiruxButton`.
+        button.cornerRadius = SidebarExpandedMetrics.buttonHeight / 2
         button.toolTip = label
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel(label)

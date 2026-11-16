@@ -1,7 +1,7 @@
 # Glass interface
 
-> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3).\
-> **Differs today:** M3's edge pill still shows (it goes in the PR after 3.3); the rows on glass come after it.
+> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3), the rows on glass (3.4).\
+> **Differs today:** the app draws every level as Opaque until phase 4 brings the Appearance page and the translucent window.
 
 Status: design validated by the user on 2026-11-14, after six rounds of
 studies (renders of today's app, mockups and the plan:
@@ -83,6 +83,31 @@ its small size, so the rows, the inbox and the callout show the same buttons.
 A button can refuse a press (`acceptsPress`): the inbox's answers ignore
 clicks for a moment after they move under the pointer, as the rows' buttons
 do.
+
+## Rows on glass
+
+The unfolded sidebar (3.4) keeps November's readable rows, their lines and
+their motions (the working line, the turn's check, the ready check, the
+merge sweep, the birth), and changes what frames them:
+
+- **State icons:** each row's mark is its `StateIcon` at 14 pt, centred where
+  the dot was, so the text doesn't move; a wait's reason comes from the
+  column the row opens on, as on the rail. Checks that run keep their own
+  ring, the family's dashed ring, which turns while rows may move. The
+  catch-up card shows the same icons. The Lead keeps its sparkle.
+- **Selection:** the selected row lies on a pane of glass: a white fill at
+  10 %, a 1 pt rim (`line`) and the light on its top edge
+  (`selectionHighlight`), at every level, Opaque included.
+- **Buttons:** the rows' drawn Allow / Deny / Yes / No / Dismiss take
+  `NiruxButton.look`'s colours and its small size, in a capsule.
+- **The foot:** a glass capsule, **Tasks · Board · History**, 30 pt high with
+  10 pt around it: 50 pt taken from the list. Buttons, not tabs: Tasks is the
+  list above (the selection's glass), Board opens the space's Board (the
+  rail's button), History opens Session History (as ⌘P does). Tabs that swap
+  the sidebar's content would be a later study. A row scrolled under the foot
+  takes no click, hover or menu there. The Archived row sits just above it.
+- **Background:** the sidebar's glass is a chrome `GlassView` under the list,
+  at Opaque until phase 4 (the sidebar's colour, as before).
 
 ## Command bar
 

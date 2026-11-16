@@ -211,7 +211,7 @@ extension SidebarView {
             }
             guard next.type == .leftMouseUp else { continue }
             let point = contentDocumentView.convert(next.locationInWindow, from: nil)
-            let released = hitArea(at: point)?.region
+            let released = isOnList(next.locationInWindow) ? hitArea(at: point)?.region : nil
             let armedAtRelease = isApprovalButtonArmed(key)
             if let decision = Self.approvalClickDecision(
                 pressed: region, released: released, clickCount: event.clickCount,
