@@ -201,10 +201,11 @@ final class SidebarGlassRowsTests: XCTestCase {
     }
 
     /// The Board row sits under the space's header, History at the bottom
-    /// with Archived above it; the list takes the whole height. Board is
-    /// selected (the selection's glass, "Board, selected") only while the
-    /// space's Board column shows, as the rail's Board button is; History
-    /// opens its panel and is never selected.
+    /// with Archived above it; the list takes the whole height. Board reads
+    /// open ("Board, open", its symbol in the accent) while the space's
+    /// Board column shows, as the rail's Board button does, never on the
+    /// selection's glass: that stays the task's. History opens its panel and
+    /// is never selected.
     func testTheNavigatorRows() throws {
         let archived = WorkspaceInfo(
             id: "old", index: 1, title: "old", profileID: WorkspaceProfile.defaultID, isInactive: true,
@@ -246,6 +247,11 @@ final class SidebarGlassRowsTests: XCTestCase {
             sidebar.expandedViews.contains { $0.identifier == SidebarWorkspaceCardRenderer.selectionGlassID && $0.frame == frame }
         }
         XCTAssertFalse(selected(board), "the Board isn't shown")
+        func boardSymbol() throws -> Data? {
+            try XCTUnwrap(sidebar.expandedViews.first { $0.identifier?.rawValue == "nirux.sidebar.navigator.Board" } as? SidebarImageView)
+                .image?.tiffRepresentation
+        }
+        let plainSymbol = try boardSymbol()
         XCTAssertEqual(try control(at: board).accessibilityLabel(), "Board")
         XCTAssertTrue(try control(at: board).toolTip?.hasPrefix("Board (") == true, "its shortcut")
         XCTAssertEqual(try control(at: history).toolTip, "Session History")
@@ -254,11 +260,17 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertEqual([opened, shown], [1, 1])
 
         show(SidebarNavigation(boardShown: true, boardAvailable: true))
-        XCTAssertTrue(selected(board), "the Board column on screen")
-        XCTAssertEqual(try control(at: board).accessibilityLabel(), "Board, selected")
+        XCTAssertEqual(try control(at: board).accessibilityLabel(), "Board, open", "the Board column on screen")
+        XCTAssertNotEqual(try boardSymbol(), plainSymbol)
+        XCTAssertEqual(
+            try boardSymbol(), SidebarRenderer.symbol(Theme.Symbol.projectBoard, color: Theme.Color.accent, pointSize: 12)?.tiffRepresentation,
+            "its symbol in the accent"
+        )
+        XCTAssertFalse(selected(board), "one selection: the task's")
+        XCTAssertTrue(selected(firstTask))
         XCTAssertFalse(selected(history))
         XCTAssertTrue(sidebar.iconRail.boardButton.isSelected, "the rail's Board button too")
-        XCTAssertEqual(sidebar.iconRail.boardButton.spokenLabel, "Board, selected")
+        XCTAssertEqual(sidebar.iconRail.boardButton.spokenLabel, "Board, open")
         XCTAssertEqual(sidebar.iconRail.boardButton.label, "Board", "its own label stays")
 
         // No task open: nothing to open the Board beside, nor a press, a

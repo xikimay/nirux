@@ -499,20 +499,22 @@ extension SidebarView {
 
     // MARK: - Navigator rows
 
-    /// The Board row, under the space's header: selected (the selection's
-    /// glass) while the space's Board column shows; it opens the Board or
-    /// brings it up, and can't be pressed while no task is open.
+    /// The Board row, under the space's header: it opens the Board or brings
+    /// it up, and can't be pressed while no task is open. While the space's
+    /// Board column shows, it reads open (its symbol in the accent, its
+    /// title bright), without the selection's glass: that stays the task's,
+    /// whose workspace the main area shows. One selection, as in Mail.
     private func buildBoardRow(top: CGFloat) -> CGFloat {
         typealias Metrics = SidebarExpandedMetrics
         let inset = Metrics.workspaceInsetX
         let frame = NSRect(x: inset, y: top - Metrics.navigatorRowHeight, width: listWidth - inset * 2, height: Metrics.navigatorRowHeight)
         let shown = navigation.boardShown
         let available = navigation.boardAvailable
-        if shown { addExpandedView(SidebarWorkspaceCardRenderer.selectionGlass(frame: frame)) }
         boardRowHoverView = buildNavigatorRow(
             title: Self.boardTitle, symbol: Theme.Symbol.projectBoard, frame: frame, region: .board,
             color: available ? (shown ? Theme.Color.textPrimary : Theme.Color.textSecondary) : Theme.Color.textDisabled,
-            label: shown ? "\(Self.boardTitle), selected" : Self.boardTitle,
+            iconColor: available && shown ? Theme.Color.accent : nil,
+            label: shown ? "\(Self.boardTitle), open" : Self.boardTitle,
             tip: available ? "Board (\(NiruxShortcuts.board.chord.display))" : "Open a task to show its space’s Board",
             press: available ? { [weak self] in self?.onOpenBoard?() } : nil
         )
@@ -537,13 +539,14 @@ extension SidebarView {
     /// on a window in the background, as the Archived row's does); `press`
     /// nil, it can't be pressed. Returns the hover view.
     private func buildNavigatorRow(
-        title: String, symbol: String, frame: NSRect, region: SidebarHitRegion, color: NSColor, label: String,
-        tip: String, press: (() -> Void)?
+        title: String, symbol: String, frame: NSRect, region: SidebarHitRegion, color: NSColor, iconColor: NSColor? = nil,
+        label: String, tip: String, press: (() -> Void)?
     ) -> NSView {
         typealias Metrics = SidebarExpandedMetrics
         hitAreas.append(SidebarHitArea(frame: frame, region: region))
         let hover = addRowHover(frame: frame)
-        let icon = SidebarImageView(image: SidebarRenderer.symbol(symbol, color: color, pointSize: 12))
+        let icon = SidebarImageView(image: SidebarRenderer.symbol(symbol, color: iconColor ?? color, pointSize: 12))
+        icon.identifier = NSUserInterfaceItemIdentifier("nirux.sidebar.navigator.\(title)")
         icon.frame = NSRect(x: Metrics.markCenterX - 7, y: frame.midY - 7, width: 14, height: 14)
         icon.setAccessibilityElement(false)
         addExpandedView(icon)
