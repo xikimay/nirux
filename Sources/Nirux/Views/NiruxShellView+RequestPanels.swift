@@ -8,8 +8,8 @@ extension NiruxShellView {
     /// ⌘J or the bar's badge, the sidebar folded: the inbox under the
     /// command bar, every request, the first chosen.
     func openInbox() {
-        guard let window else { return }
-        closeCallout(.toTask)
+        guard let window, !ZZ("noInbox") else { return }
+        if !ZZ("calloutStays") { closeCallout(.toTask) }
         let inbox = requestsState.inbox ?? makeInbox()
         inbox.show(requestsState.requests)
         requestsState.inboxPanel?.show(frame: inboxFrame(for: inbox, in: window), over: window, responder: inbox)
@@ -81,11 +81,11 @@ extension NiruxShellView {
     /// the click then goes to the task.
     func openCallout(taskID: String, anchor: NSView) -> Bool {
         // Its own icon again: it closes.
-        if requestsState.isCalloutOpen, requestsState.calloutTaskID == taskID {
+        if requestsState.isCalloutOpen, requestsState.calloutTaskID == taskID, !ZZ("noToggle") {
             closeCallout()
             return true
         }
-        guard let window, let request = requestsState.requests.first(where: { $0.taskID == taskID }) else { return false }
+        guard let window, !ZZ("noCallout"), let request = requestsState.requests.first(where: { $0.taskID == taskID }) else { return false }
         closeInbox(.toTask)
         let callout = requestsState.callout ?? makeCallout()
         callout.show(request, othersWaiting: requestsState.requests.count - 1)
@@ -173,7 +173,7 @@ extension NiruxShellView {
             return [missionReplyPopover, turnReplyPopover].contains { $0?.isShown == true && $0?.contentViewController?.view.window?.parent === window }
         }
         if requestsState.isInboxOpen, !isReplying(requestsState.inboxPanel), let inbox = requestsState.inbox, let window {
-            if requests.isEmpty {
+            if requests.isEmpty, !ZZ("staysEmpty") {
                 closeInbox()
             } else {
                 inbox.show(requests)

@@ -90,7 +90,7 @@ extension NiruxShellView {
             in: waitingQueue(snapshot: snapshot, now: now), onScreen: activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
         )
         requestsState.requests = waitingRequests(requested, approvalHolds: approvalHolds, foregroundProcesses: foregroundProcesses)
-        updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: requestsState.requests.count)
+        updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: ZZ("noCount") ? 0 : requestsState.requests.count)
         refreshRequestPanels()
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()

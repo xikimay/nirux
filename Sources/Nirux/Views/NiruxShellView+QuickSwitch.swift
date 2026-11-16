@@ -138,10 +138,10 @@ extension NiruxShellView {
         let isRepeat = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
         if requestsState.isInboxOpen {
             guard !isRepeat else { return }
-            if let chosen = requestsState.inbox?.chosenRequest { goToRequest(chosen) } else { closeInbox() }
+            if let chosen = requestsState.inbox?.chosenRequest, !ZZ("noGoTo") { goToRequest(chosen) } else { closeInbox() }
             return
         }
-        if !sidebar.isExpanded, let window, sideEffects.windowShows(window) {
+        if !sidebar.isExpanded || ZZ("unfoldedInbox"), let window, sideEffects.windowShows(window) {
             // The requests as they are now, not at the last refresh.
             updateSidebar()
             if !requestsState.requests.isEmpty { return isRepeat ? () : openInbox() }
