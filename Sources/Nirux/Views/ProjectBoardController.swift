@@ -693,9 +693,9 @@ final class ProjectBoardController {
         // Before the render `apply` makes: a new section says it reads its remote.
         if !new.isEmpty { isReadingRemotes = true }
         // A repository gone forgets its remote: back, it reads it again, never shows the old one's pull requests.
-        var context = context
-        context.baseRemotes = context.baseRemotes.filter { !gone.contains($0.key) }
-        apply(loaded, context: context, listsWorktreesAgain: false)
+        var placed = context
+        placed.baseRemotes = placed.baseRemotes.filter { !gone.contains($0.key) }
+        apply(loaded, context: placed, listsWorktreesAgain: false)
         // Only the repositories just found: the others' remotes are read.
         if !new.isEmpty { readBaseRemotesWhenShown(configRead: configRead, only: new) }
     }

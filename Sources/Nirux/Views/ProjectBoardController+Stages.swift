@@ -170,8 +170,8 @@ extension ProjectBoardController {
     ) -> BoardStagesView.Section {
         // Another repository's section lists this space's workspaces there, and nothing else of that repository: no
         // other worktree (another space's, with its Clean Up…), no pull request without a task, no stranger's merge.
-        let isExtra = isExtra(section)
-        let rows = isExtra ? rows.filter { !$0.workspaces.isEmpty } : rows
+        let readOnly = isExtra(section)
+        let rows = readOnly ? rows.filter { !$0.workspaces.isEmpty } : rows
         let reads = reads[section.id]
         let reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
@@ -189,7 +189,7 @@ extension ProjectBoardController {
             status: stagesStatus(section, now: now),
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
-        if isExtra { shown.lines.merged.removeAll { $0.lineID == nil } }
+        if readOnly { shown.lines.merged.removeAll { $0.lineID == nil } }
         for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {
             if let offer = line.offer { targets.offers[section.id, default: [:]][offer.number] = offer }
             // The menu's item: the phrase's link is only there while it acts.
