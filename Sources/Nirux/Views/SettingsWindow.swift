@@ -55,8 +55,14 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     private(set) var appPanes: [AppPane] = []
     private(set) var space: SpaceSettingsSection?
     private(set) var selection: Selection?
-    /// What the window shows when it opens with no pane asked for (⌘,).
+    /// What the window shows when it opens with no pane asked for (⌘,): the
+    /// pane last shown, if it was a space's, only for that space.
     private(set) var lastSelection: Selection?
+    private var lastSpaceID: String?
+    /// Nirux's pane last shown, for a space's that can't show again.
+    private var lastAppSelection: Selection?
+    /// The widest pane's width, measured once per set of panes.
+    private var paneWidth: CGFloat?
     let sidebar = SettingsSidebar()
     private let paneHost = NSView()
     private let divider = NSView()
@@ -68,14 +74,27 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     var selectedView: NSView? { shownPane }
 
     /// Shows the window on `selection`, else on the pane last shown, else
-    /// on Nirux's first; builds it the first time.
+    /// on Nirux's first; builds it the first time. A pane asked for by name
+    /// (Space Memory…, Board settings) may take the keyboard; otherwise the
+    /// sidebar has it, so ↑ and ↓ walk the panes.
     func show(_ selection: Selection? = nil) {
         if panel == nil { build() }
         guard let panel else { return }
-        select(selection ?? lastSelection.flatMap(available) ?? defaultSelection)
+        select(selection ?? remembered ?? defaultSelection)
         if !panel.isVisible { panel.center() }
         panel.makeKeyAndOrderFront(nil)
+        // After the window is up, which hands the sidebar the keyboard: the
+        // pane asked for takes it once its content comes.
+        if selection != nil { panel.makeFirstResponder(nil) }
         space?.windowShown()
+    }
+
+    /// The pane last shown, if the window can show it: a space's only for
+    /// that same space.
+    private var remembered: Selection? {
+        guard let last = lastSelection else { return nil }
+        if case .space = last, lastSpaceID != space?.spaceID { return lastAppSelection.flatMap(available) }
+        return available(last)
     }
 
     /// Shows `selection`'s pane, if the window has it.
@@ -84,6 +103,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         let changed = selection != self.selection
         self.selection = selection
         lastSelection = selection
+        if case .space = selection { lastSpaceID = space?.spaceID } else { lastAppSelection = selection }
         if changed || shownPane !== pane { place(pane) }
         sidebar.select(selection)
         updateTitle()
@@ -92,8 +112,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     }
 
     /// The space's section, in place of the one shown (or none). The one it
-    /// replaces is told (`SpaceSettingsSection.detach`); a space pane shown
-    /// shows the same pane of the new space.
+    /// replaces is told (`SpaceSettingsSection.detach`). A space's pane
+    /// shown goes with it: the caller shows the pane it wants
+    /// (`SpaceSettingsSection.show`), once, for the new space.
     func setSpace(_ section: SpaceSettingsSection?) {
         guard section !== space else { return }
         // Told while it still has the window: a sheet of its own ends there.
@@ -101,15 +122,20 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         space?.host = nil
         space = section
         section?.host = self
+        paneWidth = nil
         guard panel != nil else { return }
-        sidebar.reload(appPanes: appPanes, space: spaceHeader)
-        if case .space(let tab)? = selection, section != nil {
-            select(.space(tab))
-        } else if case .space? = selection {
-            select(defaultSelection)
-        } else {
-            sidebar.select(selection)
+        if case .space? = selection {
+            shownPane?.removeFromSuperview()
+            shownPane = nil
+            selection = nil
         }
+        if section != nil, sidebar.hasSpace {
+            sidebar.updateSpace(spaceHeader)
+        } else {
+            sidebar.reload(appPanes: appPanes, space: spaceHeader)
+        }
+        sidebar.select(selection)
+        if section == nil, selection == nil { select(lastAppSelection.flatMap(available) ?? defaultSelection) }
         space?.windowShown()
     }
 
@@ -129,7 +155,12 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     /// The window fits the pane shown again (a list grew, a banner showed).
     func fitToContent() {
         guard let panel, let pane = shownPane else { return }
-        let size = contentSize(for: pane)
+        var size = contentSize(for: pane)
+        // Never wider than the screen: a pane wider than its area then keeps
+        // its left side in view (see `place`).
+        if let screen = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            size.width = min(size.width, screen.width)
+        }
         var frame = panel.frameRect(forContentRect: NSRect(origin: .zero, size: size))
         frame.origin = NSPoint(x: panel.frame.minX, y: panel.frame.maxY - frame.height)
         guard frame != panel.frame else { return }
@@ -163,6 +194,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     private func build() {
         appPanes = makeAppPanes?() ?? []
+        paneWidth = nil
         if space == nil, let section = makeSpaceSection?() {
             space = section
             section.host = self
@@ -182,6 +214,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         content.wantsLayer = true
         content.layer?.backgroundColor = Theme.Color.base.cgColor
         sidebar.onSelect = { [weak self] selection in self?.select(selection) }
+        sidebar.spaces = { [weak self] in self?.spaces() ?? [] }
         sidebar.onPickSpace = { [weak self] id in
             guard let self else { return }
             self.onPickSpace?(id)
@@ -193,8 +226,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         divider.layer?.backgroundColor = Theme.Color.line.cgColor
         for view in [sidebar.view, divider, paneHost] { content.addSubview(view) }
         panel.contentView = content
-        // ↑ and ↓ walk the panes at once.
+        // ↑ and ↓ walk the panes at once; Tab goes on into the pane shown.
         panel.initialFirstResponder = sidebar.table
+        panel.autorecalculatesKeyViewLoop = true
         // The sidebar and the line keep their width, the pane's area takes
         // the rest; all follow the window's height as it fits each pane.
         let bounds = content.bounds
@@ -211,20 +245,28 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     /// The pane's area: as wide as the widest pane, so the window keeps its
     /// width; as tall as the pane, or the sidebar's list.
     private func contentSize(for pane: NSView) -> NSSize {
-        let panes = appPanes.map(\.view) + (space?.allViews ?? [])
-        let width = panes.map { $0.fittingSize.width }.max() ?? pane.fittingSize.width
+        let width = paneWidth ?? {
+            let panes = appPanes.map(\.view) + (space?.allViews ?? [])
+            let measured = ceil(panes.map { $0.fittingSize.width }.max() ?? pane.fittingSize.width)
+            paneWidth = measured
+            return measured
+        }()
         let height = max(pane.fittingSize.height, sidebar.contentHeight)
-        return NSSize(width: Self.sidebarWidth + 1 + ceil(width), height: ceil(height))
+        return NSSize(width: Self.sidebarWidth + 1 + width, height: ceil(height))
     }
 
-    /// The pane at the top of its area, centred across it.
+    /// The pane at the top of its area, centred across it; wider than its
+    /// area (a narrow screen), its left side stays in view.
     private func place(_ pane: NSView) {
         shownPane?.removeFromSuperview()
         pane.translatesAutoresizingMaskIntoConstraints = false
         paneHost.addSubview(pane)
+        let centred = pane.centerXAnchor.constraint(equalTo: paneHost.centerXAnchor)
+        centred.priority = .defaultHigh
         NSLayoutConstraint.activate([
             pane.topAnchor.constraint(equalTo: paneHost.topAnchor),
-            pane.centerXAnchor.constraint(equalTo: paneHost.centerXAnchor)
+            pane.leadingAnchor.constraint(greaterThanOrEqualTo: paneHost.leadingAnchor),
+            centred
         ])
         shownPane = pane
     }
@@ -285,5 +327,15 @@ enum MultilineReturn {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
         guard let multilineView, firstResponder === multilineView, modifiers.isEmpty else { return false }
         return event.charactersIgnoringModifiers == "\r" || event.charactersIgnoringModifiers == "\u{3}"
+    }
+}
+
+extension NSWindow {
+    /// Whether a pane in `host` may take the keyboard: nothing has it, or
+    /// something of the pane's own (the Settings sidebar keeps it).
+    func keyboardIsFree(for host: NSView) -> Bool {
+        guard let responder = firstResponder, responder !== self else { return true }
+        guard let view = responder as? NSView else { return false }
+        return view.isDescendant(of: host)
     }
 }

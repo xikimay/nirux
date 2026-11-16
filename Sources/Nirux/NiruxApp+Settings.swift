@@ -20,8 +20,12 @@ extension NiruxApp {
     /// The window Settings shows in: the one open, else the shell's (the
     /// space's panes come from it), else one of the app's own.
     var settingsController: SettingsWindow {
-        if standaloneSettings.panel != nil { return standaloneSettings }
-        return shell?.settingsWindow ?? standaloneSettings
+        if let standalone = standaloneSettings, standalone.panel != nil { return standalone }
+        if let shell { return shell.settingsWindow }
+        if let standalone = standaloneSettings { return standalone }
+        let standalone = SettingsWindow()
+        standaloneSettings = standalone
+        return standalone
     }
 
     /// Its panel while it shows.

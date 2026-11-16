@@ -6,7 +6,7 @@ import AppKit
 /// reads them as a list; the pane shown lies on the selection's glass, as a
 /// task row does in the main sidebar.
 @MainActor
-final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
     /// The space shown and the spaces the popup offers.
     struct SpaceHeader: Equatable {
         let current: SettingsWindow.Space
@@ -34,10 +34,15 @@ final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegat
     private(set) var rows: [Row] = []
     /// A pane picked with the mouse or ↑ ↓.
     var onSelect: ((SettingsWindow.Selection) -> Void)?
-    /// A space picked in the popup.
+    /// A space picked in the popup (never the one shown).
     var onPickSpace: ((String) -> Void)?
+    /// The spaces the popup lists, read each time it opens.
+    var spaces: () -> [SettingsWindow.Space] = { [] }
     /// While the window selects a row itself: no pick to report.
     private var isSelecting = false
+    /// The space's header, updated in place.
+    private weak var spaceSquare: NSView?
+    private weak var spacePopup: NSPopUpButton?
 
     override init() {
         super.init()
@@ -78,12 +83,20 @@ final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegat
         table.reloadData()
     }
 
-    /// The space's name, colour or the spaces changed.
+    /// The space's name, colour or the spaces changed: the header says them
+    /// in place (its popup may be the one whose pick led here).
     func updateSpace(_ header: SpaceHeader?) {
         guard let header, let index = rows.firstIndex(where: { if case .space = $0 { true } else { false } }) else { return }
         rows[index] = .space(header)
-        table.reloadData(forRowIndexes: [index], columnIndexes: [0])
+        if let square = spaceSquare, let popup = spacePopup {
+            Self.fill(square, popup, with: header)
+        } else {
+            table.reloadData(forRowIndexes: [index], columnIndexes: [0])
+        }
     }
+
+    /// Whether the rows have a space's header (its panes follow it).
+    var hasSpace: Bool { rows.contains { if case .space = $0 { true } else { false } } }
 
     /// Puts the selection on `selection`'s row, reporting nothing.
     func select(_ selection: SettingsWindow.Selection?) {
@@ -116,8 +129,14 @@ final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegat
         rows.indices.contains(row) ? height(of: rows[row]) : Self.paneRowHeight
     }
 
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        rows.indices.contains(row) && rows[row].selection != nil
+    /// Only panes are picked: a click on a header, or below the rows, leaves
+    /// the pane picked (↑ and ↓ step over a header on their own).
+    func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet) -> IndexSet {
+        if isSelecting { return proposed }
+        guard let row = proposed.first, proposed.count == 1, rows[safe: row]?.selection != nil else {
+            return tableView.selectedRowIndexes
+        }
+        return proposed
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
@@ -161,17 +180,15 @@ final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegat
         let square = NSView()
         square.wantsLayer = true
         square.layer?.cornerRadius = Theme.Radius.spaceMark
-        square.layer?.backgroundColor = SidebarView.profileColor(hex: header.current.colorHex).cgColor
         square.translatesAutoresizingMaskIntoConstraints = false
         let popup = NSPopUpButton(frame: .zero, pullsDown: false)
         popup.isBordered = false
         popup.font = Theme.Font.caption
         popup.contentTintColor = Theme.Color.textSecondary
-        for space in header.all {
-            popup.addItem(withTitle: space.name)
-            popup.lastItem?.representedObject = space.id
-        }
-        popup.selectItem(at: header.all.firstIndex { $0.id == header.current.id } ?? 0)
+        popup.menu?.delegate = self
+        Self.fill(square, popup, with: header)
+        spaceSquare = square
+        spacePopup = popup
         popup.target = self
         popup.action = #selector(spacePicked(_:))
         popup.setAccessibilityLabel("Space")
@@ -191,8 +208,34 @@ final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegat
         return cell
     }
 
+    /// The header's square and popup for `header`. Items are added to the
+    /// menu itself: `addItem(withTitle:)` drops a title already there.
+    private static func fill(_ square: NSView, _ popup: NSPopUpButton, with header: SpaceHeader) {
+        square.layer?.backgroundColor = SidebarView.profileColor(hex: header.current.colorHex).cgColor
+        let menu = popup.menu ?? NSMenu()
+        menu.removeAllItems()
+        for space in header.all {
+            let item = NSMenuItem(title: space.name, action: nil, keyEquivalent: "")
+            item.representedObject = space.id
+            menu.addItem(item)
+        }
+        popup.selectItem(at: header.all.firstIndex { $0.id == header.current.id } ?? 0)
+    }
+
+    /// The spaces as they are when the popup opens: one created meanwhile
+    /// is there.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let square = spaceSquare, let popup = spacePopup, menu === popup.menu,
+              case .space(let header)? = rows.first(where: { if case .space = $0 { true } else { false } })
+        else { return }
+        let all = spaces()
+        Self.fill(square, popup, with: SpaceHeader(current: header.current, all: all.isEmpty ? header.all : all))
+    }
+
     @objc private func spacePicked(_ sender: NSPopUpButton) {
         guard let id = sender.selectedItem?.representedObject as? String else { return }
+        guard case .space(let header)? = rows.first(where: { if case .space = $0 { true } else { false } }),
+              id != header.current.id else { return }
         onPickSpace?(id)
     }
 

@@ -123,7 +123,8 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         shownRepository = content.selectedRepository
         statusLabel.stringValue = status ?? ""
         layoutPanel()
-        if host.window != nil, isWritable { host.window?.makeFirstResponder(repositoryField) }
+        // Not from the Settings sidebar, where ↑ and ↓ walk the panes.
+        if let window = host.window, isWritable, window.keyboardIsFree(for: host) { window.makeFirstResponder(repositoryField) }
     }
 
     func dismiss() {

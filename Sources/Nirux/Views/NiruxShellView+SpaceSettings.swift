@@ -3,19 +3,24 @@ import AppKit
 // MARK: - Space Settings (docs/design/spaces.md, S8)
 
 extension NiruxShellView {
-    /// The Settings window on `profileID`'s `tab`. One space at a time: the
-    /// window shows this space in place of another one, unless text typed
-    /// there isn't saved.
+    /// The Settings window on `profileID`'s `tab`; `tab` nil keeps the pane
+    /// shown (Nirux's, when the sidebar's popup picks another space). One
+    /// space at a time: the window shows this space in place of another one,
+    /// unless text typed there isn't saved, or a sheet is up on it.
     /// `boardRepository`: the section the Board pane reads first, when the
     /// window opens for this space (`showBoardSettings`).
-    func showSpaceSettings(profileID: String, tab: SpaceSettingsSection.Tab = .general, boardRepository: String? = nil) {
+    func showSpaceSettings(profileID: String, tab: SpaceSettingsSection.Tab? = .general, boardRepository: String? = nil) {
         guard let space = profiles.first(where: { $0.id == profileID }) else { return }
-        if let open = spaceSettings, open.spaceID != profileID {
+        if let open = spaceSettings, open.spaceID != profileID, let panel = open.panel {
             // A name or a value still being typed counts.
-            open.panel?.makeFirstResponder(nil)
+            panel.makeFirstResponder(nil)
+            if panel.attachedSheet != nil {
+                panel.makeKeyAndOrderFront(nil)
+                return refuseSpaceSwitch("Finish what is open in this space’s settings first", in: open)
+            }
             if let unsaved = open.unsavedParts.first {
                 open.show(tab: unsaved.tab, title: Self.spaceSettingsTitle(open.spaceID, in: profiles))
-                return showToast("Save or revert the changes in this Space Settings first")
+                return refuseSpaceSwitch("Save or revert the changes in this space’s settings first", in: open)
             }
         }
         let settings = spaceSettings.flatMap { $0.spaceID == profileID ? $0 : nil } ?? makeSpaceSettings(for: space)
@@ -23,7 +28,23 @@ extension NiruxShellView {
         settingsWindow.setSpace(settings)
         spaceSettings = settings
         if let boardRepository { settings.boardRepository = boardRepository }
-        settings.show(tab: tab, title: Self.spaceSettingsTitle(profileID, in: profiles))
+        let title = Self.spaceSettingsTitle(profileID, in: profiles)
+        if let tab {
+            settings.show(tab: tab, title: title)
+        } else {
+            settings.setTitle(title)
+            settingsWindow.show()
+        }
+    }
+
+    /// Why the window keeps its space: said in it while it has the keyboard
+    /// (the popup), else in a toast on the main window.
+    private func refuseSpaceSwitch(_ reason: String, in settings: SpaceSettingsSection) {
+        guard let panel = settings.panel, panel.isKeyWindow, panel.attachedSheet == nil else { return showToast(reason) }
+        let alert = NSAlert()
+        alert.messageText = reason
+        alert.addButton(withTitle: "OK")
+        settings.askInSheet(alert, panel) { _ in }
     }
 
     func makeSettingsWindow() -> SettingsWindow {
@@ -34,7 +55,8 @@ extension NiruxShellView {
         }
         settings.onPickSpace = { [weak self] id in
             guard let self else { return }
-            self.showSpaceSettings(profileID: id, tab: self.spaceSettings?.selectedTab ?? .general)
+            // The pane shown stays: the new space's, or Nirux's.
+            self.showSpaceSettings(profileID: id, tab: self.spaceSettings?.selectedTab)
         }
         return settings
     }
@@ -194,13 +216,23 @@ extension NiruxShellView {
     }
 
     /// After a space changed (name, color, repositories) or went away:
-    /// the Settings window shows it again, or closes.
+    /// the Settings window shows it again, or the active space in its place
+    /// (Nirux's panes stay).
     func spaceSettingsSpacesChanged() {
         guard let settings = spaceSettings else { return }
         guard let space = profiles.first(where: { $0.id == settings.spaceID }) else {
             settings.brief.revert()
             settings.templates.revert()
-            return settings.close()
+            guard let active = profiles.first(where: { $0.id == activeProfileID }) else { return settings.close() }
+            // What was typed there has no space left to go to; the window
+            // stays where it is, behind or in front.
+            let tab = settings.selectedTab
+            let replacement = makeSpaceSettings(for: active)
+            settingsWindow.setSpace(replacement)
+            spaceSettings = replacement
+            replacement.setTitle(Self.spaceSettingsTitle(active.id, in: profiles))
+            if let tab { replacement.select(tab) }
+            return
         }
         settings.general.update(spaceSettingsGeneralModel(for: space))
         settings.lead.update(spaceSettingsLeadModel(for: space))

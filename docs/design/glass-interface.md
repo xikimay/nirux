@@ -340,15 +340,24 @@ space, in place of Settings' three toolbar tabs and Space Settings' seven:
   builds Nirux's each time the window opens; the shell builds the space's
   (`SpaceSettingsSection`) and writes what they change.
 - **One space at a time:** the active one, or the one whose Space Settings…
-  was chosen. Text typed and not saved keeps its space: picking another
-  shows that text and says so in a toast. Closing and quitting ask, as
-  before.
+  was chosen. The popup lists the spaces as they are when it opens; from
+  one of Nirux's panes it changes the space listed, not the pane. Text
+  typed and not saved, or a sheet up (Add Repository…, a setup script),
+  keeps its space: picking another shows that text and says why, in the
+  window when it has the keyboard, else in a toast. A space deleted while
+  it shows gives way to the active space; Nirux's pane shown stays.
+  Closing and quitting ask, as before.
+- **Keyboard:** the sidebar has it when the window opens, so ↑ ↓ walk the
+  panes (over the space's header); Tab goes on into the pane shown. A pane
+  that loads (Memory, Board) takes it only when the sidebar hasn't it, as
+  when Space Memory… or Board settings opened the window.
 - **Size:** fixed width (the sidebar and the widest pane, Memory's list),
-  narrower panes centred; the height fits each pane, or the sidebar's list,
-  top edge fixed.
+  narrower panes centred, never wider than the screen; the height fits each
+  pane, or the sidebar's list, top edge fixed.
 - **Title:** the pane's ("Agents", "Acme — Brief").
 - **Entry points:** ⌘, and Settings… open on the pane last shown (the
-  first time, Nirux's General); Space Settings… on the space's General;
+  first time, Nirux's General; a space's pane only for that same space,
+  else Nirux's pane last shown); Space Settings… on the space's General;
   Board settings and Space Memory… on their panes.
 
 ## Plan

@@ -139,7 +139,8 @@ final class ProjectMemoryPanel: NSObject {
         layoutBody(noticeShown: notice != nil)
 
         installMonitors()
-        window?.makeFirstResponder(searchField)
+        // Not from the Settings sidebar, where ↑ and ↓ walk the panes.
+        if window?.keyboardIsFree(for: host) == true { window?.makeFirstResponder(searchField) }
         reload()
     }
 
@@ -472,6 +473,8 @@ final class ProjectMemoryPanel: NSObject {
     /// Only while its tab is picked, in its window, with no sheet over it.
     private func handleKey(_ event: NSEvent) -> NSEvent? {
         guard let window, event.window === window, window.attachedSheet == nil else { return event }
+        // Keys typed in the Settings sidebar walk its panes.
+        if let host, !window.keyboardIsFree(for: host) { return event }
         // An input method composing in the field keeps its keys.
         if (searchField?.currentEditor() as? NSTextView)?.hasMarkedText() == true { return event }
         if editing != nil {
