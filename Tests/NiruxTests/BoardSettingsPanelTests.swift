@@ -259,7 +259,7 @@ final class BoardSettingsPanelTests: XCTestCase {
                 questions.append(alert.messageText)
                 reply(.alertFirstButtonReturn)
             }
-            XCTAssertFalse(settings.windowShouldClose(try XCTUnwrap(settings.panel)))
+            XCTAssertFalse(shell.settingsWindow.windowShouldClose(try XCTUnwrap(settings.panel)))
             XCTAssertEqual(questions, ["Save the changes to the board settings?"])
             XCTAssertNil(shell.spaceSettings, "saved, then closed")
             XCTAssertEqual(try store(space).load().config?.repository, "acme/widgets")
@@ -356,14 +356,17 @@ final class BoardSettingsPanelTests: XCTestCase {
     }
 
     /// Opened while the delete confirmation was up: the space goes, the
-    /// form with it.
+    /// form with it; the Settings window shows the active space's Board.
     @MainActor
     func testDeletingTheSpaceClosesItsForm() throws {
         try withShell { shell, space in
             _ = try open(shell, space)
             shell.deleteSpace(profileID: space.id)
-            XCTAssertNil(shell.boardSettingsPanel)
-            XCTAssertNil(shell.spaceSettings)
+            XCTAssertNotEqual(shell.boardSettingsPanel?.spaceID, space.id)
+            XCTAssertNotEqual(shell.spaceSettings?.spaceID, space.id)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, shell.activeProfileID)
+            XCTAssertEqual(shell.spaceSettings?.selectedTab, .board)
+            shell.spaceSettings?.close()
         }
     }
 

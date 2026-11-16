@@ -2,54 +2,48 @@ import AppKit
 
 // MARK: - Settings window
 
-/// A standard macOS Settings window: one toolbar tab per topic, and every
-/// control applies at once — no Save or Cancel. Each change writes only its
-/// own setting, so opening Settings, or touching one control, never saves
-/// another value nobody chose. A failed write puts the control back.
-///
-/// It is a panel that doesn't float or hide: like Nirux's other panels, it
-/// doesn't keep the app running once the main window closes, and keys typed
-/// in it never reach a terminal (isOverlayActive).
+/// Nirux's panes of the Settings window (`SettingsWindow`): General, Agents,
+/// Notifications. Every control applies at once — no Save or Cancel. Each
+/// change writes only its own setting, so opening Settings, or touching one
+/// control, never saves another value nobody chose. A failed write puts the
+/// control back.
 extension NiruxApp {
     private static let settingsWriteFailure = "Could not write the settings file. Check the disk and try again."
 
+    /// ⌘,: the Settings window, on the pane last shown.
     @objc func showSettings(_ sender: Any?) {
-        if let existing = settingsWindow {
-            existing.makeKeyAndOrderFront(nil)
-            return
-        }
-
-        let tabs = SettingsTabViewController()
-        tabs.tabStyle = .toolbar
-        tabs.addTabViewItem(settingsTab("General", symbol: "gearshape", generalPane()))
-        tabs.addTabViewItem(settingsTab("Agents", symbol: "sparkles", agentsPane()))
-        tabs.addTabViewItem(settingsTab("Notifications", symbol: "bell", notificationsPane()))
-
-        // This initializer also titles the window after the tab picked.
-        let window = NSPanel(contentViewController: tabs)
-        window.styleMask = [.titled, .closable]
-        window.isFloatingPanel = false
-        window.hidesOnDeactivate = false
-        window.collectionBehavior.insert(.fullScreenAuxiliary)
-        window.toolbarStyle = .preference
-        window.appearance = Theme.appearance
-        window.backgroundColor = Theme.Color.base
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        settingsWindow = window
-        tabs.fitWindowToSelectedPane(animated: false)
-        window.center()
-        window.makeKeyAndOrderFront(nil)
+        let settings = settingsController
+        wireSettings(settings)
+        settings.show()
     }
 
-    private func settingsTab(_ label: String, symbol: String, _ pane: NSView) -> NSTabViewItem {
-        let controller = NSViewController()
-        controller.view = pane
-        controller.title = label
-        let item = NSTabViewItem(viewController: controller)
-        item.label = label
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        return item
+    /// The window Settings shows in: the one open, else the shell's (the
+    /// space's panes come from it), else one of the app's own.
+    var settingsController: SettingsWindow {
+        if let standalone = standaloneSettings, standalone.panel != nil { return standalone }
+        if let shell { return shell.settingsWindow }
+        if let standalone = standaloneSettings { return standalone }
+        let standalone = SettingsWindow()
+        standaloneSettings = standalone
+        return standalone
+    }
+
+    /// Its panel while it shows.
+    var settingsWindow: NSWindow? { settingsController.panel }
+
+    /// The app's panes, built each time the window opens, and what closing
+    /// drops.
+    func wireSettings(_ settings: SettingsWindow) {
+        settings.makeAppPanes = { [weak self] in self?.settingsAppPanes() ?? [] }
+        settings.onAppClose = { [weak self] in self?.clearSettingsWindowReferences() }
+    }
+
+    func settingsAppPanes() -> [SettingsWindow.AppPane] {
+        [
+            SettingsWindow.AppPane(id: "general", title: "General", symbol: "gearshape", view: generalPane()),
+            SettingsWindow.AppPane(id: "agents", title: "Agents", symbol: "sparkles", view: agentsPane()),
+            SettingsWindow.AppPane(id: "notifications", title: "Notifications", symbol: "bell", view: notificationsPane())
+        ]
     }
 
     // MARK: - Panes
@@ -642,10 +636,9 @@ extension NiruxApp {
         }
     }
 
-    /// Drops the window and its controls; the next `showSettings` rebuilds
-    /// them from persisted state.
+    /// Drops the panes' controls; the next `showSettings` rebuilds them from
+    /// persisted state.
     private func clearSettingsWindowReferences() {
-        settingsWindow = nil
         settingsKeepAwakeCheckbox = nil
         settingsAnimationsCheckbox = nil
         settingsTasksFolderLabel = nil
@@ -675,8 +668,4 @@ extension NiruxApp: NSWindowDelegate {
         return shell.mainWindowShouldClose()
     }
 
-    func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
-        clearSettingsWindowReferences()
-    }
 }

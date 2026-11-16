@@ -12,9 +12,9 @@ The space picker at the top of the sidebar lists every space with its task count
 
 ### Space Settings
 
-Space Settings is one window with a tab per topic:
+A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the sidebar shows the space's colour square and name, with a menu to pick another space, then a pane per topic. **Space Settings…** (Space menu, the space's menu in the sidebar) opens the window on the space's General.
 
-| Tab | What it sets |
+| Pane | What it sets |
 | --- | --- |
 | General | name, color, repositories and folders, the default one, each repository's setup script |
 | Defaults | the agent new tasks preselect, the Claude Code and Codex modes, environment variables for new shells |

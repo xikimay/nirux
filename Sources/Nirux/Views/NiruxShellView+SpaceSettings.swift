@@ -3,26 +3,72 @@ import AppKit
 // MARK: - Space Settings (docs/design/spaces.md, S8)
 
 extension NiruxShellView {
-    /// Space Settings for `profileID`, on `tab`. One space at a time: the
-    /// window open for another one closes first, unless text typed there
-    /// isn't saved.
-    /// `boardRepository`: the section the Board tab reads first, when the
+    /// The Settings window on `profileID`'s `tab`; `tab` nil keeps the pane
+    /// shown (Nirux's, when the sidebar's popup picks another space). One
+    /// space at a time: the window shows this space in place of another one,
+    /// unless text typed there isn't saved, or a sheet is up on it.
+    /// `boardRepository`: the section the Board pane reads first, when the
     /// window opens for this space (`showBoardSettings`).
-    func showSpaceSettings(profileID: String, tab: SpaceSettingsWindow.Tab = .general, boardRepository: String? = nil) {
+    func showSpaceSettings(profileID: String, tab: SpaceSettingsSection.Tab? = .general, boardRepository: String? = nil) {
         guard let space = profiles.first(where: { $0.id == profileID }) else { return }
-        if let open = spaceSettings, open.spaceID != profileID {
+        if let open = spaceSettings, open.spaceID != profileID, let panel = open.panel {
             // A name or a value still being typed counts.
-            open.panel?.makeFirstResponder(nil)
-            guard !open.hasUnsavedChanges else {
-                open.show(tab: open.selectedTab ?? .general, title: Self.spaceSettingsTitle(open.spaceID, in: profiles))
-                return showToast("Save or revert the changes in this Space Settings first")
+            panel.makeFirstResponder(nil)
+            if panel.attachedSheet != nil {
+                panel.makeKeyAndOrderFront(nil)
+                return refuseSpaceSwitch("Finish what is open in this space’s settings first", in: open)
             }
-            open.close()
+            if let unsaved = open.unsavedParts.first {
+                open.show(tab: unsaved.tab, title: Self.spaceSettingsTitle(open.spaceID, in: profiles))
+                return refuseSpaceSwitch("Save or revert the changes in this space’s settings first", in: open)
+            }
         }
-        let settings = spaceSettings ?? makeSpaceSettings(for: space)
+        let settings = spaceSettings.flatMap { $0.spaceID == profileID ? $0 : nil } ?? makeSpaceSettings(for: space)
+        // The one it replaces is told first (`onClose`).
+        settingsWindow.setSpace(settings)
         spaceSettings = settings
         if let boardRepository { settings.boardRepository = boardRepository }
-        settings.show(tab: tab, title: Self.spaceSettingsTitle(profileID, in: profiles))
+        let title = Self.spaceSettingsTitle(profileID, in: profiles)
+        if let tab {
+            settings.show(tab: tab, title: title)
+        } else {
+            settings.setTitle(title)
+            settingsWindow.show()
+        }
+    }
+
+    /// Why the window keeps its space: said in it while it has the keyboard
+    /// (the popup), else in a toast on the main window.
+    private func refuseSpaceSwitch(_ reason: String, in settings: SpaceSettingsSection) {
+        guard let panel = settings.panel, panel.isKeyWindow, panel.attachedSheet == nil else { return showToast(reason) }
+        let alert = NSAlert()
+        alert.messageText = reason
+        alert.addButton(withTitle: "OK")
+        settings.askInSheet(alert, panel) { _ in }
+    }
+
+    func makeSettingsWindow() -> SettingsWindow {
+        let settings = SettingsWindow()
+        settings.makeSpaceSection = { [weak self] in self?.spaceSectionForSettings() }
+        settings.spaces = { [weak self] in
+            self?.profiles.map { SettingsWindow.Space(id: $0.id, name: $0.name, colorHex: $0.colorHex) } ?? []
+        }
+        settings.onPickSpace = { [weak self] id in
+            guard let self else { return }
+            // The pane shown stays: the new space's, or Nirux's.
+            self.showSpaceSettings(profileID: id, tab: self.spaceSettings?.selectedTab)
+        }
+        return settings
+    }
+
+    /// The active space's section, for the window opening on Nirux's panes.
+    private func spaceSectionForSettings() -> SpaceSettingsSection? {
+        if let open = spaceSettings { return open }
+        guard let space = profiles.first(where: { $0.id == activeProfileID }) else { return nil }
+        let section = makeSpaceSettings(for: space)
+        section.setTitle(Self.spaceSettingsTitle(space.id, in: profiles))
+        spaceSettings = section
+        return section
     }
 
     /// Quitting with changes typed in Space Settings asks first, in an
@@ -56,11 +102,12 @@ extension NiruxShellView {
         }
     }
 
+    /// The space's name, in the Settings window's title and sidebar.
     static func spaceSettingsTitle(_ spaceID: String, in spaces: [WorkspaceProfile]) -> String {
-        "\(spaces.first { $0.id == spaceID }?.name ?? "Space") Settings"
+        spaces.first { $0.id == spaceID }?.name ?? "Space"
     }
 
-    private func makeSpaceSettings(for space: WorkspaceProfile) -> SpaceSettingsWindow {
+    private func makeSpaceSettings(for space: WorkspaceProfile) -> SpaceSettingsSection {
         let spaceID = space.id
         let general = SpaceSettingsGeneralPane(model: spaceSettingsGeneralModel(for: space))
         general.actions = spaceSettingsGeneralActions(spaceID: spaceID)
@@ -81,7 +128,7 @@ extension NiruxShellView {
             if on { self.startLead(spaceID: spaceID) } else { self.stopLead(spaceID: spaceID) }
         }
         lead.actions.setStartsTasks = { [weak self] on in self?.setLeadStartsTasks(on, spaceID: spaceID) }
-        let settings = SpaceSettingsWindow(
+        let settings = SpaceSettingsSection(
             spaceID: spaceID, general: general, defaults: defaults, lead: lead,
             brief: SpaceFileEditorPane(source: Self.briefSource(for: space)),
             templates: SpaceFileEditorPane(source: Self.templatesSource(for: space))
@@ -102,7 +149,7 @@ extension NiruxShellView {
             case .brief, .templates: break
             }
         }
-        settings.onClose = { [weak self, weak settings] in
+        settings.onClose = { [weak self, weak settings] windowClosed in
             guard let self, let settings, self.spaceSettings === settings else { return }
             if let sheet = self.setupScriptSheet?.panel { settings.panel?.endSheet(sheet) }
             self.setupScriptSheet = nil
@@ -110,7 +157,7 @@ extension NiruxShellView {
             self.projectMemoryPanel?.dismiss()
             self.boardSettingsPanel?.dismiss()
             self.spaceSettings = nil
-            self.focusActiveTerminal(in: self.window)
+            if windowClosed { self.focusActiveTerminal(in: self.window) }
         }
         return settings
     }
@@ -169,13 +216,24 @@ extension NiruxShellView {
     }
 
     /// After a space changed (name, color, repositories) or went away:
-    /// Space Settings shows it again, or closes.
+    /// the Settings window shows it again, or the active space in its place
+    /// (Nirux's panes stay).
     func spaceSettingsSpacesChanged() {
         guard let settings = spaceSettings else { return }
         guard let space = profiles.first(where: { $0.id == settings.spaceID }) else {
             settings.brief.revert()
             settings.templates.revert()
-            return settings.close()
+            guard let active = profiles.first(where: { $0.id == activeProfileID }) else { return settings.close() }
+            // What was typed there has no space left to go to, nor what a
+            // sheet up there would add; the window stays where it is.
+            if let panel = settings.panel, let sheet = panel.attachedSheet { panel.endSheet(sheet, returnCode: .cancel) }
+            let tab = settings.selectedTab
+            let replacement = makeSpaceSettings(for: active)
+            settingsWindow.setSpace(replacement)
+            spaceSettings = replacement
+            replacement.setTitle(Self.spaceSettingsTitle(active.id, in: profiles))
+            if let tab { replacement.select(tab) }
+            return
         }
         settings.general.update(spaceSettingsGeneralModel(for: space))
         settings.lead.update(spaceSettingsLeadModel(for: space))

@@ -26,8 +26,8 @@ final class SettingsWindowTests: XCTestCase {
         try withIsolatedState {
             let app = try openSettings()
             defer { close(app) }
-            for index in app.settingsTabs.tabViewItems.indices {
-                app.settingsTabs.selectedTabViewItemIndex = index
+            for pane in app.settingsController.appPanes {
+                app.settingsController.select(.app(pane.id))
             }
             app.settingsWindow?.performClose(nil)
             XCTAssertNil(app.settingsWindow)
@@ -455,7 +455,7 @@ final class SettingsWindowTests: XCTestCase {
         try withIsolatedState {
             let app = try openSettings(statusLine: .foreign)
             defer { close(app) }
-            let agents = try XCTUnwrap(app.settingsTabs.tabViewItems.first { $0.label == "Agents" }?.viewController?.view)
+            let agents = try XCTUnwrap(app.settingsController.appPanes.first { $0.title == "Agents" }?.view)
             let texts = Self.descendants(of: agents).compactMap { ($0 as? NSTextField)?.stringValue }
             XCTAssertTrue(texts.contains(NiruxApp.usageLimitsHint(for: .foreign)))
             XCTAssertFalse(texts.contains(NiruxApp.usageLimitsHint(for: .none)))
@@ -464,45 +464,280 @@ final class SettingsWindowTests: XCTestCase {
 
     // MARK: - Window
 
-    /// Toolbar tabs; the window fits each pane, so nothing is cut off
-    /// whichever tab is picked.
+    /// A sidebar of panes, Nirux's then the space's; the window keeps its
+    /// width and fits each pane's height, top edge fixed, so nothing is cut
+    /// off whichever pane is picked.
     @MainActor
-    func testTabsAndEachPaneFitsTheWindow() throws {
+    func testTheSidebarAndEachPaneFitTheWindow() throws {
         try withIsolatedState {
-            let app = try openSettings()
+            let shell = makeShell()
+            let app = try openSettings(shell: shell)
             defer { close(app) }
+            let settings = app.settingsController
             let window = try XCTUnwrap(app.settingsWindow)
             // A panel never keeps Nirux running once the main window closes,
             // and keys typed in it never reach a terminal.
             XCTAssertTrue(window is NSPanel)
-            let tabs = app.settingsTabs
-            XCTAssertEqual(tabs.tabStyle, .toolbar)
-            XCTAssertEqual(tabs.tabViewItems.map(\.label), ["General", "Agents", "Notifications"])
-            XCTAssertTrue(tabs.tabViewItems.allSatisfy { $0.image != nil })
+            XCTAssertNil(window.toolbar, "no tabs")
+            let panes = settings.sidebar.rows.compactMap(\.selection)
+            XCTAssertEqual(panes.count, 3 + SpaceSettingsSection.Tab.allCases.count)
 
             // Tallest first, so a window that keeps the previous size would cut the next pane.
-            let order = tabs.tabViewItems.indices.sorted {
-                tabs.tabViewItems[$0].viewController!.view.fittingSize.height
-                    > tabs.tabViewItems[$1].viewController!.view.fittingSize.height
+            @MainActor func height(_ selection: SettingsWindow.Selection) -> CGFloat {
+                settings.select(selection)
+                return settings.selectedView?.fittingSize.height ?? 0
             }
+            let order = panes.sorted { height($0) > height($1) }
+            settings.select(try XCTUnwrap(order.last))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            // From the window's own fit: AppKit may narrow a panel as it
+            // shows on a small screen (CI's), before the window fits again.
+            settings.fitToContent()
             let top = window.frame.maxY
-            for index in order.reversed() + order {
-                tabs.selectedTabViewItemIndex = index
+            let width = window.frame.width
+            for selection in order.reversed() + order {
+                settings.select(selection)
                 // Let AppKit run any resize it schedules on its own.
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-                XCTAssertEqual(window.frame.maxY, top, accuracy: 0.5, "the top edge stays put")
-                let pane = try XCTUnwrap(tabs.tabViewItems[index].viewController?.view)
+                let label = window.title
+                XCTAssertEqual(window.frame.maxY, top, accuracy: 0.5, "\(label): the top edge stays put")
+                XCTAssertEqual(window.frame.width, width, accuracy: 0.5, "\(label): the width stays")
+                let pane = try XCTUnwrap(settings.selectedView)
                 let content = try XCTUnwrap(window.contentView)
                 content.layoutSubtreeIfNeeded()
-                let label = tabs.tabViewItems[index].label
-                XCTAssertEqual(window.title, label)
-                XCTAssertEqual(content.bounds.height, pane.fittingSize.height, accuracy: 1, label)
+                XCTAssertEqual(
+                    content.bounds.height, max(pane.fittingSize.height, settings.sidebar.contentHeight), accuracy: 1, label
+                )
                 for control in Self.descendants(of: pane).compactMap({ $0 as? NSControl }) where !control.isHiddenOrHasHiddenAncestor {
                     let frame = control.convert(control.bounds, to: content)
                     XCTAssertTrue(content.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame), "\(label): \(control) is cut off")
                 }
             }
         }
+    }
+
+    /// On a screen narrower than the window (CI's 1024 pt), the widest pane
+    /// (Memory's list) never makes AppKit widen the window back: it keeps
+    /// its left side in view; a narrow pane stays centred in a wide window.
+    @MainActor
+    func testAWidePaneNeverWidensTheWindow() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            let app = try openSettings(shell: shell)
+            defer { close(app) }
+            let settings = app.settingsController
+            let window = try XCTUnwrap(app.settingsWindow)
+            settings.select(.app("general"))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            let general = try XCTUnwrap(settings.selectedView)
+            let host = try XCTUnwrap(general.superview)
+            XCTAssertEqual(general.frame.midX, host.bounds.midX, accuracy: 1, "centred")
+
+            settings.select(.space(.memory))
+            var frame = window.frame
+            frame.size.width = 1024
+            window.setFrame(frame, display: true)
+            window.layoutIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertEqual(window.frame.width, 1024, accuracy: 0.5, "the window keeps the screen's width")
+            let memory = try XCTUnwrap(settings.selectedView)
+            XCTAssertEqual(memory.frame.minX, 0, accuracy: 0.5, "its left side in view")
+        }
+    }
+
+    /// One window: Nirux's panes, then the active space's; its title names
+    /// the pane. Space Settings… shows a space in it, the popup another, the
+    /// sidebar walks the panes, and ⌘, opens it again on the pane last
+    /// shown.
+    @MainActor
+    func testOneWindowHoldsNiruxThenTheSpace() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            let acme = shell.workspaceStore.createProfile(named: "Acme", select: true)
+            let beta = shell.workspaceStore.createProfile(named: "Beta", select: false)
+            let app = try openSettings(shell: shell)
+            defer { close(app) }
+            let settings = app.settingsController
+            XCTAssertIdentical(settings, shell.settingsWindow, "the shell's window, for the space's panes")
+            let window = try XCTUnwrap(app.settingsWindow)
+            XCTAssertEqual(settings.sidebar.rows.map(Self.title), [
+                "Nirux", "General", "Agents", "Notifications",
+                "Acme", "General", "Defaults", "Lead", "Brief", "Memory", "Board", "Templates"
+            ])
+            XCTAssertEqual(settings.selection, .app("general"), "Nirux's first pane")
+            XCTAssertEqual(window.title, "General")
+            XCTAssertEqual(shell.spaceSettings?.spaceID, acme.id, "the active space")
+            XCTAssertNil(shell.spaceSettings?.selectedTab)
+
+            // The sidebar walks the panes: ↓ and ↑ step over the space's
+            // header; a click on a header, or below the rows, keeps the pane.
+            let table = settings.sidebar.table
+            let header = try XCTUnwrap(settings.sidebar.rows.firstIndex { if case .space = $0 { true } else { false } })
+            table.selectRowIndexes([header - 1], byExtendingSelection: false)
+            XCTAssertEqual(settings.selection, .app("notifications"))
+            table.keyDown(with: try arrow(down: true, in: window))
+            XCTAssertEqual(settings.selection, .space(.general), "↓ over the space's header")
+            table.keyDown(with: try arrow(down: false, in: window))
+            XCTAssertEqual(settings.selection, .app("notifications"), "↑ back over it")
+            let picked = table.selectedRowIndexes
+            XCTAssertEqual(settings.sidebar.tableView(table, selectionIndexesForProposedSelection: [0]), picked, "Nirux's header is no pane")
+            XCTAssertEqual(settings.sidebar.tableView(table, selectionIndexesForProposedSelection: []), picked, "a click below the rows")
+            XCTAssertEqual(settings.sidebar.tableView(table, selectionIndexesForProposedSelection: [header + 2]), [header + 2])
+            let lead = try XCTUnwrap(settings.sidebar.rows.firstIndex { $0.selection == .space(.lead) })
+            table.selectRowIndexes([lead], byExtendingSelection: false)
+            XCTAssertEqual(settings.selection, .space(.lead))
+            XCTAssertEqual(shell.spaceSettings?.selectedTab, .lead)
+            XCTAssertEqual(window.title, "Acme — Lead")
+            // Tab goes on from the sidebar into the pane shown (its name
+            // field: with Full Keyboard Access off, only text and lists take
+            // Tab).
+            settings.select(.space(.general))
+            window.makeFirstResponder(table)
+            // With Full Keyboard Access on, the space's popup comes first.
+            for _ in 0..<3 {
+                guard let view = window.firstResponder as? NSView, view.isDescendant(of: settings.sidebar.view) else { break }
+                window.selectNextKeyView(nil)
+            }
+            let focused = try XCTUnwrap(window.firstResponder as? NSView)
+            XCTAssertTrue(focused.isDescendant(of: try XCTUnwrap(settings.selectedView)), "\(focused)")
+            // A pane that loads (Memory, Board) takes the keyboard only if the
+            // sidebar hasn't it.
+            let pane = try XCTUnwrap(settings.selectedView)
+            XCTAssertTrue(window.keyboardIsFree(for: pane), "its own field")
+            window.makeFirstResponder(table)
+            XCTAssertFalse(window.keyboardIsFree(for: pane), "the sidebar keeps it")
+            window.makeFirstResponder(nil)
+            XCTAssertTrue(window.keyboardIsFree(for: pane))
+            settings.select(.space(.lead))
+
+            // Space Settings… on another space: the same window, that space.
+            shell.showSpaceSettings(profileID: beta.id)
+            XCTAssertIdentical(app.settingsWindow, window)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, beta.id)
+            XCTAssertEqual(settings.selection, .space(.general))
+            XCTAssertEqual(window.title, "Beta — General")
+
+            // The popup: back to Acme, on the pane shown; it lists a space
+            // made while the window is open.
+            settings.select(.space(.defaults))
+            let popup = try spacePopup(settings)
+            let gamma = shell.workspaceStore.createProfile(named: "Gamma", select: false)
+            settings.sidebar.menuNeedsUpdate(try XCTUnwrap(popup.menu))
+            XCTAssertEqual(popup.itemTitles, shell.profiles.map(\.name))
+            XCTAssertTrue(popup.itemTitles.contains(gamma.name))
+            XCTAssertEqual(popup.titleOfSelectedItem, "Beta")
+            popup.selectItem(withTitle: "Acme")
+            popup.sendAction(popup.action, to: popup.target)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, acme.id)
+            XCTAssertEqual(settings.selection, .space(.defaults))
+            XCTAssertEqual(try spacePopup(settings).titleOfSelectedItem, "Acme")
+            // The space shown, picked again: nothing to do.
+            var picks = 0
+            let pick = settings.sidebar.onPickSpace
+            settings.sidebar.onPickSpace = { picks += 1; pick?($0) }
+            let same = try spacePopup(settings)
+            same.selectItem(withTitle: "Acme")
+            same.sendAction(same.action, to: same.target)
+            XCTAssertEqual(picks, 0)
+            settings.sidebar.onPickSpace = pick
+
+            // Text typed and not saved keeps its space: the popup says so.
+            let section = try XCTUnwrap(shell.spaceSettings)
+            // In the window while it has the keyboard (never in xctest).
+            section.askInSheet = { _, _, _ in }
+            section.brief.textView.string += "Draft.\n"
+            section.brief.textDidChange(Notification(name: NSText.didChangeNotification))
+            let unsaved = try spacePopup(settings)
+            unsaved.selectItem(withTitle: "Beta")
+            unsaved.sendAction(unsaved.action, to: unsaved.target)
+            XCTAssertIdentical(shell.spaceSettings, section)
+            XCTAssertEqual(settings.selection, .space(.brief), "on the text not saved")
+            XCTAssertEqual(try spacePopup(settings).titleOfSelectedItem, "Acme")
+            section.brief.revert()
+
+            // From one of Nirux's panes, the popup changes the space listed,
+            // not the pane.
+            settings.select(.app("notifications"))
+            let fromNirux = try spacePopup(settings)
+            fromNirux.selectItem(withTitle: "Beta")
+            fromNirux.sendAction(fromNirux.action, to: fromNirux.target)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, beta.id)
+            XCTAssertEqual(settings.selection, .app("notifications"))
+            XCTAssertEqual(window.title, "Notifications")
+
+            // A sheet up on the window keeps its space.
+            let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+            sheet.isReleasedWhenClosed = false
+            window.beginSheet(sheet)
+            XCTAssertIdentical(window.attachedSheet, sheet)
+            shell.showSpaceSettings(profileID: acme.id)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, beta.id)
+            XCTAssertIdentical(window.attachedSheet, sheet, "still up")
+            window.endSheet(sheet)
+
+            // The space shown is deleted: the window stays, on the active
+            // space, Nirux's pane still shown; a sheet up there goes.
+            window.beginSheet(sheet)
+            shell.deleteSpace(profileID: beta.id)
+            XCTAssertNil(window.attachedSheet)
+            XCTAssertIdentical(app.settingsWindow, window)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, acme.id)
+            XCTAssertEqual(settings.selection, .app("notifications"))
+            XCTAssertFalse(settings.sidebar.rows.map(Self.title).contains("Beta"))
+
+            // A space's pane shows again only for that space.
+            settings.select(.space(.lead))
+            window.performClose(nil)
+            XCTAssertTrue(shell.workspaceStore.selectProfile(gamma.id))
+            app.showSettings(nil)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, gamma.id)
+            XCTAssertEqual(settings.selection, .app("notifications"), "Nirux's pane last shown")
+
+            // Space Settings… opens with the sidebar's keyboard; Space Memory…
+            // frees it for its list.
+            app.settingsWindow?.performClose(nil)
+            shell.showSpaceSettings(profileID: acme.id)
+            let reopened = try XCTUnwrap(app.settingsWindow)
+            XCTAssertIdentical(reopened.firstResponder, settings.sidebar.table)
+            shell.showSpaceSettings(profileID: acme.id, tab: .memory)
+            XCTAssertIdentical(reopened.firstResponder, reopened)
+
+            // Closed, ⌘, opens it again on the pane last shown.
+            settings.select(.app("agents"))
+            app.settingsWindow?.performClose(nil)
+            XCTAssertNil(app.settingsWindow)
+            XCTAssertNil(shell.spaceSettings)
+            app.showSettings(nil)
+            XCTAssertEqual(settings.selection, .app("agents"))
+            XCTAssertEqual(app.settingsWindow?.title, "Agents")
+        }
+    }
+
+    @MainActor
+    private static func title(_ row: SettingsSidebar.Row) -> String {
+        switch row {
+        case .header(let title): return title
+        case .space(let header): return header.current.name
+        case .pane(_, let title, _): return title
+        }
+    }
+
+    @MainActor
+    private func arrow(down: Bool, in window: NSWindow) throws -> NSEvent {
+        let character = String(UnicodeScalar(down ? NSDownArrowFunctionKey : NSUpArrowFunctionKey)!)
+        return try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.numericPad, .function], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: character, charactersIgnoringModifiers: character,
+            isARepeat: false, keyCode: down ? 125 : 126
+        ))
+    }
+
+    /// The popup on the space's header.
+    @MainActor
+    private func spacePopup(_ settings: SettingsWindow) throws -> NSPopUpButton {
+        let index = try XCTUnwrap(settings.sidebar.rows.firstIndex { if case .space = $0 { true } else { false } })
+        let cell = try XCTUnwrap(settings.sidebar.table.view(atColumn: 0, row: index, makeIfNecessary: true))
+        return try XCTUnwrap(Self.descendants(of: cell).compactMap { $0 as? NSPopUpButton }.first)
     }
 
     // MARK: - Helpers
@@ -554,9 +789,12 @@ final class SettingsWindowTests: XCTestCase {
 
     /// `statusLine` stands in for ~/.claude/settings.json's.
     @MainActor
-    private func openSettings(statusLine: AgentHookInstaller.ClaudeStatusLineState = .none) throws -> NiruxApp {
+    private func openSettings(
+        statusLine: AgentHookInstaller.ClaudeStatusLineState = .none, shell: NiruxShellView? = nil
+    ) throws -> NiruxApp {
         _ = NSApplication.shared
         let app = NiruxApp()
+        app.shell = shell
         // Keep Settings off ~/.claude.
         app.claudeStatusLineStateReader = { statusLine }
         app.claudeStatusLineInstaller = { _ in }
@@ -600,9 +838,3 @@ final class SettingsWindowTests: XCTestCase {
     }
 }
 
-private extension NiruxApp {
-    var settingsTabs: NSTabViewController {
-        // swiftlint:disable:next force_cast
-        settingsWindow?.contentViewController as! NSTabViewController
-    }
-}

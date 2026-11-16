@@ -1,17 +1,14 @@
 import AppKit
 
-/// Space Settings (docs/design/spaces.md, S8): one window per space with a toolbar
-/// tab per topic, in place of the separate rename, brief, board, templates
-/// and memory panels. Like Nirux Settings, a change applies at once, except
-/// in the text editors (Brief, Templates) and the Board form, which have a
-/// Save button. The shell builds each tab's content and does the writing
-/// (see NiruxShellView+SpaceSettings).
-///
-/// It is a panel that doesn't float or hide, like Settings: it doesn't keep
-/// Nirux running once the main window closes, and keys typed in it never
-/// reach a terminal (isOverlayActive).
+/// A space's settings (docs/design/spaces.md, S8): the space's panes of the
+/// Settings window (`SettingsWindow`, docs/design/glass-interface.md, 4.1), in
+/// place of the separate rename, brief, board, templates and memory panels.
+/// A change applies at once, except in the text editors (Brief, Templates)
+/// and the Board form, which have a Save button; text typed and not saved
+/// asks before the window closes. The shell builds each pane's content and
+/// does the writing (see NiruxShellView+SpaceSettings).
 @MainActor
-final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
+final class SpaceSettingsSection: NSObject {
     enum Tab: String, CaseIterable {
         case general, defaults, lead, brief, memory, board, templates
 
@@ -48,32 +45,38 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
     let templates: SpaceFileEditorPane
     /// Filled by the shell when the tab first shows: the Board form reads
     /// git, the memory list reads files.
-    let boardHost = SpaceSettingsWindow.fixedHost(size: BoardSettingsPanel.hostSize)
-    let memoryHost = SpaceSettingsWindow.fixedHost(size: ProjectMemoryPanel.panelSize)
+    let boardHost = SpaceSettingsSection.fixedHost(size: BoardSettingsPanel.hostSize)
+    let memoryHost = SpaceSettingsSection.fixedHost(size: ProjectMemoryPanel.panelSize)
 
-    private(set) var panel: SpaceSettingsPanel?
-    private let tabs = SettingsTabViewController()
+    /// The Settings window showing it.
+    weak var host: SettingsWindow?
+    /// The window's panel, for sheets and the keyboard.
+    var panel: NSPanel? { host?.panel }
+    /// The space's name, in the window's title and sidebar.
+    private(set) var title = ""
     /// Looks for changes made on disk (an agent editing the brief) while
     /// the window is open.
     private var diskTimer: Timer?
 
-    /// A tab was picked (or shown first).
+    /// A pane was picked (or shown first).
     var onTabShown: ((Tab) -> Void)?
-    /// The window closed.
-    var onClose: (() -> Void)?
+    /// The window closed (`windowClosed`), or showed another space.
+    var onClose: ((_ windowClosed: Bool) -> Void)?
     /// Asks a question in a sheet on the window; the answer comes back
     /// through the closure. Tests replace it.
     var askInSheet: (NSAlert, NSWindow, @escaping (NSApplication.ModalResponse) -> Void) -> Void = { alert, window, answer in
         alert.beginSheetModal(for: window, completionHandler: answer)
     }
 
-    var isVisible: Bool { panel?.isVisible == true }
+    var isVisible: Bool { host?.isVisible == true }
 
-    private let memoryPlaceholder = SpaceSettingsWindow.placeholderLabel()
-    private let boardPlaceholder = SpaceSettingsWindow.placeholderLabel()
+    private let memoryPlaceholder = SpaceSettingsSection.placeholderLabel()
+    private let boardPlaceholder = SpaceSettingsSection.placeholderLabel()
 
+    /// The space's pane shown; nil while one of Nirux's shows.
     var selectedTab: Tab? {
-        Tab.allCases[safe: tabs.selectedTabViewItemIndex]
+        guard let host, host.space === self, case .space(let tab)? = host.selection else { return nil }
+        return tab
     }
 
     /// The Board tab's form and the setup script sheet, while shown (the
@@ -138,75 +141,45 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         super.init()
     }
 
-    /// Shows the window on `tab`, building it the first time.
+    /// Shows the window on `tab`. The shell made this section the window's
+    /// (`SettingsWindow.setSpace`).
     func show(tab: Tab, title: String) {
-        if panel == nil { build() }
-        guard let panel else { return }
         setTitle(title)
-        select(tab)
-        if !panel.isVisible { panel.center() }
-        panel.makeKeyAndOrderFront(nil)
-        startWatchingDisk()
+        host?.show(.space(tab))
     }
 
     func select(_ tab: Tab) {
-        guard let index = Tab.allCases.firstIndex(of: tab) else { return }
-        if tabs.selectedTabViewItemIndex != index {
-            tabs.selectedTabViewItemIndex = index
-        } else {
-            tabShown(tab)
-        }
+        host?.select(.space(tab))
     }
 
-    /// The window's title follows its content view controller's.
+    /// The space's name, in the window's title and sidebar.
     func setTitle(_ title: String) {
-        tabs.title = title
-        panel?.title = title
+        self.title = title
+        host?.spaceChanged()
     }
 
-    /// Closes without asking: unsaved text is lost.
+    /// Closes the window without asking: unsaved text is lost.
     func close() {
-        panel?.close()
+        host?.close()
     }
 
-    private func build() {
-        tabs.tabStyle = .toolbar
-        // The window keeps the space's name as its title.
-        tabs.canPropagateSelectedChildViewControllerTitle = false
-        let views: [Tab: NSView] = [
-            .general: general.view, .defaults: defaults.view, .lead: lead.view, .brief: brief.view,
-            .memory: memoryHost, .board: boardHost, .templates: templates.view
-        ]
-        for tab in Tab.allCases {
-            let controller = NSViewController()
-            controller.view = views[tab] ?? NSView()
-            controller.title = tab.title
-            let item = NSTabViewItem(viewController: controller)
-            item.label = tab.title
-            item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
-            tabs.addTabViewItem(item)
+    /// The pane's view.
+    func view(for tab: Tab) -> NSView {
+        switch tab {
+        case .general: return general.view
+        case .defaults: return defaults.view
+        case .lead: return lead.view
+        case .brief: return brief.view
+        case .memory: return memoryHost
+        case .board: return boardHost
+        case .templates: return templates.view
         }
-        let panel = SpaceSettingsPanel(contentViewController: tabs)
-        // After the init, which picks the first tab: `show` says which tab
-        // shows, once.
-        tabs.onSelect = { [weak self] index in
-            guard let self, let tab = Tab.allCases[safe: index] else { return }
-            self.tabShown(tab)
-        }
-        panel.styleMask = [.titled, .closable]
-        panel.isFloatingPanel = false
-        panel.hidesOnDeactivate = false
-        panel.collectionBehavior.insert(.fullScreenAuxiliary)
-        panel.toolbarStyle = .preference
-        panel.appearance = Theme.appearance
-        panel.backgroundColor = Theme.Color.base
-        panel.isReleasedWhenClosed = false
-        panel.delegate = self
-        self.panel = panel
-        tabs.fitWindowToSelectedPane(animated: false)
     }
 
-    private func tabShown(_ tab: Tab) {
+    var allViews: [NSView] { Tab.allCases.map(view(for:)) }
+
+    /// The window shows one of its panes.
+    func tabShown(_ tab: Tab) {
         switch tab {
         case .brief: brief.checkDisk()
         case .templates: templates.checkDisk()
@@ -215,17 +188,37 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         onTabShown?(tab)
     }
 
-    /// The window fits the tab's content again (a list grew, a banner
+    /// The window fits the pane's content again (a list grew, a banner
     /// showed).
     func fitToContent() {
-        tabs.fitWindowToSelectedPane(animated: true)
+        host?.fitToContent()
+    }
+
+    /// The window came up with this section.
+    func windowShown() {
+        startWatchingDisk()
+    }
+
+    func windowBecameKey() {
+        switch selectedTab {
+        case .brief: brief.checkDisk()
+        case .templates: templates.checkDisk()
+        default: break
+        }
+    }
+
+    /// The window closed, or shows another space now.
+    func detach(windowClosed: Bool) {
+        diskTimer?.invalidate()
+        diskTimer = nil
+        onClose?(windowClosed)
     }
 
     private func startWatchingDisk() {
         guard diskTimer == nil else { return }
         let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.panel?.isVisible == true else { return }
+                guard let self, self.isVisible else { return }
                 switch self.selectedTab {
                 case .brief: self.brief.checkDisk()
                 case .templates: self.templates.checkDisk()
@@ -289,12 +282,13 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         return host
     }
 
-    // MARK: - NSWindowDelegate
+    // MARK: - Closing
 
-    /// Unsaved changes ask first: Save, Don't Save, or Cancel.
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
+    /// Unsaved changes ask first, in a sheet on `window`: Save, Don't Save,
+    /// or Cancel. True: nothing to ask, the window may close.
+    func shouldClose(_ window: NSWindow) -> Bool {
         // A name or a value still being typed counts.
-        sender.makeFirstResponder(nil)
+        window.makeFirstResponder(nil)
         let parts = unsavedParts
         guard !parts.isEmpty else { return true }
         let alert = NSAlert()
@@ -305,11 +299,11 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Don’t Save").hasDestructiveAction = true
-        askInSheet(alert, sender) { [weak self] response in
+        askInSheet(alert, window) { [weak self] response in
             guard let self else { return }
             switch response {
             case .alertFirstButtonReturn:
-                // On its tab, which a question about it needs; one that
+                // On its pane, which a question about it needs; one that
                 // fails (a problem, a file changed on disk) keeps the window
                 // open there, saying why.
                 for part in parts {
@@ -324,41 +318,5 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
             }
         }
         return false
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        diskTimer?.invalidate()
-        diskTimer = nil
-        onClose?()
-    }
-
-    func windowDidBecomeKey(_ notification: Notification) {
-        switch selectedTab {
-        case .brief: brief.checkDisk()
-        case .templates: templates.checkDisk()
-        default: break
-        }
-    }
-}
-
-/// Return in a multi-line text view (the Board's required checks, the
-/// brief) types a line: a default button (the Board's Save) mustn't take
-/// it first when AppKit offers Return as a key equivalent.
-final class SpaceSettingsPanel: NSPanel {
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let multiline = (firstResponder as? NSTextView).flatMap { $0.isFieldEditor ? nil : $0 }
-        if MultilineReturn.leavesToTextView(event, firstResponder: firstResponder, multilineView: multiline) { return false }
-        return super.performKeyEquivalent(with: event)
-    }
-}
-
-/// Return in a multi-line text view types a line, ahead of a default button.
-enum MultilineReturn {
-    /// Return or Enter, without modifiers, while `multilineView` has the focus.
-    @MainActor
-    static func leavesToTextView(_ event: NSEvent, firstResponder: NSResponder?, multilineView: NSTextView?) -> Bool {
-        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        guard let multilineView, firstResponder === multilineView, modifiers.isEmpty else { return false }
-        return event.charactersIgnoringModifiers == "\r" || event.charactersIgnoringModifiers == "\u{3}"
     }
 }
