@@ -268,13 +268,14 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         shownPane?.removeFromSuperview()
         pane.translatesAutoresizingMaskIntoConstraints = false
         paneHost.addSubview(pane)
+        // Below windowSizeStayPut: a pane wider than its area never makes
+        // AppKit widen the window past the screen; it overflows on the right.
+        let stayPut = NSLayoutConstraint.Priority.windowSizeStayPut.rawValue
+        let leading = pane.leadingAnchor.constraint(greaterThanOrEqualTo: paneHost.leadingAnchor)
+        leading.priority = NSLayoutConstraint.Priority(stayPut - 10)
         let centred = pane.centerXAnchor.constraint(equalTo: paneHost.centerXAnchor)
-        centred.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            pane.topAnchor.constraint(equalTo: paneHost.topAnchor),
-            pane.leadingAnchor.constraint(greaterThanOrEqualTo: paneHost.leadingAnchor),
-            centred
-        ])
+        centred.priority = NSLayoutConstraint.Priority(stayPut - 20)
+        NSLayoutConstraint.activate([pane.topAnchor.constraint(equalTo: paneHost.topAnchor), leading, centred])
         shownPane = pane
     }
 

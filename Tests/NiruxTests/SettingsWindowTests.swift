@@ -516,6 +516,35 @@ final class SettingsWindowTests: XCTestCase {
         }
     }
 
+    /// On a screen narrower than the window (CI's 1024 pt), the widest pane
+    /// (Memory's list) never makes AppKit widen the window back: it keeps
+    /// its left side in view; a narrow pane stays centred in a wide window.
+    @MainActor
+    func testAWidePaneNeverWidensTheWindow() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            let app = try openSettings(shell: shell)
+            defer { close(app) }
+            let settings = app.settingsController
+            let window = try XCTUnwrap(app.settingsWindow)
+            settings.select(.app("general"))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            let general = try XCTUnwrap(settings.selectedView)
+            let host = try XCTUnwrap(general.superview)
+            XCTAssertEqual(general.frame.midX, host.bounds.midX, accuracy: 1, "centred")
+
+            settings.select(.space(.memory))
+            var frame = window.frame
+            frame.size.width = 1024
+            window.setFrame(frame, display: true)
+            window.layoutIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertEqual(window.frame.width, 1024, accuracy: 0.5, "the window keeps the screen's width")
+            let memory = try XCTUnwrap(settings.selectedView)
+            XCTAssertEqual(memory.frame.minX, 0, accuracy: 0.5, "its left side in view")
+        }
+    }
+
     /// One window: Nirux's panes, then the active space's; its title names
     /// the pane. Space Settings… shows a space in it, the popup another, the
     /// sidebar walks the panes, and ⌘, opens it again on the pane last
