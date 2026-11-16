@@ -239,6 +239,7 @@ final class RequestsTests: XCTestCase {
         let panel = RequestPanel(content: content)
         panel.keepsShortcut = { KeyChord($0.charactersIgnoringModifiers ?? "", $0.modifierFlags) == NiruxShortcuts.nextWaitingAgent.chord }
         panel.show(frame: NSRect(x: 10, y: 10, width: 100, height: 100), over: parent, responder: content)
+        XCTAssertGreaterThan(panel.panel.windowNumber, 0, "on its own window: the events name it")
         func press(_ key: String) throws {
             NSApp.sendEvent(try XCTUnwrap(NSEvent.keyEvent(
                 with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: panel.panel.windowNumber,

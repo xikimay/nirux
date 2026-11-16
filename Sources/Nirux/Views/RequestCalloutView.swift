@@ -100,7 +100,10 @@ final class RequestCalloutView: NSView {
 
     /// The host shows the callout: every answer waits before it takes a
     /// click.
-    func opened() { restartArming() }
+    func opened() {
+        escapeIsDown = false
+        restartArming()
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

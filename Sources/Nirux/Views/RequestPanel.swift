@@ -35,10 +35,15 @@ final class RequestPanel {
     /// window (a reply popover a card opened, Settings) leave it open.
     var closesOnClicks: ((NSWindow) -> Bool)?
     /// A shortcut it lets through while it has the keyboard (⌘J, which
-    /// acts on the open inbox); any other ⌘ shortcut closes it first, so
-    /// that what the shortcut moves (a workspace, a column, the find bar)
-    /// gets the keyboard.
+    /// acts on the open inbox; any key while a reply popover of a card
+    /// types, whose keys come stamped with this window); any other ⌘
+    /// shortcut closes it, then goes to the menu, so that what the shortcut
+    /// moves (a workspace, a column, the find bar) gets the keyboard.
     var keepsShortcut: ((NSEvent) -> Bool)?
+    /// When a click it let through (`keepsOpen`) last came: the window
+    /// behind takes the keyboard on that mouse-down, which must not close
+    /// it before the click acts (the badge, the callout's own icon).
+    private var keptClickAt: TimeInterval = -.infinity
     private var clickMonitor: Any?
     private var shortcutMonitor: Any?
     private var resignObserver: NSObjectProtocol?
@@ -78,8 +83,11 @@ final class RequestPanel {
         if clickMonitor == nil {
             clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
                 guard let self, self.isOpen, let window = event.window, window !== self.panel,
-                      window === self.panel.parent || self.closesOnClicks?(window) == true,
-                      self.keepsOpen?(event) != true else { return event }
+                      window === self.panel.parent || self.closesOnClicks?(window) == true else { return event }
+                if self.keepsOpen?(event) == true {
+                    self.keptClickAt = ProcessInfo.processInfo.systemUptime
+                    return event
+                }
                 self.close(.byClickElsewhere)
                 // The click goes on to what it landed on.
                 return event
@@ -91,8 +99,11 @@ final class RequestPanel {
                       !["w", "."].contains(event.charactersIgnoringModifiers ?? ""), self.keepsShortcut?(event) != true
                 else { return event }
                 self.close()
-                // The menu takes it, the window behind having the keyboard.
-                return event
+                // To the menu, as the key interceptor routes ⌘ keys: the
+                // terminal behind (Ghostty's own bindings) never takes a
+                // key typed here, nor does anything when no menu item does.
+                _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
+                return nil
             }
         }
         if resignObserver == nil {
@@ -133,6 +144,8 @@ final class RequestPanel {
                 MainActor.assumeIsolated {
                     guard let self, self.isOpen, !self.panel.isKeyWindow else { return }
                     if let key = NSApp.keyWindow, self.owns(key) { return }
+                    // A click it let through: the click acts on it.
+                    if ProcessInfo.processInfo.systemUptime - self.keptClickAt < 1 { return }
                     self.close(.byClickElsewhere)
                 }
             }
