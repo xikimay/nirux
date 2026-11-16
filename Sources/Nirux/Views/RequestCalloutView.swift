@@ -130,7 +130,17 @@ final class RequestCalloutView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        if event.charactersIgnoringModifiers == "\u{1b}" { onClose?() } else { super.keyDown(with: event) }
+        if event.charactersIgnoringModifiers == "\u{1b}" { escapeIsDown = true } else { super.keyDown(with: event) }
+    }
+
+    /// Escape closes it on its release: the keyboard then goes back to a
+    /// terminal, which a held key's repeats must not reach.
+    private var escapeIsDown = false
+
+    override func keyUp(with event: NSEvent) {
+        guard event.charactersIgnoringModifiers == "\u{1b}", escapeIsDown else { return super.keyUp(with: event) }
+        escapeIsDown = false
+        onClose?()
     }
 
     override func cancelOperation(_ sender: Any?) { onClose?() }

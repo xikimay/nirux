@@ -29,7 +29,11 @@ extension NiruxShellView {
         }
         inbox.onClose = { [weak self] in self?.closeInbox() }
         let panel = RequestPanel(content: inbox)
-        panel.onClose = { [weak self] closing, hadKeyboard in if closing == .byHost, hadKeyboard { self?.giveKeyboardBack() } }
+        panel.onClose = { [weak self, weak panel] closing, hadKeyboard in
+            guard let self else { return }
+            if let panel { closeReplyPopovers(over: panel.panel) }
+            if closing == .byHost, hadKeyboard { giveKeyboardBack() }
+        }
         // The badge acts on the open inbox (⌘J again).
         panel.keepsOpen = { [weak self] event in self?.isOnWaitingSegment(event) == true }
         panel.closesOnClicks = { [weak self] window in window === self?.commandBarToolbar?.bar.window }
@@ -94,8 +98,9 @@ extension NiruxShellView {
         }
         callout.onClose = { [weak self] in self?.closeCallout() }
         let panel = RequestPanel(content: callout)
-        panel.onClose = { [weak self] closing, hadKeyboard in
+        panel.onClose = { [weak self, weak panel] closing, hadKeyboard in
             guard let self else { return }
+            if let panel { closeReplyPopovers(over: panel.panel) }
             if let observer = requestsState.calloutScrollObserver { NotificationCenter.default.removeObserver(observer) }
             requestsState.calloutScrollObserver = nil
             requestsState.calloutTaskID = nil
@@ -161,7 +166,9 @@ extension NiruxShellView {
         }
         if requestsState.isCalloutOpen, let callout = requestsState.callout, let window {
             if let taskID = requestsState.calloutTaskID, let request = requests.first(where: { $0.taskID == taskID }),
-               let anchor = requestsState.calloutAnchor, anchor.window === window, !anchor.isHiddenOrHasHiddenAncestor {
+               let anchor = requestsState.calloutAnchor, anchor.window === window, !anchor.isHiddenOrHasHiddenAncestor,
+               // Scrolled out of the rail's view: nothing left to sit by.
+               sidebar.iconRail.iconFrame(of: taskID) != nil {
                 callout.show(request, othersWaiting: requests.count - 1)
                 requestsState.calloutPanel?.setFrame(calloutFrame(for: callout, anchor: anchor, in: window))
             } else {
@@ -203,6 +210,13 @@ extension NiruxShellView {
         guard let place = liveColumn(where: { $0.id == id }),
               let workspaceIndex = workspaces.firstIndex(where: { $0 === place.workspace }) else { return nil }
         return (workspaceIndex, place.columnIndex)
+    }
+
+    /// A reply popover a card of `panel` opened goes with it.
+    private func closeReplyPopovers(over panel: NSWindow) {
+        func hangsFrom(_ popover: NSPopover?) -> Bool { popover?.contentViewController?.view.window?.parent === panel }
+        if hangsFrom(missionReplyPopover) { closeMissionReply() }
+        if hangsFrom(turnReplyPopover) { closeTurnReply() }
     }
 
     /// The panel that had the keyboard closed: the terminal on screen takes

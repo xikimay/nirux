@@ -303,7 +303,7 @@ extension NiruxShellView {
         return true
     }
 
-    private func closeMissionReply() {
+    func closeMissionReply() {
         missionReplyPopover?.close()
         missionReplyPopover = nil
         missionReplyQuestionID = nil

@@ -911,6 +911,9 @@ extension NiruxShellView {
 
     func showCommandPalette() {
         guard let window else { return }
+        // The palette takes the keyboard and the place under the bar.
+        closeInbox(.byClickElsewhere)
+        closeCallout(.byClickElsewhere)
 
         if commandPalette?.isVisible == true {
             commandPalette?.dismiss()

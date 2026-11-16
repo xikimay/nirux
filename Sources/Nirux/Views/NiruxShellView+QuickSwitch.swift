@@ -131,21 +131,25 @@ extension NiruxShellView {
     /// space, the agents stopped on an error or exited too. With none, a
     /// hint says so, without a beep.
     func jumpToNextWaitingAgent() {
+        // ⌘J with the palette open: neither the inbox nor the hint goes
+        // under it.
+        if commandPalette?.isVisible == true { commandPalette?.dismiss() }
+        // A held ⌘J opens the inbox, or goes to its request, once.
+        let isRepeat = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
         if requestsState.isInboxOpen {
+            guard !isRepeat else { return }
             if let chosen = requestsState.inbox?.chosenRequest { goToRequest(chosen) } else { closeInbox() }
             return
         }
-        if !sidebar.isExpanded {
+        if !sidebar.isExpanded, let window, sideEffects.windowShows(window) {
             // The requests as they are now, not at the last refresh.
             updateSidebar()
-            if !requestsState.requests.isEmpty { return openInbox() }
+            if !requestsState.requests.isEmpty { return isRepeat ? () : openInbox() }
         }
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         let queue = waitingQueue(snapshot: snapshot, now: now)
         let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
-        // ⌘J with the palette open: the hint would show under it.
-        if commandPalette?.isVisible == true { commandPalette?.dismiss() }
         // The walk goes on while the user stays where its last press
         // landed; else it starts where they are.
         let walk = current != nil && current == quickSwitch.walk.last ? quickSwitch.walk : current.map { [$0] } ?? []

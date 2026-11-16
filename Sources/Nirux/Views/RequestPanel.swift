@@ -9,8 +9,11 @@ import AppKit
 @MainActor
 final class RequestPanel {
     private final class Panel: NSPanel {
+        var onPerformClose: (() -> Void)?
         override var canBecomeKey: Bool { true }
         override var canBecomeMain: Bool { false }
+        /// ⌘W while it has the keyboard closes it, not the window behind.
+        override func performClose(_ sender: Any?) { onPerformClose?() }
         /// A key nothing takes (a letter typed by mistake) goes nowhere,
         /// without a beep.
         override func noResponder(for eventSelector: Selector) {}
@@ -36,6 +39,9 @@ final class RequestPanel {
     var closesOnClicks: ((NSWindow) -> Bool)?
     private var clickMonitor: Any?
     private var resignObserver: NSObjectProtocol?
+    private var keyObservers: [NSObjectProtocol] = []
+    /// What takes the keyboard in it, again after a reply popover closed.
+    private weak var responder: NSView?
     private(set) var isOpen = false
 
     init(content: NSView) {
@@ -48,7 +54,9 @@ final class RequestPanel {
         // It closes instead (`close` on the app's deactivation): hidden
         // behind AppKit's back, it would come back stale.
         panel.hidesOnDeactivate = false
+        panel.appearance = Theme.appearance
         panel.contentView = content
+        (panel as? Panel)?.onPerformClose = { [weak self] in self?.close() }
     }
 
     /// Shows it at `frame` (screen coordinates) over `window`, `responder`
@@ -61,7 +69,9 @@ final class RequestPanel {
         }
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(responder)
+        self.responder = responder
         isOpen = true
+        if keyObservers.isEmpty { observeKey() }
         if clickMonitor == nil {
             clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
                 guard let self, self.isOpen, let window = event.window, window !== self.panel,
@@ -86,12 +96,48 @@ final class RequestPanel {
         clickMonitor = nil
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         resignObserver = nil
+        keyObservers.forEach(NotificationCenter.default.removeObserver)
+        keyObservers = []
         guard isOpen else { return }
         isOpen = false
         let hadKeyboard = panel.isKeyWindow
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
         onClose?(closing, hadKeyboard)
+    }
+
+    /// It lost the keyboard to another window (Settings, the window behind
+    /// after a drag off the badge): it closes, so that no key meant for it
+    /// reaches a terminal while it still shows; not for a reply popover one
+    /// of its cards opened. It got the keyboard back: its view takes it.
+    private func observeKey() {
+        let center = NotificationCenter.default
+        keyObservers.append(center.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
+            // Which window took the keyboard is known once the switch ends.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.isOpen, !self.panel.isKeyWindow else { return }
+                    if let key = NSApp.keyWindow, self.owns(key) { return }
+                    self.close(.byClickElsewhere)
+                }
+            }
+        })
+        keyObservers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let responder = self.responder, let content = self.panel.contentView else { return }
+                if (self.panel.firstResponder as? NSView)?.isDescendant(of: content) != true { self.panel.makeFirstResponder(responder) }
+            }
+        })
+    }
+
+    /// A window that hangs from it: a popover a card opened.
+    private func owns(_ window: NSWindow) -> Bool {
+        var current: NSWindow? = window
+        while let candidate = current {
+            if candidate === panel { return true }
+            current = candidate.parent
+        }
+        return window.className.contains("Popover")
     }
 
     /// Moves it, keeping it open.

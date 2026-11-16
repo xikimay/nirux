@@ -34,9 +34,9 @@ final class RequestInboxViewTests: XCTestCase {
         inbox.layoutSubtreeIfNeeded()
     }
 
-    private func key(_ characters: String) throws -> NSEvent {
+    private func key(_ characters: String, _ type: NSEvent.EventType = .keyDown) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
-            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
             characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0
         ))
     }
@@ -84,7 +84,9 @@ final class RequestInboxViewTests: XCTestCase {
         var closed = 0
         inbox.onClose = { closed += 1 }
         inbox.keyDown(with: try key("\u{1b}"))
-        XCTAssertEqual(closed, 1)
+        XCTAssertEqual(closed, 0, "not while Escape is held: its repeats would reach a terminal")
+        inbox.keyUp(with: try key("\u{1b}", .keyUp))
+        XCTAssertEqual(closed, 1, "on its release")
     }
 
     /// The choice comes into view; a refresh, even one that takes the chosen
@@ -254,6 +256,8 @@ final class RequestInboxViewTests: XCTestCase {
         deny.performClick(nil)
         XCTAssertEqual(answered, [.permission(.deny)], "the line below went: the buttons didn't move")
         callout.keyDown(with: try key("\u{1b}"))
+        XCTAssertEqual(closed, 0, "not while Escape is held")
+        callout.keyUp(with: try key("\u{1b}", .keyUp))
         XCTAssertEqual(closed, 1)
         XCTAssertEqual(callout.card.openButton.acceptsPress?(try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,

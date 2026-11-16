@@ -165,7 +165,7 @@ extension NiruxShellView {
         showToast("Claude moved on before your reply went: it’s on the clipboard")
     }
 
-    private func closeTurnReply() {
+    func closeTurnReply() {
         turnReplyPopover?.close()
         turnReplyPopover = nil
         turnReplyQuestion = nil

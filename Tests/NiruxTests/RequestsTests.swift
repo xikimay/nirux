@@ -98,6 +98,13 @@ final class RequestsTests: XCTestCase {
         XCTAssertNil(panel.panel.parent)
         panel.close()
         XCTAssertEqual(closings.count, 1, "once")
+
+        // ⌘W while it has the keyboard closes it, not the window behind.
+        panel.show(frame: NSRect(x: 10, y: 10, width: 100, height: 100), over: parent, responder: content)
+        panel.panel.performClose(nil)
+        XCTAssertFalse(panel.isOpen)
+        XCTAssertEqual(closings, [.byClickElsewhere, .byHost])
+        XCTAssertEqual(panel.panel.appearance, Theme.appearance)
     }
 
     /// The callout sits right of its icon, centred on it, inside the window

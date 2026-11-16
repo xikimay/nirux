@@ -22,6 +22,9 @@ final class RequestFlowTests: XCTestCase {
         }
         shell.focusWorkspace(id: here.id)
         shell.installCommandBar(in: harness.window)
+        // A test's window may be covered by another process's: the inbox
+        // opens only over a window that shows.
+        shell.sideEffects.windowShows = { _ in true }
         return (here, there)
     }
 
