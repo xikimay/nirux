@@ -255,14 +255,43 @@ final class BoardStagesContentFlowTests: XCTestCase {
             try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(#"{"schemaVersion": 3}"#.utf8).write(to: store.fileURL)
             shell.addWorkspace(title: "tool", cwd: tools, profileID: locked.id)
+            // No remote of the space's is read for a read-only file: another repository's workspace has its section all
+            // the same, and a second clone of its own repository none (under Other workspaces: its section reads nothing).
+            let outside = root + "/outside-app", toolsCopy = root + "/tools-copy"
+            try BoardConfigSuggestionsTests.makeRepository(at: outside, remote: "https://github.com/acme/outside.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: toolsCopy, remote: "git@github.com:acme/tools.git")
+            shell.addWorkspace(title: "outside", cwd: outside, profileID: locked.id)
+            shell.addWorkspace(title: "tools copy", cwd: toolsCopy, profileID: locked.id)
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "tool" }))
             try runPaletteAction("Open Board", in: shell)
             let readOnly = try XCTUnwrap(shell.projectBoardLocation(projectID: locked.id)?.board)
-            try waitUntil("board.json is read and the worktrees listed") { readOnly.loaded != nil && readOnly.local != nil }
+            try waitUntil("board.json is read, the worktrees listed, the other repository placed") {
+                readOnly.loaded != nil && readOnly.local != nil
+                    && (try? stages(of: readOnly, in: shell).sections.map(\.title)) == ["tools-app", "outside-app", "Other workspaces"]
+            }
             let lockedSection = try XCTUnwrap(try stages(of: readOnly, in: shell).sections.first)
             XCTAssertEqual(lockedSection.status?.text, "Read-only")
             XCTAssertEqual(lockedSection.status?.toolTip, BoardConfigStore.ReadOnlyReason.newerSchema(3).message)
             XCTAssertFalse(lockedSection.menu.contains(.boardSettings), "Board Settings can't save it")
+
+            // One whose board.json is a folder: read-only without a config, its anchor's remote never read for it; another
+            // repository's workspace has its section all the same.
+            let folderSpace = shell.workspaceStore.createProfile(named: "Folder")
+            let docs = root + "/docs-app"
+            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
+            var docsAnchor = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
+            docsAnchor.isDefault = true
+            XCTAssertTrue(shell.workspaceStore.setAnchors([docsAnchor], forProfile: folderSpace.id))
+            let folderStore = try XCTUnwrap(BoardConfigStore(spaceID: folderSpace.id))
+            try FileManager.default.createDirectory(at: folderStore.fileURL, withIntermediateDirectories: true)
+            shell.addWorkspace(title: "doc", cwd: docs, profileID: folderSpace.id)
+            shell.addWorkspace(title: "outside here", cwd: outside, profileID: folderSpace.id)
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "doc" }))
+            try runPaletteAction("Open Board", in: shell)
+            let folderBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: folderSpace.id)?.board)
+            try waitUntil("the other repository placed beside a board.json read-only without a config") {
+                (try? stages(of: folderBoard, in: shell).sections.map(\.title)) == ["docs-app", "outside-app"]
+            }
 
             // A fourth whose board.json names no valid GitHub repository: its settings are there, but invalid.
             let invalid = shell.workspaceStore.createProfile(named: "Invalid")

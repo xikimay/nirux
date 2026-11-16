@@ -789,11 +789,13 @@ final class ProjectBoardFlowTests: XCTestCase {
             try BoardConfigSuggestionsTests.makeRepository(at: widgets, remote: "https://github.com/acme/widgets.git")
             // Through an SSH host alias: the same repository, by owner and name.
             try BoardConfigSuggestionsTests.makeRepository(at: copy, remote: "git@github-work:acme/widgets.git")
-            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/acme/gadgets.git")
+            // A fork's checkout: its section reads upstream, as gh does, and the clone of upstream joins it.
+            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/someone/gadgets.git")
+            try git(["remote", "add", "upstream", "https://github.com/acme/gadgets.git"], at: gadgets)
             try BoardConfigSuggestionsTests.makeRepository(at: gadgetsClone, remote: "git@github.com:acme/gadgets.git")
             // Another space's worktree of gadgets: not this Board's to show, nor to clean up.
             try git(["worktree", "add", "-q", "-b", "feat/elsewhere", root + "/gadgets.elsewhere"], at: gadgets)
-            // A bare repository, named as adding it to the space would: "app.git".
+            // A bare repository, named as adding it to the space from its workspace would: "app-feature".
             try git(["clone", "-q", "--bare", gadgets, root + "/app.git"], at: root)
             try git(["worktree", "add", "-q", "-b", "feat/app", root + "/app-feature"], at: root + "/app.git")
             var widgetsAnchor = try XCTUnwrap(FolderIdentity.identify(widgets, timeout: 10)).anchor
@@ -819,7 +821,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             let gadgetsRead = { board.sections.first { $0.anchor?.name == "gadgets" }.flatMap { board.reads[$0.id] } }
             try waitUntil("gadgets' section is read from its remote, the clones placed") {
                 refresh()
-                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "gadgets", "app.git"]
+                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "app-feature", "gadgets"]
                     && gadgetsRead()?.openPullRequests != nil && gadgetsRead()?.mergedPullRequests != nil
             }
             let lineTitles = { (title: String) in section(title)?.lines.units.flatMap(\.lines).map(\.title) ?? [] }
@@ -829,7 +831,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(section("gadgets")?.lines.withoutTask.flatMap(\.lines).map(\.title), [], "no one else's pull request")
             XCTAssertEqual(section("gadgets")?.lines.merged.map(\.number), [], "no one else's merge")
             XCTAssertFalse(section("gadgets")?.menu.contains(.boardSettings) ?? true)
-            XCTAssertEqual(lineTitles("app.git"), ["app"])
+            XCTAssertEqual(lineTitles("app-feature"), ["app"])
             XCTAssertEqual(board.view.stages.content?.header.summary.hasPrefix("3 repositories"), true)
             XCTAssertEqual(board.view.header.context, "acme/widgets", "a Board with one repository of its own")
 
@@ -837,7 +839,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             for title in ["gadget", "gadget clone", "app"] {
                 shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title && !$0.isClosing }))
             }
-            try waitUntil("gadgets' and app.git's sections go") {
+            try waitUntil("gadgets' and app-feature's sections go") {
                 refresh()
                 return titles() == ["widgets"]
             }
@@ -849,12 +851,20 @@ final class ProjectBoardFlowTests: XCTestCase {
                 refresh()
                 return section("gadgets")?.status?.text == "Read-only"
             }
+            try waitUntil("gadgets' pull requests are read again") {
+                refresh()
+                return gadgetsRead()?.openPullRequests != nil
+            }
             let gadgetsAnchor = try XCTUnwrap(FolderIdentity.identify(gadgets, timeout: 10)).anchor
             XCTAssertTrue(shell.workspaceStore.setAnchors([widgetsAnchor, gadgetsAnchor], forProfile: space.id))
+            // Its remote and its pull requests stay: the section never blanks on the way.
+            var blanked = false
             try waitUntil("gadgets is the space's repository") {
                 refresh()
-                return section("gadgets")?.status?.text == "No settings"
+                if gadgetsRead()?.openPullRequests == nil { blanked = true }
+                return section("gadgets")?.status?.text == "No settings" && !board.isReadingRemotes
             }
+            XCTAssertFalse(blanked, "gadgets' section kept its pull requests")
             XCTAssertEqual(section("gadgets")?.menu.contains(.boardSettings), true)
         }
     }

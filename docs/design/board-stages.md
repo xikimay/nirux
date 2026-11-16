@@ -332,24 +332,26 @@ clicked. The sizes are the mockup's.
 - **Every repository of the space has its section**: after the space's
   repositories (its anchors), one for each other repository a workspace of
   the space is in, as the worktrees listed them
-  (`ProjectBoardController.extraRepositories`), named as adding it to the
-  space would. Without anchors, the one board.json names takes its
-  repository's checkouts. A section reading a repository keeps its other
-  clones (another folder, the same owner and name, through any host
-  alias), an outside repository's first clone listed its others: no
-  section of their own. They are placed once board.json and the space's
-  own remotes are read, so an anchor's clone never shows as another
-  repository for a moment. Such a section reads its remote's pull requests
-  as an anchor without settings does (each new one alone), and is
-  read-only: a "Read-only" pill whose tooltip says it isn't one of the
-  space's repositories, no merge queue (no Merge station offer, no
-  Retarget), no Board Settings…. It lists this space's workspaces there and
-  nothing else of that repository: no other worktree (another space's,
-  with its Clean Up…), no pull request without a task, no merge but its
-  tasks' still open here. It counts among the space's repositories in its header. It goes
-  with its last workspace (the Board lists again when a workspace it listed
-  is gone), and becomes the space's own once its repository is added. A
-  workspace in no repository is a line under "No repository".
+  (`ProjectBoardController.extraRepositories`), in the order of their main
+  checkouts' paths, named as adding it from its workspace would (a bare
+  repository by its worktree). Without anchors, the one board.json names
+  takes its repository's checkouts. Each repository's base remote (the one
+  gh takes, upstream before origin) is read before it is placed, once
+  board.json and the space's own remotes are read: an anchor's clone never
+  shows as another repository for a moment. A clone naming the repository
+  a section reads joins that section (another folder, a fork's checkout,
+  any host alias): no section of its own. With board.json read-only, the
+  space's remotes are read for that alone. Such a section reads its pull
+  requests at once, and is read-only: a "Read-only" pill whose tooltip says
+  it isn't one of the space's repositories, no merge queue (no Merge
+  station offer, no Retarget), no Board Settings…. It lists this space's
+  workspaces there and nothing else of that repository: no other worktree
+  (another space's, with its Clean Up…), no pull request without a task,
+  no merge but its tasks' still open here. It counts among the space's
+  repositories in its header. It goes with its last workspace (the Board
+  lists again when a workspace it listed is gone), and becomes the space's
+  own once its repository is added, its pull requests kept. A workspace in
+  no repository is a line under "No repository".
 - **Other workspaces** remain only as a fallback: a workspace in a
   repository git gave no common dir for, so no section can take it, is one
   fold after the repositories, in a repository header's place and type,
