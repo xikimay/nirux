@@ -14,27 +14,19 @@ extension NiruxShellView {
         inbox.show(requestsState.requests)
         requestsState.inboxPanel?.show(frame: inboxFrame(for: inbox, in: window), over: window, responder: inbox)
         inbox.opened()
-        // Chosen where ⌘J's walk goes next: each request once a round, not
-        // the first two in turn.
-        requestsState.inboxWalk = currentWalk()
+        // Chosen where ⌘J's walk goes next (`WaitingAgentQueue.next`, ⌘J's
+        // own rule): each request once a round, not the first two in turn.
         let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
-        if let next = Self.nextRequest(in: requestsState.requests, from: current, walk: requestsState.inboxWalk) { inbox.choose(next.id) }
-    }
-
-    /// ⌘J's walk as it goes on from here: on while the user stays where its
-    /// last step landed, else from the column on screen.
-    private func currentWalk() -> [UUID] {
-        let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
-        return current != nil && current == quickSwitch.walk.last ? quickSwitch.walk : current.map { [$0] } ?? []
-    }
-
-    /// The request ⌘J's walk goes to next (`WaitingAgentQueue.next`): the
-    /// first whose column the walk hasn't visited, never the one on screen;
-    /// all visited, a new round.
-    static func nextRequest(in requests: [WaitingRequest], from current: UUID?, walk: [UUID]) -> WaitingRequest? {
-        let visited = Set(walk)
-        return requests.first { $0.columnID != current && !visited.contains($0.columnID) }
-            ?? requests.first { $0.columnID != current } ?? requests.first
+        requestsState.inboxWalk = quickSwitch.walk(from: current)
+        requestsState.inboxPlan = nil
+        let agents = requestsState.requests.map {
+            WaitingAgent(workspaceID: $0.taskID, columnID: $0.columnID, wait: AgentWait(reason: .question(nil), since: 0))
+        }
+        if let (next, walked) = WaitingAgentQueue.next(from: current, walk: requestsState.inboxWalk, in: agents),
+           let request = requestsState.requests.first(where: { $0.columnID == next.columnID }) {
+            inbox.choose(request.id)
+            requestsState.inboxPlan = (next.columnID, walked)
+        }
     }
 
     func closeInbox(_ closing: RequestPanel.Closing = .byHost) {
@@ -47,9 +39,11 @@ extension NiruxShellView {
         inbox.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         inbox.onClose = { [weak self] in self?.closeInbox() }
         let panel = RequestPanel(content: inbox)
+        panel.onEscape = { [weak self] in self?.closeInbox() }
+        panel.ownsWindow = { [weak self, weak panel] window in self?.isReplyPopoverWindow(window, of: panel) == true }
         panel.onClose = { [weak self, weak panel] closing, hadKeyboard in
             guard let self else { return }
-            if let panel { closeReplyPopovers(over: panel.panel) }
+            if let panel { closeReplyPopovers(of: panel) }
             if closing == .byHost, hadKeyboard { giveKeyboardBack() }
         }
         // The badge acts on the open inbox (⌘J again).
@@ -101,7 +95,8 @@ extension NiruxShellView {
         callout.show(request, othersWaiting: requestsState.requests.count - 1)
         requestsState.calloutTaskID = taskID
         requestsState.calloutRequestID = request.id
-        requestsState.inboxWalk = currentWalk()
+        requestsState.inboxWalk = quickSwitch.walk(from: activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id)
+        requestsState.inboxPlan = nil
         requestsState.calloutAnchor = anchor
         followCalloutAnchor(anchor)
         requestsState.calloutPanel?.show(frame: calloutFrame(for: callout, anchor: anchor, in: window), over: window, responder: callout)
@@ -119,10 +114,12 @@ extension NiruxShellView {
         callout.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         callout.onClose = { [weak self] in self?.closeCallout() }
         let panel = RequestPanel(content: callout)
+        panel.onEscape = { [weak self] in self?.closeCallout() }
+        panel.ownsWindow = { [weak self, weak panel] window in self?.isReplyPopoverWindow(window, of: panel) == true }
         panel.keepsShortcut = { [weak self, weak panel] _ in self?.isReplying(panel) == true }
         panel.onClose = { [weak self, weak panel] closing, hadKeyboard in
             guard let self else { return }
-            if let panel { closeReplyPopovers(over: panel.panel) }
+            if let panel { closeReplyPopovers(of: panel) }
             if let observer = requestsState.calloutScrollObserver { NotificationCenter.default.removeObserver(observer) }
             requestsState.calloutScrollObserver = nil
             requestsState.calloutTaskID = nil
@@ -154,8 +151,10 @@ extension NiruxShellView {
 
     func calloutFrame(for callout: RequestCalloutView, anchor: NSView, in window: NSWindow) -> NSRect {
         let icon = anchor.window?.convertToScreen(anchor.convert(anchor.bounds, to: nil)) ?? .zero
+        // Capped as the inbox is: the card scrolls past it.
+        let height = min(callout.fittingHeight, window.frame.height * 0.7)
         return Self.calloutFrame(
-            beside: icon, size: NSSize(width: RequestCalloutView.width, height: callout.fittingHeight),
+            beside: icon, size: NSSize(width: RequestCalloutView.width, height: height),
             in: window.frame, screen: window.screen?.visibleFrame
         )
     }
@@ -189,9 +188,10 @@ extension NiruxShellView {
         if requestsState.isInboxOpen, !isReplying(requestsState.inboxPanel), let inbox = requestsState.inbox, let window {
             if requests.isEmpty {
                 closeInbox()
-            } else {
+            } else if requests != inbox.requests || window.frame != requestsState.inboxPlacedFor {
                 inbox.show(requests)
                 requestsState.inboxPanel?.setFrame(inboxFrame(for: inbox, in: window))
+                requestsState.inboxPlacedFor = window.frame
             }
         }
         if requestsState.isCalloutOpen, !isReplying(requestsState.calloutPanel), let callout = requestsState.callout, let window {
@@ -200,7 +200,9 @@ extension NiruxShellView {
                let anchor = requestsState.calloutAnchor, anchor.window === window, !anchor.isHiddenOrHasHiddenAncestor,
                // Scrolled out of the rail's view: nothing left to sit by.
                sidebar.iconRail.iconFrame(of: taskID) != nil {
-                callout.show(request, othersWaiting: requests.count - 1)
+                if request != callout.request || requests.count - 1 != callout.othersWaiting {
+                    callout.show(request, othersWaiting: requests.count - 1)
+                }
                 requestsState.calloutPanel?.setFrame(calloutFrame(for: callout, anchor: anchor, in: window))
             } else {
                 closeCallout()
@@ -215,8 +217,10 @@ extension NiruxShellView {
         case let (.permission(approval), .permission(behavior)):
             decidePermission(workspaceIndex: workspaceIndex, columnIndex: columnIndex, requestID: approval.requestID, behavior: behavior)
         case let (.question(question), .turn(answer)):
+            requestsState.replyFrom = panel(holding: button)
             answerFromCard(answer, to: question, button: button)
         case let (.mission(question), .missionReply):
+            requestsState.replyFrom = panel(holding: button)
             showMissionReplyPopover(workspaceIndex: workspaceIndex, columnIndex: columnIndex, anchor: button, questionID: question.questionID)
         default:
             break
@@ -232,11 +236,13 @@ extension NiruxShellView {
         // The panel had the keyboard: the window takes it back first.
         window?.makeKey()
         focusWorkspace(id: place.workspace.id, column: place.columnIndex)
-        // ⌘J's walk goes on from there; a new round once every request was
-        // visited.
-        let visited = Set(requestsState.inboxWalk)
-        let roundOver = requestsState.requests.allSatisfy { visited.contains($0.columnID) || $0.id == request.id }
-        quickSwitch.noteWalk(roundOver ? [request.columnID] : requestsState.inboxWalk + [request.columnID])
+        // ⌘J's walk goes on from there: as `WaitingAgentQueue.next` planned
+        // it, or with the request picked instead.
+        if let plan = requestsState.inboxPlan, plan.column == request.columnID {
+            quickSwitch.noteWalk(plan.walk)
+        } else {
+            quickSwitch.noteWalk(requestsState.inboxWalk + [request.columnID])
+        }
     }
 
     /// The column with `id`, open and not closing, by its indexes.
@@ -246,18 +252,30 @@ extension NiruxShellView {
         return (workspaceIndex, place.columnIndex)
     }
 
+    /// The panel whose window holds `view`: the card an answer came from.
+    private func panel(holding view: NSView) -> RequestPanel? {
+        [requestsState.inboxPanel, requestsState.calloutPanel].compactMap { $0 }.first { view.window === $0.panel }
+    }
+
     /// A reply popover a card of `panel` opened is up: its keys, and the
     /// panel as it is.
     func isReplying(_ panel: RequestPanel?) -> Bool {
-        guard let window = panel?.panel else { return false }
-        return [missionReplyPopover, turnReplyPopover].contains { $0?.isShown == true && $0?.contentViewController?.view.window?.parent === window }
+        guard let panel, requestsState.replyFrom === panel else { return false }
+        return missionReplyPopover?.isShown == true || turnReplyPopover?.isShown == true
+    }
+
+    /// The window of a reply popover a card of `panel` opened.
+    private func isReplyPopoverWindow(_ window: NSWindow, of panel: RequestPanel?) -> Bool {
+        guard isReplying(panel) else { return false }
+        return [missionReplyPopover, turnReplyPopover].contains { $0?.contentViewController?.view.window === window }
     }
 
     /// A reply popover a card of `panel` opened goes with it.
-    private func closeReplyPopovers(over panel: NSWindow) {
-        func hangsFrom(_ popover: NSPopover?) -> Bool { popover?.contentViewController?.view.window?.parent === panel }
-        if hangsFrom(missionReplyPopover) { closeMissionReply() }
-        if hangsFrom(turnReplyPopover) { closeTurnReply() }
+    private func closeReplyPopovers(of panel: RequestPanel) {
+        guard requestsState.replyFrom === panel else { return }
+        requestsState.replyFrom = nil
+        closeMissionReply()
+        closeTurnReply()
     }
 
     /// The panel that had the keyboard closed: the terminal on screen takes

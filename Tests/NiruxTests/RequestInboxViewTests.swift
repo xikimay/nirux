@@ -292,4 +292,18 @@ final class RequestInboxViewTests: XCTestCase {
         deny.performClick(nil)
         XCTAssertEqual(answered.count, 1, "the press was on a")
     }
+
+    /// Capped by its host (a short window, a tall command), the callout
+    /// scrolls its card: its title and "Open task" stay reachable.
+    func testTheCalloutScrollsPastItsCap() throws {
+        let callout = RequestCalloutView(level: .opaque)
+        callout.show(RequestCardViewTests.request(.terminal(String(repeating: "a long command ", count: 60))), othersWaiting: 2)
+        let full = callout.fittingHeight
+        callout.frame = NSRect(x: 0, y: 0, width: RequestCalloutView.width, height: full / 2)
+        callout.layoutSubtreeIfNeeded()
+        let scroll = callout.scroll
+        XCTAssertLessThan(scroll.frame.height, full / 2, "the more line below it")
+        XCTAssertGreaterThan(try XCTUnwrap(scroll.documentView).frame.height, scroll.contentSize.height, "the card scrolls")
+        XCTAssertTrue(callout.card.isDescendant(of: scroll))
+    }
 }

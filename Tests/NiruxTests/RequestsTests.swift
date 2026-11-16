@@ -54,6 +54,10 @@ final class RequestsTests: XCTestCase {
         let queue = shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100)
         XCTAssertEqual(queue.map(\.columnID), [column.id, blocked.id], "the oldest first")
         XCTAssertEqual(queue.first?.wait.since, 20)
+        // Seen on screen, it stands after the waits not seen yet.
+        shell.requestsState.seenHandedOff = ["q1"]
+        XCTAssertEqual(shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100).map(\.columnID), [blocked.id, column.id])
+        shell.requestsState.seenHandedOff = []
 
         let requests = shell.waitingRequests(NiruxShellView.requestedAgents(in: queue, onScreen: nil), approvalHolds: [:], foregroundProcesses: [:])
         XCTAssertEqual(requests.map(\.kind), [.mission(asked), .terminal("Bash: rm")])
@@ -152,6 +156,11 @@ final class RequestsTests: XCTestCase {
     /// the sidebar shows the cards, in the inbox and the callout while it
     /// is folded; never for the column on screen or under VoiceOver.
     func testWhereTheButtonsAreOffered() {
+        // A background subagent's request waits for the buttons drawn now:
+        // folded, only while the inbox or the callout is open.
+        XCTAssertTrue(NiruxShellView.showsApprovalButtonsNow(sidebarShowsCards: true, requestPanelOpen: false))
+        XCTAssertTrue(NiruxShellView.showsApprovalButtonsNow(sidebarShowsCards: false, requestPanelOpen: true))
+        XCTAssertFalse(NiruxShellView.showsApprovalButtonsNow(sidebarShowsCards: false, requestPanelOpen: false), "behind the count")
         func offers(cards: Bool, onScreen: Bool = false, buttons: Bool = true, voiceOver: Bool = false) -> Bool {
             NiruxShellView.offersApprovalButtons(sidebarShowsCards: cards, isOnScreen: onScreen, cardHasButtons: buttons, voiceOver: voiceOver)
         }
@@ -215,19 +224,6 @@ final class RequestsTests: XCTestCase {
         XCTAssertNil(pty.sidebarApproval(now: now), "on screen: its terminal answers")
     }
 
-    /// The inbox opens on where ⌘J's walk goes next: each request once a
-    /// round, never the one on screen, then a new round.
-    func testTheInboxChoosesWhereTheWalkGoesNext() {
-        let ids = (0..<3).map { _ in UUID() }
-        let requests = ids.map { WaitingRequest(taskID: "t", columnID: $0, taskTitle: "T", icon: StateIcon(.needsYou(.command)), waited: nil, kind: .terminal("x")) }
-        func next(_ current: UUID?, _ walk: [UUID]) -> UUID? { NiruxShellView.nextRequest(in: requests, from: current, walk: walk)?.columnID }
-        XCTAssertEqual(next(nil, []), ids[0])
-        XCTAssertEqual(next(ids[0], [ids[0]]), ids[1])
-        XCTAssertEqual(next(ids[1], [ids[0], ids[1]]), ids[2], "not back to the first")
-        XCTAssertEqual(next(ids[2], ids), ids[0], "a new round")
-        XCTAssertEqual(next(ids[0], ids), ids[1], "never the one on screen")
-    }
-
     /// A ⌘ shortcut typed while a panel has the keyboard closes it first,
     /// so that what it moves gets the keyboard; ⌘J, which acts on the open
     /// inbox, leaves it open.
@@ -250,5 +246,67 @@ final class RequestsTests: XCTestCase {
         XCTAssertTrue(panel.isOpen, "⌘J acts on it")
         try press("2")
         XCTAssertFalse(panel.isOpen, "⌘2 moves the focus: it closes first")
+    }
+
+    private func shownPanel(over parent: NSWindow) -> (RequestPanel, NSView) {
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let panel = RequestPanel(content: content)
+        panel.show(frame: NSRect(x: 10, y: 10, width: 100, height: 100), over: parent, responder: content)
+        return (panel, content)
+    }
+
+    private func parentWindow() -> NSWindow {
+        let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: .titled, backing: .buffered, defer: true)
+        parent.isReleasedWhenClosed = false
+        return parent
+    }
+
+    /// Escape and ⌘. close on their release, whatever has the keyboard in
+    /// the panel (a card's button): held, their repeats stay there, never
+    /// reaching the terminal that takes the keyboard back.
+    func testEscapeClosesOnItsRelease() throws {
+        let parent = parentWindow()
+        defer { parent.close() }
+        let (panel, _) = shownPanel(over: parent)
+        let button = NSButton(frame: .zero)
+        panel.panel.contentView?.addSubview(button)
+        panel.panel.makeFirstResponder(button)
+        var escapes = 0
+        panel.onEscape = { escapes += 1 }
+        func send(_ type: NSEvent.EventType, _ key: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags = [], repeat isRepeat: Bool = false) throws {
+            NSApp.sendEvent(try XCTUnwrap(NSEvent.keyEvent(
+                with: type, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: panel.panel.windowNumber,
+                context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: isRepeat, keyCode: keyCode
+            )))
+        }
+        try send(.keyDown, "\u{1b}", keyCode: 53)
+        try send(.keyDown, "\u{1b}", keyCode: 53, repeat: true)
+        XCTAssertEqual(escapes, 0, "held: nothing yet")
+        try send(.keyUp, "\u{1b}", keyCode: 53)
+        XCTAssertEqual(escapes, 1, "on its release")
+        try send(.keyDown, ".", keyCode: 47, .command)
+        try send(.keyUp, ".", keyCode: 47, .command)
+        XCTAssertEqual(escapes, 2, "⌘. too")
+        try send(.keyUp, "\u{1b}", keyCode: 53)
+        XCTAssertEqual(escapes, 2, "a release without its press does nothing")
+    }
+
+    /// A click the panel let through (the badge) moves the keyboard to the
+    /// window behind on its mouse-down: the panel waits for the press to
+    /// end, then closes if it is still up without the keyboard (a press
+    /// dragged off the badge), so no key goes to a terminal behind it.
+    func testAPressDraggedOffClosesThePanelOnceItEnds() throws {
+        let parent = parentWindow()
+        defer { parent.close() }
+        let (panel, _) = shownPanel(over: parent)
+        var pressed = 1
+        panel.pressedMouseButtons = { pressed }
+        panel.noteKeptClick()
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: panel.panel)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertTrue(panel.isOpen, "the press goes on: its action may still come")
+        pressed = 0
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertFalse(panel.isOpen, "released, no action closed it: it goes")
     }
 }

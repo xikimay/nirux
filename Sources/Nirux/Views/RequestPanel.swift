@@ -28,8 +28,19 @@ final class RequestPanel {
     /// keyboard then (only then does the host give it back).
     var onClose: ((Closing, _ hadKeyboard: Bool) -> Void)?
     /// A click there leaves it open: its host acts on it (the bar's badge,
-    /// which toggles the inbox; the callout's own icon).
+    /// which goes to the inbox's chosen request; the callout's own icon,
+    /// which closes it).
     var keepsOpen: ((NSEvent) -> Bool)?
+    /// Escape or ⌘. typed while it has the keyboard, on its release: the
+    /// host closes it (the terminal then takes the keyboard back, which a
+    /// held key's repeats must not reach). Whatever has the keyboard in it,
+    /// a card's button included.
+    var onEscape: (() -> Void)?
+    /// A window of the host's that belongs with it (a reply popover one of
+    /// its cards opened): taking the keyboard there doesn't close it.
+    var ownsWindow: ((NSWindow) -> Bool)?
+    /// Whether the mouse's button is down; tests say.
+    var pressedMouseButtons: () -> Int = { NSEvent.pressedMouseButtons }
     /// Another window whose clicks close it, besides the one it sits over
     /// (the toolbar's own window in full screen). Clicks in any other
     /// window (a reply popover a card opened, Settings) leave it open.
@@ -46,6 +57,9 @@ final class RequestPanel {
     private var keptClickAt: TimeInterval = -.infinity
     private var clickMonitor: Any?
     private var shortcutMonitor: Any?
+    private var escapeMonitor: Any?
+    /// Escape or ⌘. is down: its release closes.
+    private var escapeIsDown = false
     private var resignObserver: NSObjectProtocol?
     private var keyObservers: [NSObjectProtocol] = []
     /// What takes the keyboard in it, again after a reply popover closed.
@@ -85,12 +99,25 @@ final class RequestPanel {
                 guard let self, self.isOpen, let window = event.window, window !== self.panel,
                       window === self.panel.parent || self.closesOnClicks?(window) == true else { return event }
                 if self.keepsOpen?(event) == true {
-                    self.keptClickAt = ProcessInfo.processInfo.systemUptime
+                    self.noteKeptClick()
                     return event
                 }
                 self.close(.byClickElsewhere)
                 // The click goes on to what it landed on.
                 return event
+            }
+        }
+        escapeIsDown = false
+        if escapeMonitor == nil {
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+                guard let self, self.isOpen, event.window === self.panel, Self.isEscape(event) else { return event }
+                if event.type == .keyDown {
+                    self.escapeIsDown = true
+                } else if self.escapeIsDown {
+                    self.escapeIsDown = false
+                    self.onEscape?()
+                }
+                return nil
             }
         }
         if shortcutMonitor == nil {
@@ -120,6 +147,8 @@ final class RequestPanel {
         clickMonitor = nil
         if let shortcutMonitor { NSEvent.removeMonitor(shortcutMonitor) }
         shortcutMonitor = nil
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        escapeMonitor = nil
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         resignObserver = nil
         keyObservers.forEach(NotificationCenter.default.removeObserver)
@@ -142,11 +171,12 @@ final class RequestPanel {
             // Which window took the keyboard is known once the switch ends.
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let self, self.isOpen, !self.panel.isKeyWindow else { return }
-                    if let key = NSApp.keyWindow, self.owns(key) { return }
-                    // A click it let through: the click acts on it.
-                    if ProcessInfo.processInfo.systemUptime - self.keptClickAt < 1 { return }
-                    self.close(.byClickElsewhere)
+                    guard let self else { return }
+                    // A click it let through acts on it first; then, if it
+                    // didn't close it (a press dragged off the badge), the
+                    // same rule.
+                    if ProcessInfo.processInfo.systemUptime - self.keptClickAt < 1 { return self.closeIfKeyboardElsewhereOncePressEnds() }
+                    self.closeIfKeyboardElsewhere()
                 }
             }
         })
@@ -158,14 +188,49 @@ final class RequestPanel {
         })
     }
 
-    /// A window that hangs from it: a popover a card opened.
+    /// A click it let through (`keepsOpen`): the window behind takes the
+    /// keyboard on its mouse-down, which must not close it before the
+    /// click acts.
+    func noteKeptClick() {
+        keptClickAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    /// Shown without the keyboard, which went to a window not its own: it
+    /// closes, so that no key meant for it reaches a terminal while it
+    /// still shows.
+    private func closeIfKeyboardElsewhere() {
+        guard isOpen, !panel.isKeyWindow else { return }
+        if let key = NSApp.keyWindow, owns(key) { return }
+        close(.byClickElsewhere)
+    }
+
+    /// Once the press it let through ends (its action has run by then), the
+    /// same rule: a press dragged off the badge leaves it without the
+    /// keyboard, and nothing else would close it.
+    private func closeIfKeyboardElsewhereOncePressEnds() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.isOpen else { return }
+                if self.pressedMouseButtons() & 1 != 0 { return self.closeIfKeyboardElsewhereOncePressEnds() }
+                // After what the release does.
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.closeIfKeyboardElsewhere() } }
+            }
+        }
+    }
+
+    /// A window that hangs from it, or one its host says belongs with it.
     private func owns(_ window: NSWindow) -> Bool {
         var current: NSWindow? = window
         while let candidate = current {
             if candidate === panel { return true }
             current = candidate.parent
         }
-        return window.className.contains("Popover")
+        return ownsWindow?(window) == true
+    }
+
+    /// Escape, and ⌘. (the key bindings' Cancel).
+    static func isEscape(_ event: NSEvent) -> Bool {
+        event.keyCode == 53 || (event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == ".")
     }
 
     /// Moves it, keeping it open.

@@ -255,7 +255,17 @@ repeats must not reach the terminal that takes the keyboard back), a ⌘
 shortcut other than ⌘J closes the panel before the menu acts, a panel that
 loses the keyboard to another window closes (not for a reply popover a card
 opened, which keeps its panel as it is through refreshes), and ⌘P and the
-panels never show together.
+panels never show together. After the Lead's review: Escape and ⌘. are the
+panel's own (`RequestPanel.onEscape`, on their release, whatever has the
+keyboard in it, a card's button included); a press the panel let through
+(the badge, the callout's icon) is followed until it ends, and a panel left
+without the keyboard then closes (a press dragged off the badge), so a
+visible panel always has the keyboard; folded, a background subagent's
+request is held only while the inbox or the callout is open (its dialog
+waits for the hook), the main thread's as above; a handed-off Mission
+question read on screen stands after the waits not seen yet; the inbox's
+choice and "Open task" go through `WaitingAgentQueue.next`, ⌘J's own rule;
+the callout is capped as the inbox is, its card scrolling past the cap.
 
 ![The inbox with three requests: Opaque exact, Glass approximated](../images/request-inbox.png)
 

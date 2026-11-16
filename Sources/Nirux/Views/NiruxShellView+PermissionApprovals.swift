@@ -66,7 +66,9 @@ extension NiruxShellView {
                 && sidebar.listsWorkspace(isInactive: workspace.isInactive, isActive: workspaceIndex == activeWSIndex),
             voiceOver: NSWorkspace.shared.isVoiceOverEnabled
         )
-        let userSeesSidebar = NSApp.isActive && window?.isVisible == true && window?.isMiniaturized == false
+        let userSeesSidebar = Self.showsApprovalButtonsNow(
+            sidebarShowsCards: sidebar.isExpanded, requestPanelOpen: requestsState.isInboxOpen || requestsState.isCalloutOpen
+        ) && NSApp.isActive && window?.isVisible == true && window?.isMiniaturized == false
             && window?.occlusionState.contains(.visible) == true
         return PermissionApprovalHold(cardShown: cardShown, userSeesSidebar: userSeesSidebar)
     }
@@ -75,6 +77,14 @@ extension NiruxShellView {
     /// while the sidebar shows the cards (`cardHasButtons`), in the inbox
     /// and the callout while it is folded; never for the column on screen
     /// or under VoiceOver.
+    /// Whether Allow / Deny are drawn right now, which a background
+    /// subagent's request waits for (its dialog waits for the hook): on the
+    /// cards while the sidebar shows them; folded, only while the inbox or
+    /// the callout is open, not behind the bar's count.
+    static func showsApprovalButtonsNow(sidebarShowsCards: Bool, requestPanelOpen: Bool) -> Bool {
+        sidebarShowsCards || requestPanelOpen
+    }
+
     static func offersApprovalButtons(sidebarShowsCards: Bool, isOnScreen: Bool, cardHasButtons: Bool, voiceOver: Bool) -> Bool {
         guard !isOnScreen, !voiceOver else { return false }
         return sidebarShowsCards ? cardHasButtons : true

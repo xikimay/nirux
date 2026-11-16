@@ -22,8 +22,13 @@ final class RequestCalloutView: NSView {
     }
 
     private(set) var request: WaitingRequest?
+    private(set) var othersWaiting = 0
     private let glass: GlassView
     private let content = BoardStagesFlippedView()
+    /// Holds the card, which scrolls once the host caps the callout's
+    /// height (a short window, a tall command).
+    let scroll = NSScrollView()
+    private let cardHolder = BoardStagesFlippedView()
     let card = RequestCardView(trailing: .openTask)
     /// "1 more · ⌘J".
     let moreLabel = NSTextField(labelWithString: "")
@@ -42,8 +47,18 @@ final class RequestCalloutView: NSView {
         glass.contentView.addSubview(content)
         moreLabel.font = Theme.Font.caption
         moreLabel.textColor = Theme.Color.textTertiary
-        content.addSubview(card)
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = cardHolder
+        cardHolder.addSubview(card)
+        content.addSubview(scroll)
         content.addSubview(moreLabel)
+        // Scrolled, the answers moved: they wait again (the next layout).
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView
+        )
         card.onAnswer = { [weak self] choice, button in
             guard let self, let request = self.request else { return }
             self.onAnswer?(request, choice, button)
@@ -66,6 +81,7 @@ final class RequestCalloutView: NSView {
     /// Shows `request`, and how many other requests wait.
     func show(_ request: WaitingRequest, othersWaiting: Int) {
         self.request = request
+        self.othersWaiting = othersWaiting
         card.show(request)
         moreLabel.stringValue = "\(othersWaiting) more · ⌘J"
         moreLabel.setAccessibilityLabel("\(othersWaiting) more waiting, Command J")
@@ -83,12 +99,16 @@ final class RequestCalloutView: NSView {
 
     override func layout() {
         super.layout()
-        let cardHeight = card.fittingHeight(width: bounds.width)
-        card.frame = NSRect(x: 0, y: 0, width: bounds.width, height: cardHeight)
+        let more = moreLabel.isHidden ? 0 : Self.moreHeight
+        scroll.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - more))
+        let width = scroll.contentSize.width
+        let cardHeight = card.fittingHeight(width: width)
+        cardHolder.frame = NSRect(x: 0, y: 0, width: width, height: max(cardHeight, scroll.contentSize.height))
+        card.frame = NSRect(x: 0, y: 0, width: width, height: cardHeight)
         card.needsLayout = true
         card.layoutSubtreeIfNeeded()
         moreLabel.frame = NSRect(
-            x: RequestCardView.padding, y: cardHeight - Theme.Space.xs,
+            x: RequestCardView.padding, y: scroll.frame.maxY - Theme.Space.xs,
             width: bounds.width - 2 * RequestCardView.padding, height: 16
         )
         guard let id = request?.id else { return arming.refresh([:]) }
@@ -120,6 +140,8 @@ final class RequestCalloutView: NSView {
     }
 
     @objc private func windowMoved() { needsLayout = true }
+
+    @objc private func scrolled() { needsLayout = true }
 
     override func viewDidUnhide() {
         super.viewDidUnhide()

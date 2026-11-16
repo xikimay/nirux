@@ -26,8 +26,18 @@ final class RequestsState {
     var calloutRequestID: String?
     weak var calloutAnchor: NSView?
     var calloutScrollObserver: NSObjectProtocol?
-    /// ⌘J's walk when the inbox opened: going to a request goes on with it.
+    /// ⌘J's walk when the inbox or the callout opened, and where
+    /// `WaitingAgentQueue.next` planned it to go with the walk it leaves:
+    /// going to a request goes on with them.
     var inboxWalk: [UUID] = []
+    var inboxPlan: (column: UUID, walk: [UUID])?
+    /// The window frame the inbox was last placed for.
+    var inboxPlacedFor: NSRect = .zero
+    /// The panel whose card opened the reply popover that is up.
+    weak var replyFrom: RequestPanel?
+    /// The handed-off Mission questions the user has seen on screen, by id:
+    /// they stand after the waits not seen yet, in ⌘J's walk and the inbox.
+    var seenHandedOff: Set<String> = []
 
     var isInboxOpen: Bool { inboxPanel?.isOpen == true }
     var isCalloutOpen: Bool { calloutPanel?.isOpen == true }
@@ -57,7 +67,7 @@ extension NiruxShellView {
             .map { columnID, handed in
                 WaitingAgent(
                     workspaceID: handed.workspaceID, columnID: columnID,
-                    wait: Self.handedOffWait(handed.question)
+                    wait: Self.handedOffWait(handed.question, isRead: requestsState.seenHandedOff.contains(handed.question.questionID))
                 )
             }
         return WaitingAgentQueue.ordered(agents)
@@ -65,8 +75,15 @@ extension NiruxShellView {
 
     /// The wait a Mission question handed to the user stands for in ⌘J's
     /// queue.
-    static func handedOffWait(_ question: SidebarMissionQuestion) -> AgentWait {
-        AgentWait(reason: .question(question.text), since: question.askedAt)
+    /// `isRead`: the user saw it on screen; it then stands after the waits
+    /// not seen yet, as a turn's question does.
+    static func handedOffWait(_ question: SidebarMissionQuestion, isRead: Bool = false) -> AgentWait {
+        AgentWait(reason: .question(question.text), since: question.askedAt, isRead: isRead)
+    }
+
+    /// Whether `wait` is the one a handed-off question stands for.
+    static func isHandedOffWait(_ wait: AgentWait, of question: SidebarMissionQuestion) -> Bool {
+        wait.reason == .question(question.text) && wait.since == question.askedAt
     }
 
     /// Of ⌘J's queue, what waits for the user's answer (amber: not an
@@ -103,7 +120,7 @@ extension NiruxShellView {
             let foreground = foregroundProcesses[ObjectIdentifier(column)]
             let approval = sidebarApproval(for: column, hold: approvalHolds[ObjectIdentifier(column)])
             // The question's own entry, not a wait of the agent's.
-            let handed = requestsState.handedOff[column.id].map(\.question).flatMap { agent.wait == Self.handedOffWait($0) ? $0 : nil }
+            let handed = requestsState.handedOff[column.id].map(\.question).flatMap { Self.isHandedOffWait(agent.wait, of: $0) ? $0 : nil }
             let kind = Self.requestKind(
                 mission: handed, approval: approval,
                 turnQuestion: Self.sidebarTurnQuestion(of: column, status: column.pty?.cachedAgentState ?? .idle, foreground: foreground),

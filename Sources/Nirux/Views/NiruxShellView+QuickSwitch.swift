@@ -24,6 +24,12 @@ final class QuickSwitchState {
     func focusMoved() { walk = [] }
 
     func noteWalk(_ columns: [UUID]) { walk = columns }
+
+    /// The walk as it goes on from `current`, the column on screen: on while
+    /// the user stays where its last step landed, else from there.
+    func walk(from current: UUID?) -> [UUID] {
+        current != nil && current == walk.last ? walk : current.map { [$0] } ?? []
+    }
 }
 
 // MARK: - Quick switcher (⌘P workspaces) and Next Waiting Agent (⌘J)
@@ -152,7 +158,7 @@ extension NiruxShellView {
         let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
         // The walk goes on while the user stays where its last press
         // landed; else it starts where they are.
-        let walk = current != nil && current == quickSwitch.walk.last ? quickSwitch.walk : current.map { [$0] } ?? []
+        let walk = quickSwitch.walk(from: current)
         guard let (next, walked) = WaitingAgentQueue.next(from: current, walk: walk, in: queue),
               let workspace = workspaces.first(where: { $0.id == next.workspaceID }),
               let columnIndex = workspace.columns.firstIndex(where: { $0.id == next.columnID }) else {
