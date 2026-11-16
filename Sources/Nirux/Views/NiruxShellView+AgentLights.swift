@@ -9,10 +9,6 @@ final class AgentLightState {
     /// (`agentTurnDone`), until the next refresh shows it: one sweep of
     /// light each.
     var endedTurns: [UUID: TimeInterval] = [:]
-    /// The columns out of view whose pill already showed: scrolling,
-    /// switching workspaces or spaces, or coming back to the app doesn't
-    /// announce a wait twice. Forgotten once the column no longer waits.
-    var announced: Set<UUID> = []
     /// Between the screens' sleep and wake notifications.
     var isDisplayAsleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
     /// Another user's session has the screen (fast user switching).
@@ -49,9 +45,6 @@ extension NiruxShellView {
     }
 
     func wireAgentLights() {
-        for glow in [edgeGlowLeft, edgeGlowRight, edgeGlowTop, edgeGlowBottom] {
-            glow.onClick = { [weak self] target in self?.goToAgent(target) }
-        }
         // What decides whether lights move, beside the window's occlusion
         // (see `viewDidMoveToWindow`) and the layout.
         let center = NSWorkspace.shared.notificationCenter
@@ -83,17 +76,6 @@ extension NiruxShellView {
             active?.showsColumn(at: column.index) ?? false
         }
         agentLights.plan = plan
-        // A wait that ended is forgotten: the next one is announced. A
-        // column of another space isn't in `infos`: its wait is kept.
-        let columns = infos.flatMap(\.columns)
-        let listed = Set(columns.compactMap(\.id))
-        let open = Set(workspaces.flatMap { $0.columns.map(\.id) })
-        agentLights.announced = agentLights.announced.filter { id in
-            guard open.contains(id) else { return false }
-            guard listed.contains(id) else { return true }
-            if case .alert? = plan.columns[id] { return true }
-            return false
-        }
         // Now or never: a sweep says the turn just ended.
         let ended = Set(agentLights.endedTurns.keys)
         agentLights.endedTurns = [:]
@@ -126,20 +108,11 @@ extension NiruxShellView {
                 if sweeps { view.sweep() }
             }
         }
-        // An agent out of view is named once per wait, when someone can
-        // see the window.
-        let isSeen = sideEffects.windowShows(window)
+        // An agent out of view lights its edge.
         for (glow, alert) in [
             (edgeGlowLeft, plan.left), (edgeGlowRight, plan.right), (edgeGlowTop, plan.top), (edgeGlowBottom, plan.bottom)
         ] {
-            let column = alert?.columnID
-            let announcing = isSeen && column.map { !agentLights.announced.contains($0) } ?? false
-            if announcing, let column { agentLights.announced.insert(column) }
-            glow.show(
-                alert.map { .alert($0.signal) }, moving: moves,
-                target: alert.map { EdgeGlowView.Target(workspaceID: $0.workspaceID, columnID: $0.columnID, text: $0.text) },
-                announcing: announcing
-            )
+            glow.show(alert.map { .alert($0.signal) }, moving: moves)
         }
         columnIndicator.pulses = moves
         sidebar.animates = moves
@@ -185,13 +158,5 @@ extension NiruxShellView {
     func clearAgentAlertLights() {
         agentLights.plan.clearColumnAlerts()
         applyAgentLights()
-    }
-
-    /// A click on an edge's pill: to the agent it names, if it is still
-    /// there.
-    private func goToAgent(_ target: EdgeGlowView.Target) {
-        guard let workspace = workspaces.first(where: { $0.id == target.workspaceID && !$0.isClosing }) else { return }
-        let column = target.columnID.flatMap { id in workspace.columns.firstIndex { $0.id == id && !$0.isClosing } }
-        focusWorkspace(id: workspace.id, column: column)
     }
 }

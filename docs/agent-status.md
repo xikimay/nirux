@@ -34,7 +34,7 @@ Each agent's column carries a light at its edge:
 - red when it stopped on an error;
 - one sweep when Claude Code or Codex reports the end of its turn.
 
-When an agent that is waiting or stopped on an error is out of view (a column scrolled away, another workspace), the window's edge on that side lights up and a small label names the agent for a few seconds. Click the label to go there.
+When an agent that is waiting or stopped on an error is out of view (a column scrolled away, another workspace), the window's edge on that side lights up. The command bar counts the agents waiting for you, and `Cmd+J` goes to them.
 
 With **Settings › General › Animate the interface** off, or macOS's Reduce motion on, the same colors show without moving.
 

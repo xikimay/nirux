@@ -440,10 +440,10 @@ final class NiruxShellView: NSView {
                 + "viewport=\(viewportW)x\(viewportH)"
         )
 
-        // Deeper than the glows themselves: each holds its pill.
-        let glowWidth = min(viewportH, EdgeGlowView.topHeight)
-        let sideGlowWidth = min(viewportW, 320)
-        let bottomGlowHeight = min(viewportH, 56)
+        // Each edge's view: its glow's depth.
+        let glowWidth = min(viewportH, EdgeGlowView.depth)
+        let sideGlowWidth = min(viewportW, EdgeGlowView.depth)
+        let bottomGlowHeight = min(viewportH, EdgeGlowView.depth)
         let vpX = sidebarW + 1
 
         let frames = ChromeFrames(
