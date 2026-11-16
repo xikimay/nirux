@@ -445,6 +445,10 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
     func testAgentCommands() throws {
         try UIFlowHarness.run { harness in
+            // ⌘J walks while the sidebar is unfolded; folded, it opens the
+            // inbox (RequestFlowTests).
+            if !harness.shell.isSidebarExpanded { harness.shell.toggleSidebar() }
+            harness.waitUntil("the sidebar to unfold") { harness.shell.sidebar.isExpanded }
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
             let columnCount = workspace.columns.count
 
