@@ -13,8 +13,9 @@ final class RequestInboxView: NSView {
 
     /// A click on an answer: the request, the answer, its button.
     var onAnswer: ((WaitingRequest, RequestChoice, NSView) -> Void)?
-    /// A request only the terminal answers: its task, by id.
-    var onOpenTask: ((String) -> Void)?
+    /// "Open task" on a request: the request, whose column the host
+    /// brings up (a task may wait in several).
+    var onOpenTask: ((WaitingRequest) -> Void)?
     var onClose: (() -> Void)?
 
     var level: InterfaceTransparency {
@@ -146,7 +147,7 @@ final class RequestInboxView: NSView {
         card.onClick = { [weak self] in self?.choose(id) }
         card.onOpenTask = { [weak self] in
             guard let self, let request = self.requests.first(where: { $0.id == id }) else { return }
-            self.onOpenTask?(request.taskID)
+            self.onOpenTask?(request)
         }
         cards[id] = card
         return card

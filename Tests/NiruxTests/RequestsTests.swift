@@ -44,7 +44,7 @@ final class RequestsTests: XCTestCase {
         shell.stopHeartbeat()
         let workspace = try XCTUnwrap(shell.activeWorkspace)
         let column = try XCTUnwrap(workspace.columns.first)
-        shell.addWorkspace(title: "blocked", cwd: NSHomeDirectory())
+        shell.addWorkspace(title: "blocked", cwd: NSTemporaryDirectory())
         let blocked = try XCTUnwrap(shell.workspaces.last?.columns.first)
         shell.quickSwitch.agentWait = { candidate, _, _ in
             candidate === blocked ? AgentWait(reason: .permission(tool: "Bash", summary: "rm"), since: 50) : nil

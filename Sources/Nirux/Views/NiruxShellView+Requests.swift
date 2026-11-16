@@ -20,8 +20,10 @@ final class RequestsState {
     var inboxPanel: RequestPanel?
     var callout: RequestCalloutView?
     var calloutPanel: RequestPanel?
-    /// The task whose request the callout shows, and the icon it sits by.
+    /// The task whose request the callout shows, that request, and the
+    /// icon it sits by.
     var calloutTaskID: String?
+    var calloutRequestID: String?
     weak var calloutAnchor: NSView?
     var calloutScrollObserver: NSObjectProtocol?
 

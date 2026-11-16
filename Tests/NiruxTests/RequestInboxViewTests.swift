@@ -242,7 +242,7 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertLessThanOrEqual(callout.moreLabel.frame.maxY, callout.bounds.height - Theme.Space.sm, "inside the callout")
 
         var opened: [String] = [], answered: [RequestChoice] = [], closed = 0
-        callout.onOpenTask = { opened.append($0) }
+        callout.onOpenTask = { opened.append($0.taskID) }
         callout.onAnswer = { _, choice, _ in answered.append(choice) }
         callout.onClose = { closed += 1 }
         callout.card.openButton.performClick(nil)

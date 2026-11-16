@@ -12,7 +12,8 @@ final class RequestCalloutView: NSView {
 
     /// A click on an answer: the request, the answer, its button.
     var onAnswer: ((WaitingRequest, RequestChoice, NSView) -> Void)?
-    var onOpenTask: ((String) -> Void)?
+    /// "Open task": the request, whose column the host brings up.
+    var onOpenTask: ((WaitingRequest) -> Void)?
     var onClose: (() -> Void)?
 
     var level: InterfaceTransparency {
@@ -52,8 +53,8 @@ final class RequestCalloutView: NSView {
             return self.arming.isArmed(RequestInboxView.armingKey(id, choice))
         }
         card.onOpenTask = { [weak self] in
-            guard let self, let taskID = self.request?.taskID else { return }
-            self.onOpenTask?(taskID)
+            guard let self, let request = self.request else { return }
+            self.onOpenTask?(request)
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)

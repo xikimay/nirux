@@ -23,10 +23,7 @@ extension NiruxShellView {
     private func makeInbox() -> RequestInboxView {
         let inbox = RequestInboxView(level: .opaque)
         inbox.onAnswer = { [weak self] request, choice, button in self?.answerRequest(request, choice, button: button) }
-        inbox.onOpenTask = { [weak self] taskID in
-            guard let self, let request = requestsState.requests.first(where: { $0.taskID == taskID }) else { return }
-            goToRequest(request)
-        }
+        inbox.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         inbox.onClose = { [weak self] in self?.closeInbox() }
         let panel = RequestPanel(content: inbox)
         panel.onClose = { [weak self, weak panel] closing, hadKeyboard in
@@ -78,6 +75,7 @@ extension NiruxShellView {
         let callout = requestsState.callout ?? makeCallout()
         callout.show(request, othersWaiting: requestsState.requests.count - 1)
         requestsState.calloutTaskID = taskID
+        requestsState.calloutRequestID = request.id
         requestsState.calloutAnchor = anchor
         followCalloutAnchor(anchor)
         requestsState.calloutPanel?.show(frame: calloutFrame(for: callout, anchor: anchor, in: window), over: window, responder: callout)
@@ -92,10 +90,7 @@ extension NiruxShellView {
     private func makeCallout() -> RequestCalloutView {
         let callout = RequestCalloutView(level: .opaque)
         callout.onAnswer = { [weak self] request, choice, button in self?.answerRequest(request, choice, button: button) }
-        callout.onOpenTask = { [weak self] taskID in
-            guard let self, let request = requestsState.requests.first(where: { $0.taskID == taskID }) else { return }
-            goToRequest(request)
-        }
+        callout.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         callout.onClose = { [weak self] in self?.closeCallout() }
         let panel = RequestPanel(content: callout)
         panel.onClose = { [weak self, weak panel] closing, hadKeyboard in
@@ -165,7 +160,8 @@ extension NiruxShellView {
             }
         }
         if requestsState.isCalloutOpen, let callout = requestsState.callout, let window {
-            if let taskID = requestsState.calloutTaskID, let request = requests.first(where: { $0.taskID == taskID }),
+            // Its request, not its task's next one: answered, it closes.
+            if let taskID = requestsState.calloutTaskID, let request = requests.first(where: { $0.id == requestsState.calloutRequestID }),
                let anchor = requestsState.calloutAnchor, anchor.window === window, !anchor.isHiddenOrHasHiddenAncestor,
                // Scrolled out of the rail's view: nothing left to sit by.
                sidebar.iconRail.iconFrame(of: taskID) != nil {

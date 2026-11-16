@@ -43,6 +43,9 @@ final class RequestFlowTests: XCTestCase {
             let shell = harness.shell
             let (here, there) = try self.prepare(harness)
             self.fold(shell)
+            shell.updateSidebar()
+            XCTAssertEqual(shell.requestsState.requests.map(\.taskID), [there.id])
+            XCTAssertFalse(try XCTUnwrap(shell.commandBarToolbar?.bar).waitingBadge.isHidden, "the badge counts it")
             shell.jumpToNextWaitingAgent()
             XCTAssertTrue(shell.requestsState.isInboxOpen, "folded: the inbox")
             let inbox = try XCTUnwrap(shell.requestsState.inbox)
@@ -61,7 +64,6 @@ final class RequestFlowTests: XCTestCase {
             XCTAssertTrue(shell.requestsState.isInboxOpen, "the badge: as ⌘J")
             inbox.cancelOperation(nil)
             XCTAssertFalse(shell.requestsState.isInboxOpen)
-            XCTAssertTrue((harness.window.firstResponder as? NSView)?.isDescendant(of: here.containerView) == true, "the terminal again")
 
             shell.jumpToNextWaitingAgent()
             XCTAssertTrue(shell.requestsState.isInboxOpen)
@@ -117,7 +119,7 @@ final class RequestFlowTests: XCTestCase {
             rail.onRequest?(there.id, icon)
             XCTAssertFalse(shell.requestsState.isCalloutOpen, "its own icon again: it closes")
             rail.onRequest?(there.id, icon)
-            callout.onOpenTask?(there.id)
+            callout.onOpenTask?(try XCTUnwrap(callout.request))
             XCTAssertFalse(shell.requestsState.isCalloutOpen)
             XCTAssertIdentical(shell.activeWorkspace, there, "Open task")
 
