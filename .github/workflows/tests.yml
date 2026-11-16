@@ -56,3 +56,12 @@ jobs:
 
       - name: Run tests
         run: scripts/run-tests.sh
+
+      # DO NOT MERGE: the flake gate of two reworked test classes.
+      - name: Repeat ProjectBoardFlowTests
+        if: always()
+        run: scripts/repeat-class.sh NiruxTests.ProjectBoardFlowTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.MergeQueueBoardFlowTests
+
+      - name: Repeat BoardStagesContentFlowTests
+        if: always()
+        run: scripts/repeat-class.sh NiruxTests.BoardStagesContentFlowTests 12 6 NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests NiruxTests.ProjectBoardFlowTests
