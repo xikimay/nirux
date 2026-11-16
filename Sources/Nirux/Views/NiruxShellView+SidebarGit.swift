@@ -752,7 +752,10 @@ extension NiruxShellView {
     /// The navigator rows follow the columns in view: a Board column
     /// scrolled, resized or moved into or out of view.
     func refreshSidebarNavigation() {
-        sidebar.navigation = sidebarNavigation
+        let navigation = sidebarNavigation
+        // Each frame of a resize lays the columns out: most change nothing.
+        guard navigation != sidebar.navigation else { return }
+        sidebar.navigation = navigation
         sidebar.renderIfChanged()
     }
 }
