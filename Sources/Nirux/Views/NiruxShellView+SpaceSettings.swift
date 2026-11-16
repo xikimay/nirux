@@ -224,8 +224,9 @@ extension NiruxShellView {
             settings.brief.revert()
             settings.templates.revert()
             guard let active = profiles.first(where: { $0.id == activeProfileID }) else { return settings.close() }
-            // What was typed there has no space left to go to; the window
-            // stays where it is, behind or in front.
+            // What was typed there has no space left to go to, nor what a
+            // sheet up there would add; the window stays where it is.
+            if let panel = settings.panel, let sheet = panel.attachedSheet { panel.endSheet(sheet, returnCode: .cancel) }
             let tab = settings.selectedTab
             let replacement = makeSpaceSettings(for: active)
             settingsWindow.setSpace(replacement)
