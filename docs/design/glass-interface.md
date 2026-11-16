@@ -93,8 +93,10 @@ merge sweep, the birth), and changes what frames them:
 - **State icons:** each row's mark is its `StateIcon` at 14 pt, centred where
   the dot was, so the text doesn't move; a wait's reason comes from the
   column the row opens on, as on the rail. Checks that run keep their own
-  ring, the family's dashed ring, which turns while rows may move. The
-  catch-up card shows the same icons. The Lead keeps its sparkle.
+  ring at the family's size: an arc that turns while rows may move, the
+  family's dashed ring while they may not. The catch-up card shows the same
+  icons. The Lead keeps its sparkle; its state is a 12 pt icon at the end of
+  its line.
 - **Selection:** the selected row lies on a pane of glass: a white fill at
   10 %, a 1 pt rim (`line`) and the light on its top edge
   (`selectionHighlight`), at every level, Opaque included.
@@ -103,9 +105,11 @@ merge sweep, the birth), and changes what frames them:
 - **The foot:** a glass capsule, **Tasks · Board · History**, 30 pt high with
   10 pt around it: 50 pt taken from the list. Buttons, not tabs: Tasks is the
   list above (the selection's glass), Board opens the space's Board (the
-  rail's button), History opens Session History (as ⌘P does). Tabs that swap
-  the sidebar's content would be a later study. A row scrolled under the foot
-  takes no click, hover or menu there. The Archived row sits just above it.
+  rail's button), History opens the Session History panel (⌘P's and the
+  Space menu's "Session History…"). Tabs that swap the sidebar's content
+  would be a later study. A row scrolled under the foot takes no click,
+  hover or menu there; a scroll over the foot scrolls the list. The Archived
+  row sits just above it.
 - **Background:** the sidebar's glass is a chrome `GlassView` under the list,
   at Opaque until phase 4 (the sidebar's colour, as before).
 

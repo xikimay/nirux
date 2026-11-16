@@ -3,8 +3,8 @@ import AppKit
 /// The unfolded sidebar's foot (docs/design/glass-interface.md, 3.4): a
 /// glass capsule with Tasks, the list the sidebar shows (always the current
 /// one, on the selection's glass), the space's Board and the Session History.
-/// Buttons, not tabs: Board and History open what the rail's Board button and
-/// ⌘P open.
+/// Buttons, not tabs: Board opens what the rail's Board button opens, History
+/// the panel of ⌘P's and the Space menu's "Session History…".
 final class SidebarFooterView: NSView {
     static let height: CGFloat = 30
     /// Around the capsule, to the sidebar's edges.
@@ -53,7 +53,7 @@ final class SidebarFooterView: NSView {
 
         boardButton.target = self
         boardButton.action = #selector(boardPressed)
-        boardButton.toolTip = "The space's Board"
+        boardButton.toolTip = "Board (\(NiruxShortcuts.board.chord.display))"
         historyButton.target = self
         historyButton.action = #selector(historyPressed)
         historyButton.toolTip = "Session History"

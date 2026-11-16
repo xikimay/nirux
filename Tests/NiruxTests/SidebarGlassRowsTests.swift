@@ -107,6 +107,22 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertEqual(broke.shownIcon, StateIcon(.error))
     }
 
+    /// A card row keeps only the icon it shows: a change of its task row's
+    /// icon the card doesn't draw leaves the card equal, so its presses
+    /// don't wait again.
+    func testACatchUpRowChangesOnlyWithWhatItShows() {
+        var finished = row([column(.needsAttention, reason: .turnFinished)])
+        finished.turnStatusLine = "fix pushed"
+        var idle = row([column()])
+        idle.turnStatusLine = "fix pushed"
+        XCTAssertNotEqual(finished.rowSummary.mark, idle.rowSummary.mark, "the task rows differ")
+        XCTAssertEqual(SidebarCatchUp.row(for: finished), SidebarCatchUp.row(for: idle), "the card draws the same grey check")
+        let checks = row([column()], pullRequest: pullRequest(ci: "PENDING"))
+        let passed = row([column()], pullRequest: pullRequest(ci: "SUCCESS"))
+        XCTAssertEqual(SidebarCatchUp.row(for: checks).text, SidebarCatchUp.row(for: passed).text)
+        XCTAssertEqual(SidebarCatchUp.row(for: checks), SidebarCatchUp.row(for: passed))
+    }
+
     // MARK: - The selection
 
     /// The selected row lies on a pane of glass: a translucent fill, a rim
@@ -221,6 +237,17 @@ final class SidebarGlassRowsTests: XCTestCase {
         sidebar.lastRowPress = (0, ProcessInfo.processInfo.systemUptime)
         sidebar.mouseDown(with: try event(.leftMouseDown, at: inFoot, clicks: 2))
         XCTAssertEqual(actions, [], "no rename")
+
+        // A scroll over the foot goes to the list's scroll view (a made-up
+        // scroll moves no list off screen: it is seen arriving there).
+        var scrolled = 0
+        let noted = sidebar.contentScrollView.onScrollWheel
+        sidebar.contentScrollView.onScrollWheel = { scrolled += 1; noted?() }
+        let scroll = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0
+        ).flatMap { NSEvent(cgEvent: $0) })
+        sidebar.scrollWheel(with: scroll)
+        XCTAssertEqual(scrolled, 1, "the list's scroll view has it")
 
         // A row in view still answers.
         let visible = sidebar.contentScrollView.documentVisibleRect

@@ -4,7 +4,7 @@ Every shortcut mentioned here is also listed in [Keyboard shortcuts](keyboard-sh
 
 ## The sidebar
 
-Each workspace is a row of two lines: its title and time, then one status line. Before the title, its state icon, the same one the folded rail, the command bar and the requests show: an amber disc while an agent waits for you (a command or a question), a red "!" for an error, a green ring while an agent works, a grey check once a turn has ended, a dashed ring while its pull request's checks run. The selected row lies on a pane of glass. At the foot of the sidebar, **Tasks · Board · History**: Tasks is the list above, Board opens the space's Board, History opens `Session History…`. The status line shows the first of these that applies:
+Each workspace is a row of two lines: its title and time, then one status line. Before the title, its state icon, the same one the folded rail, the command bar and the requests show: an amber disc while an agent waits for you (a command or a question), a red "!" for an error, a green ring while an agent works, a grey check once a turn has ended, a turning ring while its pull request's checks run. The selected row lies on a pane of glass. At the foot of the sidebar, **Tasks · Board · History**: Tasks is the list above, Board opens the space's Board, History opens `Session History…`. The status line shows the first of these that applies:
 
 | Status line | When |
 | --- | --- |

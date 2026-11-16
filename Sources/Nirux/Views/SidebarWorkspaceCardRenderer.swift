@@ -338,19 +338,20 @@ final class SidebarWorkspaceCardRenderer {
     /// rows may not move, and for an archived task, whose pull request
     /// isn't read again: nothing turns there for ever.
     private func buildChecksRing(center: NSPoint) -> NSView {
-        // The state icons' ring (`StateIcon`, on its 16-unit grid: radius
-        // 6.25, line 1.5), in their grey.
+        // The state icons' ring (`StateIcon`, on its 16-unit grid), in their
+        // grey.
         let size = Metrics.stateIconSize
         let unit = size / 16
+        let inset = 8 - StateIcon.ringRadius
         let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
         host.identifier = Self.checksRingID
         host.wantsLayer = true
         let ring = CAShapeLayer()
         ring.frame = host.bounds
-        ring.path = CGPath(ellipseIn: host.bounds.insetBy(dx: 1.75 * unit, dy: 1.75 * unit), transform: nil)
+        ring.path = CGPath(ellipseIn: host.bounds.insetBy(dx: inset * unit, dy: inset * unit), transform: nil)
         ring.fillColor = nil
         ring.strokeColor = StateIcon(.waiting).color.cgColor
-        ring.lineWidth = 1.5 * unit
+        ring.lineWidth = StateIcon.ringWidth * unit
         ring.lineCap = .round
         if animates, !workspace.isInactive {
             // One arc going round.
@@ -370,8 +371,7 @@ final class SidebarWorkspaceCardRenderer {
             ring.add(turn, forKey: Self.checksRingKey)
         } else {
             // The family's ten dashes.
-            let period = 2 * CGFloat.pi * 6.25 * unit / 10
-            ring.lineDashPattern = [NSNumber(value: Double(period * 0.56)), NSNumber(value: Double(period * 0.44))]
+            ring.lineDashPattern = StateIcon.dash.map { NSNumber(value: Double($0 * unit)) }
         }
         host.layer?.addSublayer(ring)
         append(host)

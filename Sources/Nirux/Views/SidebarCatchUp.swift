@@ -26,19 +26,23 @@ struct SidebarCatchUp: Hashable {
         let title: String
         let kind: Kind
         let text: String
-        /// Its row's state icon; nil draws its kind's.
+        /// The icon by the row (`icon(for:row:)`); nil draws its kind's.
+        /// Only what it shows: the card changes, and its presses wait
+        /// again, only when the user can see it change.
         var icon: StateIcon?
 
-        /// The icon by the row: its row's, a grey check once its turn is
-        /// over.
-        var shownIcon: StateIcon {
-            switch kind {
-            case .done: StateIcon(.finished)
-            case .asks: icon.flatMap { $0.waitsForUser ? $0 : nil } ?? StateIcon(.needsYou(.question))
-            case .broken: StateIcon(.error)
-            case .quiet: icon ?? StateIcon(.idle)
-            case .working: StateIcon(.working)
-            }
+        var shownIcon: StateIcon { icon ?? SidebarCatchUp.icon(for: kind, row: nil) }
+    }
+
+    /// The icon a row of `kind` shows: its task row's (`row`) while it asks
+    /// or is blocked, a grey check once its turn is over.
+    static func icon(for kind: Kind, row: StateIcon?) -> StateIcon {
+        switch kind {
+        case .done: StateIcon(.finished)
+        case .asks: row.flatMap { $0.waitsForUser ? $0 : nil } ?? StateIcon(.needsYou(.question))
+        case .broken: StateIcon(.error)
+        case .quiet: row ?? StateIcon(.idle)
+        case .working: StateIcon(.working)
         }
     }
 
@@ -79,7 +83,10 @@ struct SidebarCatchUp: Hashable {
         case .idle, .finished, .readyToMerge, .merged, .checksRunning: .done
         }
         let text = kind == .done ? info.turnStatusLine ?? "Done" : summary.status.text
-        return Row(workspaceID: info.id, title: info.title, kind: kind, text: text, icon: info.stateIcon(summary: summary))
+        return Row(
+            workspaceID: info.id, title: info.title, kind: kind, text: text,
+            icon: icon(for: kind, row: info.stateIcon(summary: summary))
+        )
     }
 
     /// "since 12:40", in the user's clock format: it doesn't age on screen
@@ -216,13 +223,16 @@ struct SidebarCatchUpCardRenderer {
     }
 
     /// The row's sign, in the state marks' column: its row's state icon.
+    /// Takes no click, as a row's doesn't.
     private func mark(_ icon: StateIcon, centerY: CGFloat) -> NSView {
         let size = SidebarExpandedMetrics.stateIconSize
         let centerX = SidebarExpandedMetrics.markCenterX
+        let host = SidebarBackgroundView(frame: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
         let view = StateIconView(icon, size: size)
-        view.frame = NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size)
+        view.frame = host.bounds
         view.setAccessibilityElement(false)
-        return view
+        host.addSubview(view)
+        return host
     }
 
     /// What VoiceOver presses; clicks go through the hit areas.

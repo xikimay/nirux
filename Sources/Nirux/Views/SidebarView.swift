@@ -230,6 +230,8 @@ final class SidebarView: NSView {
     /// The row a single press landed on, and when: the double-click's
     /// second press renames it, wherever the rows moved meanwhile.
     var lastRowPress: (workspaceIndex: Int, at: TimeInterval)?
+    /// While a scroll over the foot is handed to the list (`scrollWheel`).
+    private var isForwardingScroll = false
 
     // Hover-highlight backing views registered per rebuild (workspace index
     // → view), plus the current target. Tinting is applied/cleared directly
@@ -626,7 +628,7 @@ final class SidebarView: NSView {
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         // The checklist's buttons track their own hover and cursor.
-        if let card = onboardingCardView, card.superview != nil, card.frame.contains(point) {
+        if isOnList(event.locationInWindow), let card = onboardingCardView, card.superview != nil, card.frame.contains(point) {
             clearHover()
             setHoverTarget(nil)
             if !card.hasButton(at: point) { NSCursor.arrow.set() }
@@ -686,6 +688,15 @@ final class SidebarView: NSView {
 
     func hitArea(at point: NSPoint) -> SidebarHitArea? {
         hitAreas.first { $0.frame.contains(point) }
+    }
+
+    /// A scroll over the foot, or the glass around the list, scrolls the
+    /// list; what the list hands back up goes on up.
+    override func scrollWheel(with event: NSEvent) {
+        guard isExpanded, !isForwardingScroll else { return super.scrollWheel(with: event) }
+        isForwardingScroll = true
+        defer { isForwardingScroll = false }
+        contentScrollView.scrollWheel(with: event)
     }
 
     /// Whether a point of the window falls on the list: under the foot,

@@ -225,11 +225,13 @@ struct StateIcon: Hashable, Sendable {
         }
     }
 
-    private static let ringRadius: CGFloat = 6.25
-    private static let ringWidth: CGFloat = 1.5
+    /// The ring on the 16-unit grid; the sidebar's ring of checks that run
+    /// draws with them too.
+    static let ringRadius: CGFloat = 6.25
+    static let ringWidth: CGFloat = 1.5
     private static let glyphWidth: CGFloat = 1.6
     /// Ten dashes around the ring, so that its seam doesn't show.
-    private static let dash: [CGFloat] = {
+    static let dash: [CGFloat] = {
         let period = 2 * CGFloat.pi * ringRadius / 10
         return [period * 0.56, period * 0.44]
     }()
