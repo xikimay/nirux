@@ -103,15 +103,18 @@ merge sweep, the birth), and changes what frames them:
   at every level, Opaque included.
 - **Buttons:** the rows' drawn Allow / Deny / Yes / No / Dismiss take
   `NiruxButton.look`'s colours and its small size, in a capsule.
-- **The foot:** a glass capsule, **Tasks · Board · History**, 30 pt high with
-  10 pt around it: 50 pt taken from the list. Buttons, not tabs: Tasks is the
-  list above (the selection's glass), Board opens the space's Board (the
-  rail's button), History opens the Session History panel (⌘P's and the
-  Space menu's "Session History…"). Tabs that swap the sidebar's content
-  would be a later study. A row scrolled under the foot takes no click,
-  hover or menu there (`hitArea` and `cardIndex` answer only where the list
-  shows); a scroll over the foot scrolls the list; a dragged row stays in
-  the part of the list in view. The Archived row sits just above it.
+- **Navigator rows (3.4b):** the sidebar navigates the main area, as Linear,
+  Mail and Finder do: a row is selected only while what it shows is shown.
+  **Board**, under the space's header, opens the space's Board column or
+  brings it up, and lies on the selection's glass while that column is in
+  focus ("Board, selected"; the rail's Board button too); it can't be
+  pressed while no task is open. **History**, at the bottom with Archived
+  above it, opens the Session History panel and is never selected. They
+  replace 3.4's Tasks · Board · History capsule, which looked like tabs
+  ("Tasks" stayed selected) while its other segments opened things
+  elsewhere; the list gets its 50 pt back. `hitArea` and `cardIndex` answer
+  only where the list shows; a dragged row stays in the part of the list in
+  view.
 - **Background:** the sidebar's glass behind the list comes in phase 4 with
   the interface's level: at Opaque it is the sidebar's colour.
 

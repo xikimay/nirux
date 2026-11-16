@@ -219,7 +219,7 @@ extension SidebarView {
         }
         contentDocumentView.autoscroll(with: event)
         // Where the pointer is once the list has scrolled, kept to the part
-        // of the list in view: over the foot, the row goes to the last slot
+        // of the list in view: past its edge, the row goes to the last slot
         // the user sees, its ghost and the line stay in view. (Autoscroll
         // reveals the pointer's place at once; this holds if it stops short.)
         let visible = contentScrollView.documentVisibleRect

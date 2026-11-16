@@ -442,6 +442,11 @@ enum SidebarHitRegion {
     case newTask
     /// The Archived row: folds and unfolds the archived list.
     case archivedToggle
+    /// The Board row, under the space's header: opens or brings up the
+    /// space's Board column.
+    case board
+    /// The History row, at the bottom: Session History.
+    case history
     case link(url: String, label: NSTextField)
     case column(workspaceIndex: Int, columnIndex: Int)
     case workspace(Int)
@@ -498,6 +503,8 @@ enum SidebarHoverTarget: Hashable {
     case spacePicker
     case newTask
     case archivedToggle
+    case board
+    case history
     case workspaceCard(Int)
     case menuBadge(Int)
     case columnRow(workspaceIndex: Int, columnIndex: Int)
@@ -507,7 +514,7 @@ enum SidebarHoverTarget: Hashable {
     /// whole card lit. Nil for targets outside the workspace list.
     var workspaceIndex: Int? {
         switch self {
-        case .spacePicker, .newTask, .archivedToggle: return nil
+        case .spacePicker, .newTask, .archivedToggle, .board, .history: return nil
         case .workspaceCard(let index), .menuBadge(let index): return index
         case .columnRow(let workspaceIndex, _), .approvalButton(let workspaceIndex, _): return workspaceIndex
         }
@@ -567,4 +574,13 @@ enum SidebarTurnAnswer: String, Hashable {
         case .reply, .dismiss: return nil
         }
     }
+}
+
+/// What the sidebar's navigator rows say (docs/design/glass-interface.md,
+/// 3.4b): the Board row is selected while the space's Board column is the
+/// one in focus, as a task row is while its task is on screen; it can't be
+/// pressed while no task is open (the Board opens beside one).
+struct SidebarNavigation: Hashable {
+    var boardShown = false
+    var boardAvailable = true
 }

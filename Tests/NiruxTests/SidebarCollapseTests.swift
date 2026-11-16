@@ -135,7 +135,10 @@ final class SidebarCollapseTests: XCTestCase {
         )
         let row = try XCTUnwrap(sidebar.inactiveSectionHeaderFrame)
         XCTAssertEqual(row.height, SidebarExpandedMetrics.archivedRowHeight)
-        XCTAssertEqual(row.minY, SidebarExpandedMetrics.bottomPadding)
+        // Above the History row.
+        XCTAssertEqual(
+            row.minY, SidebarExpandedMetrics.bottomPadding + SidebarExpandedMetrics.navigatorRowHeight + SidebarExpandedMetrics.navigatorGap
+        )
         XCTAssertEqual(row.width, 260 - SidebarExpandedMetrics.workspaceInsetX * 2)
 
         let document = sidebar.contentDocumentView

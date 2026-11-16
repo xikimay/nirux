@@ -97,13 +97,21 @@ final class SidebarView: NSView {
     /// A click on an amber rail icon: (task id, its icon). True when the
     /// shell shows its request there; false, the click goes to the task.
     var onRailRequest: ((String, NSView) -> Bool)?
-    /// The footer's History: the Session History panel.
+    /// The History row: the Session History panel.
     var onShowHistory: (() -> Void)?
+    /// What the navigator rows say: the Board row selected while the
+    /// space's Board column is in focus (set by the shell).
+    var navigation = SidebarNavigation() {
+        didSet {
+            guard navigation != oldValue else { return }
+            iconRail.boardButton.isSelected = navigation.boardShown
+            iconRail.boardButton.isEnabled = navigation.boardAvailable
+            lastRenderSignature = renderSignature()
+            rebuildContent()
+        }
+    }
     /// Folded, the sidebar is this rail (see SidebarView+IconRail).
     let iconRail = IconRail(level: .opaque)
-    /// Unfolded, the sidebar's foot. (Its glass behind the list comes with
-    /// the interface's level, phase 4: at Opaque it is the sidebar's colour.)
-    let footer = SidebarFooterView(level: .opaque)
     var isExpanded: Bool = false {
         didSet {
             isRailHidden = false
@@ -229,8 +237,6 @@ final class SidebarView: NSView {
     /// The row a single press landed on, and when: the double-click's
     /// second press renames it, wherever the rows moved meanwhile.
     var lastRowPress: (workspaceIndex: Int, at: TimeInterval)?
-    /// While a scroll over the foot is handed to the list (`scrollWheel`).
-    private var isForwardingScroll = false
 
     // Hover-highlight backing views registered per rebuild (workspace index
     // → view), plus the current target. Tinting is applied/cleared directly
@@ -244,6 +250,8 @@ final class SidebarView: NSView {
     var spacePickerHoverView: NSView?
     var newTaskButton: SidebarBadgeView?
     var archivedRowHoverView: NSView?
+    var boardRowHoverView: NSView?
+    var historyRowHoverView: NSView?
     var hoveredTarget: SidebarHoverTarget?
 
     /// The rail faded out for an expansion: rebuilds leave it hidden until
@@ -293,9 +301,6 @@ final class SidebarView: NSView {
         contentScrollView.onScrollerStyleChange = { [weak self] in self?.updateScrollerVisibility() }
         updateScrollerVisibility()
         addSubview(contentScrollView)
-        footer.onBoard = { [weak self] in self?.onOpenBoard?() }
-        footer.onHistory = { [weak self] in self?.onShowHistory?() }
-        addSubview(footer)
         wireIconRail()
         observeScrollingForApprovalArming()
         contentScrollView.onScrollWheel = { [weak self] in self?.notePointer(.scroll) }
@@ -307,29 +312,19 @@ final class SidebarView: NSView {
     override func layout() {
         super.layout()
         isTilingScrollView = true
-        contentScrollView.frame = listFrame
+        contentScrollView.frame = bounds
         isTilingScrollView = false
-        let margin = SidebarFooterView.margin
-        footer.frame = NSRect(x: margin, y: margin, width: max(0, bounds.width - 2 * margin), height: SidebarFooterView.height)
         rebuildContent()
-    }
-
-    /// Where the list scrolls: above the foot while unfolded.
-    var listFrame: NSRect {
-        guard isExpanded else { return bounds }
-        let room = min(SidebarFooterView.room, bounds.height)
-        return NSRect(x: 0, y: room, width: bounds.width, height: bounds.height - room)
     }
 
     /// The cards show the Mac's scroller. Folded, the cards' scroll view
     /// goes: the rail scrolls by itself, without scrollers.
     func updateScrollerVisibility() {
         contentScrollView.isHidden = !isExpanded
-        footer.isHidden = !isExpanded
-        // The list takes the room the foot leaves, or all of it again.
-        if contentScrollView.frame != listFrame {
+        // The list takes the whole sidebar, laid out or not yet.
+        if contentScrollView.frame != bounds {
             isTilingScrollView = true
-            contentScrollView.frame = listFrame
+            contentScrollView.frame = bounds
             isTilingScrollView = false
         }
         let shows = isExpanded
@@ -343,7 +338,7 @@ final class SidebarView: NSView {
     /// Mac's "Show scroll bars" setting changed, or a mouse came): they
     /// take the width it leaves.
     @objc private func clipResized() {
-        guard !isTilingScrollView, contentScrollView.frame.size == listFrame.size,
+        guard !isTilingScrollView, contentScrollView.frame.size == bounds.size,
               contentScrollView.contentSize.width != listWidth else { return }
         needsLayout = true
     }
@@ -506,6 +501,7 @@ final class SidebarView: NSView {
         // The rail draws no card.
         if isExpanded { hasher.combine(catchUp) }
         hasher.combine(animates)
+        hasher.combine(navigation)
         for workspace in lastInfos {
             if let lastActivityAt = workspace.lastActivityAt {
                 hasher.combine(Self.cardAge(since: lastActivityAt))
@@ -648,10 +644,14 @@ final class SidebarView: NSView {
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spacePicker, .newTask, .archivedToggle:
+        case .spacePicker, .newTask, .archivedToggle, .history:
             clearHover()
             setHoverTarget(Self.hoverTarget(of: area.region))
             NSCursor.pointingHand.set()
+        case .board:
+            clearHover()
+            setHoverTarget(navigation.boardAvailable ? .board : nil)
+            (navigation.boardAvailable ? NSCursor.pointingHand : NSCursor.arrow).set()
         case .catchUp:
             clearHover()
             setHoverTarget(nil)
@@ -695,16 +695,6 @@ final class SidebarView: NSView {
         contentScrollView.documentVisibleRect.contains(point)
     }
 
-    /// A scroll over the foot scrolls the list. What the list hands up
-    /// (it can't use it) goes on up.
-    override func scrollWheel(with event: NSEvent) {
-        let onList = isShown(contentDocumentView.convert(event.locationInWindow, from: nil))
-        guard isExpanded, !onList, !isForwardingScroll else { return super.scrollWheel(with: event) }
-        isForwardingScroll = true
-        defer { isForwardingScroll = false }
-        contentScrollView.scrollWheel(with: event)
-    }
-
     private func handleHit(_ region: SidebarHitRegion, event: NSEvent) {
         switch region {
         case .spacePicker:
@@ -713,6 +703,10 @@ final class SidebarView: NSView {
             onNewWorkspace?()
         case .archivedToggle:
             toggleInactiveSection()
+        case .board:
+            if navigation.boardAvailable { onOpenBoard?() }
+        case .history:
+            onShowHistory?()
         case .catchUp(let action):
             // Its second press lands on what moved under the pointer.
             lastButtonActionAt = event.timestamp
@@ -924,7 +918,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spacePicker, .newTask, .archivedToggle, .link, .catchUp:
+            case .spacePicker, .newTask, .archivedToggle, .board, .history, .link, .catchUp:
                 continue
             }
         }

@@ -439,14 +439,45 @@ final class RailRoundButton: NSView {
     }
     private let glass: GlassView
     private let button: NiruxButton
+    /// The selection's glass, while what the button opens is in focus.
+    private let selection = NSView()
+    private var baseLabel: String
+
+    /// Selected while what it opens shows in the main area (the Board
+    /// column in focus), as the sidebar's Board row is.
+    var isSelected = false {
+        didSet {
+            guard isSelected != oldValue else { return }
+            selection.isHidden = !isSelected
+            updateLook()
+        }
+    }
+
+    var isEnabled: Bool {
+        get { button.isEnabled }
+        set {
+            button.isEnabled = newValue
+            updateLook()
+        }
+    }
 
     init(symbol: String, label: String, level: InterfaceTransparency) {
         glass = GlassView(role: .chrome, level: level, cornerRadius: IconRail.width / 2)
         button = NiruxButton(title: "", kind: .quiet)
+        baseLabel = label
         super.init(frame: NSRect(x: 0, y: 0, width: IconRail.width, height: IconRail.width))
         glass.frame = bounds
         glass.autoresizingMask = [.width, .height]
         addSubview(glass)
+        selection.wantsLayer = true
+        selection.layer?.cornerRadius = IconRail.width / 2
+        selection.layer?.backgroundColor = Theme.Color.selectionGlass.cgColor
+        selection.layer?.borderWidth = 1
+        selection.layer?.borderColor = Theme.Color.line.cgColor
+        selection.frame = bounds
+        selection.autoresizingMask = [.width, .height]
+        selection.isHidden = true
+        glass.contentView.addSubview(selection)
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
         button.imagePosition = .imageOnly
@@ -463,10 +494,19 @@ final class RailRoundButton: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// What VoiceOver calls it.
+    /// What VoiceOver calls it ("…, selected" while selected).
     var label: String {
         get { button.accessibilityLabel() ?? "" }
-        set { button.setAccessibilityLabel(newValue) }
+        set {
+            baseLabel = newValue
+            updateLook()
+        }
+    }
+
+    private func updateLook() {
+        button.contentTintColor = !button.isEnabled ? Theme.Color.textDisabled
+            : isSelected ? Theme.Color.textPrimary : Theme.Color.textSecondary
+        button.setAccessibilityLabel(isSelected ? "\(baseLabel), selected" : baseLabel)
     }
 
     /// On the button, which takes the pointer.
