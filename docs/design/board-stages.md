@@ -1,7 +1,7 @@
 # Board Stages
 
-> **Design record:** in progress. The Board's column shows the stages of its workspace's space; a section for each repository of the space isn't built yet.\
-> **Differs today:** its sections are today's Board's ([Project Board](project-board.md)), the workspaces in another repository folded under "Other workspaces".\
+> **Design record:** in progress. The Board's column shows the stages of its workspace's space, a section for each of its repositories.\
+> **Differs today:** a repository that isn't one of the space's is read-only, without a merge queue (section 5, Known limits).\
 > **User guide:** [Pull requests](../pull-requests.md#the-board).
 
 Status: design validated by the user on 2026-11-11 (study D). The model
@@ -329,15 +329,38 @@ clicked. The sizes are the mockup's.
 
   ![Other worktrees unfolded: a detached HEAD, a branch whose pull request merged, one being cleaned up](../images/board-stages-worktrees.png)
 
-- **Other workspaces** (a worktree of another repository with workspaces of
-  the space) are one fold after the repositories, in a repository header's
-  place and type, "▸ Other workspaces · N", with no `owner/name`, queue or
-  menu: a section of its own, not a fold of the one above. Each entry is its
-  folder and Focus on the most urgent agent there, as the table's row
-  offered it, titled by the workspace Focus goes to ("Docs +1"). A workspace
-  in no repository is a line under "No repository", one in another
-  repository is no line: each task is in one place. This lasts until the
-  Board has a section per repository of the space.
+- **Every repository of the space has its section**: after the space's
+  repositories (its anchors), one for each other repository a workspace of
+  the space is in, as the worktrees listed them
+  (`ProjectBoardController.extraRepositories`), in the order of their main
+  checkouts' paths, named as adding it from its workspace would (a bare
+  repository by its worktree). Without anchors, the one board.json names
+  takes its repository's checkouts. Each repository's base remote (the one
+  gh takes, upstream before origin) is read before it is placed, once
+  board.json and the space's own remotes are read: an anchor's clone never
+  shows as another repository for a moment. A clone naming the repository
+  an anchor's section reads joins that section (another folder, any host
+  alias); an outside clone whose own base remote is the repository another
+  one's section reads joins it (a fork's checkout reading upstream): no
+  section of its own. A Refresh reads their remotes again. With board.json read-only, the
+  space's remotes are read for that alone. Such a section reads its pull
+  requests at once, and is read-only: a "Read-only" pill whose tooltip says
+  it isn't one of the space's repositories, no merge queue (no Merge
+  station offer, no Retarget), no Board Settings…. It lists this space's
+  workspaces there and nothing else of that repository: no other worktree
+  (another space's, with its Clean Up…), no pull request without a task,
+  no merge but its tasks' still open here. It counts among the space's
+  repositories in its header. It goes with its last workspace (the Board
+  lists again when a workspace it listed is gone), and becomes the space's
+  own once its repository is added, its pull requests kept. A workspace in
+  no repository is a line under "No repository".
+- **Other workspaces** remain only as a fallback: a workspace in a
+  repository git gave no common dir for, or in a second clone of the
+  space's repository while its section reads no GitHub repository
+  (board.json read-only, settings without a valid one), so no section can
+  take it, is one fold after the repositories, in a repository header's place and type,
+  "▸ Other workspaces · N", each entry its folder and Focus on the most
+  urgent agent there. Each task is in one place.
 
   ![The Lead’s worktree first under Other worktrees, “Lead · lead/notes” with Focus and Clean Up…; then Other workspaces, in a repository title’s place after No repository, each with Focus lined up with the Open and Focus above](../images/board-stages-lead-and-others.png)
 
@@ -395,8 +418,9 @@ read. Pure; nothing is read again.
   is a pull request without a task: after the tasks, in the rows' order, once,
   named by its title. A main checkout or a worktree with neither is no line.
   The Lead's linked worktree is listed first under "Other worktrees", with
-  Focus; the worktrees of another repository with workspaces of the space are
-  "Other workspaces" (`BoardStages.otherWorkspaces`).
+  Focus. Another repository with workspaces of the space has its own
+  section (section 5); one no section can take is under "Other
+  workspaces" (`BoardStages.otherWorkspaces`).
 - **A task says what its sidebar row read**: what its agents do, its reviews,
   its texts. One the sidebar hasn't read yet is a line at rest. What the
   sidebar read of git in another worktree (the task's focused column is
@@ -753,9 +777,9 @@ The Board's column (`BoardColumnView`) is its header, then the stages.
   button is: they leave the keyboard to the terminal in every column. The
   Board reads again on its own, and each repository's ⋯ has Board
   Settings….
-- **Other workspaces offer Focus only**: no agent state and no Resume, which
-  the table's row showed; the sidebar shows both. Until the Board has a
-  section per repository of the space, where they are lines.
+- **A repository that isn't one of the space's is read-only on its
+  Board**: no merge queue, no Retarget, no Board Settings…. Add it to the
+  space's repositories (Space Settings) to use them.
 - **A Lead whose folder is gone** has nothing on the Board (the table offered
   Clean Up… to close its workspace): the space header still shows the Lead,
   and the sidebar closes it.

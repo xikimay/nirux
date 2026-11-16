@@ -194,7 +194,8 @@ extension NiruxShellView {
         let members = projectWorkspaces(of: board.projectID)
         let foreground = pass?.foregroundProcesses ?? foregroundProcesses(of: members, snapshot: snapshot)
         let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
-        // A workspace opened in a folder not listed yet: list them again.
+        // A workspace opened in a folder not listed yet, or one closed or moved away: list them again.
+        board.expireWorktreesIfWorkspacesLeft(members.map(\.cwd))
         if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
             board.expireWorktrees()
         }

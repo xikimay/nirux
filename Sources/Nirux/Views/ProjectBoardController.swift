@@ -92,6 +92,26 @@ final class ProjectBoardController {
     private(set) var context = BoardSections.Context()
     /// One per repository anchor, else the space's one repository.
     private(set) var sections: [BoardSections.Section] = []
+    /// The repositories of the space's workspaces that are no anchor of it
+    /// (nor, without anchors, the one board.json names), as the worktrees
+    /// listed them: a read-only section each, after the anchors' (no Board
+    /// Settings, no merge queue), so every repository of the space shows.
+    private(set) var extraRepositories: [SpaceAnchor] = []
+    /// The sections `extraRepositories` made at the last `apply`: the ids
+    /// of the read-only ones (one made an anchor since isn't).
+    private var extraIDs: Set<String> = []
+    /// The sections that are the space's own: its anchors', or the one
+    /// board.json names; `sections` without the read-only ones.
+    private(set) var ownSections: [BoardSections.Section] = []
+    /// The base remote of each repository the worktrees listed outside the
+    /// space's own sections, by common dir: read before it is placed, it
+    /// says which section its clones join. Emptied by a Refresh.
+    private var listedRemotes: [String: BoardSections.BaseRemote] = [:]
+    /// The generation a read of `listedRemotes` runs for: one at a time.
+    private var runningListedRead: Int?
+    /// The workspaces' folders the last listing listed: one with no
+    /// workspace left lists them again (its repository's section goes).
+    private var listedWorkspaceFolders: Set<String> = []
     /// Each section's name, by id, told apart when two share one.
     private(set) var displayNames: [String: String] = [:]
     private(set) var local: ProjectBoard.LocalSnapshot?
@@ -115,7 +135,7 @@ final class ProjectBoardController {
     /// The base remotes of the anchors without a config are read after
     /// board.json, once the board is shown: a section none is known for
     /// yet doesn't say why it has no pull requests.
-    private var isReadingRemotes = false
+    private(set) var isReadingRemotes = false
     /// The config read whose remotes wait for the board to be shown, or for
     /// the read under way.
     private var remotesDue: Int?
@@ -155,7 +175,7 @@ final class ProjectBoardController {
 
     /// The section with this id; with nil, the board's only section.
     func section(id: String?) -> BoardSections.Section? {
-        guard let id else { return sections.count == 1 ? sections.first : nil }
+        guard let id else { return soleSection }
         return sections.first { $0.id == id }
     }
 
@@ -171,23 +191,23 @@ final class ProjectBoardController {
         loaded?.view(for: section.slot)
     }
 
-    /// The configured repository of a board with one section: what the
-    /// column header names. Nil with several, or none.
-    var repository: (name: String, gitHub: GitHubRepository)? {
-        guard sections.count == 1, let only = sections.first else { return nil }
-        return repository(of: only)
+    /// The one section that isn't a read-only one of another repository
+    /// (`isExtra`), where it is the only one: a Board "with one repository".
+    var soleSection: BoardSections.Section? {
+        ownSections.count == 1 ? ownSections.first : nil
     }
 
     /// Some section has a GitHub repository, saved or its remote's: the
     /// board reads pull requests. Only a saved one has a merge queue
     /// (`repository(of:)`).
-    var readsPullRequests: Bool { !reads.isEmpty }
+    var readsPullRequests: Bool { ownSections.contains { reads[$0.id] != nil } }
 
     /// The board lists rows: some section reads pull requests, or has an
     /// anchor whose worktrees show without them. Not with an unreadable
-    /// board.json, which the board asks to replace.
+    /// board.json, which the board asks to replace. A repository that is no
+    /// anchor of the space doesn't count: it only comes with the others.
     var listsRows: Bool {
-        loaded?.status != .unreadable && (readsPullRequests || sections.contains { $0.anchor != nil })
+        loaded?.status != .unreadable && (readsPullRequests || ownSections.contains { $0.anchor != nil })
     }
 
     // MARK: - Reading
@@ -205,6 +225,12 @@ final class ProjectBoardController {
         requestedAnchors = nil
         context = BoardSections.Context()
         sections = []
+        extraRepositories = []
+        extraIDs = []
+        ownSections = []
+        listedRemotes = [:]
+        runningListedRead = nil
+        listedWorkspaceFolders = []
         local = nil
         reads = [:]
         // The old space's tasks: the new one's are read without the sidebar's pass until its next one.
@@ -220,6 +246,8 @@ final class ProjectBoardController {
         configRead += 1
         let current = configRead
         schedule.makeEverythingDue()
+        // The other repositories' remotes are read again too, before they are placed again.
+        listedRemotes = [:]
         for id in reads.keys {
             reads[id]?.schedule.makeEverythingDue()
             // Its errors stay until the next answer replaces them: a line
@@ -250,11 +278,19 @@ final class ProjectBoardController {
             var context = read.1
             // Until they are read again, the base remotes read before: a
             // Refresh doesn't empty a section meanwhile.
-            if readsRemotes { context.baseRemotes = self.context.baseRemotes }
+            if readsRemotes {
+                context.baseRemotes = self.context.baseRemotes
+            } else {
+                // Another repository's section keeps its remote all the same: none of the space's is read.
+                let extras = Set(self.extraRepositories.compactMap(BoardSections.commonDir(of:)))
+                context.baseRemotes = self.context.baseRemotes.filter { extras.contains($0.key) }
+            }
             self.isReadingRemotes = readsRemotes
             self.remotesDue = nil
             self.apply(read.0, context: context)
             if readsRemotes { self.readBaseRemotesWhenShown(configRead: current) }
+            // Held back while board.json was read: placed now, or once the space's own remotes are read.
+            if let local = self.local { self.noteExtraRepositories(in: local) }
         })
     }
 
@@ -264,7 +300,8 @@ final class ProjectBoardController {
     /// behind another workspace runs no git for them), then applied with
     /// the config read last.
     private func readBaseRemotesWhenShown(configRead current: Int) {
-        let unsaved = sections.filter { $0.config == nil && $0.commonDir != nil }
+        // Another repository's section has its remote from `readListedRemotes`.
+        let unsaved = ownSections.filter { $0.config == nil && $0.commonDir != nil }
         guard !unsaved.isEmpty else {
             isReadingRemotes = false
             return
@@ -283,10 +320,17 @@ final class ProjectBoardController {
                 self.runningRemoteRead = nil
             }
             if self.configRead == current, let loaded = self.loaded {
-                self.isReadingRemotes = false
+                // Another read, started meanwhile for other repositories, still reads theirs.
+                self.isReadingRemotes = self.runningRemoteRead != nil
                 var context = self.context
+                // What this read didn't cover stays (that other read read it), for the repositories still shown.
+                let shown = Set(self.sections.compactMap(\.commonDir))
                 context.baseRemotes = Self.merged(remotes, keeping: self.context.baseRemotes)
+                    .merging(self.context.baseRemotes) { new, _ in new }
+                    .filter { shown.contains($0.key) }
                 self.apply(loaded, context: context, listsWorktreesAgain: false)
+                // An anchor read from its remote takes its other clones by it now: placed again, at once.
+                if let local = self.local { self.noteExtraRepositories(in: local) }
             }
             // board.json read again meanwhile: its remotes, now.
             if let due = self.remotesDue, due == self.configRead {
@@ -327,6 +371,15 @@ final class ProjectBoardController {
         // An unreadable file holds no config this build can use.
         let entries = newConfig.status == .unreadable ? [] : newConfig.entries
         sections = BoardSections.sections(entries, context: context)
+        ownSections = sections
+        let anchored = Set(sections.compactMap(\.commonDir))
+        let extras = extraRepositories.compactMap { anchor in
+            BoardSections.commonDir(of: anchor).flatMap { commonDir in
+                anchored.contains(commonDir) ? nil : BoardSections.Section(slot: .anchor(commonDir: commonDir), anchor: anchor, config: nil)
+            }
+        }
+        sections += extras
+        extraIDs = Set(extras.map(\.id))
         displayNames = BoardSections.displayNames(sections)
         var newReads: [String: RepositoryReads] = [:]
         // Two sections never read one repository, as Board Settings never
@@ -418,11 +471,18 @@ final class ProjectBoardController {
         schedule.expire(.worktrees)
     }
 
+    /// A workspace closed or moved away since the last listing: list again,
+    /// so that a repository's section goes with its last workspace.
+    func expireWorktreesIfWorkspacesLeft(_ folders: [String]) {
+        if !listedWorkspaceFolders.isSubset(of: folders) { schedule.expire(.worktrees) }
+    }
+
     /// The workspaces' folders, then each repository anchor's main checkout
     /// (or its git dir, for a bare repository): its worktrees show even
-    /// with no workspace open there.
+    /// with no workspace open there. Not another repository's
+    /// (`extraRepositories`): it shows while a workspace is in it.
     private var foldersToList: [String] {
-        let anchors = sections.compactMap(\.checkoutFolder)
+        let anchors = ownSections.compactMap(\.checkoutFolder)
         let folders = workspaceFolders()
         return folders + anchors.filter { !folders.contains($0) }
     }
@@ -431,10 +491,13 @@ final class ProjectBoardController {
         schedule.start(.worktrees, now: now)
         let current = generation
         let folders = foldersToList
+        let workspaces = Set(workspaceFolders())
         Self.readOffMain({ ProjectBoard.readLocal(folders: folders) }, then: { [weak self] snapshot in
             guard let self, current == self.generation else { return }
             self.schedule.finish(.worktrees)
             self.local = snapshot
+            self.listedWorkspaceFolders = workspaces
+            self.noteExtraRepositories(in: snapshot)
             self.scheduleRender()
         })
     }
@@ -562,7 +625,7 @@ final class ProjectBoardController {
     /// and when the pull requests were read, or what went wrong reading
     /// them (Refresh's tooltip); the repository's header has the pill.
     func columnHeader(spaceName: String, now: Date = Date()) -> BoardColumnView.Header {
-        let single = sections.count == 1 ? sections.first.flatMap { reads[$0.id] } : nil
+        let single = soleSection.flatMap { reads[$0.id] }
         return BoardColumnView.Header(
             spaceName: spaceName, repository: single?.name,
             status: single.flatMap { Self.errorText($0)?.message } ?? readStatus(now: now)
@@ -593,9 +656,120 @@ final class ProjectBoardController {
     static let listingWorktrees = "Listing worktrees…"
 
 
+    /// A section of a repository that is no anchor of the space
+    /// (`extraRepositories`): read-only.
+    func isExtra(_ section: BoardSections.Section) -> Bool {
+        extraIDs.contains(section.id)
+    }
+
+    /// The repositories the worktrees listed that no section has: a section
+    /// each from now on, read from their remotes as an anchor without
+    /// settings is. Each repository's base remote is read before it is
+    /// placed: its section reads its pull requests at once, and a clone
+    /// naming the repository a section reads joins it, as an anchor's
+    /// clones do. Not while board.json is read again, nor before the
+    /// space's own remotes are known: an anchor's clone would show as
+    /// another repository for a moment. The reads that land call it again.
+    private func noteExtraRepositories(in snapshot: ProjectBoard.LocalSnapshot) {
+        guard !isReadingConfig, let loaded else { return }
+        let remote = { (commonDir: String) in self.context.baseRemotes[commonDir] ?? self.listedRemotes[commonDir] }
+        // The space's own remotes, read for its sections without settings: their read lands and calls this again.
+        let readsOwnRemotes = loaded.status == .missing || loaded.status == .loaded
+        let ownPending = readsOwnRemotes && ownSections.contains { section in
+            section.config == nil && section.commonDir.map { remote($0) == nil } ?? false
+        }
+        if ownPending { return }
+        // A section of the space's that reads no GitHub repository (a file read-only, settings without a valid
+        // repository): its remote is read here, only to know its clones.
+        let ownUnread = ownSections.compactMap { section -> String? in
+            guard reads[section.id]?.gitHub == nil, let commonDir = section.commonDir, remote(commonDir) == nil else { return nil }
+            return commonDir
+        }
+        let anchored = Set(ownSections.compactMap(\.commonDir))
+        // A section reading a repository takes its other clones by remote (`ProjectBoard.sectionRows`): the one
+        // board.json names without anchors, an anchor's second checkout. Compared as the rows are, by owner and name.
+        let taken = ownSections.compactMap { section in
+            reads[section.id]?.gitHub ?? section.commonDir.flatMap(remote).flatMap(RepositoryReads.init(baseRemote:))?.gitHub
+        }
+        let isTaken = { (remotes: [GitHubRepository]) in
+            remotes.contains { remote in taken.contains { $0.owner == remote.owner && $0.name == remote.name } }
+        }
+        var listed = anchored
+        // By their main checkout's path: the same clone names the section whatever the sidebar's order.
+        let candidates = snapshot.repositories.compactMap { repository -> (String, ProjectBoard.LocalRepository)? in
+            guard let commonDir = repository.commonDir, listed.insert(commonDir).inserted, !isTaken(repository.remotes) else { return nil }
+            return (commonDir, repository)
+        }.sorted { ($0.1.worktrees.first?.path ?? $0.0) < ($1.1.worktrees.first?.path ?? $1.0) }
+        listedRemotes = listedRemotes.filter { listed.contains($0.key) }
+        // Read again after a Refresh, before they are placed again: a remote changed since lands.
+        let unread = candidates.map(\.0).filter { listedRemotes[$0] == nil } + ownUnread
+        guard unread.isEmpty else {
+            readListedRemotes(Set(unread))
+            return
+        }
+        var found: [SpaceAnchor] = []
+        var remotes: [String: BoardSections.BaseRemote] = [:]
+        var placedRepositories: [GitHubRepository] = []
+        let folders = workspaceFolders().map { snapshot.folders[$0] ?? $0 }
+        for (commonDir, repository) in candidates {
+            guard let read = listedRemotes[commonDir] else { continue }
+            // Its section reads its base remote: a clone whose own base remote is that repository joins it.
+            if let gitHub = RepositoryReads(baseRemote: read)?.gitHub {
+                guard !placedRepositories.contains(where: { $0.owner == gitHub.owner && $0.name == gitHub.name }) else { continue }
+                placedRepositories.append(gitHub)
+            }
+            remotes[commonDir] = read
+            found.append(SpaceAnchor.repository(commonDir: commonDir, topLevel: Self.topLevel(of: repository, holding: folders)))
+        }
+        guard found != extraRepositories || remotes.contains(where: { context.baseRemotes[$0.key] != $0.value }) else { return }
+        // Gone, unless made one of the space's: its remote with it.
+        let gone = Set(extraRepositories.compactMap(BoardSections.commonDir(of:)))
+            .subtracting(found.compactMap(BoardSections.commonDir(of:))).subtracting(anchored)
+        extraRepositories = found
+        var placed = context
+        placed.baseRemotes = placed.baseRemotes.merging(remotes) { _, read in read }.filter { !gone.contains($0.key) }
+        apply(loaded, context: placed, listsWorktreesAgain: false)
+    }
+
+    /// The base remotes of these repositories (common dirs), into
+    /// `listedRemotes`; the repositories placed again once read.
+    private func readListedRemotes(_ commonDirs: Set<String>) {
+        guard runningListedRead != generation else { return }
+        runningListedRead = generation
+        let current = generation
+        let toRead = commonDirs.sorted().map { commonDir in
+            let anchor = SpaceAnchor.repository(commonDir: commonDir, topLevel: nil)
+            return BoardSections.Section(slot: .anchor(commonDir: commonDir), anchor: anchor, config: nil)
+        }
+        Self.readOffMain({ BoardSections.readBaseRemotes(toRead) }, then: { [weak self] remotes in
+            guard let self, current == self.generation else { return }
+            self.runningListedRead = nil
+            // What a blip didn't answer stays as read before, here or for a section.
+            var read = Self.merged(remotes, keeping: self.listedRemotes.merging(self.context.baseRemotes) { listed, _ in listed })
+            // Never asked again and again: one git didn't answer for is unread.
+            for commonDir in commonDirs where read[commonDir] == nil { read[commonDir] = .unread }
+            self.listedRemotes.merge(read) { _, new in new }
+            if let local = self.local { self.noteExtraRepositories(in: local) }
+        })
+    }
+
+    /// The worktree of `repository` a workspace of the space is in (the
+    /// innermost), else its first: what adding the repository from that
+    /// workspace would name it (a bare repository's worktree, a
+    /// submodule's checkout).
+    static func topLevel(of repository: ProjectBoard.LocalRepository, holding folders: [String]) -> String? {
+        let worktrees = repository.worktrees.filter { !$0.isBare }.map(\.path)
+        for folder in folders {
+            let holding = worktrees.filter { folder == $0 || folder.hasPrefix($0 + "/") }
+            if let innermost = holding.max(by: { $0.count < $1.count }) { return innermost }
+        }
+        return repository.worktrees.first?.path
+    }
+
     /// Board Settings is what would show its pull requests: not for a
     /// checkout gone, nor for the repository another section reads.
     func canBeSetUp(_ section: BoardSections.Section) -> Bool {
+        if isExtra(section) { return false }
         if case .notARepository? = section.commonDir.flatMap({ context.baseRemotes[$0] }), reads[section.id] == nil {
             return false
         }
@@ -617,6 +791,7 @@ final class ProjectBoardController {
     /// Why a section has no saved repository, in a sentence; nil when it
     /// has one, or while its remote is being read.
     func setupNote(_ section: BoardSections.Section) -> String? {
+        if isExtra(section) { return extraNote(section) }
         if let reads = reads[section.id] {
             return reads.remoteName.map { "Read-only, from \($0): save Board Settings to use the merge queue." }
         }
@@ -645,38 +820,72 @@ final class ProjectBoardController {
         }
     }
 
-    /// The rows of the Board's repositories, which the stages are made of.
-    enum ListedRows {
-        /// A space without a repository anchor: its one repository, found
-        /// by remote, as before anchors; the workspaces in another
-        /// repository or in none among its rows.
-        case one(rows: [ProjectBoard.Row], repository: String)
-        /// Each section's rows, then the workspaces in none of their
-        /// repositories (or in no repository).
-        case sections([String: [ProjectBoard.Row]], others: [ProjectBoard.Row])
+    /// What a section of a repository that is no anchor of the space says:
+    /// read-only, whatever its remote, and why it reads nothing when it does.
+    private func extraNote(_ section: BoardSections.Section) -> String? {
+        let notAnchor = "not one of this space’s repositories, so no merge queue here"
+        if let reads = reads[section.id] { return "Read-only, from \(reads.remoteName ?? "its remote"): \(notAnchor)." }
+        if let other = sectionSharingRemote(with: section) {
+            let otherName = displayNames[other.id] ?? other.name ?? "another repository"
+            return "Same GitHub repository as “\(otherName)”: its pull requests show there."
+        }
+        switch section.commonDir.flatMap({ context.baseRemotes[$0] }) {
+        case .noRemote?: return "No remote: its pull requests don’t show (\(notAnchor))."
+        case .notGitHub(let host, let remote)?:
+            let place = host.map { "\(remote) points to \($0), not github.com" } ?? "\(remote) isn’t on github.com"
+            return "\(place): its pull requests don’t show (\(notAnchor))."
+        case .notARepository?: return "Its checkout is gone, or no longer a git repository."
+        case .unread?: return "Nirux couldn’t read its remotes: Refresh to read them again."
+        case nil where isReadingRemotes: return nil
+        case .gitHub?, nil: return "No GitHub repository: its pull requests don’t show (\(notAnchor))."
+        }
+    }
+
+    /// The rows of the Board's repositories, which the stages are made of:
+    /// each section's, then the workspaces in none of their repositories
+    /// (or in no repository).
+    struct ListedRows {
+        var bySection: [String: [ProjectBoard.Row]]
+        var others: [ProjectBoard.Row]
     }
 
     func listedRows(local: ProjectBoard.LocalSnapshot, workspaces: [ProjectBoard.Workspace]) -> ListedRows {
-        if sections.count == 1, let only = sections.first, only.anchor == nil, let repository = reads[only.id] {
-            return .one(rows: ProjectBoard.rows(ProjectBoard.Sources(
+        let extras = sections.filter(isExtra)
+        // A space without a repository anchor: its one repository, found by remote, as before anchors; the
+        // workspaces in another repository go to that repository's section when it has one.
+        if let only = soleSection, only.anchor == nil, let repository = reads[only.id] {
+            let rows = ProjectBoard.rows(ProjectBoard.Sources(
                 repository: repository.gitHub,
                 baseBranch: repository.baseBranch,
                 local: local.repositories,
                 workspaces: workspaces,
                 openPullRequests: repository.openPullRequests ?? [],
                 mergedPullRequests: repository.mergedPullRequests ?? []
-            )), repository: repository.name)
-        }
-        let (bySection, others) = ProjectBoard.sectionRows(sections.map { section in
-            let repository = reads[section.id]
-            return ProjectBoard.SectionSources(
-                id: section.id, commonDir: section.commonDir, repository: repository?.gitHub,
-                baseBranch: repository?.baseBranch ?? section.config?.baseBranch,
-                openPullRequests: repository?.openPullRequests ?? [],
-                mergedPullRequests: repository?.mergedPullRequests ?? []
+            ))
+            let outside = rows.filter { $0.group == .otherRepository }
+            var listed = ListedRows(bySection: [only.id: rows.filter { $0.group != .otherRepository }], others: outside)
+            guard !extras.isEmpty else { return listed }
+            let outsideIDs = Set(outside.flatMap { $0.workspaces.map(\.id) })
+            let (byExtra, rest) = ProjectBoard.sectionRows(
+                extras.map(sources(of:)), local: local.repositories, workspaces: workspaces.filter { outsideIDs.contains($0.id) }
             )
-        }, local: local.repositories, workspaces: workspaces)
-        return .sections(bySection, others: others)
+            listed.bySection.merge(byExtra) { own, _ in own }
+            listed.others = rest
+            return listed
+        }
+        let (bySection, others) = ProjectBoard.sectionRows(sections.map(sources(of:)), local: local.repositories, workspaces: workspaces)
+        return ListedRows(bySection: bySection, others: others)
+    }
+
+    /// What a section's rows are made of.
+    private func sources(of section: BoardSections.Section) -> ProjectBoard.SectionSources {
+        let repository = reads[section.id]
+        return ProjectBoard.SectionSources(
+            id: section.id, commonDir: section.commonDir, repository: repository?.gitHub,
+            baseBranch: repository?.baseBranch ?? section.config?.baseBranch,
+            openPullRequests: repository?.openPullRequests ?? [],
+            mergedPullRequests: repository?.mergedPullRequests ?? []
+        )
     }
 
     /// The post-merge run as a pill, while there is one to read.

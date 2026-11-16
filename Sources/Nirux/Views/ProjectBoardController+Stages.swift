@@ -102,18 +102,11 @@ extension ProjectBoardController {
             local.repositories.flatMap(\.worktrees).compactMap { worktree in worktree.head.map { (worktree.path, $0) } },
             uniquingKeysWith: { first, _ in first }
         )
-        let others: [ProjectBoard.Row]
-        switch listedRows(local: local, workspaces: inputs.workspaces) {
-        case .one(let rows, _):
-            // Its rows hold the Board's own workspace at least: a read that failed says so in the section's pill.
-            guard let only = sections.first else { return content }
-            others = rows.filter { $0.group == .otherRepository }
-            content.sections = [stagesSection(
-                only, rows: rows.filter { $0.group != .otherRepository }, inputs, heads: heads, now: now, targets: &targets
-            )]
-        case .sections(let bySection, let rest):
-            others = rest
-            content.sections = sections.map { stagesSection($0, rows: bySection[$0.id] ?? [], inputs, heads: heads, now: now, targets: &targets) }
+        // A section with no rows still shows: a read that failed says so in its pill.
+        let listed = listedRows(local: local, workspaces: inputs.workspaces)
+        let others = listed.others
+        content.sections = sections.map { section in
+            stagesSection(section, rows: listed.bySection[section.id] ?? [], inputs, heads: heads, now: now, targets: &targets)
         }
         // A workspace in no repository is a line there; one in another repository is no line (`sectionFacts`), but under
         // Other workspaces.
@@ -142,7 +135,8 @@ extension ProjectBoardController {
     /// anchored or read; its tasks not archived, the Lead apart), its
     /// Lead's state and line, said as a line says a task at rest or at work.
     private func stagesHeader(_ inputs: StagesInputs) -> BoardStagesView.Header {
-        let repositories = sections.filter { $0.anchor != nil || reads[$0.id] != nil }.count
+        // Another repository's read-only section only counts beside the Board's own rows (no message in their place).
+        let repositories = sections.filter { ($0.anchor != nil || reads[$0.id] != nil) && (listsRows || !isExtra($0)) }.count
         let tasks = inputs.workspaces.filter { !$0.isInactive && $0.id != inputs.lead }.count
         let held = [
             repositories == 0 ? nil : "\(repositories) \(repositories == 1 ? "repository" : "repositories")",
@@ -174,6 +168,10 @@ extension ProjectBoardController {
         _ section: BoardSections.Section, rows: [ProjectBoard.Row], _ inputs: StagesInputs, heads: [String: String], now: Date,
         targets: inout StagesTargets
     ) -> BoardStagesView.Section {
+        // Another repository's section lists this space's workspaces there, and nothing else of that repository: no
+        // other worktree (another space's, with its Clean Up…), no pull request without a task, no stranger's merge.
+        let readOnly = isExtra(section)
+        let rows = readOnly ? rows.filter { !$0.workspaces.isEmpty } : rows
         let reads = reads[section.id]
         let reading = BoardStages.RepositoryReading(
             id: section.id, rows: rows, readsPullRequests: reads?.openPullRequests != nil,
@@ -191,6 +189,7 @@ extension ProjectBoardController {
             status: stagesStatus(section, now: now),
             lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
         )
+        if readOnly { shown.lines.merged.removeAll { $0.lineID == nil } }
         for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {
             if let offer = line.offer { targets.offers[section.id, default: [:]][offer.number] = offer }
             // The menu's item: the phrase's link is only there while it acts.
@@ -252,7 +251,8 @@ extension ProjectBoardController {
             if let loaded, case .readOnly(let reason) = loaded.status {
                 return ColumnHeaderView.Status("Read-only", tone: .neutral, toolTip: reason.message)
             }
-            let word = section.config != nil && reads[section.id] == nil ? "Invalid settings" : canBeSetUp(section) ? "No settings" : "Not read"
+            let word = isExtra(section) ? (reads[section.id] == nil ? "Not read" : "Read-only")
+                : section.config != nil && reads[section.id] == nil ? "Invalid settings" : canBeSetUp(section) ? "No settings" : "Not read"
             return ColumnHeaderView.Status(word, tone: .neutral, toolTip: note)
         }
         return reads[section.id].flatMap { Self.runStatus($0, now: now) }

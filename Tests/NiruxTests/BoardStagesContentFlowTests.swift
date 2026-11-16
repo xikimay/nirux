@@ -46,7 +46,8 @@ final class BoardStagesContentFlowTests: XCTestCase {
     @MainActor
     func testTheContentIsWhatTheTableListsAsStages() throws {
         let client = ProjectBoardFlowTests.FakeGitHub(
-            openPullRequests: Self.pullRequests, mergedPullRequests: Self.merged, runs: ProjectBoardGitHubTests.postMergeRuns
+            openPullRequests: Self.pullRequests, mergedPullRequests: Self.merged, runs: ProjectBoardGitHubTests.postMergeRuns,
+            openByRepository: ["acme/gadgets": "[]"]
         )
         try withShell(client: client) { shell, space in
             let repo = root + "/widgets"
@@ -72,10 +73,11 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "widgets" }))
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("the pull requests and the post-merge run are read, the worktrees listed") {
-                board.reads.values.first?.openPullRequests != nil && board.reads.values.first?.mergedPullRequests != nil
+            try waitUntil("the pull requests and the post-merge run are read, the worktrees listed, gadgets read too") {
+                board.reads["legacy"]?.openPullRequests != nil && board.reads["legacy"]?.mergedPullRequests != nil
                     && board.local != nil && !board.view.stages.lineViews.isEmpty
                     && board.view.stages.content?.sections.first?.status?.toolTip?.contains("success") == true
+                    && board.reads.values.contains { $0.name == "acme/gadgets" && $0.openPullRequests != nil }
             }
             let ids = { (title: String) in shell.workspaces.first { $0.title == title }?.id ?? "" }
             let content = try stages(of: board, in: shell)
@@ -100,12 +102,12 @@ final class BoardStagesContentFlowTests: XCTestCase {
 
             // The space, what it holds (the Lead is no task), its Lead.
             XCTAssertEqual(content.header.name, "Board")
-            XCTAssertEqual(content.header.summary, "1 repository · 4 tasks", "the Lead apart, an archived task left out")
+            XCTAssertEqual(content.header.summary, "2 repositories · 4 tasks", "the Lead apart, an archived task left out")
             XCTAssertEqual(content.header.lead?.text.hasPrefix("Lead · "), true, content.header.lead?.text ?? "")
             XCTAssertEqual(content.header.lead?.state, .idle, "a Lead with no agent at work")
             XCTAssertNil(content.message)
             XCTAssertEqual(content.runningQueues, [], "no queue runs")
-            XCTAssertEqual(content.sections.map(\.id), ["legacy", ProjectBoardController.noRepositoryID, BoardStagesView.Section.otherWorkspacesID])
+            XCTAssertEqual(content.sections.map(\.title), ["Widgets", "gadgets", "No repository"])
 
             // The repository: its name and owner/name, its post-merge pill, its queue at rest, its menu.
             let widgets = try XCTUnwrap(content.sections.first)
@@ -121,26 +123,30 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(widgets.lines.otherWorktrees.map(\.title), ["Lead · lead/notes", "scratch"])
             XCTAssertEqual(widgets.lines.otherWorktrees.first?.menu.first, .focus(workspaceID: ids("Lead"), columnID: nil))
 
-            // A workspace in no repository is a line there; one in another repository is under Other workspaces.
+            // A workspace in no repository is a line there; one in another repository, a line of that repository's
+            // section: read-only from its remote (not one of the space's repositories), no queue, no Board Settings.
             let noRepository = try XCTUnwrap(content.sections.first { $0.id == ProjectBoardController.noRepositoryID })
-            XCTAssertEqual(noRepository.title, "No repository")
             XCTAssertEqual(noRepository.lines.units.flatMap(\.lines).map(\.id), [ids("notes")])
             XCTAssertNil(noRepository.queue)
-            let others = try XCTUnwrap(content.sections.first { $0.id == BoardStagesView.Section.otherWorkspacesID })
-            XCTAssertEqual(others.kind, .otherWorkspaces)
-            XCTAssertEqual(others.lines.otherWorktrees.map(\.title), ["gadget"])
-            XCTAssertEqual(others.lines.otherWorktrees.map(\.path), [gadgets])
+            let gadgetsSection = try XCTUnwrap(content.sections.first { $0.title == "gadgets" })
+            XCTAssertEqual(gadgetsSection.detail, "acme/gadgets")
+            XCTAssertEqual(gadgetsSection.lines.units.flatMap(\.lines).map(\.id), [ids("gadget")])
+            XCTAssertNil(gadgetsSection.queue)
+            XCTAssertFalse(gadgetsSection.menu.contains(.boardSettings))
+            XCTAssertEqual(gadgetsSection.status?.text, "Read-only")
+            XCTAssertEqual(gadgetsSection.status?.toolTip, "Read-only, from origin: not one of this space’s repositories, so no merge queue here.")
+            XCTAssertNil(content.sections.first { $0.kind == .otherWorkspaces }, "no Other workspaces")
 
             // Start says what the next one takes.
-            shell.addToMergeQueue(12, board: board, section: nil)
-            shell.addToMergeQueue(40, board: board, section: nil)
+            shell.addToMergeQueue(12, board: board, section: "legacy")
+            shell.addToMergeQueue(40, board: board, section: "legacy")
             XCTAssertEqual(try stages(of: board, in: shell).sections[0].queue?.start?.title.hasSuffix(" · 1"), true, "a merged one counts for none")
         }
     }
 
     /// The table's messages in place of its rows are the stages' in place of
     /// their sections, Board Settings… offered where the settings can fix
-    /// them; a deleted space says so.
+    /// them.
     @MainActor
     func testTheBoardSaysWhatTheTableSaysInPlaceOfItsRows() throws {
         let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: ProjectBoardGitHubTests.postMergeRuns)
@@ -249,14 +255,54 @@ final class BoardStagesContentFlowTests: XCTestCase {
             try FileManager.default.createDirectory(at: store.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(#"{"schemaVersion": 3}"#.utf8).write(to: store.fileURL)
             shell.addWorkspace(title: "tool", cwd: tools, profileID: locked.id)
+            // No remote of the space's is read for a read-only file: another repository's workspace has its section all
+            // the same, and a second clone of its own repository none (under Other workspaces: its section reads nothing).
+            let outside = root + "/outside-app", toolsCopy = root + "/tools-copy"
+            try BoardConfigSuggestionsTests.makeRepository(at: outside, remote: "https://github.com/acme/outside.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: toolsCopy, remote: "git@github.com:acme/tools.git")
+            shell.addWorkspace(title: "outside", cwd: outside, profileID: locked.id)
+            shell.addWorkspace(title: "tools copy", cwd: toolsCopy, profileID: locked.id)
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "tool" }))
             try runPaletteAction("Open Board", in: shell)
             let readOnly = try XCTUnwrap(shell.projectBoardLocation(projectID: locked.id)?.board)
-            try waitUntil("board.json is read and the worktrees listed") { readOnly.loaded != nil && readOnly.local != nil }
+            try waitUntil("board.json is read, the worktrees listed, the other repository placed") {
+                readOnly.loaded != nil && readOnly.local != nil
+                    && (try? stages(of: readOnly, in: shell).sections.map(\.title)) == ["tools-app", "outside-app", "Other workspaces"]
+            }
             let lockedSection = try XCTUnwrap(try stages(of: readOnly, in: shell).sections.first)
             XCTAssertEqual(lockedSection.status?.text, "Read-only")
             XCTAssertEqual(lockedSection.status?.toolTip, BoardConfigStore.ReadOnlyReason.newerSchema(3).message)
             XCTAssertFalse(lockedSection.menu.contains(.boardSettings), "Board Settings can't save it")
+
+            // One whose board.json is a folder: read-only without a config, its anchor's remote never read for it; another
+            // repository's workspace has its section all the same.
+            let folderSpace = shell.workspaceStore.createProfile(named: "Folder")
+            let docs = root + "/docs-app"
+            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://github.com/acme/docs.git")
+            var docsAnchor = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
+            docsAnchor.isDefault = true
+            XCTAssertTrue(shell.workspaceStore.setAnchors([docsAnchor], forProfile: folderSpace.id))
+            let folderStore = try XCTUnwrap(BoardConfigStore(spaceID: folderSpace.id))
+            try FileManager.default.createDirectory(at: folderStore.fileURL, withIntermediateDirectories: true)
+            shell.addWorkspace(title: "doc", cwd: docs, profileID: folderSpace.id)
+            shell.addWorkspace(title: "outside here", cwd: outside, profileID: folderSpace.id)
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "doc" }))
+            try runPaletteAction("Open Board", in: shell)
+            let folderBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: folderSpace.id)?.board)
+            try waitUntil("the other repository placed beside a board.json read-only without a config") {
+                (try? stages(of: folderBoard, in: shell).sections.map(\.title)) == ["docs-app", "outside-app"]
+            }
+            // A Refresh keeps its remote meanwhile (its section never blanks), and reads it again: a remote changed lands.
+            _ = try BoardConfigSuggestionsTests.git(["remote", "set-url", "origin", "https://github.com/acme/outside-renamed.git"], at: outside)
+            let outsideRead = { folderBoard.sections.first { $0.anchor?.name == "outside-app" }.flatMap { folderBoard.reads[$0.id] } }
+            var blanked = false
+            folderBoard.reload()
+            try waitUntil("the other repository read from its new remote after a Refresh") {
+                folderBoard.tick(onScreen: true)
+                if outsideRead() == nil { blanked = true }
+                return client.calls.contains { $0.what == "pr open acme/outside-renamed" }
+            }
+            XCTAssertFalse(blanked, "its section kept its remote through the Refresh")
 
             // A fourth whose board.json names no valid GitHub repository: its settings are there, but invalid.
             let invalid = shell.workspaceStore.createProfile(named: "Invalid")

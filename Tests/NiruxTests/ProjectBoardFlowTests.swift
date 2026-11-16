@@ -760,6 +760,120 @@ final class ProjectBoardFlowTests: XCTestCase {
         }
     }
 
+    /// A workspace in a repository that isn't one of the space's: that
+    /// repository's section, read-only, after the space's, with this space's
+    /// workspaces there and nothing else of that repository; a second clone
+    /// (of the space's repository, or of that one) joins its section. The
+    /// section goes with the repository's last workspace, and is no longer
+    /// read-only once the repository is the space's.
+    @MainActor
+    func testEachRepositoryOfAWorkspaceHasItsSection() throws {
+        // Pull requests of gadgets no workspace here has, open and merged today: someone else's, not shown.
+        let strange = """
+        [{"number": 31, "state": "OPEN", "headRefName": "feat/strange", "headRefOid": "\(String(repeating: "b", count: 40))",
+          "headRepository": {"name": "gadgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
+          "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/gadgets/pull/31", "statusCheckRollup": []}]
+        """
+        let strangeMerge = """
+        [{"number": 32, "state": "MERGED", "headRefName": "feat/strange-merge", "headRefOid": "\(String(repeating: "c", count: 40))",
+          "headRepository": {"name": "gadgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
+          "isDraft": false, "mergeable": "UNKNOWN", "url": "https://github.com/acme/gadgets/pull/32",
+          "mergedAt": "\(ISO8601DateFormatter().string(from: Date()))", "statusCheckRollup": []}]
+        """
+        let client = FakeGitHub(
+            openPullRequests: "[]", mergedPullRequests: strangeMerge, runs: "[]", openByRepository: ["acme/gadgets": strange]
+        )
+        try withShell(client: client) { shell, space in
+            let widgets = root + "/widgets", copy = root + "/widgets-copy"
+            let gadgets = root + "/gadgets", gadgetsClone = root + "/gadgets-clone"
+            try BoardConfigSuggestionsTests.makeRepository(at: widgets, remote: "https://github.com/acme/widgets.git")
+            // Through an SSH host alias: the same repository, by owner and name.
+            try BoardConfigSuggestionsTests.makeRepository(at: copy, remote: "git@github-work:acme/widgets.git")
+            // A clone of the fork alone, before the fork's checkout by path: a section of its own, reading the fork.
+            let fork = root + "/fork"
+            try BoardConfigSuggestionsTests.makeRepository(at: fork, remote: "https://github.com/someone/gadgets.git")
+            // A fork's checkout: its section reads upstream, as gh does, and the clone of upstream joins it.
+            try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/someone/gadgets.git")
+            try git(["remote", "add", "upstream", "https://github.com/acme/gadgets.git"], at: gadgets)
+            try BoardConfigSuggestionsTests.makeRepository(at: gadgetsClone, remote: "git@github.com:acme/gadgets.git")
+            // Another space's worktree of gadgets: not this Board's to show, nor to clean up.
+            try git(["worktree", "add", "-q", "-b", "feat/elsewhere", root + "/gadgets.elsewhere"], at: gadgets)
+            // A bare repository, named as adding it to the space from its workspace would: "app-feature".
+            try git(["clone", "-q", "--bare", gadgets, root + "/app.git"], at: root)
+            try git(["worktree", "add", "-q", "-b", "feat/app", root + "/app-feature"], at: root + "/app.git")
+            var widgetsAnchor = try XCTUnwrap(FolderIdentity.identify(widgets, timeout: 10)).anchor
+            widgetsAnchor.isDefault = true
+            // Without settings: the anchor's section reads its remote, and takes the clone by it all the same.
+            XCTAssertTrue(shell.workspaceStore.setAnchors([widgetsAnchor], forProfile: space.id))
+            shell.addWorkspace(title: "widgets", cwd: widgets, profileID: space.id)
+            shell.addWorkspace(title: "copy", cwd: copy, profileID: space.id)
+            shell.addWorkspace(title: "gadget", cwd: gadgets, profileID: space.id)
+            shell.addWorkspace(title: "gadget clone", cwd: gadgetsClone, profileID: space.id)
+            shell.addWorkspace(title: "app", cwd: root + "/app-feature", profileID: space.id)
+            shell.addWorkspace(title: "fork", cwd: fork, profileID: space.id)
+            try select("widgets", in: shell)
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            let titles = { board.view.stages.content?.sections.map(\.title) ?? [] }
+            let section = { (title: String) in board.view.stages.content?.sections.first { $0.title == title } }
+            let refresh = {
+                board.tick(onScreen: true)
+                shell.renderProjectBoard(board)
+            }
+            // Once widgets' remote is read too, the clones are placed: no section of their own. Gadgets' pull requests
+            // read, so that what it doesn't show is there to show.
+            let gadgetsRead = { board.sections.first { $0.anchor?.name == "gadgets" }.flatMap { board.reads[$0.id] } }
+            try waitUntil("gadgets' section is read from its remote, the clones placed") {
+                refresh()
+                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "app-feature", "fork", "gadgets"]
+                    && gadgetsRead()?.openPullRequests != nil && gadgetsRead()?.mergedPullRequests != nil
+            }
+            let lineTitles = { (title: String) in section(title)?.lines.units.flatMap(\.lines).map(\.title) ?? [] }
+            XCTAssertEqual(lineTitles("widgets"), ["widgets", "copy"], "the second clone of the space's repository stays there")
+            XCTAssertEqual(lineTitles("gadgets"), ["gadget", "gadget clone"], "both clones of gadgets in its one section")
+            XCTAssertEqual(section("gadgets")?.lines.otherWorktrees.map(\.path), [], "no other space's worktree, no Clean Up…")
+            XCTAssertEqual(section("gadgets")?.lines.withoutTask.flatMap(\.lines).map(\.title), [], "no one else's pull request")
+            XCTAssertEqual(section("gadgets")?.lines.merged.map(\.number), [], "no one else's merge")
+            XCTAssertFalse(section("gadgets")?.menu.contains(.boardSettings) ?? true)
+            XCTAssertEqual(lineTitles("app-feature"), ["app"])
+            XCTAssertEqual(lineTitles("fork"), ["fork"])
+            XCTAssertEqual(board.view.stages.content?.header.summary.hasPrefix("4 repositories"), true)
+            XCTAssertEqual(board.view.header.context, "acme/widgets", "a Board with one repository of its own")
+
+            // Its last workspaces closed: the section goes, the Board listing again by itself.
+            for title in ["gadget", "gadget clone", "app", "fork"] {
+                shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title && !$0.isClosing }))
+            }
+            try waitUntil("the other repositories' sections go") {
+                refresh()
+                return titles() == ["widgets"]
+            }
+
+            // Back, then made one of the space's repositories: no longer read-only, Board Settings… offered there.
+            shell.addWorkspace(title: "gadget", cwd: gadgets, profileID: space.id)
+            try select("widgets", in: shell)
+            try waitUntil("gadgets' section is back") {
+                refresh()
+                return section("gadgets")?.status?.text == "Read-only"
+            }
+            try waitUntil("gadgets' pull requests are read again") {
+                refresh()
+                return gadgetsRead()?.openPullRequests != nil
+            }
+            let gadgetsAnchor = try XCTUnwrap(FolderIdentity.identify(gadgets, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.setAnchors([widgetsAnchor, gadgetsAnchor], forProfile: space.id))
+            // Its remote and its pull requests stay: the section never blanks on the way.
+            var blanked = false
+            try waitUntil("gadgets is the space's repository") {
+                refresh()
+                if gadgetsRead()?.openPullRequests == nil { blanked = true }
+                return section("gadgets")?.status?.text == "No settings" && !board.isReadingRemotes
+            }
+            XCTAssertFalse(blanked, "gadgets' section kept its pull requests")
+            XCTAssertEqual(section("gadgets")?.menu.contains(.boardSettings), true)
+        }
+    }
+
     /// A queue still running on the repository Board Settings just replaced
     /// keeps its line at the Board's foot, with its Stop, named after its
     /// repository; the repository's header shows the Board's own queue.
@@ -793,7 +907,8 @@ final class ProjectBoardFlowTests: XCTestCase {
                 return board.view.stages.runningQueueViews.map(\.queue.title) == ["acme/widgets"]
                     && board.view.stages.content?.sections.first?.detail == "acme/gadgets"
             }
-            XCTAssertEqual(board.repository?.name, "acme/gadgets")
+            // Saved for gadgets: widgets' checkout is a read-only section of its own now, without a queue.
+            XCTAssertEqual(board.sections.first.flatMap(board.repository(of:))?.name, "acme/gadgets")
             let section = try XCTUnwrap(board.view.stages.content?.sections.first)
             XCTAssertNotNil(section.queue, "gadgets' queue, in its header")
             XCTAssertNil(section.queue?.stop, "which doesn't run")
