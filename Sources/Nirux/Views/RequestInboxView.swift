@@ -181,6 +181,7 @@ final class RequestInboxView: NSView {
     /// call: the answers that slid on screen wait again by themselves.
     func opened() {
         choose(requests.first?.id)
+        escapeIsDown = false
         restartArming()
     }
 
