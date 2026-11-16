@@ -983,6 +983,7 @@ struct AgentStatusMachine {
     }
 
     private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
+    private static let enterKey = Data([0x0D])
 
     /// Esc or Ctrl-C pressed, as Claude Code reads them: the plain byte,
     /// the kitty keyboard protocol's `ESC [ code ; mods u`, or xterm's
@@ -1048,7 +1049,7 @@ struct AgentStatusMachine {
     /// text (Tab's amendment) reads as its answer, and what follows as a
     /// draft; so does the number after an Esc that only left that text.
     static func answersApproval(_ keys: Data) -> Bool {
-        keys == Data([0x0D]) || isCancelKey(keys) || (keys.count == 1 && (0x31...0x39).contains(keys[keys.startIndex]))
+        keys == enterKey || isCancelKey(keys) || (keys.count == 1 && (0x31...0x39).contains(keys[keys.startIndex]))
     }
 
     /// Keys that leave the prompt as it was, with Claude Code's default
@@ -1096,7 +1097,6 @@ struct AgentStatusMachine {
     /// What kind of key a write was, for the log: never its characters.
     static func keyKind(_ keys: Data?) -> String {
         guard let keys else { return "key" }
-        if keys == Data([0x0D]) { return "enter" }
         if isCancelKey(keys) { return "cancel" }
         if keys.first == 0x1B {
             guard isOneKey(keys) else { return "paste" }
@@ -1135,8 +1135,10 @@ struct AgentStatusMachine {
         lastInputAt = time
         // Any other key may leave text at the prompt, or open a screen no hook
         // tells of (Esc Esc's rewind picker, Ctrl-O's transcript, a slash
-        // command's), but those that leave it as it was.
-        if inFront == nil, !(keys.map(Self.leavesPromptAsItWas) ?? false) {
+        // command's), but those that leave it as it was, and Enter, which adds
+        // nothing of its own: it sends what other keys left, or nothing from an
+        // empty prompt (Tab or Right takes a suggested one).
+        if inFront == nil, !(keys.map(Self.leavesPromptAsItWas) ?? false), keys != Self.enterKey {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
         }

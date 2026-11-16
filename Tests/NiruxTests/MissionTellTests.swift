@@ -428,6 +428,49 @@ final class MissionTellTests: XCTestCase {
         XCTAssertTrue(isFree(machine))
     }
 
+    /// Enter adds no draft of its own: at an empty prompt Claude Code sends
+    /// nothing (a second Return after a prompt once kept a question from the
+    /// Lead for hours, the log naming no other key). What other input left
+    /// stays a draft, and a dialog waiting for a key takes Enter as before.
+    func testEnterAloneAtAnEmptyPromptIsNoDraft() {
+        let enter = Data([0x0D])
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        var machine = idleMachine()
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        machine.noteKeystroke(now: at(11), keys: enter)
+        _ = machine.apply(hook(.stop, at: 20), isUserFocused: false)
+        machine.noteKeystroke(now: at(30), keys: enter)
+        XCTAssertTrue(isFree(machine), machine.promptFacts(now: t0 + 100))
+        XCTAssertTrue(machine.promptFacts(now: t0 + 100).contains(" draft=- input=70s "), machine.promptFacts(now: t0 + 100))
+
+        func enterAfter(_ input: (inout AgentStatusMachine) -> Void) -> AgentPromptRefusal? {
+            var machine = idleMachine()
+            input(&machine)
+            machine.noteKeystroke(now: at(31), keys: enter)
+            return refusal(machine)
+        }
+        XCTAssertEqual(enterAfter { $0.noteKeystroke(now: at(30), keys: Data("\u{1B}[200~notes\u{1B}[201~".utf8)) }, .draft,
+                       "a paste from the Edit menu")
+        XCTAssertEqual(enterAfter { $0.noteKeystroke(now: at(30), keys: Data("\u{1B}[A".utf8)) }, .draft, "Up recalls an old prompt")
+        XCTAssertEqual(enterAfter { $0.notePromptRecall(now: at(30)) }, .draft, "so does a wheel scroll")
+        let pty = PtySession()
+        pty.sendRaw(enter)
+        XCTAssertFalse(pty.reviewSendHasDraft)
+        pty.sendRaw(Data("/tmp/a\\ b.png".utf8))
+        pty.sendRaw(enter)
+        XCTAssertTrue(pty.reviewSendHasDraft, "a dropped file's path")
+
+        var approval = idleMachine()
+        _ = approval.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = approval.apply(hook(.permissionRequest, at: 15, tool: "Bash", key: "k"), isUserFocused: false)
+        approval.noteKeystroke(now: at(20), keys: enter)
+        XCTAssertNil(approval.visibleDialog(foreground: claude()), "Enter answers an approval")
+        approval.noteKeystroke(now: at(21), keys: enter)
+        _ = approval.apply(hook(.postToolUse, at: 25, tool: "Bash", key: "k"), isUserFocused: false)
+        _ = approval.apply(hook(.stop, at: 30), isUserFocused: false)
+        XCTAssertTrue(isFree(approval), "nor is a second Enter while its tool runs")
+    }
+
     /// `/clear` fires SessionStart, not UserPromptSubmit: the text went in.
     func testClearEmptiesThePrompt() {
         var machine = idleMachine()
