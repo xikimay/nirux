@@ -789,6 +789,9 @@ final class ProjectBoardFlowTests: XCTestCase {
             try BoardConfigSuggestionsTests.makeRepository(at: widgets, remote: "https://github.com/acme/widgets.git")
             // Through an SSH host alias: the same repository, by owner and name.
             try BoardConfigSuggestionsTests.makeRepository(at: copy, remote: "git@github-work:acme/widgets.git")
+            // A clone of the fork alone, before the fork's checkout by path: a section of its own, reading the fork.
+            let fork = root + "/fork"
+            try BoardConfigSuggestionsTests.makeRepository(at: fork, remote: "https://github.com/someone/gadgets.git")
             // A fork's checkout: its section reads upstream, as gh does, and the clone of upstream joins it.
             try BoardConfigSuggestionsTests.makeRepository(at: gadgets, remote: "https://github.com/someone/gadgets.git")
             try git(["remote", "add", "upstream", "https://github.com/acme/gadgets.git"], at: gadgets)
@@ -807,6 +810,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.addWorkspace(title: "gadget", cwd: gadgets, profileID: space.id)
             shell.addWorkspace(title: "gadget clone", cwd: gadgetsClone, profileID: space.id)
             shell.addWorkspace(title: "app", cwd: root + "/app-feature", profileID: space.id)
+            shell.addWorkspace(title: "fork", cwd: fork, profileID: space.id)
             try select("widgets", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
@@ -821,7 +825,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             let gadgetsRead = { board.sections.first { $0.anchor?.name == "gadgets" }.flatMap { board.reads[$0.id] } }
             try waitUntil("gadgets' section is read from its remote, the clones placed") {
                 refresh()
-                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "app-feature", "gadgets"]
+                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "app-feature", "fork", "gadgets"]
                     && gadgetsRead()?.openPullRequests != nil && gadgetsRead()?.mergedPullRequests != nil
             }
             let lineTitles = { (title: String) in section(title)?.lines.units.flatMap(\.lines).map(\.title) ?? [] }
@@ -832,14 +836,15 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(section("gadgets")?.lines.merged.map(\.number), [], "no one else's merge")
             XCTAssertFalse(section("gadgets")?.menu.contains(.boardSettings) ?? true)
             XCTAssertEqual(lineTitles("app-feature"), ["app"])
-            XCTAssertEqual(board.view.stages.content?.header.summary.hasPrefix("3 repositories"), true)
+            XCTAssertEqual(lineTitles("fork"), ["fork"])
+            XCTAssertEqual(board.view.stages.content?.header.summary.hasPrefix("4 repositories"), true)
             XCTAssertEqual(board.view.header.context, "acme/widgets", "a Board with one repository of its own")
 
             // Its last workspaces closed: the section goes, the Board listing again by itself.
-            for title in ["gadget", "gadget clone", "app"] {
+            for title in ["gadget", "gadget clone", "app", "fork"] {
                 shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title && !$0.isClosing }))
             }
-            try waitUntil("gadgets' and app-feature's sections go") {
+            try waitUntil("the other repositories' sections go") {
                 refresh()
                 return titles() == ["widgets"]
             }

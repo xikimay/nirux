@@ -339,8 +339,10 @@ clicked. The sizes are the mockup's.
   gh takes, upstream before origin) is read before it is placed, once
   board.json and the space's own remotes are read: an anchor's clone never
   shows as another repository for a moment. A clone naming the repository
-  a section reads joins that section (another folder, a fork's checkout,
-  any host alias): no section of its own. With board.json read-only, the
+  an anchor's section reads joins that section (another folder, any host
+  alias); an outside clone whose own base remote is the repository another
+  one's section reads joins it (a fork's checkout reading upstream): no
+  section of its own. A Refresh reads their remotes again. With board.json read-only, the
   space's remotes are read for that alone. Such a section reads its pull
   requests at once, and is read-only: a "Read-only" pill whose tooltip says
   it isn't one of the space's repositories, no merge queue (no Merge
@@ -353,8 +355,10 @@ clicked. The sizes are the mockup's.
   own once its repository is added, its pull requests kept. A workspace in
   no repository is a line under "No repository".
 - **Other workspaces** remain only as a fallback: a workspace in a
-  repository git gave no common dir for, so no section can take it, is one
-  fold after the repositories, in a repository header's place and type,
+  repository git gave no common dir for, or in a second clone of the
+  space's repository while its section reads no GitHub repository
+  (board.json read-only, settings without a valid one), so no section can
+  take it, is one fold after the repositories, in a repository header's place and type,
   "▸ Other workspaces · N", each entry its folder and Focus on the most
   urgent agent there. Each task is in one place.
 

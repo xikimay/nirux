@@ -292,6 +292,17 @@ final class BoardStagesContentFlowTests: XCTestCase {
             try waitUntil("the other repository placed beside a board.json read-only without a config") {
                 (try? stages(of: folderBoard, in: shell).sections.map(\.title)) == ["docs-app", "outside-app"]
             }
+            // A Refresh keeps its remote meanwhile (its section never blanks), and reads it again: a remote changed lands.
+            _ = try BoardConfigSuggestionsTests.git(["remote", "set-url", "origin", "https://github.com/acme/outside-renamed.git"], at: outside)
+            let outsideRead = { folderBoard.sections.first { $0.anchor?.name == "outside-app" }.flatMap { folderBoard.reads[$0.id] } }
+            var blanked = false
+            folderBoard.reload()
+            try waitUntil("the other repository read from its new remote after a Refresh") {
+                folderBoard.tick(onScreen: true)
+                if outsideRead() == nil { blanked = true }
+                return client.calls.contains { $0.what == "pr open acme/outside-renamed" }
+            }
+            XCTAssertFalse(blanked, "its section kept its remote through the Refresh")
 
             // A fourth whose board.json names no valid GitHub repository: its settings are there, but invalid.
             let invalid = shell.workspaceStore.createProfile(named: "Invalid")

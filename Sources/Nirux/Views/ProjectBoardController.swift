@@ -278,7 +278,13 @@ final class ProjectBoardController {
             var context = read.1
             // Until they are read again, the base remotes read before: a
             // Refresh doesn't empty a section meanwhile.
-            if readsRemotes { context.baseRemotes = self.context.baseRemotes }
+            if readsRemotes {
+                context.baseRemotes = self.context.baseRemotes
+            } else {
+                // Another repository's section keeps its remote all the same: none of the space's is read.
+                let extras = Set(self.extraRepositories.compactMap(BoardSections.commonDir(of:)))
+                context.baseRemotes = self.context.baseRemotes.filter { extras.contains($0.key) }
+            }
             self.isReadingRemotes = readsRemotes
             self.remotesDue = nil
             self.apply(read.0, context: context)
@@ -294,7 +300,8 @@ final class ProjectBoardController {
     /// behind another workspace runs no git for them), then applied with
     /// the config read last.
     private func readBaseRemotesWhenShown(configRead current: Int) {
-        let unsaved = sections.filter { $0.config == nil && $0.commonDir != nil }
+        // Another repository's section has its remote from `readListedRemotes`.
+        let unsaved = ownSections.filter { $0.config == nil && $0.commonDir != nil }
         guard !unsaved.isEmpty else {
             isReadingRemotes = false
             return
@@ -681,7 +688,7 @@ final class ProjectBoardController {
         let anchored = Set(ownSections.compactMap(\.commonDir))
         // A section reading a repository takes its other clones by remote (`ProjectBoard.sectionRows`): the one
         // board.json names without anchors, an anchor's second checkout. Compared as the rows are, by owner and name.
-        var taken = ownSections.compactMap { section in
+        let taken = ownSections.compactMap { section in
             reads[section.id]?.gitHub ?? section.commonDir.flatMap(remote).flatMap(RepositoryReads.init(baseRemote:))?.gitHub
         }
         let isTaken = { (remotes: [GitHubRepository]) in
@@ -694,28 +701,33 @@ final class ProjectBoardController {
             return (commonDir, repository)
         }.sorted { ($0.1.worktrees.first?.path ?? $0.0) < ($1.1.worktrees.first?.path ?? $1.0) }
         listedRemotes = listedRemotes.filter { listed.contains($0.key) }
-        let unread = candidates.map(\.0).filter { remote($0) == nil } + ownUnread
+        // Read again after a Refresh, before they are placed again: a remote changed since lands.
+        let unread = candidates.map(\.0).filter { listedRemotes[$0] == nil } + ownUnread
         guard unread.isEmpty else {
             readListedRemotes(Set(unread))
             return
         }
         var found: [SpaceAnchor] = []
         var remotes: [String: BoardSections.BaseRemote] = [:]
-        let folders = workspaceFolders()
-        for (commonDir, repository) in candidates where !isTaken(repository.remotes) {
-            guard let read = remote(commonDir) else { continue }
-            // Its section reads its base remote: the clones naming that repository are its.
-            if let gitHub = RepositoryReads(baseRemote: read)?.gitHub { taken.append(gitHub) }
+        var placedRepositories: [GitHubRepository] = []
+        let folders = workspaceFolders().map { snapshot.folders[$0] ?? $0 }
+        for (commonDir, repository) in candidates {
+            guard let read = listedRemotes[commonDir] else { continue }
+            // Its section reads its base remote: a clone whose own base remote is that repository joins it.
+            if let gitHub = RepositoryReads(baseRemote: read)?.gitHub {
+                guard !placedRepositories.contains(where: { $0.owner == gitHub.owner && $0.name == gitHub.name }) else { continue }
+                placedRepositories.append(gitHub)
+            }
             remotes[commonDir] = read
             found.append(SpaceAnchor.repository(commonDir: commonDir, topLevel: Self.topLevel(of: repository, holding: folders)))
         }
-        guard found != extraRepositories else { return }
-        // Gone, unless made one of the space's: back, it is read again, never shown with the old remote.
+        guard found != extraRepositories || remotes.contains(where: { context.baseRemotes[$0.key] != $0.value }) else { return }
+        // Gone, unless made one of the space's: its remote with it.
         let gone = Set(extraRepositories.compactMap(BoardSections.commonDir(of:)))
             .subtracting(found.compactMap(BoardSections.commonDir(of:))).subtracting(anchored)
         extraRepositories = found
         var placed = context
-        placed.baseRemotes = placed.baseRemotes.merging(remotes) { current, _ in current }.filter { !gone.contains($0.key) }
+        placed.baseRemotes = placed.baseRemotes.merging(remotes) { _, read in read }.filter { !gone.contains($0.key) }
         apply(loaded, context: placed, listsWorktreesAgain: false)
     }
 
@@ -732,7 +744,8 @@ final class ProjectBoardController {
         Self.readOffMain({ BoardSections.readBaseRemotes(toRead) }, then: { [weak self] remotes in
             guard let self, current == self.generation else { return }
             self.runningListedRead = nil
-            var read = Self.merged(remotes, keeping: self.listedRemotes)
+            // What a blip didn't answer stays as read before, here or for a section.
+            var read = Self.merged(remotes, keeping: self.listedRemotes.merging(self.context.baseRemotes) { listed, _ in listed })
             // Never asked again and again: one git didn't answer for is unread.
             for commonDir in commonDirs where read[commonDir] == nil { read[commonDir] = .unread }
             self.listedRemotes.merge(read) { _, new in new }
