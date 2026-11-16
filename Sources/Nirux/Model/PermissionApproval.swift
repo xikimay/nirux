@@ -113,8 +113,9 @@ enum PermissionApproval {
 
 /// When the sidebar may hold a column's requests.
 struct PermissionApprovalHold: Equatable {
-    /// The column's card is drawn with its buttons (expanded sidebar, its
-    /// workspace listed, not folded away) and the column is not the one on
+    /// The column's buttons are offered: on its card (expanded sidebar, its
+    /// workspace listed, not folded away) or, the sidebar folded, in the
+    /// inbox and the rail's callout; and the column is not the one on
     /// screen, whose terminal dialog answers.
     let cardShown: Bool
     /// The user can see the sidebar now: app active, window visible.

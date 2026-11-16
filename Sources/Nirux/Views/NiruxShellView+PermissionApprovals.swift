@@ -47,23 +47,47 @@ extension NiruxShellView {
         NSLog("[Approvals] %@ sent for %@ request %@", behavior.rawValue, request.toolName ?? "?", requestID)
     }
 
-    /// Whether the sidebar may hold the requests of a column: its card is
-    /// drawn with the buttons, for a column the user is not looking at
-    /// (its terminal dialog answers). Not in a collapsed sidebar, another
-    /// space (`listed` holds the listed workspaces), a workspace in the
-    /// folded inactive section (listed there when it waits, without its
-    /// buttons), or under VoiceOver, which the buttons don't serve.
+    /// Whether Nirux may hold the requests of a column: its buttons are
+    /// offered, for a column the user is not looking at (its terminal
+    /// dialog answers; once it comes on screen the request goes back there
+    /// at the next refresh). Unfolded, on its card: not for another space
+    /// (`listed` holds the listed workspaces) or a workspace in the folded
+    /// inactive section (listed there when it waits, without its buttons).
+    /// Folded, in the inbox and the rail's callout, which list every
+    /// space's requests (decided with the Lead, 2026-11-16). Never under
+    /// VoiceOver, which the buttons don't serve.
     func approvalHold(workspaceIndex: Int, columnIndex: Int, listed: Set<Int>) -> PermissionApprovalHold {
         guard workspaces.indices.contains(workspaceIndex) else { return .never }
         let workspace = workspaces[workspaceIndex]
         let isOnScreen = columnIndex == workspace.focusedIndex && workspaceIndex == activeWSIndex
-        let cardShown = isSidebarExpanded && !isOnScreen
-            && listed.contains(workspaceIndex)
-            && sidebar.listsWorkspace(isInactive: workspace.isInactive, isActive: workspaceIndex == activeWSIndex)
-            && !NSWorkspace.shared.isVoiceOverEnabled
-        let userSeesSidebar = NSApp.isActive && window?.isVisible == true && window?.isMiniaturized == false
+        let cardShown = Self.offersApprovalButtons(
+            sidebarShowsCards: sidebar.isExpanded, isOnScreen: isOnScreen,
+            cardHasButtons: listed.contains(workspaceIndex)
+                && sidebar.listsWorkspace(isInactive: workspace.isInactive, isActive: workspaceIndex == activeWSIndex),
+            voiceOver: NSWorkspace.shared.isVoiceOverEnabled
+        )
+        let userSeesSidebar = Self.showsApprovalButtonsNow(
+            sidebarShowsCards: sidebar.isExpanded, requestPanelOpen: requestsState.isInboxOpen || requestsState.isCalloutOpen
+        ) && NSApp.isActive && window?.isVisible == true && window?.isMiniaturized == false
             && window?.occlusionState.contains(.visible) == true
         return PermissionApprovalHold(cardShown: cardShown, userSeesSidebar: userSeesSidebar)
+    }
+
+    /// Whether a column's Allow / Deny are offered somewhere: on its card
+    /// while the sidebar shows the cards (`cardHasButtons`), in the inbox
+    /// and the callout while it is folded; never for the column on screen
+    /// or under VoiceOver.
+    /// Whether Allow / Deny are drawn right now, which a background
+    /// subagent's request waits for (its dialog waits for the hook): on the
+    /// cards while the sidebar shows them; folded, only while the inbox or
+    /// the callout is open, not behind the bar's count.
+    static func showsApprovalButtonsNow(sidebarShowsCards: Bool, requestPanelOpen: Bool) -> Bool {
+        sidebarShowsCards || requestPanelOpen
+    }
+
+    static func offersApprovalButtons(sidebarShowsCards: Bool, isOnScreen: Bool, cardHasButtons: Bool, voiceOver: Bool) -> Bool {
+        guard !isOnScreen, !voiceOver else { return false }
+        return sidebarShowsCards ? cardHasButtons : true
     }
 
     /// Release every request the sidebar can no longer hold (see

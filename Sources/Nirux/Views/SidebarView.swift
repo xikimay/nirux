@@ -94,6 +94,9 @@ final class SidebarView: NSView {
     var onShowArchived: (() -> Void)?
     /// The rail's Board.
     var onOpenBoard: (() -> Void)?
+    /// A click on an amber rail icon: (task id, its icon). True when the
+    /// shell shows its request there; false, the click goes to the task.
+    var onRailRequest: ((String, NSView) -> Bool)?
     /// Folded, the sidebar is this rail (see SidebarView+IconRail).
     let iconRail = IconRail(level: .opaque)
     var isExpanded: Bool = false {

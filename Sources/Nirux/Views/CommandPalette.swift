@@ -219,7 +219,8 @@ final class CommandPalette: NSObject {
     /// its window (`windowFrame`) and then on the screen (`screen`, its
     /// visible frame), the left edge first; below the bar, or above it where
     /// the screen's bottom leaves no room below but room above.
-    static func place(underBar bar: NSRect, in windowFrame: NSRect, screen: NSRect?) -> BarPlace {
+    /// `size`: the palette's, or the inbox's that hangs there too.
+    static func place(underBar bar: NSRect, in windowFrame: NSRect, screen: NSRect?, size: NSSize = CommandPalette.size) -> BarPlace {
         let margin = Theme.Space.sm
         var x = max(min(bar.midX - size.width / 2, windowFrame.maxX - margin - size.width), windowFrame.minX + margin)
         var y = bar.minY - barGap - size.height

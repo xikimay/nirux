@@ -20,6 +20,9 @@ extension NiruxShellView {
             && (!catchUpState.followsSystem || awayConditionsNow().subtracting([.appActive]).isEmpty)
         let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
         noteMissionQuestionHandOffs(missionQuestions)
+        requestsState.handedOff = handedOffQuestions(missionQuestions)
+        // Seen ones no longer handed off are forgotten.
+        requestsState.seenHandedOff.formIntersection(requestsState.handedOff.values.map(\.question.questionID))
         let appIsActive = sideEffects.appIsActive()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
@@ -29,6 +32,11 @@ extension NiruxShellView {
                 // Its question read on screen: its column in front, the
                 // user there. Next Waiting Agent goes to it after the others.
                 if isUserFocused, col.pty?.agentHasUnseenQuestion == true, userIsThere { col.pty?.noteAgentQuestionSeen() }
+                // A Mission question handed to the user, read on screen the
+                // same way: it stands after the waits not seen yet.
+                if isUserFocused, userIsThere, let question = requestsState.handedOff[col.id]?.question {
+                    requestsState.seenHandedOff.insert(question.questionID)
+                }
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
                 let agentStatus = col.pty?.agentStatus(
                     foregroundProcess: foregroundProcess,
@@ -83,15 +91,14 @@ extension NiruxShellView {
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.update(profiles: profileInfos, workspaces: infos)
-        // The command bar counts what ⌘J would visit, through ⌘J's own
-        // queue, that waits for the user's answer.
-        let queue = WaitingAgentQueue.collect(from: workspaces) { self.quickSwitch.agentWait($0, snapshot, now) }
-        updateCommandBar(
-            task: infos.first { $0.index == activeWSIndex },
-            waitingCount: Self.commandBarWaitingCount(
-                queue: queue, onScreen: activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
-            )
+        // The requests: what ⌘J would visit, through ⌘J's own queue, that
+        // waits for the user's answer; the command bar counts them.
+        let requested = Self.requestedAgents(
+            in: waitingQueue(snapshot: snapshot, now: now), onScreen: activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
         )
+        requestsState.requests = waitingRequests(requested, approvalHolds: approvalHolds, foregroundProcesses: foregroundProcesses)
+        updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: requestsState.requests.count)
+        refreshRequestPanels()
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)

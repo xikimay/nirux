@@ -34,9 +34,9 @@ final class RequestInboxViewTests: XCTestCase {
         inbox.layoutSubtreeIfNeeded()
     }
 
-    private func key(_ characters: String) throws -> NSEvent {
+    private func key(_ characters: String, _ type: NSEvent.EventType = .keyDown) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
-            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
             characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0
         ))
     }
@@ -84,7 +84,9 @@ final class RequestInboxViewTests: XCTestCase {
         var closed = 0
         inbox.onClose = { closed += 1 }
         inbox.keyDown(with: try key("\u{1b}"))
-        XCTAssertEqual(closed, 1)
+        XCTAssertEqual(closed, 0, "not while Escape is held: its repeats would reach a terminal")
+        inbox.keyUp(with: try key("\u{1b}", .keyUp))
+        XCTAssertEqual(closed, 1, "on its release")
     }
 
     /// The choice comes into view; a refresh, even one that takes the chosen
@@ -240,7 +242,7 @@ final class RequestInboxViewTests: XCTestCase {
         XCTAssertLessThanOrEqual(callout.moreLabel.frame.maxY, callout.bounds.height - Theme.Space.sm, "inside the callout")
 
         var opened: [String] = [], answered: [RequestChoice] = [], closed = 0
-        callout.onOpenTask = { opened.append($0) }
+        callout.onOpenTask = { opened.append($0.taskID) }
         callout.onAnswer = { _, choice, _ in answered.append(choice) }
         callout.onClose = { closed += 1 }
         callout.card.openButton.performClick(nil)
@@ -254,6 +256,8 @@ final class RequestInboxViewTests: XCTestCase {
         deny.performClick(nil)
         XCTAssertEqual(answered, [.permission(.deny)], "the line below went: the buttons didn't move")
         callout.keyDown(with: try key("\u{1b}"))
+        XCTAssertEqual(closed, 0, "not while Escape is held")
+        callout.keyUp(with: try key("\u{1b}", .keyUp))
         XCTAssertEqual(closed, 1)
         XCTAssertEqual(callout.card.openButton.acceptsPress?(try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
@@ -287,5 +291,19 @@ final class RequestInboxViewTests: XCTestCase {
         clock += SidebarView.approvalArmingDelay
         deny.performClick(nil)
         XCTAssertEqual(answered.count, 1, "the press was on a")
+    }
+
+    /// Capped by its host (a short window, a tall command), the callout
+    /// scrolls its card: its title and "Open task" stay reachable.
+    func testTheCalloutScrollsPastItsCap() throws {
+        let callout = RequestCalloutView(level: .opaque)
+        callout.show(RequestCardViewTests.request(.terminal(String(repeating: "a long command ", count: 60))), othersWaiting: 2)
+        let full = callout.fittingHeight
+        callout.frame = NSRect(x: 0, y: 0, width: RequestCalloutView.width, height: full / 2)
+        callout.layoutSubtreeIfNeeded()
+        let scroll = callout.scroll
+        XCTAssertLessThan(scroll.frame.height, full / 2, "the more line below it")
+        XCTAssertGreaterThan(try XCTUnwrap(scroll.documentView).frame.height, scroll.contentSize.height, "the card scrolls")
+        XCTAssertTrue(callout.card.isDescendant(of: scroll))
     }
 }

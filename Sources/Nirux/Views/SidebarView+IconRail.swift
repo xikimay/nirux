@@ -28,9 +28,12 @@ extension SidebarView {
         iconRail.isHidden = true
         addSubview(iconRail)
         iconRail.onSelect = { [weak self] id in self?.selectFromRail(id) }
-        // Until the callout (3.3): what a click on the task's row does,
-        // which goes to the column that waits.
-        iconRail.onRequest = { [weak self] id, _ in self?.selectFromRail(id) }
+        // The task's request beside its icon (the shell's callout); with
+        // none to show, what a click on the row does.
+        iconRail.onRequest = { [weak self] id, icon in
+            guard let self else { return }
+            if onRailRequest?(id, icon) != true { selectFromRail(id) }
+        }
         iconRail.onArchived = { [weak self] in self?.onShowArchived?() }
         iconRail.onNew = { [weak self] in self?.onNewWorkspace?() }
         iconRail.onBoard = { [weak self] in self?.onOpenBoard?() }

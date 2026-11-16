@@ -24,6 +24,12 @@ final class QuickSwitchState {
     func focusMoved() { walk = [] }
 
     func noteWalk(_ columns: [UUID]) { walk = columns }
+
+    /// The walk as it goes on from `current`, the column on screen: on while
+    /// the user stays where its last step landed, else from there.
+    func walk(from current: UUID?) -> [UUID] {
+        current != nil && current == walk.last ? walk : current.map { [$0] } ?? []
+    }
 }
 
 // MARK: - Quick switcher (⌘P workspaces) and Next Waiting Agent (⌘J)
@@ -121,21 +127,38 @@ extension NiruxShellView {
 
     static let noWaitingAgentHint = "No agent is waiting on you"
 
-    /// Next Waiting Agent (⌘J): to the agent blocked on the user that
-    /// they have not seen yet, the longest wait first, then on through
-    /// every other one at each press (see `WaitingAgentQueue.next`),
-    /// whatever its workspace or space. With
-    /// none, a hint says so, without a beep.
+    /// Next Waiting Agent (⌘J, the command bar's badge). The sidebar
+    /// folded, requests waiting: the inbox opens under the bar (over a
+    /// callout, which closes), and ⌘J again goes to the request chosen in
+    /// it. Else, as the sidebar unfolded, where the requests stay in the
+    /// rows: to the agent blocked on the user that they have not seen yet,
+    /// the longest wait first, then on through every other one at each
+    /// press (see `WaitingAgentQueue.next`), whatever its workspace or
+    /// space, the agents stopped on an error or exited too. With none, a
+    /// hint says so, without a beep.
     func jumpToNextWaitingAgent() {
+        // ⌘J with the palette open: neither the inbox nor the hint goes
+        // under it.
+        if commandPalette?.isVisible == true { commandPalette?.dismiss() }
+        // A held ⌘J opens the inbox, or goes to its request, once.
+        let isRepeat = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
+        if requestsState.isInboxOpen {
+            guard !isRepeat else { return }
+            if let chosen = requestsState.inbox?.chosenRequest { goToRequest(chosen) } else { closeInbox() }
+            return
+        }
+        if !sidebar.isExpanded, let window, sideEffects.windowShows(window) {
+            // The requests as they are now, not at the last refresh.
+            updateSidebar()
+            if !requestsState.requests.isEmpty { return isRepeat ? () : openInbox() }
+        }
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
-        let queue = WaitingAgentQueue.collect(from: workspaces) { self.quickSwitch.agentWait($0, snapshot, now) }
+        let queue = waitingQueue(snapshot: snapshot, now: now)
         let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
-        // ⌘J with the palette open: the hint would show under it.
-        if commandPalette?.isVisible == true { commandPalette?.dismiss() }
         // The walk goes on while the user stays where its last press
         // landed; else it starts where they are.
-        let walk = current != nil && current == quickSwitch.walk.last ? quickSwitch.walk : current.map { [$0] } ?? []
+        let walk = quickSwitch.walk(from: current)
         guard let (next, walked) = WaitingAgentQueue.next(from: current, walk: walk, in: queue),
               let workspace = workspaces.first(where: { $0.id == next.workspaceID }),
               let columnIndex = workspace.columns.firstIndex(where: { $0.id == next.columnID }) else {

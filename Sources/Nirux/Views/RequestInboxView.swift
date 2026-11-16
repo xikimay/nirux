@@ -4,16 +4,18 @@ import AppKit
 /// command bar, every request waiting for the user, in the order it is
 /// given (oldest first), each with its answers. It opens with the oldest
 /// chosen; ↑ ↓ move the choice, and ⌘J again goes to the chosen task
-/// (`chosenRequest`); Escape closes it. Answers are clicks only. Built, not
-/// shown yet: phase 3 hosts it and feeds it.
+/// (`chosenRequest`); Escape closes it. Answers are clicks only. The shell
+/// hosts it under the command bar (`openInbox`, a `RequestPanel`) and feeds
+/// it at each sidebar refresh.
 final class RequestInboxView: NSView {
     static let width: CGFloat = 372
     static let headerHeight: CGFloat = 34
 
     /// A click on an answer: the request, the answer, its button.
     var onAnswer: ((WaitingRequest, RequestChoice, NSView) -> Void)?
-    /// A request only the terminal answers: its task, by id.
-    var onOpenTask: ((String) -> Void)?
+    /// "Open task" on a request: the request, whose column the host
+    /// brings up (a task may wait in several).
+    var onOpenTask: ((WaitingRequest) -> Void)?
     var onClose: (() -> Void)?
 
     var level: InterfaceTransparency {
@@ -145,7 +147,7 @@ final class RequestInboxView: NSView {
         card.onClick = { [weak self] in self?.choose(id) }
         card.onOpenTask = { [weak self] in
             guard let self, let request = self.requests.first(where: { $0.id == id }) else { return }
-            self.onOpenTask?(request.taskID)
+            self.onOpenTask?(request)
         }
         cards[id] = card
         return card
@@ -179,6 +181,7 @@ final class RequestInboxView: NSView {
     /// call: the answers that slid on screen wait again by themselves.
     func opened() {
         choose(requests.first?.id)
+        escapeIsDown = false
         restartArming()
     }
 
@@ -281,8 +284,18 @@ final class RequestInboxView: NSView {
         case .upArrow?: moveChoice(by: -1)
         case .downArrow?: moveChoice(by: 1)
         default:
-            if event.charactersIgnoringModifiers == "\u{1b}" { onClose?() } else { super.keyDown(with: event) }
+            if event.charactersIgnoringModifiers == "\u{1b}" { escapeIsDown = true } else { super.keyDown(with: event) }
         }
+    }
+
+    /// Escape closes it on its release: the keyboard then goes back to a
+    /// terminal, which a held key's repeats must not reach.
+    private var escapeIsDown = false
+
+    override func keyUp(with event: NSEvent) {
+        guard event.charactersIgnoringModifiers == "\u{1b}", escapeIsDown else { return super.keyUp(with: event) }
+        escapeIsDown = false
+        onClose?()
     }
 
     /// ⌘. and the key bindings' Escape.
