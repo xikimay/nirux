@@ -8,7 +8,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var shell: NiruxShellView?
     var updaterController: SPUStandardUpdaterController?
     var updateDot: NSView?
-    var settingsWindow: NSWindow?
+    /// Settings without a shell (tests); the app's are the shell's.
+    lazy var standaloneSettings = SettingsWindow()
     weak var settingsKeepAwakeCheckbox: NSButton?
     weak var settingsAnimationsCheckbox: NSButton?
     weak var settingsTasksFolderLabel: NSTextField?
@@ -156,6 +157,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
+        wireSettings(shellView.settingsWindow)
         shellView.installCommandBar(in: window)
         // The frame the screen leaves, now that the toolbar set the title
         // bar's height: even margins all round.

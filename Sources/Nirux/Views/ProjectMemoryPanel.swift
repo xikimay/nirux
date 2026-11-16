@@ -523,7 +523,7 @@ final class ProjectMemoryPanel: NSObject {
     private func createContent(in host: NSView) {
         background?.removeFromSuperview()
         let size = Self.panelSize
-        // The host is held at this size (see SpaceSettingsWindow).
+        // The host is held at this size (see SpaceSettingsSection).
         let background = NSView(frame: NSRect(origin: .zero, size: size))
         background.wantsLayer = true
         background.layer?.backgroundColor = Theme.Color.base.cgColor

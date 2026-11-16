@@ -200,7 +200,10 @@ final class NiruxShellView: NSView {
     /// Space Settings, for one space at a time (see
     /// NiruxShellView+SpaceSettings), its setup script sheet, and the
     /// GitHub repositories read for its rows, by anchor key.
-    var spaceSettings: SpaceSettingsWindow?
+    var spaceSettings: SpaceSettingsSection?
+    /// Nirux's one Settings window (docs/design/glass-interface.md, 4.1): the
+    /// app's panes come from NiruxApp, the space's from here.
+    lazy var settingsWindow: SettingsWindow = makeSettingsWindow()
     var setupScriptSheet: (panel: NSPanel, editor: SpaceFileEditorPane)?
     var spaceSettingsGitHub: [String: String] = [:]
     var newTaskPanel: NewTaskPanel?

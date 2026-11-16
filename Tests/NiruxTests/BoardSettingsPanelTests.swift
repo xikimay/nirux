@@ -259,7 +259,7 @@ final class BoardSettingsPanelTests: XCTestCase {
                 questions.append(alert.messageText)
                 reply(.alertFirstButtonReturn)
             }
-            XCTAssertFalse(settings.windowShouldClose(try XCTUnwrap(settings.panel)))
+            XCTAssertFalse(shell.settingsWindow.windowShouldClose(try XCTUnwrap(settings.panel)))
             XCTAssertEqual(questions, ["Save the changes to the board settings?"])
             XCTAssertNil(shell.spaceSettings, "saved, then closed")
             XCTAssertEqual(try store(space).load().config?.repository, "acme/widgets")

@@ -276,12 +276,12 @@ final class SpaceSettingsFlowTests: XCTestCase {
             settings.select(.brief)
 
             let panel = try XCTUnwrap(settings.panel)
-            XCTAssertFalse(settings.windowShouldClose(panel), "Cancel")
+            XCTAssertFalse(shell.settingsWindow.windowShouldClose(panel), "Cancel")
             XCTAssertEqual(questions, ["Save the changes to the brief?"])
             XCTAssertIdentical(shell.spaceSettings, settings)
 
             answer = .alertThirdButtonReturn
-            XCTAssertFalse(settings.windowShouldClose(panel))
+            XCTAssertFalse(shell.settingsWindow.windowShouldClose(panel))
             XCTAssertNil(shell.spaceSettings, "Don’t Save closes")
             XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(SpaceBrief.briefURL(spaceID: first.id)).path))
 

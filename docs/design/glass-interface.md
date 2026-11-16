@@ -1,6 +1,6 @@
 # Glass interface
 
-> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3), the rows on glass (3.4).\
+> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3), the rows on glass (3.4); phase 4 starts with one Settings window (4.1).\
 > **Differs today:** the app draws every level as Opaque until phase 4 brings the Appearance page and the translucent window.
 
 Status: design validated by the user on 2026-11-14, after six rounds of
@@ -323,6 +323,33 @@ the palette its `windowShows` from `ShellSideEffects`, so that flow tests,
 whose windows never show, reach the placement under the bar.
 
 ![⌘P under the command bar: Opaque exact, Glass approximated](../images/palette-under-bar.png)
+
+## Settings
+
+`SettingsWindow` is the one Settings window (4.1), for the app and the
+space, in place of Settings' three toolbar tabs and Space Settings' seven:
+
+- **Sidebar** (`SettingsSidebar`, a table, so ↑ ↓ walk the panes and
+  VoiceOver reads a list): "Nirux" and its panes (General, Agents,
+  Notifications; Appearance comes in 4.2), then the space's colour square
+  and name, a popup to pick another space, and its panes (General, Defaults,
+  Lead, Brief, Memory, Board, Templates). Plain SF Symbols in the secondary
+  text colour, no coloured tiles: colour stays for states. The pane shown
+  lies on the selection's glass, as a selected task row does.
+- **Panes** as they were in the tabs; their redesign is phase 5. The app
+  builds Nirux's each time the window opens; the shell builds the space's
+  (`SpaceSettingsSection`) and writes what they change.
+- **One space at a time:** the active one, or the one whose Space Settings…
+  was chosen. Text typed and not saved keeps its space: picking another
+  shows that text and says so in a toast. Closing and quitting ask, as
+  before.
+- **Size:** fixed width (the sidebar and the widest pane, Memory's list),
+  narrower panes centred; the height fits each pane, or the sidebar's list,
+  top edge fixed.
+- **Title:** the pane's ("Agents", "Acme — Brief").
+- **Entry points:** ⌘, and Settings… open on the pane last shown (the
+  first time, Nirux's General); Space Settings… on the space's General;
+  Board settings and Space Memory… on their panes.
 
 ## Plan
 

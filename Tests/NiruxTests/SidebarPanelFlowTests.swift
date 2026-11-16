@@ -527,20 +527,21 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertIdentical(spaceWorkspace, repoWorkspace)
             XCTAssertEqual(spaceWorkspace.profileID, space.id)
 
-            // Space Settings opens on General: the name, the color, the
-            // repositories; its tabs hold what the space menu used to.
+            // Space Settings opens the Settings window on the space's
+            // General: the name, the color, the repositories; its panes hold
+            // what the space menu used to.
             harness.perform(["Space Settings…"], in: shell.sidebar.spacePickerMenu())
             let settings = try XCTUnwrap(shell.spaceSettings)
             XCTAssertEqual(settings.spaceID, space.id)
             XCTAssertEqual(settings.selectedTab, .general)
-            XCTAssertEqual(settings.panel?.title, "repo Settings")
+            XCTAssertEqual(settings.panel?.title, "repo — General")
             XCTAssertEqual(settings.general.model.rows.map(\.anchor.name), ["repo"])
             let nameField = try XCTUnwrap(harness.waitForField(placeholder: "Space name"))
             XCTAssertIdentical(nameField, settings.general.nameField)
             XCTAssertEqual(nameField.stringValue, space.name)
             harness.submit("Flow Space", into: nameField)
             XCTAssertEqual(try activeSpace().name, "Flow Space")
-            XCTAssertEqual(settings.panel?.title, "Flow Space Settings")
+            XCTAssertEqual(settings.panel?.title, "Flow Space — General")
 
             let color = try XCTUnwrap(WorkspaceProfile.palette.first {
                 $0.hex.caseInsensitiveCompare(space.colorHex) != .orderedSame

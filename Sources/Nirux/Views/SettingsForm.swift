@@ -3,7 +3,7 @@ import AppKit
 /// Building blocks of the Settings window's panes: section headers,
 /// checkboxes with their hint underneath, labeled rows. A pane is a vertical
 /// stack of sections, as wide as every other pane, as tall as its content
-/// (the window fits each pane when its tab is picked).
+/// (the window fits each pane when it is picked).
 @MainActor
 enum SettingsForm {
     static let paneWidth: CGFloat = 560
@@ -117,31 +117,5 @@ enum SettingsForm {
     static func select(_ value: Any, in popup: NSPopUpButton) {
         let index = popup.indexOfItem(withRepresentedObject: value)
         if index >= 0 { popup.selectItem(at: index) }
-    }
-}
-
-/// Toolbar tabs, one pane each. Picking a tab fits the window to that pane,
-/// top edge fixed, as macOS Settings windows do: left alone, the tab view
-/// controller grows the window for a taller pane but never shrinks it.
-final class SettingsTabViewController: NSTabViewController {
-    /// The index of the tab just picked.
-    var onSelect: ((Int) -> Void)?
-
-    override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
-        super.tabView(tabView, didSelect: tabViewItem)
-        fitWindowToSelectedPane(animated: true)
-        onSelect?(selectedTabViewItemIndex)
-    }
-
-    /// Animates only in front of the user (xctest's app is never active).
-    func fitWindowToSelectedPane(animated: Bool) {
-        guard let window = view.window,
-              tabViewItems.indices.contains(selectedTabViewItemIndex),
-              let pane = tabViewItems[selectedTabViewItemIndex].viewController?.view
-        else { return }
-        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: pane.fittingSize))
-        frame.origin = NSPoint(x: window.frame.minX, y: window.frame.maxY - frame.height)
-        guard frame != window.frame else { return }
-        window.setFrame(frame, display: true, animate: animated && window.isVisible && NSApp.isActive)
     }
 }
