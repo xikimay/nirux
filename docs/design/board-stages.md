@@ -346,7 +346,7 @@ clicked. The sizes are the mockup's.
   Retarget), no Board Settings…. It lists this space's workspaces there and
   nothing else of that repository: no other worktree (another space's,
   with its Clean Up…), no pull request without a task, no merge but its
-  tasks'. It counts among the space's repositories in its header. It goes
+  tasks' still open here. It counts among the space's repositories in its header. It goes
   with its last workspace (the Board lists again when a workspace it listed
   is gone), and becomes the space's own once its repository is added. A
   workspace in no repository is a line under "No repository".

@@ -768,13 +768,21 @@ final class ProjectBoardFlowTests: XCTestCase {
     /// read-only once the repository is the space's.
     @MainActor
     func testEachRepositoryOfAWorkspaceHasItsSection() throws {
-        // A pull request of gadgets no workspace here has: someone else's, not shown.
+        // Pull requests of gadgets no workspace here has, open and merged today: someone else's, not shown.
         let strange = """
         [{"number": 31, "state": "OPEN", "headRefName": "feat/strange", "headRefOid": "\(String(repeating: "b", count: 40))",
           "headRepository": {"name": "gadgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
           "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/gadgets/pull/31", "statusCheckRollup": []}]
         """
-        let client = FakeGitHub(openPullRequests: "[]", runs: "[]", openByRepository: ["acme/gadgets": strange])
+        let strangeMerge = """
+        [{"number": 32, "state": "MERGED", "headRefName": "feat/strange-merge", "headRefOid": "\(String(repeating: "c", count: 40))",
+          "headRepository": {"name": "gadgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
+          "isDraft": false, "mergeable": "UNKNOWN", "url": "https://github.com/acme/gadgets/pull/32",
+          "mergedAt": "\(ISO8601DateFormatter().string(from: Date()))", "statusCheckRollup": []}]
+        """
+        let client = FakeGitHub(
+            openPullRequests: "[]", mergedPullRequests: strangeMerge, runs: "[]", openByRepository: ["acme/gadgets": strange]
+        )
         try withShell(client: client) { shell, space in
             let widgets = root + "/widgets", copy = root + "/widgets-copy"
             let gadgets = root + "/gadgets", gadgetsClone = root + "/gadgets-clone"
@@ -785,6 +793,9 @@ final class ProjectBoardFlowTests: XCTestCase {
             try BoardConfigSuggestionsTests.makeRepository(at: gadgetsClone, remote: "git@github.com:acme/gadgets.git")
             // Another space's worktree of gadgets: not this Board's to show, nor to clean up.
             try git(["worktree", "add", "-q", "-b", "feat/elsewhere", root + "/gadgets.elsewhere"], at: gadgets)
+            // A bare repository, named as adding it to the space would: "app.git".
+            try git(["clone", "-q", "--bare", gadgets, root + "/app.git"], at: root)
+            try git(["worktree", "add", "-q", "-b", "feat/app", root + "/app-feature"], at: root + "/app.git")
             var widgetsAnchor = try XCTUnwrap(FolderIdentity.identify(widgets, timeout: 10)).anchor
             widgetsAnchor.isDefault = true
             // Without settings: the anchor's section reads its remote, and takes the clone by it all the same.
@@ -793,6 +804,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.addWorkspace(title: "copy", cwd: copy, profileID: space.id)
             shell.addWorkspace(title: "gadget", cwd: gadgets, profileID: space.id)
             shell.addWorkspace(title: "gadget clone", cwd: gadgetsClone, profileID: space.id)
+            shell.addWorkspace(title: "app", cwd: root + "/app-feature", profileID: space.id)
             try select("widgets", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
@@ -802,25 +814,30 @@ final class ProjectBoardFlowTests: XCTestCase {
                 board.tick(onScreen: true)
                 shell.renderProjectBoard(board)
             }
-            // Once widgets' remote is read too, the clones are placed: no section of their own.
+            // Once widgets' remote is read too, the clones are placed: no section of their own. Gadgets' pull requests
+            // read, so that what it doesn't show is there to show.
+            let gadgetsRead = { board.sections.first { $0.anchor?.name == "gadgets" }.flatMap { board.reads[$0.id] } }
             try waitUntil("gadgets' section is read from its remote, the clones placed") {
                 refresh()
-                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "gadgets"]
+                return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "gadgets", "app.git"]
+                    && gadgetsRead()?.openPullRequests != nil && gadgetsRead()?.mergedPullRequests != nil
             }
             let lineTitles = { (title: String) in section(title)?.lines.units.flatMap(\.lines).map(\.title) ?? [] }
             XCTAssertEqual(lineTitles("widgets"), ["widgets", "copy"], "the second clone of the space's repository stays there")
             XCTAssertEqual(lineTitles("gadgets"), ["gadget", "gadget clone"], "both clones of gadgets in its one section")
             XCTAssertEqual(section("gadgets")?.lines.otherWorktrees.map(\.path), [], "no other space's worktree, no Clean Up…")
             XCTAssertEqual(section("gadgets")?.lines.withoutTask.flatMap(\.lines).map(\.title), [], "no one else's pull request")
+            XCTAssertEqual(section("gadgets")?.lines.merged.map(\.number), [], "no one else's merge")
             XCTAssertFalse(section("gadgets")?.menu.contains(.boardSettings) ?? true)
-            XCTAssertEqual(board.view.stages.content?.header.summary.hasPrefix("2 repositories"), true)
+            XCTAssertEqual(lineTitles("app.git"), ["app"])
+            XCTAssertEqual(board.view.stages.content?.header.summary.hasPrefix("3 repositories"), true)
             XCTAssertEqual(board.view.header.context, "acme/widgets", "a Board with one repository of its own")
 
             // Its last workspaces closed: the section goes, the Board listing again by itself.
-            for title in ["gadget", "gadget clone"] {
+            for title in ["gadget", "gadget clone", "app"] {
                 shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title && !$0.isClosing }))
             }
-            try waitUntil("gadgets' section goes") {
+            try waitUntil("gadgets' and app.git's sections go") {
                 refresh()
                 return titles() == ["widgets"]
             }

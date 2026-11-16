@@ -67,7 +67,7 @@ One Explain runs at a time in the whole app, and **Cancel** stops it. Explain is
 
 ## The Board
 
-`Ctrl+Cmd+B`, or `Open Board` in the command palette, opens the Board of the current space: a section per repository, one line per task. A repository that isn't one of the space's (Space Settings) but holds one of its workspaces has a read-only section: its pull requests, without a merge queue.
+`Ctrl+Cmd+B`, or `Open Board` in the command palette, opens the Board of the current space: a section per repository, one line per task. A repository that isn't one of the space's (Space Settings) but holds one of its workspaces has a read-only section: its tasks there and their pull requests, without a merge queue.
 
 - Each line shows the task's state, a rail of four stations (Code, Reviews, Checks, Merge), a phrase saying what the task waits for, its pull request and a time. A sub-task sits under its task; a stack of pull requests shares a numbered rail.
 - A click on a line opens the task. A right click shows its menu: Open Pull Request, Add to Queue, Retarget, Resume, Clean Up…, Open.

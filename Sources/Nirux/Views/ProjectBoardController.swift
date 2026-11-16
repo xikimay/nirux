@@ -686,10 +686,15 @@ final class ProjectBoardController {
         }
         extraRemotes = remotes
         guard found != extraRepositories else { return }
-        let new = Set(found.compactMap(BoardSections.commonDir(of:))).subtracting(extraRepositories.compactMap(BoardSections.commonDir(of:)))
+        let foundDirs = Set(found.compactMap(BoardSections.commonDir(of:)))
+        let new = foundDirs.subtracting(extraRepositories.compactMap(BoardSections.commonDir(of:)))
+        let gone = Set(extraRepositories.compactMap(BoardSections.commonDir(of:))).subtracting(foundDirs)
         extraRepositories = found
         // Before the render `apply` makes: a new section says it reads its remote.
         if !new.isEmpty { isReadingRemotes = true }
+        // A repository gone forgets its remote: back, it reads it again, never shows the old one's pull requests.
+        var context = context
+        context.baseRemotes = context.baseRemotes.filter { !gone.contains($0.key) }
         apply(loaded, context: context, listsWorktreesAgain: false)
         // Only the repositories just found: the others' remotes are read.
         if !new.isEmpty { readBaseRemotesWhenShown(configRead: configRead, only: new) }
