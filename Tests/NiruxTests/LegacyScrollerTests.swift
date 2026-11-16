@@ -38,7 +38,8 @@ final class LegacyScrollerTests: XCTestCase {
 
     /// `width`: the rail's or the list's, as `expanded` says, unless given.
     private func sidebar(rows count: Int, style: NSScroller.Style, expanded: Bool = true, width: CGFloat? = nil) -> SidebarView {
-        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: width ?? (expanded ? 260 : SidebarView.foldedWidth), height: 300))
+        // Room for two rows, the catch-up card and the navigator rows.
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: width ?? (expanded ? 260 : SidebarView.foldedWidth), height: 380))
         show(sidebar)
         sidebar.contentScrollView.scrollerStyle = style
         sidebar.isExpanded = expanded

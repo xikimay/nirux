@@ -90,6 +90,7 @@ extension NiruxShellView {
             )
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
+        sidebar.navigation = sidebarNavigation
         sidebar.update(profiles: profileInfos, workspaces: infos)
         // The requests: what ⌘J would visit, through ⌘J's own queue, that
         // waits for the user's answer; the command bar counts them.
@@ -731,5 +732,21 @@ extension NiruxShellView {
                 }
             }
         }
+    }
+}
+
+extension NiruxShellView {
+    /// The navigator rows' state: the Board row selected while the space's
+    /// Board column shows on screen (`showsColumn`, the one definition of in
+    /// view): it opens beside the agent, and a click between the two leaves
+    /// both shown. Pressable while a task is open (the Board opens beside
+    /// it).
+    var sidebarNavigation: SidebarNavigation {
+        guard let workspace = activeWorkspace, !workspace.isClosing else { return SidebarNavigation(boardShown: false, boardAvailable: false) }
+        let shown = workspace.columns.indices.contains { index in
+            let column = workspace.columns[index]
+            return column.projectBoard != nil && !column.isClosing && workspace.showsColumn(at: index)
+        }
+        return SidebarNavigation(boardShown: shown, boardAvailable: true)
     }
 }

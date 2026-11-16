@@ -117,7 +117,7 @@ extension SidebarView {
         }.max { $0.bottom < $1.bottom }
         folds.append(Fold(
             workspaceID: workspace.id, startedAt: now, top: height - frame.maxY, frame: frame, picture: picture,
-            under: under, cardTop: card, above: above, fitted: contentDocumentView.frame.height <= listFrame.height + 0.5
+            under: under, cardTop: card, above: above, fitted: contentDocumentView.frame.height <= bounds.height + 0.5
         ))
         return true
     }
@@ -135,7 +135,7 @@ extension SidebarView {
         // A list taller than the sidebar scrolls: where rows were on screen
         // depended on the scroll, so nothing folds or comes up; the rows
         // just take their places, as they did.
-        let fits = contentDocumentView.frame.height <= listFrame.height + 0.5
+        let fits = contentDocumentView.frame.height <= bounds.height + 0.5
         let live = folds.filter { now - $0.startedAt < Self.foldMotionDuration && $0.fitted && fits }
             .sorted { $0.startedAt < $1.startedAt }
         // Each task that was under a fold comes up from where it was, by

@@ -439,10 +439,30 @@ final class RailRoundButton: NSView {
     }
     private let glass: GlassView
     private let button: NiruxButton
+    private var baseLabel: String
+
+    /// Open while what it opens shows in the main area (the Board column on
+    /// screen): its symbol in the accent, as the sidebar's Board row; the
+    /// halo stays the task's.
+    var isSelected = false {
+        didSet {
+            guard isSelected != oldValue else { return }
+            updateLook()
+        }
+    }
+
+    var isEnabled: Bool {
+        get { button.isEnabled }
+        set {
+            button.isEnabled = newValue
+            updateLook()
+        }
+    }
 
     init(symbol: String, label: String, level: InterfaceTransparency) {
         glass = GlassView(role: .chrome, level: level, cornerRadius: IconRail.width / 2)
         button = NiruxButton(title: "", kind: .quiet)
+        baseLabel = label
         super.init(frame: NSRect(x: 0, y: 0, width: IconRail.width, height: IconRail.width))
         glass.frame = bounds
         glass.autoresizingMask = [.width, .height]
@@ -463,10 +483,22 @@ final class RailRoundButton: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// What VoiceOver calls it.
+    /// What VoiceOver calls it; ", open" follows while open.
     var label: String {
-        get { button.accessibilityLabel() ?? "" }
-        set { button.setAccessibilityLabel(newValue) }
+        get { baseLabel }
+        set {
+            baseLabel = newValue
+            updateLook()
+        }
+    }
+
+    /// What VoiceOver says now.
+    var spokenLabel: String { button.accessibilityLabel() ?? "" }
+
+    private func updateLook() {
+        button.contentTintColor = !button.isEnabled ? Theme.Color.textDisabled
+            : isSelected ? Theme.Color.accent : Theme.Color.textSecondary
+        button.setAccessibilityLabel(isSelected ? "\(baseLabel), open" : baseLabel)
     }
 
     /// On the button, which takes the pointer.

@@ -29,6 +29,12 @@ extension SidebarView {
         case .archivedToggle:
             archivedRowHoverView?.layer?.backgroundColor =
                 on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
+        case .board:
+            boardRowHoverView?.layer?.backgroundColor =
+                on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
+        case .history:
+            historyRowHoverView?.layer?.backgroundColor =
+                on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
         case .newTask:
             newTaskButton?.isHovered = on
         case .menuBadge(let workspaceIndex):
@@ -47,6 +53,8 @@ extension SidebarView {
         case .spacePicker: return .spacePicker
         case .newTask: return .newTask
         case .archivedToggle: return .archivedToggle
+        case .board: return .board
+        case .history: return .history
         default: return nil
         }
     }
@@ -69,7 +77,9 @@ extension SidebarView {
         let point = contentDocumentView.convert(windowPoint, from: nil)
         guard let area = hitArea(at: point) else { return }
         switch area.region {
-        case .spacePicker, .newTask, .archivedToggle:
+        case .board where !navigation.boardAvailable:
+            return
+        case .spacePicker, .newTask, .archivedToggle, .board, .history:
             setHoverTarget(Self.hoverTarget(of: area.region))
         case .workspace(let workspaceIndex):
             setHoverTarget(.workspaceCard(workspaceIndex))

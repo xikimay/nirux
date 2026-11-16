@@ -36,7 +36,7 @@ extension SidebarView {
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let catchUpHeight = catchUp.map { SidebarCatchUpCardRenderer.height(of: $0) + SidebarCatchUpCardRenderer.Metrics.gapBelow } ?? 0
         // At the width the clip shows for the list's height.
-        let fitted = contentScrollView.documentWidth(frameSize: listFrame.size) { width in
+        let fitted = contentScrollView.documentWidth(frameSize: bounds.size) { width in
             let archived = archivedListHeight(listedInactiveInfos, width: width)
             let height = expandedContentHeight(
                 hasPicker: activeProfile != nil,
@@ -52,7 +52,7 @@ extension SidebarView {
         let (archivedHeight, contentH) = fitted.measured
         let onboardingCard = preparedOnboardingCard()
 
-        let docHeight = max(listFrame.height, contentH)
+        let docHeight = max(bounds.height, contentH)
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: listWidth, height: docHeight)
 
         var yOffset = docHeight - SidebarExpandedMetrics.topPadding
@@ -60,6 +60,7 @@ extension SidebarView {
             yOffset = buildSpacePicker(activeProfile, top: yOffset)
             yOffset -= SidebarExpandedMetrics.pickerBottomGap
         }
+        yOffset = buildBoardRow(top: yOffset) - SidebarExpandedMetrics.pickerBottomGap
         if !leadInfos.isEmpty {
             yOffset = buildWorkspaceGroup(leadInfos, yOffset: yOffset) + SidebarExpandedMetrics.workspaceGap
             yOffset -= SidebarExpandedMetrics.leadGap
@@ -79,6 +80,8 @@ extension SidebarView {
         if !inactiveInfos.isEmpty {
             buildArchivedBlock(count: inactiveInfos.count, listed: listedInactiveInfos, listHeight: archivedHeight)
         }
+        // Last: VoiceOver reads the rows in their views' order.
+        buildHistoryRow()
 
         restoreScroll(to: anchor)
         refreshHoverTargetFromMouse()
@@ -211,6 +214,9 @@ extension SidebarView {
             height += Metrics.groupHeight(for: leadInfos, sidebarWidth: width) - Metrics.workspaceGap + Metrics.leadGap
         }
         if hasPicker { height += Metrics.pickerHeight + Metrics.pickerBottomGap }
+        // The Board row under the header, History at the bottom.
+        height += Metrics.navigatorRowHeight + Metrics.pickerBottomGap
+        height += Metrics.navigatorRowHeight + Metrics.navigatorGap
         if let onboardingHeight { height += Metrics.onboardingCardGap + onboardingHeight }
         if let archivedHeight { height += Metrics.archivedGap + archivedHeight + Metrics.archivedRowHeight }
         return height + Metrics.bottomPadding
@@ -239,6 +245,8 @@ extension SidebarView {
         spacePickerHoverView = nil
         newTaskButton = nil
         archivedRowHoverView = nil
+        boardRowHoverView = nil
+        historyRowHoverView = nil
         // The new rows' Archived count, if they have one.
         archivedCountLabel = nil
         hoveredTarget = nil
@@ -427,8 +435,10 @@ extension SidebarView {
     private func buildArchivedBlock(count: Int, listed: [WorkspaceInfo], listHeight: CGFloat) {
         typealias Metrics = SidebarExpandedMetrics
         let inset = Metrics.workspaceInsetX
+        // Above the History row.
         let rowFrame = NSRect(
-            x: inset, y: Metrics.bottomPadding, width: listWidth - inset * 2, height: Metrics.archivedRowHeight
+            x: inset, y: Metrics.bottomPadding + Metrics.navigatorRowHeight + Metrics.navigatorGap,
+            width: listWidth - inset * 2, height: Metrics.archivedRowHeight
         )
         buildArchivedRow(count: count, frame: rowFrame)
         guard !listed.isEmpty else { return }
@@ -486,6 +496,80 @@ extension SidebarView {
     }
 
     static let archivedTitle = "Archived"
+
+    // MARK: - Navigator rows
+
+    /// The Board row, under the space's header: it opens the Board or brings
+    /// it up, and can't be pressed while no task is open. While the space's
+    /// Board column shows, it reads open (its symbol in the accent, its
+    /// title bright), without the selection's glass: that stays the task's,
+    /// whose workspace the main area shows. One selection, as in Mail.
+    private func buildBoardRow(top: CGFloat) -> CGFloat {
+        typealias Metrics = SidebarExpandedMetrics
+        let inset = Metrics.workspaceInsetX
+        let frame = NSRect(x: inset, y: top - Metrics.navigatorRowHeight, width: listWidth - inset * 2, height: Metrics.navigatorRowHeight)
+        let shown = navigation.boardShown
+        let available = navigation.boardAvailable
+        boardRowHoverView = buildNavigatorRow(
+            title: Self.boardTitle, symbol: Theme.Symbol.projectBoard, frame: frame, region: .board,
+            color: available ? (shown ? Theme.Color.textPrimary : Theme.Color.textSecondary) : Theme.Color.textDisabled,
+            iconColor: available && shown ? Theme.Color.accent : nil,
+            label: shown ? "\(Self.boardTitle), open" : Self.boardTitle,
+            tip: available ? "Board (\(NiruxShortcuts.board.chord.display))" : "Open a task to show its space’s Board",
+            press: available ? { [weak self] in self?.onOpenBoard?() } : nil
+        )
+        return frame.minY
+    }
+
+    /// The History row, at the very bottom: Session History, a panel, so it
+    /// never stays selected.
+    private func buildHistoryRow() {
+        typealias Metrics = SidebarExpandedMetrics
+        let inset = Metrics.workspaceInsetX
+        let frame = NSRect(x: inset, y: Metrics.bottomPadding, width: listWidth - inset * 2, height: Metrics.navigatorRowHeight)
+        historyRowHoverView = buildNavigatorRow(
+            title: Self.historyTitle, symbol: Theme.Symbol.sessionHistory, frame: frame, region: .history,
+            color: Theme.Color.textSecondary, label: Self.historyTitle, tip: "Session History",
+            press: { [weak self] in self?.onShowHistory?() }
+        )
+    }
+
+    /// A navigator row: its symbol in the marks' column, its title, its
+    /// hover, and the control VoiceOver presses (which takes the first click
+    /// on a window in the background, as the Archived row's does); `press`
+    /// nil, it can't be pressed. Returns the hover view.
+    private func buildNavigatorRow(
+        title: String, symbol: String, frame: NSRect, region: SidebarHitRegion, color: NSColor, iconColor: NSColor? = nil,
+        label: String, tip: String, press: (() -> Void)?
+    ) -> NSView {
+        typealias Metrics = SidebarExpandedMetrics
+        hitAreas.append(SidebarHitArea(frame: frame, region: region))
+        let hover = addRowHover(frame: frame)
+        let icon = SidebarImageView(image: SidebarRenderer.symbol(symbol, color: iconColor ?? color, pointSize: 12))
+        icon.identifier = NSUserInterfaceItemIdentifier("nirux.sidebar.navigator.\(title)")
+        icon.frame = NSRect(x: Metrics.markCenterX - 7, y: frame.midY - 7, width: 14, height: 14)
+        icon.setAccessibilityElement(false)
+        addExpandedView(icon)
+        let titleLabel = textLabel(title, font: Theme.Font.body, color: color)
+        let titleHeight = ceil(titleLabel.fittingSize.height)
+        titleLabel.frame = NSRect(
+            x: Metrics.textX, y: frame.midY - titleHeight / 2,
+            width: max(0, frame.maxX - Metrics.cardPaddingX - Metrics.textX), height: titleHeight
+        )
+        titleLabel.setAccessibilityElement(false)
+        addExpandedView(titleLabel)
+        let control = SidebarSectionToggleView(frame: frame)
+        control.setAccessibilityLabel(label)
+        control.setAccessibilityEnabled(press != nil)
+        control.acceptsFirstClick = press != nil
+        control.toolTip = tip
+        control.onPress = press
+        addExpandedView(control)
+        return hover
+    }
+
+    static let boardTitle = "Board"
+    static let historyTitle = "History"
 
     // MARK: - Getting Started checklist
 
