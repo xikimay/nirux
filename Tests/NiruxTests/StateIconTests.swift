@@ -85,4 +85,41 @@ final class StateIconTests: XCTestCase {
         view.frame.size = .zero
         XCTAssertEqual(view.intrinsicContentSize, NSSize(width: 14, height: 14))
     }
+
+    /// A label (the rail's initials) takes the centre of every icon but the
+    /// amber and red ones, whose glyph says why; there the glyph stays. With
+    /// a label, the glyph and the inner fill go: the station runs along the
+    /// ring instead.
+    func testALabelTakesTheCentreWhenNoGlyphSaysWhy() throws {
+        for kind: StateIcon.Kind in [.needsYou(.command), .needsYou(.question), .error] {
+            XCTAssertFalse(StateIcon(kind).admitsLabel, "\(kind)")
+        }
+        for kind: StateIcon.Kind in [.working, .idle, .waiting, .asking, .readyToMerge, .merged, .blocked, .finished] {
+            XCTAssertTrue(StateIcon(kind).admitsLabel, "\(kind)")
+        }
+        XCTAssertEqual(StateIcon(.merged).labelColor, Theme.Color.canvas, "ink on the disc")
+        XCTAssertEqual(StateIcon(.working).labelColor, Theme.Color.working)
+
+        let view = StateIconView(StateIcon(.finished), size: 32)
+        view.label = "FC"
+        XCTAssertEqual(view.shownLabel, "FC")
+        view.icon = StateIcon(.needsYou(.question))
+        XCTAssertNil(view.shownLabel, "the glyph shows instead")
+
+        func pixels(_ icon: StateIcon, labelled: Bool) throws -> Data {
+            let rep = try XCTUnwrap(NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+            ))
+            let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep)?.cgContext)
+            // Flipped, as the view is.
+            context.translateBy(x: 0, y: 32)
+            context.scaleBy(x: 1, y: -1)
+            icon.draw(in: context, rect: CGRect(x: 0, y: 0, width: 32, height: 32), labelled: labelled)
+            return try XCTUnwrap(rep.bitmapData.map { Data(bytes: $0, count: rep.bytesPerRow * 32) })
+        }
+        XCTAssertNotEqual(try pixels(StateIcon(.finished), labelled: true), try pixels(StateIcon(.finished), labelled: false), "the check goes")
+        XCTAssertNotEqual(try pixels(StateIcon(.working, stage: 2), labelled: true), try pixels(StateIcon(.working, stage: 2), labelled: false), "the fill moves to the ring")
+        XCTAssertEqual(try pixels(StateIcon(.error), labelled: true), try pixels(StateIcon(.error), labelled: false), "the red glyph stays")
+    }
 }

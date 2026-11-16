@@ -135,7 +135,13 @@ on an amber icon.
 
 In the window (3.2) the rail sits in the folded sidebar's 52 pt, where the
 rail of initials was, so the columns don't move; the cards' scroll view goes
-while it shows. It lists what the folded rows listed: the active tasks, and
+while it shows. Each task's icon carries its initials in the ring (the user's
+pick B after the before/after render, 2026-11-16, so that tasks at rest stay
+apart without a hover), numbered over every task of the space (`TaskInitials`:
+"CR", "CR2"), while the icon has no glyph to show: the amber and red glyphs
+(an agent waiting for the user, one that failed) take the centre instead. With
+initials, the ring keeps its colour and the station runs along it rather than
+inside it, and the icons grow from 15 to 22 pt so that the letters read. It lists what the folded rows listed: the active tasks, and
 of the archived ones the task on screen and those whose agent waits on the
 user or broke, never the whole archived list (it has nowhere to show). Its
 icons are the rows' states: the row's mark, a wait's reason from the column
@@ -172,7 +178,7 @@ turn end's check and the working line of M5, the merge's sweep of M10) stay
 the unfolded rows', as with the rail of initials; the icon shows the state
 they end on (a grey check, a violet merged disc).
 
-![The rail with a Lead and nine tasks: Opaque exact, the other levels approximated](../images/icon-rail.png)
+![The rail with a Lead and nine tasks, as rendered in 2.2 (before the initials): Opaque exact, the other levels approximated](../images/icon-rail.png)
 
 ## Inbox and callout
 

@@ -294,4 +294,36 @@ final class IconRailSidebarTests: XCTestCase {
         shell.relayoutForNewSize()
         XCTAssertFalse(shell.sidebar.isExpanded)
     }
+
+    func testInitialsDropTheBranchTypeAndNumberRepeats() {
+        XCTAssertEqual(TaskInitials.initials(of: "Fix login rate limit"), "FL")
+        XCTAssertEqual(TaskInitials.initials(of: "feat/crash-report"), "CR")
+        XCTAssertEqual(TaskInitials.initials(of: "main"), "MA")
+        XCTAssertEqual(TaskInitials.initials(of: "CelticFantasyMusicLofi"), "CF")
+        XCTAssertEqual(TaskInitials.initials(of: "ws 12"), "W12")
+        XCTAssertEqual(TaskInitials.initials(of: "nirux-101"), "N101")
+        XCTAssertEqual(TaskInitials.initials(of: "Update CI/CD pipeline"), "UC")
+        XCTAssertEqual(TaskInitials.initials(of: "  "), "?")
+        XCTAssertEqual(
+            TaskInitials.initials(for: ["feat/merge-queue-engine", "feat/merge-queue-ui", "docs/merge-queue"]),
+            ["MQ", "MQ2", "MQ3"]
+        )
+    }
+
+    /// Each task's icon carries its initials, numbered over every task of
+    /// the space (listed or not, so none renumbers as tasks come and go);
+    /// the Lead has its sign. An amber icon shows its glyph instead.
+    func testEachIconCarriesItsTasksInitials() throws {
+        // An archived task the rail doesn't list, before "Asks": "AS".
+        var all = rows
+        all.insert(row("ascent", index: 6, archived: true), at: 3)
+        let rail = sidebar(all).iconRail
+        let labels = Dictionary(uniqueKeysWithValues: rail.content.tasks.map { ($0.id, $0.label) })
+        XCTAssertFalse(labels.keys.contains("ascent"), "not listed")
+        XCTAssertEqual(labels["checkout"], "CH")
+        XCTAssertEqual(labels["asks"], "AS2", "numbered over every task")
+        XCTAssertNil(rail.content.lead?.label)
+        XCTAssertEqual(try XCTUnwrap(rail.itemViews["checkout"]).iconView.shownLabel, "CH")
+        XCTAssertNil(try XCTUnwrap(rail.itemViews["export"]).iconView.shownLabel, "its amber glyph instead")
+    }
 }

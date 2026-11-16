@@ -71,6 +71,10 @@ extension SidebarView {
     /// a rebuild runs at every layout pass.
     var railContent: IconRail.Content {
         var content = IconRail.Content(lead: nil, tasks: [], archivedCount: lastInfos.filter(\.isInactive).count)
+        // Over every task, listed or not: a task coming or going renumbers
+        // none ("CR2" stays "CR2").
+        let tasks = displayedWorkspaceInfos.filter { !$0.isLead }
+        let initials = Dictionary(zip(tasks.map(\.id), TaskInitials.initials(for: tasks.map(\.title))), uniquingKeysWith: { first, _ in first })
         for info in displayedWorkspaceInfos {
             let state = info.railState
             guard !info.isInactive || info.isActive || info.asksUser || state == .waiting else { continue }
@@ -81,7 +85,10 @@ extension SidebarView {
             // on, or a row that says less than the amber icon: then the
             // icon's state says more.
             let saysLess = summary.status.tone == .branch || icon != rowIcon
-            let item = IconRail.Item(id: info.id, title: info.title, icon: icon, detail: saysLess ? nil : summary.status.text)
+            let item = IconRail.Item(
+                id: info.id, title: info.title, icon: icon, detail: saysLess ? nil : summary.status.text,
+                label: info.isLead ? nil : initials[info.id]
+            )
             if info.isLead, content.lead == nil { content.lead = item } else if !info.isLead { content.tasks.append(item) }
             if info.isActive { content.selectedID = info.id }
         }

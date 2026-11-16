@@ -16,6 +16,9 @@ final class IconRail: NSView {
         /// What the task's row says (its status line), for the tooltip;
         /// nil: the icon's state.
         var detail: String?
+        /// The task's initials (`TaskInitials`), in the ring while the icon
+        /// has no glyph; nil for the Lead.
+        var label: String?
     }
 
     struct Content: Equatable {
@@ -32,7 +35,7 @@ final class IconRail: NSView {
     static let width: CGFloat = 38
     /// One icon's place, top to bottom.
     static let pitch: CGFloat = 28
-    static let iconSize: CGFloat = 15
+    static let iconSize: CGFloat = 22
     private static let gap = Theme.Space.sm
 
     /// A click on a task, a double-click on a waiting one, or VoiceOver's
@@ -322,6 +325,7 @@ final class RailItemView: NSView {
         self.item = item
         self.isSelected = isSelected
         iconView.icon = item.icon
+        iconView.label = item.label
         iconView.isHidden = isLead
         leadIcon.isHidden = !isLead
         leadIcon.contentTintColor = item.icon.color
