@@ -178,6 +178,10 @@ final class QuickSwitcherFlowTests: XCTestCase {
     func testNextWaitingAgentWalksFromTheLongestWait() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            // ⌘J walks while the sidebar is unfolded; folded, it opens the
+            // inbox (RequestFlowTests).
+            if !harness.shell.isSidebarExpanded { harness.shell.toggleSidebar() }
+            harness.waitUntil("the sidebar to unfold") { harness.shell.sidebar.isExpanded }
             let repo = try XCTUnwrap(shell.activeWorkspace)
 
             // Two columns, the waiting one not focused.

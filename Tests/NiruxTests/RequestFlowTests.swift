@@ -46,7 +46,7 @@ final class RequestFlowTests: XCTestCase {
             self.fold(shell)
             shell.updateSidebar()
             XCTAssertEqual(shell.requestsState.requests.map(\.taskID), [there.id])
-            XCTAssertFalse(try XCTUnwrap(shell.commandBarToolbar?.bar).waitingBadge.isHidden, "the badge counts it")
+            XCTAssertEqual(try XCTUnwrap(shell.commandBarToolbar?.bar).waitingBadge.count, 1, "the badge counts it")
             shell.jumpToNextWaitingAgent()
             XCTAssertTrue(shell.requestsState.isInboxOpen, "folded: the inbox")
             let inbox = try XCTUnwrap(shell.requestsState.inbox)
