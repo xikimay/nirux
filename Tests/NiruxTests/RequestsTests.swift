@@ -129,4 +129,71 @@ final class RequestsTests: XCTestCase {
         )
         XCTAssertEqual(place.frame, NSRect(x: 600 - RequestInboxView.width / 2, y: 760 - CommandPalette.barGap - 300, width: RequestInboxView.width, height: 300))
     }
+
+    /// Allow / Deny are offered, so a request may be held: on a card while
+    /// the sidebar shows the cards, in the inbox and the callout while it
+    /// is folded; never for the column on screen or under VoiceOver.
+    func testWhereTheButtonsAreOffered() {
+        func offers(cards: Bool, onScreen: Bool = false, buttons: Bool = true, voiceOver: Bool = false) -> Bool {
+            NiruxShellView.offersApprovalButtons(sidebarShowsCards: cards, isOnScreen: onScreen, cardHasButtons: buttons, voiceOver: voiceOver)
+        }
+        XCTAssertTrue(offers(cards: true))
+        XCTAssertFalse(offers(cards: true, buttons: false), "another space, the folded archived list")
+        XCTAssertTrue(offers(cards: false, buttons: false), "folded: the inbox lists every space")
+        XCTAssertFalse(offers(cards: false, onScreen: true), "its terminal answers")
+        XCTAssertFalse(offers(cards: true, onScreen: true))
+        XCTAssertFalse(offers(cards: false, voiceOver: true))
+        XCTAssertFalse(offers(cards: true, voiceOver: true))
+    }
+
+    /// A request held for the inbox goes back to its terminal: when its
+    /// column comes on screen, and when the sidebar unfolds and its card
+    /// can't offer it (another space). While folded it stays held, in any
+    /// space.
+    func testAHeldRequestGoesBackToItsTerminal() throws {
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 600))
+        shell.stopHeartbeat()
+        let home = shell.activeProfileID
+        let here = try XCTUnwrap(shell.activeWorkspace)
+        shell.addWorkspace(title: "there", cwd: NSTemporaryDirectory())
+        let there = try XCTUnwrap(shell.activeWorkspace)
+        let pty = try XCTUnwrap(there.columns.first?.pty)
+        shell.focusWorkspace(id: here.id)
+        let now = Date().timeIntervalSince1970
+        func hold(_ id: String) {
+            func event(_ name: AgentHookEvent.Name, at offset: TimeInterval, requestID: String? = nil) -> AgentHookEvent {
+                AgentHookEvent(
+                    kind: .claude, name: name, sessionID: "s", detail: "Bash", toolName: "Bash", toolSummary: "npm test",
+                    toolKey: "k", agentID: nil, approvalRequestID: requestID, approvalDeadline: requestID.map { _ in now + 56 },
+                    approvalText: requestID.map { _ in "npm test" }, approvalOutcome: nil, timestamp: now + offset
+                )
+            }
+            _ = pty.applyAgentHook(event(.sessionStart, at: -3), isUserFocused: false)
+            _ = pty.applyAgentHook(event(.userPromptSubmit, at: -2), isUserFocused: false)
+            _ = pty.applyAgentHook(event(.permissionRequest, at: -1, requestID: id), isUserFocused: false)
+        }
+        hold("r1")
+        XCTAssertEqual(pty.sidebarApproval(now: now)?.approval?.requestID, "r1", "held")
+        XCTAssertFalse(shell.sidebar.isExpanded)
+        _ = shell.releaseApprovalsNotHeld()
+        XCTAssertNotNil(pty.sidebarApproval(now: now), "folded, off screen: the inbox offers it")
+
+        let work = shell.workspaceStore.createProfile(named: "Work", select: false)
+        shell.moveWorkspaceToSpace(workspaceID: there.id, profileID: work.id)
+        shell.selectProfile(home)
+        _ = shell.releaseApprovalsNotHeld()
+        XCTAssertNotNil(pty.sidebarApproval(now: now), "in another space too")
+
+        shell.sidebar.isExpanded = true
+        _ = shell.releaseApprovalsNotHeld()
+        XCTAssertNil(pty.sidebarApproval(now: now), "unfolded, another space's has no card: its terminal answers")
+
+        shell.sidebar.isExpanded = false
+        hold("r2")
+        _ = shell.releaseApprovalsNotHeld()
+        XCTAssertEqual(pty.sidebarApproval(now: now)?.approval?.requestID, "r2")
+        // Going there refreshes the sidebar, which hands it back at once.
+        shell.focusWorkspace(id: there.id)
+        XCTAssertNil(pty.sidebarApproval(now: now), "on screen: its terminal answers")
+    }
 }

@@ -240,6 +240,14 @@ request is left; the callout closes once its request is gone (answered, or
 its column on screen) or its icon is. Answers go to the rows' receivers
 (`decidePermission`, `answerFromCard`, `showMissionReplyPopover`, which now
 checks the question's id); "Open task" and ⌘J go to the request's column.
+For Allow / Deny to show there, Nirux holds a permission while the sidebar
+is folded too (decided with the Lead, 2026-11-16: the user chose the inbox
+and the callout for answering, which a reader-only inbox would break):
+folded, the requests of every column not on screen, in every space, are held
+(`offersApprovalButtons`); unfolded, as before, only those a card shows.
+The deadline and the release rules don't change: under VoiceOver nothing is
+held, and a column that comes on screen hands its request back to its
+terminal at that refresh, so that the terminal and a card never both answer.
 
 ![The inbox with three requests: Opaque exact, Glass approximated](../images/request-inbox.png)
 
