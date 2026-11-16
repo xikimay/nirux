@@ -10,9 +10,10 @@ import AppKit
 /// column, as its sibling: the terminal's own layer is never animated.
 ///
 /// On an edge of the viewport: the glow of an agent out of view that waits
-/// or broke, a bar of light on the padding. A pill names the agent for a
-/// few seconds, then leaves the glow alone; the pointer resting on the
-/// glow brings the pill back, and a click on the pill goes to that agent.
+/// or broke, a bar of light on the padding. Decoration only: it takes no
+/// click and names nobody (M3's pill went with the glass interface's
+/// requests, step 3.3: the command bar's count, ⌘J and the rail say who
+/// waits).
 final class EdgeGlowView: NSView {
     enum Edge {
         case left, right, top, bottom
@@ -20,24 +21,9 @@ final class EdgeGlowView: NSView {
         case around
     }
 
-    /// The agent out of view an edge's glow stands for.
-    struct Target: Equatable {
-        let workspaceID: String
-        /// `ColumnState.id`.
-        let columnID: UUID?
-        /// "Cookies needs permission".
-        let text: String
-    }
-
     /// How far a viewport edge's glow reaches: a bar of light on the
     /// terminal's padding that is gone before the text.
     static let depth: CGFloat = 8
-    /// The top edge's view is this tall: room for its pill under the
-    /// column headers, whose buttons it must not cover.
-    static let topHeight: CGFloat = ColumnHeaderView.height + pillGap + EdgeGlowPill.height + pillGap
-    /// Between the glow, or the headers, and the pill: the pill never
-    /// comes up under the pointer that brought it.
-    static let pillGap: CGFloat = 6
     /// The focused column's light starts inside its focus ring, which
     /// stays as it is.
     static let focusRingWidth: CGFloat = 2
@@ -49,7 +35,6 @@ final class EdgeGlowView: NSView {
     static let columnGlowDepth: CGFloat = 12
     static let columnGlowAlpha: CGFloat = 0.08
     static let cornerRadius: CGFloat = 6
-    private static let pillMargin: CGFloat = 10
 
     let edge: Edge
     private(set) var light: AgentLight?
@@ -64,26 +49,9 @@ final class EdgeGlowView: NSView {
     private static let movementKey = "move"
     /// The focused column's light: fainter, and inside its focus ring.
     private(set) var isSoft = false
-    private(set) var target: Target?
-    private(set) var isPillShown = false
     /// A sweep is crossing the column.
     var isSweeping: Bool { sweepBand.animation(forKey: Self.sweepKey) != nil }
     private static let sweepKey = "sweep"
-    var onClick: ((Target) -> Void)?
-    /// How long the pill stays once an agent starts waiting out of view.
-    var pillDuration: TimeInterval = 4
-    /// How long the pointer rests on the glow before the pill comes back:
-    /// a pointer crossing the edge brings nothing up.
-    var hoverDwell: TimeInterval = 0.3
-    /// How long the pill stays once the pointer left the glow: time to
-    /// reach it.
-    var pillLinger: TimeInterval = 1.2
-    /// Runs the pill's delays; tests pass a clock they advance by hand.
-    var schedule: MainActorSchedule = mainQueueSchedule
-    /// Whether the window's pointer is tracked (the areas follow the key
-    /// window only), and where it is, in the window; tests say.
-    var tracksPointer: (NSWindow) -> Bool = { $0.isKeyWindow }
-    var pointerLocation: (NSWindow) -> NSPoint = { $0.mouseLocationOutsideOfEventStream }
 
     /// Fades the light in and out.
     private let fadeLayer = CALayer()
@@ -93,22 +61,7 @@ final class EdgeGlowView: NSView {
     private var glows: [(side: Edge, layer: CAGradientLayer)] = []
     private let sweepHost = CALayer()
     private let sweepBand = CAGradientLayer()
-    /// A viewport edge's only: a column's light never makes one.
-    private lazy var pill = EdgeGlowPill()
-    /// Tells a pending pill dismissal whether it still applies.
-    private var pillGeneration = 0
-    /// The pill's first seconds are still running.
-    private var isAnnouncing = false
-    /// The pointer is on the glow, or on the pill it brought back.
-    private var pointerOnGlow = false
-    private var pointerOnPill = false
-    private var isHovered: Bool { pointerOnGlow || pointerOnPill }
-    private var glowArea: NSTrackingArea?
-    private var pillArea: NSTrackingArea?
-    /// Tells a pending dwell or linger whether the pointer moved since.
-    private var hoverGeneration = 0
-    /// The last `moving` given: whether a change that comes by itself (the
-    /// pill leaving) may animate.
+    /// The last `moving` given: whether its fades animate.
     private var animatesChanges = false
 
     init(edge: Edge) {
@@ -144,10 +97,8 @@ final class EdgeGlowView: NSView {
             sweepBand.colors = ([0, 0.18, 0] as [CGFloat]).map { green.withAlphaComponent($0).cgColor }
             sweepHost.addSublayer(sweepBand)
             layer?.addSublayer(sweepHost)
-        } else {
-            pill.alphaValue = 0
-            addSubview(pill)
         }
+        setAccessibilityElement(false)
     }
 
     @available(*, unavailable)
@@ -157,14 +108,9 @@ final class EdgeGlowView: NSView {
 
     /// Shows `light`; nil fades it out. `moving`: it breathes or pulses,
     /// and its changes animate; else it shows steady and changes at once.
-    /// `target`: the agent a viewport edge stands for; `announcing` shows
-    /// its pill for `pillDuration`, once per call.
-    func show(
-        _ light: AgentLight?, moving: Bool, soft: Bool = false, target: Target? = nil, announcing: Bool = false
-    ) {
+    func show(_ light: AgentLight?, moving: Bool, soft: Bool = false) {
         animatesChanges = moving
         guard let light else {
-            setTarget(nil, announcing: false)
             guard self.light != nil else { return }
             // From the level it shows now, mid-breath or steady: stopping
             // the movement must not flash before the fade.
@@ -190,7 +136,6 @@ final class EdgeGlowView: NSView {
         }
         if appears { fade(to: 1) }
         setMoving(moving)
-        setTarget(target, announcing: announcing)
     }
 
     /// One pass of light across the column: its agent's turn ended.
@@ -294,7 +239,6 @@ final class EdgeGlowView: NSView {
             sweepHost.frame = bounds
             for glow in glows { glow.layer.frame = strip(glow.side, depth: depth, inset: inset) }
         }
-        layoutPill()
     }
 
     /// The part of the view within `depth` of `side`, `inset` from every
@@ -323,237 +267,10 @@ final class EdgeGlowView: NSView {
     var steadyLevel: Float { lightLayer.opacity }
     var blendsAsAGroup: Bool { fadeLayer.allowsGroupOpacity || lightLayer.allowsGroupOpacity }
 
-    // MARK: - Pill
-
-    /// The agent the glow stands for. `announcing` shows its pill for
-    /// `pillDuration`; without it a new agent's pill waits for the pointer.
-    private func setTarget(_ target: Target?, announcing: Bool) {
-        var announcing = announcing
-        if target != self.target {
-            // The same agent says something else while its pill is up (a
-            // message turns into a permission request, a verdict into a
-            // question): the pill stays, for its full time again.
-            if isAnnouncing, let target, target.workspaceID == self.target?.workspaceID,
-               target.columnID == self.target?.columnID {
-                announcing = true
-            }
-            self.target = target
-            pillGeneration += 1
-            isAnnouncing = false
-            setAccessibilityElement(target != nil)
-            setAccessibilityRole(.button)
-            setAccessibilityLabel(target?.text)
-            if let target, let light {
-                pill.configure(text: target.text, edge: edge, color: light.color)
-                layoutPill()
-            }
-            updateTrackingAreas()
-            if target == nil || !(announcing || isHovered) { setPillShown(false) }
-        }
-        guard target != nil, announcing else { return }
-        setPillShown(true)
-        isAnnouncing = true
-        pillGeneration += 1
-        let generation = pillGeneration
-        // Then only the glow: the pill never stays over a terminal's text.
-        schedule(pillDuration) { [weak self] in
-            guard let self, self.pillGeneration == generation else { return }
-            self.endAnnouncement()
-        }
-    }
-
-    /// The pill's first seconds are over: it leaves, unless the pointer is
-    /// on the glow or on it.
-    func endAnnouncement() {
-        guard isAnnouncing else { return }
-        isAnnouncing = false
-        dropStaleHover()
-        // The pill came up under a pointer that was already there: no
-        // entry was reported for it. Only in the key window, whose pointer
-        // the areas track: elsewhere no exit would ever take the pill away.
-        if let window, tracksPointer(window), pill.frame.contains(convert(pointerLocation(window), from: nil)) {
-            pointerOnPill = true
-        }
-        if !isHovered { setPillShown(false) }
-    }
-
-    private func setPillShown(_ shown: Bool) {
-        guard shown != isPillShown else { return }
-        isPillShown = shown
-        let wasVisible = pill.layer?.presentation()?.opacity ?? Float(pill.alphaValue)
-        pill.alphaValue = shown ? 1 : 0
-        pill.layer?.removeAllAnimations()
-        guard animatesChanges, let pillLayer = pill.layer else { return }
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = wasVisible
-        fade.toValue = shown ? 1 : 0
-        fade.duration = shown ? 0.2 : 0.3
-        pillLayer.add(fade, forKey: "fade")
-        guard shown else { return }
-        // It comes in from its edge.
-        let slide = CASpringAnimation(keyPath: edge == .left || edge == .right ? "transform.translation.x" : "transform.translation.y")
-        slide.fromValue = edge == .left || edge == .bottom ? -Self.pillMargin : Self.pillMargin
-        slide.toValue = 0
-        slide.damping = 14
-        slide.duration = slide.settlingDuration
-        pillLayer.add(slide, forKey: "slide")
-    }
-
-    private func layoutPill() {
-        guard edge != .around else { return }
-        // Past the glow, so not under the pointer that rests on it.
-        let margin = Self.depth + Self.pillGap
-        let width = min(pill.fittingWidth, max(0, bounds.width - margin * 2))
-        let height = EdgeGlowPill.height
-        let origin: NSPoint
-        switch edge {
-        case .left: origin = NSPoint(x: margin, y: bounds.midY - height / 2)
-        case .right: origin = NSPoint(x: bounds.maxX - margin - width, y: bounds.midY - height / 2)
-        // Under the column headers.
-        case .top:
-            origin = NSPoint(x: bounds.midX - width / 2, y: bounds.maxY - ColumnHeaderView.height - Self.pillGap - height)
-        // Above the column dots.
-        case .bottom, .around: origin = NSPoint(x: bounds.midX - width / 2, y: 26)
-        }
-        pill.frame = NSRect(origin: origin, size: NSSize(width: width, height: height)).integral
-    }
-
-    var pillFrame: NSRect { pill.frame }
-    var pillText: String { pill.text }
-
-    // MARK: - Pointer
-
-    /// Where the pointer's rest brings the pill back: the glow itself.
-    var hoverStrip: NSRect { strip(edge, depth: Self.depth) }
-
-    enum HoverZone { case glow, pill }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        [glowArea, pillArea].compactMap { $0 }.forEach(removeTrackingArea)
-        (glowArea, pillArea) = (nil, nil)
-        guard target != nil, edge != .around else {
-            (pointerOnGlow, pointerOnPill) = (false, false)
-            return
-        }
-        let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow]
-        let glow = NSTrackingArea(rect: hoverStrip, options: options, owner: self)
-        let onPill = NSTrackingArea(rect: pill.frame, options: options, owner: self)
-        addTrackingArea(glow)
-        addTrackingArea(onPill)
-        (glowArea, pillArea) = (glow, onPill)
-        dropStaleHover()
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        if let zone = zone(of: event) { pointerEntered(zone) }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        if let zone = zone(of: event) { pointerExited(zone) }
-    }
-
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        super.viewWillMove(toWindow: newWindow)
-        guard edge != .around else { return }
-        let center = NotificationCenter.default
-        center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
-        if let newWindow {
-            center.addObserver(
-                self, selector: #selector(windowResignedKey), name: NSWindow.didResignKeyNotification, object: newWindow
-            )
-        } else {
-            windowResignedKey()
-        }
-    }
-
-    /// The window stopped being the key one: its pointer is no longer
-    /// tracked, so no exit would be reported for it. It is gone as far as
-    /// the pill goes: a pill the pointer kept leaves now, and none stays
-    /// over a terminal's text or takes a click there.
-    @objc func windowResignedKey() {
-        guard isHovered else { return }
-        hoverGeneration += 1
-        (pointerOnGlow, pointerOnPill) = (false, false)
-        if !isAnnouncing { setPillShown(false) }
-    }
-
-    /// The zone an event's tracking area stands for; nil for an area this
-    /// view replaced since.
-    private func zone(of event: NSEvent) -> HoverZone? {
-        guard let area = event.trackingArea else { return nil }
-        if area === glowArea { return .glow }
-        return area === pillArea ? .pill : nil
-    }
-
-    /// The pointer resting on the glow brings the pill back; on the pill
-    /// it keeps it.
-    func pointerEntered(_ zone: HoverZone) {
-        hoverGeneration += 1
-        switch zone {
-        case .pill:
-            pointerOnPill = isPillShown
-        case .glow:
-            pointerOnGlow = true
-            guard target != nil, !isPillShown else { return }
-            after(hoverDwell) { glow in
-                if glow.pointerOnGlow, glow.target != nil { glow.setPillShown(true) }
-            }
-        }
-    }
-
-    /// Off the glow, the pill stays long enough to be reached; off the
-    /// pill, it leaves.
-    func pointerExited(_ zone: HoverZone) {
-        hoverGeneration += 1
-        switch zone {
-        case .glow: pointerOnGlow = false
-        case .pill: pointerOnPill = false
-        }
-        guard isPillShown, !isHovered, !isAnnouncing else { return }
-        after(zone == .glow ? pillLinger : 0) { glow in
-            if !glow.isHovered, !glow.isAnnouncing { glow.setPillShown(false) }
-        }
-    }
-
-    /// Runs `change` after `delay`, unless the pointer moved in or out
-    /// meanwhile; at once without a delay.
-    private func after(_ delay: TimeInterval, _ change: @escaping @MainActor @Sendable (EdgeGlowView) -> Void) {
-        guard delay > 0 else { return change(self) }
-        let generation = hoverGeneration
-        schedule(delay) { [weak self] in
-            guard let self, self.hoverGeneration == generation else { return }
-            change(self)
-        }
-    }
-
-    /// A tracking area replaced after the pointer left sends no exit: a
-    /// hover the pointer is no longer in must not keep the pill.
-    private func dropStaleHover() {
-        guard isHovered, let window else { return }
-        let point = convert(pointerLocation(window), from: nil)
-        if pointerOnGlow, !hoverStrip.contains(point) { pointerExited(.glow) }
-        if pointerOnPill, !pill.frame.contains(point) { pointerExited(.pill) }
-    }
-
-    /// Decoration, but for the pill while it shows: a click on it goes to
-    /// the agent. Everything else under the glow keeps its clicks: the
-    /// column headers, the terminals' first and last cells, the resize
-    /// handle at the viewport's edge.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard target != nil, isPillShown, let superview else { return nil }
-        return pill.frame.contains(convert(point, from: superview)) ? self : nil
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        if let target { onClick?(target) }
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        guard let target else { return false }
-        onClick?(target)
-        return true
-    }
+    /// Decoration: the column headers, the terminals' first and last
+    /// cells and the resize handle at the viewport's edge keep their
+    /// clicks.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 extension CABasicAnimation {
@@ -581,57 +298,5 @@ extension CABasicAnimation {
         // sidebar's dots ever asked for.
         move.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
         return move
-    }
-}
-
-/// Names the agent an edge's glow stands for, in the glow's color, with an
-/// arrow toward it. The glow view takes its clicks and speaks for it.
-final class EdgeGlowPill: NSView {
-    static let height: CGFloat = 22
-    private static let paddingX: CGFloat = 10
-
-    private let label = NSTextField(labelWithString: "")
-    var text: String { label.stringValue }
-
-    init() {
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.backgroundColor = Theme.Color.raised.cgColor
-        layer?.cornerRadius = Self.height / 2
-        layer?.borderWidth = 1
-        label.font = Theme.Font.captionEmphasized
-        label.lineBreakMode = .byTruncatingMiddle
-        // The glow view is the button VoiceOver reads, shown or not.
-        label.setAccessibilityElement(false)
-        label.cell?.setAccessibilityElement(false)
-        addSubview(label)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    func configure(text: String, edge: EdgeGlowView.Edge, color: NSColor) {
-        switch edge {
-        case .left: label.stringValue = "← \(text)"
-        case .right: label.stringValue = "\(text) →"
-        case .top: label.stringValue = "↑ \(text)"
-        case .bottom, .around: label.stringValue = "↓ \(text)"
-        }
-        label.textColor = color
-        layer?.borderColor = color.withAlphaComponent(0.6).cgColor
-    }
-
-    var fittingWidth: CGFloat {
-        ceil(label.cell?.cellSize.width ?? 0) + Self.paddingX * 2
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        let height = ceil(label.cell?.cellSize.height ?? 14)
-        label.frame = NSRect(
-            x: Self.paddingX, y: (newSize.height - height) / 2, width: max(0, newSize.width - Self.paddingX * 2), height: height
-        )
     }
 }

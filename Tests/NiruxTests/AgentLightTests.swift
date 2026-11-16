@@ -68,7 +68,7 @@ final class AgentLightTests: XCTestCase {
             try XCTUnwrap(focused.id): .working, try XCTUnwrap(shownRight.id): .alert(.waiting)
         ])
         XCTAssertEqual(plan.left, AgentLightPlan.EdgeAlert(
-            signal: .waiting, workspaceID: "ws-0", columnID: nearLeft.id, text: "claude needs permission"
+            signal: .waiting, workspaceID: "ws-0", columnID: nearLeft.id
         ))
         XCTAssertNil(plan.right, "the column in view lights itself")
         XCTAssertNil(plan.top)
@@ -76,8 +76,8 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(plan.edgeAlerts, [try XCTUnwrap(plan.left)])
     }
 
-    /// The workspaces above and below glow on the top and bottom edges,
-    /// named by their title: the most urgent, then the nearest.
+    /// The workspaces above and below glow on the top and bottom edges: the
+    /// most urgent, then the nearest.
     func testWorkspacesAboveAndBelowGlowOnTheirEdge() {
         let far = workspace(0, "far", [column(0, status: .needsAttention, reason: permission)])
         let near = workspace(1, "near", [column(0, status: .needsAttention, reason: .question(nil))])
@@ -88,9 +88,8 @@ final class AgentLightTests: XCTestCase {
 
         let plan = AgentLightPlan.make(infos: [far, near, active, broken, asking, done], activeIndex: 2) { _ in true }
 
-        XCTAssertEqual(plan.top?.text, "near has a question", "equally urgent: the nearest")
-        XCTAssertEqual(plan.top?.workspaceID, "ws-1")
-        XCTAssertEqual(plan.bottom?.text, "asking needs permission", "a wait outranks an error nearer by")
+        XCTAssertEqual(plan.top?.workspaceID, "ws-1", "equally urgent: the nearest")
+        XCTAssertEqual(plan.bottom?.workspaceID, "ws-4", "a wait outranks an error nearer by")
         XCTAssertEqual(plan.bottom?.signal, .waiting)
         XCTAssertNil(plan.left)
         XCTAssertNil(plan.right)
@@ -99,25 +98,11 @@ final class AgentLightTests: XCTestCase {
         XCTAssertNil(quiet.bottom, "a finished turn doesn't glow")
     }
 
-    func testALongNameIsCutInThePill() {
-        let title = String(repeating: "a", count: 40)
-        let above = workspace(0, title, [column(0, status: .needsAttention, reason: permission)])
-        let active = workspace(1, "here", [column(0, focused: true)], isActive: true)
-        let plan = AgentLightPlan.make(infos: [above, active], activeIndex: 1) { _ in true }
-        XCTAssertEqual(plan.top?.text, String(repeating: "a", count: AgentLightPlan.nameLimit - 1) + "… needs permission")
-
-        // A title may carry anything: the pill and its label get one clean line.
-        let odd = workspace(0, "feat\n\u{202E}login", [column(0, status: .needsAttention, reason: permission)])
-        XCTAssertEqual(
-            AgentLightPlan.make(infos: [odd, active], activeIndex: 1) { _ in true }.top?.text, "feat login needs permission"
-        )
-    }
-
     /// Back in the app: the columns' waits are seen, work goes on, and the
     /// edges keep what they show until the next refresh.
     func testClearingColumnAlertsKeepsWorkAndTheEdges() {
         let working = UUID()
-        let edge = AgentLightPlan.EdgeAlert(signal: .waiting, workspaceID: "w", columnID: nil, text: "w needs you")
+        let edge = AgentLightPlan.EdgeAlert(signal: .waiting, workspaceID: "w", columnID: nil)
         var plan = AgentLightPlan()
         plan.columns = [working: .working, UUID(): .alert(.waiting), UUID(): .alert(.error)]
         plan.top = edge
@@ -218,7 +203,7 @@ final class AgentLightTests: XCTestCase {
     }
 
     /// A viewport edge's glow is a bar on the padding: it stops before the
-    /// text, however much room the view keeps for its pill.
+    /// text, whatever the view's size.
     func testAnEdgesGlowStopsBeforeTheText() {
         let right = EdgeGlowView(edge: .right)
         right.frame = NSRect(x: 0, y: 0, width: 320, height: 600)
@@ -240,304 +225,6 @@ final class AgentLightTests: XCTestCase {
         edge.frame = NSRect(x: 0, y: 0, width: 400, height: 32)
         edge.sweep()
         XCTAssertFalse(edge.isSweeping)
-    }
-
-    // MARK: - The pill
-
-    private func edgeGlow(_ edge: EdgeGlowView.Edge, frame: NSRect, in container: NSView) -> EdgeGlowView {
-        let glow = EdgeGlowView(edge: edge)
-        glow.frame = frame
-        // Never by itself during a test.
-        glow.pillDuration = 3_600
-        container.addSubview(glow)
-        return glow
-    }
-
-    private func rightEdge(in container: NSView) -> EdgeGlowView {
-        edgeGlow(.right, frame: NSRect(x: 480, y: 0, width: 320, height: 600), in: container)
-    }
-
-    private func target(_ text: String = "Cookies needs permission", column: UUID? = nil) -> EdgeGlowView.Target {
-        EdgeGlowView.Target(workspaceID: "ws", columnID: column, text: text)
-    }
-
-    /// The pill names the agent for a few seconds, then leaves the glow
-    /// alone. It shows when its owner announces the agent, not at each
-    /// refresh of the same wait; an agent that isn't announced waits for
-    /// the pointer.
-    func testThePillAnnouncesAnAgentThenLeaves() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        let glow = rightEdge(in: container)
-
-        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
-        XCTAssertTrue(glow.isPillShown)
-        XCTAssertEqual(glow.pillText, "Cookies needs permission →")
-        XCTAssertLessThanOrEqual(glow.pillFrame.maxX, glow.bounds.maxX)
-        XCTAssertGreaterThan(glow.pillFrame.width, 100)
-
-        glow.show(.alert(.waiting), moving: false, target: target())
-        XCTAssertTrue(glow.isPillShown, "a refresh during its first seconds leaves it")
-        glow.endAnnouncement()
-        XCTAssertFalse(glow.isPillShown)
-        XCTAssertEqual(glow.light, .alert(.waiting), "the glow stays")
-        glow.show(.alert(.waiting), moving: false, target: target())
-        XCTAssertFalse(glow.isPillShown, "a refresh of the same wait")
-
-        glow.show(.alert(.waiting), moving: false, target: target("claude has a question"))
-        XCTAssertFalse(glow.isPillShown, "not announced: its name waits for the pointer")
-        XCTAssertEqual(glow.pillText, "claude has a question →")
-        XCTAssertEqual(glow.accessibilityLabel(), "claude has a question")
-
-        glow.show(.alert(.waiting), moving: false, target: target("claude has a question"), announcing: true)
-        XCTAssertTrue(glow.isPillShown)
-        glow.show(.alert(.waiting), moving: false, target: target("codex needs permission", column: UUID()))
-        XCTAssertFalse(glow.isPillShown, "another agent's name doesn't ride on the first one's seconds")
-
-        glow.show(nil, moving: false)
-        XCTAssertFalse(glow.isPillShown)
-        XCTAssertNil(glow.target)
-        XCTAssertFalse(glow.isAccessibilityElement())
-    }
-
-    func testThePillLeavesByItselfAfterItsTime() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        let glow = rightEdge(in: container)
-        let clock = ManualSchedule()
-        glow.schedule = clock.schedule
-        glow.pillDuration = 4
-        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
-        clock.advance(by: 3.9)
-        XCTAssertTrue(glow.isPillShown)
-        clock.advance(by: 0.2)
-        XCTAssertFalse(glow.isPillShown)
-        XCTAssertEqual(glow.light, .alert(.waiting))
-
-        // Announced again before its time is up: the first one's end
-        // doesn't cut the second short.
-        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
-        clock.advance(by: 3)
-        glow.show(.alert(.waiting), moving: false, target: target("claude has a question"), announcing: true)
-        clock.advance(by: 1.5)
-        XCTAssertTrue(glow.isPillShown)
-        clock.advance(by: 3)
-        XCTAssertFalse(glow.isPillShown)
-    }
-
-    /// The agent says something else while its pill is up (a message
-    /// turns into a permission request, a verdict into a question): the
-    /// pill stays, with the new words, for its full time again. Once its
-    /// time is over, new words wait for the pointer.
-    func testThePillFollowsItsAgentsNewWords() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        let glow = rightEdge(in: container)
-        let clock = ManualSchedule()
-        glow.schedule = clock.schedule
-        glow.pillDuration = 4
-        let agent = UUID()
-        glow.show(.alert(.waiting), moving: false, target: target("claude has a message", column: agent), announcing: true)
-        clock.advance(by: 3)
-        glow.show(.alert(.waiting), moving: false, target: target("claude needs permission", column: agent))
-        XCTAssertTrue(glow.isPillShown, "no flash")
-        XCTAssertEqual(glow.pillText, "claude needs permission →")
-        clock.advance(by: 3.9)
-        XCTAssertTrue(glow.isPillShown, "long enough to be read")
-        clock.advance(by: 0.2)
-        XCTAssertFalse(glow.isPillShown)
-
-        glow.show(.alert(.waiting), moving: false, target: target("claude asks you something", column: agent))
-        XCTAssertFalse(glow.isPillShown, "its seconds are over")
-        XCTAssertEqual(glow.pillText, "claude asks you something →")
-    }
-
-    /// Only the key window's pointer is tracked. Elsewhere no exit would
-    /// ever take away a pill the pointer kept: it would stay over the
-    /// terminal's text and take the next click there.
-    func testOnlyTheKeyWindowsPointerKeepsThePill() throws {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false
-        )
-        window.isReleasedWhenClosed = false
-        defer { window.close() }
-        let container = try XCTUnwrap(window.contentView)
-        let glow = rightEdge(in: container)
-        // The pointer lies where the pill comes up, and doesn't move.
-        glow.pointerLocation = { [unowned glow] _ in
-            glow.convert(NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.midY), to: nil)
-        }
-        let onPill = glow.convert(NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.midY), to: container)
-
-        // Not the key window (a test's never is).
-        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
-        glow.endAnnouncement()
-        XCTAssertFalse(glow.isPillShown, "nothing would take it away later")
-        XCTAssertNil(glow.hitTest(onPill))
-
-        // The key window: the pointer keeps the pill…
-        var isKey = true
-        glow.tracksPointer = { _ in isKey }
-        glow.show(nil, moving: false)
-        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
-        glow.endAnnouncement()
-        XCTAssertTrue(glow.isPillShown, "under the pointer")
-        XCTAssertTrue(glow.hitTest(onPill) === glow)
-        let other = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false
-        )
-        other.isReleasedWhenClosed = false
-        defer { other.close() }
-        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: other)
-        XCTAssertTrue(glow.isPillShown, "another window's business")
-        // …until its window stops being the key one.
-        isKey = false
-        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
-        XCTAssertFalse(glow.isPillShown)
-        XCTAssertNil(glow.hitTest(onPill), "the click goes to the terminal")
-
-        // Its first seconds are its own, key window or not. (The pointer
-        // rests on the glow: nothing but the window says it is gone.)
-        glow.pointerLocation = { [unowned glow] _ in
-            glow.convert(NSPoint(x: glow.hoverStrip.midX, y: glow.hoverStrip.midY), to: nil)
-        }
-        glow.show(nil, moving: false)
-        glow.show(.alert(.waiting), moving: false, target: target(), announcing: true)
-        glow.pointerEntered(.glow)
-        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
-        XCTAssertTrue(glow.isPillShown, "still announcing")
-        glow.endAnnouncement()
-        XCTAssertFalse(glow.isPillShown, "the pointer that was on the glow counts no more")
-    }
-
-    /// The pointer resting on the glow brings the pill back, clear of the
-    /// pointer and of the column headers, and the pill stays long enough
-    /// to be reached, then while the pointer is on it.
-    func testThePointerBringsThePillBackAndReachesIt() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 1_000, height: 700))
-        let frames: [(EdgeGlowView.Edge, NSRect)] = [
-            (.left, NSRect(x: 0, y: 0, width: 320, height: 700)), (.right, NSRect(x: 680, y: 0, width: 320, height: 700)),
-            (.top, NSRect(x: 0, y: 700 - EdgeGlowView.topHeight, width: 1_000, height: EdgeGlowView.topHeight)),
-            (.bottom, NSRect(x: 0, y: 0, width: 1_000, height: 56))
-        ]
-        for (edge, frame) in frames {
-            let glow = edgeGlow(edge, frame: frame, in: container)
-            glow.hoverDwell = 0
-            glow.pillLinger = 3_600
-            XCTAssertEqual(glow.trackingAreas.count, 0, "\(edge)")
-            glow.show(.alert(.waiting), moving: false, target: target())
-            XCTAssertFalse(glow.isPillShown)
-            XCTAssertEqual(glow.trackingAreas.count, 2, "\(edge): the glow and the pill")
-            XCTAssertTrue(glow.bounds.contains(glow.pillFrame), "\(edge)")
-            XCTAssertFalse(glow.hoverStrip.intersects(glow.pillFrame), "\(edge): never under the pointer that brings it")
-            if edge == .top {
-                XCTAssertLessThanOrEqual(
-                    glow.pillFrame.maxY, glow.bounds.maxY - ColumnHeaderView.height, "under the headers' buttons"
-                )
-            }
-
-            glow.pointerEntered(.glow)
-            XCTAssertTrue(glow.isPillShown, "\(edge)")
-            glow.pointerExited(.glow)
-            XCTAssertTrue(glow.isPillShown, "\(edge): time to reach it")
-            glow.pointerEntered(.pill)
-            let onPill = glow.convert(NSPoint(x: glow.pillFrame.midX, y: glow.pillFrame.midY), to: container)
-            XCTAssertTrue(glow.hitTest(onPill) === glow, "\(edge): it takes the click")
-            glow.pointerExited(.pill)
-            XCTAssertFalse(glow.isPillShown, "\(edge): the pointer left it")
-
-            glow.pointerEntered(.pill)
-            XCTAssertFalse(glow.isPillShown, "\(edge): where the pill was is no way back in")
-            glow.pointerExited(.pill)
-
-            glow.pillLinger = 0
-            glow.pointerEntered(.glow)
-            glow.pointerExited(.glow)
-            XCTAssertFalse(glow.isPillShown, "\(edge): gone once its time is up")
-
-            glow.show(nil, moving: false)
-            XCTAssertEqual(glow.trackingAreas.count, 0, "\(edge)")
-        }
-    }
-
-    /// A pointer that only crosses the edge, on its way from the sidebar
-    /// or the title bar, brings nothing up; one that rests there does. A
-    /// pointer that comes back keeps the pill its full time: the first
-    /// departure's end doesn't cut it short.
-    func testThePillComesForAPointerThatRestsAndStaysWhileItComesBack() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        let glow = rightEdge(in: container)
-        let clock = ManualSchedule()
-        glow.schedule = clock.schedule
-        glow.hoverDwell = 0.3
-        glow.pillLinger = 1.2
-        glow.show(.alert(.waiting), moving: false, target: target())
-
-        glow.pointerEntered(.glow)
-        clock.advance(by: 0.1)
-        glow.pointerExited(.glow)
-        clock.advance(by: 1)
-        XCTAssertFalse(glow.isPillShown, "it only crossed")
-
-        glow.pointerEntered(.glow)
-        clock.advance(by: 0.29)
-        XCTAssertFalse(glow.isPillShown)
-        clock.advance(by: 0.02)
-        XCTAssertTrue(glow.isPillShown, "it rests there")
-
-        glow.pointerExited(.glow)
-        clock.advance(by: 1)
-        glow.pointerEntered(.glow)
-        glow.pointerExited(.glow)
-        clock.advance(by: 0.5)
-        XCTAssertTrue(glow.isPillShown, "the first departure's time is up, not the second's")
-        clock.advance(by: 1)
-        XCTAssertFalse(glow.isPillShown)
-    }
-
-    /// During its first seconds the pointer leaving changes nothing, and
-    /// the pointer staying keeps the pill past them.
-    func testThePointerKeepsThePillPastItsFirstSeconds() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        let glow = rightEdge(in: container)
-        glow.hoverDwell = 0
-        glow.pillLinger = 0
-        glow.show(.alert(.error), moving: false, target: target("claude exited mid-turn"), announcing: true)
-        glow.pointerEntered(.glow)
-        glow.pointerExited(.glow)
-        XCTAssertTrue(glow.isPillShown, "still announcing")
-        glow.pointerEntered(.glow)
-        glow.endAnnouncement()
-        XCTAssertTrue(glow.isPillShown, "the pointer is on the glow")
-        glow.pointerExited(.glow)
-        XCTAssertFalse(glow.isPillShown)
-    }
-
-    /// The glow is decoration over headers, terminals and the resize
-    /// handle at the viewport's edge: only its pill, while it shows, takes
-    /// a click, which goes to the agent.
-    func testOnlyAShownPillTakesClicks() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        let glow = rightEdge(in: container)
-        var clicked: [EdgeGlowView.Target] = []
-        glow.onClick = { clicked.append($0) }
-        let onEdge = NSPoint(x: 797, y: 40)
-        let agent = target(column: UUID())
-
-        glow.show(.alert(.waiting), moving: false, target: agent, announcing: true)
-        let onPill = NSPoint(x: glow.frame.minX + glow.pillFrame.midX, y: glow.frame.minY + glow.pillFrame.midY)
-        XCTAssertTrue(glow.hitTest(onPill) === glow)
-        XCTAssertNil(glow.hitTest(onEdge), "the edge keeps its resize handle and its text")
-        XCTAssertNil(glow.hitTest(NSPoint(x: 500, y: 300)), "and so does the room kept for the pill")
-
-        glow.endAnnouncement()
-        XCTAssertNil(glow.hitTest(onPill), "a pill that left takes nothing")
-
-        XCTAssertTrue(glow.accessibilityPerformPress())
-        XCTAssertEqual(clicked, [agent])
-
-        let columnLight = EdgeGlowView(edge: .around)
-        columnLight.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
-        container.addSubview(columnLight)
-        columnLight.show(.alert(.waiting), moving: false)
-        XCTAssertNil(columnLight.hitTest(NSPoint(x: 1, y: 150)), "a column's light takes no click")
     }
 
     /// The shell's observers go away with it.
@@ -620,8 +307,8 @@ private final class UnreachedClassifier: TurnEndClassifier, @unchecked Sendable 
     func classify(_ message: String) async -> TurnEndVerdict { .unknown }
 }
 
-/// The lights in a window: when they may move, the turn end's sweep, the
-/// way back from an edge, and the setting.
+/// The lights in a window: when they may move, the turn end's sweep, an
+/// agent out of view lighting its edge, and the setting.
 @MainActor
 final class AgentLightShellTests: XCTestCase {
     private func withShell(
@@ -1000,7 +687,7 @@ final class AgentLightShellTests: XCTestCase {
 
     /// One definition of "in view" (`WorkspaceState.showsColumn(at:)`): a
     /// column that shows only a sliver is out of view for the edge that
-    /// names it and for its own light alike, which doesn't pulse there.
+    /// stands for it and for its own light alike, which doesn't pulse there.
     func testASliverOfAColumnIsOutOfView() throws {
         try withShell { shell, _, _ in
             let workspace = try fourColumns(in: shell)
@@ -1018,21 +705,22 @@ final class AgentLightShellTests: XCTestCase {
                 workspace, index: 0, in: shell, statuses: [.idle, .needsAttention, .needsAttention, .idle],
                 reasons: [1: permission, 2: permission]
             )])
-            XCTAssertEqual(shell.edgeGlowRight.target?.columnID, workspace.columns[2].id, "the edge names it")
+            XCTAssertEqual(shell.agentLights.plan.right?.columnID, workspace.columns[2].id, "its edge stands for it")
+            XCTAssertEqual(shell.edgeGlowRight.light, .alert(.waiting))
             XCTAssertEqual(workspace.columns[2].light?.light, .alert(.waiting))
             XCTAssertEqual(workspace.columns[2].light?.isMoving, false, "its own light doesn't pulse on top")
             XCTAssertEqual(workspace.columns[1].light?.isMoving, true)
         }
     }
 
-    /// A column scrolled out that waits: its side's edge glows and names
-    /// it once, a click on the pill goes to it, and neither a refresh nor
-    /// coming back to the app brings the pill back for the same wait.
-    func testTheEdgeNamesAnAgentOutOfViewOnce() throws {
+    /// A column scrolled out that waits: its side's edge glows, decoration
+    /// only (the one in view pulses itself, the other edge stays dark);
+    /// back in the app the columns' rings go while the edge keeps its glow;
+    /// answered, the edge goes dark.
+    func testAnAgentOutOfViewLightsItsEdge() throws {
         try withShell { shell, _, _ in
             let workspace = try fourColumns(in: shell)
             let glow = shell.edgeGlowRight
-            glow.pillDuration = 3_600
             let permission = self.permission
             let refresh = { (waiting: Bool) in
                 shell.updateAgentLights(infos: [self.info(
@@ -1044,54 +732,20 @@ final class AgentLightShellTests: XCTestCase {
             refresh(true)
             XCTAssertEqual(workspace.columns[1].light?.light, .alert(.waiting), "in view: it pulses itself")
             XCTAssertEqual(glow.light, .alert(.waiting))
-            XCTAssertEqual(glow.target?.columnID, workspace.columns[3].id, "the one out of view")
-            XCTAssertEqual(glow.pillText, "claude needs permission →")
-            XCTAssertTrue(glow.isPillShown)
+            XCTAssertEqual(shell.agentLights.plan.right?.columnID, workspace.columns[3].id, "the one out of view")
             XCTAssertTrue(glow.isMoving)
             XCTAssertNil(shell.edgeGlowLeft.light)
-            XCTAssertGreaterThan(glow.frame.width, glow.pillFrame.width)
-
-            glow.endAnnouncement()
-            refresh(true)
-            XCTAssertFalse(glow.isPillShown, "a refresh of the same wait")
-            XCTAssertEqual(shell.agentLights.announced, [workspace.columns[3].id])
-            shell.updateAgentLights(infos: [self.info(
-                workspace, index: 0, in: shell, statuses: [.working, .needsAttention, .idle, .needsAttention],
-                reasons: [1: permission, 3: .question("Which one?")]
-            )])
-            XCTAssertEqual(glow.pillText, "claude has a question →")
-            XCTAssertFalse(glow.isPillShown, "the same column's wait, under another name")
-            // Another space on screen lists none of these columns: the
-            // wait is remembered for the way back.
-            shell.updateAgentLights(infos: [])
-            XCTAssertEqual(shell.agentLights.announced, [workspace.columns[3].id])
-            refresh(true)
-            XCTAssertFalse(glow.isPillShown)
+            XCTAssertNil(glow.hitTest(NSPoint(x: glow.frame.midX, y: glow.frame.midY)), "it takes no click")
+            XCTAssertFalse(glow.isAccessibilityElement())
 
             // Back in the app: the column's ring goes, the edge keeps its
-            // glow, and the pill stays away.
+            // glow until the next refresh.
             shell.clearAgentAlertLights()
             XCTAssertNil(workspace.columns[1].light?.light)
             XCTAssertEqual(workspace.columns[0].light?.light, .working)
             XCTAssertEqual(glow.light, .alert(.waiting))
-            refresh(true)
-            XCTAssertFalse(glow.isPillShown)
-            XCTAssertEqual(workspace.columns[1].light?.light, .alert(.waiting), "its dialog is still open")
-
-            // Answered, then another wait: named again. Not while nobody
-            // can see the window: then when it shows.
             refresh(false)
-            XCTAssertNil(glow.light)
-            shell.sideEffects.windowShows = { _ in false }
-            refresh(true)
-            XCTAssertEqual(glow.target?.columnID, workspace.columns[3].id)
-            XCTAssertFalse(glow.isPillShown)
-            shell.sideEffects.windowShows = { _ in true }
-            shell.applyAgentLights()
-            XCTAssertTrue(glow.isPillShown)
-
-            XCTAssertTrue(glow.accessibilityPerformPress())
-            XCTAssertEqual(workspace.focusedIndex, 3)
+            XCTAssertNil(glow.light, "answered")
         }
     }
 

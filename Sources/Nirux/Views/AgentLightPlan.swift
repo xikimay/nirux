@@ -19,15 +19,12 @@ enum AgentLight: Equatable {
 /// The lights of the space on screen: each column's own, and for an agent
 /// out of view that waits or broke, the viewport's edge on its side.
 struct AgentLightPlan: Equatable {
-    /// The agent an edge's glow stands for: its pill names it, a click
-    /// goes to it.
+    /// The agent an edge's glow stands for (its color is its signal's).
     struct EdgeAlert: Equatable {
         let signal: AttentionSignal
         let workspaceID: String
         /// `ColumnState.id`.
         let columnID: UUID?
-        /// "Cookies needs permission", "claude has a question".
-        let text: String
     }
 
     /// Lit columns, by `ColumnState.id`.
@@ -36,9 +33,6 @@ struct AgentLightPlan: Equatable {
     var right: EdgeAlert?
     var top: EdgeAlert?
     var bottom: EdgeAlert?
-
-    /// A name longer than this is cut in a pill.
-    static let nameLimit = 28
 
     /// A column's light: a wait or an error first, then work. The focused
     /// column lights up too (more softly, see `EdgeGlowView.isSoft`): its
@@ -69,16 +63,16 @@ struct AgentLightPlan: Equatable {
         if let active = infos.first(where: { $0.index == activeIndex }) {
             let hidden = active.columns.filter { !shows($0) }.map { (workspace: active, column: $0) }
             let focused = active.focusedColumn
-            // Nearest first: at equal urgency the edge names the closest.
-            plan.left = edgeAlert(among: Array(hidden.filter { $0.column.index < focused }.reversed()), namesWorkspace: false)
-            plan.right = edgeAlert(among: hidden.filter { $0.column.index > focused }, namesWorkspace: false)
+            // Nearest first: at equal urgency the edge stands for the closest.
+            plan.left = edgeAlert(among: Array(hidden.filter { $0.column.index < focused }.reversed()))
+            plan.right = edgeAlert(among: hidden.filter { $0.column.index > focused })
         }
         let position = infos.firstIndex { $0.index == activeIndex } ?? 0
         func columns(of workspaces: [WorkspaceInfo]) -> [(workspace: WorkspaceInfo, column: ColumnInfo)] {
             workspaces.flatMap { workspace in workspace.columns.map { (workspace, $0) } }
         }
-        plan.top = edgeAlert(among: columns(of: Array(infos.prefix(position).reversed())), namesWorkspace: true)
-        plan.bottom = edgeAlert(among: columns(of: Array(infos.dropFirst(position + 1))), namesWorkspace: true)
+        plan.top = edgeAlert(among: columns(of: Array(infos.prefix(position).reversed())))
+        plan.bottom = edgeAlert(among: columns(of: Array(infos.dropFirst(position + 1))))
         return plan
     }
 
@@ -86,7 +80,7 @@ struct AgentLightPlan: Equatable {
     /// at equal urgency.
     @MainActor
     private static func edgeAlert(
-        among candidates: [(workspace: WorkspaceInfo, column: ColumnInfo)], namesWorkspace: Bool
+        among candidates: [(workspace: WorkspaceInfo, column: ColumnInfo)]
     ) -> EdgeAlert? {
         var best: (signal: AttentionSignal, workspace: WorkspaceInfo, column: ColumnInfo)?
         for candidate in candidates {
@@ -94,19 +88,13 @@ struct AgentLightPlan: Equatable {
             if best.map({ signal > $0.signal }) ?? true { best = (signal, candidate.workspace, candidate.column) }
         }
         guard let best else { return nil }
-        let name = namesWorkspace ? best.workspace.title : SidebarRenderer.columnName(best.column)
-        let headline = best.column.attentionSummary?.headline ?? (best.signal == .waiting ? "needs you" : "stopped")
-        return EdgeAlert(
-            signal: best.signal, workspaceID: best.workspace.id, columnID: best.column.id,
-            // A title may carry anything: one clean line, cut to fit.
-            text: "\(AgentText.clean(name, maxLength: nameLimit) ?? "Agent") \(headline)"
-        )
+        return EdgeAlert(signal: best.signal, workspaceID: best.workspace.id, columnID: best.column.id)
     }
 
     /// The user is back in the app: the columns' waits and errors are
     /// seen, work goes on (see `NiruxShellView.clearAllAgentAttention`).
     /// The edges stay as they are until the next refresh: a dialog still
-    /// open out of view keeps its glow, without its pill coming back.
+    /// open out of view keeps its glow.
     mutating func clearColumnAlerts() {
         columns = columns.filter { $0.value == .working }
     }
