@@ -63,7 +63,7 @@ struct AgentLightPlan: Equatable {
         if let active = infos.first(where: { $0.index == activeIndex }) {
             let hidden = active.columns.filter { !shows($0) }.map { (workspace: active, column: $0) }
             let focused = active.focusedColumn
-            // Nearest first: at equal urgency the edge names the closest.
+            // Nearest first: at equal urgency the edge stands for the closest.
             plan.left = edgeAlert(among: Array(hidden.filter { $0.column.index < focused }.reversed()))
             plan.right = edgeAlert(among: hidden.filter { $0.column.index > focused })
         }

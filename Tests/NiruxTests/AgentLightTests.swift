@@ -227,6 +227,52 @@ final class AgentLightTests: XCTestCase {
         XCTAssertFalse(edge.isSweeping)
     }
 
+    /// The shell's observers go away with it.
+    func testObserversLeaveWithTheirBag() {
+        let center = NotificationCenter()
+        let name = Notification.Name("AgentLightTests.ping")
+        let heard = Count()
+        var bag: ObserverBag? = ObserverBag()
+        bag?.add(center.addObserver(forName: name, object: nil, queue: nil) { _ in heard.value += 1 }, on: center)
+        center.post(name: name, object: nil)
+        XCTAssertEqual(heard.value, 1)
+        bag = nil
+        center.post(name: name, object: nil)
+        XCTAssertEqual(heard.value, 1)
+    }
+
+    // MARK: - The other dots that move
+
+    /// A waiting column's ring among the column dots pulses or stands
+    /// still at once, and an empty space keeps none.
+    func testTheColumnDotsRingFollowsPulses() throws {
+        let indicator = ColumnIndicatorView(frame: NSRect(x: 0, y: 0, width: 300, height: 16))
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 300, pixelsHigh: 16, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+            isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let draw = {
+            NSGraphicsContext.saveGraphicsState()
+            defer { NSGraphicsContext.restoreGraphicsState() }
+            NSGraphicsContext.current = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+            indicator.draw(indicator.bounds)
+        }
+        indicator.update(columnCount: 3, focusedIndex: 0, columnSignals: [nil, .waiting, .finished])
+        try draw()
+        XCTAssertEqual(indicator.pulsingRings, [true], "one ring, for the wait")
+
+        indicator.pulses = false
+        XCTAssertEqual(indicator.pulsingRings, [false], "at once, without waiting for a draw")
+        try draw()
+        XCTAssertEqual(indicator.pulsingRings, [false])
+        indicator.pulses = true
+        XCTAssertEqual(indicator.pulsingRings, [true])
+
+        indicator.update(columnCount: 0, focusedIndex: 0)
+        try draw()
+        XCTAssertEqual(indicator.pulsingRings, [], "an empty space keeps no ring")
+    }
+
     /// The header's working dot and the rail's badge breathe only while
     /// animations may run. (A row shows work as a line: SidebarRowMotionTests.)
     func testTheWorkingDotsFollowAnimates() {
@@ -261,8 +307,8 @@ private final class UnreachedClassifier: TurnEndClassifier, @unchecked Sendable 
     func classify(_ message: String) async -> TurnEndVerdict { .unknown }
 }
 
-/// The lights in a window: when they may move, the turn end's sweep, the
-/// way back from an edge, and the setting.
+/// The lights in a window: when they may move, the turn end's sweep, an
+/// agent out of view lighting its edge, and the setting.
 @MainActor
 final class AgentLightShellTests: XCTestCase {
     private func withShell(
@@ -664,6 +710,42 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertEqual(workspace.columns[2].light?.light, .alert(.waiting))
             XCTAssertEqual(workspace.columns[2].light?.isMoving, false, "its own light doesn't pulse on top")
             XCTAssertEqual(workspace.columns[1].light?.isMoving, true)
+        }
+    }
+
+    /// A column scrolled out that waits: its side's edge glows, decoration
+    /// only (the one in view pulses itself, the other edge stays dark);
+    /// back in the app the columns' rings go while the edge keeps its glow;
+    /// answered, the edge goes dark.
+    func testAnAgentOutOfViewLightsItsEdge() throws {
+        try withShell { shell, _, _ in
+            let workspace = try fourColumns(in: shell)
+            let glow = shell.edgeGlowRight
+            let permission = self.permission
+            let refresh = { (waiting: Bool) in
+                shell.updateAgentLights(infos: [self.info(
+                    workspace, index: 0, in: shell,
+                    statuses: [.working, .needsAttention, .idle, waiting ? .needsAttention : .idle],
+                    reasons: waiting ? [1: permission, 3: permission] : [1: permission]
+                )])
+            }
+            refresh(true)
+            XCTAssertEqual(workspace.columns[1].light?.light, .alert(.waiting), "in view: it pulses itself")
+            XCTAssertEqual(glow.light, .alert(.waiting))
+            XCTAssertEqual(shell.agentLights.plan.right?.columnID, workspace.columns[3].id, "the one out of view")
+            XCTAssertTrue(glow.isMoving)
+            XCTAssertNil(shell.edgeGlowLeft.light)
+            XCTAssertNil(glow.hitTest(NSPoint(x: glow.frame.midX, y: glow.frame.midY)), "it takes no click")
+            XCTAssertFalse(glow.isAccessibilityElement())
+
+            // Back in the app: the column's ring goes, the edge keeps its
+            // glow until the next refresh.
+            shell.clearAgentAlertLights()
+            XCTAssertNil(workspace.columns[1].light?.light)
+            XCTAssertEqual(workspace.columns[0].light?.light, .working)
+            XCTAssertEqual(glow.light, .alert(.waiting))
+            refresh(false)
+            XCTAssertNil(glow.light, "answered")
         }
     }
 

@@ -440,20 +440,18 @@ final class NiruxShellView: NSView {
                 + "viewport=\(viewportW)x\(viewportH)"
         )
 
-        // Each edge's view: its glow's depth.
-        let glowWidth = min(viewportH, EdgeGlowView.depth)
-        let sideGlowWidth = min(viewportW, EdgeGlowView.depth)
-        let bottomGlowHeight = min(viewportH, EdgeGlowView.depth)
+        // Each edge's view is as deep as its glow.
+        let edgeDepth = min(viewportW, viewportH, EdgeGlowView.depth)
         let vpX = sidebarW + 1
 
         let frames = ChromeFrames(
             sidebar: NSRect(x: 0, y: statusH, width: sidebarW, height: bounds.height - statusH),
             divider: NSRect(x: sidebarW, y: statusH, width: 1, height: bounds.height - statusH),
             viewport: NSRect(x: vpX, y: statusH, width: viewportW, height: viewportH),
-            glowLeft: NSRect(x: vpX, y: statusH, width: sideGlowWidth, height: viewportH),
-            glowRight: NSRect(x: vpX + viewportW - sideGlowWidth, y: statusH, width: sideGlowWidth, height: viewportH),
-            glowTop: NSRect(x: vpX, y: statusH + viewportH - glowWidth, width: viewportW, height: glowWidth),
-            glowBottom: NSRect(x: vpX, y: statusH, width: viewportW, height: bottomGlowHeight),
+            glowLeft: NSRect(x: vpX, y: statusH, width: edgeDepth, height: viewportH),
+            glowRight: NSRect(x: vpX + viewportW - edgeDepth, y: statusH, width: edgeDepth, height: viewportH),
+            glowTop: NSRect(x: vpX, y: statusH + viewportH - edgeDepth, width: viewportW, height: edgeDepth),
+            glowBottom: NSRect(x: vpX, y: statusH, width: viewportW, height: edgeDepth),
             indicator: NSRect(x: vpX, y: 4, width: viewportW, height: 16),
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
