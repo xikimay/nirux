@@ -162,8 +162,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         guard let panel, let pane = shownPane else { return }
         var size = contentSize(for: pane)
         // Never wider than the screen: a pane wider than its area then keeps
-        // its left side in view (see `place`).
-        if let screen = (panel.screen ?? NSScreen.main)?.visibleFrame {
+        // its left side in view (see `place`). Before the panel is on a
+        // screen (and in xctest, where none is main), the first one, as
+        // AppKit constrains it when it shows.
+        if let screen = (panel.screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
             size.width = min(size.width, screen.width)
         }
         var frame = panel.frameRect(forContentRect: NSRect(origin: .zero, size: size))
