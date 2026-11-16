@@ -17,6 +17,7 @@ extension SidebarView {
         // Before the rows go: what the list hangs by.
         let anchor = scrollAnchor()
         builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })
+        let wasLit = hoveredTarget != nil
         resetRenderState()
         showIconRail()
         guard isExpanded else {
@@ -84,7 +85,7 @@ extension SidebarView {
         buildHistoryRow()
 
         restoreScroll(to: anchor)
-        refreshHoverTargetFromMouse()
+        refreshHoverTargetFromMouse(wasLit: wasLit)
         refreshApprovalArming()
         followActiveWorkspace(docHeight: docHeight)
         applyBirthMotion()
@@ -454,45 +455,14 @@ extension SidebarView {
     }
 
     private func buildArchivedRow(count: Int, frame: NSRect) {
-        typealias Metrics = SidebarExpandedMetrics
-        hitAreas.append(SidebarHitArea(frame: frame, region: .archivedToggle))
-        archivedRowHoverView = addRowHover(frame: frame)
-
-        let icon = SidebarImageView(image: SidebarRenderer.symbol(
-            Theme.Symbol.inactiveWorkspaces, color: Theme.Color.textSecondary, pointSize: 12
-        ))
-        icon.frame = NSRect(x: Metrics.markCenterX - 7, y: frame.midY - 7, width: 14, height: 14)
-        icon.setAccessibilityElement(false)
-        addExpandedView(icon)
-
-        let countLabel = textLabel("\(count)", font: Theme.Font.caption, color: Theme.Color.textSecondary)
-        countLabel.alignment = .right
-        let countSize = countLabel.fittingSize
-        countLabel.frame = NSRect(
-            x: frame.maxX - Metrics.cardPaddingX - countSize.width, y: frame.midY - ceil(countSize.height) / 2,
-            width: countSize.width, height: ceil(countSize.height)
+        let row = buildNavigatorRow(
+            title: Self.archivedTitle, symbol: Theme.Symbol.inactiveWorkspaces, frame: frame, region: .archivedToggle,
+            color: Theme.Color.textSecondary, label: "\(Self.archivedTitle), \(count)", trailing: "\(count)",
+            press: { [weak self] in self?.toggleInactiveSection() }
         )
-        countLabel.setAccessibilityElement(false)
-        addExpandedView(countLabel)
-        archivedCountLabel = countLabel
-
-        let titleX = Metrics.textX
-        let title = textLabel(Self.archivedTitle, font: Theme.Font.body, color: Theme.Color.textSecondary)
-        let titleHeight = ceil(title.fittingSize.height)
-        title.frame = NSRect(
-            x: titleX, y: frame.midY - titleHeight / 2,
-            width: max(0, countLabel.frame.minX - Theme.Space.sm - titleX), height: titleHeight
-        )
-        title.setAccessibilityElement(false)
-        addExpandedView(title)
-
-        // Takes the first click on a window in the background, and is what
-        // VoiceOver sees.
-        let toggle = SidebarSectionToggleView(frame: frame)
-        toggle.setAccessibilityLabel("\(Self.archivedTitle), \(count)")
-        toggle.setAccessibilityExpanded(!isInactiveSectionCollapsed)
-        toggle.onPress = { [weak self] in self?.toggleInactiveSection() }
-        addExpandedView(toggle)
+        row.control.setAccessibilityExpanded(!isInactiveSectionCollapsed)
+        archivedRowHoverView = row.hover
+        archivedCountLabel = row.trailing
     }
 
     static let archivedTitle = "Archived"
@@ -514,10 +484,9 @@ extension SidebarView {
             title: Self.boardTitle, symbol: Theme.Symbol.projectBoard, frame: frame, region: .board,
             color: available ? (shown ? Theme.Color.textPrimary : Theme.Color.textSecondary) : Theme.Color.textDisabled,
             iconColor: available && shown ? Theme.Color.accent : nil,
-            label: shown ? "\(Self.boardTitle), open" : Self.boardTitle,
-            tip: available ? "Board (\(NiruxShortcuts.board.chord.display))" : "Open a task to show its space’s Board",
+            label: shown ? "\(Self.boardTitle), open" : Self.boardTitle, tip: navigation.boardTip,
             press: available ? { [weak self] in self?.onOpenBoard?() } : nil
-        )
+        ).hover
         return frame.minY
     }
 
@@ -531,30 +500,50 @@ extension SidebarView {
             title: Self.historyTitle, symbol: Theme.Symbol.sessionHistory, frame: frame, region: .history,
             color: Theme.Color.textSecondary, label: Self.historyTitle, tip: "Session History",
             press: { [weak self] in self?.onShowHistory?() }
-        )
+        ).hover
     }
 
-    /// A navigator row: its symbol in the marks' column, its title, its
-    /// hover, and the control VoiceOver presses (which takes the first click
-    /// on a window in the background, as the Archived row's does); `press`
-    /// nil, it can't be pressed. Returns the hover view.
+    /// A navigator row's views: its hover, the control VoiceOver presses,
+    /// its trailing label.
+    struct NavigatorRow {
+        let hover: NSView
+        let control: SidebarSectionToggleView
+        let trailing: NSTextField?
+    }
+
+    /// A navigator row: its symbol in the marks' column, its title, an
+    /// optional trailing count, its hover, and the control VoiceOver presses
+    /// (which takes the first click on a window in the background). With
+    /// `press` nil it takes no click, no hover and no press.
     private func buildNavigatorRow(
         title: String, symbol: String, frame: NSRect, region: SidebarHitRegion, color: NSColor, iconColor: NSColor? = nil,
-        label: String, tip: String, press: (() -> Void)?
-    ) -> NSView {
+        label: String, tip: String? = nil, trailing: String? = nil, press: (() -> Void)?
+    ) -> NavigatorRow {
         typealias Metrics = SidebarExpandedMetrics
-        hitAreas.append(SidebarHitArea(frame: frame, region: region))
+        if press != nil { hitAreas.append(SidebarHitArea(frame: frame, region: region)) }
         let hover = addRowHover(frame: frame)
         let icon = SidebarImageView(image: SidebarRenderer.symbol(symbol, color: iconColor ?? color, pointSize: 12))
         icon.identifier = NSUserInterfaceItemIdentifier("nirux.sidebar.navigator.\(title)")
         icon.frame = NSRect(x: Metrics.markCenterX - 7, y: frame.midY - 7, width: 14, height: 14)
         icon.setAccessibilityElement(false)
         addExpandedView(icon)
+        let trailingLabel = trailing.map { text in
+            let label = textLabel(text, font: Theme.Font.caption, color: color)
+            label.alignment = .right
+            let size = label.fittingSize
+            label.frame = NSRect(
+                x: frame.maxX - Metrics.cardPaddingX - size.width, y: frame.midY - ceil(size.height) / 2,
+                width: size.width, height: ceil(size.height)
+            )
+            label.setAccessibilityElement(false)
+            addExpandedView(label)
+            return label
+        }
         let titleLabel = textLabel(title, font: Theme.Font.body, color: color)
         let titleHeight = ceil(titleLabel.fittingSize.height)
+        let titleEnd = trailingLabel.map { $0.frame.minX - Theme.Space.sm } ?? frame.maxX - Metrics.cardPaddingX
         titleLabel.frame = NSRect(
-            x: Metrics.textX, y: frame.midY - titleHeight / 2,
-            width: max(0, frame.maxX - Metrics.cardPaddingX - Metrics.textX), height: titleHeight
+            x: Metrics.textX, y: frame.midY - titleHeight / 2, width: max(0, titleEnd - Metrics.textX), height: titleHeight
         )
         titleLabel.setAccessibilityElement(false)
         addExpandedView(titleLabel)
@@ -565,7 +554,7 @@ extension SidebarView {
         control.toolTip = tip
         control.onPress = press
         addExpandedView(control)
-        return hover
+        return NavigatorRow(hover: hover, control: control, trailing: trailingLabel)
     }
 
     static let boardTitle = "Board"

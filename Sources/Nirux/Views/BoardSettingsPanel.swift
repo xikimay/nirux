@@ -123,8 +123,15 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         shownRepository = content.selectedRepository
         statusLabel.stringValue = status ?? ""
         layoutPanel()
-        // Not from the Settings sidebar, where ↑ and ↓ walk the panes.
-        if let window = host.window, isWritable, window.keyboardIsFree(for: host) { window.makeFirstResponder(repositoryField) }
+        takeKeyboardIfFree()
+    }
+
+    /// The keyboard goes to the first field, unless something outside the
+    /// form has it: the Settings sidebar, where ↑ and ↓ walk the panes.
+    func takeKeyboardIfFree() {
+        if let host = hostView, let window = host.window, isWritable, window.keyboardIsFree(for: host) {
+            window.makeFirstResponder(repositoryField)
+        }
     }
 
     func dismiss() {

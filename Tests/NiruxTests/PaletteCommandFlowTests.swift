@@ -744,7 +744,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             NSApp.delegate = app
             harness.runPaletteCommand("Open Settings")
             NSApp.delegate = previousDelegate
-            let settings = try XCTUnwrap(app.settingsWindow)
+            let settings = try XCTUnwrap(app.settingsPanel)
             XCTAssertTrue(settings.isVisible)
             settings.orderOut(nil)
             settings.close()

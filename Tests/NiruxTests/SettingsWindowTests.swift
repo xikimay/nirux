@@ -26,11 +26,12 @@ final class SettingsWindowTests: XCTestCase {
         try withIsolatedState {
             let app = try openSettings()
             defer { close(app) }
-            for pane in app.settingsController.appPanes {
-                app.settingsController.select(.app(pane.id))
+            let settings = try XCTUnwrap(app.settingsController)
+            for pane in settings.appPanes {
+                settings.select(.app(pane.id))
             }
-            app.settingsWindow?.performClose(nil)
-            XCTAssertNil(app.settingsWindow)
+            app.settingsPanel?.performClose(nil)
+            XCTAssertNil(app.settingsPanel)
             XCTAssertNil(Persistence.load(), "nothing was chosen, so nothing is saved")
         }
     }
@@ -84,7 +85,7 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertEqual(NiruxShellView.currentClaudeLaunchMode(), .plan)
             XCTAssertEqual(NiruxShellView.currentCodexLaunchMode(), .bypass)
             XCTAssertEqual(NiruxShellView.currentStuckAgentMinutes(), 30)
-            XCTAssertNil(app.settingsWindow?.attachedSheet)
+            XCTAssertNil(app.settingsPanel?.attachedSheet)
         }
     }
 
@@ -230,13 +231,13 @@ final class SettingsWindowTests: XCTestCase {
 
             try choose(CodexLaunchMode.bypass.rawValue, in: app.settingsCodexLaunchModePopup)
             XCTAssertEqual(selectedRawValue(app.settingsCodexLaunchModePopup), CodexLaunchMode.default.rawValue)
-            XCTAssertNotNil(app.settingsWindow?.attachedSheet)
+            XCTAssertNotNil(app.settingsPanel?.attachedSheet)
             dismissSheet(app)
-            XCTAssertNil(app.settingsWindow?.attachedSheet)
+            XCTAssertNil(app.settingsPanel?.attachedSheet)
 
             try click(app.settingsKeepAwakeCheckbox)
             XCTAssertEqual(app.settingsKeepAwakeCheckbox?.state, .on)
-            XCTAssertNotNil(app.settingsWindow?.attachedSheet)
+            XCTAssertNotNil(app.settingsPanel?.attachedSheet)
             dismissSheet(app)
 
             // Nothing applies a setting that wasn't saved.
@@ -455,7 +456,7 @@ final class SettingsWindowTests: XCTestCase {
         try withIsolatedState {
             let app = try openSettings(statusLine: .foreign)
             defer { close(app) }
-            let agents = try XCTUnwrap(app.settingsController.appPanes.first { $0.title == "Agents" }?.view)
+            let agents = try XCTUnwrap(app.settingsController?.appPanes.first { $0.title == "Agents" }?.view)
             let texts = Self.descendants(of: agents).compactMap { ($0 as? NSTextField)?.stringValue }
             XCTAssertTrue(texts.contains(NiruxApp.usageLimitsHint(for: .foreign)))
             XCTAssertFalse(texts.contains(NiruxApp.usageLimitsHint(for: .none)))
@@ -473,8 +474,8 @@ final class SettingsWindowTests: XCTestCase {
             let shell = makeShell()
             let app = try openSettings(shell: shell)
             defer { close(app) }
-            let settings = app.settingsController
-            let window = try XCTUnwrap(app.settingsWindow)
+            let settings = try XCTUnwrap(app.settingsController)
+            let window = try XCTUnwrap(app.settingsPanel)
             // A panel never keeps Nirux running once the main window closes,
             // and keys typed in it never reach a terminal.
             XCTAssertTrue(window is NSPanel)
@@ -525,8 +526,8 @@ final class SettingsWindowTests: XCTestCase {
             let shell = makeShell()
             let app = try openSettings(shell: shell)
             defer { close(app) }
-            let settings = app.settingsController
-            let window = try XCTUnwrap(app.settingsWindow)
+            let settings = try XCTUnwrap(app.settingsController)
+            let window = try XCTUnwrap(app.settingsPanel)
             settings.select(.app("general"))
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             let general = try XCTUnwrap(settings.selectedView)
@@ -557,9 +558,9 @@ final class SettingsWindowTests: XCTestCase {
             let beta = shell.workspaceStore.createProfile(named: "Beta", select: false)
             let app = try openSettings(shell: shell)
             defer { close(app) }
-            let settings = app.settingsController
+            let settings = try XCTUnwrap(app.settingsController)
             XCTAssertIdentical(settings, shell.settingsWindow, "the shell's window, for the space's panes")
-            let window = try XCTUnwrap(app.settingsWindow)
+            let window = try XCTUnwrap(app.settingsPanel)
             XCTAssertEqual(settings.sidebar.rows.map(Self.title), [
                 "Nirux", "General", "Agents", "Notifications",
                 "Acme", "General", "Defaults", "Lead", "Brief", "Memory", "Board", "Templates"
@@ -612,7 +613,7 @@ final class SettingsWindowTests: XCTestCase {
 
             // Space Settings… on another space: the same window, that space.
             shell.showSpaceSettings(profileID: beta.id)
-            XCTAssertIdentical(app.settingsWindow, window)
+            XCTAssertIdentical(app.settingsPanel, window)
             XCTAssertEqual(shell.spaceSettings?.spaceID, beta.id)
             XCTAssertEqual(settings.selection, .space(.general))
             XCTAssertEqual(window.title, "Beta — General")
@@ -670,17 +671,37 @@ final class SettingsWindowTests: XCTestCase {
             sheet.isReleasedWhenClosed = false
             window.beginSheet(sheet)
             XCTAssertIdentical(window.attachedSheet, sheet)
+            var refusal: (reason: String, window: NSWindow)?
+            shell.spaceSettings?.askInSheet = { alert, parent, _ in refusal = (alert.messageText, parent) }
             shell.showSpaceSettings(profileID: acme.id)
             XCTAssertEqual(shell.spaceSettings?.spaceID, beta.id)
             XCTAssertIdentical(window.attachedSheet, sheet, "still up")
+            XCTAssertEqual(refusal?.reason, "Finish what is open in this space’s settings first")
+            XCTAssertIdentical(refusal?.window, sheet, "said in the window, over the sheet")
             window.endSheet(sheet)
+
+            // Nirux's own sheet (the tasks folder's chooser) is no space's:
+            // it neither keeps the space shown nor goes with it.
+            let delta = shell.workspaceStore.createProfile(named: "Delta", select: false)
+            let chooser = NSWindow(contentRect: sheet.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            chooser.isReleasedWhenClosed = false
+            shell.sideEffects.chooseFolder = { _, parent, _ in parent?.beginSheet(chooser) }
+            app.settingsChangeTasksFolder(NSButton())
+            XCTAssertIdentical(window.attachedSheet, chooser)
+            shell.showSpaceSettings(profileID: delta.id, tab: nil)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, delta.id, "Nirux's sheet keeps no space")
+            shell.deleteSpace(profileID: delta.id)
+            XCTAssertNotEqual(shell.spaceSettings?.spaceID, delta.id)
+            XCTAssertIdentical(window.attachedSheet, chooser, "nor goes with one")
+            window.endSheet(chooser)
+            shell.showSpaceSettings(profileID: beta.id, tab: nil)
 
             // The space shown is deleted: the window stays, on the active
             // space, Nirux's pane still shown; a sheet up there goes.
             window.beginSheet(sheet)
             shell.deleteSpace(profileID: beta.id)
             XCTAssertNil(window.attachedSheet)
-            XCTAssertIdentical(app.settingsWindow, window)
+            XCTAssertIdentical(app.settingsPanel, window)
             XCTAssertEqual(shell.spaceSettings?.spaceID, acme.id)
             XCTAssertEqual(settings.selection, .app("notifications"))
             XCTAssertFalse(settings.sidebar.rows.map(Self.title).contains("Beta"))
@@ -695,21 +716,43 @@ final class SettingsWindowTests: XCTestCase {
 
             // Space Settings… opens with the sidebar's keyboard; Space Memory…
             // frees it for its list.
-            app.settingsWindow?.performClose(nil)
+            app.settingsPanel?.performClose(nil)
             shell.showSpaceSettings(profileID: acme.id)
-            let reopened = try XCTUnwrap(app.settingsWindow)
+            let reopened = try XCTUnwrap(app.settingsPanel)
             XCTAssertIdentical(reopened.firstResponder, settings.sidebar.table)
             shell.showSpaceSettings(profileID: acme.id, tab: .memory)
             XCTAssertIdentical(reopened.firstResponder, reopened)
 
             // Closed, ⌘, opens it again on the pane last shown.
             settings.select(.app("agents"))
-            app.settingsWindow?.performClose(nil)
-            XCTAssertNil(app.settingsWindow)
+            app.settingsPanel?.performClose(nil)
+            XCTAssertNil(app.settingsPanel)
             XCTAssertNil(shell.spaceSettings)
             app.showSettings(nil)
             XCTAssertEqual(settings.selection, .app("agents"))
-            XCTAssertEqual(app.settingsWindow?.title, "Agents")
+            XCTAssertEqual(app.settingsPanel?.title, "Agents")
+        }
+    }
+
+    /// Closing Settings leaves the keyboard of the main window where it was:
+    /// typing in an editor, ⌘, then ⌘W, the editor still has it.
+    @MainActor
+    func testClosingSettingsLeavesTheMainWindowsKeyboard() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            let main = NSWindow(contentRect: shell.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            main.isReleasedWhenClosed = false
+            main.contentView = shell
+            defer { main.close() }
+            let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+            shell.addSubview(editor)
+            XCTAssertTrue(main.makeFirstResponder(editor))
+            let app = try openSettings(shell: shell)
+            defer { close(app) }
+            XCTAssertNotNil(shell.spaceSettings, "the active space's panes, in the window")
+            app.settingsPanel?.performClose(nil)
+            XCTAssertNil(app.settingsPanel)
+            XCTAssertIdentical(main.firstResponder, editor)
         }
     }
 
@@ -799,21 +842,21 @@ final class SettingsWindowTests: XCTestCase {
         app.claudeStatusLineStateReader = { statusLine }
         app.claudeStatusLineInstaller = { _ in }
         app.showSettings(nil)
-        _ = try XCTUnwrap(app.settingsWindow)
+        _ = try XCTUnwrap(app.settingsPanel)
         return app
     }
 
     @MainActor
     private func close(_ app: NiruxApp) {
         dismissSheet(app)
-        app.settingsWindow?.orderOut(nil)
-        app.settingsWindow?.close()
+        app.settingsPanel?.orderOut(nil)
+        app.settingsPanel?.close()
     }
 
     @MainActor
     private func dismissSheet(_ app: NiruxApp) {
-        if let sheet = app.settingsWindow?.attachedSheet {
-            app.settingsWindow?.endSheet(sheet)
+        if let sheet = app.settingsPanel?.attachedSheet {
+            app.settingsPanel?.endSheet(sheet)
         }
     }
 

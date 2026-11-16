@@ -139,9 +139,15 @@ final class ProjectMemoryPanel: NSObject {
         layoutBody(noticeShown: notice != nil)
 
         installMonitors()
-        // Not from the Settings sidebar, where ↑ and ↓ walk the panes.
-        if window?.keyboardIsFree(for: host) == true { window?.makeFirstResponder(searchField) }
+        takeKeyboardIfFree()
         reload()
+    }
+
+    /// The keyboard goes to the search field, unless something outside the
+    /// list has it: the Settings sidebar, where ↑ and ↓ walk the panes.
+    func takeKeyboardIfFree() {
+        guard let host, let window = host.window, window.keyboardIsFree(for: host) else { return }
+        window.makeFirstResponder(searchField)
     }
 
     /// Its window closed: an edit or an addition in progress is dropped.

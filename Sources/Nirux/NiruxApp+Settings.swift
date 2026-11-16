@@ -12,24 +12,23 @@ extension NiruxApp {
 
     /// ⌘,: the Settings window, on the pane last shown.
     @objc func showSettings(_ sender: Any?) {
-        let settings = settingsController
-        wireSettings(settings)
-        settings.show()
+        if shell == nil, standaloneSettings == nil {
+            let standalone = SettingsWindow()
+            wireSettings(standalone)
+            standaloneSettings = standalone
+        }
+        settingsController?.show()
     }
 
-    /// The window Settings shows in: the one open, else the shell's (the
-    /// space's panes come from it), else one of the app's own.
-    var settingsController: SettingsWindow {
+    /// The window Settings shows in: the app's own while it is open, else
+    /// the shell's (the space's panes come from it), else the app's own.
+    var settingsController: SettingsWindow? {
         if let standalone = standaloneSettings, standalone.panel != nil { return standalone }
-        if let shell { return shell.settingsWindow }
-        if let standalone = standaloneSettings { return standalone }
-        let standalone = SettingsWindow()
-        standaloneSettings = standalone
-        return standalone
+        return shell?.settingsWindow ?? standaloneSettings
     }
 
-    /// Its panel while it shows.
-    var settingsWindow: NSWindow? { settingsController.panel }
+    /// The Settings window's panel while it shows.
+    var settingsPanel: NSPanel? { settingsController?.panel }
 
     /// The app's panes, built each time the window opens, and what closing
     /// drops.
@@ -412,7 +411,7 @@ extension NiruxApp {
     /// isn't trusted yet: the ⌘N sheet says so again.
     @objc func settingsChangeTasksFolder(_ sender: NSButton) {
         guard let shell else { return }
-        shell.sideEffects.chooseFolder("Choose", settingsWindow) { [weak self] path in
+        shell.sideEffects.chooseFolder("Choose", settingsPanel) { [weak self] path in
             guard let self, let path else { return }
             // The default stays the default, made again if it goes; Start
             // refuses it, saying why, when it is in a git repository.
@@ -426,6 +425,7 @@ extension NiruxApp {
             guard self.saveSetting(revert: {}, { $0.tasksFolder = chosen; $0.startedFolderTask = false }) else { return }
             self.settingsTasksFolderLabel?.stringValue = self.settingsTasksFolderText()
         }
+        settingsController?.appSheet = settingsPanel?.attachedSheet
     }
 
     /// Read at the next launch. Only a changed choice is written: a value a
@@ -629,8 +629,9 @@ extension NiruxApp {
         alert.messageText = "Settings"
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
-        if let settingsWindow {
-            alert.beginSheetModal(for: settingsWindow)
+        if let settingsPanel {
+            alert.beginSheetModal(for: settingsPanel)
+            settingsController?.appSheet = alert.window
         } else {
             alert.runModal()
         }

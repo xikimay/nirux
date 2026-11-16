@@ -6,7 +6,7 @@ extension NiruxShellView {
     /// The Settings window on `profileID`'s `tab`; `tab` nil keeps the pane
     /// shown (Nirux's, when the sidebar's popup picks another space). One
     /// space at a time: the window shows this space in place of another one,
-    /// unless text typed there isn't saved, or a sheet is up on it.
+    /// unless text typed there isn't saved, or a sheet of its panes is up.
     /// `boardRepository`: the section the Board pane reads first, when the
     /// window opens for this space (`showBoardSettings`).
     func showSpaceSettings(profileID: String, tab: SpaceSettingsSection.Tab? = .general, boardRepository: String? = nil) {
@@ -14,7 +14,7 @@ extension NiruxShellView {
         if let open = spaceSettings, open.spaceID != profileID, let panel = open.panel {
             // A name or a value still being typed counts.
             panel.makeFirstResponder(nil)
-            if panel.attachedSheet != nil {
+            if settingsWindow.spaceSheet != nil {
                 panel.makeKeyAndOrderFront(nil)
                 return refuseSpaceSwitch("Finish what is open in this space’s settings first", in: open)
             }
@@ -37,14 +37,16 @@ extension NiruxShellView {
         }
     }
 
-    /// Why the window keeps its space: said in it while it has the keyboard
-    /// (the popup), else in a toast on the main window.
+    /// Why the window keeps its space, said in it: over the space's sheet
+    /// up there, else on the window; once, while it shows.
     private func refuseSpaceSwitch(_ reason: String, in settings: SpaceSettingsSection) {
-        guard let panel = settings.panel, panel.isKeyWindow, panel.attachedSheet == nil else { return showToast(reason) }
+        guard let panel = settings.panel else { return showToast(reason) }
+        guard settings.refusal?.sheetParent == nil else { return }
         let alert = NSAlert()
         alert.messageText = reason
         alert.addButton(withTitle: "OK")
-        settings.askInSheet(alert, panel) { _ in }
+        settings.askInSheet(alert, settingsWindow.spaceSheet ?? panel) { _ in }
+        settings.refusal = alert.window
     }
 
     func makeSettingsWindow() -> SettingsWindow {
@@ -112,16 +114,16 @@ extension NiruxShellView {
         let general = SpaceSettingsGeneralPane(model: spaceSettingsGeneralModel(for: space))
         general.actions = spaceSettingsGeneralActions(spaceID: spaceID)
         let store = SpaceDefaultsStore(spaceID: spaceID)
+        let unread = SpaceDefaultsStore.Loaded(defaults: SpaceDefaults(), status: .missing)
         var defaultsActions = SpaceSettingsDefaultsPane.Actions()
         defaultsActions.save = { defaults, loaded in
             store.map { $0.save(defaults, replacing: loaded) } ?? .failure(.couldNotWrite("The space’s folder can’t be named."))
         }
-        defaultsActions.reload = {
-            store?.load() ?? SpaceDefaultsStore.Loaded(defaults: SpaceDefaults(), status: .missing)
-        }
+        defaultsActions.reload = { store?.load() ?? unread }
         defaultsActions.settingsClaudeMode = { Self.currentClaudeLaunchMode() }
         defaultsActions.settingsCodexMode = { Self.currentCodexLaunchMode() }
-        let defaults = SpaceSettingsDefaultsPane(loaded: defaultsActions.reload(), actions: defaultsActions)
+        // Read when its pane first shows (`onTabShown`), not for each ⌘,.
+        let defaults = SpaceSettingsDefaultsPane(loaded: unread, actions: defaultsActions)
         let lead = SpaceSettingsLeadPane(model: spaceSettingsLeadModel(for: space))
         lead.actions.setLead = { [weak self] on in
             guard let self else { return }
@@ -149,6 +151,14 @@ extension NiruxShellView {
             case .brief, .templates: break
             }
         }
+        settings.onKeyboardFreed = { [weak self, weak settings] tab in
+            guard let self, let settings, self.spaceSettings === settings else { return }
+            switch tab {
+            case .board: if self.boardSettingsPanel?.hostView === settings.boardHost { self.boardSettingsPanel?.takeKeyboardIfFree() }
+            case .memory: if let memory = self.projectMemoryPanel, memory.shows(in: settings.memoryHost) { memory.takeKeyboardIfFree() }
+            default: break
+            }
+        }
         settings.onClose = { [weak self, weak settings] windowClosed in
             guard let self, let settings, self.spaceSettings === settings else { return }
             if let sheet = self.setupScriptSheet?.panel { settings.panel?.endSheet(sheet) }
@@ -157,7 +167,11 @@ extension NiruxShellView {
             self.projectMemoryPanel?.dismiss()
             self.boardSettingsPanel?.dismiss()
             self.spaceSettings = nil
-            if windowClosed { self.focusActiveTerminal(in: self.window) }
+            // The main window keeps what had its keyboard, unless that went
+            // meanwhile (its column closed).
+            if windowClosed, let window = self.window, (window.firstResponder as? NSView)?.window !== window {
+                self.focusActiveTerminal(in: window)
+            }
         }
         return settings
     }
@@ -225,8 +239,9 @@ extension NiruxShellView {
             settings.templates.revert()
             guard let active = profiles.first(where: { $0.id == activeProfileID }) else { return settings.close() }
             // What was typed there has no space left to go to, nor what a
-            // sheet up there would add; the window stays where it is.
-            if let panel = settings.panel, let sheet = panel.attachedSheet { panel.endSheet(sheet, returnCode: .cancel) }
+            // sheet of its panes would add; Nirux's own sheet stays, and so
+            // does the window.
+            if let sheet = settingsWindow.spaceSheet { settings.panel?.endSheet(sheet, returnCode: .cancel) }
             let tab = settings.selectedTab
             let replacement = makeSpaceSettings(for: active)
             settingsWindow.setSpace(replacement)
@@ -242,7 +257,8 @@ extension NiruxShellView {
         settings.brief.replaceSource(Self.briefSource(for: space))
         settings.templates.replaceSource(Self.templatesSource(for: space))
         settings.fitToContent()
-        refreshSpaceSettingsGitHub()
+        // Read again when General shows.
+        if settings.selectedTab == .general { refreshSpaceSettingsGitHub() }
     }
 
     /// General's rows again (a setup script saved or removed).

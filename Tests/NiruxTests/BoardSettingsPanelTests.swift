@@ -51,6 +51,21 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
     }
 
+    /// Board settings asked for again, on the form already shown, gives it
+    /// the keyboard: the form isn't read again, and the keyboard is never
+    /// left nowhere.
+    @MainActor
+    func testBoardSettingsAgainGivesTheFormTheKeyboard() throws {
+        try withShell { shell, space in
+            let form = try open(shell, space)
+            let panel = try XCTUnwrap(shell.spaceSettings?.panel)
+            panel.makeFirstResponder(shell.settingsWindow.sidebar.table)
+            shell.showBoardSettings(profileID: space.id)
+            XCTAssertIdentical(shell.boardSettingsPanel, form, "not read again")
+            XCTAssertIdentical((panel.firstResponder as? NSTextView)?.delegate as? NSTextField, form.repositoryField)
+        }
+    }
+
     // MARK: - Saving
 
     @MainActor

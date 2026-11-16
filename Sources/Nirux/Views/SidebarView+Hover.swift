@@ -70,15 +70,19 @@ extension SidebarView {
 
     /// Re-derive the hover highlight from the live mouse position. Called
     /// after every rebuild — the registered backing views are new, and rows
-    /// may have shifted under a stationary pointer.
-    func refreshHoverTargetFromMouse() {
+    /// may have shifted under a stationary pointer. `wasLit`: something was
+    /// lit before the rebuild.
+    func refreshHoverTargetFromMouse(wasLit: Bool = false) {
         guard let window else { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
         let point = contentDocumentView.convert(windowPoint, from: nil)
-        guard let area = hitArea(at: point) else { return }
-        switch area.region {
-        case .board where !navigation.boardAvailable:
+        guard let area = hitArea(at: point) else {
+            // What was lit under the pointer went (the Board row can't be
+            // pressed any more): the pointer is an arrow again.
+            if wasLit, bounds.contains(convert(windowPoint, from: nil)) { NSCursor.arrow.set() }
             return
+        }
+        switch area.region {
         case .spacePicker, .newTask, .archivedToggle, .board, .history:
             setHoverTarget(Self.hoverTarget(of: area.region))
         case .workspace(let workspaceIndex):

@@ -100,14 +100,14 @@ final class SidebarView: NSView {
     var onRailRequest: ((String, NSView) -> Bool)?
     /// The History row: the Session History panel.
     var onShowHistory: (() -> Void)?
-    /// What the navigator rows say: the Board row selected while the
-    /// space's Board column shows (set by the shell, before `update`, whose
-    /// render check then rebuilds the rows once).
+    /// What the navigator rows say (set by the shell; `update` or
+    /// `renderIfChanged` rebuilds the rows).
     var navigation = SidebarNavigation() {
         didSet {
             guard navigation != oldValue else { return }
             iconRail.boardButton.isSelected = navigation.boardShown
             iconRail.boardButton.isEnabled = navigation.boardAvailable
+            iconRail.boardButton.toolTip = navigation.boardTip
         }
     }
     /// Folded, the sidebar is this rail (see SidebarView+IconRail).
@@ -373,6 +373,11 @@ final class SidebarView: NSView {
         // cursor. Skip when the rendered output would be identical.
         // (A row whose check starts changed its mark: the rebuild follows.)
         settleOwedTurnEnds()
+        renderIfChanged()
+    }
+
+    /// Rebuilds the rows if what they show changed.
+    func renderIfChanged() {
         let signature = renderSignature()
         guard signature != lastRenderSignature else { return }
         lastRenderSignature = signature
@@ -644,14 +649,10 @@ final class SidebarView: NSView {
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spacePicker, .newTask, .archivedToggle, .history:
+        case .spacePicker, .newTask, .archivedToggle, .board, .history:
             clearHover()
             setHoverTarget(Self.hoverTarget(of: area.region))
             NSCursor.pointingHand.set()
-        case .board:
-            clearHover()
-            setHoverTarget(navigation.boardAvailable ? .board : nil)
-            (navigation.boardAvailable ? NSCursor.pointingHand : NSCursor.arrow).set()
         case .catchUp:
             clearHover()
             setHoverTarget(nil)
@@ -704,8 +705,11 @@ final class SidebarView: NSView {
         case .archivedToggle:
             toggleInactiveSection()
         case .board:
-            if navigation.boardAvailable { onOpenBoard?() }
+            // A double-click's second press would focus the Board it opened.
+            lastButtonActionAt = event.timestamp
+            onOpenBoard?()
         case .history:
+            lastButtonActionAt = event.timestamp
             onShowHistory?()
         case .catchUp(let action):
             // Its second press lands on what moved under the pointer.

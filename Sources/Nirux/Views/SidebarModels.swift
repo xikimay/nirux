@@ -577,10 +577,15 @@ enum SidebarTurnAnswer: String, Hashable {
 }
 
 /// What the sidebar's navigator rows say (docs/design/glass-interface.md,
-/// 3.4b): the Board row is selected while the space's Board column shows on
-/// screen, as a task row is while its task is on screen; it can't be
-/// pressed while no task is open (the Board opens beside one).
+/// 3.4b): the Board row reads open while the space's Board column shows on
+/// screen; it can't be pressed while no task is open (the Board opens
+/// beside one).
 struct SidebarNavigation: Hashable {
     var boardShown = false
     var boardAvailable = true
+
+    /// The Board's tooltip, on the row and on the folded rail's button.
+    var boardTip: String {
+        boardAvailable ? "Board (\(NiruxShortcuts.board.chord.display))" : "Open a task to show its space’s Board"
+    }
 }

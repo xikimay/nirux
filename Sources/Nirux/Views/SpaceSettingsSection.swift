@@ -54,12 +54,18 @@ final class SpaceSettingsSection: NSObject {
     var panel: NSPanel? { host?.panel }
     /// The space's name, in the window's title and sidebar.
     private(set) var title = ""
-    /// Looks for changes made on disk (an agent editing the brief) while
-    /// the window is open.
+    /// Looks for changes made on disk (an agent editing the brief) once the
+    /// brief or the templates showed, until the section leaves the window.
     private var diskTimer: Timer?
 
     /// A pane was picked (or shown first).
     var onTabShown: ((Tab) -> Void)?
+    /// The window freed the keyboard for the pane, asked for by name: its
+    /// content takes it if it is there (a load under way takes it as it
+    /// lands).
+    var onKeyboardFreed: ((Tab) -> Void)?
+    /// The alert saying why the window keeps this space.
+    weak var refusal: NSWindow?
     /// The window closed (`windowClosed`), or showed another space.
     var onClose: ((_ windowClosed: Bool) -> Void)?
     /// Asks a question in a sheet on the window; the answer comes back
@@ -181,22 +187,25 @@ final class SpaceSettingsSection: NSObject {
     /// The window shows one of its panes.
     func tabShown(_ tab: Tab) {
         switch tab {
-        case .brief: brief.checkDisk()
-        case .templates: templates.checkDisk()
+        case .brief:
+            brief.checkDisk()
+            startWatchingDisk()
+        case .templates:
+            templates.checkDisk()
+            startWatchingDisk()
         default: break
         }
         onTabShown?(tab)
+    }
+
+    func keyboardFreed(for tab: Tab) {
+        onKeyboardFreed?(tab)
     }
 
     /// The window fits the pane's content again (a list grew, a banner
     /// showed).
     func fitToContent() {
         host?.fitToContent()
-    }
-
-    /// The window came up with this section.
-    func windowShown() {
-        startWatchingDisk()
     }
 
     func windowBecameKey() {
