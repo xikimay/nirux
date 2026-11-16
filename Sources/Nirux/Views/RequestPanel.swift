@@ -14,9 +14,6 @@ final class RequestPanel {
         override var canBecomeMain: Bool { false }
         /// ⌘W while it has the keyboard closes it, not the window behind.
         override func performClose(_ sender: Any?) { onPerformClose?() }
-        /// A key nothing takes (a letter typed by mistake) goes nowhere,
-        /// without a beep.
-        override func noResponder(for eventSelector: Selector) {}
     }
 
     /// How it closed: the host gives the keyboard back to the terminal
@@ -37,7 +34,13 @@ final class RequestPanel {
     /// (the toolbar's own window in full screen). Clicks in any other
     /// window (a reply popover a card opened, Settings) leave it open.
     var closesOnClicks: ((NSWindow) -> Bool)?
+    /// A shortcut it lets through while it has the keyboard (⌘J, which
+    /// acts on the open inbox); any other ⌘ shortcut closes it first, so
+    /// that what the shortcut moves (a workspace, a column, the find bar)
+    /// gets the keyboard.
+    var keepsShortcut: ((NSEvent) -> Bool)?
     private var clickMonitor: Any?
+    private var shortcutMonitor: Any?
     private var resignObserver: NSObjectProtocol?
     private var keyObservers: [NSObjectProtocol] = []
     /// What takes the keyboard in it, again after a reply popover closed.
@@ -82,6 +85,16 @@ final class RequestPanel {
                 return event
             }
         }
+        if shortcutMonitor == nil {
+            shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, self.isOpen, event.window === self.panel, event.modifierFlags.contains(.command),
+                      !["w", "."].contains(event.charactersIgnoringModifiers ?? ""), self.keepsShortcut?(event) != true
+                else { return event }
+                self.close()
+                // The menu takes it, the window behind having the keyboard.
+                return event
+            }
+        }
         if resignObserver == nil {
             resignObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
@@ -94,6 +107,8 @@ final class RequestPanel {
     func close(_ closing: Closing = .byHost) {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         clickMonitor = nil
+        if let shortcutMonitor { NSEvent.removeMonitor(shortcutMonitor) }
+        shortcutMonitor = nil
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         resignObserver = nil
         keyObservers.forEach(NotificationCenter.default.removeObserver)

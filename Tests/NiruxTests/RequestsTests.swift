@@ -60,6 +60,7 @@ final class RequestsTests: XCTestCase {
         XCTAssertEqual(requests.first?.taskID, workspace.id)
         XCTAssertEqual(requests.first?.icon, StateIcon(.needsYou(.question)))
         XCTAssertEqual(requests.last?.icon, StateIcon(.needsYou(.command)))
+        XCTAssertEqual(requests.last?.taskTitle, "blocked")
 
         // Its agent waits on a permission meanwhile: that is what it asks.
         shell.quickSwitch.agentWait = { candidate, _, _ in
@@ -77,6 +78,23 @@ final class RequestsTests: XCTestCase {
         }
         let stopped = NiruxShellView.requestedAgents(in: shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100), onScreen: nil)
         XCTAssertEqual(shell.waitingRequests(stopped, approvalHolds: [:], foregroundProcesses: [:]).map(\.kind), [.mission(asked)])
+
+        // Another space's request names its space (every Lead is "Lead").
+        let work = shell.workspaceStore.createProfile(named: "Work", select: false)
+        let blockedWorkspace = try XCTUnwrap(shell.workspaces.last)
+        let home = shell.activeProfileID
+        shell.moveWorkspaceToSpace(workspaceID: blockedWorkspace.id, profileID: work.id)
+        shell.selectProfile(home)
+        // (The moves refreshed the sidebar, which read no Mission: only the
+        // blocked agent waits now.)
+        shell.quickSwitch.agentWait = { candidate, _, _ in
+            candidate === blocked ? AgentWait(reason: .permission(tool: "Bash", summary: "rm"), since: 50) : nil
+        }
+        let elsewhere = shell.waitingRequests(
+            NiruxShellView.requestedAgents(in: shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100), onScreen: nil),
+            approvalHolds: [:], foregroundProcesses: [:]
+        )
+        XCTAssertEqual(elsewhere.last?.taskTitle, "blocked · Work")
     }
 
     /// A panel closes when Nirux stops being the active app, as a click
@@ -195,5 +213,41 @@ final class RequestsTests: XCTestCase {
         // Going there refreshes the sidebar, which hands it back at once.
         shell.focusWorkspace(id: there.id)
         XCTAssertNil(pty.sidebarApproval(now: now), "on screen: its terminal answers")
+    }
+
+    /// The inbox opens on where ⌘J's walk goes next: each request once a
+    /// round, never the one on screen, then a new round.
+    func testTheInboxChoosesWhereTheWalkGoesNext() {
+        let ids = (0..<3).map { _ in UUID() }
+        let requests = ids.map { WaitingRequest(taskID: "t", columnID: $0, taskTitle: "T", icon: StateIcon(.needsYou(.command)), waited: nil, kind: .terminal("x")) }
+        func next(_ current: UUID?, _ walk: [UUID]) -> UUID? { NiruxShellView.nextRequest(in: requests, from: current, walk: walk)?.columnID }
+        XCTAssertEqual(next(nil, []), ids[0])
+        XCTAssertEqual(next(ids[0], [ids[0]]), ids[1])
+        XCTAssertEqual(next(ids[1], [ids[0], ids[1]]), ids[2], "not back to the first")
+        XCTAssertEqual(next(ids[2], ids), ids[0], "a new round")
+        XCTAssertEqual(next(ids[0], ids), ids[1], "never the one on screen")
+    }
+
+    /// A ⌘ shortcut typed while a panel has the keyboard closes it first,
+    /// so that what it moves gets the keyboard; ⌘J, which acts on the open
+    /// inbox, leaves it open.
+    func testAShortcutClosesThePanelButJ() throws {
+        let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: .titled, backing: .buffered, defer: true)
+        parent.isReleasedWhenClosed = false
+        defer { parent.close() }
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let panel = RequestPanel(content: content)
+        panel.keepsShortcut = { KeyChord($0.charactersIgnoringModifiers ?? "", $0.modifierFlags) == NiruxShortcuts.nextWaitingAgent.chord }
+        panel.show(frame: NSRect(x: 10, y: 10, width: 100, height: 100), over: parent, responder: content)
+        func press(_ key: String) throws {
+            NSApp.sendEvent(try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: panel.panel.windowNumber,
+                context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0
+            )))
+        }
+        try press("j")
+        XCTAssertTrue(panel.isOpen, "⌘J acts on it")
+        try press("2")
+        XCTAssertFalse(panel.isOpen, "⌘2 moves the focus: it closes first")
     }
 }

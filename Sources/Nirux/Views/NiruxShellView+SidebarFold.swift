@@ -50,6 +50,8 @@ extension NiruxShellView {
         let unfold = applySidebarAutoFold()
         relayout(animated: false)
         unfold?()
+        // Child windows follow the window's moves, not its resizes.
+        refreshRequestPanels()
     }
 
     /// Folds the sidebar when the window just got narrow, unfolds it back

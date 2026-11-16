@@ -33,11 +33,12 @@ final class RequestFlowTests: XCTestCase {
         XCTAssertFalse(shell.sidebar.isExpanded)
     }
 
-    /// Folded, ⌘J opens the inbox in a window of its own (keys typed there
-    /// reach no terminal), the request chosen; ⌘J again goes to its task.
-    /// The badge does what ⌘J does; Escape closes the inbox and gives the
-    /// keyboard back to the terminal; the inbox closes once no request is
-    /// left.
+    /// Folded, ⌘J opens the inbox in a window of its own (the key
+    /// interceptor routes only the main window's keys to terminals), the
+    /// request chosen; ⌘J again goes to its task. The badge does what ⌘J
+    /// does; ⌘. closes the inbox; the inbox closes once no request is left.
+    /// (xctest has no key window: giving the keyboard back can't be seen
+    /// here.)
     func testFoldedTheInboxOpensAndJGoesOn() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

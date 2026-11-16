@@ -248,6 +248,14 @@ folded, the requests of every column not on screen, in every space, are held
 The deadline and the release rules don't change: under VoiceOver nothing is
 held, and a column that comes on screen hands its request back to its
 terminal at that refresh, so that the terminal and a card never both answer.
+After the reviews: the inbox opens on the request ⌘J's walk goes to next
+(each once a round, as ⌘J unfolded), a request from another space names its
+space ("Lead · Work"), Escape closes a panel on its release (a held key's
+repeats must not reach the terminal that takes the keyboard back), a ⌘
+shortcut other than ⌘J closes the panel before the menu acts, a panel that
+loses the keyboard to another window closes (not for a reply popover a card
+opened, which keeps its panel as it is through refreshes), and ⌘P and the
+panels never show together.
 
 ![The inbox with three requests: Opaque exact, Glass approximated](../images/request-inbox.png)
 

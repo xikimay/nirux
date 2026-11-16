@@ -26,6 +26,8 @@ final class RequestsState {
     var calloutRequestID: String?
     weak var calloutAnchor: NSView?
     var calloutScrollObserver: NSObjectProtocol?
+    /// ⌘J's walk when the inbox opened: going to a request goes on with it.
+    var inboxWalk: [UUID] = []
 
     var isInboxOpen: Bool { inboxPanel?.isOpen == true }
     var isCalloutOpen: Bool { calloutPanel?.isOpen == true }
@@ -107,8 +109,10 @@ extension NiruxShellView {
                 turnQuestion: Self.sidebarTurnQuestion(of: column, status: column.pty?.cachedAgentState ?? .idle, foreground: foreground),
                 dialog: column.pty?.agentVisibleDialog(foreground: foreground)?.dialog, reason: agent.wait.reason
             )
+            // Another space's request names its space: every Lead is "Lead".
+            let space = workspace.profileID == activeProfileID ? nil : workspaceStore.profiles.first { $0.id == workspace.profileID }?.name
             return WaitingRequest(
-                taskID: workspace.id, columnID: column.id, taskTitle: workspace.title,
+                taskID: workspace.id, columnID: column.id, taskTitle: space.map { "\(workspace.title) · \($0)" } ?? workspace.title,
                 icon: StateIcon(.needsYou(approval != nil ? .command : StateIcon.Reason(agent.wait.reason) ?? .question)),
                 waited: SidebarView.cardAge(since: agent.wait.since), kind: kind
             )

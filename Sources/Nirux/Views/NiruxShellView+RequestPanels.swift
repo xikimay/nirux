@@ -14,6 +14,20 @@ extension NiruxShellView {
         inbox.show(requestsState.requests)
         requestsState.inboxPanel?.show(frame: inboxFrame(for: inbox, in: window), over: window, responder: inbox)
         inbox.opened()
+        // Chosen where ⌘J's walk goes next: each request once a round, not
+        // the first two in turn.
+        let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
+        requestsState.inboxWalk = current != nil && current == quickSwitch.walk.last ? quickSwitch.walk : current.map { [$0] } ?? []
+        if let next = Self.nextRequest(in: requestsState.requests, from: current, walk: requestsState.inboxWalk) { inbox.choose(next.id) }
+    }
+
+    /// The request ⌘J's walk goes to next (`WaitingAgentQueue.next`): the
+    /// first whose column the walk hasn't visited, never the one on screen;
+    /// all visited, a new round.
+    static func nextRequest(in requests: [WaitingRequest], from current: UUID?, walk: [UUID]) -> WaitingRequest? {
+        let visited = Set(walk)
+        return requests.first { $0.columnID != current && !visited.contains($0.columnID) }
+            ?? requests.first { $0.columnID != current } ?? requests.first
     }
 
     func closeInbox(_ closing: RequestPanel.Closing = .byHost) {
@@ -34,6 +48,7 @@ extension NiruxShellView {
         // The badge acts on the open inbox (⌘J again).
         panel.keepsOpen = { [weak self] event in self?.isOnWaitingSegment(event) == true }
         panel.closesOnClicks = { [weak self] window in window === self?.commandBarToolbar?.bar.window }
+        panel.keepsShortcut = { KeyChord($0.charactersIgnoringModifiers ?? "", $0.modifierFlags) == NiruxShortcuts.nextWaitingAgent.chord }
         requestsState.inbox = inbox
         requestsState.inboxPanel = panel
         return inbox
@@ -151,7 +166,13 @@ extension NiruxShellView {
     /// its icon went), each where it belongs now.
     func refreshRequestPanels() {
         let requests = requestsState.requests
-        if requestsState.isInboxOpen, let inbox = requestsState.inbox, let window {
+        // A reply being typed in a popover a card opened: its panel stays as
+        // it is (the popover deals with a question gone stale).
+        func isReplying(_ panel: RequestPanel?) -> Bool {
+            guard let window = panel?.panel else { return false }
+            return [missionReplyPopover, turnReplyPopover].contains { $0?.isShown == true && $0?.contentViewController?.view.window?.parent === window }
+        }
+        if requestsState.isInboxOpen, !isReplying(requestsState.inboxPanel), let inbox = requestsState.inbox, let window {
             if requests.isEmpty {
                 closeInbox()
             } else {
@@ -159,7 +180,7 @@ extension NiruxShellView {
                 requestsState.inboxPanel?.setFrame(inboxFrame(for: inbox, in: window))
             }
         }
-        if requestsState.isCalloutOpen, let callout = requestsState.callout, let window {
+        if requestsState.isCalloutOpen, !isReplying(requestsState.calloutPanel), let callout = requestsState.callout, let window {
             // Its request, not its task's next one: answered, it closes.
             if let taskID = requestsState.calloutTaskID, let request = requests.first(where: { $0.id == requestsState.calloutRequestID }),
                let anchor = requestsState.calloutAnchor, anchor.window === window, !anchor.isHiddenOrHasHiddenAncestor,
@@ -197,8 +218,11 @@ extension NiruxShellView {
         // The panel had the keyboard: the window takes it back first.
         window?.makeKey()
         focusWorkspace(id: place.workspace.id, column: place.columnIndex)
-        // Where ⌘J's walk goes on from.
-        quickSwitch.noteWalk([request.columnID])
+        // ⌘J's walk goes on from there; a new round once every request was
+        // visited.
+        let visited = Set(requestsState.inboxWalk)
+        let roundOver = requestsState.requests.allSatisfy { visited.contains($0.columnID) || $0.id == request.id }
+        quickSwitch.noteWalk(roundOver ? [request.columnID] : requestsState.inboxWalk + [request.columnID])
     }
 
     /// The column with `id`, open and not closing, by its indexes.
