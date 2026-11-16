@@ -92,14 +92,15 @@ merge sweep, the birth), and changes what frames them:
 
 - **State icons:** each row's mark is its `StateIcon` at 14 pt, centred where
   the dot was, so the text doesn't move; a wait's reason comes from the
-  column the row opens on, as on the rail. Checks that run keep their own
-  ring at the family's size: an arc that turns while rows may move, the
-  family's dashed ring while they may not. The catch-up card shows the same
+  column the row opens on, as on the rail. Checks that run show an arc that
+  turns at the family's size while rows may move, and the family's dashed
+  ring (`StateIcon`'s waiting icon) while they may not: Reduce motion, a
+  window out of sight, an archived task. The catch-up card shows the same
   icons. The Lead keeps its sparkle; its state is a 12 pt icon at the end of
   its line.
 - **Selection:** the selected row lies on a pane of glass: a white fill at
-  10 %, a 1 pt rim (`line`) and the light on its top edge
-  (`selectionHighlight`), at every level, Opaque included.
+  10 %, a 1 pt rim (`line`) and the light on its top edge (`lineStrong`),
+  at every level, Opaque included.
 - **Buttons:** the rows' drawn Allow / Deny / Yes / No / Dismiss take
   `NiruxButton.look`'s colours and its small size, in a capsule.
 - **The foot:** a glass capsule, **Tasks · Board · History**, 30 pt high with
@@ -108,10 +109,11 @@ merge sweep, the birth), and changes what frames them:
   rail's button), History opens the Session History panel (⌘P's and the
   Space menu's "Session History…"). Tabs that swap the sidebar's content
   would be a later study. A row scrolled under the foot takes no click,
-  hover or menu there; a scroll over the foot scrolls the list. The Archived
-  row sits just above it.
-- **Background:** the sidebar's glass is a chrome `GlassView` under the list,
-  at Opaque until phase 4 (the sidebar's colour, as before).
+  hover or menu there (`hitArea` and `cardIndex` answer only where the list
+  shows); a scroll over the foot scrolls the list; a dragged row stays in
+  the part of the list in view. The Archived row sits just above it.
+- **Background:** the sidebar's glass behind the list comes in phase 4 with
+  the interface's level: at Opaque it is the sidebar's colour.
 
 ## Command bar
 

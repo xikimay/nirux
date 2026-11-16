@@ -53,6 +53,7 @@ extension SidebarView {
 
     /// The card under `point`, whatever region of it is on top.
     func cardIndex(at point: NSPoint) -> Int? {
+        guard isShown(point) else { return nil }
         for area in hitAreas where area.frame.contains(point) {
             if case .workspace(let index) = area.region { return index }
         }
@@ -65,7 +66,6 @@ extension SidebarView {
     func refreshHoverTargetFromMouse() {
         guard let window else { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
-        guard isOnList(windowPoint) else { return }
         let point = contentDocumentView.convert(windowPoint, from: nil)
         guard let area = hitArea(at: point) else { return }
         switch area.region {

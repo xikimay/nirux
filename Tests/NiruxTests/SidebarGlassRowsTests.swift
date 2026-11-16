@@ -85,13 +85,22 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertTrue(icons(in: views(quiet)).isEmpty, "nothing going on: its sparkle alone")
     }
 
-    /// Checks that run: the family's ring, at the icons' size.
+    /// Checks that run: an arc turning at the icons' size; still, the
+    /// family's own dashed ring.
     func testRunningChecksRingIsTheIconsSize() throws {
         let running = row([column()], pullRequest: pullRequest(ci: "PENDING"))
-        let ring = try XCTUnwrap(views(running).first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID })
-        XCTAssertEqual(ring.frame.size, NSSize(width: SidebarExpandedMetrics.stateIconSize, height: SidebarExpandedMetrics.stateIconSize))
+        let size = NSSize(width: SidebarExpandedMetrics.stateIconSize, height: SidebarExpandedMetrics.stateIconSize)
+        let turning = views(running)
+        let ring = try XCTUnwrap(turning.first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID })
+        XCTAssertEqual(ring.frame.size, size)
         XCTAssertEqual(ring.frame.midX, SidebarExpandedMetrics.markCenterX, accuracy: 0.5)
-        XCTAssertTrue(icons(in: views(running)).isEmpty, "the ring alone")
+        XCTAssertTrue(icons(in: turning).isEmpty, "the arc alone")
+
+        let still = SidebarWorkspaceCardRenderer(workspace: running, sidebarWidth: 260, yOffset: 500, animates: false, now: 5_000)
+            .render().views
+        let stillRing = try XCTUnwrap(still.first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID })
+        XCTAssertEqual(stillRing.frame.size, size)
+        XCTAssertEqual(icons(in: still).map(\.icon), [StateIcon(.waiting)], "the family's dashed ring")
     }
 
     /// The catch-up card's rows show their rows' icons; a turn over, the
@@ -99,12 +108,12 @@ final class SidebarGlassRowsTests: XCTestCase {
     func testTheCatchUpCardShowsTheRowsIcons() {
         let asks = SidebarCatchUp.row(for: row([column(.needsAttention, reason: .permission(tool: "Bash", summary: "npm test"))]))
         XCTAssertEqual(asks.kind, .asks)
-        XCTAssertEqual(asks.shownIcon, StateIcon(.needsYou(.command)))
-        XCTAssertEqual(SidebarCatchUp.row(for: row([column(.working)])).shownIcon, StateIcon(.working))
-        XCTAssertEqual(SidebarCatchUp.row(for: row([column(.needsAttention, reason: .turnFinished)])).shownIcon, StateIcon(.finished))
-        XCTAssertEqual(SidebarCatchUp.row(for: row([column()], blocker: "the staging key")).shownIcon, StateIcon(.blocked))
+        XCTAssertEqual(asks.icon, StateIcon(.needsYou(.command)))
+        XCTAssertEqual(SidebarCatchUp.row(for: row([column(.working)])).icon, StateIcon(.working))
+        XCTAssertEqual(SidebarCatchUp.row(for: row([column(.needsAttention, reason: .turnFinished)])).icon, StateIcon(.finished))
+        XCTAssertEqual(SidebarCatchUp.row(for: row([column()], blocker: "the staging key")).icon, StateIcon(.blocked))
         let broke = SidebarCatchUp.row(for: row([column()], pullRequest: pullRequest(ci: "FAILURE")))
-        XCTAssertEqual(broke.shownIcon, StateIcon(.error))
+        XCTAssertEqual(broke.icon, StateIcon(.error))
     }
 
     /// A card row keeps only the icon it shows: a change of its task row's
@@ -135,7 +144,7 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertEqual(pane.layer?.borderWidth, 1)
         XCTAssertEqual(pane.layer?.borderColor, Theme.Color.line.cgColor)
         let light = try XCTUnwrap(pane.layer?.sublayers?.first)
-        XCTAssertEqual(light.backgroundColor, Theme.Color.selectionHighlight.cgColor)
+        XCTAssertEqual(light.backgroundColor, Theme.Color.lineStrong.cgColor)
         XCTAssertEqual(light.frame.maxY, pane.bounds.height - 1, accuracy: 0.5, "along its top edge")
         XCTAssertLessThanOrEqual(light.frame.height, 1)
         XCTAssertNil(views(row([column()])).first { $0.identifier == SidebarWorkspaceCardRenderer.selectionGlassID })
@@ -203,7 +212,6 @@ final class SidebarGlassRowsTests: XCTestCase {
         sidebar.isExpanded = false
         sidebar.layoutSubtreeIfNeeded()
         XCTAssertTrue(footer.isHidden)
-        XCTAssertTrue(sidebar.backdrop.isHidden)
         XCTAssertEqual(sidebar.contentScrollView.frame, sidebar.bounds)
     }
 
@@ -218,7 +226,10 @@ final class SidebarGlassRowsTests: XCTestCase {
         // In the foot's margin, under the capsule's left end.
         let inFoot = sidebar.convert(NSPoint(x: 30, y: 4), to: nil)
         let hidden = sidebar.contentDocumentView.convert(inFoot, from: nil)
-        XCTAssertNotNil(sidebar.cardIndex(at: hidden), "a row lies there, out of view")
+        XCTAssertTrue(sidebar.hitAreas.contains { if case .workspace = $0.region { $0.frame.contains(hidden) } else { false } },
+                      "a row lies there, out of view")
+        XCTAssertNil(sidebar.hitArea(at: hidden), "out of view: no area")
+        XCTAssertNil(sidebar.cardIndex(at: hidden), "nor a card")
         func event(_ type: NSEvent.EventType, at point: NSPoint, clicks: Int = 1) throws -> NSEvent {
             try XCTUnwrap(NSEvent.mouseEvent(
                 with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -243,11 +254,22 @@ final class SidebarGlassRowsTests: XCTestCase {
         var scrolled = 0
         let noted = sidebar.contentScrollView.onScrollWheel
         sidebar.contentScrollView.onScrollWheel = { scrolled += 1; noted?() }
-        let scroll = try XCTUnwrap(CGEvent(
-            scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0
-        ).flatMap { NSEvent(cgEvent: $0) })
-        sidebar.scrollWheel(with: scroll)
+        // A scroll event without a window is placed on the screen: the
+        // window lies at the screen's origin, so that is the window's point.
+        func scroll(at point: NSPoint) throws -> NSEvent {
+            let event = try XCTUnwrap(CGEvent(
+                scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0
+            ))
+            event.location = CGPoint(x: point.x, y: CGDisplayBounds(CGMainDisplayID()).height - point.y)
+            let scroll = try XCTUnwrap(NSEvent(cgEvent: event))
+            XCTAssertEqual(scroll.locationInWindow.y, point.y, accuracy: 0.5, "where it was made")
+            return scroll
+        }
+        sidebar.scrollWheel(with: try scroll(at: inFoot))
         XCTAssertEqual(scrolled, 1, "the list's scroll view has it")
+        // One the list itself handed up (it couldn't use it) goes on up.
+        sidebar.scrollWheel(with: try scroll(at: sidebar.convert(NSPoint(x: 30, y: 200), to: nil)))
+        XCTAssertEqual(scrolled, 1, "not handed back to the list")
 
         // A row in view still answers.
         let visible = sidebar.contentScrollView.documentVisibleRect

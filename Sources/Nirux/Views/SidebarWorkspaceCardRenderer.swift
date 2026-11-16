@@ -211,21 +211,27 @@ final class SidebarWorkspaceCardRenderer {
     private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) -> NSView? {
         let center = NSPoint(x: Metrics.markCenterX + layout.nestIndent, y: centerY)
         if mark == .checksRunning { return buildChecksRing(center: center) }
-        let size = Metrics.stateIconSize
-        // Takes no click, as the dot didn't; a layer of its own: a check
-        // drawn over it hides it meanwhile. The status line says it to
-        // VoiceOver.
-        let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
-        host.wantsLayer = true
         // Only the row's own mark waits for the user: a compact row's is
-        // merged or grey.
-        let icon = StateIconView(mark == .needsYou ? workspace.stateIcon(summary: layout.summary) : StateIcon(mark: mark), size: size)
-        icon.frame = host.bounds
-        host.addSubview(icon)
+        // merged or grey. The status line says it to VoiceOver.
+        let icon = mark == .needsYou ? workspace.stateIcon(summary: layout.summary) : StateIcon(mark: mark)
+        let host = Self.stateIconView(icon, size: Metrics.stateIconSize, center: center)
         append(host)
         // Drawn once, when the checks pass in front of the user.
         if mark == .readyToMerge { buildCheck(over: host, startedAt: readyAt, holds: false) }
         return Self.drawsTurnEnd(over: mark) ? host : nil
+    }
+
+    /// A state icon centred on `center`, in a host that takes no click (as
+    /// the dot didn't) and has a layer of its own: a check drawn over it
+    /// fades it meanwhile. The rows, the Lead's row and the catch-up card.
+    static func stateIconView(_ icon: StateIcon, size: CGFloat, center: NSPoint) -> SidebarBackgroundView {
+        let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
+        host.wantsLayer = true
+        let view = StateIconView(icon, size: size)
+        view.frame = host.bounds
+        view.setAccessibilityElement(false)
+        host.addSubview(view)
+        return host
     }
 
     /// The selected row's pane of glass (the glass interface, 3.4): a
@@ -244,7 +250,7 @@ final class SidebarWorkspaceCardRenderer {
         let light = CALayer()
         // The layer's y goes up: its top edge, inside the rounded corners.
         light.frame = CGRect(x: radius, y: frame.height - 2, width: max(0, frame.width - 2 * radius), height: 1)
-        light.backgroundColor = Theme.Color.selectionHighlight.cgColor
+        light.backgroundColor = Theme.Color.lineStrong.cgColor
         pane.layer?.addSublayer(light)
         return pane
     }
@@ -338,41 +344,41 @@ final class SidebarWorkspaceCardRenderer {
     /// rows may not move, and for an archived task, whose pull request
     /// isn't read again: nothing turns there for ever.
     private func buildChecksRing(center: NSPoint) -> NSView {
-        // The state icons' ring (`StateIcon`, on its 16-unit grid), in their
-        // grey.
         let size = Metrics.stateIconSize
+        guard animates, !workspace.isInactive else {
+            // Still: the family's own dashed ring.
+            let still = Self.stateIconView(StateIcon(.waiting), size: size, center: center)
+            still.identifier = Self.checksRingID
+            append(still)
+            return still
+        }
+        // One arc going round, where the family's ring is (`StateIcon`'s
+        // 16-unit grid: radius 6.25, line 1.5), in its grey.
         let unit = size / 16
-        let inset = 8 - StateIcon.ringRadius
         let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
         host.identifier = Self.checksRingID
         host.wantsLayer = true
         let ring = CAShapeLayer()
         ring.frame = host.bounds
-        ring.path = CGPath(ellipseIn: host.bounds.insetBy(dx: inset * unit, dy: inset * unit), transform: nil)
+        ring.path = CGPath(ellipseIn: host.bounds.insetBy(dx: 1.75 * unit, dy: 1.75 * unit), transform: nil)
         ring.fillColor = nil
         ring.strokeColor = StateIcon(.waiting).color.cgColor
-        ring.lineWidth = StateIcon.ringWidth * unit
+        ring.lineWidth = 1.5 * unit
         ring.lineCap = .round
-        if animates, !workspace.isInactive {
-            // One arc going round.
-            ring.strokeEnd = 0.37
-            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
-            turn.fromValue = 0
-            turn.toValue = -2 * Double.pi
-            turn.duration = Self.checksRingDuration
-            turn.repeatCount = .infinity
-            // Began when the clock's current turn did: a rebuilt row's
-            // ring carries on exactly where the old one was.
-            turn.beginTime = now - now.truncatingRemainder(dividingBy: turn.duration)
-            // Endless, so under the lights' cap
-            // (`CABasicAnimation.lightMovement`), and slow enough to stay
-            // smooth at that rate.
-            turn.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
-            ring.add(turn, forKey: Self.checksRingKey)
-        } else {
-            // The family's ten dashes.
-            ring.lineDashPattern = StateIcon.dash.map { NSNumber(value: Double($0 * unit)) }
-        }
+        ring.strokeEnd = 0.37
+        let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+        turn.fromValue = 0
+        turn.toValue = -2 * Double.pi
+        turn.duration = Self.checksRingDuration
+        turn.repeatCount = .infinity
+        // Began when the clock's current turn did: a rebuilt row's
+        // ring carries on exactly where the old one was.
+        turn.beginTime = now - now.truncatingRemainder(dividingBy: turn.duration)
+        // Endless, so under the lights' cap
+        // (`CABasicAnimation.lightMovement`), and slow enough to stay
+        // smooth at that rate.
+        turn.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
+        ring.add(turn, forKey: Self.checksRingKey)
         host.layer?.addSublayer(ring)
         append(host)
         return host
@@ -901,10 +907,9 @@ final class SidebarWorkspaceCardRenderer {
         var maxX = layout.contentMaxX
         if [.working, .needsYou, .error].contains(layout.summary.mark) {
             let size = Metrics.leadStateIconSize
-            let host = SidebarBackgroundView(frame: NSRect(x: maxX - size, y: midY - size / 2, width: size, height: size))
-            let icon = StateIconView(workspace.stateIcon(summary: layout.summary), size: size)
-            icon.frame = host.bounds
-            host.addSubview(icon)
+            let host = Self.stateIconView(
+                workspace.stateIcon(summary: layout.summary), size: size, center: NSPoint(x: maxX - size / 2, y: midY)
+            )
             append(host)
             maxX = host.frame.minX - Theme.Space.sm
         }

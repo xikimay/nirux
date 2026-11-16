@@ -101,9 +101,8 @@ final class SidebarView: NSView {
     var onShowHistory: (() -> Void)?
     /// Folded, the sidebar is this rail (see SidebarView+IconRail).
     let iconRail = IconRail(level: .opaque)
-    /// Unfolded: the sidebar's glass, under the list (Opaque until the
-    /// interface's level is a setting, phase 4), and its foot.
-    let backdrop = GlassView(role: .chrome, level: .opaque, cornerRadius: 0)
+    /// Unfolded, the sidebar's foot. (Its glass behind the list comes with
+    /// the interface's level, phase 4: at Opaque it is the sidebar's colour.)
     let footer = SidebarFooterView(level: .opaque)
     var isExpanded: Bool = false {
         didSet {
@@ -293,7 +292,6 @@ final class SidebarView: NSView {
         )
         contentScrollView.onScrollerStyleChange = { [weak self] in self?.updateScrollerVisibility() }
         updateScrollerVisibility()
-        addSubview(backdrop)
         addSubview(contentScrollView)
         footer.onBoard = { [weak self] in self?.onOpenBoard?() }
         footer.onHistory = { [weak self] in self?.onShowHistory?() }
@@ -311,7 +309,6 @@ final class SidebarView: NSView {
         isTilingScrollView = true
         contentScrollView.frame = listFrame
         isTilingScrollView = false
-        backdrop.frame = bounds
         let margin = SidebarFooterView.margin
         footer.frame = NSRect(x: margin, y: margin, width: max(0, bounds.width - 2 * margin), height: SidebarFooterView.height)
         rebuildContent()
@@ -328,7 +325,6 @@ final class SidebarView: NSView {
     /// goes: the rail scrolls by itself, without scrollers.
     func updateScrollerVisibility() {
         contentScrollView.isHidden = !isExpanded
-        backdrop.isHidden = !isExpanded
         footer.isHidden = !isExpanded
         // The list takes the room the foot leaves, or all of it again.
         if contentScrollView.frame != listFrame {
@@ -575,14 +571,14 @@ final class SidebarView: NSView {
 
         // A double-click renames the row its first click landed on: that
         // click selected it, and the rows moved (the selected row is taller).
-        if event.clickCount == 2, let first = lastRowPress, isOnList(event.locationInWindow),
+        if event.clickCount == 2, let first = lastRowPress, isShown(docLocation),
            event.timestamp - first.at <= NSEvent.doubleClickInterval {
             lastRowPress = nil
             onWorkspaceClicked?(first.workspaceIndex)
             onWorkspaceAction?(.rename, first.workspaceIndex)
             return
         }
-        if isOnList(event.locationInWindow), let area = hitArea(at: docLocation) {
+        if let area = hitArea(at: docLocation) {
             // The catch-up card just came, went or changed: what is under
             // the pointer moved (see `catchUpChangedAt`).
             guard clock() - catchUpChangedAt >= Self.catchUpArming else { return }
@@ -628,14 +624,14 @@ final class SidebarView: NSView {
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         // The checklist's buttons track their own hover and cursor.
-        if isOnList(event.locationInWindow), let card = onboardingCardView, card.superview != nil, card.frame.contains(point) {
+        if isShown(point), let card = onboardingCardView, card.superview != nil, card.frame.contains(point) {
             clearHover()
             setHoverTarget(nil)
             if !card.hasButton(at: point) { NSCursor.arrow.set() }
             return
         }
 
-        guard isOnList(event.locationInWindow), let area = hitArea(at: point) else {
+        guard let area = hitArea(at: point) else {
             clearHover()
             setHoverTarget(nil)
             NSCursor.arrow.set()
@@ -686,24 +682,27 @@ final class SidebarView: NSView {
         }
     }
 
+    /// The area under `point`, in the list's coordinates, where the list
+    /// shows: under the foot, or over the title bar, document points still
+    /// fall on rows scrolled out of view.
     func hitArea(at point: NSPoint) -> SidebarHitArea? {
-        hitAreas.first { $0.frame.contains(point) }
+        guard isShown(point) else { return nil }
+        return hitAreas.first { $0.frame.contains(point) }
     }
 
-    /// A scroll over the foot, or the glass around the list, scrolls the
-    /// list; what the list hands back up goes on up.
+    /// Whether a point of the list's document is in view.
+    func isShown(_ point: NSPoint) -> Bool {
+        contentScrollView.documentVisibleRect.contains(point)
+    }
+
+    /// A scroll over the foot scrolls the list. What the list hands up
+    /// (it can't use it) goes on up.
     override func scrollWheel(with event: NSEvent) {
-        guard isExpanded, !isForwardingScroll else { return super.scrollWheel(with: event) }
+        let onList = isShown(contentDocumentView.convert(event.locationInWindow, from: nil))
+        guard isExpanded, !onList, !isForwardingScroll else { return super.scrollWheel(with: event) }
         isForwardingScroll = true
         defer { isForwardingScroll = false }
         contentScrollView.scrollWheel(with: event)
-    }
-
-    /// Whether a point of the window falls on the list: under the foot,
-    /// or over the title bar, document points still fall on rows scrolled
-    /// out of view.
-    func isOnList(_ windowPoint: NSPoint) -> Bool {
-        listFrame.contains(convert(windowPoint, from: nil))
     }
 
     private func handleHit(_ region: SidebarHitRegion, event: NSEvent) {
@@ -772,7 +771,7 @@ final class SidebarView: NSView {
         // Right-click on the space picker mirrors its left-click menu —
         // every region that advertises a menu answers both buttons.
         let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
-        if isOnList(event.locationInWindow), case .spacePicker? = hitArea(at: docLocation)?.region { return spacePickerMenu() }
+        if case .spacePicker? = hitArea(at: docLocation)?.region { return spacePickerMenu() }
         guard let target = menuTarget(at: event) else { return super.menu(for: event) }
         return workspaceActionMenu(workspaceIndex: target.workspaceIndex, columnIndex: target.columnIndex)
     }
@@ -912,8 +911,8 @@ final class SidebarView: NSView {
     }
 
     private func menuTarget(at event: NSEvent) -> MenuTarget? {
-        guard isOnList(event.locationInWindow) else { return nil }
         let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+        guard isShown(docLocation) else { return nil }
         for area in hitAreas where area.frame.contains(docLocation) {
             switch area.region {
             case .column(let workspaceIndex, let columnIndex),

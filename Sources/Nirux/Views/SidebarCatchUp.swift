@@ -26,12 +26,19 @@ struct SidebarCatchUp: Hashable {
         let title: String
         let kind: Kind
         let text: String
-        /// The icon by the row (`icon(for:row:)`); nil draws its kind's.
-        /// Only what it shows: the card changes, and its presses wait
-        /// again, only when the user can see it change.
-        var icon: StateIcon?
+        /// The icon by the row (`icon(for:row:)`): only what it shows, so
+        /// the card changes, and its presses wait again, only when the user
+        /// can see it change.
+        let icon: StateIcon
 
-        var shownIcon: StateIcon { icon ?? SidebarCatchUp.icon(for: kind, row: nil) }
+        /// `icon` nil: its kind's.
+        init(workspaceID: String, title: String, kind: Kind, text: String, icon: StateIcon? = nil) {
+            self.workspaceID = workspaceID
+            self.title = title
+            self.kind = kind
+            self.text = text
+            self.icon = icon ?? SidebarCatchUp.icon(for: kind, row: nil)
+        }
     }
 
     /// The icon a row of `kind` shows: its task row's (`row`) while it asks
@@ -177,7 +184,10 @@ struct SidebarCatchUpCardRenderer {
         for row in catchUp.shownRows {
             y -= Metrics.rowHeight
             let frame = NSRect(x: card.minX, y: y, width: card.width, height: Metrics.rowHeight)
-            views.append(mark(row.shownIcon, centerY: y + Metrics.rowHeight - 10))
+            views.append(SidebarWorkspaceCardRenderer.stateIconView(
+                row.icon, size: SidebarExpandedMetrics.stateIconSize,
+                center: NSPoint(x: SidebarExpandedMetrics.markCenterX, y: y + Metrics.rowHeight - 10)
+            ))
             let title = label(row.title, font: Theme.Font.body, color: Theme.Color.textPrimary)
             title.frame = NSRect(x: textX, y: y + 16, width: textWidth, height: 16)
             views.append(title)
@@ -220,19 +230,6 @@ struct SidebarCatchUpCardRenderer {
         case .broken: Theme.Color.error
         case .done, .quiet, .working: Theme.Color.textSecondary
         }
-    }
-
-    /// The row's sign, in the state marks' column: its row's state icon.
-    /// Takes no click, as a row's doesn't.
-    private func mark(_ icon: StateIcon, centerY: CGFloat) -> NSView {
-        let size = SidebarExpandedMetrics.stateIconSize
-        let centerX = SidebarExpandedMetrics.markCenterX
-        let host = SidebarBackgroundView(frame: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
-        let view = StateIconView(icon, size: size)
-        view.frame = host.bounds
-        view.setAccessibilityElement(false)
-        host.addSubview(view)
-        return host
     }
 
     /// What VoiceOver presses; clicks go through the hit areas.

@@ -26,9 +26,8 @@ enum Theme {
         static let fillSelected = accent.withAlphaComponent(0.16)
         /// The glass interface's selection (3.4): a pane of glass laid on the
         /// sidebar (the selected row, the footer's current list), rimmed
-        /// with `line`, and the light on its top edge.
+        /// with `line`, with `lineStrong` along its top edge.
         static let selectionGlass = NSColor.white.withAlphaComponent(0.10)
-        static let selectionHighlight = NSColor.white.withAlphaComponent(0.12)
         static let line = NSColor.white.withAlphaComponent(0.07)
         static let lineStrong = NSColor.white.withAlphaComponent(0.12)
 
