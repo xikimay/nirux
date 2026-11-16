@@ -37,6 +37,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     }
 
     static let sidebarWidth: CGFloat = 200
+    /// The panes that put the keyboard in a field of theirs once loaded.
+    static let panesTakingKeyboard: [Selection] = [.space(.memory), .space(.board)]
     static let firstAppPane = "general"
 
     /// Nirux's panes, built each time the window opens (the app).
@@ -74,18 +76,21 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     var selectedView: NSView? { shownPane }
 
     /// Shows the window on `selection`, else on the pane last shown, else
-    /// on Nirux's first; builds it the first time. A pane asked for by name
-    /// (Space Memory…, Board settings) may take the keyboard; otherwise the
-    /// sidebar has it, so ↑ and ↓ walk the panes.
+    /// on Nirux's first; builds it the first time. The sidebar has the
+    /// keyboard, so ↑ and ↓ walk the panes; Memory and Board, asked for by
+    /// name (Space Memory…, Board settings), take it once their content
+    /// comes, unless something of theirs has it already.
     func show(_ selection: Selection? = nil) {
         if panel == nil { build() }
         guard let panel else { return }
         select(selection ?? remembered ?? defaultSelection)
         if !panel.isVisible { panel.center() }
         panel.makeKeyAndOrderFront(nil)
-        // After the window is up, which hands the sidebar the keyboard: the
-        // pane asked for takes it once its content comes.
-        if selection != nil { panel.makeFirstResponder(nil) }
+        // After the window is up, which hands the sidebar the keyboard.
+        if let selection, Self.panesTakingKeyboard.contains(selection), let pane = shownPane,
+           !panel.keyboardIsFree(for: pane) {
+            panel.makeFirstResponder(nil)
+        }
         space?.windowShown()
     }
 

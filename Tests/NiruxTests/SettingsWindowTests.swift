@@ -561,7 +561,11 @@ final class SettingsWindowTests: XCTestCase {
             // Tab).
             settings.select(.space(.general))
             window.makeFirstResponder(table)
-            window.selectKeyView(following: table)
+            // With Full Keyboard Access on, the space's popup comes first.
+            for _ in 0..<3 {
+                guard let view = window.firstResponder as? NSView, view.isDescendant(of: settings.sidebar.view) else { break }
+                window.selectNextKeyView(nil)
+            }
             let focused = try XCTUnwrap(window.firstResponder as? NSView)
             XCTAssertTrue(focused.isDescendant(of: try XCTUnwrap(settings.selectedView)), "\(focused)")
             // A pane that loads (Memory, Board) takes the keyboard only if the
@@ -640,8 +644,10 @@ final class SettingsWindowTests: XCTestCase {
             window.endSheet(sheet)
 
             // The space shown is deleted: the window stays, on the active
-            // space, Nirux's pane still shown.
+            // space, Nirux's pane still shown; a sheet up there goes.
+            window.beginSheet(sheet)
             shell.deleteSpace(profileID: beta.id)
+            XCTAssertNil(window.attachedSheet)
             XCTAssertIdentical(app.settingsWindow, window)
             XCTAssertEqual(shell.spaceSettings?.spaceID, acme.id)
             XCTAssertEqual(settings.selection, .app("notifications"))
@@ -654,6 +660,15 @@ final class SettingsWindowTests: XCTestCase {
             app.showSettings(nil)
             XCTAssertEqual(shell.spaceSettings?.spaceID, gamma.id)
             XCTAssertEqual(settings.selection, .app("notifications"), "Nirux's pane last shown")
+
+            // Space Settings… opens with the sidebar's keyboard; Space Memory…
+            // frees it for its list.
+            app.settingsWindow?.performClose(nil)
+            shell.showSpaceSettings(profileID: acme.id)
+            let reopened = try XCTUnwrap(app.settingsWindow)
+            XCTAssertIdentical(reopened.firstResponder, settings.sidebar.table)
+            shell.showSpaceSettings(profileID: acme.id, tab: .memory)
+            XCTAssertIdentical(reopened.firstResponder, reopened)
 
             // Closed, ⌘, opens it again on the pane last shown.
             settings.select(.app("agents"))
