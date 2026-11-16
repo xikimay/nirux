@@ -72,7 +72,7 @@ extension SidebarView {
         }
         // A list taller than the sidebar scrolls: which rows kept their
         // place on screen depends on the scroll, so none is pushed.
-        let fits = contentDocumentView.frame.height <= listFrame.height + 0.5
+        let fits = contentDocumentView.frame.height <= bounds.height + 0.5
         for (workspaceID, opens) in rowOpensAt where now - opens < Self.birthDuration {
             guard let born = rows.first(where: { $0.info.id == workspaceID }) else { continue }
             let own = born.frame.insetBy(dx: -1, dy: -1)

@@ -1007,7 +1007,7 @@ final class SidebarWorkspaceCardRenderer {
 /// An image drawn in its frame, aspect kept; clicks go through to the
 /// sidebar's hit areas.
 final class SidebarImageView: NSView {
-    private let image: NSImage?
+    let image: NSImage?
 
     init(image: NSImage?) {
         self.image = image

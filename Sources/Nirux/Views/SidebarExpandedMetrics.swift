@@ -13,6 +13,10 @@ enum SidebarExpandedMetrics {
     /// The least room between the last card and the archived block.
     static let archivedGap = Theme.Space.md
     static let archivedRowHeight: CGFloat = 30
+    /// The navigator rows: Board under the space's header, History at the
+    /// bottom; as tall as the Archived row.
+    static let navigatorRowHeight: CGFloat = 30
+    static let navigatorGap = Theme.Space.xs
     /// Between the archived list and the Archived row under it.
     static let archivedListGap: CGFloat = 6
     static let bottomPadding = Theme.Space.sm

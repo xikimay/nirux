@@ -81,7 +81,7 @@ extension SidebarView {
             skippedRebuild: rebuildSkippedDuringDrag,
             animates: animates,
             isExpanded: isExpanded,
-            fits: list.frame.height <= listFrame.height + 0.5,
+            fits: list.frame.height <= bounds.height + 0.5,
             sinceRebuild: lastRebuildAt.map { now - $0 },
             sinceUpdate: lastUpdateAt.map { now - $0 }
         )

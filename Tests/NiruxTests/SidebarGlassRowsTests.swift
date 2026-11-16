@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// The rows on glass (docs/design/glass-interface.md, step 3.4): the state
-/// icons in the rows, the selected row's pane of glass, the rows' buttons in
-/// `NiruxButton`'s looks, and the unfolded sidebar's foot.
+/// The rows on glass (docs/design/glass-interface.md, steps 3.4 and 3.4b): the
+/// state icons in the rows, the selected row's pane of glass, the rows'
+/// buttons in `NiruxButton`'s looks, and the navigator rows.
 @MainActor
 final class SidebarGlassRowsTests: XCTestCase {
     private func column(_ status: AgentStatus = .idle, reason: AgentAttentionReason? = nil) -> ColumnInfo {
@@ -174,58 +174,149 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertEqual(SidebarExpandedMetrics.buttonHeight, NiruxButton.Size.small.height)
     }
 
-    // MARK: - The foot
+    // MARK: - The navigator rows
 
-    private func windowed(_ rows: [WorkspaceInfo], height: CGFloat = 600) -> (SidebarView, NSWindow) {
+    /// A sidebar in a window taller than it, `below` points under it: the
+    /// window's points there fall on rows of the list out of view.
+    private func windowed(_ rows: [WorkspaceInfo], height: CGFloat = 600, below: CGFloat = 0) -> (SidebarView, NSWindow) {
         _ = NSApplication.shared
-        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: height))
-        let window = NSWindow(contentRect: sidebar.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: height + below))
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: below, width: 260, height: height))
+        host.addSubview(sidebar)
+        let window = NSWindow(contentRect: host.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = sidebar
+        window.contentView = host
         sidebar.isExpanded = true
-        sidebar.update(profiles: [], workspaces: rows)
-        sidebar.layoutSubtreeIfNeeded()
+        sidebar.update(profiles: [space], workspaces: rows)
+        host.layoutSubtreeIfNeeded()
         return (sidebar, window)
     }
 
-    /// Unfolded, the foot sits at the bottom, the list above it; Board and
-    /// History open theirs, Tasks shows as the current list. Folded, the
-    /// rail has the whole height.
-    func testTheFootSitsUnderTheList() {
-        let (sidebar, window) = windowed([row([column()])])
-        defer { window.close() }
-        let footer = sidebar.footer
-        XCTAssertFalse(footer.isHidden)
-        XCTAssertEqual(footer.frame, NSRect(x: 10, y: 10, width: 240, height: SidebarFooterView.height))
-        XCTAssertEqual(sidebar.contentScrollView.frame, NSRect(x: 0, y: SidebarFooterView.room, width: 260, height: 600 - SidebarFooterView.room))
-        XCTAssertEqual(footer.tasksPill.layer?.backgroundColor, Theme.Color.selectionGlass.cgColor, "the current list")
+    private let space = ProfileInfo(
+        id: WorkspaceProfile.defaultID, name: "Acme", colorHex: "#9ECE6A", isActive: true, workspaceCount: 2, taskCount: 2, attention: nil
+    )
 
-        var board = 0
-        var history = 0
-        sidebar.onOpenBoard = { board += 1 }
-        sidebar.onShowHistory = { history += 1 }
-        footer.boardButton.performClick(nil)
-        XCTAssertEqual([board, history], [1, 0])
-        footer.historyButton.performClick(nil)
-        XCTAssertEqual([board, history], [1, 1])
-
-        sidebar.isExpanded = false
-        sidebar.layoutSubtreeIfNeeded()
-        XCTAssertTrue(footer.isHidden)
-        XCTAssertEqual(sidebar.contentScrollView.frame, sidebar.bounds)
+    private func frame(of region: (SidebarHitRegion) -> Bool, in sidebar: SidebarView) throws -> NSRect {
+        try XCTUnwrap(sidebar.hitAreas.first { region($0.region) }?.frame)
     }
 
-    /// A row scrolled under the foot takes no press, no hover and no menu
-    /// there: the foot is not the list.
-    func testTheFootHidesTheRowsUnderIt() throws {
-        let (sidebar, window) = windowed((0..<20).map { row([column()], id: "ws\($0)", index: $0) }, height: 300)
+    /// The Board row sits under the space's header, History at the bottom
+    /// with Archived above it; the list takes the whole height. Board reads
+    /// open ("Board, open", its symbol in the accent) while the space's
+    /// Board column shows, as the rail's Board button does, never on the
+    /// selection's glass: that stays the task's. History opens its panel and
+    /// is never selected.
+    func testTheNavigatorRows() throws {
+        let archived = WorkspaceInfo(
+            id: "old", index: 1, title: "old", profileID: WorkspaceProfile.defaultID, isInactive: true,
+            columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false, columns: [column()],
+            prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .parked, lastSummary: nil, lastActivityAt: nil
+        )
+        let rows = [row([column()], active: true), archived]
+        let (sidebar, window) = windowed(rows)
+        defer { window.close() }
+        /// As the shell does: the state, then the rows, rebuilt once.
+        func show(_ navigation: SidebarNavigation) {
+            sidebar.navigation = navigation
+            sidebar.update(profiles: [space], workspaces: rows)
+        }
+        XCTAssertEqual(sidebar.contentScrollView.frame, sidebar.bounds, "no foot: the list has the whole height")
+
+        let picker = try frame(of: { if case .spacePicker = $0 { true } else { false } }, in: sidebar)
+        let board = try frame(of: { if case .board = $0 { true } else { false } }, in: sidebar)
+        let history = try frame(of: { if case .history = $0 { true } else { false } }, in: sidebar)
+        let archivedRow = try XCTUnwrap(sidebar.inactiveSectionHeaderFrame)
+        let firstTask = try frame(of: { if case .workspace = $0 { true } else { false } }, in: sidebar)
+        XCTAssertLessThan(board.maxY, picker.minY, "under the space's header")
+        XCTAssertGreaterThan(board.minY, firstTask.maxY, "above the tasks")
+        XCTAssertEqual(history.minY, SidebarExpandedMetrics.bottomPadding, "at the bottom")
+        XCTAssertGreaterThan(archivedRow.minY, history.maxY, "Archived above History")
+        let controls = sidebar.expandedViews.compactMap { $0 as? SidebarSectionToggleView }
+        let historyAt = try XCTUnwrap(controls.firstIndex { $0.frame == history })
+        let archivedAt = try XCTUnwrap(controls.firstIndex { $0.frame == archivedRow })
+        XCTAssertGreaterThan(historyAt, archivedAt, "VoiceOver reads Archived, then History")
+
+        var opened = 0
+        var shown = 0
+        sidebar.onOpenBoard = { opened += 1 }
+        sidebar.onShowHistory = { shown += 1 }
+        func control(at frame: NSRect) throws -> SidebarSectionToggleView {
+            try XCTUnwrap(sidebar.expandedViews.compactMap { $0 as? SidebarSectionToggleView }.first { $0.frame == frame })
+        }
+        func selected(_ frame: NSRect) -> Bool {
+            sidebar.expandedViews.contains { $0.identifier == SidebarWorkspaceCardRenderer.selectionGlassID && $0.frame == frame }
+        }
+        XCTAssertFalse(selected(board), "the Board isn't shown")
+        func boardSymbol() throws -> Data? {
+            try XCTUnwrap(sidebar.expandedViews.first { $0.identifier?.rawValue == "nirux.sidebar.navigator.Board" } as? SidebarImageView)
+                .image?.tiffRepresentation
+        }
+        let plainSymbol = try boardSymbol()
+        XCTAssertEqual(try control(at: board).accessibilityLabel(), "Board")
+        XCTAssertTrue(try control(at: board).toolTip?.hasPrefix("Board (") == true, "its shortcut")
+        XCTAssertEqual(try control(at: history).toolTip, "Session History")
+        XCTAssertTrue(try control(at: board).accessibilityPerformPress())
+        XCTAssertTrue(try control(at: history).accessibilityPerformPress())
+        XCTAssertEqual([opened, shown], [1, 1])
+
+        show(SidebarNavigation(boardShown: true, boardAvailable: true))
+        XCTAssertEqual(try control(at: board).accessibilityLabel(), "Board, open", "the Board column on screen")
+        XCTAssertNotEqual(try boardSymbol(), plainSymbol)
+        XCTAssertEqual(
+            try boardSymbol(), SidebarRenderer.symbol(Theme.Symbol.projectBoard, color: Theme.Color.accent, pointSize: 12)?.tiffRepresentation,
+            "its symbol in the accent"
+        )
+        XCTAssertFalse(selected(board), "one selection: the task's")
+        XCTAssertTrue(selected(firstTask))
+        XCTAssertFalse(selected(history))
+        XCTAssertTrue(sidebar.iconRail.boardButton.isSelected, "the rail's Board button too")
+        XCTAssertEqual(sidebar.iconRail.boardButton.spokenLabel, "Board, open")
+        XCTAssertEqual(sidebar.iconRail.boardButton.label, "Board", "its own label stays")
+
+        // No task open: nothing to open the Board beside, nor a press, a
+        // first click or a hover.
+        show(SidebarNavigation(boardShown: false, boardAvailable: false))
+        XCTAssertFalse(try control(at: board).accessibilityPerformPress())
+        XCTAssertFalse(try control(at: board).acceptsFirstMouse(for: nil))
+        XCTAssertEqual(try control(at: board).toolTip, "Open a task to show its space’s Board")
+        XCTAssertEqual(opened, 1)
+        XCTAssertFalse(sidebar.iconRail.boardButton.isEnabled)
+        XCTAssertFalse(sidebar.iconRail.boardButton.isSelected)
+    }
+
+    /// The shell selects the Board row while the space's Board column shows
+    /// on screen, whichever column has the focus, and makes it pressable
+    /// while a task is open.
+    func testTheShellSaysWhenTheBoardShows() throws {
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let workspace = try XCTUnwrap(shell.activeWorkspace)
+        XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: false, boardAvailable: true))
+        workspace.addProjectBoardColumn(shell.makeProjectBoard(projectID: workspace.profileID, offersSettings: true))
+        shell.isMetadataRefreshScheduled = false
+        shell.relayout(animated: false)
+        XCTAssertTrue(shell.isMetadataRefreshScheduled, "the Board came into view: the rows follow at the next refresh")
+        let boardIndex = try XCTUnwrap(workspace.columns.firstIndex { $0.projectBoard != nil })
+        XCTAssertTrue(workspace.showsColumn(at: boardIndex))
+        XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: true, boardAvailable: true))
+        workspace.focusedIndex = boardIndex == 0 ? 1 : 0
+        XCTAssertTrue(shell.sidebarNavigation.boardShown, "the agent in focus, the Board beside it")
+        workspace.columns[boardIndex].isClosing = true
+        XCTAssertFalse(shell.sidebarNavigation.boardShown, "closing")
+        workspace.columns[boardIndex].isClosing = false
+    }
+
+    /// A row of the list out of view takes no press, no hover and no menu
+    /// where the window shows something else (under the sidebar here).
+    func testRowsOutOfViewTakeNoPress() throws {
+        let (sidebar, window) = windowed((0..<20).map { row([column()], id: "ws\($0)", index: $0) }, height: 300, below: 60)
         defer { window.close() }
         var clicked: [Int] = []
         sidebar.onWorkspaceClicked = { clicked.append($0) }
         XCTAssertGreaterThan(sidebar.contentDocumentView.frame.height, 300, "a long list")
-        // In the foot's margin, under the capsule's left end.
-        let inFoot = sidebar.convert(NSPoint(x: 30, y: 4), to: nil)
-        let hidden = sidebar.contentDocumentView.convert(inFoot, from: nil)
+        let under = NSPoint(x: 30, y: 30)
+        let hidden = sidebar.contentDocumentView.convert(under, from: nil)
         XCTAssertTrue(sidebar.hitAreas.contains { if case .workspace = $0.region { $0.frame.contains(hidden) } else { false } },
                       "a row lies there, out of view")
         XCTAssertNil(sidebar.hitArea(at: hidden), "out of view: no area")
@@ -236,40 +327,18 @@ final class SidebarGlassRowsTests: XCTestCase {
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
             ))
         }
-        XCTAssertNil(sidebar.menu(for: try event(.rightMouseDown, at: inFoot)), "no row's menu")
-        sidebar.mouseMoved(with: try event(.mouseMoved, at: inFoot))
+        XCTAssertNil(sidebar.menu(for: try event(.rightMouseDown, at: under)), "no row's menu")
+        sidebar.mouseMoved(with: try event(.mouseMoved, at: under))
         XCTAssertNil(sidebar.hoveredTarget, "no row lit")
-        sidebar.mouseDown(with: try event(.leftMouseDown, at: inFoot))
+        sidebar.mouseDown(with: try event(.leftMouseDown, at: under))
         XCTAssertEqual(clicked, [], "no row pressed")
-        // A row's click, then a second one in the foot: no double-click
+        // A row's click, then a second one out of view: no double-click
         // renames that row.
         var actions: [Int] = []
         sidebar.onWorkspaceAction = { _, index in actions.append(index) }
         sidebar.lastRowPress = (0, ProcessInfo.processInfo.systemUptime)
-        sidebar.mouseDown(with: try event(.leftMouseDown, at: inFoot, clicks: 2))
+        sidebar.mouseDown(with: try event(.leftMouseDown, at: under, clicks: 2))
         XCTAssertEqual(actions, [], "no rename")
-
-        // A scroll over the foot goes to the list's scroll view (a made-up
-        // scroll moves no list off screen: it is seen arriving there).
-        var scrolled = 0
-        let noted = sidebar.contentScrollView.onScrollWheel
-        sidebar.contentScrollView.onScrollWheel = { scrolled += 1; noted?() }
-        // A scroll event without a window is placed on the screen: the
-        // window lies at the screen's origin, so that is the window's point.
-        func scroll(at point: NSPoint) throws -> NSEvent {
-            let event = try XCTUnwrap(CGEvent(
-                scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0
-            ))
-            event.location = CGPoint(x: point.x, y: CGDisplayBounds(CGMainDisplayID()).height - point.y)
-            let scroll = try XCTUnwrap(NSEvent(cgEvent: event))
-            XCTAssertEqual(scroll.locationInWindow.y, point.y, accuracy: 0.5, "where it was made")
-            return scroll
-        }
-        sidebar.scrollWheel(with: try scroll(at: inFoot))
-        XCTAssertEqual(scrolled, 1, "the list's scroll view has it")
-        // One the list itself handed up (it couldn't use it) goes on up.
-        sidebar.scrollWheel(with: try scroll(at: sidebar.convert(NSPoint(x: 30, y: 200), to: nil)))
-        XCTAssertEqual(scrolled, 1, "not handed back to the list")
 
         // A row in view still answers.
         let visible = sidebar.contentScrollView.documentVisibleRect
