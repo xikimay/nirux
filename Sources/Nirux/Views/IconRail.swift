@@ -439,12 +439,12 @@ final class RailRoundButton: NSView {
     }
     private let glass: GlassView
     private let button: NiruxButton
-    /// The selection's glass, while what the button opens is in focus.
+    /// The selection's glass, while what the button opens shows.
     private let selection = NSView()
     private var baseLabel: String
 
     /// Selected while what it opens shows in the main area (the Board
-    /// column in focus), as the sidebar's Board row is.
+    /// column on screen), as the sidebar's Board row is.
     var isSelected = false {
         didSet {
             guard isSelected != oldValue else { return }

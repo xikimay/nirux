@@ -577,8 +577,8 @@ enum SidebarTurnAnswer: String, Hashable {
 }
 
 /// What the sidebar's navigator rows say (docs/design/glass-interface.md,
-/// 3.4b): the Board row is selected while the space's Board column is the
-/// one in focus, as a task row is while its task is on screen; it can't be
+/// 3.4b): the Board row is selected while the space's Board column shows on
+/// screen, as a task row is while its task is on screen; it can't be
 /// pressed while no task is open (the Board opens beside one).
 struct SidebarNavigation: Hashable {
     var boardShown = false

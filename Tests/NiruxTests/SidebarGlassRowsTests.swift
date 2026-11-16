@@ -282,7 +282,9 @@ final class SidebarGlassRowsTests: XCTestCase {
         let workspace = try XCTUnwrap(shell.activeWorkspace)
         XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: false, boardAvailable: true))
         workspace.addProjectBoardColumn(shell.makeProjectBoard(projectID: workspace.profileID, offersSettings: true))
+        shell.isMetadataRefreshScheduled = false
         shell.relayout(animated: false)
+        XCTAssertTrue(shell.isMetadataRefreshScheduled, "the Board came into view: the rows follow at the next refresh")
         let boardIndex = try XCTUnwrap(workspace.columns.firstIndex { $0.projectBoard != nil })
         XCTAssertTrue(workspace.showsColumn(at: boardIndex))
         XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: true, boardAvailable: true))

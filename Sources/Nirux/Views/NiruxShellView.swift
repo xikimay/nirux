@@ -480,6 +480,9 @@ final class NiruxShellView: NSView {
         scheduleDeferredAgentsOnScreen()
         scheduleBranchReviewsOnScreen()
         refreshStaleBranchReviewsOnScreen()
+        // The Board row follows its column into and out of view (a width
+        // cycled, a column moved, the window resized), at the next refresh.
+        if sidebar.navigation != sidebarNavigation { scheduleMetadataRefresh() }
     }
 
     // MARK: - Terminal Occlusion
