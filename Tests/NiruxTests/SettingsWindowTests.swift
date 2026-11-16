@@ -490,6 +490,9 @@ final class SettingsWindowTests: XCTestCase {
             let order = panes.sorted { height($0) > height($1) }
             settings.select(try XCTUnwrap(order.last))
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            // From the window's own fit: AppKit may narrow a panel as it
+            // shows on a small screen (CI's), before the window fits again.
+            settings.fitToContent()
             let top = window.frame.maxY
             let width = window.frame.width
             for selection in order.reversed() + order {
