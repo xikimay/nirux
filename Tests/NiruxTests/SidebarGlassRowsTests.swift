@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// The rows on glass (docs/design/glass-interface.md, step 3.4): the state
-/// icons in the rows, the selected row's pane of glass, the rows' buttons in
-/// `NiruxButton`'s looks, and the unfolded sidebar's foot.
+/// The rows on glass (docs/design/glass-interface.md, steps 3.4 and 3.4b): the
+/// state icons in the rows, the selected row's pane of glass, the rows'
+/// buttons in `NiruxButton`'s looks, and the navigator rows.
 @MainActor
 final class SidebarGlassRowsTests: XCTestCase {
     private func column(_ status: AgentStatus = .idle, reason: AgentAttentionReason? = nil) -> ColumnInfo {
@@ -203,16 +203,22 @@ final class SidebarGlassRowsTests: XCTestCase {
     /// The Board row sits under the space's header, History at the bottom
     /// with Archived above it; the list takes the whole height. Board is
     /// selected (the selection's glass, "Board, selected") only while the
-    /// space's Board column is in focus, as the rail's Board button is;
-    /// History opens its panel and is never selected.
+    /// space's Board column shows, as the rail's Board button is; History
+    /// opens its panel and is never selected.
     func testTheNavigatorRows() throws {
         let archived = WorkspaceInfo(
             id: "old", index: 1, title: "old", profileID: WorkspaceProfile.defaultID, isInactive: true,
             columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false, columns: [column()],
             prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .parked, lastSummary: nil, lastActivityAt: nil
         )
-        let (sidebar, window) = windowed([row([column()], active: true), archived])
+        let rows = [row([column()], active: true), archived]
+        let (sidebar, window) = windowed(rows)
         defer { window.close() }
+        /// As the shell does: the state, then the rows, rebuilt once.
+        func show(_ navigation: SidebarNavigation) {
+            sidebar.navigation = navigation
+            sidebar.update(profiles: [space], workspaces: rows)
+        }
         XCTAssertEqual(sidebar.contentScrollView.frame, sidebar.bounds, "no foot: the list has the whole height")
 
         let picker = try frame(of: { if case .spacePicker = $0 { true } else { false } }, in: sidebar)
@@ -224,6 +230,10 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertGreaterThan(board.minY, firstTask.maxY, "above the tasks")
         XCTAssertEqual(history.minY, SidebarExpandedMetrics.bottomPadding, "at the bottom")
         XCTAssertGreaterThan(archivedRow.minY, history.maxY, "Archived above History")
+        let controls = sidebar.expandedViews.compactMap { $0 as? SidebarSectionToggleView }
+        let historyAt = try XCTUnwrap(controls.firstIndex { $0.frame == history })
+        let archivedAt = try XCTUnwrap(controls.firstIndex { $0.frame == archivedRow })
+        XCTAssertGreaterThan(historyAt, archivedAt, "VoiceOver reads Archived, then History")
 
         var opened = 0
         var shown = 0
@@ -237,27 +247,34 @@ final class SidebarGlassRowsTests: XCTestCase {
         }
         XCTAssertFalse(selected(board), "the Board isn't shown")
         XCTAssertEqual(try control(at: board).accessibilityLabel(), "Board")
+        XCTAssertTrue(try control(at: board).toolTip?.hasPrefix("Board (") == true, "its shortcut")
+        XCTAssertEqual(try control(at: history).toolTip, "Session History")
         XCTAssertTrue(try control(at: board).accessibilityPerformPress())
         XCTAssertTrue(try control(at: history).accessibilityPerformPress())
         XCTAssertEqual([opened, shown], [1, 1])
 
-        sidebar.navigation = SidebarNavigation(boardShown: true, boardAvailable: true)
-        XCTAssertTrue(selected(board), "the Board column in focus")
+        show(SidebarNavigation(boardShown: true, boardAvailable: true))
+        XCTAssertTrue(selected(board), "the Board column on screen")
         XCTAssertEqual(try control(at: board).accessibilityLabel(), "Board, selected")
         XCTAssertFalse(selected(history))
         XCTAssertTrue(sidebar.iconRail.boardButton.isSelected, "the rail's Board button too")
-        XCTAssertEqual(sidebar.iconRail.boardButton.label, "Board, selected")
+        XCTAssertEqual(sidebar.iconRail.boardButton.spokenLabel, "Board, selected")
+        XCTAssertEqual(sidebar.iconRail.boardButton.label, "Board", "its own label stays")
 
-        // No task open: nothing to open the Board beside.
-        sidebar.navigation = SidebarNavigation(boardShown: false, boardAvailable: false)
-        XCTAssertTrue(try control(at: board).accessibilityPerformPress())
+        // No task open: nothing to open the Board beside, nor a press, a
+        // first click or a hover.
+        show(SidebarNavigation(boardShown: false, boardAvailable: false))
+        XCTAssertFalse(try control(at: board).accessibilityPerformPress())
+        XCTAssertFalse(try control(at: board).acceptsFirstMouse(for: nil))
+        XCTAssertEqual(try control(at: board).toolTip, "Open a task to show its space’s Board")
         XCTAssertEqual(opened, 1)
         XCTAssertFalse(sidebar.iconRail.boardButton.isEnabled)
         XCTAssertFalse(sidebar.iconRail.boardButton.isSelected)
     }
 
-    /// The shell selects the Board row while the column in focus is the
-    /// space's Board, and makes it pressable while a task is open.
+    /// The shell selects the Board row while the space's Board column shows
+    /// on screen, whichever column has the focus, and makes it pressable
+    /// while a task is open.
     func testTheShellSaysWhenTheBoardShows() throws {
         _ = NSApplication.shared
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
@@ -265,11 +282,15 @@ final class SidebarGlassRowsTests: XCTestCase {
         let workspace = try XCTUnwrap(shell.activeWorkspace)
         XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: false, boardAvailable: true))
         workspace.addProjectBoardColumn(shell.makeProjectBoard(projectID: workspace.profileID, offersSettings: true))
+        shell.relayout(animated: false)
         let boardIndex = try XCTUnwrap(workspace.columns.firstIndex { $0.projectBoard != nil })
-        workspace.focusedIndex = boardIndex
+        XCTAssertTrue(workspace.showsColumn(at: boardIndex))
         XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: true, boardAvailable: true))
         workspace.focusedIndex = boardIndex == 0 ? 1 : 0
-        XCTAssertEqual(shell.sidebarNavigation.boardShown, false, "another column in focus")
+        XCTAssertTrue(shell.sidebarNavigation.boardShown, "the agent in focus, the Board beside it")
+        workspace.columns[boardIndex].isClosing = true
+        XCTAssertFalse(shell.sidebarNavigation.boardShown, "closing")
+        workspace.columns[boardIndex].isClosing = false
     }
 
     /// A row of the list out of view takes no press, no hover and no menu

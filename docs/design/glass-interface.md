@@ -106,9 +106,11 @@ merge sweep, the birth), and changes what frames them:
 - **Navigator rows (3.4b):** the sidebar navigates the main area, as Linear,
   Mail and Finder do: a row is selected only while what it shows is shown.
   **Board**, under the space's header, opens the space's Board column or
-  brings it up, and lies on the selection's glass while that column is in
-  focus ("Board, selected"; the rail's Board button too); it can't be
-  pressed while no task is open. **History**, at the bottom with Archived
+  brings it up, and lies on the selection's glass while that column shows
+  on screen ("Board, selected"; the rail's Board button too): it opens
+  beside the agent, so a click from one to the other leaves it selected. It
+  can't be pressed while no task is open (its tooltip says so). The task
+  whose workspace holds the Board stays selected too: both are shown. **History**, at the bottom with Archived
   above it, opens the Session History panel and is never selected. They
   replace 3.4's Tasks · Board · History capsule, which looked like tabs
   ("Tasks" stayed selected) while its other segments opened things

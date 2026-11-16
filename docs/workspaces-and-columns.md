@@ -4,7 +4,7 @@ Every shortcut mentioned here is also listed in [Keyboard shortcuts](keyboard-sh
 
 ## The sidebar
 
-Each workspace is a row of two lines: its title and time, then one status line. Before the title, its state icon, the same one the folded rail, the command bar and the requests show: an amber disc while an agent waits for you (a command or a question), a red "!" for an error, a green ring while an agent works, a grey check once a turn has ended, a grey ring while its pull request's checks run (an arc that turns while the window is in sight, dashes with Reduce motion or on an archived task), a green ring with a check once they pass, a violet disc once merged, a struck grey ring for a blocker, a grey "?" while the agent asks the one that started it. The selected row lies on a pane of glass. Under the space's name, **Board** opens the space's Board, and stays selected while the Board is the column in focus; at the bottom, **History** opens `Session History…`. The status line shows the first of these that applies:
+Each workspace is a row of two lines: its title and time, then one status line. Before the title, its state icon, the same one the folded rail, the command bar and the requests show: an amber disc while an agent waits for you (a command or a question), a red "!" for an error, a green ring while an agent works, a grey check once a turn has ended, a grey ring while its pull request's checks run (an arc that turns while the window is in sight, dashes with Reduce motion or on an archived task), a green ring with a check once they pass, a violet disc once merged, a struck grey ring for a blocker, a grey "?" while the agent asks the one that started it. The selected row lies on a pane of glass. Under the space's name, **Board** opens the space's Board, and stays selected while the Board's column is on screen; at the bottom, **History** opens `Session History…`. The status line shows the first of these that applies:
 
 | Status line | When |
 | --- | --- |
@@ -23,7 +23,7 @@ In a row's `⋯` menu:
 
 - `Rename Workspace` changes the title. A double-click on the row does too.
 - `View/Edit Context…` holds notes on the work: purpose, phase, latest summary, next step, blocker. They are saved with the workspace.
-- `Organize › Archive` puts a finished workspace away. Archived workspaces wait behind the **Archived** row at the bottom of the sidebar and don't poll GitHub.
+- `Organize › Archive` puts a finished workspace away. Archived workspaces wait behind the **Archived** row near the bottom of the sidebar, above History, and don't poll GitHub.
 
 `Ctrl+Cmd+S` folds the sidebar into a rail of icons: the space's Lead, then one state icon per task with the task's initials in its ring, ringed in amber only when an agent is waiting for you (the reason then takes the place of the initials, as an error's "!" does), and a working one breathes. Hover an icon for its name and what its row says. A click goes where a click on its row goes (a task whose agent waits for you opens on that agent), and a right-click opens the task's menu; drag and double-click to rename stay in the unfolded sidebar. Under the rail: the archived tasks (unfolds the sidebar with the Archived list open), a new task, and the Board. The sidebar also folds by itself when the window is narrower than 900 points, and unfolds again from 940 points if you had it unfolded.
 

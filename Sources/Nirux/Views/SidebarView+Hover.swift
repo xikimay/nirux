@@ -77,6 +77,8 @@ extension SidebarView {
         let point = contentDocumentView.convert(windowPoint, from: nil)
         guard let area = hitArea(at: point) else { return }
         switch area.region {
+        case .board where !navigation.boardAvailable:
+            return
         case .spacePicker, .newTask, .archivedToggle, .board, .history:
             setHoverTarget(Self.hoverTarget(of: area.region))
         case .workspace(let workspaceIndex):

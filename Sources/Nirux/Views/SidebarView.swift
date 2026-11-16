@@ -20,7 +20,8 @@ final class SidebarSectionToggleView: NSView {
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { role }
     override func accessibilityPerformPress() -> Bool {
-        onPress?()
+        guard let onPress else { return false }
+        onPress()
         return true
     }
 }
@@ -100,14 +101,13 @@ final class SidebarView: NSView {
     /// The History row: the Session History panel.
     var onShowHistory: (() -> Void)?
     /// What the navigator rows say: the Board row selected while the
-    /// space's Board column is in focus (set by the shell).
+    /// space's Board column shows (set by the shell, before `update`, whose
+    /// render check then rebuilds the rows once).
     var navigation = SidebarNavigation() {
         didSet {
             guard navigation != oldValue else { return }
             iconRail.boardButton.isSelected = navigation.boardShown
             iconRail.boardButton.isEnabled = navigation.boardAvailable
-            lastRenderSignature = renderSignature()
-            rebuildContent()
         }
     }
     /// Folded, the sidebar is this rail (see SidebarView+IconRail).
@@ -683,8 +683,8 @@ final class SidebarView: NSView {
     }
 
     /// The area under `point`, in the list's coordinates, where the list
-    /// shows: under the foot, or over the title bar, document points still
-    /// fall on rows scrolled out of view.
+    /// shows: over the title bar, document points still fall on rows
+    /// scrolled out of view.
     func hitArea(at point: NSPoint) -> SidebarHitArea? {
         guard isShown(point) else { return nil }
         return hitAreas.first { $0.frame.contains(point) }

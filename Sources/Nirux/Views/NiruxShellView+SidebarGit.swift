@@ -736,12 +736,17 @@ extension NiruxShellView {
 }
 
 extension NiruxShellView {
-    /// The navigator rows' state: the Board row selected while the column
-    /// in focus is the space's Board; pressable while a task is open (the
-    /// Board opens beside it).
+    /// The navigator rows' state: the Board row selected while the space's
+    /// Board column shows on screen (`showsColumn`, the one definition of in
+    /// view): it opens beside the agent, and a click between the two leaves
+    /// both shown. Pressable while a task is open (the Board opens beside
+    /// it).
     var sidebarNavigation: SidebarNavigation {
         guard let workspace = activeWorkspace, !workspace.isClosing else { return SidebarNavigation(boardShown: false, boardAvailable: false) }
-        let focused = workspace.columns[safe: workspace.focusedIndex]
-        return SidebarNavigation(boardShown: focused?.projectBoard != nil && focused?.isClosing == false, boardAvailable: true)
+        let shown = workspace.columns.indices.contains { index in
+            let column = workspace.columns[index]
+            return column.projectBoard != nil && !column.isClosing && workspace.showsColumn(at: index)
+        }
+        return SidebarNavigation(boardShown: shown, boardAvailable: true)
     }
 }

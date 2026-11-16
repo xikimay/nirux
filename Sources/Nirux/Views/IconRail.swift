@@ -494,14 +494,17 @@ final class RailRoundButton: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// What VoiceOver calls it ("…, selected" while selected).
+    /// What VoiceOver calls it; ", selected" follows while selected.
     var label: String {
-        get { button.accessibilityLabel() ?? "" }
+        get { baseLabel }
         set {
             baseLabel = newValue
             updateLook()
         }
     }
+
+    /// What VoiceOver says now.
+    var spokenLabel: String { button.accessibilityLabel() ?? "" }
 
     private func updateLook() {
         button.contentTintColor = !button.isEnabled ? Theme.Color.textDisabled
