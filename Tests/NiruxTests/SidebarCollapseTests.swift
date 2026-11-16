@@ -60,7 +60,7 @@ final class SidebarCollapseTests: XCTestCase {
 
         XCTAssertTrue(sidebar.isInactiveSectionCollapsed)
         XCTAssertEqual(cardIndices(sidebar), [0, 1])
-        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active", "on-screen"])
+        XCTAssertEqual(sidebar.railContent.tasks.map(\.id), ["active", "on-screen"])
 
         sidebar.update(
             profiles: [],
@@ -73,7 +73,7 @@ final class SidebarCollapseTests: XCTestCase {
 
         XCTAssertTrue(sidebar.isInactiveSectionCollapsed)
         XCTAssertEqual(cardIndices(sidebar), [0])
-        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active"])
+        XCTAssertEqual(sidebar.railContent.tasks.map(\.id), ["active"])
     }
 
     /// An unfolded section must not reappear unfolded later on its own:

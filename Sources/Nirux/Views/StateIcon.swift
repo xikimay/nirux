@@ -114,6 +114,23 @@ struct StateIcon: Hashable, Sendable {
         }
     }
 
+    /// Whether a label (a task's initials, on the rail) may take the icon's
+    /// centre: not when its glyph says why it stopped, an agent waiting for
+    /// the user (amber) or failing (red), which then shows instead.
+    var admitsLabel: Bool {
+        switch kind {
+        case .needsYou, .error: return false
+        default: return true
+        }
+    }
+
+    /// The colour a label in the icon's centre takes: the state's, or the
+    /// ink on a disc.
+    var labelColor: NSColor {
+        if case .merged = kind { return Theme.Color.canvas }
+        return color
+    }
+
     /// What VoiceOver says: the state, then the station the ring shows.
     var accessibilityText: String {
         let stations = ["Code", "Reviews", "Checks", "Merge"]
@@ -156,14 +173,56 @@ struct StateIcon: Hashable, Sendable {
 
     /// Draws the icon centred in `rect` of a context whose y goes down (a
     /// flipped view, a flipped image): the glyphs and the ring's fill
-    /// assume it.
-    func draw(in context: CGContext, rect: CGRect) {
+    /// assume it. `labelled`, with room in its centre for a label (see
+    /// `admitsLabel`): no glyph, and the station as an arc along the ring.
+    func draw(in context: CGContext, rect: CGRect, labelled: Bool = false) {
         let side = min(rect.width, rect.height)
         context.saveGState()
         context.translateBy(x: rect.midX - side / 2, y: rect.midY - side / 2)
         context.scaleBy(x: side / 16, y: side / 16)
-        drawOnGrid(context)
+        if labelled, admitsLabel { drawFrameOnGrid(context) } else { drawOnGrid(context) }
         context.restoreGState()
+    }
+
+    /// The ring or disc in the state's colour without a glyph, the station
+    /// along the ring rather than inside it: a label takes the centre.
+    private func drawFrameOnGrid(_ context: CGContext) {
+        let color = self.color
+        let radius = Self.ringRadius
+        func ring(alpha: CGFloat = 1, dashed: Bool = false) {
+            context.setStrokeColor(color.withAlphaComponent(alpha).cgColor)
+            context.setLineWidth(Self.ringWidth)
+            context.setLineDash(phase: 0, lengths: dashed ? Self.dash : [])
+            context.strokeEllipse(in: CGRect(x: 8 - radius, y: 8 - radius, width: 2 * radius, height: 2 * radius))
+            context.setLineDash(phase: 0, lengths: [])
+        }
+        func arc(_ stage: Int) {
+            guard stage > 0 else { return }
+            // From 12 o'clock, clockwise on screen: y goes down here.
+            let start = -CGFloat.pi / 2
+            context.setStrokeColor(color.cgColor)
+            context.setLineWidth(Self.ringWidth)
+            context.setLineCap(.round)
+            context.addArc(center: CGPoint(x: 8, y: 8), radius: radius, startAngle: start,
+                           endAngle: start + 2 * .pi * CGFloat(stage) / 4, clockwise: false)
+            context.strokePath()
+        }
+        switch kind {
+        case .working:
+            ring(alpha: 0.45)
+            arc(max(1, stage))
+        case .idle where stage > 0:
+            ring(alpha: 0.45)
+            arc(stage)
+        case .waiting:
+            ring(dashed: true)
+            arc(stage)
+        case .merged:
+            context.setFillColor(color.cgColor)
+            context.fillEllipse(in: CGRect(x: 1, y: 1, width: 14, height: 14))
+        case .idle, .asking, .readyToMerge, .finished, .blocked, .needsYou, .error:
+            ring()
+        }
     }
 
     private static let ringRadius: CGFloat = 6.25
@@ -292,6 +351,15 @@ final class StateIconView: NSView {
         }
     }
 
+    /// A few letters in the ring's centre (the rail's task initials), shown
+    /// while the icon has no glyph to show (`StateIcon.admitsLabel`).
+    var label: String? {
+        didSet { if label != oldValue { needsDisplay = true } }
+    }
+
+    /// The label drawn now: none while the glyph shows.
+    var shownLabel: String? { icon.admitsLabel ? label : nil }
+
     /// Its natural size, whatever frame a layout gives it.
     private let size: CGFloat
 
@@ -311,6 +379,20 @@ final class StateIconView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        icon.draw(in: context, rect: bounds)
+        let label = shownLabel
+        icon.draw(in: context, rect: bounds, labelled: label != nil)
+        guard let label else { return }
+        // Inside the ring: shrunk to fit a longer one ("CR2", "W12").
+        let side = min(bounds.width, bounds.height)
+        let room = side * 0.6
+        var font = NSFont.systemFont(ofSize: side * 0.4, weight: .semibold)
+        var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: icon.labelColor]
+        var size = (label as NSString).size(withAttributes: attributes)
+        if size.width > room {
+            font = NSFont.systemFont(ofSize: font.pointSize * room / size.width, weight: .semibold)
+            attributes[.font] = font
+            size = (label as NSString).size(withAttributes: attributes)
+        }
+        (label as NSString).draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), withAttributes: attributes)
     }
 }

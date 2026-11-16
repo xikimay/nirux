@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Card / column / "⋯" badge / rail tile hover highlights
+// MARK: - Card / column / "⋯" badge hover highlights
 
 extension SidebarView {
     /// Swap the card/column/badge hover highlight to a new target. Hovering
@@ -11,19 +11,17 @@ extension SidebarView {
         applyHover(hoveredTarget, on: false)
         applyHover(target, on: true)
         hoveredTarget = target
-        updateRailTooltip()
     }
 
     private func applyHover(_ target: SidebarHoverTarget?, on: Bool) {
         guard let target else { return }
-        railTileViews[target]?.isHovered = on
         if let workspaceIndex = target.workspaceIndex {
             cardHoverViews[workspaceIndex]?.layer?.backgroundColor =
                 on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
             menuBadgeViews[workspaceIndex]?.isCardHovered = on
         }
         switch target {
-        case .workspaceCard, .railButton:
+        case .workspaceCard:
             break
         case .spacePicker:
             spacePickerHoverView?.layer?.backgroundColor =
@@ -66,8 +64,6 @@ extension SidebarView {
     /// may have shifted under a stationary pointer.
     func refreshHoverTargetFromMouse() {
         guard let window else { return }
-        // Inactive, the window doesn't hear the pointer leave.
-        if !isExpanded, railHoverNeedsLivePointer, !(NSApp.isActive && window.isKeyWindow) { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
         // Over the status bar or the title bar, document points still fall
         // on rows scrolled out of view.
@@ -92,8 +88,6 @@ extension SidebarView {
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
             if let card = cardIndex(at: point) { setHoverTarget(.workspaceCard(card)) }
-        case .railButton(let button):
-            setHoverTarget(.railButton(button))
         case .catchUp:
             setHoverTarget(nil)
         }

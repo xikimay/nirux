@@ -311,8 +311,7 @@ New flow, built on the guarded typing `tell` already uses
   Organize › Move Out of “<task>” lists one next to its task, after its other
   sub-tasks: under the task that one is listed under, else as a task of its
   own, for good. The row's title tooltip and VoiceOver say "Sub-task of
-  “<task>”", as does the rail's tooltip, on its own line (a tile isn't
-  indented). The Lead's tasks stay the space's list under the Lead row (a
+  “<task>”". The Lead's tasks stay the space's list under the Lead row (a
   deleted space's former Lead too). Reporting and nesting are apart: a
   sub-task that reports to the Lead still lists under its task. The Lead's
   `list_tasks` names a task's parent and who started it (the user, or another

@@ -5,8 +5,8 @@ import AppKit
 /// sidebar rebuilds are suspended while a drag is in flight.
 struct SidebarWorkspaceDrag {
     let workspaceID: String      // stable identity — store indices can shift mid-drag
-    let title: String            // shown on the floating ghost card (a rail ghost shows the tile)
-    let rowFrame: NSRect         // dragged card's (or rail tile's) hit area
+    let title: String            // shown on the floating ghost card
+    let rowFrame: NSRect         // dragged card's hit area
     let groupRowFrames: [NSRect] // rows in the same active/inactive group, top → bottom
     let position: Int            // dragged card's position within groupRowFrames
     let startPoint: NSPoint
@@ -33,7 +33,7 @@ enum SidebarDragMath {
     }
 }
 
-// MARK: - Drag-to-reorder tracking (cards and rail tiles)
+// MARK: - Drag-to-reorder tracking (cards)
 
 extension SidebarView {
 
@@ -300,10 +300,7 @@ extension SidebarView {
     // MARK: - Visuals
 
     private func beginDragVisuals(for drag: SidebarWorkspaceDrag) {
-        hideRailTooltip()
-        let dragged = lastInfos.first { $0.id == drag.workspaceID }
-        let railTile = isExpanded ? nil : dragged.flatMap { railTileViews[.workspaceCard($0.index)] }
-        let ghost = railTile.map(railDragGhost) ?? cardDragGhost(for: drag)
+        let ghost = cardDragGhost(for: drag)
         contentDocumentView.addSubview(ghost)
         dragGhostView = ghost
         dragGhostOriginY = ghost.frame.origin.y
@@ -352,16 +349,6 @@ extension SidebarView {
         return ghost
     }
 
-    /// Dims the rail tile and returns a copy of it.
-    private func railDragGhost(_ tile: SidebarRailTileView) -> NSView {
-        addDragDim(frame: SidebarRailTileView.tileRect.offsetBy(dx: tile.frame.minX, dy: tile.frame.minY))
-        let ghost = SidebarRailTileView(style: tile.style, text: tile.text)
-        ghost.frame = tile.frame
-        ghost.isHovered = true
-        addGhostShadow(ghost)
-        return ghost
-    }
-
     private func addDragDim(frame: NSRect) {
         let dim = SidebarBackgroundView(frame: frame)
         dim.wantsLayer = true
@@ -385,8 +372,7 @@ extension SidebarView {
             return
         }
         let rows = drag.groupRowFrames
-        // A rail tile's hit area already spans half the gap around it.
-        let gap = isExpanded ? SidebarExpandedMetrics.workspaceGap : 0
+        let gap = SidebarExpandedMetrics.workspaceGap
         let y: CGFloat
         if slot == 0 {
             y = rows[0].maxY + gap / 2
@@ -395,8 +381,8 @@ extension SidebarView {
         } else {
             y = (rows[slot - 1].minY + rows[slot].maxY) / 2
         }
-        let inset = isExpanded ? SidebarExpandedMetrics.workspaceInsetX : SidebarRailMetrics.tileX
-        let width = isExpanded ? listWidth - inset * 2 : SidebarRailMetrics.tileSize
+        let inset = SidebarExpandedMetrics.workspaceInsetX
+        let width = listWidth - inset * 2
         indicator.frame = NSRect(x: inset, y: y - 1, width: width, height: 2)
         indicator.isHidden = false
     }

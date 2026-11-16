@@ -1,7 +1,7 @@
 # Glass interface
 
-> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window, the command bar first (3.1).\
-> **Differs today:** the window has the sidebar and the collapsed rail of initials described in [Workspaces and columns](../workspaces-and-columns.md); the rail, the inbox and the callout come with 3.2 and 3.3.
+> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), then the icon rail as the folded sidebar (3.2).\
+> **Differs today:** a click on an amber rail icon goes to its task; the inbox and the callout come with 3.3, the rows on glass after it.
 
 Status: design validated by the user on 2026-11-14, after six rounds of
 studies (renders of today's app, mockups and the plan:
@@ -109,8 +109,8 @@ never goes to. The task's detail is its row's status as the row says it
 moves the toolbar into a window of its own, which ⌘P's placement accepts. On macOS 26 the bar's toolbar item asks for no glass of the
 system's (not bordered, the plain style): the bar draws its own. The usage
 limits and the cup stay at the toolbar's right end. The title bar's New,
-Board and Search buttons went: New is in the sidebar and ⌘N, the Board comes
-back as an icon at the bottom of the rail (3.2).
+Board and Search buttons went: New is in the sidebar and ⌘N, the Board is an
+icon at the bottom of the rail (3.2).
 
 ![The title bar before 3.1, after it, and in full screen (simulated): real windows captured off screen, invented data](../images/window-command-bar.png)
 
@@ -120,8 +120,9 @@ back as an icon at the bottom of the rail (3.2).
 
 `IconRail` is the folded sidebar: a 38 pt glass capsule with the space's Lead
 first (its sparkle, in its state's colour), a line, then one state icon per
-task in the sidebar's order, 28 pt apart; under it, two round glass buttons
-for the archived tasks and a new task. The task on screen wears a halo and
+task in the sidebar's order, 28 pt apart; under it, round glass buttons for
+the archived tasks (while there are some), a new task and, at the foot, the
+Board. The task on screen wears a halo and
 stays in view as the list scrolls (without scrollers); the pointer wears a
 fainter one; a task whose agent waits for the user wears an amber ring, apart
 from the icon. A click on an amber icon asks for its request (the callout,
@@ -130,12 +131,54 @@ goes to the task, and the callout closes as the task opens. A click on any
 other icon goes to the task, even in a window in the background, as today.
 Names show in a tooltip; VoiceOver reads each icon as a button, its name and
 its state, in the rail's order, hears a state change, and offers "Open task"
-on an amber icon. For phase 3: what today's rail does beyond this (its menus,
-dragging, the archived count) comes with the swap, and the demo at the end of
-phase 2 checks whether macOS 26 wants the rail's three glass shapes in one
-`NSGlassEffectContainerView`.
+on an amber icon.
 
-![The rail with a Lead and nine tasks: Opaque exact, the other levels approximated](../images/icon-rail.png)
+In the window (3.2) the rail sits in the folded sidebar's 52 pt, where the
+rail of initials was, so the columns don't move; the cards' scroll view goes
+while it shows. Each task's icon carries its initials in the ring (the user's
+pick B after the before/after render, 2026-11-16, so that tasks at rest stay
+apart without a hover), numbered over every task of the space (`TaskInitials`:
+"CR", "CR2"), while the icon has no glyph to show: the amber and red glyphs
+(an agent waiting for the user, one that failed) take the centre instead. With
+initials, the ring keeps its colour and the station runs along it rather than
+inside it, and the icons grow from 15 to 22 pt so that the letters read. It lists what the folded rows listed: the active tasks, and
+of the archived ones the task on screen and those whose agent waits on the
+user or broke, never the whole archived list (it has nowhere to show). Its
+icons are the rows' states: the row's mark, a wait's reason from the column
+that waits, and amber for a question a Mission child handed to the user. A
+click does what a click on the row does: a task whose agent waits goes to
+that column, until the callout of 3.3 takes the amber icons. A right-click
+opens the task's menu, which holds Rename; dragging and renaming in place
+stay in the unfolded sidebar, and the rail of initials' rich tooltip goes for
+a short one: the name and what the row says ("Needs you · Bash: npm run
+migrate", "Stuck? · …"), or the icon's state where the row prints its
+branch. The archived button unfolds the sidebar with the
+Archived list open and its header in view (as View › Show Archived and ⌘P do
+while folded); its tooltip counts them. The space tile went: the command
+bar's space segment opens the same menu. The sidebar folds by itself below a
+900 pt window (`SidebarFold`: 260 pt of sidebar would leave the columns less
+than about 640 pt) and unfolds back from 940 pt (a window dragged about the
+width doesn't make the columns jump) if the user's choice, which is what is
+saved, is unfolded; a toggle while narrow is the user's choice until the
+window gets wide and narrow again, and a first launch unfolds it for the
+Getting Started checklist whatever the width. The fold that follows a resize
+doesn't animate: the window's own resize moves the columns, and the cards
+come in once the sidebar is wide. Folded, the sidebar takes
+the window's colour, on which the capsule reads at Opaque (its colour is the
+unfolded sidebar's).
+
+![The sidebar folded into the icon rail, and unfolded: real views rendered off screen, invented data](../images/sidebar-icon-rail.png)
+
+The approved motions on the rail: a working agent's icon breathes, the Lead's
+sign too, at most 15 frames a second (the sidebar's old dots' cap), and only
+while the interface may move; a new task's ⌘N sheet folds onto its icon,
+which opens with a spring as it lands while the icons under it give way (not
+in a list that scrolls), as its row does unfolded. The rows' other moments (a
+turn end's check and the working line of M5, the merge's sweep of M10) stay
+the unfolded rows', as with the rail of initials; the icon shows the state
+they end on (a grey check, a violet merged disc).
+
+![The rail with a Lead and nine tasks, as rendered in 2.2 (before the initials): Opaque exact, the other levels approximated](../images/icon-rail.png)
 
 ## Inbox and callout
 

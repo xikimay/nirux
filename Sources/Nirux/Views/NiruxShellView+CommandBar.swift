@@ -37,9 +37,8 @@ extension NiruxShellView {
         )
         guard let task else { return content }
         let summary = task.rowSummary
-        let column = task.columns.first { $0.index == summary.focusColumn ?? task.focusedColumn }
         content.taskTitle = task.title
-        content.taskIcon = StateIcon(mark: summary.mark, reason: summary.mark == .needsYou ? column.map(Self.waitReason) : nil)
+        content.taskIcon = task.stateIcon
         var detail = summary.status.text
         if case .turn(let time)? = summary.trailing { detail += " \(time)" }
         content.taskDetail = detail
@@ -52,14 +51,6 @@ extension NiruxShellView {
     /// also visits), leaving out the column on screen, where ⌘J never goes.
     static func commandBarWaitingCount(queue: [WaitingAgent], onScreen: UUID?) -> Int {
         queue.filter { $0.columnID != onScreen && $0.wait.reason.signal == .waiting }.count
-    }
-
-    /// What a waiting column waits on, for its icon: a permission the row
-    /// offers, else the dialog on screen (focusing the column clears its
-    /// attention, not the dialog), else its attention's reason.
-    static func waitReason(of column: ColumnInfo) -> StateIcon.Reason {
-        if column.permissionApproval != nil { return .command }
-        return StateIcon.Reason(column.openDialog ?? column.attentionReason) ?? .question
     }
 
     /// The space menu, as the sidebar's picker has it, under the bar's space

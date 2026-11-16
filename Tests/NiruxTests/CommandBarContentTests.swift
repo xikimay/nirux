@@ -52,13 +52,13 @@ final class CommandBarContentTests: XCTestCase {
         // permission the row offers is a command whatever the attention says.
         var dialog = column(0, .idle)
         dialog.openDialog = .permission(tool: "Bash", summary: "git push")
-        XCTAssertEqual(NiruxShellView.waitReason(of: dialog), .command)
+        XCTAssertEqual(WorkspaceInfo.waitReason(of: dialog), .command)
         var offered = column(0, .idle)
         var request = AgentPermissionRequest(toolName: "Bash", summary: "git push", key: "k", agentID: nil, sessionID: "s", requestedAt: 0)
         request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: "git push")
         offered.permissionApproval = SidebarPermissionApproval(request, now: 1)
-        XCTAssertEqual(NiruxShellView.waitReason(of: offered), .command)
-        XCTAssertEqual(NiruxShellView.waitReason(of: column(0, .needsAttention, reason: .question("?"))), .question)
+        XCTAssertEqual(WorkspaceInfo.waitReason(of: offered), .command)
+        XCTAssertEqual(WorkspaceInfo.waitReason(of: column(0, .needsAttention, reason: .question("?"))), .question)
         let failed = NiruxShellView.commandBarContent(space: space, task: task([column(0, .needsAttention, reason: .apiError(kind: nil, detail: nil))]), waitingCount: 0)
         XCTAssertEqual(failed.taskIcon, StateIcon(.error))
     }

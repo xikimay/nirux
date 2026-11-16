@@ -38,7 +38,7 @@ final class LegacyScrollerTests: XCTestCase {
 
     /// `width`: the rail's or the list's, as `expanded` says, unless given.
     private func sidebar(rows count: Int, style: NSScroller.Style, expanded: Bool = true, width: CGFloat? = nil) -> SidebarView {
-        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: width ?? (expanded ? 260 : SidebarRailMetrics.width), height: 300))
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: width ?? (expanded ? 260 : SidebarView.foldedWidth), height: 300))
         show(sidebar)
         sidebar.contentScrollView.scrollerStyle = style
         sidebar.isExpanded = expanded
@@ -126,20 +126,17 @@ final class LegacyScrollerTests: XCTestCase {
         XCTAssertFalse(sidebar.contentScrollView.hasVerticalScroller, "the rail shows no legacy scroller")
     }
 
-    func testTheRailShowsAnOverlayScrollerButNoLegacyOne() throws {
-        // 52 pt: a legacy scroller would cover the tiles' right edge and
-        // their badges.
+    /// Folded, the cards' scroll view goes, scroller and all, whatever
+    /// the Mac's style: the rail scrolls by itself, without scrollers.
+    func testTheRailHasNoScroller() throws {
         let rail = sidebar(rows: 30, style: .legacy, expanded: false)
         let scroll = rail.contentScrollView
-        XCTAssertGreaterThan(rail.contentDocumentView.frame.height, 300, "the rail is longer than it is tall")
+        XCTAssertTrue(scroll.isHidden)
         XCTAssertFalse(scroll.hasVerticalScroller, "no legacy scroller")
-        XCTAssertEqual(scroll.contentView.frame.width, SidebarRailMetrics.width, "nothing takes its width")
         // As AppKit sets it when the Mac's preferred style changes.
         scroll.scrollerStyle = .overlay
-        XCTAssertTrue(scroll.hasVerticalScroller, "an overlay one tells how far the rail goes")
-        XCTAssertEqual(scroll.contentView.frame.width, SidebarRailMetrics.width, "and takes no width")
-        scroll.scrollerStyle = .legacy
-        XCTAssertFalse(scroll.hasVerticalScroller, "legacy again: none")
+        XCTAssertFalse(scroll.hasVerticalScroller, "nor an overlay one")
+        XCTAssertTrue(scroll.isHidden)
     }
 
     func testADocumentIsLaidOutWholeWhenItFitsWhole() throws {

@@ -148,36 +148,51 @@ final class TaskBirthTests: UIFlowTestCase {
         XCTAssertTrue(views(in: sidebar, with: SidebarView.birthPushKey("task-5")).isEmpty)
     }
 
-    /// In the rail: the born tile opens, the tile under it gives way by a
-    /// tile, and "+" at the rail's bottom stays.
-    func testTheRailsTilesOpenAndGiveWayToo() throws {
-        let sidebar = sidebar(
-            [row("born", index: 0), row("under", index: 1), row("old", index: 2, archived: true)], expanded: false
-        )
-        sidebar.toggleInactiveSection()
+    /// Folded, the rail plays it: the born icon opens, the icons under it
+    /// give way, and the place it opens at is the icon's. Played once: a
+    /// rebuild doesn't start it again.
+    func testTheRailsIconsOpenAndGiveWayToo() throws {
+        let sidebar = sidebar([row("born", index: 0), row("under", index: 1)], expanded: false)
         sidebar.noteBirth(workspaceID: "born")
-        let born = try XCTUnwrap(sidebar.rowFrame(workspaceID: "born"))
-        let under = try XCTUnwrap(sidebar.rowFrame(workspaceID: "under"))
-        let old = try XCTUnwrap(sidebar.rowFrame(workspaceID: "old"), "the archived tile is listed")
-        XCTAssertFalse(views(in: sidebar, inside: born).isEmpty)
-        XCTAssertTrue(views(in: sidebar, inside: born).allSatisfy { $0.layer?.animation(forKey: SidebarView.birthKey) != nil })
-        let pushKey = SidebarView.birthPushKey("born")
-        let pushed = Set(views(in: sidebar, with: pushKey).map(ObjectIdentifier.init))
-        // Everything laid out under it, the separator and the archived
-        // tiles too, so nothing opens a hole; but "+", laid out from the
-        // rail's bottom, the lowest view of all.
-        let frame = { (view: NSView) in sidebar.convert(view.frame, from: view.superview) }
-        let laidOutUnder = sidebar.expandedViews.filter { frame($0).maxY <= born.minY + 1 }
-        let add = try XCTUnwrap(laidOutUnder.min { frame($0).minY < frame($1).minY })
-        let flowing = laidOutUnder.filter { $0 !== add }
-        let tiles = views(in: sidebar, inside: under).count + views(in: sidebar, inside: old).count
-        XCTAssertGreaterThan(flowing.count, tiles, "the separator and the Archived tile as well")
-        XCTAssertEqual(pushed, Set(flowing.map(ObjectIdentifier.init)))
-        XCTAssertNil(add.layer?.animation(forKey: pushKey), "\"+\" stays")
-        let push = try XCTUnwrap(
-            views(in: sidebar, with: pushKey).first?.layer?.animation(forKey: pushKey) as? CASpringAnimation
+        let rail = sidebar.iconRail
+        let born = try XCTUnwrap(rail.itemViews["born"]?.layer)
+        let appear = try XCTUnwrap(born.animation(forKey: SidebarView.birthKey))
+        XCTAssertNotNil(born.animation(forKey: SidebarView.birthSpringKey))
+        XCTAssertNotNil(rail.itemViews["under"]?.layer?.animation(forKey: SidebarView.birthPushKey("born")))
+        XCTAssertEqual(
+            try XCTUnwrap(sidebar.rowFrame(workspaceID: "born")),
+            sidebar.convert(try XCTUnwrap(rail.iconFrame(of: "born")), from: rail), "the icon's place"
         )
-        XCTAssertEqual((push.fromValue as? NSNumber)?.doubleValue, Double(born.height), "a tile's area holds its gap")
+        sidebar.update(profiles: [], workspaces: [row("born", index: 0), row("under", index: 1), row("new", index: 2)])
+        XCTAssertTrue(born.animation(forKey: SidebarView.birthKey) === appear, "not started again")
+
+        // From the ⌘N sheet: it opens as the picture lands, on the layers'
+        // clock.
+        sidebar.noteBirth(workspaceID: "under", delay: NiruxShellView.taskBirthRowDelay)
+        let delayed = try XCTUnwrap(rail.itemViews["under"]?.layer?.animation(forKey: SidebarView.birthKey))
+        XCTAssertEqual(delayed.beginTime, CACurrentMediaTime() + NiruxShellView.taskBirthRowDelay, accuracy: 0.1)
+
+        // Born before its row is listed: it plays once the rail shows it.
+        sidebar.noteBirth(workspaceID: "late")
+        sidebar.update(profiles: [], workspaces: [row("born", index: 0), row("under", index: 1), row("late", index: 2)])
+        XCTAssertNotNil(rail.itemViews["late"]?.layer?.animation(forKey: SidebarView.birthKey), "played when it came")
+
+        // Born on the unfolded rows, then folded: nothing starts part-way.
+        let unfolded = self.sidebar([row("first", index: 0), row("second", index: 1)], expanded: true)
+        unfolded.noteBirth(workspaceID: "first")
+        unfolded.isExpanded = false
+        XCTAssertNil(unfolded.iconRail.itemViews["first"]?.layer?.animation(forKey: SidebarView.birthKey))
+        XCTAssertNil(unfolded.iconRail.itemViews["second"]?.layer?.animation(forKey: SidebarView.birthPushKey("first")))
+        // Folded before its row opened (the sheet's picture still on its
+        // way): the rail plays it.
+        unfolded.isExpanded = true
+        unfolded.noteBirth(workspaceID: "second", delay: NiruxShellView.taskBirthRowDelay)
+        unfolded.isExpanded = false
+        XCTAssertNotNil(unfolded.iconRail.itemViews["second"]?.layer?.animation(forKey: SidebarView.birthKey))
+
+        // Unfolded while the rail plays them: the rows don't play them again.
+        sidebar.isExpanded = true
+        XCTAssertTrue(views(in: sidebar, with: SidebarView.birthKey).isEmpty)
     }
 
     /// Rows that may not move open nothing: not at a birth, and not at a

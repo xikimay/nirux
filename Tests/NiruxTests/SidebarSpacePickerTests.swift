@@ -62,7 +62,7 @@ final class SidebarSpacePickerTests: XCTestCase {
 
     /// The closed picker says when an agent waits in another space, which
     /// the sidebar doesn't show: not for the space on screen, whose cards
-    /// say it, nor for an error. The rail's space tile says it too.
+    /// say it, nor for an error.
     func testPickerSaysAnotherSpaceWaits() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
         sidebar.isExpanded = true
@@ -74,15 +74,11 @@ final class SidebarSpacePickerTests: XCTestCase {
 
         sidebar.update(profiles: spaces, workspaces: [])
         XCTAssertEqual(try pickerValue(), "General. An agent waits for you in client")
-        sidebar.isExpanded = false
-        XCTAssertEqual(sidebar.railTileViews[.railButton(.project)]?.style.badge, Theme.Color.waiting)
 
         var calm = spaces
         calm[0] = space(WorkspaceProfile.defaultID, isActive: true, attention: .waiting)
         calm[1] = space("client")
         sidebar.update(profiles: calm, workspaces: [])
-        XCTAssertNil(sidebar.railTileViews[.railButton(.project)]?.style.badge)
-        sidebar.isExpanded = true
         XCTAssertEqual(try pickerValue(), "General")
     }
 

@@ -13,7 +13,9 @@ extension NiruxShellView {
         guard OnboardingChecklist.shouldExpandSidebarAtLaunch(
             persisted: persisted, hasUnreadableState: hasUnreadableState
         ) else { return }
-        isSidebarExpanded = true
+        // The checklist lives in the sidebar: shown, even in a narrow
+        // window, until the window gets wide and narrow again.
+        sidebarFold.choose(true)
         sidebar.isExpanded = true
         relayout(animated: false)
     }

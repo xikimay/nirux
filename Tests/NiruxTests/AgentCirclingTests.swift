@@ -459,11 +459,7 @@ final class AgentCirclingTests: XCTestCase {
         XCTAssertEqual(circling.rowSummary.focusColumn, 1, "a click on the row brings it up")
         XCTAssertEqual(circling.cardState, .working)
         XCTAssertNil(circling.attention, "nothing alerts")
-        // The collapsed sidebar's tooltip says it too.
-        XCTAssertEqual(circling.railTooltip, SidebarRailTooltip(
-            title: "Fix login", detail: "2 agents working · 45m", detailColor: Theme.Color.working, note: hint.statusText
-        ))
-        XCTAssertNil(workspace([column(0, .working)]).railTooltip.note)
+        XCTAssertEqual(circling.railIcon, StateIcon(.working), "the rail's icon works in grey's place too")
         XCTAssertNil(workspace([column(0, .working)]).rowSummary.focusColumn)
 
         @MainActor func line(_ hint: AgentCirclingHint, subtask: Bool = false) throws -> NSTextField {

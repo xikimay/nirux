@@ -3,9 +3,15 @@ import GhosttyTerminal
 
 /// Root AppKit view: sidebar + niri-style 2D scrolling viewport
 final class NiruxShellView: NSView {
-    private static let collapsedSidebarWidth = SidebarRailMetrics.width
+    private static let collapsedSidebarWidth = SidebarView.foldedWidth
     private static let expandedSidebarWidth: CGFloat = 260
-    var isSidebarExpanded = false
+    /// The user's choice and the window's width (see `SidebarFold`).
+    var sidebarFold = SidebarFold()
+    /// Whether the sidebar is unfolded; set, the user's choice.
+    var isSidebarExpanded: Bool {
+        get { sidebarFold.isExpanded }
+        set { sidebarFold.choose(newValue) }
+    }
     /// Counts sidebar toggles: an expansion's delayed step checks that no
     /// toggle came after it.
     var sidebarToggleGeneration = 0
@@ -302,6 +308,8 @@ final class NiruxShellView: NSView {
         sidebar.onCreateProfile = { [weak self] in self?.showNewSpacePanel() }
         sidebar.onShowSpaceSettings = { [weak self] profileID in self?.showSpaceSettings(profileID: profileID) }
         sidebar.onNewWorkspace = { [weak self] in self?.showNewPanel() }
+        sidebar.onShowArchived = { [weak self] in self?.showArchivedTasks() }
+        sidebar.onOpenBoard = { [weak self] in self?.openProjectBoard() }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in
             self?.moveWorkspaceToSpace(workspaceID: workspaceID, profileID: profileID)
@@ -346,7 +354,7 @@ final class NiruxShellView: NSView {
             self.goToColumn(colIndex)
         }
         updateSidebar()
-        relayout(animated: false)
+        relayoutForNewSize()
 
         startHeartbeat()
     }
@@ -521,7 +529,7 @@ final class NiruxShellView: NSView {
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
-        relayout(animated: false)
+        relayoutForNewSize()
         scheduleRedrawAfterResize()
     }
 
