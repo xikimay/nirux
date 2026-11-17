@@ -54,5 +54,9 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the flake gate of LeadTaskToolsFlowTests.
+      - name: Repeat the new class
+        run: scripts/repeat-class.sh NiruxTests.LeadTaskToolsFlowTests 12 6
+
+      - name: Repeat it next to heavy classes
+        run: scripts/repeat-class.sh NiruxTests.LeadTaskToolsFlowTests 6 3 NiruxTests.LeadToolsFlowTests NiruxTests.SettingsWindowTests NiruxTests.MenuBarFlowTests
