@@ -39,13 +39,20 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed and its Claude settings; its brief stays.
+    /// proposed; its brief stays. Its Claude settings are emptied, not
+    /// removed: its workspaces go on in General, and their columns' launch
+    /// lines name the file.
     static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
+        do {
+            try ClaudeSpaceSettings.empty(spaceID: spaceID, stateDirectory: stateDirectory)
+        } catch {
+            NiruxDebugLog.log("SpaceDefaultsStore: could not empty the Claude settings of a deleted space: \(error)")
+        }
         guard let folder = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory),
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
         for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
-            || name == RuleProposalStore.fileName || name == ClaudeSpaceSettings.fileName {
+            || name == RuleProposalStore.fileName {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {

@@ -106,7 +106,8 @@ final class SpaceSettingsFlowTests: XCTestCase {
             try flip(.denyIrreversible)
             XCTAssertEqual(store.load().defaults.claudeDeniesIrreversible, false)
             XCTAssertEqual(pane.model.on, [.trustRepositories])
-            XCTAssertTrue(try launch("first").contains("'--settings=\(file.path)'"))
+            let first = try launch("first")
+            XCTAssertTrue(first.contains("'--settings=\(file.path)'"))
             XCTAssertEqual(Set(try written().keys), ["autoMode"])
 
             try flip(.denyIrreversible)
@@ -114,7 +115,8 @@ final class SpaceSettingsFlowTests: XCTestCase {
             try flip(.trustRepositories)
             try flip(.denyIrreversible)
             XCTAssertFalse(try launch("second").contains("--settings"))
-            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "nothing on, no file")
+            // The first column's restart replays its line, which names the file.
+            XCTAssertEqual(try written().count, 0, "still there, empty, for \(first)")
         }
     }
 
