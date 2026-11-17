@@ -23,12 +23,12 @@ final class TerminalScreenTextTests: XCTestCase {
         terminal.configuration = TerminalSurfaceOptions(backend: .inMemory(session), workingDirectory: "/tmp")
         window.contentView?.addSubview(terminal)
         window.orderFront(nil)
-        waitUntil { session.readViewportText() != nil }
+        try await waitUntil("the terminal's text", timeout: 10) { session.readViewportText() != nil }
 
         // Wider than the terminal: each line wraps.
         let lines = (1...300).map { "row \($0) " + String(repeating: "x", count: 120) }
         session.receive(lines.joined(separator: "\r\n"))
-        waitUntil { session.readViewportText()?.contains("row 300 ") == true }
+        try await waitUntil("row 300", timeout: 10) { session.readViewportText()?.contains("row 300 ") == true }
         XCTAssertFalse(session.readViewportText()?.contains("row 1 ") ?? true)
 
         let read = await Self.readOffMain(session)
@@ -42,13 +42,5 @@ final class TerminalScreenTextTests: XCTestCase {
                 continuation.resume(returning: TerminalScreenText.wholeScreen(session))
             }
         }
-    }
-
-    private func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertTrue(condition(), "timed out")
     }
 }
