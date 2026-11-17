@@ -65,7 +65,8 @@ final class GlassView: NSView {
     private var tintView: NSView?
     /// Casts the floating shadow, masked to outside the shape so that it
     /// never shows through the translucent glass.
-    private let shadowLayer = ShapeShadowLayer()
+    private let shadowLayer = CALayer()
+    private let shadowMask = CAShapeLayer()
 
     init(
         role: Role, level: InterfaceTransparency, cornerRadius: CGFloat, fillsWindow: Bool = false,
@@ -85,6 +86,8 @@ final class GlassView: NSView {
         contentView.layer?.cornerCurve = .continuous
         contentView.autoresizingMask = [.width, .height]
         addSubview(contentView)
+        shadowMask.fillRule = .evenOdd
+        shadowLayer.mask = shadowMask
         layer?.insertSublayer(shadowLayer, at: 0)
         update()
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -211,7 +214,8 @@ final class GlassView: NSView {
         max(0, min(ceil(radius * 1.6), floor(min(size.width, size.height) / 2)))
     }
 
-    nonisolated static func mask(radius: CGFloat, in size: NSSize) -> NSImage {
+    /// `curve`: the corners of the clip it stands for.
+    nonisolated static func mask(radius: CGFloat, in size: NSSize, curve: CALayerCornerCurve = .continuous) -> NSImage {
         let corner = maskCorner(radius: radius, in: size)
         let side = corner * 2 + 1
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
@@ -219,7 +223,7 @@ final class GlassView: NSView {
             let shape = CALayer()
             shape.frame = rect
             shape.cornerRadius = radius
-            shape.cornerCurve = .continuous
+            shape.cornerCurve = curve
             shape.backgroundColor = NSColor.black.cgColor
             shape.render(in: context)
             return true
@@ -291,8 +295,16 @@ final class GlassView: NSView {
             return
         }
         shadowLayer.isHidden = false
+        shadowLayer.frame = bounds
         let shape = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        shadowLayer.cast(.floating, along: shape, frame: bounds)
+        Theme.Elevation.apply(.floating, to: shadowLayer, path: shape)
+        // The mask spans the shadow's reach, with the shape cut out.
+        let reach = Theme.Elevation.Level.floating.reach
+        let outside = CGMutablePath()
+        outside.addRect(bounds.insetBy(dx: -reach, dy: -reach))
+        outside.addPath(shape)
+        shadowMask.frame = shadowLayer.bounds
+        shadowMask.path = outside
     }
 
     override func layout() {
