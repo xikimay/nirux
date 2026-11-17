@@ -261,6 +261,7 @@ extension NiruxShellView {
         }
         settings.general.update(spaceSettingsGeneralModel(for: space))
         settings.lead.update(spaceSettingsLeadModel(for: space))
+        settings.safety.update(spaceSettingsSafetyModel(for: space))
         settings.setTitle(Self.spaceSettingsTitle(space.id, in: profiles))
         // Their templates name the space.
         settings.brief.replaceSource(Self.briefSource(for: space))

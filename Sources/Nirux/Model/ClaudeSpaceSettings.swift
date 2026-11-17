@@ -29,18 +29,16 @@ enum ClaudeSpaceSettings {
     }
 
     /// Refused in every permission mode, bypass included, as Space Settings
-    /// lists them: secrets, then git commands that can't be undone. Claude Code
-    /// checks each command of a compound line (`cd x && git reset --hard`).
+    /// lists them: secrets, then git commands that lose work. Claude Code
+    /// checks each command of a compound line (`cd x && git reset --hard`);
+    /// `git *` also takes options before the subcommand (`git -C x`).
     static let denyRuleGroups: [[String]] = [
         ["Read(**/.env)", "Read(**/.env.*)", "Edit(**/.env)", "Edit(**/.env.*)"],
         ["Read(~/.ssh/**)", "Edit(~/.ssh/**)"],
-        ["Bash(git push --force*)", "Bash(git push -f*)"],
-        ["Bash(git push * --force*)", "Bash(git push * -f*)"],
-        ["Bash(git reset --hard*)", "Bash(git reset * --hard*)"],
-        ["Bash(git checkout -- .*)", "Bash(git restore .*)"],
-        ["Bash(git clean -f*)", "Bash(git clean -d*)"],
-        ["Bash(git clean -x*)", "Bash(git clean --force*)"],
-        ["Bash(git worktree remove*)"]
+        ["Bash(git *push --force*)", "Bash(git *push -f*)"],
+        ["Bash(git *push * --force*)", "Bash(git *push * -f*)", "Bash(git *push * +*)"],
+        ["Bash(git *reset *--hard*)", "Bash(git *clean -*)", "Bash(git *worktree remove*)"],
+        ["Bash(git *checkout -- .)", "Bash(git *checkout .)", "Bash(git *restore .)"]
     ]
 
     static var denyRules: [String] { denyRuleGroups.flatMap { $0 } }
@@ -64,19 +62,23 @@ enum ClaudeSpaceSettings {
     }
 
     /// What `defaults` turns on, or nil for nothing. The sandbox switched
-    /// off writes nothing, so the user's own setting holds.
-    static func file(_ defaults: SpaceDefaults, repositories: [Repository]) -> File? {
+    /// off writes nothing, so the user's own setting holds. `userEnvironment`
+    /// is the user's `autoMode.environment`: Claude Code joins it with ours,
+    /// then puts its own entries at the first "$defaults", and a list
+    /// without one replaces them. Ours brings one only when the user's has
+    /// no list of its own.
+    static func file(_ defaults: SpaceDefaults, repositories: [Repository], userEnvironment: [String]? = nil) -> File? {
+        let keepsBuiltIn = userEnvironment?.isEmpty ?? true ? ["$defaults"] : []
         let file = File(
             autoMode: defaults.isOn(.trustRepositories) && !repositories.isEmpty
-                ? File.AutoMode(environment: ["$defaults"] + repositories.map(environmentEntry)) : nil,
+                ? File.AutoMode(environment: keepsBuiltIn + repositories.map(environmentEntry)) : nil,
             permissions: defaults.isOn(.denyIrreversible) ? File.Permissions(deny: denyRules) : nil,
             sandbox: defaults.isOn(.sandbox) ? File.Sandbox(enabled: true) : nil
         )
         return file == File() ? nil : file
     }
 
-    /// A bullet in the words of Claude Code's `/auto-mode-setup`. The
-    /// "$defaults" before them keeps Claude Code's own entries.
+    /// A bullet in the words of Claude Code's `/auto-mode-setup`.
     static func environmentEntry(_ repository: Repository) -> String {
         let place = repository.remotes.isEmpty
             ? "the local repository at \(repository.path)"
@@ -84,52 +86,73 @@ enum ClaudeSpaceSettings {
         return "**Trusted repo**: \(place), and its worktrees"
     }
 
-    /// The space's repositories, with the remotes their git config names.
+    /// The space's repositories, each with its `origin`: another remote
+    /// (a fork's upstream) isn't the user's.
     static func repositories(_ anchors: [SpaceAnchor]) -> [Repository] {
         anchors.compactMap { anchor in
             guard case .gitRepository(let commonDir) = anchor.kind else { return nil }
             let config = try? String(contentsOfFile: commonDir + "/config", encoding: .utf8)
-            return Repository(path: anchor.folder ?? commonDir, remotes: config.map(remotes(gitConfig:)) ?? [])
+            return Repository(path: anchor.folder ?? commonDir, remotes: config.flatMap(origin(gitConfig:)).map { [$0] } ?? [])
         }
     }
 
-    /// Each remote's `host/owner/name`, never its URL, which may hold a
-    /// token.
-    static func remotes(gitConfig: String) -> [String] {
-        var inRemote = false
-        var found: [String] = []
+    /// `origin`'s `host/owner/name`, never its URL, which may hold a token.
+    static func origin(gitConfig: String) -> String? {
+        var inOrigin = false
         for line in gitConfig.split(whereSeparator: \.isNewline) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("[") {
-                inRemote = trimmed.hasPrefix("[remote ")
+                inOrigin = trimmed.replacingOccurrences(of: " ", with: "").lowercased() == "[remote\"origin\"]"
                 continue
             }
             let pair = trimmed.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard inRemote, pair.count == 2, pair[0].lowercased() == "url",
-                  let repository = GitHubRepository(remoteURL: pair[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
-            else { continue }
-            let name = "\(repository.host)/\(repository.owner)/\(repository.name)"
-            if !found.contains(name) { found.append(name) }
+            guard inOrigin, pair.count == 2, pair[0].lowercased() == "url" else { continue }
+            // A comment ends the value; quotes hold it.
+            let url = pair[1].split(whereSeparator: { $0 == "#" || $0 == ";" }).first.map(String.init) ?? ""
+            let unquoted = url.trimmingCharacters(in: CharacterSet(charactersIn: "\" \t"))
+            guard !unquoted.lowercased().hasPrefix("file:"), let repository = GitHubRepository(remoteURL: unquoted) else { return nil }
+            return "\(repository.host)/\(repository.owner)/\(repository.name)"
         }
-        return found
+        return nil
     }
 
-    /// Writes the file a launch in the space passes and returns its path;
-    /// nil when the space hands nothing. A file left by an earlier launch
-    /// then holds `{}` rather than going: restarting a column replays its
-    /// command, which still names it.
+    /// The space's switches as a launch reads them: a defaults.json Nirux
+    /// can't read trusts nothing.
+    static func switches(_ loaded: SpaceDefaultsStore.Loaded?) -> SpaceDefaults {
+        var defaults = loaded?.defaults ?? SpaceDefaults()
+        if loaded?.isUnread == true { defaults.set(.trustRepositories, on: false) }
+        return defaults
+    }
+
+    /// `autoMode.environment` of the user's Claude Code settings.
+    static func userEnvironment(_ settings: [String: Any]) -> [String]? {
+        (settings["autoMode"] as? [String: Any])?["environment"] as? [String]
+    }
+
+    static func fileURL(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {
+        SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory)?.appendingPathComponent(fileName)
+    }
+
+    /// Writes the file a launch in the space passes, when it changed, and
+    /// returns its path; nil when the space hands nothing. A file left by an
+    /// earlier launch then holds `{}` rather than going: restarting a column
+    /// replays its command, which still names it.
     static func prepare(
-        spaceID: String, defaults: SpaceDefaults, anchors: [SpaceAnchor], stateDirectory: URL = Persistence.stateDirectory
+        spaceID: String, defaults: SpaceDefaults, anchors: [SpaceAnchor], userEnvironment: [String]?,
+        stateDirectory: URL = Persistence.stateDirectory
     ) -> String? {
-        guard let url = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory)?
-            .appendingPathComponent(fileName) else { return nil }
-        let content = file(defaults, repositories: repositories(anchors))
-        guard content != nil || FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory) else { return nil }
+        let content = file(defaults, repositories: repositories(anchors), userEnvironment: userEnvironment)
+        let existing = try? Data(contentsOf: url)
+        guard content != nil || existing != nil else { return nil }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try encoder.encode(content ?? File()).write(to: url, options: .atomic)
+            let data = try encoder.encode(content ?? File())
+            if data != existing {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: url, options: .atomic)
+            }
         } catch {
             NiruxDebugLog.log("ClaudeSpaceSettings: could not write \(url.path): \(error)")
             return nil

@@ -5,11 +5,12 @@ import AppKit
 extension NiruxShellView {
     func spaceSettingsSafetyModel(for space: WorkspaceProfile) -> SpaceSettingsSafetyPane.Model {
         let loaded = SpaceDefaultsStore(spaceID: space.id)?.load()
-        let defaults = loaded?.defaults ?? SpaceDefaults()
+        let defaults = ClaudeSpaceSettings.switches(loaded)
         return SpaceSettingsSafetyPane.Model(
             on: Set(ClaudeSpaceSettings.Part.allCases.filter(defaults.isOn)),
             repositories: ClaudeSpaceSettings.repositories(space.anchors),
-            canChange: loaded?.isWritable ?? false
+            canChange: loaded?.isWritable ?? false,
+            problem: loaded?.problem
         )
     }
 

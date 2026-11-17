@@ -120,10 +120,11 @@ extension NiruxShellView {
            case .failure(let error) = store.save(defaults, replacing: loaded) {
             showToast(error.message, tone: .error)
         }
-        // The Defaults tab shows the file as it is now, unless it holds
-        // variables being typed.
-        if let settings = spaceSettings, settings.spaceID == spaceID, !settings.defaults.hasUnsavedRows {
-            settings.defaults.show(store.load())
+        // The Defaults tab shows the file as it is now, under the variables
+        // being typed.
+        if let settings = spaceSettings, settings.spaceID == spaceID {
+            let saved = store.load()
+            if settings.defaults.hasUnsavedRows { settings.defaults.rebase(on: saved) } else { settings.defaults.show(saved) }
         }
     }
 

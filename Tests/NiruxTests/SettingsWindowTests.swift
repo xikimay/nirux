@@ -650,7 +650,7 @@ final class SettingsWindowTests: XCTestCase {
             let window = try XCTUnwrap(app.settingsPanel)
             XCTAssertEqual(settings.sidebar.rows.map(Self.title), [
                 "Nirux", "General", "Appearance", "Agents", "Notifications",
-                "Acme", "General", "Defaults", "Lead", "Brief", "Memory", "Board", "Templates"
+                "Acme", "General", "Defaults", "Safety", "Lead", "Brief", "Memory", "Board", "Templates"
             ])
             XCTAssertEqual(settings.selection, .app("general"), "Nirux's first pane")
             XCTAssertEqual(window.title, "General")

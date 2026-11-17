@@ -60,16 +60,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         let writable = loaded.isWritable
         for control in [agentPopup, claudePopup, codexPopup, addButton, tableView] as [NSControl] { control.isEnabled = writable }
         updateRemoveButton()
-        let banner: String?
-        if let message {
-            banner = message
-        } else if case .readOnly(let reason) = loaded.status {
-            banner = reason.message
-        } else if loaded.status == .unreadable {
-            banner = "defaults.json can’t be read: the next change keeps a copy of it (defaults.corrupt.….json) and replaces it."
-        } else {
-            banner = nil
-        }
+        let banner = message ?? loaded.problem
         bannerLabel.stringValue = banner?.asWarning ?? ""
         bannerLabel.isHidden = banner == nil
         showProblems()
@@ -188,6 +179,16 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
 
     /// Variables typed and not written (a problem holds them back).
     var hasUnsavedRows: Bool { rows != loaded.defaults.environment }
+
+    /// Another tab saved the file: it becomes what a save replaces, under
+    /// the variables still being typed.
+    func rebase(on loaded: SpaceDefaultsStore.Loaded) {
+        let typed = rows
+        show(loaded)
+        rows = typed
+        tableView.reloadData()
+        showProblems()
+    }
 
     /// Writes the typed variables; false while a problem holds them back,
     /// or when the write failed (the pane then says why).

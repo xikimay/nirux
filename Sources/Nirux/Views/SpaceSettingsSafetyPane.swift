@@ -11,6 +11,8 @@ final class SpaceSettingsSafetyPane: NSObject {
         var repositories: [ClaudeSpaceSettings.Repository] = []
         /// False while the space's defaults.json can't be written.
         var canChange = true
+        /// Why defaults.json is used only in part (`SpaceDefaultsStore.Loaded.problem`).
+        var problem: String?
     }
 
     struct Actions {
@@ -24,6 +26,7 @@ final class SpaceSettingsSafetyPane: NSObject {
     let view = NSView()
     private(set) var switches: [ClaudeSpaceSettings.Part: NSSwitch] = [:]
     let repositoriesLabel = SpaceSettingsSafetyPane.detailLabel()
+    let problemLabel = NSTextField(wrappingLabelWithString: "")
 
     private(set) var model: Model
     var actions = Actions()
@@ -41,6 +44,8 @@ final class SpaceSettingsSafetyPane: NSObject {
             control.state = model.on.contains(part) ? .on : .off
             control.isEnabled = model.canChange
         }
+        problemLabel.stringValue = model.problem?.asWarning ?? ""
+        problemLabel.isHidden = model.problem == nil
         repositoriesLabel.stringValue = model.repositories.isEmpty
             ? "This space has no repository yet: add one in General."
             : model.repositories.map(Self.line).joined(separator: "\n")
@@ -85,7 +90,10 @@ final class SpaceSettingsSafetyPane: NSObject {
 
     private func build() {
         view.translatesAutoresizingMaskIntoConstraints = false
-        var rows: [NSView] = []
+        problemLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        problemLabel.isSelectable = false
+        problemLabel.preferredMaxLayoutWidth = Self.width - Self.insets.left - Self.insets.right
+        var rows: [NSView] = [problemLabel]
         var widths: [NSLayoutConstraint] = []
         for part in ClaudeSpaceSettings.Part.allCases {
             let control = NSSwitch()

@@ -40,6 +40,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             shell.addWorkspace(title: "claude", cwd: harness.repo, agent: .claude, profileID: space.id)
             harness.waitUntil("the Claude launch") { harness.agentLaunches.contains { $0.hasPrefix("command claude") } }
             XCTAssertTrue(harness.agentLaunches.last?.contains("--permission-mode plan") == true, harness.agentLaunches.last ?? "")
+            XCTAssertTrue(harness.agentLaunches.last?.contains("'--settings=") == true, harness.agentLaunches.last ?? "")
             let claude = try XCTUnwrap(workspace(harness, "claude"))
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === claude }))
             shell.openCodex()
@@ -66,6 +67,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertEqual(outside.profileID, space.id)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
             XCTAssertFalse(harness.agentLaunches.last?.contains("--permission-mode plan") == true, harness.agentLaunches.last ?? "")
+            XCTAssertFalse(harness.agentLaunches.last?.contains("--settings") == true, harness.agentLaunches.last ?? "")
             XCTAssertNil(outside.terminalEnvironment(agentUUID: "A-3")["API_URL"])
             let persisted = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == outside.id })
             XCTAssertTrue(persisted.startedOutsideNirux)

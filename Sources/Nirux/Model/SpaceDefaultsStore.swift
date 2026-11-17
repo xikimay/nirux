@@ -75,6 +75,23 @@ struct SpaceDefaultsStore: Sendable {
             if case .readOnly = status { return false }
             return true
         }
+
+        /// Nothing of the file could be read: what it holds is unknown.
+        var isUnread: Bool {
+            switch status {
+            case .unreadable, .readOnly(.notARegularFile), .readOnly(.tooLarge): return true
+            default: return false
+            }
+        }
+
+        /// Why the file is used only in part, or not at all.
+        var problem: String? {
+            switch status {
+            case .readOnly(let reason): return reason.message
+            case .unreadable: return "defaults.json can’t be read: the next change keeps a copy of it (defaults.corrupt.….json) and replaces it."
+            case .missing, .loaded: return nil
+            }
+        }
     }
 
     enum ReadOnlyReason: Equatable, Sendable {
@@ -138,11 +155,13 @@ struct SpaceDefaultsStore: Sendable {
         if top["codexLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.codexLaunchMode == nil {
             unknown.insert("codexLaunchMode")
         }
-        let switches: [(String, Bool?)] = [
-            ("leadStartsTasks", decoded.leadStartsTasks), ("claudeTrustsRepositories", decoded.claudeTrustsRepositories),
-            ("claudeDeniesIrreversible", decoded.claudeDeniesIrreversible), ("claudeSandbox", decoded.claudeSandbox)
+        let switches: [(SpaceDefaults.CodingKeys, Bool?)] = [
+            (.leadStartsTasks, decoded.leadStartsTasks), (.claudeTrustsRepositories, decoded.claudeTrustsRepositories),
+            (.claudeDeniesIrreversible, decoded.claudeDeniesIrreversible), (.claudeSandbox, decoded.claudeSandbox)
         ]
-        for (key, value) in switches where value == nil && top[key].map({ !($0 is NSNull) }) == true { unknown.insert(key) }
+        for (key, value) in switches where value == nil && top[key.rawValue].map({ !($0 is NSNull) }) == true {
+            unknown.insert(key.rawValue)
+        }
         if let variables = top["environment"], !(variables is NSNull) {
             let entries = variables as? [Any] ?? []
             let readable = entries.allSatisfy { entry in
