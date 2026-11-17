@@ -9,7 +9,7 @@ final class ShapeShadowLayer: CALayer {
     override init() {
         super.init()
         cutOut.fillRule = .evenOdd
-        mask = cutOut
+        if !ZZ("noCutOut") { mask = cutOut }
     }
 
     override init(layer: Any) {

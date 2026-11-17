@@ -693,7 +693,7 @@ extension NiruxShellView {
         for (index, col) in workspace.columns.enumerated() {
             let isFocus = isOnScreen && index == workspace.focusedIndex
             col.setHeaderFocused(isFocus)
-            col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : 1
+            col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : (ZZ("noHairline") ? 0 : 1)
             col.view.layer?.borderColor = isFocus ? accent : Theme.Color.line.cgColor
         }
     }

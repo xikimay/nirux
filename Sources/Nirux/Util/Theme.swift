@@ -158,7 +158,7 @@ enum Theme {
             static let floating = Level(opacity: 0.38, radius: 16, drop: 12)
             /// A column, a card resting on the window: short enough to stay
             /// within the air around it (`WorkspaceState.columnInset`).
-            static let column = Level(opacity: 0.35, radius: 3, drop: 2)
+            static let column = ZZ("longShadow") ? Level(opacity: 0.32, radius: 7, drop: 3) : Level(opacity: 0.35, radius: 3, drop: 2)
         }
 
         /// Gives `layer` the shadow of `level` along `path`, the shape in

@@ -54,5 +54,10 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the flake gate of ColumnCardsTests (a new class that
+      # drives the shell): its mutants, then ten runs, three at a time, next
+      # to two heavy classes that lay columns out.
+      - name: Flake gate
+        run: |
+          scripts/mutants-class.sh NiruxTests.ColumnCardsTests noAir countWidth noShadow noClip noRadius refViewport noCameraAir shadowAbove keepShadow noCutOut longShadow noFrostMask noEdgesAfterDrag noHairline shadowStays
+          scripts/repeat-class.sh NiruxTests.ColumnCardsTests 10 3 NiruxTests.AgentLightShellTests NiruxTests.WorkspaceSwitchTests

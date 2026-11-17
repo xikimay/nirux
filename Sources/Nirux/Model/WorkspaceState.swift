@@ -951,7 +951,7 @@ extension WorkspaceState {
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
         col.light?.removeFromSuperview()
-        col.shadow?.removeFromSuperview()
+        if !ZZ("keepShadow") { col.shadow?.removeFromSuperview() }
         if resizeHandles.indices.contains(index) {
             let handle = resizeHandles.remove(at: index)
             handle.removeFromSuperview()
@@ -978,8 +978,8 @@ extension WorkspaceState {
 
     /// Air between the columns and around them: each rests on the window
     /// as a card (docs/design/glass-interface.md, depth study P1).
-    static let columnGap = Theme.Space.sm
-    static let columnInset = Theme.Space.sm
+    static let columnGap = ZZ("noAir") ? 2 : Theme.Space.sm
+    static let columnInset = ZZ("noAir") ? 0 : Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
 
     /// What a width fraction of 1 spans, its gap included: the viewport
@@ -991,7 +991,7 @@ extension WorkspaceState {
 
     /// The width a fraction of the viewport `viewportWidth` gives a column.
     private static func width(_ fraction: CGFloat, in viewportWidth: CGFloat) -> CGFloat {
-        max(0, floor(fraction * span(viewportWidth) - columnGap))
+        ZZ("countWidth") ? max(0, floor(fraction * (viewportWidth - columnInset * 2 - columnGap * 3))) : max(0, floor(fraction * span(viewportWidth) - columnGap))
     }
 
     /// The size `layoutAndScroll` gives `column` (outside fit-all) in a
@@ -1026,18 +1026,18 @@ extension WorkspaceState {
             col.terminalView?.autoresizingMask = []
             col.view.frame = NSRect(x: xOffset, y: inset, width: widths[index], height: innerHeight)
             col.light?.frame = col.view.frame
-            shadow(for: col).frame = col.view.frame
+            if !ZZ("noShadow") { shadow(for: col).frame = col.view.frame }
             col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
             // Its content clipped to its corners; its border (the focus) is
             // the shell's.
-            col.view.layer?.masksToBounds = true
-            col.view.layer?.cornerRadius = Theme.Radius.column
+            col.view.layer?.masksToBounds = !ZZ("noClip")
+            col.view.layer?.cornerRadius = ZZ("noRadius") ? 0 : Theme.Radius.column
 
             // Resize handle straddling the air at this column's right edge.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
                 // A drag moves the edge with the pointer.
-                handle.referenceWidth = max(Self.span(viewportWidth), 1)
+                handle.referenceWidth = ZZ("refViewport") ? max(viewportWidth, 1) : max(Self.span(viewportWidth), 1)
                 handle.isHidden = fitAll
                 handle.frame = NSRect(
                     x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
@@ -1060,7 +1060,7 @@ extension WorkspaceState {
             cameraX = 0
         } else {
             let left = widths[..<focusedIndex].reduce(0) { $0 + $1 + gap }
-            let right = left + widths[focusedIndex] + inset * 2
+            let right = left + widths[focusedIndex] + (ZZ("noCameraAir") ? 0 : inset * 2)
 
             var camera = lastCameraX
             if left < camera {
@@ -1093,7 +1093,7 @@ extension WorkspaceState {
     func shadow(for column: ColumnState) -> ColumnShadowView {
         if let shadow = column.shadow { return shadow }
         let shadow = ColumnShadowView(frame: column.view.frame)
-        stripView.addSubview(shadow, positioned: .below, relativeTo: nil)
+        stripView.addSubview(shadow, positioned: ZZ("shadowAbove") ? .above : .below, relativeTo: nil)
         column.shadow = shadow
         return shadow
     }
