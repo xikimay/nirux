@@ -189,7 +189,7 @@ final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
         titleLabel.font = Theme.Font.body
         titleLabel.textColor = Theme.Color.textSecondary
         titleLabel.lineBreakMode = .byTruncatingTail
-        detailLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        detailLabel.font = Theme.Font.captionDigits
         detailLabel.textColor = Theme.Color.textTertiary
         for label in [titleLabel, detailLabel, linkLabel] {
             label.setAccessibilityElement(false)

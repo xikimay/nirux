@@ -27,7 +27,7 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: Self.height))
         container.isHidden = true
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        label.font = Theme.Font.captionDigits
         label.textColor = Self.normalColor
         label.lineBreakMode = .byClipping
         container.addSubview(label)

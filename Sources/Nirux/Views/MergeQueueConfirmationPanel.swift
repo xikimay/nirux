@@ -132,7 +132,7 @@ final class MergeQueueConfirmationPanel: NSObject {
         let width = scroll.contentSize.width
         var y: CGFloat = 12
 
-        func add(_ text: String, color: NSColor, font: NSFont = .systemFont(ofSize: 12), indent: CGFloat = 16,
+        func add(_ text: String, color: NSColor, font: NSFont = Theme.Font.body, indent: CGFloat = 16,
                  trailing: CGFloat = 16, gap: CGFloat = 4) {
             let label = NSTextField(wrappingLabelWithString: text)
             label.font = font
@@ -147,14 +147,14 @@ final class MergeQueueConfirmationPanel: NSObject {
         }
         func heading(_ text: String) {
             y += 8
-            add(text, color: Self.secondaryText, font: .systemFont(ofSize: 11, weight: .semibold), gap: 6)
+            add(text, color: Self.secondaryText, font: Theme.Font.captionEmphasized, gap: 6)
         }
 
         if isDryRun {
-            add(Self.dryRunExplanation, color: Self.warningColor, font: .systemFont(ofSize: 12, weight: .semibold),
+            add(Self.dryRunExplanation, color: Self.warningColor, font: Theme.Font.bodyEmphasized,
                 gap: dryRunReason == nil ? 8 : 2)
             if let dryRunReason {
-                add("This build: \(dryRunReason).", color: Self.secondaryText, font: .systemFont(ofSize: 11), gap: 8)
+                add("This build: \(dryRunReason).", color: Self.secondaryText, font: Theme.Font.caption, gap: 8)
             }
         }
         guard let confirmation else {
@@ -163,7 +163,7 @@ final class MergeQueueConfirmationPanel: NSObject {
             return
         }
         for refusal in confirmation.refusals {
-            add(refusal, color: Self.refusalColor, font: .systemFont(ofSize: 12, weight: .medium))
+            add(refusal, color: Self.refusalColor, font: Theme.Font.bodyEmphasized)
         }
         for warning in confirmation.warnings {
             add(warning.asWarning, color: Self.warningColor)
@@ -173,15 +173,15 @@ final class MergeQueueConfirmationPanel: NSObject {
             for (index, item) in confirmation.items.enumerated() {
                 let top = y
                 let title = "\(index + 1). #\(item.entry.number)" + (item.title.map { "  \($0)" } ?? "")
-                add(title, color: Self.primaryText, font: .systemFont(ofSize: 12.5, weight: .semibold), trailing: 90, gap: 2)
+                add(title, color: Self.primaryText, font: Theme.Font.title, trailing: 90, gap: 2)
                 add("\(item.entry.branch) · head \(WorktreeCleanup.short(item.entry.head)) · \(item.checks)",
-                    color: Self.secondaryText, font: .monospacedSystemFont(ofSize: 11, weight: .regular), indent: 34,
+                    color: Self.secondaryText, font: Theme.Font.mono, indent: 34,
                     trailing: 90, gap: 2)
                 for note in item.notes {
-                    add(note, color: Self.secondaryText, font: .systemFont(ofSize: 11), indent: 34, trailing: 90, gap: 2)
+                    add(note, color: Self.secondaryText, font: Theme.Font.caption, indent: 34, trailing: 90, gap: 2)
                 }
                 for warning in item.warnings {
-                    add(warning.asWarning, color: Self.warningColor, font: .systemFont(ofSize: 11), indent: 34, trailing: 90,
+                    add(warning.asWarning, color: Self.warningColor, font: Theme.Font.caption, indent: 34, trailing: 90,
                         gap: 2)
                 }
                 let up = moveButton("↑", index: index, action: #selector(moveUp(_:)), enabled: index > 0)
@@ -203,7 +203,7 @@ final class MergeQueueConfirmationPanel: NSObject {
         }
         if confirmation.canStart {
             heading("WHAT HAPPENS")
-            for line in confirmation.plan { add(line, color: Self.secondaryText, font: .systemFont(ofSize: 11.5)) }
+            for line in confirmation.plan { add(line, color: Self.secondaryText, font: Theme.Font.caption) }
         }
         finishLayout(y: y)
     }
@@ -246,12 +246,12 @@ final class MergeQueueConfirmationPanel: NSObject {
 
         let container = NSView(frame: NSRect(origin: .zero, size: size))
         let heading = NSTextField(labelWithString: isDryRun ? "Dry Run of the Merge Queue" : "Start the Merge Queue")
-        heading.font = .systemFont(ofSize: 16, weight: .semibold)
+        heading.font = Theme.Font.display
         heading.textColor = NSColor.white.withAlphaComponent(0.94)
         heading.frame = NSRect(x: 24, y: size.height - 46, width: size.width - 48, height: 22)
         container.addSubview(heading)
         let subheading = NSTextField(labelWithString: "\(repository) · into \(baseBranch)")
-        subheading.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        subheading.font = Theme.Font.mono
         subheading.textColor = Self.secondaryText
         subheading.frame = NSRect(x: 24, y: size.height - 68, width: size.width - 48, height: 16)
         container.addSubview(subheading)
@@ -262,7 +262,7 @@ final class MergeQueueConfirmationPanel: NSObject {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = 8
+        scroll.layer?.cornerRadius = Theme.Radius.card
         scroll.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
         scroll.layer?.borderWidth = 1
         scroll.layer?.borderColor = NSColor.white.withAlphaComponent(0.07).cgColor
@@ -271,7 +271,7 @@ final class MergeQueueConfirmationPanel: NSObject {
         container.addSubview(scroll)
 
         let status = NSTextField(labelWithString: "")
-        status.font = .systemFont(ofSize: 11)
+        status.font = Theme.Font.caption
         status.textColor = Self.refusalColor
         status.lineBreakMode = .byTruncatingTail
         status.frame = NSRect(x: 24, y: 24, width: size.width - 24 - 290, height: 16)

@@ -11,10 +11,6 @@ extension NSColor {
     /// as amber, which says something waits for the user's answer
     /// (`Theme.Color.waiting`).
     static let niruxWarning = Theme.Color.textPrimary
-    /// Old name of `niruxWarning`, kept so branches written before it still
-    /// build: give the words "⚠︎ " too (`String.asWarning`).
-    @available(*, deprecated, message: "Use niruxWarning, with String.asWarning")
-    static let niruxNearLimit = niruxWarning
 }
 
 extension String {

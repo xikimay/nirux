@@ -413,7 +413,7 @@ final class GlobalSearchPanel: NSObject {
 
         let background = NSView(frame: NSRect(origin: .zero, size: size))
         background.wantsLayer = true
-        background.layer?.cornerRadius = 12
+        background.layer?.cornerRadius = Theme.Radius.panel
         background.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.98).cgColor
         background.layer?.borderWidth = 1
         background.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
@@ -424,7 +424,7 @@ final class GlobalSearchPanel: NSObject {
         fieldRow.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
         fieldRow.addSubview(PaletteIconView(.symbol("magnifyingglass"), frame: NSRect(x: 14, y: 10, width: 24, height: 24)))
         let field = NSTextField()
-        field.font = .systemFont(ofSize: 15)
+        field.font = Theme.Font.input
         field.textColor = .white
         field.backgroundColor = .clear
         field.isBezeled = false
@@ -442,7 +442,7 @@ final class GlobalSearchPanel: NSObject {
         background.addSubview(separator)
 
         let status = NSTextField(labelWithString: "")
-        status.font = .systemFont(ofSize: 11)
+        status.font = Theme.Font.caption
         status.textColor = NSColor.white.withAlphaComponent(0.45)
         status.lineBreakMode = .byTruncatingTail
         status.frame = NSRect(x: 16, y: 6, width: size.width - 32, height: 14)
@@ -517,10 +517,10 @@ private final class GlobalSearchCellView: NSTableCellView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        placeLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        placeLabel.font = Theme.Font.bodyMedium
         placeLabel.textColor = NSColor.white.withAlphaComponent(0.85)
         placeLabel.lineBreakMode = .byTruncatingMiddle
-        lineLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        lineLabel.font = Theme.Font.captionDigits
         lineLabel.textColor = NSColor.white.withAlphaComponent(0.4)
         lineLabel.alignment = .right
         excerptLabel.lineBreakMode = .byTruncatingTail
@@ -543,7 +543,7 @@ private final class GlobalSearchCellView: NSTableCellView {
         lineLabel.stringValue = row.detail
         // A transcript's text is prose; a terminal's, machine text.
         let isProse = row.session != nil
-        let font = isProse ? Theme.Font.caption : NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let font = isProse ? Theme.Font.caption : Theme.Font.mono
         // The string's paragraph style decides, not the field's.
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
@@ -554,7 +554,7 @@ private final class GlobalSearchCellView: NSTableCellView {
         ])
         if NSMaxRange(row.highlight) <= excerpt.length {
             excerpt.addAttributes([
-                .font: isProse ? Theme.Font.captionEmphasized : NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                .font: isProse ? Theme.Font.captionEmphasized : NSFont.monospacedSystemFont(ofSize: Theme.Font.mono.pointSize, weight: .bold),
                 .foregroundColor: Theme.Color.accent
             ], range: row.highlight)
         }

@@ -592,7 +592,7 @@ final class ColumnHeaderButton: NSButton {
 final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
     convenience init() {
         self.init(labelWithString: "")
-        font = NSFont.monospacedDigitSystemFont(ofSize: Theme.Font.caption.pointSize, weight: .regular)
+        font = Theme.Font.captionDigits
         textColor = Theme.Color.textTertiary
     }
 
@@ -676,7 +676,7 @@ final class ColumnStatusPill: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = Self.height / 2
-        label.font = NSFont.monospacedDigitSystemFont(ofSize: Theme.Font.caption.pointSize, weight: .regular)
+        label.font = Theme.Font.captionDigits
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
         symbolView.imageScaling = .scaleNone
