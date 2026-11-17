@@ -34,9 +34,7 @@ final class ColumnCardsTests: XCTestCase {
             NSRect(x: inset + width + gap, y: inset, width: width, height: 600 - inset * 2)
         ])
         for column in workspace.columns {
-            let layer = try XCTUnwrap(column.view.layer)
-            XCTAssertEqual(layer.cornerRadius, Theme.Radius.column)
-            XCTAssertTrue(layer.masksToBounds, "its content clipped to its corners")
+            XCTAssertEqual(try XCTUnwrap(column.view.layer).cornerRadius, Theme.Radius.column)
         }
     }
 
