@@ -1077,6 +1077,25 @@ struct AgentStatusMachine {
         }
     }
 
+    /// Whether `keys`, reaching Claude's prompt with no dialog waiting for
+    /// them, may leave text there or open a screen no hook tells of (Esc Esc's
+    /// rewind picker, Ctrl-O's transcript, a slash command's). Not those that
+    /// leave it as it was, nor Enter while a turn is in flight: an empty prompt
+    /// queues nothing then, and what earlier keys left is a draft already. At
+    /// an idle prompt Enter may run text Nirux never saw (a slash command
+    /// picked with the mouse) into a picker no hook tells of.
+    static func mayLeaveDraft(_ keys: Data?, turnInFlight: Bool) -> Bool {
+        guard let keys else { return true }
+        return !leavesPromptAsItWas(keys) && !(turnInFlight && keys == enterKey)
+    }
+
+    /// The turn the last prompt started still runs, by hook evidence: no
+    /// main-thread turn end since (a background subagent at work after its
+    /// Stop doesn't count), nor an idle reminder that ended it.
+    private var promptTurnInFlight: Bool {
+        hookTurnInFlight && mainTurnEndedAt < (lastPromptAt ?? 0)
+    }
+
     /// One key's bytes: a character, a short escape sequence, or one
     /// control sequence however long its parameters (a key the kitty
     /// keyboard protocol or modifyOtherKeys reports). A bracketed paste is
@@ -1097,6 +1116,7 @@ struct AgentStatusMachine {
     /// What kind of key a write was, for the log: never its characters.
     static func keyKind(_ keys: Data?) -> String {
         guard let keys else { return "key" }
+        if keys == enterKey { return "enter" }
         if isCancelKey(keys) { return "cancel" }
         if keys.first == 0x1B {
             guard isOneKey(keys) else { return "paste" }
@@ -1133,12 +1153,7 @@ struct AgentStatusMachine {
         }
         if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
         lastInputAt = time
-        // Any other key may leave text at the prompt, or open a screen no hook
-        // tells of (Esc Esc's rewind picker, Ctrl-O's transcript, a slash
-        // command's), but those that leave it as it was, and Enter, which adds
-        // nothing of its own: it sends what other keys left, or nothing from an
-        // empty prompt (Tab or Right takes a suggested one).
-        if inFront == nil, !(keys.map(Self.leavesPromptAsItWas) ?? false), keys != Self.enterKey {
+        if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
         }
