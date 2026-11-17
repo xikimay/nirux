@@ -600,4 +600,26 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(try interrupt().text.contains("Esc already went into this turn"), "a second Esc would open the rewind")
         }
     }
+
+    /// A tell its recipient's prompt never took within the hour is given
+    /// up, and its sender hears it once, with what held the prompt.
+    func testAnExpiredTellTellsItsSender() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Busy", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Review this."], lead: lead).isError)
+            let given = { harness.shell.pendingLeadNotices.filter { $0.text.contains("was never typed") } }
+            harness.shell.noticeExpiredInstructions(now: Date().timeIntervalSince1970 + 60, snapshot: ProcessSnapshot())
+            XCTAssertTrue(given().isEmpty, "within the hour it still waits")
+            let later = Date().timeIntervalSince1970 + MissionEventCLI.instructionLifetime + 1
+            harness.shell.noticeExpiredInstructions(now: later, snapshot: ProcessSnapshot())
+            XCTAssertEqual(given().count, 1)
+            XCTAssertEqual(given().first?.workspaceID, lead.workspace.id)
+            XCTAssertTrue(given().first?.text.contains("(its agent was working when Nirux gave it up)") == true, given().first?.text ?? "")
+            harness.shell.noticeExpiredInstructions(now: later + 10, snapshot: ProcessSnapshot())
+            XCTAssertEqual(given().count, 1, "once")
+        }
+    }
 }

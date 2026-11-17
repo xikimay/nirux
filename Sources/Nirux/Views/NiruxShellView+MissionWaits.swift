@@ -125,10 +125,41 @@ extension NiruxShellView {
     /// can free up with no turn end to try at (a subagent's dialog closing
     /// after the turn). The heartbeat runs it, the stuck watch in the
     /// background.
+    /// Tells the sender of each message whose hour ran out untyped, and what
+    /// held its recipient's prompt then: it may send it again.
+    func noticeExpiredInstructions(now: TimeInterval, snapshot: ProcessSnapshot, store: MissionStore = .shared) {
+        for delivery in store.expireInstructions(now: now) {
+            let mission = delivery.mission
+            let receiver = MissionPromptText.quoted(workspaces.first { $0.id == mission.childWorkspaceID }?.title ?? mission.branch)
+            let refusal = missionRecipient(of: delivery)?.pty?.missionPromptRefusal(runningSince: delivery.event.timestamp, snapshot: snapshot)
+            let sent = ProjectBoard.clockTime(Date(timeIntervalSince1970: delivery.event.timestamp), now: Date(timeIntervalSince1970: now))
+            tellProposer(
+                NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID),
+                "Your message to “\(receiver)” (sent \(sent)) was never typed: its prompt wasn't free for an hour "
+                    + "(\(Self.heldWords(refusal)) when Nirux gave it up). Send it again if it still applies."
+            )
+        }
+    }
+
+    /// What held a prompt, in a few words.
+    static func heldWords(_ refusal: AgentPromptRefusal?) -> String {
+        switch refusal {
+        case .working?: "its agent was working"
+        case .dialog?: "a dialog waited on the user"
+        case .draft?: "text typed into it wasn't sent"
+        case .restarted?: "its agent had restarted since"
+        case .noPromptYet?: "its agent had taken no prompt since it started"
+        case .failedTurn?: "its last turn had failed"
+        case .verdict?: "its last turn was still being read"
+        case .noClaude?, nil: "its agent wasn't running"
+        }
+    }
+
     func checkMissionWaits(snapshot: ProcessSnapshot, now: TimeInterval, store: MissionStore = .shared) {
         guard !snapshot.isEmpty else { return }
         if let checkedAt = missionWaits.checkedAt, (0..<Self.missionWaitCheckInterval).contains(now - checkedAt) { return }
         missionWaits.checkedAt = now
+        noticeExpiredInstructions(now: now, snapshot: snapshot, store: store)
         missionWaits.typedAt = missionWaits.typedAt.filter { now - $0.value < Self.typedTextGrace }
         var waiting: [UUID: (column: ColumnState, messages: [WaitingMessage])] = [:]
         func add(_ column: ColumnState?, _ message: WaitingMessage) {

@@ -506,7 +506,8 @@ extension NiruxShellView {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
         typeMissionMessages()
-        answer("Nirux types it into “\(workspace.title)”’s prompt once its turn is over, within the hour.", false)
+        answer("Nirux types it into “\(workspace.title)”’s prompt once its turn is over, within the hour; past that it drops it "
+            + "and tells you.", false)
     }
 
     private func leadReply(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {

@@ -91,6 +91,9 @@ struct MissionEvent: Codable, Equatable {
     /// On a question: the parent (a space's Lead, `ask_user`) handed it to
     /// the user, for this reason. Its row turns amber at once.
     var handedToUserBecause: String?
+    /// On an instruction never typed within `MissionEventCLI.instructionLifetime`:
+    /// when Nirux gave it up (and told its sender).
+    var expiredAt: TimeInterval?
 
     init(
         id: String,
@@ -561,6 +564,32 @@ final class MissionStore {
     }
 
     @discardableResult
+    /// The instructions whose hour ran out untyped since the last call,
+    /// marked expired: their senders weren't told. One that ran out long
+    /// ago (before a relaunch, or a build that didn't mark them) is marked
+    /// without being returned: nobody waits on it any more.
+    func expireInstructions(now: TimeInterval = Date().timeIntervalSince1970) -> [AcceptedEvent] {
+        guard ensureLoaded() else { return [] }
+        let lifetime = MissionEventCLI.instructionLifetime
+        var updated = missions
+        var expired: [AcceptedEvent] = []
+        var changed = false
+        for missionIndex in updated.indices {
+            for eventIndex in updated[missionIndex].events.indices {
+                let event = updated[missionIndex].events[eventIndex]
+                guard event.kind == .instruction, event.childConsumedAt == nil, event.expiredAt == nil,
+                      now - event.timestamp >= lifetime else { continue }
+                updated[missionIndex].events[eventIndex].expiredAt = now
+                changed = true
+                if now - event.timestamp < lifetime + MissionEventCLI.parentMessageLifetime {
+                    expired.append(AcceptedEvent(mission: updated[missionIndex], event: updated[missionIndex].events[eventIndex]))
+                }
+            }
+        }
+        guard changed else { return [] }
+        return commit(updated) ? expired : []
+    }
+
     func markDelivered(
         eventID: String, at timestamp: TimeInterval = Date().timeIntervalSince1970
     ) -> Bool {

@@ -48,7 +48,11 @@ child's prompt.
   reopen anything.
 - **An hour at most.** A message not typed within an hour is dropped: nobody
   may want it any more. A `claude` started after the message (restarted, or
-  restored after Nirux relaunched) never gets it.
+  restored after Nirux relaunched) never gets it. Since
+  2026-11-17 its sender hears it: a `[Nirux Mission]` line naming what held
+  the prompt when Nirux gave it up (`MissionEvent.expiredAt` marks it, once).
+  A tell sent at the start of an agent's turn that runs past an hour was lost
+  silently before (the Lead's review of #586).
 - **`/clear` counts as a prompt.** It fires SessionStart (`source: clear`),
   not UserPromptSubmit; without this, a `tell` of `/clear` would block every
   later one. Other built-in commands (`/model`) fire neither: the next `tell`
