@@ -48,8 +48,8 @@ enum Theme {
         /// Not for agent states: an agent that finished is idle, not green.
         static let success = working
         /// Something waits for the user's answer: an agent's permission or
-        /// question, the editor's file conflict. Amber means nothing else:
-        /// not warnings, not pending checks.
+        /// question. Amber means nothing else: not warnings, not pending
+        /// checks, not a file conflict (`ThemeGuardTests` lists who may use it).
         static let waiting = NSColor(hex: 0xF5A623)
         /// An agent stopped on an error, a failed check, a refusal.
         static let error = NSColor(hex: 0xF0656B)

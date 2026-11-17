@@ -37,7 +37,9 @@ final class DropTargetView: NSView {
 
 /// Banner shown over the editor when the file on disk changed while the
 /// buffer had unsaved edits. Offers an explicit choice instead of silently
-/// clobbering external changes on the next save.
+/// clobbering external changes on the next save. A warning, never amber
+/// (amber means an agent waits for the user): its words after "⚠︎ ", on the
+/// look of its neighbour `EditorBranchReviewBanner`.
 final class EditorConflictBanner: NSView {
     static let height: CGFloat = 34
 
@@ -49,13 +51,13 @@ final class EditorConflictBanner: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = Theme.Color.tint(Theme.Color.waiting, 0.3).cgColor
-        layer?.cornerRadius = 7
+        layer?.backgroundColor = Theme.Color.surface.cgColor
+        layer?.cornerRadius = Theme.Radius.card
         layer?.borderWidth = 1
-        layer?.borderColor = Theme.Color.waiting.withAlphaComponent(0.5).cgColor
+        layer?.borderColor = Theme.Color.line.cgColor
 
-        messageLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        messageLabel.textColor = NSColor.white.withAlphaComponent(0.9)
+        messageLabel.font = Theme.Font.caption
+        messageLabel.textColor = NSColor.niruxWarning
         messageLabel.lineBreakMode = .byTruncatingMiddle
         addSubview(messageLabel)
 
@@ -72,12 +74,12 @@ final class EditorConflictBanner: NSView {
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .small
-        button.font = .systemFont(ofSize: 11, weight: .medium)
+        button.font = Theme.Font.caption
         return button
     }
 
     func configure(fileName: String) {
-        messageLabel.stringValue = "\(fileName) changed on disk while you have unsaved edits."
+        messageLabel.stringValue = "\(fileName) changed on disk while you have unsaved edits.".asWarning
         needsLayout = true
     }
 

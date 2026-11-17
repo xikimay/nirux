@@ -32,6 +32,32 @@ final class ThemeGuardTests: XCTestCase {
         XCTAssertEqual(offenders, [], Self.advice)
     }
 
+    /// Amber (`Theme.Color.waiting`) means an agent waits for the user, and
+    /// nothing else. The files allowed to paint it, each for that: a new one
+    /// joins this list knowingly. The space palette's Yellow and Orange
+    /// stay, user-chosen colours on a square mark that doesn't read as a
+    /// state's dot (`WorkspaceProfile.palette`; hex strings, not seen here).
+    static let amberFiles: Set<String> = [
+        "Views/BoardStagesLineView.swift", "Views/BoardStagesMergedView.swift", "Views/BoardStagesView.swift",
+        "Views/ColumnHeaderView.swift", "Views/CommandPalette.swift", "Views/CountBadge.swift", "Views/IconRail.swift",
+        "Views/MissionReplyViewController.swift", "Views/NiruxShellView+WorkspaceSwitch.swift", "Views/SessionHistoryPanel.swift",
+        "Views/SidebarApprovalBlockRenderer.swift", "Views/SidebarCardLayout.swift", "Views/SidebarCatchUp.swift",
+        "Views/SidebarRenderer.swift", "Views/SidebarView+Rendering.swift", "Views/SidebarView+SpaceMenus.swift",
+        "Views/SidebarWorkspaceCardRenderer.swift", "Views/StateIcon.swift"
+    ]
+
+    func testOnlyWaitsOnTheUserPaintAmber() throws {
+        let paths = try FileManager.default.subpathsOfDirectory(atPath: sources.path).filter { $0.hasSuffix(".swift") }
+        var users = Set<String>()
+        for path in paths where path != "Util/Theme.swift" {
+            let text = try String(contentsOf: sources.appendingPathComponent(path), encoding: .utf8)
+            let code = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            if code.contains(where: { $0.contains("Color.waiting") }) { users.insert(path) }
+        }
+        XCTAssertEqual(users.subtracting(Self.amberFiles).sorted(), [], "amber is for an agent waiting on the user only")
+        XCTAssertEqual(Self.amberFiles.subtracting(users).sorted(), [], "a file that no longer paints amber leaves the list")
+    }
+
     /// Font sizes, corner radii and shadows written as numbers outside
     /// `Theme`: no file may gain any (docs/design/glass-interface.md). The
     /// counts below are what each file held on 2026-11-14; lower a count when
@@ -62,7 +88,7 @@ final class ThemeGuardTests: XCTestCase {
     private static let literalCounts: [String: Int] = [
         "Model/WorkspaceState.swift": 1,
         "Views/ClaudeUsageIndicator.swift": 1,
-        "Views/ColumnInternalViews.swift": 9,
+        "Views/ColumnInternalViews.swift": 6,
         "Views/CommandPalette+URLMode.swift": 4,
         "Views/CommandPalette.swift": 4,
         "Views/EditorFileTree.swift": 8,
