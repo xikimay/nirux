@@ -65,9 +65,9 @@ struct QuickSwitchWorkspace: Equatable {
 /// The most pressing agent state among a workspace's columns.
 enum QuickSwitchAgentState: Equatable {
     case working
-    /// An agent waits on a dialog, since this epoch time (the longest),
-    /// for this reason.
-    case waiting(since: TimeInterval, reason: AgentAttentionReason? = nil)
+    /// An agent waits on a dialog, since this epoch time (the longest);
+    /// `reason` is its row icon's glyph.
+    case waiting(since: TimeInterval, reason: StateIcon.Reason = .question)
     /// An agent's turn failed, or it exited mid-turn.
     case failed(AgentAttentionReason)
 
@@ -77,7 +77,7 @@ enum QuickSwitchAgentState: Equatable {
         if let failure = waits.filter(\.reason.isFailure).min(by: { $0.since < $1.since }) {
             return .failed(failure.reason)
         }
-        if let wait = waits.min(by: { $0.since < $1.since }) { return .waiting(since: wait.since, reason: wait.reason) }
+        if let wait = waits.min(by: { $0.since < $1.since }) { return .waiting(since: wait.since) }
         return isWorking ? .working : nil
     }
 

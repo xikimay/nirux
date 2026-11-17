@@ -274,11 +274,10 @@ final class QuickSwitchTests: XCTestCase {
         let failure = AgentWait(reason: .apiError(kind: "overloaded", detail: nil), since: 1_100)
 
         XCTAssertEqual(QuickSwitchAgentState.summary(waits: [dialog, older, failure], isWorking: true), .failed(failure.reason))
-        XCTAssertEqual(QuickSwitchAgentState.summary(waits: [dialog, older], isWorking: true), .waiting(since: 400, reason: older.reason))
-        // Its badge's icon says why, as the sidebar's row does.
-        let permission = PaletteBadge(.waiting(since: 1_000, reason: dialog.reason), now: 1_100)
-        XCTAssertEqual(permission.icon, StateIcon(.needsYou(.command)))
-        XCTAssertEqual(PaletteBadge(.waiting(since: 400, reason: older.reason), now: 1_100).icon, StateIcon(.needsYou(.question)))
+        XCTAssertEqual(QuickSwitchAgentState.summary(waits: [dialog, older], isWorking: true), .waiting(since: 400))
+        // Its badge's icon takes the glyph its row gives (the shell reads it there).
+        XCTAssertEqual(PaletteBadge(.waiting(since: 1_000, reason: .command), now: 1_100).icon, StateIcon(.needsYou(.command)))
+        XCTAssertEqual(PaletteBadge(.waiting(since: 400), now: 1_100).icon, StateIcon(.needsYou(.question)))
         XCTAssertEqual(QuickSwitchAgentState.summary(waits: [], isWorking: true), .working)
         XCTAssertNil(QuickSwitchAgentState.summary(waits: [], isWorking: false))
 

@@ -252,6 +252,16 @@ final class BoardStagesUnitsTests: XCTestCase {
         XCTAssertEqual(result.merged.map(\.needsYou), [false, true], "amber is never hidden: the closing line carries it")
     }
 
+    /// A merged entry's glyph and its amber come from one line, the one it
+    /// opens: a permission there shows the command's glyph.
+    func testAMergedEntrysGlyphComesFromTheLineItOpens() {
+        var allowing = task("allowing", 40, merged: true)
+        allowing.activity = .needsYou("Bash(rm)", reason: .command)
+        let result = section([allowing], merged: [mergedToday(40)])
+        XCTAssertEqual(result.merged.map(\.needsYou), [true])
+        XCTAssertEqual(result.merged.map(\.reason), [.command])
+    }
+
     func testTheQueueKeepsItsLineUntilItIsThroughWithIt() {
         var waiting = task("waiting", 40, merged: true)
         waiting.queue = BoardStages.Queue(order: 1, step: .merge("Waiting for nightly"))

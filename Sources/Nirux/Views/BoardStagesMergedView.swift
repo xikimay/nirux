@@ -133,7 +133,7 @@ final class BoardStagesMergedView: NSView {
     @objc private func moreClicked() { onUnfold?() }
 }
 
-/// One pull request merged today: its dot, its title, then "#287 · 14:02",
+/// One pull request merged today: its icon, its title, then "#287 · 14:02",
 /// and "· Clean up" while its task's worktree is there. The title is what
 /// gives way; a click opens its task while that one is open here, but on
 /// "Clean up", a link of its own.
@@ -165,8 +165,8 @@ final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
     /// Where a hand was last given to AppKit.
     private var registeredHandRects: [NSRect] = []
 
-    /// Its state icon: the size the sidebar gives its Lead's.
-    private static let icon: CGFloat = 12
+    /// Its state icon's side: the size the sidebar gives its Lead's.
+    private static let iconSide: CGFloat = 12
     /// Under this, a title that is cut gives the link's room back.
     private static let fewestTitle: CGFloat = 40
     /// The room of the link, the same whether a clean-up is offered or
@@ -246,16 +246,16 @@ final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
 
     /// The width it draws whole in.
     var fittingWidth: CGFloat {
-        Self.icon + 6 + ColumnHeaderView.textWidth(titleLabel) + 4 + ColumnHeaderView.textWidth(detailLabel) + (hasLink ? Self.linkRoom : 0)
+        Self.iconSide + 6 + ColumnHeaderView.textWidth(titleLabel) + 4 + ColumnHeaderView.textWidth(detailLabel) + (hasLink ? Self.linkRoom : 0)
     }
 
     /// Merged, or amber while an agent of its task needs the user: never
     /// hidden.
-    var icon: StateIcon { pullRequest.needsYou ? StateIcon(.needsYou(pullRequest.waitsOnCommand ? .command : .question)) : StateIcon(.merged) }
+    var icon: StateIcon { pullRequest.needsYou ? StateIcon(.needsYou(pullRequest.reason)) : StateIcon(.merged) }
 
     override func layout() {
         super.layout()
-        let titleX = Self.icon + 6
+        let titleX = Self.iconSide + 6
         let whole = ColumnHeaderView.textWidth(titleLabel)
         // The number and the time give way last. The link shows whole or
         // not at all, and only while the title keeps some of itself.
@@ -317,7 +317,7 @@ final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        icon.draw(in: context, rect: NSRect(x: 0, y: bounds.midY - Self.icon / 2, width: Self.icon, height: Self.icon))
+        icon.draw(in: context, rect: NSRect(x: 0, y: bounds.midY - Self.iconSide / 2, width: Self.iconSide, height: Self.iconSide))
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

@@ -1,7 +1,7 @@
 import AppKit
 
-/// One line: its dot and title, its rail, its phrase, its pull request and
-/// its time. It draws the dot, the rail and what joins it to the lines
+/// One line: its icon and title, its rail, its phrase, its pull request and
+/// its time. It draws the icon, the rail and what joins it to the lines
 /// around it; the words are labels. It takes the mouse for its words and
 /// shows their tooltips. A click opens its task, but on its Merge station
 /// where that changes the queue's list, and on the link ending its phrase
@@ -196,7 +196,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
     var icon: StateIcon {
         let station = line.rail == nil ? nil : line.station
         if line.asksParent { return StateIcon(.asking, stage: StateIcon.stage(of: station)) }
-        return StateIcon(state: line.state, station: station, reason: line.waitsOnCommand ? .command : .question)
+        return StateIcon(state: line.state, station: station, reason: line.reason)
     }
 
     /// Where the icon's centre is: at the line's edge, or inset under a
@@ -351,7 +351,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
 
     /// The elbow that joins a sub-task to its task, the line a task sends
     /// down to its sub-tasks, a stack's numbered rail. Half a point off
-    /// the dots' centre, so a 1 pt stroke fills whole pixels.
+    /// the icons' centre, so a 1 pt stroke fills whole pixels.
     private func drawConnectors() {
         let x = Metrics.connectorX - 0.5
         let midY = bounds.midY - 0.5

@@ -1,10 +1,10 @@
 import AppKit
 
 /// The glass interface's state icons, one family everywhere: the rail, the
-/// rows, the inbox, ⌘P and later the Board (docs/design/glass-interface.md).
-/// A ring filled by the Board's stations (Code, Reviews, Checks, Merge) in
-/// the state's colour, with a glyph saying why. Amber means an agent waits
-/// for the user, and nothing else. Nothing shows these yet.
+/// rows, the inbox, the command bar, ⌘P and the Board
+/// (docs/design/glass-interface.md). A ring filled by the Board's stations
+/// (Code, Reviews, Checks, Merge) in the state's colour, with a glyph saying
+/// why. Amber means an agent waits for the user, and nothing else.
 struct StateIcon: Hashable, Sendable {
     enum Kind: Hashable, Sendable {
         /// An agent works: a green ring, filled up to its station.
@@ -97,7 +97,9 @@ struct StateIcon: Hashable, Sendable {
         self.init(kind, stage: Self.stage(of: station))
     }
 
-    /// Code fills a quarter, Merge the whole ring; no station, nothing.
+    /// Code fills a quarter, Merge the whole ring; no station, nothing
+    /// (a working icon still shows Code's quarter until the rows know their
+    /// station, 5.1b).
     static func stage(of station: BoardStages.Station?) -> Int {
         station.map { $0.rawValue + 1 } ?? 0
     }

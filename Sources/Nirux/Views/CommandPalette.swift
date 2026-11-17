@@ -27,16 +27,15 @@ struct PaletteAction {
 /// A short label on the right of a row, after its state icon: one state
 /// language with the sidebar, the rail and the Board.
 struct PaletteBadge: Equatable {
-    enum Tone { case working, waiting, failure }
+    /// Waiting carries why, its icon's glyph.
+    enum Tone: Equatable { case working, waiting(StateIcon.Reason), failure }
     let text: String
     let tone: Tone
-    /// What an agent waits on: a permission shows the command's glyph.
-    var reason: StateIcon.Reason = .question
 
     var icon: StateIcon {
         switch tone {
         case .working: return StateIcon(.working)
-        case .waiting: return StateIcon(.needsYou(reason))
+        case .waiting(let reason): return StateIcon(.needsYou(reason))
         case .failure: return StateIcon(.error)
         }
     }
@@ -85,6 +84,15 @@ struct PaletteFold {
 final class CommandPalette: NSObject {
     /// A badge's state icon: the size the sidebar gives its Lead's.
     static let badgeIcon: CGFloat = 12
+    /// Badges' icon images, drawn once each (rows are built at each key).
+    private static var badgeImages: [StateIcon: NSImage] = [:]
+
+    static func badgeImage(_ icon: StateIcon) -> NSImage {
+        if let image = badgeImages[icon] { return image }
+        let image = icon.image(size: badgeIcon)
+        badgeImages[icon] = image
+        return image
+    }
     /// The commands, searched with `sections`.
     var actions: [PaletteAction] = []
     /// Ranked with the actions (see `PaletteRanking.list`); each section
@@ -676,12 +684,12 @@ final class CommandPalette: NSObject {
         // Right side: the badge, else the shortcut.
         var textRight = width - padding
         let accessory: NSTextField?
-        var badgeIcon: StateIconView?
+        var badgeIcon: NSImageView?
         if let badge = action.badge {
             accessory = NSTextField(labelWithString: badge.text)
             accessory?.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
             accessory?.textColor = badge.color
-            badgeIcon = StateIconView(badge.icon, size: Self.badgeIcon)
+            badgeIcon = NSImageView(image: Self.badgeImage(badge.icon))
         } else if let chord = action.shortcut?.chord {
             accessory = NSTextField(labelWithString: chord.display)
             accessory?.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
@@ -696,9 +704,10 @@ final class CommandPalette: NSObject {
             textRight = accessory.frame.minX - Theme.Space.md
             if let badgeIcon {
                 let side = Self.badgeIcon
-                // On the text's capitals, not the field's frame.
-                let capsMidY = accessory.frame.maxY - accessory.firstBaselineOffsetFromTop + (accessory.font?.capHeight ?? 0) / 2
-                badgeIcon.frame = NSRect(x: accessory.frame.minX - Theme.Space.xs - side, y: capsMidY - side / 2, width: side, height: side)
+                // On the text's capitals, from the baseline the text sits
+                // on, on the pixel grid of a 2x screen as the labels are.
+                let bottom = ((baseline + (accessory.font?.capHeight ?? 0) / 2 - side / 2) * 2).rounded() / 2
+                badgeIcon.frame = NSRect(x: accessory.frame.minX - Theme.Space.xs - side, y: bottom, width: side, height: side)
                 row.addSubview(badgeIcon)
                 textRight = badgeIcon.frame.minX - Theme.Space.md
             }

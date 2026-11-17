@@ -14,8 +14,8 @@ final class BoardStagesView: NSView {
         var state: BoardStages.State
         /// "Lead · reviewing #438".
         var text: String
-        /// It waits for a permission: the command's glyph, as on its row.
-        var waitsOnCommand = false
+        /// Why it waits for the user: its icon's glyph, as on its row.
+        var reason: StateIcon.Reason = .question
     }
 
     struct Header: Equatable {
@@ -239,7 +239,7 @@ final class BoardStagesView: NSView {
     let summaryLabel = NSTextField(labelWithString: "")
     let leadIcon = StateIconView(StateIcon(.idle), size: Metrics.leadIcon)
     let leadLabel = NSTextField(labelWithString: "")
-    /// Over the Lead's dot and line: a click focuses the Lead.
+    /// Over the Lead's icon and line: a click focuses the Lead.
     let leadButton = BoardStagesButton(title: "", target: nil, action: nil)
     /// The space whose Lead the button shows, as laid out: another space's
     /// Lead is another target.
@@ -387,10 +387,10 @@ final class BoardStagesView: NSView {
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
         if let lead = content.header.lead {
-            leadIcon.icon = StateIcon(state: lead.state, station: nil, reason: lead.waitsOnCommand ? .command : .question)
+            leadIcon.icon = StateIcon(state: lead.state, station: nil, reason: lead.reason)
         }
         leadLabel.stringValue = content.header.lead?.text ?? ""
-        // Where the Lead's line has no room, its dot says it.
+        // Where the Lead's line has no room, its icon says it.
         leadIcon.toolTip = content.header.lead?.text
         leadButton.toolTip = content.header.lead?.text
         leadButton.setAccessibilityLabel(content.header.lead?.text)
@@ -806,7 +806,7 @@ final class BoardStagesView: NSView {
     /// - A phrase under `shortestPhrase` says nothing: it goes, and the
     ///   title takes its place (below about 390 pt).
     /// - A Board too narrow for a rail beside a title (about 300 pt) keeps
-    ///   each line's dot and title.
+    ///   each line's icon and title.
     struct Columns: Equatable {
         var task: NSRect
         /// No width when the Board is too narrow for it.
@@ -961,7 +961,7 @@ final class BoardStagesView: NSView {
     /// switch, before it the Lead, and what the space holds in what is
     /// left. On a narrow Board they give way in this order: the summary,
     /// the Lead's line, the order switch; the name is the last to (a long
-    /// one keeps `minimumName` beside the switch). The Lead's dot keeps
+    /// one keeps `minimumName` beside the switch). The Lead's icon keeps
     /// its place: its state is never hidden.
     private func layoutHeader(width: CGFloat) {
         let pad = Metrics.padding
@@ -969,16 +969,16 @@ final class BoardStagesView: NSView {
         spaceDot.frame = NSRect(x: pad, y: midY - 5, width: 10, height: 10)
         let nameX = spaceDot.frame.maxX + 8
         let hasLead = content?.header.lead != nil
-        let dotRoom = hasLead ? Metrics.leadIcon + 12 : 0
+        let iconRoom = hasLead ? Metrics.leadIcon + 12 : 0
         var right = width - pad
         let switchWidth = ceil(orderSwitch.fittingSize.width)
         let wholeName = ColumnHeaderView.textWidth(nameLabel)
-        orderSwitch.isHidden = right - switchWidth - 12 - dotRoom - nameX < min(wholeName, Metrics.minimumName)
+        orderSwitch.isHidden = right - switchWidth - 12 - iconRoom - nameX < min(wholeName, Metrics.minimumName)
         if !orderSwitch.isHidden {
             orderSwitch.frame = NSRect(x: right - switchWidth, y: midY - 11, width: switchWidth, height: 22)
             right = orderSwitch.frame.minX - 12
         }
-        let nameWidth = min(wholeName, max(0, right - dotRoom - nameX))
+        let nameWidth = min(wholeName, max(0, right - iconRoom - nameX))
         nameLabel.frame = NSRect(x: nameX, y: midY - 10, width: nameWidth, height: 20)
 
         let free = right - nameLabel.frame.maxX - 12

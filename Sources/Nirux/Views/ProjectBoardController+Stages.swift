@@ -157,7 +157,7 @@ extension ProjectBoardController {
             facts.blocker = reading.blocker
             facts.lastActivityAt = reading.lastActivityAt
             let line = BoardStages.line(facts)
-            header.lead = BoardStagesView.Lead(state: line.state, text: "Lead · \(line.phrase.text)", waitsOnCommand: line.waitsOnCommand)
+            header.lead = BoardStagesView.Lead(state: line.state, text: "Lead · \(line.phrase.text)", reason: line.reason)
         }
         return header
     }

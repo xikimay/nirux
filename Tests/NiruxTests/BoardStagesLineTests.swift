@@ -101,11 +101,14 @@ final class BoardStagesLineTests: XCTestCase {
     /// glyph (the command's, as on the sidebar's row); a question, or a
     /// line that doesn't need the user, never says so.
     func testALineSaysWhenItsAgentWaitsOnACommand() {
-        XCTAssertTrue(line(facts(activity: .needsYou("Bash(swift test)", command: true))).waitsOnCommand)
-        XCTAssertFalse(line(facts(activity: .needsYou("a question"))).waitsOnCommand)
-        XCTAssertFalse(line(facts(activity: .working(since: nil))).waitsOnCommand)
+        XCTAssertEqual(line(facts(activity: .needsYou("Bash(swift test)", reason: .command))).reason, .command)
+        XCTAssertEqual(line(facts(activity: .needsYou("a question"))).reason, .question)
         XCTAssertTrue(line(facts(activity: .asking("Ship checkout"))).asksParent)
         XCTAssertFalse(line(facts(activity: .idle)).asksParent)
+        // The queue's phrase wins over the agent asking its parent: so does the icon.
+        let queued = line(facts(pullRequest(), activity: .asking("Lead"), queue: Queue(step: .merge("Merging"))))
+        XCTAssertEqual(queued.phrase.text, "Merging")
+        XCTAssertFalse(queued.asksParent, "no asking ring beside the queue's words")
     }
 
     func testReviewsStaysCurrentWhileTheReviewsTurnIsNotOver() {

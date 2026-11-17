@@ -2530,12 +2530,12 @@ final class BoardStagesViewTests: XCTestCase {
             id: "t", title: "T", station: .checks, state: .needsYou, rail: BoardStages.Rail(marks: [.done, .done, .current, .ahead]),
             phrase: BoardStages.Phrase(text: ""), pullRequest: "#52"
         )
-        line.waitsOnCommand = true
+        line.reason = .command
         let view = BoardStagesLineView(line, link: .none)
         XCTAssertEqual(view.icon, StateIcon(state: .needsYou, station: .checks, reason: .command))
         XCTAssertEqual(StateIcon(state: .ready, station: nil).color, Theme.Color.success)
         XCTAssertEqual(BoardStagesView.color(of: .ready), Theme.Color.success, "the current station takes the same palette")
-        line.waitsOnCommand = false
+        line.reason = .question
         line.state = .waiting
         line.asksParent = true
         XCTAssertEqual(BoardStagesLineView(line, link: .none).icon, StateIcon(.asking, stage: 3), "asking its parent, as on the row")
