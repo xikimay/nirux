@@ -1028,7 +1028,8 @@ final class ProjectBoardFlowTests: XCTestCase {
             )
             let phrase = { BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text }
 
-            shell.renderProjectBoard(board, pass: pass)
+            let now = Date().timeIntervalSince1970
+            shell.drawProjectBoards(shell.readProjectBoards(snapshot: ProcessSnapshot(entries: []), now: now, pass: pass), now: now)
             XCTAssertEqual(phrase(), "Asking Lead")
             shell.renderProjectBoard(board)
             XCTAssertEqual(phrase(), "Asking Lead", "between two passes: the last pass's reading")
