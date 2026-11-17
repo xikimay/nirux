@@ -252,18 +252,6 @@ final class BoardStagesUnitsTests: XCTestCase {
         XCTAssertEqual(result.merged.map(\.needsYou), [false, true], "amber is never hidden: the closing line carries it")
     }
 
-    /// A task's line stands at the app's station for it, the one its row
-    /// shows; a pull request without a task keeps the Board's own.
-    func testATaskLineStandsAtTheAppsStation() {
-        let lines = [task("checkout", 40, checks: .pending(since: nil)), task("bot", 41, checks: .pending(since: nil), hasTask: false)]
-        let own = section(lines)
-        XCTAssertEqual((own.units + own.withoutTask).flatMap(\.lines).map(\.station), [.checks, .checks])
-        let given = BoardStages.section(
-            BoardStages.SectionFacts(id: "nirux", lines: lines), stations: ["checkout": .merge, "bot": .merge], now: now, timeZone: zone
-        )
-        XCTAssertEqual((given.units + given.withoutTask).flatMap(\.lines).map(\.station), [.merge, .checks])
-    }
-
     /// A merged entry's glyph and its amber come from one line, the one it
     /// opens: a permission there shows the command's glyph.
     func testAMergedEntrysGlyphComesFromTheLineItOpens() {

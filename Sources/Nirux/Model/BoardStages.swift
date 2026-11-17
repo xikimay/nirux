@@ -471,9 +471,8 @@ extension BoardStages {
 // MARK: - Deriving a line
 
 extension BoardStages {
-    /// `facts`' line, at `given` when the app knows its station.
-    static func line(_ facts: Facts, rules: Rules = Rules(), station given: Station? = nil) -> Line {
-        let station = given ?? station(of: facts, rules: rules)
+    static func line(_ facts: Facts, rules: Rules = Rules()) -> Line {
+        let station = station(of: facts, rules: rules)
         let reading = reading(of: facts, at: station, rules: rules)
         let rail = rail(of: facts, at: station, rules: rules)
         let offer = rail == nil ? nil : offer(facts)

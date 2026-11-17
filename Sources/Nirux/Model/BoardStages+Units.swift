@@ -119,11 +119,9 @@ extension BoardStages {
     /// `now` is the wall clock, in seconds since 1970 as `mergedAt` is:
     /// "today" starts at midnight in `timeZone`.
     static func section(
-        _ facts: SectionFacts, order: Order = .sidebar, rules: Rules = Rules(), stations: [String: Station] = [:], now: TimeInterval,
-        timeZone: TimeZone = .current
+        _ facts: SectionFacts, order: Order = .sidebar, rules: Rules = Rules(), now: TimeInterval, timeZone: TimeZone = .current
     ) -> Section {
-        // A task's station is the app's (`stations`), the one its row shows.
-        let lines = facts.lines.map { line($0, rules: rules, station: $0.hasTask ? stations[$0.id] : nil) }
+        let lines = facts.lines.map { line($0, rules: rules) }
         let tree = Tree(ids: facts.lines.map(\.id), parents: facts.parents)
 
         var calendar = Calendar(identifier: .gregorian)
