@@ -55,7 +55,7 @@ final class ThemeGuardTests: XCTestCase {
             | \.system(Green|Red|Blue|Purple|Pink|Teal|Indigo|Gray|Brown|Mint|Cyan) \b
             | \.white\.withAlphaComponent\(
             """#, options: .allowCommentsAndWhitespace)
-        XCTAssertEqual(try grown(loose, past: Self.looseCounts), [], "use Theme.Symbol sizes, Theme.Radius and Theme.Color; add a token to Util/Theme.swift when none fits")
+        XCTAssertEqual(try grown(loose, past: Self.looseCounts), [], "size a symbol from a Theme.Font, round with Theme.Radius, colour with Theme.Color; add a token to Util/Theme.swift when none fits")
     }
 
     /// "path: count, was ceiling" for each source past its ceiling.
