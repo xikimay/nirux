@@ -19,6 +19,16 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
     /// "clean up the docs"`, `git push --follow-tags`, `git push origin
     /// feature-foo`, `git restore .gitignore`, `git restore --staged a.txt`,
     /// `git checkout -- a.txt`, `git checkout -b feat/x`, `git status`.
+    /// Then refused: `cat ../outside/.env`, `cat /abs/outside/.env.local` and
+    /// the Read tool on an outside `.env` (the rules without `//` let them
+    /// through), `git stash drop`, `git stash clear`, `git -C x stash drop`,
+    /// `git checkout -f main`, `git checkout --force main`, `git switch -f
+    /// main`, `git switch --force main`, `git switch --discard-changes main`,
+    /// `git push --delete origin x`, `git push origin --delete x`, `git push
+    /// -d origin x`, `git push origin -d x`, `git push --mirror`, `git push
+    /// origin --mirror`. Still ran: `cat ../outside/notes.txt`, `git stash
+    /// list`, `git switch main`, `git push --dry-run`, `git checkout -b
+    /// feat-fix`, `git push origin feature-d`.
     func testTheDefaultFileTrustsTheRepositoriesAndRefusesWhatCantBeUndone() throws {
         let file = try XCTUnwrap(ClaudeSpaceSettings.file(SpaceDefaults(), repositories: [app]))
         XCTAssertEqual(file.autoMode?.environment, [
@@ -26,12 +36,16 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
             "**Trusted repo**: github.com/acme/app, checked out at /Users/me/Projects/app, and its worktrees"
         ])
         XCTAssertEqual(file.permissions?.deny, [
-            "Read(**/.env)", "Read(**/.env.*)", "Edit(**/.env)", "Edit(**/.env.*)",
+            "Read(//**/.env)", "Read(//**/.env.*)", "Edit(//**/.env)", "Edit(//**/.env.*)",
             "Read(~/.ssh/**)", "Edit(~/.ssh/**)",
             "Bash(git *push --force*)", "Bash(git *push -f*)",
             "Bash(git *push * --force*)", "Bash(git *push * -f*)", "Bash(git *push * +*)",
+            "Bash(git *push --delete*)", "Bash(git *push * --delete*)", "Bash(git *push -d *)", "Bash(git *push * -d *)",
+            "Bash(git *push --mirror*)", "Bash(git *push * --mirror*)",
             "Bash(git *reset *--hard*)", "Bash(git *clean -*)", "Bash(git *worktree remove*)",
-            "Bash(git *checkout *.)", "Bash(git *checkout *./)", "Bash(git *restore *.)", "Bash(git *restore *./)"
+            "Bash(git *checkout *.)", "Bash(git *checkout *./)", "Bash(git *checkout -f*)", "Bash(git *checkout --force*)",
+            "Bash(git *switch -f*)", "Bash(git *switch --force*)", "Bash(git *switch --discard-changes*)",
+            "Bash(git *restore *.)", "Bash(git *restore *./)", "Bash(git *stash drop*)", "Bash(git *stash clear*)"
         ])
         XCTAssertNil(file.sandbox, "the user's own sandbox setting holds")
 
@@ -76,14 +90,21 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         XCTAssertNil(ClaudeSpaceSettings.userEnvironment(["permissions": [:]]))
     }
 
-    /// A defaults.json, or a trust switch, Nirux can't read trusts nothing,
-    /// and so does a save that replaces it; the deny rules stay.
-    func testWhatNiruxCantReadTrustsNothing() throws {
-        for text in ["{ not json", #"{"schemaVersion": 1, "claudeTrustsRepositories": "no"}"#] {
-            let loaded = SpaceDefaultsStore.decode(Data(text.utf8))
-            XCTAssertFalse(loaded.defaults.isOn(.trustRepositories), text)
-            XCTAssertTrue(loaded.defaults.isOn(.denyIrreversible), text)
-        }
+    /// A defaults.json, or a switch, Nirux can't read takes each switch's
+    /// safe side, and so does a save that replaces it.
+    func testWhatNiruxCantReadTakesTheSafeSide() throws {
+        let unreadable = SpaceDefaultsStore.decode(Data("{ not json".utf8)).defaults
+        XCTAssertFalse(unreadable.isOn(.trustRepositories))
+        XCTAssertTrue(unreadable.isOn(.denyIrreversible))
+        XCTAssertTrue(unreadable.isOn(.sandbox), "a sandbox the user may have turned on")
+        XCTAssertFalse(unreadable.leadStartsTasksWithoutAsking)
+        let garbledSwitches = SpaceDefaultsStore.decode(Data(
+            #"{"schemaVersion": 1, "claudeTrustsRepositories": "no", "claudeSandbox": 0, "claudeDeniesIrreversible": "x", "leadStartsTasks": 1}"#.utf8
+        )).defaults
+        XCTAssertFalse(garbledSwitches.isOn(.trustRepositories))
+        XCTAssertTrue(garbledSwitches.isOn(.sandbox))
+        XCTAssertTrue(garbledSwitches.isOn(.denyIrreversible))
+        XCTAssertFalse(garbledSwitches.leadStartsTasksWithoutAsking)
         XCTAssertTrue(SpaceDefaultsStore.decode(Data(#"{"schemaVersion": 1, "later": 1}"#.utf8)).defaults.isOn(.trustRepositories))
         let newer = SpaceDefaultsStore.decode(Data(#"{"schemaVersion": 2, "claudeTrustsRepositories": {"mode": "off"}}"#.utf8))
         XCTAssertEqual(newer.status, .readOnly(.newerSchema(2)))
@@ -96,6 +117,7 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: "S1", stateDirectory: state))
         try FileManager.default.createDirectory(at: store.fileURL, withIntermediateDirectories: true)
         XCTAssertFalse(store.load().defaults.isOn(.trustRepositories), "not a regular file")
+        XCTAssertTrue(store.load().defaults.isOn(.sandbox), "not a regular file")
     }
 
     /// A switch at its default writes nothing; the others round-trip and
@@ -115,33 +137,35 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
 
         let odd = SpaceDefaultsStore.decode(Data(#"{"schemaVersion": 1, "claudeSandbox": "yes"}"#.utf8))
         XCTAssertEqual(odd.status, .readOnly(.unknownSettings(["claudeSandbox"])))
-        XCTAssertFalse(odd.defaults.isOn(.sandbox))
     }
 
-    /// Only `origin`, as `host/owner/name`: a fork's upstream isn't the
-    /// user's, and a URL may carry a token.
-    func testOnlyOriginIsTrustedNeverItsURL() {
+    /// Exactly where `origin` pushes: the whole path, its `pushurl`s when
+    /// set, never another remote, a token or a local path.
+    func testTheTrustedRepositoryIsWhereOriginPushes() {
         let config = """
         [core]
         \turl = https://github.com/core/ignored.git
         [remote "upstream"]
         \turl = git@github.com:upstream/app.git
-        [Remote "origin"]
-        \turl = https://x-access-token:SECRET@github.com/Acme/App.git # mine
+        [remote "Origin"]
+        \turl = git@github.com:look/alike.git
+        [REMOTE "origin"]
+        \turl = https://x-access-token:SECRET@GitLab.com/Group/Sub/App.git # mine
         \tfetch = +refs/heads/*:refs/remotes/origin/*
         [submodule "vendor"]
         \turl = https://github.com/vendor/lib.git
         """
-        XCTAssertEqual(ClaudeSpaceSettings.origin(gitConfig: config), "github.com/acme/app")
-        XCTAssertEqual(ClaudeSpaceSettings.origin(gitConfig: "[remote \"origin\"]\n\turl = \"git@github.com:a/b.git\""), "github.com/a/b")
-        XCTAssertNil(ClaudeSpaceSettings.origin(gitConfig: "[remote \"origin\"]\n\turl = file:///Users/me/backup/app.git"))
-        XCTAssertNil(ClaudeSpaceSettings.origin(gitConfig: "[remote \"origin\"]\n\turl = /Users/me/backup/app.git"))
-        XCTAssertNil(ClaudeSpaceSettings.origin(gitConfig: "[remote \"upstream\"]\n\turl = git@github.com:a/b.git"))
+        XCTAssertEqual(ClaudeSpaceSettings.originPushTargets(gitConfig: config), ["gitlab.com/Group/Sub/App"])
+        let pushes = "[remote \"origin\"]\n\turl = git@github.com:acme/app.git\n\tpushUrl = \"ssh://git@code.acme.dev:2222/team/app.git\"\n\tpushurl = git@github.com:acme/app.git"
+        XCTAssertEqual(ClaudeSpaceSettings.originPushTargets(gitConfig: pushes), ["code.acme.dev:2222/team/app", "github.com/acme/app"])
+        XCTAssertEqual(ClaudeSpaceSettings.originPushTargets(gitConfig: "[remote \"origin\"]\n\turl = file:///Users/me/backup/app.git"), [])
+        XCTAssertEqual(ClaudeSpaceSettings.originPushTargets(gitConfig: "[remote \"origin\"]\n\turl = /Users/me/backup/app.git"), [])
+        XCTAssertEqual(ClaudeSpaceSettings.originPushTargets(gitConfig: "[remote \"upstream\"]\n\turl = git@github.com:a/b.git"), [])
     }
 
-    /// The file a launch names is rewritten when it changes; switched off, it
-    /// holds `{}` for the commands that still name it.
-    func testPrepareWritesTheFileAndEmptiesItWhenNothingIsOn() throws {
+    /// The file a launch names is rewritten when it changes, and goes when
+    /// nothing is on: the launch then passes none.
+    func testPrepareWritesTheFileAndRemovesItWhenNothingIsOn() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-claude-settings-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: state) }
         let gitDir = state.appendingPathComponent("app/.git")
@@ -167,8 +191,7 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         off.set(.trustRepositories, on: false)
         off.set(.denyIrreversible, on: false)
         XCTAssertNil(try ClaudeSpaceSettings.prepare(spaceID: "S1", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
-        let emptied = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any]
-        XCTAssertEqual(emptied?.isEmpty, true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
         XCTAssertNil(try ClaudeSpaceSettings.prepare(spaceID: "S2", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
         XCTAssertFalse(FileManager.default.fileExists(atPath: state.appendingPathComponent("projects/S2").path))
 

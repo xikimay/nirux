@@ -59,6 +59,17 @@ struct SpaceDefaults: Equatable, Sendable {
         }
     }
 
+    /// Each on/off switch the file holds, with its value when Nirux can't
+    /// read it: the safe side (SpaceDefaultsStore).
+    static var switches: [(key: WritableKeyPath<SpaceDefaults, Bool?>, name: CodingKeys, safe: Bool)] {
+        [
+            (\.leadStartsTasks, .leadStartsTasks, false),
+            (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
+            (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
+            (\.claudeSandbox, .claudeSandbox, true)
+        ]
+    }
+
     struct EnvironmentVariable: Equatable, Sendable {
         var name: String
         var value: String

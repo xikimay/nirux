@@ -129,19 +129,9 @@ extension NiruxShellView {
     }
 
     /// Whether the space's Lead starts tasks itself. A defaults.json Nirux
-    /// can't read asks first: off is the safe side.
+    /// can't read asks first: off is the safe side (`SpaceDefaults.switches`).
     func leadStartsTasksWithoutAsking(spaceID: String) -> Bool {
-        guard let loaded = SpaceDefaultsStore(spaceID: spaceID)?.load() else { return false }
-        switch loaded.status {
-        case .missing, .loaded:
-            return loaded.defaults.leadStartsTasksWithoutAsking
-        case .unreadable, .readOnly(.notARegularFile), .readOnly(.tooLarge):
-            return false
-        case .readOnly:
-            if let value = loaded.defaults.leadStartsTasks { return value }
-            let raw = loaded.contents.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
-            return raw?["leadStartsTasks"] == nil
-        }
+        SpaceDefaultsStore(spaceID: spaceID)?.load().defaults.leadStartsTasksWithoutAsking ?? false
     }
 
     /// Where the running Lead works (`leadFolder`), else where a new one

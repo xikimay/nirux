@@ -167,7 +167,8 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: elsewhere, encoding: .utf8), #"{"agent": "codex"}"#)
     }
 
-    /// A deleted space's defaults and setup scripts go; its brief stays.
+    /// A deleted space's defaults, setup scripts and Claude settings go; its
+    /// brief stays.
     func testADeletedSpaceLeavesNoSecretsBehind() throws {
         let store = try store()
         _ = try store.save(SpaceDefaults(environment: [variable("TOKEN", "s3cr3t")])).get()
@@ -176,6 +177,7 @@ final class SpaceDefaultsTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("setup"), withIntermediateDirectories: true)
         try Data("npm ci\n".utf8).write(to: folder.appendingPathComponent("setup/web-1.sh"))
         try Data("Goals.\n".utf8).write(to: folder.appendingPathComponent("brief.md"))
+        try Data("{}".utf8).write(to: folder.appendingPathComponent(ClaudeSpaceSettings.fileName))
         SpaceDefaultsStore.removeFiles(ofSpace: "space-1", stateDirectory: stateDirectory)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["brief.md"])
     }

@@ -39,13 +39,13 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed and its prompts' log; its brief stays.
+    /// proposed, its prompts' log and its Claude settings; its brief stays.
     static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
         guard let folder = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory),
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
         for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
-            || name == RuleProposalStore.fileName || name == LoopLog.fileName {
+            || name == RuleProposalStore.fileName || name == LoopLog.fileName || name == ClaudeSpaceSettings.fileName {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {
@@ -109,12 +109,12 @@ struct SpaceDefaultsStore: Sendable {
         }
     }
 
-    /// What a file, or a switch, Nirux can't read holds is unknown: it
-    /// trusts nothing more (Space Settings › Safety), and a save replacing
-    /// the file keeps that.
+    /// What a file, or a switch, Nirux can't read holds is unknown: each
+    /// switch takes its safe side (`SpaceDefaults.switches`), and a save
+    /// replacing the file keeps it.
     static var unreadDefaults: SpaceDefaults {
         var defaults = SpaceDefaults()
-        defaults.set(.trustRepositories, on: false)
+        for item in SpaceDefaults.switches { defaults[keyPath: item.key] = item.safe }
         return defaults
     }
 
@@ -133,9 +133,9 @@ struct SpaceDefaultsStore: Sendable {
               var defaults = try? JSONDecoder().decode(SpaceDefaults.self, from: data)
         else { return Loaded(defaults: unreadDefaults, status: .unreadable, contents: data) }
         let unknown = unknownSettings(in: top, decoded: defaults)
-        let trustKey = SpaceDefaults.CodingKeys.claudeTrustsRepositories.rawValue
-        if defaults.claudeTrustsRepositories == nil, top[trustKey].map({ !($0 is NSNull) }) == true {
-            defaults.claudeTrustsRepositories = false
+        for item in SpaceDefaults.switches where defaults[keyPath: item.key] == nil
+            && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
+            defaults[keyPath: item.key] = item.safe
         }
         if let version = top["schemaVersion"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
            version.doubleValue > Double(schemaVersion) {
@@ -160,12 +160,9 @@ struct SpaceDefaultsStore: Sendable {
         if top["codexLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.codexLaunchMode == nil {
             unknown.insert("codexLaunchMode")
         }
-        let switches: [(SpaceDefaults.CodingKeys, Bool?)] = [
-            (.leadStartsTasks, decoded.leadStartsTasks), (.claudeTrustsRepositories, decoded.claudeTrustsRepositories),
-            (.claudeDeniesIrreversible, decoded.claudeDeniesIrreversible), (.claudeSandbox, decoded.claudeSandbox)
-        ]
-        for (key, value) in switches where value == nil && top[key.rawValue].map({ !($0 is NSNull) }) == true {
-            unknown.insert(key.rawValue)
+        for item in SpaceDefaults.switches where decoded[keyPath: item.key] == nil
+            && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
+            unknown.insert(item.name.rawValue)
         }
         for key in [SpaceDefaults.CodingKeys.claudeAllow, .claudeEnvironment] {
             if let value = top[key.rawValue], !(value is NSNull), !(value is [String]) { unknown.insert(key.rawValue) }

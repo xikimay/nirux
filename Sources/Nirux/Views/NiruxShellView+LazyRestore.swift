@@ -20,9 +20,12 @@ extension NiruxShellView {
 
     /// Start a column's deferred agent with the flags it ran with, in the
     /// directory it ran in. False when it has none (already resumed).
-    /// `liveSessions`: `liveSessionIDs`, when the caller resumes several.
+    /// `liveSessions` and `settingsFiles` (`claudeSpaceSettingsFiles`), when
+    /// the caller resumes several.
     @discardableResult
-    func resumeDeferredAgent(_ column: ColumnState, in workspace: WorkspaceState, liveSessions: [String]? = nil) -> Bool {
+    func resumeDeferredAgent(
+        _ column: ColumnState, in workspace: WorkspaceState, liveSessions: [String]? = nil, settingsFiles: [String: String]? = nil
+    ) -> Bool {
         guard workspace.columns.contains(where: { $0 === column }),
               let deferred = column.takeDeferredAgent() else { return false }
         // Its folder may be gone since the restore (a removed worktree): the
@@ -36,7 +39,8 @@ extension NiruxShellView {
             )
         }
         let command = resumeLaunchCommand(
-            deferred.agent.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column
+            deferred.agent.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column,
+            settingsFiles: settingsFiles
         )
         sideEffects.startRestoredAgent(column, command)
         scheduleMetadataRefresh()
@@ -68,8 +72,9 @@ extension NiruxShellView {
         isOnScreenResumeScheduled = false
         guard let (workspace, columns) = deferredColumnsOnScreen() else { return }
         let liveSessions = Self.liveSessionIDs(in: workspaces)
+        let settingsFiles = claudeSpaceSettingsFiles(for: [workspace])
         for column in columns {
-            resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions)
+            resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions, settingsFiles: settingsFiles)
         }
     }
 
@@ -108,9 +113,10 @@ extension NiruxShellView {
     func resumeAllDeferredAgents() -> Bool {
         var resumed = false
         let liveSessions = Self.liveSessionIDs(in: workspaces)
+        let settingsFiles = claudeSpaceSettingsFiles(for: workspaces.filter { $0.columns.contains(where: \.isAwaitingResume) })
         for workspace in workspaces {
             for column in workspace.columns where column.isAwaitingResume {
-                resumed = resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions) || resumed
+                resumed = resumeDeferredAgent(column, in: workspace, liveSessions: liveSessions, settingsFiles: settingsFiles) || resumed
             }
         }
         if resumed { updateSidebar() }

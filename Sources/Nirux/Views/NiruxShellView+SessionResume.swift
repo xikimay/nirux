@@ -283,7 +283,8 @@ extension NiruxShellView {
     /// `SessionResumeState`), and the id in the agent's arguments proves it
     /// until its hooks do.
     func resumeLaunchCommand(
-        _ agent: DeferredAgentLaunch.Agent, workingDirectory: String? = nil, in workspace: WorkspaceState, column: ColumnState
+        _ agent: DeferredAgentLaunch.Agent, workingDirectory: String? = nil, in workspace: WorkspaceState, column: ColumnState,
+        settingsFiles: [String: String]? = nil
     ) -> String {
         let brief = spaceBriefInjection(for: workspace)
         if let sessionID = agent.sessionID {
@@ -293,7 +294,8 @@ extension NiruxShellView {
         case .claude(let resume, let mode):
             if let sessionID = agent.sessionID { column.prepareClaudeResume(sessionID: sessionID) }
             return Self.claudeCommand(
-                resume: resume, mode: mode, briefFile: brief?.claudePromptFile, settingsFile: claudeSpaceSettingsFile(for: workspace)
+                resume: resume, mode: mode, briefFile: brief?.claudePromptFile,
+                settingsFile: claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles)
             )
         case .codex(let resume, let mode):
             if let sessionID = agent.sessionID { column.prepareCodexResume(sessionID: sessionID) }
