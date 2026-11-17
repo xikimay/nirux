@@ -85,6 +85,11 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
             XCTAssertTrue(loaded.defaults.isOn(.denyIrreversible), text)
         }
         XCTAssertTrue(SpaceDefaultsStore.decode(Data(#"{"schemaVersion": 1, "later": 1}"#.utf8)).defaults.isOn(.trustRepositories))
+        let newer = SpaceDefaultsStore.decode(Data(#"{"schemaVersion": 2, "claudeTrustsRepositories": {"mode": "off"}}"#.utf8))
+        XCTAssertEqual(newer.status, .readOnly(.newerSchema(2)))
+        XCTAssertFalse(newer.defaults.isOn(.trustRepositories), "a newer build's switch Nirux can't read")
+        let garbled = SpaceDefaultsStore.decode(Data(#"{"schemaVersion": 1, "claudeTrustsRepositories": "no"}"#.utf8))
+        XCTAssertEqual(garbled.status, .readOnly(.unknownSettings(["claudeTrustsRepositories"])), "never rewritten")
 
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-unread-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: state) }
@@ -144,7 +149,7 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         try Data("[remote \"origin\"]\n\turl = git@github.com:acme/app.git\n".utf8).write(to: gitDir.appendingPathComponent("config"))
         let anchors = [SpaceAnchor.repository(commonDir: gitDir.path, topLevel: nil), SpaceAnchor.folder("/tmp")]
 
-        let path = try XCTUnwrap(ClaudeSpaceSettings.prepare(
+        let path = try XCTUnwrap(try ClaudeSpaceSettings.prepare(
             spaceID: "S1", defaults: SpaceDefaults(), anchors: anchors, userEnvironment: nil, stateDirectory: state
         ))
         XCTAssertEqual(path, state.appendingPathComponent("projects/S1/claude-settings.json").path)
@@ -155,17 +160,21 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         // The same content leaves the file as it is.
         let past = Date(timeIntervalSince1970: 1_000_000)
         try FileManager.default.setAttributes([.modificationDate: past], ofItemAtPath: path)
-        _ = ClaudeSpaceSettings.prepare(spaceID: "S1", defaults: SpaceDefaults(), anchors: anchors, userEnvironment: nil, stateDirectory: state)
+        _ = try ClaudeSpaceSettings.prepare(spaceID: "S1", defaults: SpaceDefaults(), anchors: anchors, userEnvironment: nil, stateDirectory: state)
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date, past)
 
         var off = SpaceDefaults()
         off.set(.trustRepositories, on: false)
         off.set(.denyIrreversible, on: false)
-        XCTAssertNil(ClaudeSpaceSettings.prepare(spaceID: "S1", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
+        XCTAssertNil(try ClaudeSpaceSettings.prepare(spaceID: "S1", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
         let emptied = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any]
         XCTAssertEqual(emptied?.isEmpty, true)
-        XCTAssertNil(ClaudeSpaceSettings.prepare(spaceID: "S2", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
+        XCTAssertNil(try ClaudeSpaceSettings.prepare(spaceID: "S2", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
         XCTAssertFalse(FileManager.default.fileExists(atPath: state.appendingPathComponent("projects/S2").path))
+
+        // A file Nirux can't write says so: the launch would lose the rules.
+        try FileManager.default.createDirectory(at: state.appendingPathComponent("projects/S3/claude-settings.json"), withIntermediateDirectories: true)
+        XCTAssertThrowsError(try ClaudeSpaceSettings.prepare(spaceID: "S3", defaults: SpaceDefaults(), anchors: [], userEnvironment: nil, stateDirectory: state))
     }
 
     @MainActor

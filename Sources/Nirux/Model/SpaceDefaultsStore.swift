@@ -132,14 +132,15 @@ struct SpaceDefaultsStore: Sendable {
         guard let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               var defaults = try? JSONDecoder().decode(SpaceDefaults.self, from: data)
         else { return Loaded(defaults: unreadDefaults, status: .unreadable, contents: data) }
+        let unknown = unknownSettings(in: top, decoded: defaults)
+        let trustKey = SpaceDefaults.CodingKeys.claudeTrustsRepositories.rawValue
+        if defaults.claudeTrustsRepositories == nil, top[trustKey].map({ !($0 is NSNull) }) == true {
+            defaults.claudeTrustsRepositories = false
+        }
         if let version = top["schemaVersion"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
            version.doubleValue > Double(schemaVersion) {
             let newer = Int(exactly: version.doubleValue.rounded(.down)) ?? Int.max
             return Loaded(defaults: defaults, status: .readOnly(.newerSchema(newer)), contents: data)
-        }
-        let unknown = unknownSettings(in: top, decoded: defaults)
-        if unknown.contains(SpaceDefaults.CodingKeys.claudeTrustsRepositories.rawValue) {
-            defaults.claudeTrustsRepositories = false
         }
         if !unknown.isEmpty {
             return Loaded(defaults: defaults, status: .readOnly(.unknownSettings(unknown)), contents: data)

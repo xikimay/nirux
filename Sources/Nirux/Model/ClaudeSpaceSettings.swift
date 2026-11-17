@@ -131,26 +131,22 @@ enum ClaudeSpaceSettings {
     /// Writes the file a launch in the space passes, when it changed, and
     /// returns its path; nil when the space hands nothing. A file left by an
     /// earlier launch then holds `{}` rather than going: restarting a column
-    /// replays its command, which still names it.
+    /// replays its command, which still names it. Throws when it can't be
+    /// written.
     static func prepare(
         spaceID: String, defaults: SpaceDefaults, anchors: [SpaceAnchor], userEnvironment: [String]?,
         stateDirectory: URL = Persistence.stateDirectory
-    ) -> String? {
+    ) throws -> String? {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory) else { return nil }
         let content = file(defaults, repositories: repositories(anchors), userEnvironment: userEnvironment)
         let existing = try? Data(contentsOf: url)
         guard content != nil || existing != nil else { return nil }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        do {
-            let data = try encoder.encode(content ?? File())
-            if data != existing {
-                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try data.write(to: url, options: .atomic)
-            }
-        } catch {
-            NiruxDebugLog.log("ClaudeSpaceSettings: could not write \(url.path): \(error)")
-            return nil
+        let data = try encoder.encode(content ?? File())
+        if data != existing {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
         }
         return content == nil ? nil : url.path
     }

@@ -147,10 +147,16 @@ extension NiruxShellView {
         if case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser) {
             userEnvironment = ClaudeSpaceSettings.userEnvironment(settings)
         }
-        return ClaudeSpaceSettings.prepare(
-            spaceID: workspace.profileID, defaults: defaults,
-            anchors: profiles.first { $0.id == workspace.profileID }?.anchors ?? [], userEnvironment: userEnvironment
-        )
+        do {
+            return try ClaudeSpaceSettings.prepare(
+                spaceID: workspace.profileID, defaults: defaults,
+                anchors: profiles.first { $0.id == workspace.profileID }?.anchors ?? [], userEnvironment: userEnvironment
+            )
+        } catch {
+            NiruxDebugLog.log("ClaudeSpaceSettings: could not write the space's file: \(error)")
+            showToast("Claude starts without the space’s safety settings: Nirux couldn’t write them (\(error.localizedDescription))", tone: .error)
+            return nil
+        }
     }
 
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
