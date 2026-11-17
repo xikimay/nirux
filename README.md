@@ -10,7 +10,7 @@ Each task runs in its own git worktree, a separate checkout of the repository, s
 
 - Give each task its own workspace: terminals, a browser and an editor side by side.
 - See where each task stands from its state icon: working, waiting for you, stopped on an error, checks running, ready to merge.
-- When a Claude Code agent asks to run a command, allow or deny it from the sidebar, without opening its terminal (not in Auto mode).
+- When a Claude Code agent asks to run a command, allow or deny it from the sidebar, without opening its terminal (not in Auto mode, Claude Code's default).
 - Start a task with `Cmd+N`: Nirux creates the worktree and starts the agent in it.
 - Have a Lead agent start tasks, follow them and bring you only what needs you.
 - Follow each task's pull request from the sidebar, including CI failures that look flaky.
