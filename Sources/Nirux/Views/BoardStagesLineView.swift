@@ -86,14 +86,14 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
         self.line = line
         self.link = link
         super.init(frame: .zero)
-        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        titleLabel.font = Theme.Font.listTitle
         titleLabel.textColor = Theme.Color.textPrimary
         phraseLabel.font = Theme.Font.body
         linkLabel.font = Theme.Font.body
         linkLabel.textColor = Theme.Color.accent
         pullRequestLabel.font = Theme.Font.mono
         pullRequestLabel.textColor = Theme.Color.textTertiary
-        timeLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        timeLabel.font = Theme.Font.captionDigits
         timeLabel.textColor = Theme.Color.textTertiary
         timeLabel.alignment = .right
         noRailLabel.font = Theme.Font.caption

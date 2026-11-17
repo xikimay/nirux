@@ -587,7 +587,7 @@ final class ProjectMemoryPanel: NSObject {
         row.layer?.backgroundColor = Theme.Color.fillHover.cgColor
         row.addSubview(PaletteIconView(.symbol(Theme.Symbol.projectMemory), frame: NSRect(x: 14, y: 10, width: 24, height: 24)))
         let field = NSTextField()
-        field.font = .systemFont(ofSize: 15)
+        field.font = Theme.Font.input
         field.textColor = Theme.Color.textPrimary
         field.backgroundColor = .clear
         field.isBezeled = false

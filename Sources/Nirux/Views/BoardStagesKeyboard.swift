@@ -118,7 +118,7 @@ enum BoardStagesKeyboard {
 
     /// The focus ring's shape: the view's bounds, rounded.
     static func ring(_ bounds: NSRect) -> NSBezierPath {
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: 5, yRadius: 5)
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: Theme.Radius.control, yRadius: Theme.Radius.control)
     }
 }
 

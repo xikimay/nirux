@@ -993,7 +993,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         descriptionView.drawsBackground = false
         descriptionView.isRichText = false
         descriptionView.allowsUndo = true
-        descriptionView.font = .systemFont(ofSize: 15)
+        descriptionView.font = Theme.Font.input
         descriptionView.textColor = Theme.Color.textPrimary
         descriptionView.insertionPointColor = Theme.Color.textPrimary
         descriptionView.isAutomaticQuoteSubstitutionEnabled = false
@@ -1005,7 +1005,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         descriptionScroll.documentView = descriptionView
         descriptionBox.subviews.forEach { $0.removeFromSuperview() }
         descriptionBox.addSubview(descriptionScroll)
-        placeholderLabel.font = .systemFont(ofSize: 15)
+        placeholderLabel.font = Theme.Font.input
         placeholderLabel.textColor = Theme.Color.textTertiary
         placeholderLabel.lineBreakMode = .byTruncatingTail
         descriptionBox.addSubview(placeholderLabel)

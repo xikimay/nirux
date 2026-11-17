@@ -1,8 +1,7 @@
 import AppKit
 
-/// Shared Raycast-style panel factory used by NameInputPanel and
-/// URLInputPanel: one NSPanel + rounded-container + icon + text-field +
-/// Escape-monitor setup, so the panels only describe what's unique to them.
+/// Raycast-style panel factory used by NameInputPanel: one NSPanel +
+/// rounded-container + icon + text-field + Escape-monitor setup.
 @MainActor
 enum RaycastPanel {
 

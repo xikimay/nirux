@@ -37,7 +37,9 @@ final class DropTargetView: NSView {
 
 /// Banner shown over the editor when the file on disk changed while the
 /// buffer had unsaved edits. Offers an explicit choice instead of silently
-/// clobbering external changes on the next save.
+/// clobbering external changes on the next save. A warning, never amber
+/// (amber means an agent waits for the user): its words after "⚠︎ ", on the
+/// look of its neighbour `EditorBranchReviewBanner`.
 final class EditorConflictBanner: NSView {
     static let height: CGFloat = 34
 
@@ -49,13 +51,13 @@ final class EditorConflictBanner: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = Theme.Color.tint(Theme.Color.waiting, 0.3).cgColor
-        layer?.cornerRadius = 7
+        layer?.backgroundColor = Theme.Color.surface.cgColor
+        layer?.cornerRadius = Theme.Radius.card
         layer?.borderWidth = 1
-        layer?.borderColor = Theme.Color.waiting.withAlphaComponent(0.5).cgColor
+        layer?.borderColor = Theme.Color.line.cgColor
 
-        messageLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        messageLabel.textColor = NSColor.white.withAlphaComponent(0.9)
+        messageLabel.font = Theme.Font.caption
+        messageLabel.textColor = NSColor.niruxWarning
         messageLabel.lineBreakMode = .byTruncatingMiddle
         addSubview(messageLabel)
 
@@ -72,12 +74,12 @@ final class EditorConflictBanner: NSView {
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .small
-        button.font = .systemFont(ofSize: 11, weight: .medium)
+        button.font = Theme.Font.caption
         return button
     }
 
     func configure(fileName: String) {
-        messageLabel.stringValue = "\(fileName) changed on disk while you have unsaved edits."
+        messageLabel.stringValue = "\(fileName) changed on disk while you have unsaved edits.".asWarning
         needsLayout = true
     }
 
@@ -129,7 +131,7 @@ final class EditorBranchReviewBanner: NSView {
         openButton.action = #selector(openClicked)
         openButton.bezelStyle = .rounded
         openButton.controlSize = .small
-        openButton.font = .systemFont(ofSize: 11, weight: .medium)
+        openButton.font = Theme.Font.buttonSmall
         addSubview(openButton)
     }
 
@@ -166,13 +168,13 @@ final class EditorLoadFailureOverlay: NSView {
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.base.cgColor
 
-        messageLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        messageLabel.font = Theme.Font.bodyMedium
         messageLabel.textColor = NSColor.white.withAlphaComponent(0.55)
         messageLabel.alignment = .center
         addSubview(messageLabel)
 
         retryButton.bezelStyle = .rounded
-        retryButton.font = .systemFont(ofSize: 12, weight: .medium)
+        retryButton.font = Theme.Font.button
         retryButton.target = self
         retryButton.action = #selector(retryClicked)
         addSubview(retryButton)
@@ -240,12 +242,12 @@ final class ShellExitedOverlay: NSView {
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.canvas.withAlphaComponent(0.92).cgColor
 
-        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.font = Theme.Font.title
         label.textColor = NSColor.white.withAlphaComponent(0.85)
         label.alignment = .center
         addSubview(label)
 
-        hint.font = .systemFont(ofSize: 11)
+        hint.font = Theme.Font.caption
         hint.textColor = NSColor.white.withAlphaComponent(0.45)
         hint.alignment = .center
         hint.lineBreakMode = .byTruncatingTail
@@ -255,7 +257,7 @@ final class ShellExitedOverlay: NSView {
             (restartButton, #selector(restartClicked)), (dismissButton, #selector(dismissClicked))
         ] {
             button.bezelStyle = .rounded
-            button.font = .systemFont(ofSize: 12, weight: .medium)
+            button.font = Theme.Font.button
             button.target = self
             button.action = action
             addSubview(button)

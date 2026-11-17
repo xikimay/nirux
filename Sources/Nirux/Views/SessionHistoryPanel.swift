@@ -283,7 +283,7 @@ final class SessionHistoryPanel: NSObject {
             .symbol(Theme.Symbol.sessionHistory), frame: NSRect(x: 14, y: 10, width: 24, height: 24)
         ))
         let field = NSTextField()
-        field.font = .systemFont(ofSize: 15)
+        field.font = Theme.Font.input
         field.textColor = Theme.Color.textPrimary
         field.backgroundColor = .clear
         field.isBezeled = false
