@@ -8,10 +8,15 @@ import XCTest
 final class CommandBarToolbarTests: XCTestCase {
     /// Nirux's main window, `width` wide, with the toolbar; the test closes
     /// it.
-    private func window(width: CGFloat = 1100, indicators: Bool = false) -> (NSWindow, CommandBarToolbar, cup: KeepAwakeIndicator?) {
+    private func window(
+        width: CGFloat = 1100, level: InterfaceTransparency = .opaque, indicators: Bool = false
+    ) -> (NSWindow, CommandBarToolbar, cup: KeepAwakeIndicator?) {
         let window = NiruxApp.makeMainWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 400))
         window.isReleasedWhenClosed = false
-        let toolbar = CommandBarToolbar(bar: CommandBarView(level: .opaque))
+        let bar = CommandBarView(level: level)
+        // The level as picked: CI's runners reduce transparency.
+        bar.resolveLevel = { $0 }
+        let toolbar = CommandBarToolbar(bar: bar)
         toolbar.bar.show(CommandBarView.Content(
             spaceName: "Acme", spaceColor: Theme.Color.working, taskTitle: "Fix checkout rounding",
             taskIcon: StateIcon(.working), taskDetail: "Working 12m", waitingCount: 2
@@ -57,6 +62,37 @@ final class CommandBarToolbarTests: XCTestCase {
         let bar = toolbar.bar.convert(toolbar.bar.bounds, to: nil)
         XCTAssertEqual(bar.midX, window.frame.width / 2, accuracy: 1, "centred")
         XCTAssertGreaterThan(window.frame.height - window.contentLayoutRect.height, 40, "a title bar tall enough for the bar")
+    }
+
+    /// At every level the bar takes the strip's width, the widest in a wide
+    /// window and less in a narrow one: macOS 26's glass, which draws it
+    /// above Opaque, asks the toolbar for no size. Only macOS 26 and later
+    /// draw that glass: on macOS 15 this checks the other backings.
+    func testTheBarTakesTheStripsWidthAtEveryLevel() {
+        for level in InterfaceTransparency.allCases {
+            let (wide, toolbar, _) = window(width: 1560, level: level)
+            XCTAssertEqual(toolbar.bar.frame.width, CommandBarToolbar.maximumBarWidth, accuracy: 0.5, "\(level), wide")
+            wide.close()
+            let (narrow, narrowToolbar, _) = window(width: 700, level: level)
+            let width = narrowToolbar.bar.frame.width
+            XCTAssertTrue(narrowToolbar.bar.window === narrow, "\(level), narrow: in the window, not the » menu")
+            XCTAssertGreaterThanOrEqual(width, CommandBarToolbar.minimumBarWidth, "\(level), narrow")
+            XCTAssertLessThan(width, CommandBarToolbar.maximumBarWidth, "\(level), narrow")
+            narrow.close()
+        }
+    }
+
+    /// The level switched on one open window, as Settings › Appearance does:
+    /// the widest bar after each switch, whatever the glass rebuilt or
+    /// restyled.
+    func testTheBarKeepsItsWidthAsTheLevelChanges() {
+        let (window, toolbar, _) = window(width: 1560)
+        defer { window.close() }
+        for level: InterfaceTransparency in [.opaque, .glass, .clear, .tinted, .glass, .opaque] {
+            toolbar.bar.level = level
+            window.contentView?.superview?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(toolbar.bar.frame.width, CommandBarToolbar.maximumBarWidth, accuracy: 0.5, "after switching to \(level)")
+        }
     }
 
     /// At the minimum width, the cup coming after the bar was laid out makes

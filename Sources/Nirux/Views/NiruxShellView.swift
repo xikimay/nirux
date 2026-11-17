@@ -291,7 +291,7 @@ final class NiruxShellView: NSView {
         verticalStrip.wantsLayer = true
         viewport.addSubview(verticalStrip)
         viewport.addSubview(emptySpaceView)
-        sidebar.level = interfaceTransparency
+        sidebar.show(level: interfaceTransparency, resolveLevel: sideEffects.drawnTransparency)
         addSubview(sidebar)
         addSubview(divider)
         addSubview(viewport)

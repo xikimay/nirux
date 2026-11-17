@@ -112,9 +112,18 @@ final class SidebarView: NSView {
     }
     /// Folded, the sidebar is this rail (see SidebarView+IconRail).
     let iconRail = IconRail(level: .opaque)
-    /// Settings › Appearance's level, which the rail draws.
-    var level: InterfaceTransparency = .opaque {
-        didSet { iconRail.level = level }
+    /// Settings › Appearance's level, which the rail draws, and the level
+    /// drawn for the one picked: made opaque where macOS asks
+    /// (`ShellSideEffects.drawnTransparency`). Set together (`show(level:resolveLevel:)`).
+    private(set) var level: InterfaceTransparency = .opaque
+    private(set) var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
+
+    func show(level: InterfaceTransparency, resolveLevel: @escaping @MainActor (InterfaceTransparency) -> InterfaceTransparency) {
+        self.level = level
+        self.resolveLevel = resolveLevel
+        iconRail.resolveLevel = resolveLevel
+        iconRail.level = level
+        showBackground()
     }
     var isExpanded: Bool = false {
         didSet {
@@ -292,7 +301,7 @@ final class SidebarView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = Theme.Color.base.cgColor
+        showBackground()
 
         contentScrollView.drawsBackground = false
         contentScrollView.hasHorizontalScroller = false

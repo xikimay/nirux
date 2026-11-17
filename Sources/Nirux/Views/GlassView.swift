@@ -240,8 +240,13 @@ final class GlassView: NSView {
         return responder as? NSView
     }
 
+    /// Sized by this view (`layout`, `setFrameSize`), not by autoresizing:
+    /// its size constraints are constants, so nothing inside it (macOS 26's
+    /// glass draws through views that hug their size) sizes this view's
+    /// host. A toolbar measured the command bar at its minimum that way.
     private func install(_ view: NSView) {
-        view.autoresizingMask = [.width, .height]
+        view.autoresizingMask = []
+        view.frame = bounds
         addSubview(view, positioned: .below, relativeTo: contentView)
         backingView = view
     }
@@ -310,9 +315,10 @@ final class GlassView: NSView {
     }
 
     /// A frame change without a layout pass (autoresizing, `setFrameSize`)
-    /// still reshapes the corners and the shadow.
+    /// still sizes the backing and reshapes the corners and the shadow.
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        backingView?.frame = bounds
         applyShape()
     }
 }

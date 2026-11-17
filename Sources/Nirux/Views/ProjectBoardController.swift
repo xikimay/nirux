@@ -84,8 +84,8 @@ final class ProjectBoardController {
     /// What the Board's clicks act on, as it last showed them
     /// (`stagesContent`).
     var stagesTargets = StagesTargets()
-    /// The stages last built, and what from: only `stagesContent` sets it.
-    var builtStages: (key: StagesKey, content: BoardStagesView.Content, targets: StagesTargets)?
+    /// The stages last built, and what from.
+    let builtStages = BuiltStages()
     private let client: any ProjectBoardGitHub
 
     /// board.json as last read; nil until it is.

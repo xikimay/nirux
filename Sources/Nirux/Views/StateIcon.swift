@@ -178,6 +178,8 @@ struct StateIcon: Hashable, Sendable {
     func draw(in context: CGContext, rect: CGRect, labelled: Bool = false) {
         let side = min(rect.width, rect.height)
         context.saveGState()
+        // Its own paths only: not one its caller left open.
+        context.beginPath()
         context.translateBy(x: rect.midX - side / 2, y: rect.midY - side / 2)
         context.scaleBy(x: side / 16, y: side / 16)
         if labelled, admitsLabel { drawFrameOnGrid(context) } else { drawOnGrid(context) }

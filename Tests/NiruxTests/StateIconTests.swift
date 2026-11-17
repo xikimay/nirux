@@ -80,6 +80,28 @@ final class StateIconTests: XCTestCase {
         XCTAssertEqual(rim.greenComponent, amber.greenComponent, accuracy: 0.08)
     }
 
+    /// An icon draws its own paths only: a path its caller left open stays
+    /// unstroked.
+    func testAnIconLeavesItsCallersPathAlone() throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let kinds: [StateIcon.Kind] = [
+            .working, .needsYou(.command), .needsYou(.question), .asking, .error, .waiting, .readyToMerge, .merged, .blocked, .finished, .idle,
+        ]
+        for kind in kinds {
+            for labelled in [false, true] {
+                context.move(to: CGPoint(x: 0, y: 30))
+                context.addLine(to: CGPoint(x: 32, y: 30))
+                StateIcon(kind, stage: 2).draw(in: context, rect: CGRect(x: 0, y: 0, width: 16, height: 16), labelled: labelled)
+                let rep = NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
+                // y counts from the top in the bitmap: the open line was 2 px from it.
+                XCTAssertEqual(rep.colorAt(x: 28, y: 1)?.alphaComponent ?? 0, 0, "\(kind), labelled \(labelled): the caller's line, never stroked")
+            }
+        }
+    }
+
     /// The view keeps quiet for VoiceOver unless its host makes it speak,
     /// follows the icon it is given, and keeps its size whatever frame a
     /// layout gave it.

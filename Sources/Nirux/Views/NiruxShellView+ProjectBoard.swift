@@ -188,9 +188,16 @@ extension NiruxShellView {
         for location in projectBoardLocations {
             let isShown = isProjectBoardShown(location)
             if isShown { location.board.tick(onScreen: inFront) }
-            let stages = projectBoardStages(location.board, isShown: isShown, snapshot: snapshot, now: now, pass: pass)
+            let inputs = projectBoardInputs(location.board, isShown: isShown, snapshot: snapshot, now: now, pass: pass)
+            let date = Date(timeIntervalSince1970: now)
+            guard isShown else {
+                // Its lines only give the rows their stations.
+                noteTaskStations(of: location.board, content: location.board.keptStagesContent(inputs, now: date))
+                continue
+            }
+            let stages = location.board.stagesContent(inputs, now: date)
             noteTaskStations(of: location.board, content: stages.content)
-            if isShown { shown.append((location.board, stages)) }
+            shown.append((location.board, stages))
         }
         return shown
     }
@@ -204,7 +211,8 @@ extension NiruxShellView {
     /// tasks as the last pass read them. The rows follow its stations at
     /// once.
     func renderProjectBoard(_ board: ProjectBoardController, snapshot: ProcessSnapshot? = nil, now: TimeInterval = Date().timeIntervalSince1970) {
-        let stages = projectBoardStages(board, isShown: true, snapshot: snapshot ?? ProcessSnapshot(), now: now, pass: nil)
+        let inputs = projectBoardInputs(board, isShown: true, snapshot: snapshot ?? ProcessSnapshot(), now: now, pass: nil)
+        let stages = board.stagesContent(inputs, now: Date(timeIntervalSince1970: now))
         showProjectBoard(board, stages, now: now)
         guard noteTaskStations(of: board, content: stages.content) else { return }
         let infos = sidebar.lastInfos.map { info in
@@ -216,13 +224,12 @@ extension NiruxShellView {
         updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: requestsState.requests.count)
     }
 
-    /// The board's tasks as the sidebar's pass read them (`pass`), else as
-    /// the last pass did. A Board shown lists its worktrees again when its
-    /// workspaces moved; one not shown builds its stages again only when
-    /// what they are built from changed.
-    private func projectBoardStages(
+    /// What the board's stages are built from: its tasks as the sidebar's
+    /// pass read them (`pass`), else as the last pass did. A Board shown
+    /// lists its worktrees again when its workspaces moved.
+    private func projectBoardInputs(
         _ board: ProjectBoardController, isShown: Bool, snapshot: ProcessSnapshot, now: TimeInterval, pass: SidebarPassReadings?
-    ) -> BoardShown {
+    ) -> ProjectBoardController.StagesInputs {
         let members = projectWorkspaces(of: board.projectID)
         let foreground = pass?.foregroundProcesses ?? foregroundProcesses(of: members, snapshot: snapshot)
         let boardWorkspaces = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
@@ -245,10 +252,7 @@ extension NiruxShellView {
             ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
             now: now
         )
-        return board.stagesContent(
-            stagesInputs(of: board, members: members, workspaces: boardWorkspaces, readings: readings, order: boardOrder),
-            now: Date(timeIntervalSince1970: now), reusing: !isShown
-        )
+        return stagesInputs(of: board, members: members, workspaces: boardWorkspaces, readings: readings, order: boardOrder)
     }
 
     private func showProjectBoard(_ board: ProjectBoardController, _ stages: BoardShown, now: TimeInterval) {
