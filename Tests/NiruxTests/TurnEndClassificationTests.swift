@@ -525,8 +525,10 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "text in one write too")
         at = try turn(keys: [("\u{1B}[B", 3), ("\r", 3.2)], dialog: true)
         XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "moved through, then answered")
-        at = try turn(keys: [("2", 3), ("\r", 3.2)], dialog: true)
+        at = try turn(keys: [("2", 3), ("x", 3.2)], dialog: true)
         XCTAssertFalse(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "a key after its answer")
+        at = try turn(keys: [("2", 3), ("\r", 3.2)], dialog: true)
+        XCTAssertTrue(machine.acceptsQuickAnswer(to: at, foreground: claude, now: at + 9), "but Enter, mid-turn, adds nothing")
         // Its terminal still draws: a Stop hook's continuation at work.
         at = try ended()
         machine.noteRead(now: Date(timeIntervalSince1970: at + 2))

@@ -103,7 +103,8 @@ extension AgentStatusMachine {
         let dialogs = pendingDialogs.map { "\($0.toolName ?? "?")/\($0.agentID == nil ? "main" : "sub")/\(age($0.requestedAt))" }
         let draft = lastDraftInputAt > (lastPromptAt ?? 0) ? "\(lastDraftKind ?? "?")/\(age(lastDraftInputAt))" : "-"
         return "working=\(hookWorking ? 1 : 0) inFlight=\(hookTurnInFlight ? 1 : 0) turn=\(age(turnStartedAt)) "
-            + "dialogs=[\(dialogs.joined(separator: ","))] prompt=\(age(lastPromptAt)) draft=\(draft) verdict=\(verdict) "
+            + "dialogs=[\(dialogs.joined(separator: ","))] prompt=\(age(lastPromptAt)) draft=\(draft) "
+            + "input=\(age(lastInputAt > 0 ? lastInputAt : nil)) verdict=\(verdict) "
             + "failed=\(turnFailure == nil ? 0 : 1) last=\(lastEventName ?? "-")/\(age(lastEventAt > 0 ? lastEventAt : nil))"
     }
 

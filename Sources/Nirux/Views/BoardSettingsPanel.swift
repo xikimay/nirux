@@ -428,14 +428,14 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         scrollView.documentView = view
         container.addSubview(scrollView)
 
-        errorLabel.font = .systemFont(ofSize: 11.5)
+        errorLabel.font = Theme.Font.caption
         errorLabel.textColor = .systemRed
         errorLabel.maximumNumberOfLines = 0
         errorLabel.preferredMaxLayoutWidth = Self.width - 48
         errorLabel.isHidden = true
         container.addSubview(errorLabel)
 
-        statusLabel.font = .systemFont(ofSize: 11.5)
+        statusLabel.font = Theme.Font.caption
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
         container.addSubview(statusLabel)
@@ -455,7 +455,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
     private func addLabel(_ text: String, y: CGFloat, in view: NSView) -> CGFloat {
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12)
+        label.font = Theme.Font.body
         label.textColor = NSColor.white.withAlphaComponent(0.85)
         label.frame = NSRect(x: Self.labelX, y: y + 3, width: Self.fieldX - Self.labelX - 8, height: 18)
         view.addSubview(label)
@@ -463,7 +463,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     }
 
     private func addField(_ field: NSTextField, y: CGFloat, in view: NSView) -> CGFloat {
-        field.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        field.font = Theme.Font.code
         field.frame = NSRect(x: Self.fieldX, y: y, width: Self.fieldWidth, height: 24)
         field.lineBreakMode = .byTruncatingTail
         field.usesSingleLineMode = true
@@ -484,7 +484,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         checksView.textContainer?.widthTracksTextView = true
         checksView.isRichText = false
         checksView.allowsUndo = true
-        checksView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        checksView.font = Theme.Font.code
         checksView.textColor = NSColor.white.withAlphaComponent(0.9)
         checksView.insertionPointColor = .white
         checksView.isAutomaticQuoteSubstitutionEnabled = false
@@ -536,13 +536,13 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     ) -> CGFloat {
         _ = addLabel(title, y: y, in: view)
         field.stringValue = minutes.map(String.init) ?? ""
-        field.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        field.font = Theme.Font.code
         field.alignment = .right
         field.usesSingleLineMode = true
         field.frame = NSRect(x: Self.fieldX, y: y, width: 60, height: 24)
         view.addSubview(field)
         let unit = NSTextField(labelWithString: "minutes")
-        unit.font = .systemFont(ofSize: 12)
+        unit.font = Theme.Font.body
         unit.textColor = NSColor.white.withAlphaComponent(0.5)
         unit.frame = NSRect(x: Self.fieldX + 68, y: y + 3, width: 80, height: 18)
         view.addSubview(unit)
@@ -571,13 +571,13 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         let inset: CGFloat = 10
         let width = Self.width - 48
         bannerLabel.stringValue = text.asWarning
-        bannerLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        bannerLabel.font = Theme.Font.caption
         bannerLabel.textColor = .niruxWarning
         bannerLabel.preferredMaxLayoutWidth = width - 2 * inset
         let height = Self.wrappedHeight(of: bannerLabel, width: width - 2 * inset)
         let box = NSView(frame: NSRect(x: 24, y: y, width: width, height: height + 2 * inset))
         box.wantsLayer = true
-        box.layer?.cornerRadius = 6
+        box.layer?.cornerRadius = Theme.Radius.card
         box.layer?.backgroundColor = Theme.Color.surface.cgColor
         box.layer?.borderWidth = 1
         box.layer?.borderColor = Theme.Color.line.cgColor

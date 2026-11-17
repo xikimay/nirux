@@ -10,7 +10,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         didSet { if let shell, shell !== oldValue { wireSettings(shell.settingsWindow) } }
     }
     var updaterController: SPUStandardUpdaterController?
-    var updateDot: NSView?
     /// Settings without a shell (tests); the app's are the shell's.
     var standaloneSettings: SettingsWindow?
     weak var settingsKeepAwakeCheckbox: NSButton?

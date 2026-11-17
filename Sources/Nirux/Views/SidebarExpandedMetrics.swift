@@ -126,6 +126,7 @@ enum SidebarExpandedMetrics {
     /// The selected row's next step, a Mission question's line.
     static let nextStepMaxLines = 3
     static let missionQuestionMaxLines = 2
+    static let waitingMessagesMaxLines = 2
 
     /// The choices the message lists, the question, then the buttons.
     @MainActor
@@ -174,7 +175,12 @@ enum SidebarExpandedMetrics {
                 SidebarWorkspaceCardRenderer.missionQuestionText(question), width: textWidth, lineHeight: actionLineHeight,
                 maxLines: missionQuestionMaxLines
             )
-        case .cleanup, .reviewBadges, .ruleProposals, .waitingMessages: return actionLineHeight
+        case .waitingMessages(_, let waiting):
+            return SidebarWrappedText.height(
+                SidebarWorkspaceCardRenderer.waitingText(waiting), width: textWidth, lineHeight: actionLineHeight,
+                maxLines: waitingMessagesMaxLines
+            )
+        case .cleanup, .reviewBadges, .ruleProposals: return actionLineHeight
         }
     }
 

@@ -704,19 +704,6 @@ extension NiruxShellView {
         AgentStatusMachine.isRecognizedAgentProcess(name)
     }
 
-    /// Light redraw: ask every terminal to refresh its surface and mark its
-    /// view dirty. No keystrokes are sent to the TUI — use
-    /// `redrawAllTerminals()` when you also need to nudge TUI apps with Ctrl+L.
-    func refreshTerminalSurfaces() {
-        for workspace in workspaces {
-            for col in workspace.columns {
-                col.terminalView?.fitToSize()
-                col.pty?.forceRedraw()
-                col.terminalView?.needsDisplay = true
-            }
-        }
-    }
-
     /// Heavy redraw: refresh every terminal surface and additionally send
     /// Ctrl+L (0x0C) to any foreground process that isn't a plain shell or
     /// a recognized agent (vim, htop, etc.) so TUI apps repaint their buffer.

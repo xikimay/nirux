@@ -172,7 +172,6 @@ final class NiruxShellView: NSView {
     /// The window's toolbar holding the command bar (step 3.1 of the glass
     /// interface), once `installCommandBar` gave the window one.
     var commandBarToolbar: CommandBarToolbar?
-    var urlPanel: URLInputPanel?
     /// A cookie import is under way, from reading the profiles to its
     /// result: one at a time (see importBrowserCookies).
     var isImportingCookies = false

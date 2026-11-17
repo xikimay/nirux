@@ -428,6 +428,43 @@ final class MissionTellTests: XCTestCase {
         XCTAssertTrue(isFree(machine))
     }
 
+    /// Enter adds no draft while a turn is in flight and no dialog waits: an
+    /// empty prompt queues nothing then (a second Return a second after the
+    /// Lead's prompt once kept a question out for hours). At an idle prompt
+    /// it may run text Nirux never saw: a draft, as Backspace is.
+    func testEnterAloneMidTurnIsNoDraft() {
+        let enter = Data([0x0D])
+        func at(_ offset: TimeInterval) -> Date { Date(timeIntervalSince1970: t0 + offset) }
+        var machine = idleMachine()
+        _ = machine.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        machine.noteKeystroke(now: at(11), keys: enter)
+        _ = machine.apply(hook(.stop, at: 20), isUserFocused: false)
+        XCTAssertTrue(isFree(machine), machine.promptFacts(now: t0 + 100))
+        XCTAssertTrue(machine.promptFacts(now: t0 + 100).contains(" draft=- input=89s "), machine.promptFacts(now: t0 + 100))
+
+        for (key, name) in [(enter, "Enter"), (Data([0x7F]), "Backspace")] {
+            var idle = idleMachine()
+            idle.noteKeystroke(now: at(30), keys: key)
+            XCTAssertEqual(refusal(idle), .draft, "\(name) at an idle prompt")
+        }
+        var background = idleMachine()
+        _ = background.apply(AgentHookEvent(
+            kind: .claude, name: .preToolUse, sessionID: "lead", toolName: "Bash", agentID: "sub", timestamp: t0 + 25
+        ), isUserFocused: false)
+        background.noteKeystroke(now: at(30), keys: enter)
+        XCTAssertTrue(background.hasDraft, "a background subagent at work after the Stop: the prompt is idle")
+
+        var approval = idleMachine()
+        _ = approval.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)
+        _ = approval.apply(hook(.permissionRequest, at: 15, tool: "Bash", key: "k"), isUserFocused: false)
+        approval.noteKeystroke(now: at(20), keys: enter)
+        XCTAssertNil(approval.visibleDialog(foreground: claude()), "Enter answers an approval")
+        approval.noteKeystroke(now: at(21), keys: enter)
+        _ = approval.apply(hook(.postToolUse, at: 25, tool: "Bash", key: "k"), isUserFocused: false)
+        _ = approval.apply(hook(.stop, at: 30), isUserFocused: false)
+        XCTAssertTrue(isFree(approval), "nor is a second Enter while its tool runs")
+    }
+
     /// `/clear` fires SessionStart, not UserPromptSubmit: the text went in.
     func testClearEmptiesThePrompt() {
         var machine = idleMachine()
