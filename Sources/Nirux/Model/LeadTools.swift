@@ -3,7 +3,8 @@ import Foundation
 /// The Lead's tools (docs/design/spaces.md, "The Lead"), listed by the Nirux MCP
 /// server to a space's Lead only (`NIRUX_LEAD=1`). Each call goes to the
 /// running app through `LeadChannel`, which acts within the Lead's space:
-/// no tool merges, removes a worktree or a branch, or reaches another space.
+/// no tool merges or reaches another space, and only `close_task` removes
+/// a worktree and a branch, once its pull request is merged.
 enum LeadTools {
     static let startTask = "start_task"
     static let listTasks = "list_tasks"
@@ -13,7 +14,9 @@ enum LeadTools {
     static let queueMerge = "queue_merge"
     static let setTaskContext = "set_task_context"
     static let proposeRule = "propose_rule"
-    static let names = [startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule]
+    static let closeTask = "close_task"
+    static let moveTask = "move_task"
+    static let names = [startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, closeTask, moveTask]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
     /// of its own (unless a repository of the space has that name).
@@ -31,9 +34,10 @@ enum LeadTools {
     static let takeTimeout: TimeInterval = 15
 
     /// How long a call then waits for the answer: a task fetches origin
-    /// and makes its worktree first.
+    /// and makes its worktree first; a clean-up asks GitHub, then git
+    /// deletes.
     static func workTimeout(for tool: String) -> TimeInterval {
-        tool == startTask ? 300 : 30
+        [startTask, closeTask].contains(tool) ? 300 : 30
     }
 
     static var definitions: [[String: Any]] {
@@ -160,19 +164,48 @@ enum LeadTools {
                     ]
                 ],
                 required: ["rule", "evidence"]
+            ),
+            definition(
+                closeTask, title: "Close a task",
+                description: """
+                    Close a task's workspace once it is merged or abandoned: its agent's session ends. When its pull \
+                    request is merged (Nirux asks GitHub, as Clean Up Worktree… does), Nirux also deletes its worktree \
+                    and local branch; a task without a repository has its folder moved to the Trash. Otherwise they \
+                    stay, and the answer says why. Any task of this space, the user's too, but never while the user has \
+                    it on screen, its agent works or waits on the user, a program runs in its terminals, with unsaved \
+                    editor changes, or with sub-tasks open.
+                    """,
+                properties: ["task": ["type": "string", "description": taskDescription]],
+                required: ["task"], destructive: true
+            ),
+            definition(
+                moveTask, title: "Move a task in the sidebar",
+                description: """
+                    Move a task up or down the sidebar, among its siblings: the space's tasks, a task's sub-tasks, or \
+                    the archived tasks. Its sub-tasks move with it; your own row stays first.
+                    """,
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "position": [
+                        "type": "integer", "minimum": 1,
+                        "description": "Its place among its siblings, 1 for the top, in list_tasks' order; past the end, last."
+                    ]
+                ],
+                required: ["task", "position"]
             )
         ]
     }
 
     static func definition(
-        _ name: String, title: String, description: String, properties: [String: Any], required: [String], readOnly: Bool = false
+        _ name: String, title: String, description: String, properties: [String: Any], required: [String],
+        readOnly: Bool = false, destructive: Bool = false
     ) -> [String: Any] {
         [
             "name": name,
             "title": title,
             "description": description,
             "inputSchema": ["type": "object", "properties": properties, "required": required, "additionalProperties": false],
-            "annotations": ["readOnlyHint": readOnly, "destructiveHint": false, "openWorldHint": false]
+            "annotations": ["readOnlyHint": readOnly, "destructiveHint": destructive, "openWorldHint": false]
         ]
     }
 
@@ -201,11 +234,17 @@ enum LeadTools {
         guard let values = arguments["prs"] as? [Any], !values.isEmpty else { return nil }
         var numbers: [Int] = []
         for value in values {
-            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-                  let whole = Int(exactly: number.doubleValue), whole > 0 else { return nil }
+            guard let whole = positiveInteger(value) else { return nil }
             if !numbers.contains(whole) { numbers.append(whole) }
         }
         return numbers
+    }
+
+    /// A whole positive number, as JSON gives it (not a boolean).
+    static func positiveInteger(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              let whole = Int(exactly: number.doubleValue), whole > 0 else { return nil }
+        return whole
     }
 
     /// What's wrong with a call's arguments before it reaches the app, or nil.
@@ -226,6 +265,11 @@ enum LeadTools {
         case askUser:
             guard string(arguments, "task") != nil else { return "task is missing." }
             return string(arguments, "why") == nil ? "why must say why you can't answer it yourself." : nil
+        case closeTask:
+            return string(arguments, "task") == nil ? "task is missing." : nil
+        case moveTask:
+            guard string(arguments, "task") != nil else { return "task is missing." }
+            return positiveInteger(arguments["position"]) == nil ? "position must be a whole number, 1 for the top." : nil
         case queueMerge:
             return pullRequestNumbers(arguments) == nil ? "prs must list pull request numbers." : nil
         case setTaskContext:

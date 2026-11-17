@@ -7,7 +7,7 @@ import Foundation
 /// task, in the tasks folder (Settings › General, `~/Nirux Tasks` unless the
 /// user picks another), in a space's folder outside git, or in the folder of
 /// the task it is a sub-task of. No branch, no pull request, no clean-up:
-/// Nirux never deletes it.
+/// Close keeps it; only the Lead's close_task moves it to the Trash.
 extension NewTask {
     /// The tasks folder in the home folder, unless the user picks another.
     static let defaultTasksFolderName = "Nirux Tasks"

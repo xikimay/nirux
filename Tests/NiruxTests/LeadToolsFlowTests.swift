@@ -7,43 +7,21 @@ import XCTest
 /// handed to the shell as LeadRequestCenter does.
 @MainActor
 final class LeadToolsFlowTests: XCTestCase {
-    private struct Lead {
-        let space: String
-        let workspace: WorkspaceState
-        let agentUUID: String
-    }
+    private typealias Lead = UIFlowHarness.Lead
 
-    /// A space anchored to the harness's repository, with its Lead, and
-    /// Mission handoffs off: the Lead's tasks must work all the same.
     private func makeLead(_ harness: UIFlowHarness) throws -> Lead {
-        let shell = harness.shell
-        shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
-        XCTAssertTrue(Persistence.updateSettings(liveLayout: shell.persistedState()) { $0.missionHandoffsEnabled = false })
-        let repository = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo", isDefault: true)
-        let space = shell.workspaceStore.createProfile(named: "Tools", anchors: [repository], select: true).id
-        shell.startLead(spaceID: space)
-        let workspace = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
-        return Lead(space: space, workspace: workspace, agentUUID: try XCTUnwrap(workspace.columns.first?.agentUUID))
+        try harness.makeLead()
     }
 
-    /// The answer to a request from `workspace`'s column, once it comes.
     private func call(
         _ tool: String, _ arguments: [String: Any] = [:], from workspace: WorkspaceState, agentUUID: String,
         in harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line
     ) throws -> (text: String, isError: Bool) {
-        let json = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: arguments), encoding: .utf8))
-        let request = LeadChannel.Request(
-            id: UUID().uuidString, tool: tool, arguments: json,
-            workspaceID: workspace.id, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
-        )
-        var answer: (text: String, isError: Bool)?
-        harness.shell.handleLeadRequest(request) { text, isError in answer = (text, isError) }
-        harness.waitUntil("the answer to \(tool)", file: file, line: line) { answer != nil }
-        return try XCTUnwrap(answer, file: file, line: line)
+        try harness.callLeadTool(tool, arguments, from: workspace, agentUUID: agentUUID, file: file, line: line)
     }
 
     private func call(_ tool: String, _ arguments: [String: Any] = [:], lead: Lead, in harness: UIFlowHarness) throws -> (text: String, isError: Bool) {
-        try call(tool, arguments, from: lead.workspace, agentUUID: lead.agentUUID, in: harness)
+        try harness.callLeadTool(tool, arguments, lead: lead)
     }
 
     /// A question from `task`'s agent, as its `ask` records it.
@@ -394,7 +372,7 @@ final class LeadToolsFlowTests: XCTestCase {
             )
             let ambiguous = try setContext(["blocker": "y"])
             XCTAssertTrue(ambiguous.isError)
-            XCTAssertTrue(ambiguous.text.contains("several share that title"), ambiguous.text)
+            XCTAssertTrue(ambiguous.text.contains("several share that name"), ambiguous.text)
             XCTAssertEqual(task.blocker, "CI is red on main")
 
             // Its status line is kept across a relaunch.

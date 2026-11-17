@@ -262,7 +262,9 @@ New flow, built on the guarded typing `tell` already uses
   - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
     and checks, the question waiting or the result) and repositories.
   - `tell(task, message)`, `reply(question, message)`: Missions. A task is named
-    by its branch or title; the Lead reaches only the tasks it started that
+    by its branch, else its folder, else its title or folder's name; within
+    the first that any task answers, only one may (a workspace's branch is
+    its focused terminal's, which another may share); the Lead reaches only the tasks it started that
     are still in its space. A question typed into the Lead names `reply`.
   - `ask_user(task, why)`: hands the question the task waits on to the user
     (amber row at once, the popover saying why). The answer is typed into the
@@ -285,6 +287,34 @@ New flow, built on the guarded typing `tell` already uses
   - `propose_rule(rule, evidence)`: a rule for the space brief, once the Lead
     sends tasks the same kind of finding a second time (see "Learned rules"
     below). Nothing reaches the brief without the user.
+  - `close_task(task)`: closes any task of the space, the user's too, as
+    Close Workspace does. When its pull request is merged, Clean Up
+    Worktree…'s checks run and, all passed, its worktree and local branch go
+    too (the call stands in for the alert's click); a task without a
+    repository has its folder moved to the Trash (for this tool only: Close
+    and Archive keep it). Otherwise they stay and the answer says why: not
+    merged, uncommitted changes, another workspace open in it, a folder named
+    for another branch (a base reused across branches)… The task closes and
+    its shells hang up first; git runs, or the folder goes to the Trash,
+    once all their processes ended (10 s at most, else the folder stays and
+    the answer names them). A folder task's folder holding a git repository
+    with uncommitted changes or commits no remote has stays; the answer
+    names where the Trash took the rest, which Put Back restores. Refused
+    while the user has it on screen (Nirux active), and while its agent's own
+    state holds something (`AgentStatusMachine.hold`, under a launcher too):
+    a turn, a dialog, a question it ended on, any attention but a finished
+    turn, a draft typed and not sent, a turn end still being read; also a
+    question handed over, an agent paused since a relaunch last seen working
+    or waiting, or one that can't be told idle (no hooks); while a program
+    is in front of one of its terminals; with unsaved editor changes; for a sub-task whose
+    parent's agent waits for it, a task with sub-tasks open, and a workspace
+    that isn't a task (a main checkout). Closing the selected task selects
+    the next without giving its terminal the keyboard. A folder task's
+    folder stays when another workspace or task works in it, and is moved
+    once its terminals are gone.
+  - `move_task(task, position)`: moves a task among its siblings (the
+    space's tasks, a task's sub-tasks, or the archived ones), 1 for the top,
+    as dragging its row does: its sub-tasks follow, and the Lead stays first.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -292,7 +322,8 @@ New flow, built on the guarded typing `tell` already uses
   nobody claims within 15 s is taken back: nothing happens. A claimed one the
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
-- **No tool merges, removes a worktree or a branch, or reaches another space.**
+- **No tool merges or reaches another space.** Only `close_task` removes a
+  worktree and a branch, once Clean Up Worktree…'s checks pass.
 - **Sub-tasks under their task** (shipped with S11c for Mission children): a
   workspace keeps the task it is a sub-task of (`parentWorkspaceID`, saved
   with it) when it opens from ⌘N's "Sub-task of", or from the worktree skill
