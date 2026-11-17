@@ -24,7 +24,7 @@ extension NiruxShellView {
         // Seen ones no longer handed off are forgotten.
         requestsState.seenHandedOff.formIntersection(requestsState.handedOff.values.map(\.question.questionID))
         let appIsActive = sideEffects.appIsActive()
-        let infos = visibleIndices.map { index in
+        let built = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
@@ -70,6 +70,16 @@ extension NiruxShellView {
                 }
             }
         }
+        // Every Board reads its tasks before the rows draw: a row shows its
+        // line's station.
+        let stages = readProjectBoards(snapshot: snapshot, now: now, pass: SidebarPassReadings(
+            infos: built, foregroundProcesses: foregroundProcesses, approvalHolds: approvalHolds, missionQuestions: missionQuestions
+        ))
+        let infos = built.map { info in
+            var info = info
+            info.station = taskStations[info.id]
+            return info
+        }
         updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
@@ -105,9 +115,7 @@ extension NiruxShellView {
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)
         closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
-        refreshProjectBoards(snapshot: snapshot, now: now, pass: SidebarPassReadings(
-            infos: infos, foregroundProcesses: foregroundProcesses, approvalHolds: approvalHolds, missionQuestions: missionQuestions
-        ))
+        drawProjectBoards(stages, now: now)
     }
 
     /// A running pass ends once the process that sent its event exited (a
@@ -191,6 +199,7 @@ extension NiruxShellView {
                       lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
                       lastActivityAt: workspace.lastActivityAt,
                       reviewBadges: workspace.reviewBadges,
+                      station: taskStations[workspace.id],
                       mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                       isLead: workspace.isLead,
                       parentTitle: parentTitle,

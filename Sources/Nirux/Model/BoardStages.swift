@@ -504,7 +504,7 @@ extension BoardStages {
     /// - Checks, once the open pull request's checks passed.
     /// A pull request the running queue works on is where the queue has
     /// it: the user confirmed its head at Start, whatever its reviews.
-    private static func station(of facts: Facts, rules: Rules) -> Station {
+    static func station(of facts: Facts, rules: Rules) -> Station {
         guard facts.hasRepository else { return .code }
         guard let pullRequest = facts.pullRequest else {
             if !hasEnteredReview(facts, rules: rules) { return .code }

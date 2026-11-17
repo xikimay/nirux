@@ -171,35 +171,68 @@ extension NiruxShellView {
         var missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]
     }
 
-    /// At each status refresh: the boards shown draw their agents as they
-    /// are now, and read what is due if they are on screen.
-    func refreshProjectBoards(snapshot: ProcessSnapshot, now: TimeInterval, pass: SidebarPassReadings) {
+    /// What a Board shows: its content, and what its clicks act on.
+    typealias BoardShown = (content: BoardStagesView.Content, targets: ProjectBoardController.StagesTargets)
+
+    /// At each status refresh, before the rows draw: every Board, shown or
+    /// not, reads its tasks from what it read and the sidebar's pass, and
+    /// its tasks take their lines' stations (`noteTaskStations`). The shown
+    /// ones read again (`tick`); what they draw is returned.
+    func readProjectBoards(
+        snapshot: ProcessSnapshot, now: TimeInterval, pass: SidebarPassReadings
+    ) -> [(board: ProjectBoardController, stages: BoardShown)] {
         let inFront = isInFront
         refreshMergeQueuesElsewhere()
-        for location in projectBoardLocations where isProjectBoardShown(location) {
-            location.board.tick(onScreen: inFront)
-            renderProjectBoard(location.board, snapshot: snapshot, now: now, pass: pass)
+        taskStations = [:]
+        var shown: [(board: ProjectBoardController, stages: BoardShown)] = []
+        for location in projectBoardLocations {
+            let isShown = isProjectBoardShown(location)
+            if isShown { location.board.tick(onScreen: inFront) }
+            let stages = projectBoardStages(location.board, isShown: isShown, snapshot: snapshot, now: now, pass: pass)
+            noteTaskStations(of: location.board, content: stages.content)
+            if isShown { shown.append((location.board, stages)) }
         }
+        return shown
     }
 
-    /// Draws the board: its tasks as the sidebar's pass read them (`pass`),
-    /// else as the last pass did (a read landing, a click between two).
-    func renderProjectBoard(
-        _ board: ProjectBoardController,
-        snapshot: ProcessSnapshot? = nil,
-        now: TimeInterval = Date().timeIntervalSince1970,
-        pass: SidebarPassReadings? = nil
-    ) {
-        let snapshot = snapshot ?? ProcessSnapshot()
+    /// Draws what `readProjectBoards` read for the Boards shown.
+    func drawProjectBoards(_ boards: [(board: ProjectBoardController, stages: BoardShown)], now: TimeInterval) {
+        for (board, stages) in boards { showProjectBoard(board, stages, now: now) }
+    }
+
+    /// Draws the board between two passes (a read landing, a click): its
+    /// tasks as the last pass read them. The rows follow its stations at
+    /// once.
+    func renderProjectBoard(_ board: ProjectBoardController, snapshot: ProcessSnapshot? = nil, now: TimeInterval = Date().timeIntervalSince1970) {
+        let stages = projectBoardStages(board, isShown: true, snapshot: snapshot ?? ProcessSnapshot(), now: now, pass: nil)
+        showProjectBoard(board, stages, now: now)
+        guard noteTaskStations(of: board, content: stages.content) else { return }
+        let infos = sidebar.lastInfos.map { info in
+            var info = info
+            info.station = taskStations[info.id]
+            return info
+        }
+        sidebar.update(profiles: sidebar.lastProfiles, workspaces: infos)
+        updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: requestsState.requests.count)
+    }
+
+    /// The board's tasks as the sidebar's pass read them (`pass`), else as
+    /// the last pass did. A Board shown lists its worktrees again when its
+    /// workspaces moved.
+    private func projectBoardStages(
+        _ board: ProjectBoardController, isShown: Bool, snapshot: ProcessSnapshot, now: TimeInterval, pass: SidebarPassReadings?
+    ) -> BoardShown {
         let members = projectWorkspaces(of: board.projectID)
         let foreground = pass?.foregroundProcesses ?? foregroundProcesses(of: members, snapshot: snapshot)
         let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
-        // A workspace opened in a folder not listed yet, or one closed or moved away: list them again.
-        board.expireWorktreesIfWorkspacesLeft(members.map(\.cwd))
-        if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
-            board.expireWorktrees()
+        if isShown {
+            // A workspace opened in a folder not listed yet, or one closed or moved away: list them again.
+            board.expireWorktreesIfWorkspacesLeft(members.map(\.cwd))
+            if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
+                board.expireWorktrees()
+            }
+            board.reloadIfAnchorsChanged()
         }
-        board.reloadIfAnchorsChanged()
         if let pass {
             board.stagesReadings = boardReadings(
                 ofSpace: board.projectID, sidebarInfos: pass.infos, foregroundProcesses: pass.foregroundProcesses,
@@ -211,14 +244,17 @@ extension NiruxShellView {
             ofSpace: board.projectID, foregroundProcesses: foreground, approvalHolds: [:], missionQuestions: [:], snapshot: snapshot,
             now: now
         )
-        let (content, targets) = board.stagesContent(
+        return board.stagesContent(
             stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),
             now: Date(timeIntervalSince1970: now)
         )
+    }
+
+    private func showProjectBoard(_ board: ProjectBoardController, _ stages: BoardShown, now: TimeInterval) {
         let spaceName = profiles.first { $0.id == board.projectID }?.name ?? ""
-        board.view.show(header: board.columnHeader(spaceName: spaceName, now: Date(timeIntervalSince1970: now)), stages: content)
+        board.view.show(header: board.columnHeader(spaceName: spaceName, now: Date(timeIntervalSince1970: now)), stages: stages.content)
         // What the clicks act on is what the Board shows.
-        board.stagesTargets = targets
+        board.stagesTargets = stages.targets
     }
 
     /// What runs in front in each open column of `members`, as the process table says.

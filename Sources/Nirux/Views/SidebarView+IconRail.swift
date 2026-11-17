@@ -125,7 +125,7 @@ extension WorkspaceInfo {
 
     func stateIcon(summary: SidebarRowSummary) -> StateIcon {
         let column = columns.first { $0.index == summary.focusColumn ?? focusedColumn }
-        return StateIcon(mark: summary.mark, reason: summary.mark == .needsYou ? column.map(Self.waitReason) : nil)
+        return StateIcon(mark: summary.mark, reason: summary.mark == .needsYou ? column.map(Self.waitReason) : nil, station: station)
     }
 
     /// What a waiting column waits on, for its icon: a permission the row

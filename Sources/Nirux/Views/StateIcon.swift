@@ -97,9 +97,7 @@ struct StateIcon: Hashable, Sendable {
         self.init(kind, stage: Self.stage(of: station))
     }
 
-    /// Code fills a quarter, Merge the whole ring; no station, nothing
-    /// (a working icon still shows Code's quarter until the rows know their
-    /// station, 5.1b).
+    /// Code fills a quarter, Merge the whole ring; no station, nothing.
     static func stage(of station: BoardStages.Station?) -> Int {
         station.map { $0.rawValue + 1 } ?? 0
     }
@@ -212,7 +210,7 @@ struct StateIcon: Hashable, Sendable {
         switch kind {
         case .working:
             ring(alpha: 0.45)
-            arc(max(1, stage))
+            arc(stage)
         case .idle where stage > 0:
             ring(alpha: 0.45)
             arc(stage)
@@ -279,7 +277,7 @@ struct StateIcon: Hashable, Sendable {
         switch kind {
         case .working:
             ring(alpha: 0.45)
-            pie(max(1, stage))
+            pie(stage)
         case .idle:
             ring()
             pie(stage)

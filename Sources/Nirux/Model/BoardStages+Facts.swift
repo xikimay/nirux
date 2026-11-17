@@ -368,7 +368,7 @@ extension BoardStages {
         self.checks(latest: ProjectBoard.latest(checks), required: required)
     }
 
-    private static func checks(latest: [ProjectBoard.Check], required: [String]) -> Checks {
+    static func checks(latest: [ProjectBoard.Check], required: [String]) -> Checks {
         guard !latest.isEmpty || !required.isEmpty else { return .absent }
         let name = { (check: ProjectBoard.Check) in check.qualifiedName ?? check.name }
         var failed: [String] = []

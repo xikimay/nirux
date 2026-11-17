@@ -213,7 +213,7 @@ final class SidebarWorkspaceCardRenderer {
         if mark == .checksRunning { return buildChecksRing(center: center) }
         // Only the row's own mark waits for the user: a compact row's is
         // merged or grey. The status line says it to VoiceOver.
-        let icon = mark == .needsYou ? workspace.stateIcon(summary: layout.summary) : StateIcon(mark: mark)
+        let icon = mark == .needsYou ? workspace.stateIcon(summary: layout.summary) : StateIcon(mark: mark, station: workspace.station)
         let host = Self.stateIconView(icon, size: Metrics.stateIconSize, center: center)
         append(host)
         // Drawn once, when the checks pass in front of the user.
@@ -347,7 +347,7 @@ final class SidebarWorkspaceCardRenderer {
         let size = Metrics.stateIconSize
         guard animates, !workspace.isInactive else {
             // Still: the family's own dashed ring.
-            let still = Self.stateIconView(StateIcon(.waiting), size: size, center: center)
+            let still = Self.stateIconView(StateIcon(.waiting, stage: StateIcon.stage(of: workspace.station)), size: size, center: center)
             still.identifier = Self.checksRingID
             append(still)
             return still
@@ -380,6 +380,21 @@ final class SidebarWorkspaceCardRenderer {
         turn.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
         ring.add(turn, forKey: Self.checksRingKey)
         host.layer?.addSublayer(ring)
+        // Its station inside, as the still icon's: under the turning arc.
+        let stage = StateIcon.stage(of: workspace.station)
+        if stage > 0 {
+            let station = CAShapeLayer()
+            station.frame = host.bounds
+            let middle = CGPoint(x: host.bounds.midX, y: host.bounds.midY)
+            let path = CGMutablePath()
+            path.move(to: middle)
+            // From 12 o'clock, clockwise on screen: y goes up here.
+            path.addArc(center: middle, radius: 3.5 * unit, startAngle: .pi / 2, endAngle: .pi / 2 - 2 * .pi * CGFloat(stage) / 4, clockwise: true)
+            path.closeSubpath()
+            station.path = path
+            station.fillColor = StateIcon(.waiting).color.cgColor
+            host.layer?.addSublayer(station)
+        }
         append(host)
         return host
     }

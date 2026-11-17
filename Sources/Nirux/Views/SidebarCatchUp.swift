@@ -49,7 +49,7 @@ struct SidebarCatchUp: Hashable {
         case .asks: row.flatMap { $0.waitsForUser ? $0 : nil } ?? StateIcon(.needsYou(.question))
         case .broken: StateIcon(.error)
         case .quiet: row ?? StateIcon(.idle)
-        case .working: StateIcon(.working)
+        case .working: StateIcon(.working, stage: row?.stage ?? 0)
         }
     }
 

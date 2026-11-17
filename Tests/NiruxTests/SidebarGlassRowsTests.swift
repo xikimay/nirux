@@ -101,6 +101,16 @@ final class SidebarGlassRowsTests: XCTestCase {
         let stillRing = try XCTUnwrap(still.first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID })
         XCTAssertEqual(stillRing.frame.size, size)
         XCTAssertEqual(icons(in: still).map(\.icon), [StateIcon(.waiting)], "the family's dashed ring")
+
+        // With its station: inside the still ring, and under the turning arc.
+        var atChecks = running
+        atChecks.station = .checks
+        let stillAtChecks = SidebarWorkspaceCardRenderer(workspace: atChecks, sidebarWidth: 260, yOffset: 500, animates: false, now: 5_000)
+            .render().views
+        XCTAssertEqual(icons(in: stillAtChecks).map(\.icon), [StateIcon(.waiting, stage: 3)])
+        let turningAtChecks = try XCTUnwrap(views(atChecks).first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID })
+        XCTAssertEqual(turningAtChecks.layer?.sublayers?.count, 2, "the arc and its station")
+        XCTAssertEqual(ring.layer?.sublayers?.count, 1, "no station: the arc alone")
     }
 
     /// The catch-up card's rows show their rows' icons; a turn over, the
@@ -345,6 +355,84 @@ final class SidebarGlassRowsTests: XCTestCase {
         board.isClosing = true
         XCTAssertFalse(shell.sidebarNavigation.boardShown, "closing")
         board.isClosing = false
+    }
+
+    /// A task's station is its Board line's, the Board's own reading of it
+    /// (5.1b): none for a line without a rail, nor for a pull request
+    /// without a task.
+    func testATasksStationIsItsBoardLines() {
+        func line(_ id: String, _ station: BoardStages.Station, rail: Bool = true, task: Bool = true) -> BoardStages.Line {
+            var line = BoardStages.Line(
+                id: id, title: id, station: station, state: .working, rail: rail ? BoardStages.Rail(marks: [.current, .ahead, .ahead, .ahead]) : nil,
+                phrase: BoardStages.Phrase(text: "Working"), pullRequest: "#1", since: nil
+            )
+            line.hasTask = task
+            return line
+        }
+        let lines = BoardStages.Section(
+            id: "widgets", units: [.task(line("checkout", .checks), subtasks: [line("tests", .reviews)]), .task(line("notes", .code, rail: false), subtasks: [])],
+            withoutTask: [.task(line("bot", .merge, task: false), subtasks: [])], merged: []
+        )
+        let content = BoardStagesView.Content(
+            header: BoardStagesView.Header(name: "Acme", color: Theme.Color.accent, summary: "", lead: nil), order: .sidebar,
+            sections: [BoardStagesView.Section(id: "widgets", title: "widgets", detail: nil, status: nil, lines: lines)], now: 0
+        )
+        XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: ["widgets"]), ["checkout": .checks, "tests": .reviews])
+        XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: []), [:], "its reading aged: none")
+        // A reading stands for two read intervals.
+        XCTAssertTrue(ProjectBoardController.stands(age: 120, interval: 60))
+        XCTAssertFalse(ProjectBoardController.stands(age: 121, interval: 60))
+        XCTAssertFalse(ProjectBoardController.stands(age: nil, interval: 60), "never read")
+    }
+
+    /// The Board's lines give its space's tasks their stations, what it no
+    /// longer lists loses its own, and every surface reads that one value:
+    /// the row, its icon, the rail, the command bar, ⌘P. No Board, none.
+    func testEverySurfaceShowsItsLinesStation() throws {
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let workspace = try XCTUnwrap(shell.activeWorkspace)
+        let index = try XCTUnwrap(shell.activeWSIndex)
+        let board = shell.makeProjectBoard(projectID: workspace.profileID, offersSettings: true)
+        func content(_ station: BoardStages.Station?) -> BoardStagesView.Content {
+            let units = station.map { station in
+                [BoardStages.Unit.task(BoardStages.Line(
+                    id: workspace.id, title: "checkout", station: station, state: .working,
+                    rail: BoardStages.Rail(marks: [.done, .done, .current, .ahead]), phrase: BoardStages.Phrase(text: "Working"),
+                    pullRequest: "#12", since: nil
+                ), subtasks: [])]
+            } ?? []
+            return BoardStagesView.Content(
+                header: BoardStagesView.Header(name: "Acme", color: Theme.Color.accent, summary: "", lead: nil), order: .sidebar,
+                sections: [BoardStagesView.Section(
+                    id: "widgets", title: "widgets", detail: nil, status: nil,
+                    lines: BoardStages.Section(id: "widgets", units: units, withoutTask: [], merged: [])
+                )], now: 0
+            )
+        }
+        XCTAssertNil(shell.taskStations[workspace.id], "no Board read: none")
+        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"]))
+        let row = shell.sidebarWorkspaceInfo(at: index, columns: [], isActive: true, parentTitle: nil)
+        let bar = NiruxShellView.commandBarContent(space: WorkspaceProfile.defaultProfile, task: row, waitingCount: 0)
+        let palette = PaletteBadge(.working, station: shell.taskStations[workspace.id], now: 0)
+        XCTAssertEqual(row.station, .checks)
+        XCTAssertEqual([row.stateIcon.stage, row.railIcon.stage, bar.taskIcon?.stage, palette.icon.stage], [3, 3, 3, 3])
+        XCTAssertFalse(shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"]), "nothing changed")
+        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(nil), fresh: ["widgets"]))
+        XCTAssertNil(shell.taskStations[workspace.id], "its line gone, its station too")
+        shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"])
+        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(.checks)), "never read: no fill")
+        XCTAssertNil(shell.taskStations[workspace.id])
+    }
+
+    /// A working row's own icon fills up to its station: the card's and the
+    /// catch-up card's, not only the rail's.
+    func testTheCardsIconFillsUpToItsStation() {
+        var info = row([column(.working)])
+        info.station = .reviews
+        XCTAssertEqual(icons(in: views(info)).first?.icon, StateIcon(.working, stage: 2))
+        XCTAssertEqual(SidebarCatchUp.icon(for: .working, row: info.stateIcon), StateIcon(.working, stage: 2))
     }
 
     /// A row of the list out of view takes no press, no hover and no menu

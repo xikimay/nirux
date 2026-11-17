@@ -27,14 +27,15 @@ struct PaletteAction {
 /// A short label on the right of a row, after its state icon: one state
 /// language with the sidebar, the rail and the Board.
 struct PaletteBadge: Equatable {
-    /// Waiting carries why, its icon's glyph.
-    enum Tone: Equatable { case working, waiting(StateIcon.Reason), failure }
+    /// Working carries its task's station, waiting why: its icon's ring
+    /// and glyph.
+    enum Tone: Equatable { case working(BoardStages.Station?), waiting(StateIcon.Reason), failure }
     let text: String
     let tone: Tone
 
     var icon: StateIcon {
         switch tone {
-        case .working: return StateIcon(.working)
+        case .working(let station): return StateIcon(.working, stage: StateIcon.stage(of: station))
         case .waiting(let reason): return StateIcon(.needsYou(reason))
         case .failure: return StateIcon(.error)
         }

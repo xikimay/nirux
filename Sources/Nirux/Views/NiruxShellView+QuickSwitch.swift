@@ -129,7 +129,7 @@ extension NiruxShellView {
             subtitle: workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath()),
             shortcut: nil,
             ranking: workspace.candidate,
-            badge: workspace.agent.map { PaletteBadge($0, now: now) },
+            badge: workspace.agent.map { PaletteBadge($0, station: taskStations[workspace.id], now: now) },
             isDimmed: workspace.isInactive
         ) { [weak self] in
             self?.openWorkspace(id: workspace.id)
@@ -203,10 +203,10 @@ extension NiruxShellView {
 }
 
 extension PaletteBadge {
-    init(_ state: QuickSwitchAgentState, now: TimeInterval) {
+    init(_ state: QuickSwitchAgentState, station: BoardStages.Station? = nil, now: TimeInterval) {
         let tone: Tone
         switch state {
-        case .working: tone = .working
+        case .working: tone = .working(station)
         case .waiting(_, let reason): tone = .waiting(reason)
         case .failed: tone = .failure
         }
