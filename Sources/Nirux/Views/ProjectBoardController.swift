@@ -440,6 +440,27 @@ final class ProjectBoardController {
         return lastReadGeneration
     }
 
+    /// The sections whose reading still stands: their pull requests read
+    /// within two read intervals, or for one without GitHub, the worktrees
+    /// listed. A Board not shown doesn't read: what it last read ages, and
+    /// its tasks' rows show no station.
+    func freshSections(now: Date = Date(), clock: TimeInterval = ProjectBoard.clock()) -> Set<String> {
+        let interval = ProjectBoard.RefreshSchedule.interval
+        let worktrees = Self.stands(age: schedule.lastStarted[.worktrees].map { clock - $0 }, interval: interval(.worktrees, false))
+        let ids = sections.map(\.id) + Array(reads.keys) + [Self.noRepositoryID]
+        return Set(ids.filter { id in
+            guard let read = reads[id] else { return worktrees }
+            let age = read.pullRequestsReadAt.map { now.timeIntervalSince($0) }
+            return Self.stands(age: age, interval: interval(.openPullRequests, read.hasPendingChecks))
+        })
+    }
+
+    /// A reading made `age` seconds ago, of a source read every `interval`:
+    /// it stands for two intervals. Never made, it doesn't.
+    static func stands(age: TimeInterval?, interval: TimeInterval) -> Bool {
+        age.map { $0 <= 2 * interval } ?? false
+    }
+
     /// Reads what is due. Called on every status refresh (the heartbeat),
     /// which reads only while the board is on screen.
     func tick(now: TimeInterval = ProjectBoard.clock(), onScreen: Bool? = nil) {

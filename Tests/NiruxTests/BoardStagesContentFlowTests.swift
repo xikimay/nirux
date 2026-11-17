@@ -146,6 +146,12 @@ final class BoardStagesContentFlowTests: XCTestCase {
                 let line = try XCTUnwrap(lines.first { $0.id == row.id })
                 XCTAssertEqual(row.station, line.rail == nil ? nil : line.station, line.title)
             }
+            XCTAssertTrue(rows.contains { $0.station != nil }, "read just now: its stations stand")
+            // An hour without a read (a Board not shown doesn't read): its stations have aged, the rows drop them.
+            let later = board.freshSections(now: Date().addingTimeInterval(3_600), clock: ProjectBoard.clock() + 3_600)
+            XCTAssertEqual(later, [])
+            shell.noteTaskStations(of: board, content: try stages(of: board, in: shell), fresh: later)
+            XCTAssertTrue(rows.allSatisfy { shell.taskStations[$0.id] == nil })
 
             // Start says what the next one takes.
             shell.addToMergeQueue(12, board: board, section: "legacy")

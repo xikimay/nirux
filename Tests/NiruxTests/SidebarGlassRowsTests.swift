@@ -377,7 +377,12 @@ final class SidebarGlassRowsTests: XCTestCase {
             header: BoardStagesView.Header(name: "Acme", color: Theme.Color.accent, summary: "", lead: nil), order: .sidebar,
             sections: [BoardStagesView.Section(id: "widgets", title: "widgets", detail: nil, status: nil, lines: lines)], now: 0
         )
-        XCTAssertEqual(NiruxShellView.taskStations(of: content), ["checkout": .checks, "tests": .reviews])
+        XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: ["widgets"]), ["checkout": .checks, "tests": .reviews])
+        XCTAssertEqual(NiruxShellView.taskStations(of: content, fresh: []), [:], "its reading aged: none")
+        // A reading stands for two read intervals.
+        XCTAssertTrue(ProjectBoardController.stands(age: 120, interval: 60))
+        XCTAssertFalse(ProjectBoardController.stands(age: 121, interval: 60))
+        XCTAssertFalse(ProjectBoardController.stands(age: nil, interval: 60), "never read")
     }
 
     /// The Board's lines give its space's tasks their stations, what it no
@@ -407,15 +412,18 @@ final class SidebarGlassRowsTests: XCTestCase {
             )
         }
         XCTAssertNil(shell.taskStations[workspace.id], "no Board read: none")
-        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(.checks)))
+        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"]))
         let row = shell.sidebarWorkspaceInfo(at: index, columns: [], isActive: true, parentTitle: nil)
         let bar = NiruxShellView.commandBarContent(space: WorkspaceProfile.defaultProfile, task: row, waitingCount: 0)
         let palette = PaletteBadge(.working, station: shell.taskStations[workspace.id], now: 0)
         XCTAssertEqual(row.station, .checks)
         XCTAssertEqual([row.stateIcon.stage, row.railIcon.stage, bar.taskIcon?.stage, palette.icon.stage], [3, 3, 3, 3])
-        XCTAssertFalse(shell.noteTaskStations(of: board, content: content(.checks)), "nothing changed")
-        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(nil)))
+        XCTAssertFalse(shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"]), "nothing changed")
+        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(nil), fresh: ["widgets"]))
         XCTAssertNil(shell.taskStations[workspace.id], "its line gone, its station too")
+        shell.noteTaskStations(of: board, content: content(.checks), fresh: ["widgets"])
+        XCTAssertTrue(shell.noteTaskStations(of: board, content: content(.checks)), "never read: no fill")
+        XCTAssertNil(shell.taskStations[workspace.id])
     }
 
     /// A working row's own icon fills up to its station: the card's and the
