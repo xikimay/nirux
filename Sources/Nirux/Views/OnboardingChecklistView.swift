@@ -28,7 +28,7 @@ final class OnboardingChecklistView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = Theme.Radius.card
         layer?.backgroundColor = NSColor.white.withAlphaComponent(0.040).cgColor
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
@@ -73,7 +73,7 @@ final class OnboardingChecklistView: NSView {
     private func addHeader(width: CGFloat) -> CGFloat {
         let title = label(
             "GETTING STARTED",
-            font: .monospacedSystemFont(ofSize: 10, weight: .bold),
+            font: Theme.Font.label,
             color: NSColor.white.withAlphaComponent(0.55)
         )
         title.frame = NSRect(
@@ -102,7 +102,7 @@ final class OnboardingChecklistView: NSView {
 
         let title = wrappingLabel(
             row.title,
-            font: .systemFont(ofSize: 12, weight: .semibold),
+            font: Theme.Font.bodyEmphasized,
             color: NSColor.white.withAlphaComponent(row.mark == .done ? 0.72 : 0.90),
             width: textWidth
         )
@@ -113,7 +113,7 @@ final class OnboardingChecklistView: NSView {
         if let detail = row.detail {
             let detailLabel = wrappingLabel(
                 detail,
-                font: .systemFont(ofSize: 11, weight: .regular),
+                font: Theme.Font.caption,
                 color: NSColor.white.withAlphaComponent(0.50),
                 width: textWidth
             )
@@ -196,7 +196,7 @@ final class OnboardingChecklistView: NSView {
         addSubview(mark)
         let title = label(
             "Shortcuts",
-            font: .systemFont(ofSize: 12, weight: .semibold),
+            font: Theme.Font.bodyEmphasized,
             color: NSColor.white.withAlphaComponent(0.90)
         )
         title.frame = NSRect(x: textX, y: y, width: textWidth, height: 16)
@@ -233,7 +233,7 @@ final class OnboardingChecklistView: NSView {
 
         let message = label(
             "You're all set.",
-            font: .systemFont(ofSize: 12, weight: .medium),
+            font: Theme.Font.bodyMedium,
             color: NSColor.systemGreen.withAlphaComponent(0.90)
         )
         message.frame = NSRect(
@@ -333,10 +333,9 @@ final class OnboardingChecklistButton: NSView {
 
     private var font: NSFont {
         switch style {
-        case .primary: return .systemFont(ofSize: 11, weight: .semibold)
-        case .link: return .systemFont(ofSize: 11, weight: .medium)
-        case .command: return .monospacedSystemFont(ofSize: 10, weight: .medium)
-        case .close: return .systemFont(ofSize: 14, weight: .regular)
+        case .primary, .link: return Theme.Font.buttonSmall
+        case .command: return Theme.Font.monoBadge
+        case .close: return Theme.Font.listTitle
         }
     }
 
@@ -398,12 +397,12 @@ final class OnboardingChecklistButton: NSView {
         switch style {
         case .primary:
             Theme.Color.accent.withAlphaComponent(isPressed ? 0.65 : (isHovered ? 1.0 : 0.85)).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+            NSBezierPath(roundedRect: rect, xRadius: Theme.Radius.control, yRadius: Theme.Radius.control).fill()
         case .command:
             NSColor.white.withAlphaComponent(isHovered ? 0.11 : 0.06).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+            NSBezierPath(roundedRect: rect, xRadius: Theme.Radius.control, yRadius: Theme.Radius.control).fill()
             NSColor.white.withAlphaComponent(0.13).setStroke()
-            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).stroke()
+            NSBezierPath(roundedRect: rect, xRadius: Theme.Radius.control, yRadius: Theme.Radius.control).stroke()
             textColor = NSColor.white.withAlphaComponent(0.80)
         case .link:
             textColor = Theme.Color.accent.withAlphaComponent(isPressed ? 0.7 : 1.0)
