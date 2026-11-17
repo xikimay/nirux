@@ -166,19 +166,23 @@ extension NiruxShellView {
     func leadCloseRefusal(of task: WorkspaceState, snapshot: ProcessSnapshot) -> String? {
         let title = MissionPromptText.quoted(task.title)
         // Closing it would move their selection and keyboard.
-        if task === activeWorkspace, NSApp.isActive {
+        if task === activeWorkspace, sideEffects.appIsActive() {
             return "The user has “\(title)” on screen: leave it to them, or ask them to close it."
         }
+        // A failed read sees no agent at all.
+        guard !snapshot.isEmpty else { return "Nirux couldn't read the running processes: call again in a moment." }
         let readings = agentReadings(of: task, snapshot: snapshot)
         // A turn that just ended reads "needs the user" until they look:
         // only what they must answer counts.
         if let dialog = readings.lazy.compactMap(\.dialog).first {
             return "“\(title)” waits for the user (\(dialog)): leave it to them."
         }
-        if readings.contains(where: { $0.status == .working }) {
+        let columns = task.openColumns
+        // Also one under a launcher (npx), which the readings don't see.
+        let agents = columns.compactMap { $0.liveAgent(snapshot: snapshot) }
+        if readings.contains(where: { $0.status == .working }) || agents.contains(where: { $0.status == .working }) {
             return "“\(title)”'s agent is working: wait for its turn to end, then close it."
         }
-        let columns = task.openColumns
         if columns.contains(where: { $0.pty?.awaitsTurnVerdict == true }) {
             return "“\(title)”'s last turn is still being read (it may ask the user something): call again in a moment."
         }
@@ -186,10 +190,11 @@ extension NiruxShellView {
             return "“\(title)” hasn't resumed since Nirux restarted, \(paused.lastStatusText ?? ""): leave it to the user."
         }
         // Idle is only known from Claude's hooks (see WorkspaceClosePolicy).
-        if let unknown = columns.compactMap({ $0.liveAgent(snapshot: snapshot) }).first(where: { $0.status == nil }) {
+        if let unknown = agents.first(where: { $0.status == nil }) {
             return "Nirux can't tell whether “\(title)”'s \(unknown.displayName) is done: ask the user to close it."
         }
-        // A dev server or a test run in a terminal of its own.
+        // A dev server or a test run in front of a terminal of its own (one
+        // sent to the background isn't seen).
         let programs = columns.compactMap { column -> String? in
             guard let pty = column.pty, pty.runningAgentName(snapshot: snapshot) == nil,
                   let name = pty.foregroundProcess(snapshot: snapshot)?.name else { return nil }

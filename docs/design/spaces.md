@@ -298,7 +298,8 @@ New flow, built on the guarded typing `tell` already uses
     on the user (a dialog, a question it ended on or handed over, a turn end
     still being read), hasn't resumed since a relaunch and was last seen
     working or waiting, or can't be told idle (no hooks); while a program
-    runs in its terminals; with unsaved editor changes; for a sub-task whose
+    is in front of one of its terminals (a job sent to the background with
+    & or ^Z isn't seen); with unsaved editor changes; for a sub-task whose
     parent's agent waits for it, a task with sub-tasks open, and a workspace
     that isn't a task (a main checkout). A name two workspaces answer is no
     answer (a workspace's branch is its focused terminal's). A folder task's

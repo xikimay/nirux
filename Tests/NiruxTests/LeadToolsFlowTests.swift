@@ -372,7 +372,7 @@ final class LeadToolsFlowTests: XCTestCase {
             )
             let ambiguous = try setContext(["blocker": "y"])
             XCTAssertTrue(ambiguous.isError)
-            XCTAssertTrue(ambiguous.text.contains("several share that title"), ambiguous.text)
+            XCTAssertTrue(ambiguous.text.contains("several share that name"), ambiguous.text)
             XCTAssertEqual(task.blocker, "CI is red on main")
 
             // Its status line is kept across a relaunch.

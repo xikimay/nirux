@@ -75,6 +75,12 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 XCTAssertTrue(answer.text.contains(words), answer.text)
             }
 
+            // On screen, Nirux in front: the user may be typing in it.
+            shell.sideEffects.appIsActive = { true }
+            shell.workspaceStore.selectWorkspace(id: work.id)
+            try refusal("Work", "The user has “Work” on screen")
+            shell.sideEffects.appIsActive = { false }
+
             try refusal("Lead", "No task in Tools is named “Lead”")
             try refusal("repo", "No task in Tools is named “repo”")
             try refusal("Checkout", "isn't a task")

@@ -41,8 +41,8 @@ final class UIFlowHarness {
     /// A committed file, the only one holding `searchNeedle`.
     static let searchTarget = "docs/search-target.txt"
     static let searchNeedle = "flow-harness-needle"
-    /// What gh would log in with, cleared for the tests.
-    nonisolated static let gitHubTokens = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]
+    /// Where gh would find a login, cleared for the tests.
+    nonisolated static let gitHubLogin = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR"]
 
     let shell: NiruxShellView
     let window: NSWindow
@@ -603,7 +603,7 @@ private struct IsolatedEnvironment {
         let environment = ProcessInfo.processInfo.environment
         // Claude Code's settings and memory come from the fake home only; gh
         // finds no login there, nor a token.
-        let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"] + UIFlowHarness.gitHubTokens
+        let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"] + UIFlowHarness.gitHubLogin
             + environment.keys.filter { $0.hasPrefix("CLAUDE_CODE_") }
             + environment.keys.filter { $0.hasPrefix("GIT_") }
         let names = ["NIRUX_STATE_DIR", "HOME"] + cleared
