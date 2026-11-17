@@ -481,8 +481,8 @@ final class PersistedStateCodingTests: XCTestCase {
     // MARK: - Legacy migration
 
     /// Old state.json format: `claudeBypassPermissions: true` was emitted as
-    /// `--dangerously-skip-permissions`, so it must decode to `.skipPermissions`
-    /// (the more aggressive bypass), not the milder `.bypassPermissions`.
+    /// `--dangerously-skip-permissions`, so it must decode to `.skipPermissions`,
+    /// which keeps that flag.
     func testLegacyClaudeBypassPermissionsTrueMigratesToSkipPermissions() throws {
         let settingsJSON = Data("""
         { "claudeBypassPermissions": true, "claudeNoFlicker": true }
@@ -617,12 +617,35 @@ extension PersistedStateCodingTests {
         XCTAssertTrue(legacy.agentCirclingHint)
     }
 
+    /// Builds before Manual can't decode it under `claudeLaunchMode`, and
+    /// would lose the whole state file.
+    func testManualLaunchModeIsSavedUnderAKeyOlderBuildsIgnore() throws {
+        let data = try JSONEncoder().encode(PersistedSettings(claudeLaunchMode: .manual))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(json["claudeLaunchMode"])
+        XCTAssertEqual(try JSONDecoder().decode(PersistedSettings.self, from: data).claudeLaunchMode, .manual)
+    }
+
+    /// A mode a newer build saved costs that setting only, not the file;
+    /// an explicit mode beats the Manual key.
+    func testLaunchModesThisBuildCantReadCostOnlyThemselves() throws {
+        let newer = try JSONDecoder().decode(
+            PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"turbo","codexLaunchMode":"warp","claudeNoFlicker":false}"#.utf8)
+        )
+        XCTAssertNil(newer.claudeLaunchMode)
+        XCTAssertNil(newer.codexLaunchMode)
+        XCTAssertEqual(newer.claudeNoFlicker, false, "the rest of the settings stays")
+        let both = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"plan","claudeManualMode":true}"#.utf8))
+        XCTAssertEqual(both.claudeLaunchMode, .plan)
+    }
+
     // MARK: - cliArgs wire format
 
     /// Lock down the CLI flag mapping so a future rename in the enum doesn't
     /// silently change what we send to the `claude` subprocess.
     func testClaudeLaunchModeCLIArgs() {
         XCTAssertEqual(ClaudeLaunchMode.default.cliArgs, [])
+        XCTAssertEqual(ClaudeLaunchMode.manual.cliArgs, ["--permission-mode", "default"])
         XCTAssertEqual(ClaudeLaunchMode.acceptEdits.cliArgs, ["--permission-mode", "acceptEdits"])
         XCTAssertEqual(ClaudeLaunchMode.auto.cliArgs, ["--permission-mode", "auto"])
         XCTAssertEqual(ClaudeLaunchMode.plan.cliArgs, ["--permission-mode", "plan"])
