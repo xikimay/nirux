@@ -98,7 +98,4 @@ struct AgentLightPlan: Equatable {
     mutating func clearColumnAlerts() {
         columns = columns.filter { $0.value == .working }
     }
-
-    /// The agents the edges stand for.
-    var edgeAlerts: [EdgeAlert] { [left, right, top, bottom].compactMap { $0 } }
 }

@@ -439,9 +439,9 @@ final class MissionDeliveryTests: XCTestCase {
         _ = NSApplication.shared
         let since = try XCTUnwrap(Calendar.current.date(bySettingHour: 22, minute: 21, second: 0, of: Date()))
         let waiting = SidebarWaitingMessages(count: 2, since: since.timeIntervalSince1970, refusal: .draft, now: since.timeIntervalSince1970 + 600)
-        XCTAssertEqual(waiting.line, "2 messages waiting since 22:21")
+        XCTAssertEqual(waiting.line, "2 messages waiting since 22:21 · held by a draft until its next prompt")
         let nextDay = SidebarWaitingMessages(count: 2, since: since.timeIntervalSince1970, refusal: .draft, now: since.timeIntervalSince1970 + 86_400)
-        XCTAssertTrue(nextDay.line.hasSuffix(" 22:21") && nextDay.line != waiting.line, "the day, once it is another: \(nextDay.line)")
+        XCTAssertTrue(nextDay.line.contains(" 22:21 · ") && nextDay.line != waiting.line, "the day, once it is another: \(nextDay.line)")
         var info = column(nil)
         info.waitingMessages = waiting
         var lead = workspace([info], index: 2)
@@ -454,8 +454,12 @@ final class MissionDeliveryTests: XCTestCase {
         sidebar.update(profiles: [], workspaces: [lead])
         sidebar.layoutSubtreeIfNeeded()
         let label = try XCTUnwrap(sidebar.expandedViews.lazy.compactMap { $0 as? NSTextField }.first {
-            $0.stringValue.hasSuffix("messages waiting since 22:21")
+            $0.stringValue == waiting.line
         })
+        XCTAssertEqual(label.frame.height, 2 * SidebarExpandedMetrics.actionLineHeight, "its reason wraps to a second line")
+        XCTAssertEqual(SidebarExpandedMetrics.height(
+            of: .waitingMessages(columnIndex: 0, waiting), width: label.frame.width, textWidth: label.frame.width
+        ), label.frame.height, "and the card counts it")
         XCTAssertEqual(label.toolTip, waiting.tooltip)
         let frame = try XCTUnwrap(label.superview).convert(label.frame, to: sidebar.contentDocumentView)
         XCTAssertTrue(sidebar.hitAreas.contains { area in

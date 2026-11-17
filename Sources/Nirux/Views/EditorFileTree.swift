@@ -45,7 +45,7 @@ final class EditorFileTree: NSView {
 
     private func configureHeaders() {
         for header in [changesHeader, filesHeader] {
-            header.font = .systemFont(ofSize: 11, weight: .semibold)
+            header.font = Theme.Font.captionEmphasized
             header.textColor = NSColor.white.withAlphaComponent(0.42)
             header.backgroundColor = .clear
             header.isBordered = false
@@ -798,11 +798,11 @@ private final class FileTreeCellView: NSTableCellView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        iconLabel.font = .systemFont(ofSize: 11)
+        iconLabel.font = Theme.Font.caption
         iconLabel.alignment = .center
         iconImageView.imageScaling = .scaleProportionallyUpOrDown
         iconImageView.isHidden = true
-        nameLabel.font = .systemFont(ofSize: 12)
+        nameLabel.font = Theme.Font.body
         nameLabel.textColor = Theme.Color.textPrimary
         nameLabel.lineBreakMode = .byTruncatingMiddle
         addSubview(iconLabel)
@@ -854,11 +854,11 @@ private final class FileTreeCellView: NSTableCellView {
             iconImageView.isHidden = true
             iconLabel.isHidden = false
             iconLabel.stringValue = gitStatus.badge
-            iconLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
+            iconLabel.font = Theme.Font.monoBadge
             iconLabel.textColor = gitStatus.color
             nameLabel.stringValue = node.name
             nameLabel.textColor = NSColor.white.withAlphaComponent(0.9)
-            nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            nameLabel.font = Theme.Font.bodyMedium
             return
         }
 
@@ -866,7 +866,7 @@ private final class FileTreeCellView: NSTableCellView {
         if node.isVirtual {
             iconImageView.isHidden = true
             iconLabel.isHidden = false
-            iconLabel.font = .systemFont(ofSize: 11)
+            iconLabel.font = Theme.Font.caption
             iconLabel.stringValue = node.isDirectory ? "▸" : "·"
             iconLabel.textColor = Theme.Color.accent
         } else if let icon = Self.icon(for: node) {
@@ -876,7 +876,7 @@ private final class FileTreeCellView: NSTableCellView {
         } else {
             iconImageView.isHidden = true
             iconLabel.isHidden = false
-            iconLabel.font = .systemFont(ofSize: 11)
+            iconLabel.font = Theme.Font.caption
             iconLabel.stringValue = node.isDirectory ? "▸" : "·"
             iconLabel.textColor = NSColor.secondaryLabelColor
         }
@@ -884,7 +884,7 @@ private final class FileTreeCellView: NSTableCellView {
         nameLabel.textColor = node.isVirtual
             ? NSColor.white.withAlphaComponent(0.95)
             : Theme.Color.textPrimary
-        nameLabel.font = .systemFont(ofSize: 12, weight: node.isVirtual ? .semibold : .regular)
+        nameLabel.font = node.isVirtual ? Theme.Font.bodyEmphasized : Theme.Font.body
     }
 }
 

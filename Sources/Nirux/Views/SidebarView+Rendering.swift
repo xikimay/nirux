@@ -349,11 +349,6 @@ extension SidebarView {
         )
     }
 
-    /// "1 workspace", "6 workspaces".
-    static func workspaceCountText(_ count: Int) -> String {
-        "\(count) \(count == 1 ? "workspace" : "workspaces")"
-    }
-
     static func profileColor(hex: String) -> NSColor {
         NSColor.niruxColor(hex: hex) ?? Theme.Color.accent
     }
