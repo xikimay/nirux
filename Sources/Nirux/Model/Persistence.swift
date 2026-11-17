@@ -266,13 +266,14 @@ struct PersistedState: Codable {
     var projectsFileVersion: Int? // mirror/marker rules: see ProjectStore
 }
 
-/// Mirrors Claude Code's `--permission-mode` values plus the legacy
-/// `--dangerously-skip-permissions` shortcut. `bypassPermissions` and
-/// `skipPermissions` are deliberately separate: per docs, the former still
-/// prompts for writes inside protected dirs (`.git`, `.claude`, …) while the
-/// latter bypasses *everything* (so we expose both honestly).
+/// Claude Code's `--permission-mode` values. `.default` passes no flag, so
+/// the user's `permissions.defaultMode` applies, else auto mode; `.manual`
+/// is the mode Claude Code names `default`. `.skipPermissions` is
+/// `--dangerously-skip-permissions`, an alias of `bypassPermissions` kept
+/// so a saved choice still launches with it.
 enum ClaudeLaunchMode: String, Codable, CaseIterable {
     case `default`
+    case manual
     case acceptEdits
     case auto
     case plan
@@ -282,20 +283,28 @@ enum ClaudeLaunchMode: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .default: return "Default (ask for permission)"
-        case .acceptEdits: return "Accept edits (file edits + common fs commands)"
-        case .auto: return "Auto (approve with safety checks — research preview)"
+        case .default: return "Claude Code default (your defaultMode, else Auto)"
+        case .manual: return "Manual (asks before edits and commands)"
+        case .acceptEdits: return "Accept edits (edits and file commands run; others ask)"
+        case .auto: return "Auto (a safety check allows or blocks risky actions)"
         case .plan: return "Plan (read-only)"
-        case .dontAsk: return "Don't ask (deny unless pre-approved)"
-        case .bypassPermissions: return "Bypass permissions (still asks for .git/.claude)"
-        case .skipPermissions: return "Skip all permissions (most aggressive)"
+        case .dontAsk: return "Don't ask (denies unless pre-approved)"
+        case .bypassPermissions: return "Bypass permissions (skips permission checks)"
+        case .skipPermissions: return "Bypass permissions (--dangerously-skip-permissions)"
         }
+    }
+
+    /// A menu's choices: `.skipPermissions` repeats `.bypassPermissions`, so
+    /// it shows only as the saved choice.
+    static func choices(keeping saved: ClaudeLaunchMode?) -> [ClaudeLaunchMode] {
+        allCases.filter { $0 != .skipPermissions || $0 == saved }
     }
 
     /// argv tail to append after `claude`. Empty for `.default`.
     var cliArgs: [String] {
         switch self {
         case .default: return []
+        case .manual: return ["--permission-mode", "default"]
         case .acceptEdits: return ["--permission-mode", "acceptEdits"]
         case .auto: return ["--permission-mode", "auto"]
         case .plan: return ["--permission-mode", "plan"]

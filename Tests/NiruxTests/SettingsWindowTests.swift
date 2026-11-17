@@ -51,6 +51,33 @@ final class SettingsWindowTests: XCTestCase {
         }
     }
 
+    /// The menu leaves out `skipPermissions`, a duplicate of Bypass
+    /// permissions, unless it is saved: then it stays selected and launches
+    /// with its flag.
+    @MainActor
+    func testSkipPermissionsShowsOnlyWhenSaved() throws {
+        try withIsolatedState {
+            let app = try openSettings()
+            defer { close(app) }
+            let popup = try XCTUnwrap(app.settingsLaunchModePopup)
+            XCTAssertEqual(popup.indexOfItem(withRepresentedObject: ClaudeLaunchMode.skipPermissions.rawValue), -1)
+        }
+        try withIsolatedState {
+            var state = PersistedState(workspaces: [], activeWorkspaceIndex: 0)
+            state.settings = try JSONDecoder().decode(
+                PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"skipPermissions"}"#.utf8)
+            )
+            XCTAssertTrue(Persistence.save(state))
+            let app = try openSettings()
+            defer { close(app) }
+            XCTAssertEqual(selectedRawValue(app.settingsLaunchModePopup), ClaudeLaunchMode.skipPermissions.rawValue)
+            XCTAssertEqual(
+                NiruxShellView.claudeCommand(mode: NiruxShellView.currentClaudeLaunchMode(), niruxExecutable: nil),
+                "command claude --dangerously-skip-permissions"
+            )
+        }
+    }
+
     /// Every control saves at once, and only its own setting.
     @MainActor
     func testEachControlSavesOnlyItsOwnSetting() throws {

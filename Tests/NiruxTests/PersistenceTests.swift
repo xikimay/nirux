@@ -623,6 +623,7 @@ extension PersistedStateCodingTests {
     /// silently change what we send to the `claude` subprocess.
     func testClaudeLaunchModeCLIArgs() {
         XCTAssertEqual(ClaudeLaunchMode.default.cliArgs, [])
+        XCTAssertEqual(ClaudeLaunchMode.manual.cliArgs, ["--permission-mode", "default"])
         XCTAssertEqual(ClaudeLaunchMode.acceptEdits.cliArgs, ["--permission-mode", "acceptEdits"])
         XCTAssertEqual(ClaudeLaunchMode.auto.cliArgs, ["--permission-mode", "auto"])
         XCTAssertEqual(ClaudeLaunchMode.plan.cliArgs, ["--permission-mode", "plan"])
