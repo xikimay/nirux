@@ -237,6 +237,9 @@ final class NiruxShellView: NSView {
     let emptySpaceView = EmptySpaceView()
     /// The Project Board's `gh` reads. Tests set a fake before a board opens.
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
+    /// The worktree clean-ups' git, gh and Trash. Tests set a stub gh and
+    /// a Trash of their own.
+    lazy var worktreeCleanupTools = WorktreeCleanup.Tools.installed
     /// How Branch Review columns read their worktree: git and gh, or a
     /// test's fixture.
     lazy var branchReviewReader: BranchReviewController.Reader = BranchReviewController.readWorktree

@@ -7,7 +7,8 @@ import AppKit
 /// app's own state first: it must come from a column of a space's Lead,
 /// and it acts in that space only. One from another workspace's column
 /// goes to that task's tools (NiruxShellView+TaskTools). Nothing here
-/// merges, removes a worktree or a branch, or starts a merge queue.
+/// merges or starts a merge queue; close_task removes a worktree and a
+/// branch only once its pull request is merged (NiruxShellView+LeadTaskTools).
 extension NiruxShellView {
     typealias LeadAnswer = @MainActor (_ text: String, _ isError: Bool) -> Void
 
@@ -34,6 +35,8 @@ extension NiruxShellView {
         case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, answer: answer)
         case LeadTools.setTaskContext: leadSetTaskContext(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.proposeRule: leadProposeRule(arguments, in: space, parent: parent, answer: answer)
+        case LeadTools.closeTask: leadCloseTask(arguments, in: space, answer: answer)
+        case LeadTools.moveTask: leadMoveTask(arguments, in: space, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
@@ -381,24 +384,39 @@ extension NiruxShellView {
 
     /// What its agents do: working, needs the user (and for what), idle.
     private func leadAgentState(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> String {
-        var agents: [(name: String, status: AgentStatus, dialog: String?)] = []
-        for column in workspace.columns {
+        let agents = agentReadings(of: workspace, snapshot: snapshot)
+        guard let first = agents.first else { return "no agent running" }
+        if let waiting = agents.first(where: \.needsUser) {
+            return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
+        }
+        if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
+        return "\(first.name) idle"
+    }
+
+    /// An agent in front of one of a workspace's columns, as list_tasks
+    /// tells the Lead about it.
+    struct AgentReading {
+        let name: String
+        let status: AgentStatus
+        /// What it waits on the user for, in a few words.
+        let dialog: String?
+
+        var needsUser: Bool { status == .needsAttention || dialog != nil }
+    }
+
+    /// The Claude and Codex agents in front of `workspace`'s columns.
+    func agentReadings(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [AgentReading] {
+        workspace.columns.compactMap { column in
             guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
-                  ["claude", "codex"].contains(foreground.name) else { continue }
+                  ["claude", "codex"].contains(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
             // A turn end found done (or still being read) asks nothing.
             let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
-            agents.append((name: foreground.name, status: status, dialog: dialog))
+            return AgentReading(name: foreground.name, status: status, dialog: dialog)
         }
-        guard let first = agents.first else { return "no agent running" }
-        if let waiting = agents.first(where: { $0.status == AgentStatus.needsAttention || $0.dialog != nil }) {
-            return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
-        }
-        if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
-        return "\(first.name) idle"
     }
 
     // MARK: tell, reply, ask_user
@@ -423,19 +441,25 @@ extension NiruxShellView {
     func namedTask(
         _ name: String, among candidates: [WorkspaceState], mission: (WorkspaceState) -> Mission?
     ) -> (workspace: WorkspaceState, mission: Mission)? {
-        func named(_ matches: (WorkspaceState) -> Bool) -> [(WorkspaceState, Mission)] {
-            candidates.filter(matches).compactMap { workspace in mission(workspace).map { (workspace, $0) } }
-        }
-        if let first = named({ $0.gitBranch == name }).first { return first }
+        let owned = candidates.compactMap { workspace in mission(workspace).map { (workspace: workspace, mission: $0) } }
+        guard let workspace = namedWorkspace(name, among: owned.map(\.workspace)) else { return nil }
+        return owned.first { $0.workspace === workspace }
+    }
+
+    /// The workspace of `candidates` named by its branch, its folder, or
+    /// its title or folder's name when only one has it.
+    func namedWorkspace(_ name: String, among candidates: [WorkspaceState]) -> WorkspaceState? {
+        if let first = candidates.first(where: { $0.gitBranch == name }) { return first }
         // A task without a repository has its folder instead, by path as
         // list_tasks shows it.
-        if let first = named({ $0.taskFolder == name }).first { return first }
+        if let first = candidates.first(where: { $0.taskFolder == name }) { return first }
         // Then a title, or a folder's name, only one task having it: a
         // title and a folder's name naming two tasks is no answer.
-        let byTitle = named { $0.title.caseInsensitiveCompare(name) == .orderedSame }
-        let byFolderName = named { $0.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false }
-        let found = Dictionary((byTitle + byFolderName).map { ($0.0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return found.count == 1 ? found.values.first : nil
+        let found = candidates.filter { workspace in
+            workspace.title.caseInsensitiveCompare(name) == .orderedSame
+                || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
+        }
+        return found.count == 1 ? found.first : nil
     }
 
     private func noLeadTask(_ name: String) -> String {

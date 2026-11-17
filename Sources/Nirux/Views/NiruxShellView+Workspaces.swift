@@ -525,10 +525,12 @@ extension NiruxShellView {
         refreshAfterWorkspaceMutation()
     }
 
-    func refreshAfterWorkspaceMutation() {
+    /// `refocusing`: false for a change the user didn't make (a Lead's
+    /// tool), which leaves the keyboard where it is.
+    func refreshAfterWorkspaceMutation(refocusing: Bool = true) {
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        if refocusing { focusActiveTerminal(in: window) }
         saveState()
     }
 

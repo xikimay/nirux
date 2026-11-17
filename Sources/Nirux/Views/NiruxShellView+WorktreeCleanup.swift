@@ -169,7 +169,7 @@ extension NiruxShellView {
     }
 
     /// The workspaces open at `path` or below it.
-    private func worktreeMembers(_ path: String) -> [WorkspaceState] {
+    func worktreeMembers(_ path: String) -> [WorkspaceState] {
         let isInside = Self.containment(in: path)
         return workspaces.filter { !$0.isClosing && isInside($0.cwd) }
     }
@@ -193,17 +193,24 @@ extension NiruxShellView {
         // A task that starts in a subfolder gets its handover there, and
         // Claude Code its local settings. (The candidate, with its process
         // snapshot, is built once the checks are back.)
-        let agentFolders = worktreeMembers(path).map(\.cwd)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                var candidate = self.worktreeCleanupCandidate(path: path)
-                candidate.inspection = inspection
-                self.presentWorktreeCleanup(candidate) { [weak self] in
-                    self?.worktreeCleanupsInFlight.remove(key)
-                }
+        Self.inspectWorktree(path, agentFolders: worktreeMembers(path).map(\.cwd), tools: worktreeCleanupTools) { [weak self] inspection in
+            guard let self else { return }
+            var candidate = self.worktreeCleanupCandidate(path: path)
+            candidate.inspection = inspection
+            self.presentWorktreeCleanup(candidate) { [weak self] in
+                self?.worktreeCleanupsInFlight.remove(key)
             }
+        }
+    }
+
+    /// `WorktreeCleanup.inspect` off the main thread; `completion` on it.
+    nonisolated static func inspectWorktree(
+        _ path: String, agentFolders: [String], tools: WorktreeCleanup.Tools,
+        completion: @escaping @MainActor @Sendable (WorktreeCleanup.Inspection) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders, tools: tools)
+            DispatchQueue.main.async { completion(inspection) }
         }
     }
 
@@ -237,19 +244,39 @@ extension NiruxShellView {
                 details: candidate.confirmationLines(for: plan),
                 confirmTitle: "Clean Up"
             ) else { return completion() }
-            Self.stoppingExplains(in: plan.worktree.path) { resumeExplains in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let execution = WorktreeCleanup.execute(plan)
-                    DispatchQueue.main.async { [weak self] in
-                        defer {
-                            resumeExplains()
-                            completion()
-                        }
-                        guard let self else { return }
-                        self.reportWorktreeCleanup(execution, of: candidate, plan: plan)
-                    }
-                }
+            executeWorktreeCleanup(plan, of: candidate) { [weak self] outcome in
+                defer { completion() }
+                guard let self, let outcome else { return }
+                self.reportWorktreeCleanup(outcome, plan: plan)
             }
+        }
+    }
+
+    /// Runs `plan` off the main thread, its worktree's Explain stopped
+    /// meanwhile, then closes the workspaces once the folder is gone (see
+    /// `finishWorktreeCleanup`). `done` comes on the main thread, with nil
+    /// once the shell is gone.
+    func executeWorktreeCleanup(
+        _ plan: WorktreeCleanup.Plan, of candidate: WorktreeCleanupCandidate,
+        done: @escaping @MainActor @Sendable (CleanupOutcome?) -> Void
+    ) {
+        let tools = worktreeCleanupTools
+        Self.stoppingExplains(in: plan.worktree.path) { [weak self] resumeExplains in
+            Self.execute(plan, tools: tools) { [weak self] execution in
+                resumeExplains()
+                done(self?.finishWorktreeCleanup(execution, of: candidate, plan: plan))
+            }
+        }
+    }
+
+    /// `WorktreeCleanup.execute` off the main thread; `completion` on it.
+    private nonisolated static func execute(
+        _ plan: WorktreeCleanup.Plan, tools: WorktreeCleanup.Tools,
+        completion: @escaping @MainActor @Sendable (WorktreeCleanup.Execution) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let execution = WorktreeCleanup.execute(plan, tools: tools)
+            DispatchQueue.main.async { completion(execution) }
         }
     }
 
@@ -267,10 +294,7 @@ extension NiruxShellView {
         }
     }
 
-    private func reportWorktreeCleanup(
-        _ execution: WorktreeCleanup.Execution, of candidate: WorktreeCleanupCandidate, plan: WorktreeCleanup.Plan
-    ) {
-        let outcome = finishWorktreeCleanup(execution, of: candidate, plan: plan)
+    private func reportWorktreeCleanup(_ outcome: CleanupOutcome, plan: WorktreeCleanup.Plan) {
         if !outcome.succeeded {
             let kept = outcome.keptOpen.isEmpty ? [] : [Self.keptOpenText(outcome.keptOpen) + "."]
             showWorktreeCleanupNotice(message: "Clean-up of \(plan.branch) stopped", lines: [outcome.message] + kept)
@@ -279,7 +303,7 @@ extension NiruxShellView {
         }
     }
 
-    private struct CleanupOutcome {
+    struct CleanupOutcome {
         let succeeded: Bool
         let message: String
         /// Workspaces left open for their unsaved editors.
@@ -357,8 +381,9 @@ extension NiruxShellView {
     private func inspectForPanel(_ candidate: WorktreeCleanupCandidate, panel: WorktreeCleanupPanel, queue: OperationQueue) {
         let path = candidate.path
         let agentFolders = candidate.agentFolders
+        let tools = worktreeCleanupTools
         Self.runOffMain(on: queue) {
-            let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
+            let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders, tools: tools)
             DispatchQueue.main.async { @MainActor [weak self, weak panel] in
                 guard let self, let panel else { return }
                 panel.update(path: path, inspection: inspection)
@@ -374,8 +399,9 @@ extension NiruxShellView {
     /// preselected.
     private func addUnopenedWorktrees(listedFrom directory: String, to panel: WorktreeCleanupPanel, queue: OperationQueue) {
         guard panel.markFolderScanned(directory) else { return }
+        let tools = worktreeCleanupTools
         Self.runOffMain(on: queue) {
-            let listing = WorktreeCleanup.worktreeListing(in: directory, tools: .installed) ?? []
+            let listing = WorktreeCleanup.worktreeListing(in: directory, tools: tools) ?? []
             // The first entry is the main checkout; a folder already gone
             // is for `git worktree prune`, not for this.
             let paths = listing.dropFirst().map(\.path).filter { $0.realPath != nil }
@@ -452,23 +478,16 @@ extension NiruxShellView {
                 panel.setResult(.skipped("Not run: another clean-up of it is in progress"), for: candidate.path)
                 return runWorktreeCleanups(rest, in: panel, finished: finished)
             }
-            Self.stoppingExplains(in: plan.worktree.path) { resumeExplains in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let execution = WorktreeCleanup.execute(plan)
-                    DispatchQueue.main.async { [weak self, weak panel] in
-                        resumeExplains()
-                        guard let self else { return finished() }
-                        self.worktreeCleanupsInFlight.remove(key)
-                        let outcome = self.finishWorktreeCleanup(execution, of: candidate, plan: plan)
-                        guard let panel else { return finished() }
-                        let keptNote = outcome.keptOpen.isEmpty ? "" : ". \(Self.keptOpenText(outcome.keptOpen))"
-                        panel.setResult(
-                            outcome.succeeded ? .done(outcome.message + keptNote) : .failed(outcome.message + keptNote),
-                            for: candidate.path
-                        )
-                        self.runWorktreeCleanups(rest, in: panel, finished: finished)
-                    }
-                }
+            executeWorktreeCleanup(plan, of: candidate) { [weak self, weak panel] outcome in
+                guard let self, let outcome else { return finished() }
+                self.worktreeCleanupsInFlight.remove(key)
+                guard let panel else { return finished() }
+                let keptNote = outcome.keptOpen.isEmpty ? "" : ". \(Self.keptOpenText(outcome.keptOpen))"
+                panel.setResult(
+                    outcome.succeeded ? .done(outcome.message + keptNote) : .failed(outcome.message + keptNote),
+                    for: candidate.path
+                )
+                self.runWorktreeCleanups(rest, in: panel, finished: finished)
             }
         case .checking, .notMerged, .blocked:
             panel.setResult(.skipped("Not run: no longer ready"), for: candidate.path)

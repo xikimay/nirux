@@ -285,6 +285,19 @@ New flow, built on the guarded typing `tell` already uses
   - `propose_rule(rule, evidence)`: a rule for the space brief, once the Lead
     sends tasks the same kind of finding a second time (see "Learned rules"
     below). Nothing reaches the brief without the user.
+  - `close_task(task)`: closes any task of the space, the user's too, as
+    Close Workspace does. When its pull request is merged, Clean Up
+    Worktree…'s checks run and, all passed, its worktree and local branch go
+    too (the call stands in for the alert's click); a task without a
+    repository has its folder moved to the Trash (for this tool only: Close
+    and Archive keep it). Otherwise they stay and the answer says why: not
+    merged, uncommitted changes, another workspace open in it… Refused while
+    its agent works or waits on the user (a dialog, a question handed over),
+    or Nirux can't tell (no hooks), with unsaved editor changes, with
+    sub-tasks open, and for a workspace that isn't a task (a main checkout).
+  - `move_task(task, position)`: moves a task among its siblings (the
+    space's tasks, a task's sub-tasks, or the archived ones), 1 for the top,
+    as dragging its row does: its sub-tasks follow, and the Lead stays first.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -292,7 +305,8 @@ New flow, built on the guarded typing `tell` already uses
   nobody claims within 15 s is taken back: nothing happens. A claimed one the
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
-- **No tool merges, removes a worktree or a branch, or reaches another space.**
+- **No tool merges or reaches another space.** Only `close_task` removes a
+  worktree and a branch, once Clean Up Worktree…'s checks pass.
 - **Sub-tasks under their task** (shipped with S11c for Mission children): a
   workspace keeps the task it is a sub-task of (`parentWorkspaceID`, saved
   with it) when it opens from ⌘N's "Sub-task of", or from the worktree skill

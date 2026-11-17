@@ -179,7 +179,7 @@ final class WorkspaceStore {
 
     @discardableResult
     func moveWorkspace(at index: Int, delta: Int) -> Bool {
-        guard delta != 0, let (candidates, position) = visibleGroupPosition(of: index) else { return false }
+        guard delta != 0, let (candidates, position) = siblingGroup(of: index) else { return false }
         let newPosition = position + delta
         guard candidates.indices.contains(newPosition) else { return false }
 
@@ -200,23 +200,24 @@ final class WorkspaceStore {
     /// the group's bounds; a move never crosses the active/inactive boundary.
     @discardableResult
     func moveWorkspace(at index: Int, toPosition targetPosition: Int) -> Bool {
-        guard let (candidates, position) = visibleGroupPosition(of: index) else { return false }
+        guard let (candidates, position) = siblingGroup(of: index) else { return false }
         let clamped = max(0, min(targetPosition, candidates.count - 1))
         guard clamped != position else { return false }
         return moveWorkspace(at: index, delta: clamped - position)
     }
 
-    /// A workspace's same-group neighbours within the visible (active
-    /// profile) list, plus its position among them. The Lead is a group of
+    /// A workspace's same-group neighbours in its space's sidebar list,
+    /// plus its position among them: the space on screen or not (the Lead
+    /// moves its tasks while the user is elsewhere). The Lead is a group of
     /// its own: it stays on top, and nothing moves above it.
-    private func visibleGroupPosition(of index: Int) -> (candidates: [Int], position: Int)? {
+    func siblingGroup(of index: Int) -> (candidates: [Int], position: Int)? {
         guard workspaces.indices.contains(index) else { return nil }
         let isInactive = workspaces[index].isInactive
         let isLead = workspaces[index].isLead
         // Among its siblings: a child moves under its parent, a card with
         // children among the cards with none above them.
         let parents = activeParents(in: workspaces[index].profileID)
-        let candidates = visibleWorkspaceIndices.filter {
+        let candidates = visibleWorkspaceIndices(in: workspaces[index].profileID).filter {
             workspaces[$0].isInactive == isInactive && workspaces[$0].isLead == isLead && parents[$0] == parents[index]
         }
         guard let position = candidates.firstIndex(of: index) else { return nil }
