@@ -176,7 +176,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             try writeConfig(for: space)
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
             shell.addWorkspace(title: "login", cwd: login, profileID: space.id)
-            let index = { @MainActor (title: String) in try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title }) }
+            let index: @MainActor (String) throws -> Int = { title in try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title }) }
             shell.switchToWorkspace(try index("widgets"))
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
@@ -190,7 +190,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // Noon: the next seconds stay the same day.
             let now = BoardStages.midnight(of: Date().timeIntervalSince1970) + 12 * 3_600
             let pass = NiruxShellView.SidebarPassReadings(infos: [], foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:])
-            let builtAt = { @MainActor (now: TimeInterval) -> TimeInterval? in
+            let builtAt: @MainActor (TimeInterval) -> TimeInterval? = { now in
                 _ = shell.readProjectBoards(snapshot: ProcessSnapshot(entries: []), now: now, pass: pass)
                 return board.builtStages?.content.now
             }
