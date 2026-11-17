@@ -76,6 +76,7 @@ extension NiruxShellView {
             guard let self, let board else { return }
             self.renderProjectBoard(board)
         }
+        board.onConfigRead = { [weak self] entries in self?.boardEntriesBySpace[projectID] = entries }
         board.onNeedsSettings = { [weak self, weak board] in
             guard let self, let board, self.profiles.contains(where: { $0.id == board.projectID }) else { return }
             self.showBoardSettings(profileID: board.projectID)

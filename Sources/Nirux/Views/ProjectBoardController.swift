@@ -167,6 +167,8 @@ final class ProjectBoardController {
     /// reads nothing.
     /// Something was read: the shell renders the board again.
     var onRead: (() -> Void)?
+    /// board.json was read: its entries, none when unreadable.
+    var onConfigRead: (([BoardConfigStore.Entry]) -> Void)?
     /// A board without a repository asks for Board Settings.
     var onNeedsSettings: (() -> Void)?
 
@@ -373,6 +375,7 @@ final class ProjectBoardController {
         self.context = context
         // An unreadable file holds no config this build can use.
         let entries = newConfig.status == .unreadable ? [] : newConfig.entries
+        onConfigRead?(entries)
         sections = BoardSections.sections(entries, context: context)
         ownSections = sections
         let anchored = Set(sections.compactMap(\.commonDir))

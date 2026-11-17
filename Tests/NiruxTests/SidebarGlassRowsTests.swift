@@ -362,8 +362,10 @@ final class SidebarGlassRowsTests: XCTestCase {
             columns: info.columns, prInfo: info.prInfo, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
             phase: .active, lastSummary: nil, lastActivityAt: nil
         )
+        XCTAssertNil(shell.withStation(info).station, "its space's checks not read yet: none known")
+        shell.boardEntriesBySpace[workspace.profileID] = []
         let alone = shell.withStation(info).station
-        XCTAssertEqual(alone, NiruxShellView.station(of: info, reviewsInFlight: []), "the Board's rule, from the row")
+        XCTAssertEqual(alone, NiruxShellView.station(of: info, required: [], reviewsInFlight: []), "the Board's rule, from the row")
         XCTAssertEqual(alone, .reviews, "open, out of draft, its review not run yet")
 
         let board = shell.makeProjectBoard(projectID: workspace.profileID, offersSettings: true)
@@ -380,6 +382,60 @@ final class SidebarGlassRowsTests: XCTestCase {
         )
         XCTAssertNil(shell.withStation(folder).station, "no repository, no stations")
         XCTAssertEqual(shell.withStation(folder).stateIcon, StateIcon(.working), "and no fill")
+    }
+
+    /// A row counts the checks its space's Board requires (board.json), so
+    /// opening the Board moves no station: a check still running that the
+    /// Board doesn't require holds back the row no more than the Board's line.
+    func testOpeningTheBoardMovesNoStation() throws {
+        let head = String(repeating: "a", count: 40)
+        let checks = [("test", ProjectBoard.CheckResult.success), ("lint", .pending)].map {
+            ProjectBoard.Check(name: $0.0, workflowName: nil, result: $0.1, startedAt: "2026-11-11T12:00:00Z", url: nil)
+        }
+        let url = "https://github.com/Acme/Widgets/pull/12"
+        let pr = PRInfo(
+            number: 12, state: "OPEN", isDraft: false, ciStatus: "PENDING", checks: checks, reviewDecision: nil, mergeable: nil,
+            url: url, additions: nil, deletions: nil, changedFiles: nil
+        )
+        var info = row([column(.working)], pullRequest: pr)
+        var review = ReviewRun(head: head, at: 900)
+        review.branch = "feat/checkout"
+        info.reviewBadges = ReviewBadges(runs: [.codeReview: review], head: head)
+        var config = BoardConfig()
+        config.repository = "acme/widgets"
+        config.requiredChecks = ["test"]
+        var legacy = config
+        legacy.requiredChecks = ["lint"]
+        let entries = [
+            BoardConfigStore.Entry(slot: .legacy, config: legacy),
+            BoardConfigStore.Entry(slot: .anchor(commonDir: "/p/widgets/.git"), config: config)
+        ]
+        let required = NiruxShellView.requiredChecks(of: pr, in: entries)
+        XCTAssertEqual(required, ["test"], "the anchor's config before schema 1's, GitHub's case ignored")
+        var elsewhere = config
+        elsewhere.repository = "acme/gadgets"
+        XCTAssertEqual(NiruxShellView.requiredChecks(of: pr, in: [BoardConfigStore.Entry(slot: .legacy, config: elsewhere)]), [])
+
+        // The Board's line: the same pull request, its section's config.
+        let boardPullRequest = ProjectBoard.PullRequest(
+            number: 12, state: "OPEN", headRefName: "feat/checkout", headOid: head, baseRefName: "main", isDraft: false,
+            mergeable: "MERGEABLE", checks: checks, url: url, isFromConfiguredRepository: true, title: "", mergedAt: nil
+        )
+        let boardRow = ProjectBoard.Row(
+            group: .active, worktreePath: "/p/widgets.x", branch: "feat/checkout", detachedHead: nil,
+            workspaces: [ProjectBoard.WorkspaceRef(id: info.id, title: info.title, isInactive: false)],
+            pullRequest: boardPullRequest, agent: ProjectBoard.Agent(), folder: nil, stack: nil
+        )
+        let section = BoardStages.sectionFacts(
+            BoardStages.RepositoryReading(
+                id: "widgets", rows: [boardRow], readsPullRequests: true, requiredChecks: config.requiredChecks, baseBranch: "main",
+                queue: nil, merged: [], heads: [:], cleaningUp: [], gitHub: nil
+            ),
+            tasks: [info.id], readings: [info.id: BoardStages.TaskReading(info, summary: nil, gitRoot: nil)], parents: [:], lead: nil
+        )
+        let onBoard = try XCTUnwrap(section.lines.first { $0.id == info.id }).map { BoardStages.line($0).station }
+        XCTAssertEqual(onBoard, .merge, "lint isn't required: its run holds nothing")
+        XCTAssertEqual(NiruxShellView.station(of: info, required: required, reviewsInFlight: []), onBoard)
     }
 
     /// A row of the list out of view takes no press, no hover and no menu

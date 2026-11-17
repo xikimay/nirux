@@ -194,6 +194,12 @@ final class NiruxShellView: NSView {
     var toastShownAt: TimeInterval = 0
     /// The Board tab's form (see NiruxShellView+BoardSettings).
     var boardSettingsPanel: BoardSettingsPanel?
+    /// Each space's board.json entries, by space id, as its Board last read
+    /// them or Board Settings saved them: the rows count their checks as
+    /// the Board does (`boardEntries(of:)`).
+    var boardEntriesBySpace: [String: [BoardConfigStore.Entry]] = [:]
+    /// The spaces whose board.json is being read for the rows.
+    var boardEntriesReading: Set<String> = []
     /// The Board tab reading board.json and the checkouts: one read at a
     /// time.
     var isReadingBoardSettings = false

@@ -119,31 +119,70 @@ extension NiruxShellView {
     /// else read the Board's way from what the row holds.
     func withStation(_ info: WorkspaceInfo) -> WorkspaceInfo {
         var info = info
-        let board = projectBoardLocation(projectID: info.profileID)?.board
-        let reviewsInFlight = workspaces.first { $0.id == info.id }.map { Set($0.reviewsRunning.map(\.pass)) } ?? []
-        info.station = board?.stations[info.id] ?? Self.station(of: info, reviewsInFlight: reviewsInFlight)
+        if let shown = projectBoardLocation(projectID: info.profileID)?.board.stations[info.id] {
+            info.station = shown
+        } else if let entries = boardEntries(of: info.profileID) {
+            let reviewsInFlight = workspaces.first { $0.id == info.id }.map { Set($0.reviewsRunning.map(\.pass)) } ?? []
+            info.station = Self.station(
+                of: info, required: Self.requiredChecks(of: info.prInfo, in: entries), reviewsInFlight: reviewsInFlight
+            )
+        } else {
+            // Its space's checks not read yet: no station known.
+            info.station = nil
+        }
         return info
+    }
+
+    /// `spaceID`'s board.json entries; nil while they are read, once, off
+    /// the main thread (its Board and Board Settings keep them current).
+    func boardEntries(of spaceID: String) -> [BoardConfigStore.Entry]? {
+        if let entries = boardEntriesBySpace[spaceID] { return entries }
+        guard let store = BoardConfigStore(spaceID: spaceID) else { return [] }
+        guard boardEntriesReading.insert(spaceID).inserted else { return nil }
+        ProjectBoardController.readOffMain({ store.load() }, then: { [weak self] loaded in
+            guard let self else { return }
+            self.boardEntriesReading.remove(spaceID)
+            // Its Board may have read the file meanwhile.
+            if self.boardEntriesBySpace[spaceID] == nil {
+                self.boardEntriesBySpace[spaceID] = loaded.status == .unreadable ? [] : loaded.entries
+            }
+        })
+        return nil
+    }
+
+    /// The checks a pull request must pass on its Board: the config naming
+    /// its repository, an anchor's before schema 1's (`BoardSections`
+    /// gives the latter only to an anchor without its own). None named: the
+    /// Board's section has no config, every check counts.
+    static func requiredChecks(of pullRequest: PRInfo?, in entries: [BoardConfigStore.Entry]) -> [String] {
+        guard let path = pullRequest.flatMap({ URL(string: $0.url) }).map(\.pathComponents), path.count >= 3,
+              let repository = GitHubRepository(ownerAndName: "\(path[1])/\(path[2])")
+        else { return [] }
+        let naming = entries.filter { $0.config.gitHubRepository == repository }
+        return (naming.first { $0.slot != .legacy } ?? naming.first)?.config.requiredChecks ?? []
     }
 
     /// A task's station from its row alone, through the Board's own rule
     /// (`BoardStages.station(of:rules:)`), with no read of its own: the pull
-    /// request as the row knows it, every check counted (the Board's
-    /// required ones are its repository's), the default review rules, no
-    /// queue (a pull request ready shows at Merge). Nil without a
-    /// repository: no stations.
-    static func station(of info: WorkspaceInfo, reviewsInFlight: Set<ReviewPass>) -> BoardStages.Station? {
+    /// request as the row knows it, the space's `required` checks, the
+    /// Board's review rules, no queue (a pull request ready shows at
+    /// Merge). Nil without a repository: no stations.
+    static func station(
+        of info: WorkspaceInfo, required: [String], reviewsInFlight: Set<ReviewPass>
+    ) -> BoardStages.Station? {
         guard info.gitBranch != nil else { return nil }
         var facts = BoardStages.Facts(id: info.id, title: info.title)
         let reading = BoardStages.TaskReading(info, summary: nil, gitRoot: nil, reviewsInFlight: reviewsInFlight)
         facts.activity = reading.activity
-        facts.reviews = reading.reviews
+        // Only the runs recorded on its branch count, as on its Board's line.
+        facts.reviews = reading.reviews.map { ReviewBadges(runs: $0.runs, head: $0.head, branch: info.gitBranch) }
         facts.reviewsInFlight = reading.reviewsInFlight
         facts.pullRequest = info.prInfo.map { pr in
             let isMerged = pr.state == "MERGED"
             var pullRequest = BoardStages.PullRequest(number: pr.number, base: "")
             pullRequest.isMerged = isMerged
             pullRequest.isDraft = pr.isDraft
-            pullRequest.checks = isMerged ? .passed : BoardStages.checks(latest: ProjectBoard.latest(pr.checks), required: [])
+            pullRequest.checks = isMerged ? .passed : BoardStages.checks(latest: ProjectBoard.latest(pr.checks), required: required)
             return pullRequest
         }
         return BoardStages.station(of: facts, rules: BoardStages.Rules())
