@@ -10,12 +10,12 @@ Each task runs in its own git worktree, a separate checkout of the repository, s
 
 - Give each task its own workspace: terminals, a browser and an editor side by side.
 - See where each task stands from its state icon: working, waiting for you, stopped on an error, checks running, ready to merge.
-- Allow or deny an agent's command from the sidebar, without opening its terminal.
+- When a Claude Code agent asks to run a command, allow or deny it from the sidebar, without opening its terminal (not in Auto mode).
 - Start a task with `Cmd+N`: Nirux creates the worktree and starts the agent in it.
 - Have a Lead agent start tasks, follow them and bring you only what needs you.
 - Follow each task's pull request from the sidebar, including CI failures that look flaky.
 - Read a branch's whole diff on one page.
-- Choose how much of your desktop shows through the window, from Opaque to Clear, in **Settings › Appearance**.
+- Choose how much of your desktop shows through the window, from Opaque, the default, to Clear, in **Settings › Appearance**.
 
 ## Install
 
@@ -34,7 +34,7 @@ To start agents, Nirux needs `claude` or `codex` installed. Pull request and CI 
 2. Choose **Space › New Space…**, name the space and add your repository. A space groups the work on one product.
 3. Press `Cmd+N`, describe a task and press Return. Nirux fetches the base branch, creates a worktree on a new branch and starts the agent there with your description.
 
-A task's row turns amber when its agent needs you, and the command bar at the top of the window counts the agents waiting. `Cmd+J` goes to the one that has waited longest, those you have not seen yet first. `Cmd+P`, or the search in the command bar, opens the command palette, which also switches workspaces. `Ctrl+Cmd+S` folds the sidebar into a rail of icons.
+A task's row turns amber when its agent needs you, and the command bar at the top of the window counts the agents waiting in every space. `Cmd+J` goes to the one that has waited longest, those you have not seen yet first. `Cmd+P`, or the search in the command bar, opens the command palette, which also switches workspaces. `Ctrl+Cmd+S` folds the sidebar into a rail of icons; `Cmd+J` then lists the waiting requests under the command bar.
 
 ## Agent status hooks
 
