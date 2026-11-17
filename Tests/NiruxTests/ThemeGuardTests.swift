@@ -60,52 +60,57 @@ final class ThemeGuardTests: XCTestCase {
 
     /// Font sizes, corner radii and shadows written as numbers outside
     /// `Theme`: no file may gain any (docs/design/glass-interface.md). The
-    /// counts below are what each file held on 2026-11-14; lower a count when
-    /// you remove some. The Board's and the merge queue's files join once the
-    /// Board's swap is done.
+    /// counts below are each file's today; lower a count when you remove some.
     func testNoNewLiteralFontsRadiiOrShadows() throws {
         let literal = try NSRegularExpression(pattern: #"""
             (systemFont|boldSystemFont|monospacedSystemFont|monospacedDigitSystemFont) \( \s* ofSize: \s* [0-9]
             | cornerRadius \s* = \s* [0-9] | xRadius: \s* [0-9]
             | shadow(Opacity|Radius|BlurRadius) \s* = \s* [0-9] | shadowOffset \s* = \s* (CGSize|NSSize) \( \s* width: \s* -? [0-9]
             """#, options: .allowCommentsAndWhitespace)
-        let paths = try FileManager.default.subpathsOfDirectory(atPath: sources.path).filter {
-            $0.hasSuffix(".swift") && $0 != "Util/Theme.swift"
-                && !$0.hasPrefix("Views/Board") && !$0.hasPrefix("Model/Board")
-                && !$0.hasPrefix("Views/ProjectBoard") && !$0.hasPrefix("Model/ProjectBoard")
-                && !$0.hasPrefix("Views/MergeQueue") && !$0.hasPrefix("Model/MergeQueue")
-        }
-        var grown: [String] = []
-        for path in paths {
+        XCTAssertEqual(try grown(literal, past: Self.literalCounts), [], "use Theme.Font, Theme.Radius and Theme's tokens; add one to Util/Theme.swift when none fits")
+    }
+
+    /// What else holds a value of its own instead of a token: a symbol's
+    /// point size, a corner radius from a local constant (a capsule's half
+    /// height stays free), a named system colour, a white alpha. Same rule:
+    /// the counts only go down.
+    func testNoNewSymbolSizesLocalRadiiSystemColoursOrWhiteAlphas() throws {
+        let loose = try NSRegularExpression(pattern: #"""
+            SymbolConfiguration \( \s* pointSize: \s* [0-9]
+            | cornerRadius \s* = \s* (?!Theme\.Radius|[0-9]) (?![^\n]* / \s* 2 \b)
+            | \.system(Green|Red|Blue|Purple|Pink|Teal|Indigo|Gray|Brown|Mint|Cyan) \b
+            | \.white\.withAlphaComponent\(
+            """#, options: .allowCommentsAndWhitespace)
+        XCTAssertEqual(try grown(loose, past: Self.looseCounts), [], "size a symbol from a Theme.Font, round with Theme.Radius, colour with Theme.Color; add a token to Util/Theme.swift when none fits")
+    }
+
+    /// "path: count, was ceiling" for each source past its ceiling.
+    private func grown(_ pattern: NSRegularExpression, past ceilings: [String: Int]) throws -> [String] {
+        let paths = try FileManager.default.subpathsOfDirectory(atPath: sources.path)
+            .filter { $0.hasSuffix(".swift") && $0 != "Util/Theme.swift" }
+        XCTAssertGreaterThan(paths.count, 100, "found too few sources under \(sources.path)")
+        return try paths.sorted().compactMap { path in
             let text = try String(contentsOf: sources.appendingPathComponent(path), encoding: .utf8)
-            let count = literal.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
-            let allowed = Self.literalCounts[path] ?? 0
-            if count > allowed { grown.append("\(path): \(count), was \(allowed)") }
+            let count = pattern.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+            let allowed = ceilings[path] ?? 0
+            return count > allowed ? "\(path): \(count), was \(allowed)" : nil
         }
-        XCTAssertEqual(grown, [], "use Theme.Font, Theme.Radius and Theme's tokens; add one to Util/Theme.swift when none fits")
     }
 
     private static let literalCounts: [String: Int] = [
         "Model/WorkspaceState.swift": 1,
-        "Views/ClaudeUsageIndicator.swift": 1,
-        "Views/ColumnInternalViews.swift": 6,
         "Views/CommandPalette+URLMode.swift": 4,
-        "Views/CommandPalette.swift": 4,
-        "Views/EditorFileTree.swift": 8,
-        "Views/EditorSearchPanel.swift": 5,
+        "Views/CommandPalette.swift": 3,
+        "Views/EditorSearchPanel.swift": 4,
         "Views/EditorTabBar.swift": 4,
-        "Views/FilePickerPanel.swift": 5,
+        "Views/FilePickerPanel.swift": 4,
         "Views/FindBar.swift": 4,
-        "Views/GlobalSearchPanel.swift": 7,
         "Views/LocalServerChipView.swift": 3,
         "Views/MissionReplyViewController.swift": 1,
         "Views/NewSpacePanel.swift": 2,
-        "Views/NewTaskPanel.swift": 3,
+        "Views/NewTaskPanel.swift": 1,
         "Views/NiruxShellView+SidebarGit.swift": 1,
-        "Views/OnboardingChecklistView.swift": 13,
-        "Views/ProjectMemoryPanel.swift": 1,
         "Views/RaycastPanel.swift": 2,
-        "Views/SessionHistoryPanel.swift": 1,
         "Views/SidebarShortcutHintView.swift": 4,
         "Views/SidebarView+Drag.swift": 5,
         "Views/SidebarView+Rendering.swift": 1,
@@ -117,9 +122,63 @@ final class ThemeGuardTests: XCTestCase {
         "Views/StatusBarView.swift": 6,
         "Views/ToastView.swift": 3,
         "Views/TransientHintView.swift": 2,
-        "Views/WorkspaceContextPanel.swift": 13,
         "Views/WorkspaceNameCard.swift": 4,
         "Views/WorktreeCleanupPanel.swift": 7
+    ]
+
+    private static let looseCounts: [String: Int] = [
+        "Model/WorkspaceState.swift": 1,
+        "Views/BoardSettingsPanel.swift": 7,
+        "Views/BoardStagesView.swift": 2,
+        "Views/ClaudeUsageIndicator.swift": 1,
+        "Views/ColumnHeaderView.swift": 2,
+        "Views/ColumnIndicatorView.swift": 1,
+        "Views/ColumnInternalViews.swift": 6,
+        "Views/CommandBarView.swift": 1,
+        "Views/CommandPalette+URLMode.swift": 2,
+        "Views/CommandPalette.swift": 9,
+        "Views/EdgeGlowView.swift": 2,
+        "Views/EditorColumn.swift": 1,
+        "Views/EditorFileTree.swift": 8,
+        "Views/EditorSearchPanel.swift": 6,
+        "Views/EditorTabBar.swift": 4,
+        "Views/FilePickerPanel.swift": 4,
+        "Views/FindBar.swift": 3,
+        "Views/GlassView.swift": 7,
+        "Views/GlobalSearchPanel.swift": 8,
+        "Views/KeepAwakeIndicator.swift": 2,
+        "Views/KeyCap.swift": 1,
+        "Views/LocalServerChipView.swift": 2,
+        "Views/MergeQueueConfirmationPanel.swift": 6,
+        "Views/MissionReplyViewController.swift": 2,
+        "Views/NewSpacePanel.swift": 2,
+        "Views/NewTaskPanel.swift": 1,
+        "Views/NiruxShellView+SidebarGit.swift": 1,
+        "Views/NiruxShellView+TaskBirth.swift": 1,
+        "Views/NiruxShellView+Workspaces.swift": 1,
+        "Views/OnboardingChecklistView.swift": 17,
+        "Views/ProjectMemoryPanel.swift": 3,
+        "Views/RaycastPanel.swift": 2,
+        "Views/RequestCardView.swift": 1,
+        "Views/ReviewSendPanel.swift": 1,
+        "Views/SessionHistoryPanel.swift": 1,
+        "Views/SettingsSidebar.swift": 2,
+        "Views/SidebarApprovalBlockRenderer.swift": 1,
+        "Views/SidebarBadgeView.swift": 1,
+        "Views/SidebarCatchUp.swift": 1,
+        "Views/SidebarShortcutHintView.swift": 4,
+        "Views/SidebarView+Drag.swift": 4,
+        "Views/SidebarView+Rendering.swift": 2,
+        "Views/SidebarWorkspaceCardRenderer.swift": 7,
+        "Views/SpaceArrivalBanner.swift": 1,
+        "Views/SpaceFileEditorPane.swift": 1,
+        "Views/SpaceSettingsDefaultsPane.swift": 1,
+        "Views/StatusBarView.swift": 9,
+        "Views/TransientHintView.swift": 3,
+        "Views/WebAddressField.swift": 1,
+        "Views/WorkspaceContextPanel.swift": 18,
+        "Views/WorkspaceNameCard.swift": 1,
+        "Views/WorktreeCleanupPanel.swift": 13
     ]
 
     /// 1-based lines of `path` with a literal color, `.darkAqua`, `niruxAccent`, or orange or yellow as a colour

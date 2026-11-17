@@ -131,7 +131,7 @@ final class EditorBranchReviewBanner: NSView {
         openButton.action = #selector(openClicked)
         openButton.bezelStyle = .rounded
         openButton.controlSize = .small
-        openButton.font = .systemFont(ofSize: 11, weight: .medium)
+        openButton.font = Theme.Font.buttonSmall
         addSubview(openButton)
     }
 
@@ -168,13 +168,13 @@ final class EditorLoadFailureOverlay: NSView {
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.base.cgColor
 
-        messageLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        messageLabel.font = Theme.Font.bodyMedium
         messageLabel.textColor = NSColor.white.withAlphaComponent(0.55)
         messageLabel.alignment = .center
         addSubview(messageLabel)
 
         retryButton.bezelStyle = .rounded
-        retryButton.font = .systemFont(ofSize: 12, weight: .medium)
+        retryButton.font = Theme.Font.button
         retryButton.target = self
         retryButton.action = #selector(retryClicked)
         addSubview(retryButton)
@@ -242,12 +242,12 @@ final class ShellExitedOverlay: NSView {
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.canvas.withAlphaComponent(0.92).cgColor
 
-        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.font = Theme.Font.title
         label.textColor = NSColor.white.withAlphaComponent(0.85)
         label.alignment = .center
         addSubview(label)
 
-        hint.font = .systemFont(ofSize: 11)
+        hint.font = Theme.Font.caption
         hint.textColor = NSColor.white.withAlphaComponent(0.45)
         hint.alignment = .center
         hint.lineBreakMode = .byTruncatingTail
@@ -257,7 +257,7 @@ final class ShellExitedOverlay: NSView {
             (restartButton, #selector(restartClicked)), (dismissButton, #selector(dismissClicked))
         ] {
             button.bezelStyle = .rounded
-            button.font = .systemFont(ofSize: 12, weight: .medium)
+            button.font = Theme.Font.button
             button.target = self
             button.action = action
             addSubview(button)

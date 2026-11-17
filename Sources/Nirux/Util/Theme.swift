@@ -79,19 +79,31 @@ enum Theme {
     enum Font {
         /// Project name, panel titles.
         static var display: NSFont { NSFont.systemFont(ofSize: 15, weight: .semibold) }
+        /// What the user types in a floating panel: ⌘P, the pickers, the
+        /// New sheet's description.
+        static var input: NSFont { NSFont.systemFont(ofSize: 15) }
         /// Card titles, palette rows.
         static var title: NSFont { NSFont.systemFont(ofSize: 13, weight: .semibold) }
         static var body: NSFont { NSFont.systemFont(ofSize: 12) }
+        /// Body text that stands out by weight, not colour: a changed file's
+        /// name, a search hit's place, a done message.
+        static var bodyMedium: NSFont { NSFont.systemFont(ofSize: 12, weight: .medium) }
         /// Column header titles.
         static var bodyEmphasized: NSFont { NSFont.systemFont(ofSize: 12, weight: .semibold) }
         /// Durations, counts, chips, tooltips.
         static var caption: NSFont { NSFont.systemFont(ofSize: 11) }
         /// Count badges and small headings.
         static var captionEmphasized: NSFont { NSFont.systemFont(ofSize: 11, weight: .semibold) }
+        /// Times, counts and line numbers that change in place: digits of
+        /// one width, so the text beside them doesn't shift.
+        static var captionDigits: NSFont { NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular) }
         /// Section labels only, uppercased and tracked by `labelKern`.
         static var label: NSFont { NSFont.systemFont(ofSize: 10, weight: .semibold) }
         static let labelKern: CGFloat = 0.6
         static var mono: NSFont { NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) }
+        /// Short codes in a chip or a badge: a file's git letter, a command
+        /// to copy.
+        static var monoBadge: NSFont { NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold) }
         /// Commands to approve, raw context.
         static var code: NSFont { NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) }
         /// Titles in the glass interface's bars and lists (the command bar's

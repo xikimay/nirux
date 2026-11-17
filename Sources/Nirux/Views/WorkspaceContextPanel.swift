@@ -106,20 +106,20 @@ final class WorkspaceContextPanel {
         let container = makeContainer()
 
         let heading = NSTextField(labelWithString: "Workspace Context")
-        heading.font = .systemFont(ofSize: 13, weight: .semibold)
+        heading.font = Theme.Font.title
         heading.textColor = NSColor.white.withAlphaComponent(0.48)
         heading.frame = NSRect(x: 24, y: 600, width: 200, height: 18)
         container.addSubview(heading)
 
         let title = NSTextField(labelWithString: "")
-        title.font = .monospacedSystemFont(ofSize: 20, weight: .bold)
+        title.font = Theme.Font.display
         title.textColor = NSColor.white.withAlphaComponent(0.94)
         title.lineBreakMode = .byTruncatingTail
         title.frame = NSRect(x: 24, y: 570, width: Self.size.width - 48, height: 26)
         container.addSubview(title)
 
         let cwd = NSTextField(labelWithString: "")
-        cwd.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        cwd.font = Theme.Font.mono
         cwd.textColor = NSColor.white.withAlphaComponent(0.36)
         cwd.lineBreakMode = .byTruncatingMiddle
         cwd.frame = NSRect(x: 24, y: 550, width: Self.size.width - 48, height: 16)
@@ -131,14 +131,14 @@ final class WorkspaceContextPanel {
 
         container.addSubview(fieldLabel("Phase", y: 436))
         let phase = NSPopUpButton(frame: NSRect(x: 24, y: 402, width: 230, height: 28), pullsDown: false)
-        phase.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        phase.font = Theme.Font.mono
         container.addSubview(phase)
 
         container.addSubview(fieldLabel("Latest meaningful summary", y: 372))
         let summary = makeTextEditor(frame: NSRect(x: 24, y: 294, width: Self.size.width - 48, height: 72))
         container.addSubview(summary.scrollView)
         let summaryHelp = NSTextField(labelWithString: "")
-        summaryHelp.font = .systemFont(ofSize: 10, weight: .regular)
+        summaryHelp.font = Theme.Font.caption
         summaryHelp.textColor = NSColor.white.withAlphaComponent(0.34)
         summaryHelp.lineBreakMode = .byTruncatingTail
         summaryHelp.frame = NSRect(x: 24, y: 276, width: Self.size.width - 48, height: 14)
@@ -154,7 +154,7 @@ final class WorkspaceContextPanel {
         blocker.placeholderString = "What is preventing progress?"
         container.addSubview(blocker)
         let contextHelp = NSTextField(labelWithString: "")
-        contextHelp.font = .systemFont(ofSize: 10, weight: .regular)
+        contextHelp.font = Theme.Font.caption
         contextHelp.textColor = NSColor.white.withAlphaComponent(0.34)
         contextHelp.lineBreakMode = .byTruncatingTail
         contextHelp.frame = NSRect(x: 24, y: 194, width: Self.size.width - 48, height: 14)
@@ -163,13 +163,13 @@ final class WorkspaceContextPanel {
         container.addSubview(fieldLabel("Live context", y: 179))
         let liveBackground = NSView(frame: NSRect(x: 24, y: 61, width: Self.size.width - 48, height: 112))
         liveBackground.wantsLayer = true
-        liveBackground.layer?.cornerRadius = 7
+        liveBackground.layer?.cornerRadius = Theme.Radius.card
         liveBackground.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.025).cgColor
         liveBackground.layer?.borderWidth = 1
         liveBackground.layer?.borderColor = NSColor.white.withAlphaComponent(0.06).cgColor
         container.addSubview(liveBackground)
         let live = NSTextField(wrappingLabelWithString: "")
-        live.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        live.font = Theme.Font.mono
         live.textColor = NSColor.white.withAlphaComponent(0.52)
         live.maximumNumberOfLines = 6
         live.frame = NSRect(x: 12, y: 9, width: liveBackground.bounds.width - 24, height: 94)
@@ -220,7 +220,7 @@ final class WorkspaceContextPanel {
     private func makeContainer() -> NSView {
         let container = NSView(frame: NSRect(origin: .zero, size: Self.size))
         container.wantsLayer = true
-        container.layer?.cornerRadius = 12
+        container.layer?.cornerRadius = Theme.Radius.panel
         container.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.99).cgColor
         container.layer?.borderWidth = 1
         container.layer?.borderColor = NSColor.white.withAlphaComponent(0.09).cgColor
@@ -265,7 +265,7 @@ final class WorkspaceContextPanel {
 
     private func fieldLabel(_ text: String, x: CGFloat = 24, y: CGFloat) -> NSTextField {
         let label = NSTextField(labelWithString: text.uppercased())
-        label.font = .monospacedSystemFont(ofSize: 9.5, weight: .semibold)
+        label.font = Theme.Font.label
         label.textColor = NSColor.white.withAlphaComponent(0.46)
         label.frame = NSRect(x: x, y: y, width: 260, height: 14)
         return label
@@ -277,13 +277,13 @@ final class WorkspaceContextPanel {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = 7
+        scroll.layer?.cornerRadius = Theme.Radius.control
         scroll.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.035).cgColor
         scroll.layer?.borderWidth = 1
         scroll.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
 
         let editor = NSTextView(frame: scroll.bounds)
-        editor.font = .systemFont(ofSize: 12.5, weight: .regular)
+        editor.font = Theme.Font.body
         editor.textColor = NSColor.white.withAlphaComponent(0.88)
         editor.backgroundColor = .clear
         editor.drawsBackground = false
@@ -302,7 +302,7 @@ final class WorkspaceContextPanel {
 
     private func makeSingleLineField(frame: NSRect) -> NSTextField {
         let field = NSTextField(frame: frame)
-        field.font = .systemFont(ofSize: 12, weight: .regular)
+        field.font = Theme.Font.body
         field.textColor = NSColor.white.withAlphaComponent(0.88)
         field.backgroundColor = NSColor.white.withAlphaComponent(0.035)
         field.isBezeled = true
