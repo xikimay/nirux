@@ -87,7 +87,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         SettingsForm.select(defaults.taskAgent.rawValue, in: agentPopup)
 
         fill(claudePopup, settings: Self.shortName(actions.settingsClaudeMode().displayName),
-             modes: ClaudeLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
+             modes: ClaudeLaunchMode.choices(keeping: defaults.claudeLaunchMode).map { ($0.rawValue, $0.displayName) },
              selected: defaults.claudeLaunchMode?.rawValue)
         fill(codexPopup, settings: Self.shortName(actions.settingsCodexMode().displayName),
              modes: CodexLaunchMode.allCases.map { ($0.rawValue, $0.displayName) },
@@ -108,7 +108,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         SettingsForm.select(selected ?? Self.settingsChoice, in: popup)
     }
 
-    /// "Accept edits (file edits + …)" reads "Accept edits".
+    /// "Accept edits (edits and …)" reads "Accept edits".
     static func shortName(_ displayName: String) -> String {
         displayName.components(separatedBy: " (").first ?? displayName
     }

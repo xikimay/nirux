@@ -488,9 +488,6 @@ extension NiruxShellView {
 
     /// Map a running `claude` process's argv flags back to the launch mode it
     /// was started with, so restore reproduces the column faithfully.
-    /// `--dangerously-skip-permissions` and `--permission-mode bypassPermissions`
-    /// are *not* equivalent (the former bypasses protected dirs too), so they
-    /// map to distinct enum cases.
     private func detectClaudeLaunchMode(process: ForegroundProcess) -> ClaudeLaunchMode? {
         ClaudeLaunchMode.detect(arguments: process.arguments)
     }
@@ -509,6 +506,7 @@ extension ClaudeLaunchMode {
         }
         guard let index = arguments.firstIndex(of: "--permission-mode"),
               arguments.indices.contains(index + 1) else { return nil }
-        return ClaudeLaunchMode(rawValue: arguments[index + 1])
+        let mode = arguments[index + 1]
+        return mode == "default" ? .manual : ClaudeLaunchMode(rawValue: mode)
     }
 }

@@ -171,12 +171,13 @@ extension NiruxApp {
 
     private func agentsPane() -> NSView {
         let claudeMode = SettingsForm.popup(target: self, action: #selector(settingsClaudeLaunchModeChanged(_:)))
-        for mode in ClaudeLaunchMode.allCases {
+        // The mode a launch would actually use, saved or not.
+        let launchMode = NiruxShellView.currentClaudeLaunchMode()
+        for mode in ClaudeLaunchMode.choices(keeping: launchMode) {
             claudeMode.addItem(withTitle: mode.displayName)
             claudeMode.lastItem?.representedObject = mode.rawValue
         }
-        // The mode a launch would actually use, saved or not.
-        SettingsForm.select(NiruxShellView.currentClaudeLaunchMode().rawValue, in: claudeMode)
+        SettingsForm.select(launchMode.rawValue, in: claudeMode)
         claudeMode.setAccessibilityLabel("Claude Code launch mode")
         settingsLaunchModePopup = claudeMode
 
@@ -229,7 +230,8 @@ extension NiruxApp {
                 SettingsForm.row("Launch mode", claudeMode),
                 noFlicker,
                 SettingsForm.hint(
-                    "Launch mode: --permission-mode (--dangerously-skip-permissions for Skip all). "
+                    "Launch mode: Claude Code default passes no flag, so your defaultMode applies, else Auto where "
+                        + "auto mode is available. The others pass --permission-mode (Skip all: --dangerously-skip-permissions). "
                         + "No-flicker: sets CLAUDE_CODE_NO_FLICKER=1."
                 ),
                 usageLimits,
