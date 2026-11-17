@@ -1,16 +1,22 @@
 import AppKit
 
-// MARK: - Space Settings › Safety (ClaudeSpaceSettings)
+// MARK: - Space Settings › Safety (ClaudeSpaceSettings, LoopRecap)
 
 extension NiruxShellView {
-    func spaceSettingsSafetyModel(for space: WorkspaceProfile) -> SpaceSettingsSafetyPane.Model {
+    func spaceSettingsSafetyModel(
+        for space: WorkspaceProfile, shown: SpaceSettingsSafetyPane.Model = .init()
+    ) -> SpaceSettingsSafetyPane.Model {
         let loaded = SpaceDefaultsStore(spaceID: space.id)?.load()
         let defaults = loaded?.defaults ?? SpaceDefaults()
+        let since = Date().timeIntervalSince1970 - Double(shown.periodDays) * 86_400
         return SpaceSettingsSafetyPane.Model(
             on: Set(ClaudeSpaceSettings.Part.allCases.filter(defaults.isOn)),
             repositories: ClaudeSpaceSettings.repositories(space.anchors),
             canChange: loaded?.isWritable ?? false,
-            problem: loaded?.problem
+            problem: loaded?.problem,
+            periodDays: shown.periodDays,
+            recap: LoopRecap.groups(LoopLog.load(spaceID: space.id), since: since),
+            added: defaults.addedLines
         )
     }
 
@@ -21,9 +27,19 @@ extension NiruxShellView {
         refreshSpaceSettingsSafety()
     }
 
-    func refreshSpaceSettingsSafety() {
+    /// A line the user added or removed from the recap.
+    func changeClaudeLines(spaceID: String, _ change: (inout SpaceDefaults) -> Void) {
+        changeSpaceDefaults(spaceID: spaceID, change)
+        refreshSpaceSettingsSafety()
+    }
+
+    /// The pane as the files hold it now, over the period it shows.
+    func refreshSpaceSettingsSafety(periodDays: Int? = nil) {
         guard let settings = spaceSettings, let space = profiles.first(where: { $0.id == settings.spaceID }) else { return }
-        let model = spaceSettingsSafetyModel(for: space)
+        var shown = settings.safety.model
+        if let periodDays { shown.periodDays = periodDays }
+        let model = spaceSettingsSafetyModel(for: space, shown: shown)
         if model != settings.safety.model { settings.safety.update(model) }
+        settings.fitToContent()
     }
 }

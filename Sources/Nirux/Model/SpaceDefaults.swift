@@ -26,6 +26,9 @@ struct SpaceDefaults: Equatable, Sendable {
     var claudeTrustsRepositories: Bool?
     var claudeDeniesIrreversible: Bool?
     var claudeSandbox: Bool?
+    /// Lines the user added from the recap (`ClaudeSpaceSettings.Line`).
+    var claudeAllow: [String] = []
+    var claudeEnvironment: [String] = []
 
     /// Whether the space's Lead starts its tasks itself.
     var leadStartsTasksWithoutAsking: Bool { leadStartsTasks ?? true }
@@ -35,6 +38,25 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Nothing is written for a part set to its default.
     mutating func set(_ part: ClaudeSpaceSettings.Part, on: Bool) {
         self[keyPath: part.key] = on == part.isOnByDefault ? nil : on
+    }
+
+    var addedLines: [ClaudeSpaceSettings.Line] {
+        claudeAllow.map(ClaudeSpaceSettings.Line.allow) + claudeEnvironment.map(ClaudeSpaceSettings.Line.environment)
+    }
+
+    mutating func add(_ line: ClaudeSpaceSettings.Line) {
+        guard !addedLines.contains(line) else { return }
+        switch line {
+        case .allow(let rule): claudeAllow.append(rule)
+        case .environment(let entry): claudeEnvironment.append(entry)
+        }
+    }
+
+    mutating func remove(_ line: ClaudeSpaceSettings.Line) {
+        switch line {
+        case .allow(let rule): claudeAllow.removeAll { $0 == rule }
+        case .environment(let entry): claudeEnvironment.removeAll { $0 == entry }
+        }
     }
 
     struct EnvironmentVariable: Equatable, Sendable {
@@ -133,14 +155,15 @@ struct SpaceDefaults: Equatable, Sendable {
 /// `{"schemaVersion": 1, "agent": "codex", "claudeLaunchMode": "plan",
 /// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}],
 /// "leadStartsTasks": false, "claudeTrustsRepositories": false,
-/// "claudeDeniesIrreversible": false, "claudeSandbox": true}`,
+/// "claudeDeniesIrreversible": false, "claudeSandbox": true,
+/// "claudeAllow": ["Bash(swift build:*)"], "claudeEnvironment": […]}`,
 /// every key optional, nothing written for what isn't set. Unknown keys and
 /// values are read-only reasons (see SpaceDefaultsStore), not decoding
 /// errors.
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks
-        case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox
+        case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox, claudeAllow, claudeEnvironment
     }
 
     private struct StoredVariable: Codable {
@@ -161,6 +184,8 @@ extension SpaceDefaults: Codable {
         claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
         claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
         claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
+        claudeAllow = ((try? container.decodeIfPresent([String].self, forKey: .claudeAllow)) ?? nil) ?? []
+        claudeEnvironment = ((try? container.decodeIfPresent([String].self, forKey: .claudeEnvironment)) ?? nil) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -176,5 +201,7 @@ extension SpaceDefaults: Codable {
         try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
         try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
         try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)
+        if !claudeAllow.isEmpty { try container.encode(claudeAllow, forKey: .claudeAllow) }
+        if !claudeEnvironment.isEmpty { try container.encode(claudeEnvironment, forKey: .claudeEnvironment) }
     }
 }

@@ -39,13 +39,13 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed; its brief stays.
+    /// proposed and its prompts' log; its brief stays.
     static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
         guard let folder = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory),
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
         for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
-            || name == RuleProposalStore.fileName {
+            || name == RuleProposalStore.fileName || name == LoopLog.fileName {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {
@@ -166,6 +166,9 @@ struct SpaceDefaultsStore: Sendable {
         ]
         for (key, value) in switches where value == nil && top[key.rawValue].map({ !($0 is NSNull) }) == true {
             unknown.insert(key.rawValue)
+        }
+        for key in [SpaceDefaults.CodingKeys.claudeAllow, .claudeEnvironment] {
+            if let value = top[key.rawValue], !(value is NSNull), !(value is [String]) { unknown.insert(key.rawValue) }
         }
         if let variables = top["environment"], !(variables is NSNull) {
             let entries = variables as? [Any] ?? []

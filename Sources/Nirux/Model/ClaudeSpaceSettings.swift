@@ -46,6 +46,21 @@ enum ClaudeSpaceSettings {
 
     static var denyRules: [String] { denyRuleGroups.flatMap { $0 } }
 
+    /// A line the user added from the recap (LoopRecap).
+    enum Line: Hashable, Sendable {
+        /// `permissions.allow`.
+        case allow(String)
+        /// `autoMode.environment`.
+        case environment(String)
+
+        var text: String {
+            switch self {
+            case .allow(let rule): return rule
+            case .environment(let entry): return entry
+            }
+        }
+    }
+
     /// A repository of the space, as auto mode hears of it.
     struct Repository: Equatable, Sendable {
         /// The main checkout, else the git dir.
@@ -56,7 +71,10 @@ enum ClaudeSpaceSettings {
 
     struct File: Encodable, Equatable {
         struct AutoMode: Encodable, Equatable { var environment: [String] }
-        struct Permissions: Encodable, Equatable { var deny: [String] }
+        struct Permissions: Encodable, Equatable {
+            var allow: [String]?
+            var deny: [String]?
+        }
         struct Sandbox: Encodable, Equatable { var enabled: Bool }
 
         var autoMode: AutoMode?
@@ -64,18 +82,22 @@ enum ClaudeSpaceSettings {
         var sandbox: Sandbox?
     }
 
-    /// What `defaults` turns on, or nil for nothing. The sandbox switched
-    /// off writes nothing, so the user's own setting holds. `userEnvironment`
-    /// is the user's `autoMode.environment`: Claude Code joins it with ours,
-    /// then puts its own entries at the first "$defaults", and a list
-    /// without one replaces them. Ours brings one only when the user's has
-    /// no list of its own.
+    /// What `defaults` turns on, and the lines the user added, or nil for
+    /// nothing. The sandbox switched off writes nothing, so the user's own
+    /// setting holds. `userEnvironment` is the user's `autoMode.environment`:
+    /// Claude Code joins it with ours, then puts its own entries at the
+    /// first "$defaults", and a list without one replaces them. Ours brings
+    /// one only when the user's has no list of its own.
     static func file(_ defaults: SpaceDefaults, repositories: [Repository], userEnvironment: [String]? = nil) -> File? {
         let keepsBuiltIn = userEnvironment?.isEmpty ?? true ? ["$defaults"] : []
+        let trusted = defaults.isOn(.trustRepositories) ? repositories.map(environmentEntry) : []
+        let environment = trusted + defaults.claudeEnvironment
+        let deny = defaults.isOn(.denyIrreversible) ? denyRules : []
         let file = File(
-            autoMode: defaults.isOn(.trustRepositories) && !repositories.isEmpty
-                ? File.AutoMode(environment: keepsBuiltIn + repositories.map(environmentEntry)) : nil,
-            permissions: defaults.isOn(.denyIrreversible) ? File.Permissions(deny: denyRules) : nil,
+            autoMode: environment.isEmpty ? nil : File.AutoMode(environment: keepsBuiltIn + environment),
+            permissions: deny.isEmpty && defaults.claudeAllow.isEmpty ? nil : File.Permissions(
+                allow: defaults.claudeAllow.isEmpty ? nil : defaults.claudeAllow, deny: deny.isEmpty ? nil : deny
+            ),
             sandbox: defaults.isOn(.sandbox) ? File.Sandbox(enabled: true) : nil
         )
         return file == File() ? nil : file

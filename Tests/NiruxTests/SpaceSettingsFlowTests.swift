@@ -118,6 +118,38 @@ final class SpaceSettingsFlowTests: XCTestCase {
         }
     }
 
+    /// The recap proposes a line for what keeps asking; Add puts it into
+    /// the next launch's file, Remove takes it out.
+    func testALineAddedFromTheRecapReachesTheNextLaunch() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try anchoredSpace(harness)
+            let now = Date().timeIntervalSince1970
+            for _ in 0..<3 {
+                LoopLog.append(.init(time: now, tool: "Bash", target: "swift build", mode: "default"), spaceID: space.id)
+            }
+            LoopLog.append(.init(time: now, tool: "AskUserQuestion", target: nil, mode: "default"), spaceID: space.id)
+            shell.showSpaceSettings(profileID: space.id, tab: .safety)
+            let pane = try XCTUnwrap(shell.spaceSettings).safety
+            XCTAssertEqual(pane.model.recap.map(\.count), [3, 1])
+            let line = ClaudeSpaceSettings.Line.allow("Bash(swift build:*)")
+            try XCTUnwrap(pane.addButtons[line]).performClick(nil)
+            XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space.id).claudeAllow, ["Bash(swift build:*)"])
+            XCTAssertEqual(pane.model.added, [line])
+            XCTAssertEqual(pane.addButtons[line]?.isEnabled, false, "added once")
+
+            shell.addWorkspace(title: "claude", cwd: harness.repo, agent: .claude, profileID: space.id)
+            harness.waitUntil("the Claude launch") { harness.agentLaunches.last?.hasPrefix("command claude") == true }
+            let file = try XCTUnwrap(ClaudeSpaceSettings.fileURL(spaceID: space.id))
+            let written = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            XCTAssertEqual((written["permissions"] as? [String: Any])?["allow"] as? [String], ["Bash(swift build:*)"])
+
+            try XCTUnwrap(pane.removeButtons[line]).performClick(nil)
+            XCTAssertEqual(SpaceDefaultsStore.defaults(forSpace: space.id).claudeAllow, [])
+            XCTAssertEqual(pane.model.added, [])
+        }
+    }
+
     /// A worktree Nirux makes runs its repository's script, then the agent;
     /// one asked for from outside Nirux, or an existing worktree opened,
     /// doesn't. Without an agent the script runs alone.

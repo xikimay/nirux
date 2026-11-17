@@ -536,6 +536,15 @@ struct AgentShellCommand: Equatable, Sendable {
         return commands
     }
 
+    /// Whether `family` names every subcommand its program takes: `git`
+    /// alone, `gh pr` or `npm run` stand for many commands.
+    static func namesWholeCommand(_ family: String) -> Bool {
+        let words = family.split(separator: " ").map(String.init)
+        guard let program = words.first, programsWithSubcommands.contains(program) else { return true }
+        let two = programsWithTwoSubcommands.contains(program) || words.count > 1 && subcommandsWithAnother.contains(words[1])
+        return words.count >= (two ? 3 : 2)
+    }
+
     private static func subcommands(of program: String, in arguments: ArraySlice<String>) -> [String] {
         guard programsWithSubcommands.contains(program) else { return [] }
         var found: [String] = []

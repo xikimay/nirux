@@ -129,6 +129,11 @@ struct AgentHookEvent: Codable, Equatable {
     /// The call's exact text, as the receiver checked it.
     var approvalText: String?
     var approvalOutcome: PermissionApproval.Outcome?
+    /// On a PermissionRequest, what it is about and the session's mode
+    /// (`permission_mode`), for the space's recap (LoopLog). Nil from older
+    /// receivers.
+    var promptTarget: String?
+    var permissionMode: String?
     /// On the PermissionRequest of a question dialog (AskUserQuestion):
     /// its questions and the options each offers, bounded, for the row of
     /// its task. Nil from older receivers, and from a line this build
@@ -176,6 +181,10 @@ struct AgentHookEvent: Codable, Equatable {
                 toolKey = AgentToolInput.key(toolName: toolName, input: input)
                 if name == .permissionRequest, toolName == "AskUserQuestion" {
                     dialog = AgentDialog(toolInput: input)
+                }
+                if name == .permissionRequest {
+                    promptTarget = Self.promptTarget(toolName: toolName, input: input, cwd: cwd)
+                    permissionMode = (payload["permission_mode"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
                 }
             } else {
                 toolSummary = nil
@@ -289,6 +298,29 @@ struct AgentHookEvent: Codable, Equatable {
            onNiruxAccount != true || !TurnEndMarker.allowsMessage(environment: environment, in: directory, running: running) {
             finalMessage = nil
         }
+    }
+
+    /// What a permission prompt is about: the program a shell command runs
+    /// (nil when nothing names it), a fetch's domain, whether a file tool
+    /// reaches outside the folder.
+    static func promptTarget(toolName: String, input: [String: Any], cwd: String?) -> String? {
+        let target: String?
+        switch toolName {
+        case _ where AgentToolInput.shellTools.contains(toolName):
+            guard let command = input["command"] as? String else { return nil }
+            // Run as another user, it is that, whatever it runs: the
+            // program's name drops the wrapper.
+            let names = command.split(whereSeparator: { " \t\n;&|()".contains($0) }).map { $0.split(separator: "/").last.map(String.init) ?? "" }
+            target = names.first(where: { ["sudo", "doas", "su"].contains($0) }) ?? AgentShellCommand(command).family
+        case "WebFetch":
+            target = (input["url"] as? String).flatMap(URL.init(string:))?.host?.lowercased()
+        case "Edit", "MultiEdit", "Write", "Read", "NotebookEdit":
+            guard let path = (input["file_path"] ?? input["notebook_path"]) as? String, let cwd, !cwd.isEmpty else { return nil }
+            target = !path.hasPrefix("/") || path.hasPrefix(cwd + "/") ? "in the folder" : "outside the folder"
+        default:
+            target = nil
+        }
+        return target.flatMap { AgentText.clean($0, maxLength: 80) }
     }
 
     /// Events that bind or confirm the column's session — where its
