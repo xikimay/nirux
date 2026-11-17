@@ -16,6 +16,8 @@ final class SpaceSettingsSafetyPane: NSObject {
         var problem: String?
         var periodDays = SpaceSettingsSafetyPane.periods[0]
         var recap: [LoopRecap.Group] = []
+        /// The log reached its size limit (`LoopLog.isFull`).
+        var logFull = false
         var added: [ClaudeSpaceSettings.Line] = []
     }
 
@@ -90,6 +92,9 @@ final class SpaceSettingsSafetyPane: NSObject {
             : "\(Self.counted(prompts, "permission prompt")) and \(Self.counted(questions, "question")) in this space’s "
                 + "Claude sessions, by tool and command. A line you add goes into the settings file at the next launch; "
                 + "nothing is added on its own."
+        if model.logFull {
+            recapSummary.stringValue += " The log is full: new prompts aren’t counted until older ones are past 30 days."
+        }
         addButtons = [:]
         recapRows.setViews(model.recap.map { groupRow($0, added: model.added) }, in: .top)
         Self.fillWidth(recapRows)
@@ -139,7 +144,7 @@ final class SpaceSettingsSafetyPane: NSObject {
             addButtons[line] = button
             views += [text, button]
         } else if group.isQuestion || group.count >= LoopRecap.minimumPrompts {
-            let note = Self.secondaryLabel(group.isQuestion ? "Claude asking you: nothing to allow" : "Nothing proposed")
+            let note = Self.secondaryLabel(group.isQuestion ? "Claude asking you: nothing to allow" : "Nothing proposed: Nirux can’t tell it’s safe")
             note.textColor = .tertiaryLabelColor
             views.append(note)
         }

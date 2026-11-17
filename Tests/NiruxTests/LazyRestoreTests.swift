@@ -148,6 +148,7 @@ final class LazyRestoreTests: XCTestCase {
         let old = LoopLog.Entry(time: Date().timeIntervalSince1970 - 40 * 86_400, tool: "Bash", target: "swift build", mode: nil)
         LoopLog.append(old, spaceID: WorkspaceProfile.defaultID, stateDirectory: URL(fileURLWithPath: root + "/state"))
         try withRestoredShell(layout()) { _, _ in
+            LoopLog.queue.sync {}
             XCTAssertEqual(LoopLog.load(spaceID: WorkspaceProfile.defaultID), [])
         }
     }

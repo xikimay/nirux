@@ -128,7 +128,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             let space = try anchoredSpace(harness)
             let now = Date().timeIntervalSince1970
             for _ in 0..<3 {
-                LoopLog.append(.init(time: now, tool: "Bash", target: "swift build", mode: "default"), spaceID: space.id)
+                LoopLog.append(.init(time: now, tool: "Bash", target: "swift build", mode: "default", exact: true), spaceID: space.id)
             }
             LoopLog.append(.init(time: now, tool: "AskUserQuestion", target: nil, mode: "default"), spaceID: space.id)
             shell.showSpaceSettings(profileID: space.id, tab: .safety)

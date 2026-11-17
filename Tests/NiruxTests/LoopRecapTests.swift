@@ -8,8 +8,8 @@ final class LoopRecapTests: XCTestCase {
         Array(repeating: LoopLog.Entry(time: time, tool: tool, target: target, mode: mode), count: count)
     }
 
-    private func group(_ tool: String, _ target: String?, count: Int = 3, autoOnly: Bool = false) -> LoopRecap.Group {
-        LoopRecap.Group(tool: tool, target: target, count: count, autoOnly: autoOnly)
+    private func group(_ tool: String, _ target: String?, count: Int = 3, autoOnly: Bool = false, exact: Int? = nil) -> LoopRecap.Group {
+        LoopRecap.Group(tool: tool, target: target, count: count, autoOnly: autoOnly, exactCount: exact ?? count)
     }
 
     func testPromptsGroupByToolAndTargetOverThePeriod() {
@@ -17,41 +17,50 @@ final class LoopRecapTests: XCTestCase {
             + entries(5, "WebFetch", "example.com", mode: "auto", at: 600) + entries(1, "WebFetch", "example.com", at: 700)
             + [LoopLog.Entry(time: 800, tool: "AskUserQuestion", target: "x", mode: "auto"), LoopLog.Entry(time: 900, tool: "AskUserQuestion", target: nil, mode: nil)]
         XCTAssertEqual(LoopRecap.groups(log, since: 100), [
-            group("WebFetch", "example.com", count: 6),
-            group("Bash", "swift build", count: 4),
-            group("AskUserQuestion", nil, count: 2)
+            group("WebFetch", "example.com", count: 6, exact: 0),
+            group("Bash", "swift build", count: 4, exact: 0),
+            group("AskUserQuestion", nil, count: 2, exact: 0)
         ])
+        let exact = [LoopLog.Entry(time: 1, tool: "Bash", target: "swift build", mode: nil, exact: true)]
+        XCTAssertEqual(LoopRecap.groups(exact + entries(2, "Bash", "swift build"), since: 0).first?.exactCount, 1)
         XCTAssertEqual(LoopRecap.groups(entries(3, "WebFetch", "example.com", mode: "auto"), since: 0).first?.autoOnly, true)
     }
 
-    func testEachGroupProposesAtMostOneLine() {
+    /// Only what Nirux knows reads, builds or tests, and only from prompts
+    /// a line would cover exactly.
+    func testOnlyKnownSafeCommandsAreProposed() {
         XCTAssertEqual(group("Bash", "swift build").proposal, .allow("Bash(swift build:*)"))
         XCTAssertEqual(group("PowerShell", "npm test").proposal, .allow("PowerShell(npm test:*)"))
-        XCTAssertEqual(group("Bash", "gh run view").proposal, .allow("Bash(gh run view:*)"))
-        XCTAssertEqual(group("Bash", "docker compose up").proposal, .allow("Bash(docker compose up:*)"))
         XCTAssertEqual(group("Bash", "git status").proposal, .allow("Bash(git status:*)"))
         XCTAssertEqual(group("Bash", "npm run build").proposal, .allow("Bash(npm run build:*)"))
         XCTAssertEqual(group("Bash", "gh pr view").proposal, .allow("Bash(gh pr view:*)"))
-        XCTAssertEqual(group("Bash", "make lint").proposal, .allow("Bash(make lint:*)"))
+        XCTAssertEqual(group("Bash", "xcrun simctl list").proposal, .allow("Bash(xcrun simctl list:*)"))
         XCTAssertEqual(group("WebFetch", "developer.apple.com").proposal, .allow("WebFetch(domain:developer.apple.com)"))
         XCTAssertEqual(
             group("WebFetch", "developer.apple.com", autoOnly: true).proposal, .environment("**Trusted domain**: developer.apple.com")
         )
-        XCTAssertEqual(group("mcp__linear__create_issue", nil).proposal, .allow("mcp__linear__create_issue"))
 
         XCTAssertNil(group("Bash", "swift build", count: 2).proposal, "fewer than three prompts")
+        XCTAssertNil(group("Bash", "swift build", count: 5, exact: 2).proposal, "most of them inside longer commands")
+        XCTAssertNil(group("WebFetch", "developer.apple.com", count: 5, exact: 0).proposal, "a domain cut short")
         XCTAssertNil(group("Bash", nil).proposal, "a command Nirux couldn't name")
-        let refused = [
-            "python3", "swift", "bash", "rm", "sudo", "curl", "source", "find", "git push", "git reset", "git clean",
-            "git worktree", "git switch", "git config",
-            // What stands for many commands: a program alone, or one whose subcommand Nirux couldn't read.
-            "git", "pnpm", "npm", "gh pr", "npm run", "make", "aws", "terraform", "xcodebuild",
-            // What runs any code through a subcommand.
-            "uv run python", "xcrun python3 x.py", "npm exec", "npm x", "npx tsx", "docker exec web", "kubectl exec",
-            "docker run alpine", "uv tool", "gh api", "go run main.go"
+        let unknown = [
+            // Run anything, or hooks and aliases.
+            "git submodule", "git bisect", "git commit", "git merge", "git pull", "git am", "git cherry-pick", "git push",
+            "git reset", "git config", "docker compose run",
+            // Stand for many commands.
+            "docker container", "docker volume", "swift package", "uv pip", "kubectl config", "git", "npm", "npm run", "aws",
+            // Publish, install, run workflows.
+            "pnpm publish", "yarn publish", "bun publish", "gh release create", "gh pr merge", "gh workflow run",
+            "gh extension install", "cargo install", "pip install", "go generate",
+            // Shells, interpreters, and the rest Nirux doesn't know.
+            "python3", "swift", "bash", "rm", "sudo", "curl", "source", "find", "uv run python", "npx tsx", "xcodebuild"
         ]
-        for program in refused {
+        for program in unknown {
             XCTAssertNil(group("Bash", program).proposal, program)
+        }
+        for tool in ["mcp__nirux__queue_merge", "mcp__browser__javascript_tool", "mcp__linear__delete_issue"] {
+            XCTAssertNil(group(tool, nil).proposal, tool)
         }
         XCTAssertNil(group("Edit", "outside the folder").proposal)
         XCTAssertNil(group("AskUserQuestion", nil, count: 9).proposal)
@@ -65,14 +74,29 @@ final class LoopRecapTests: XCTestCase {
             payload["permission_mode"] = mode
             return AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 1_000)
         }
-        let build = try XCTUnwrap(event("Bash", ["command": "cd /work/app && swift build --product SecretThing"]))
+        let build = try XCTUnwrap(event("Bash", ["command": "swift build --product SecretThing"]))
         let entry = try XCTUnwrap(LoopLog.entry(of: build))
-        XCTAssertEqual(entry, LoopLog.Entry(time: 1_000, tool: "Bash", target: "swift build", mode: "default"))
+        XCTAssertEqual(entry, LoopLog.Entry(time: 1_000, tool: "Bash", target: "swift build", mode: "default", exact: true))
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(entry), as: UTF8.self).contains("SecretThing"))
+
+        // What `Bash(<target>:*)` wouldn't match counts, but proposes nothing.
+        for command in ["git -C app status", "/usr/bin/git status", "npm --prefix web run build", "rm -rf .build && swift build",
+                        "swift build > build.log", "time swift build"] {
+            let prompt = try XCTUnwrap(event("Bash", ["command": command]))
+            XCTAssertNotNil(prompt.promptTarget, command)
+            XCTAssertEqual(prompt.promptExact, false, command)
+        }
+        XCTAssertEqual(event("Bash", ["command": "git status"])?.promptExact, true)
+        let longHost = String(repeating: "a", count: 90) + ".dev"
+        XCTAssertEqual(event("WebFetch", ["url": "https://\(longHost)/x"])?.promptExact, false, "cut short")
+        XCTAssertEqual(event("WebFetch", ["url": "https://docs.swift.org/x"])?.promptExact, true)
 
         XCTAssertNil(event("Bash", ["command": "for f in *.txt; do wc -l \"$f\"; done"])?.promptTarget)
         XCTAssertEqual(event("Bash", ["command": "cd /tmp && sudo launchctl list"])?.promptTarget, "sudo", "never the program it runs")
         XCTAssertEqual(event("Bash", ["command": "/usr/bin/sudo launchctl list"])?.promptTarget, "sudo")
+        XCTAssertEqual(event("Bash", ["command": "FOO=1 sudo ls"])?.promptTarget, "sudo")
+        XCTAssertNotEqual(event("Bash", ["command": "grep -rn sudo Sources"])?.promptTarget, "sudo", "only where a command starts")
+        XCTAssertNotEqual(event("Bash", ["command": "man su"])?.promptTarget, "su")
         XCTAssertEqual(event("Bash", ["command": "pnpm -F web build"])?.promptTarget, "pnpm")
         XCTAssertEqual(event("WebFetch", ["url": "https://Developer.Apple.com/documentation/x?q=1"])?.promptTarget, "developer.apple.com")
         XCTAssertEqual(event("Edit", ["file_path": "/etc/hosts"])?.promptTarget, "outside the folder")
@@ -104,6 +128,34 @@ final class LoopRecapTests: XCTestCase {
 
         LoopLog.trim(spaceID: "S1", now: now + 40 * day, stateDirectory: state)
         XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state), [], "at launch too, without a new prompt")
+    }
+
+    /// A log it can't read is never written over; past its size limit,
+    /// nothing is added until old lines go.
+    func testTheLogNeverLosesItself() throws {
+        let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-loop-full-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: state) }
+        let url = try XCTUnwrap(LoopLog.fileURL(spaceID: "S1", stateDirectory: state))
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let old = try JSONEncoder().encode(LoopLog.Entry(time: 1, tool: "Bash", target: "swift build", mode: nil)) + Data("\n".utf8)
+        let now: TimeInterval = 100 * 86_400
+
+        // Too large to read: neither trimmed nor added to.
+        let huge = old + Data(repeating: UInt8(ascii: " "), count: LoopLog.maxFileBytes + 100_000)
+        try huge.write(to: url)
+        LoopLog.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
+        XCTAssertEqual(try Data(contentsOf: url), huge)
+        XCTAssertTrue(LoopLog.isFull(spaceID: "S1", stateDirectory: state))
+
+        // Full but readable: nothing added, until the old lines go.
+        let recent = try JSONEncoder().encode(LoopLog.Entry(time: now - 86_400, tool: "Bash", target: "swift build", mode: nil))
+        try (recent + Data("\n".utf8) + Data(repeating: UInt8(ascii: "\n"), count: LoopLog.maxFileBytes)).write(to: url)
+        LoopLog.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
+        XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state).map(\.target), ["swift build"])
+        try (old + Data(repeating: UInt8(ascii: "\n"), count: LoopLog.maxFileBytes)).write(to: url)
+        LoopLog.append(.init(time: now, tool: "Bash", target: "swift test", mode: nil), spaceID: "S1", stateDirectory: state)
+        XCTAssertEqual(LoopLog.load(spaceID: "S1", stateDirectory: state).map(\.target), ["swift test"])
+        XCTAssertFalse(LoopLog.isFull(spaceID: "S1", stateDirectory: state))
     }
 
     /// Lines the user added go into the settings file, whatever the

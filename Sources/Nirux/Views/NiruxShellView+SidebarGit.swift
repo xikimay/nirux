@@ -441,7 +441,7 @@ extension NiruxShellView {
             }
             recordAgentSession(appliedEvent, snapshot: snapshot)
             if let entry = LoopLog.entry(of: event) {
-                LoopLog.append(entry, spaceID: appliedEvent.resolution.workspace.profileID)
+                LoopLog.appendInBackground(entry, spaceID: appliedEvent.resolution.workspace.profileID)
             }
 
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {

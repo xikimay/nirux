@@ -10,12 +10,18 @@ import Foundation
 /// File: `<state dir>/projects/<space id>/loop.jsonl`, 0600. Lines older
 /// than `keptDays` go at launch and at the next append once the oldest is
 /// past it; what is kept then starts a day later, so the file is rewritten
-/// at most once a day. A line this build can't read is dropped then.
+/// at most once a day. A line this build can't read is dropped then; a
+/// file it can't read is never rewritten. Past `maxFileBytes` nothing is
+/// added until old lines go (`isFull`).
 enum LoopLog {
     static let fileName = "loop.jsonl"
     static let keptDays = 30
-    /// A larger file, or anything but a regular file, isn't read.
+    /// Appends stop there; a file past it by more than a line, or anything
+    /// but a regular file, isn't read.
     static let maxFileBytes = 4_000_000
+    private static let readLimit = maxFileBytes + 65_536
+    /// Appends and their trims, off the main thread, in order.
+    static let queue = DispatchQueue(label: "nirux.loop-log")
     private static let day: TimeInterval = 86_400
 
     struct Entry: Codable, Equatable, Sendable {
@@ -23,8 +29,11 @@ enum LoopLog {
         var tool: String
         var target: String?
         var mode: String?
+        /// A line naming the target covers exactly what prompted
+        /// (`AgentHookEvent.promptExact`); nil reads as no.
+        var exact: Bool?
 
-        enum CodingKeys: String, CodingKey { case time = "t", tool, target, mode }
+        enum CodingKeys: String, CodingKey { case time = "t", tool, target, mode, exact }
     }
 
     static func fileURL(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {
@@ -34,13 +43,31 @@ enum LoopLog {
     /// The prompt an event reports, or nil.
     static func entry(of event: AgentHookEvent) -> Entry? {
         guard event.kind == .claude, event.name == .permissionRequest, let tool = event.toolName else { return nil }
-        return Entry(time: event.timestamp, tool: tool, target: event.promptTarget, mode: event.permissionMode)
+        return Entry(time: event.timestamp, tool: tool, target: event.promptTarget, mode: event.permissionMode, exact: event.promptExact)
+    }
+
+    /// `append` on `queue`.
+    static func appendInBackground(_ entry: Entry, spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
+        queue.async { append(entry, spaceID: spaceID, stateDirectory: stateDirectory) }
+    }
+
+    /// `trim` for each space on `queue`, after the appends already on it.
+    static func trimInBackground(spaceIDs: [String], stateDirectory: URL = Persistence.stateDirectory) {
+        queue.async { for spaceID in spaceIDs { trim(spaceID: spaceID, stateDirectory: stateDirectory) } }
+    }
+
+    /// The file reached `maxFileBytes`: new prompts aren't counted.
+    static func isFull(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> Bool {
+        guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
+              let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int else { return false }
+        return size >= maxFileBytes
     }
 
     static func append(_ entry: Entry, spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
               var line = try? JSONEncoder().encode(entry) else { return }
         trim(spaceID: spaceID, now: entry.time, stateDirectory: stateDirectory)
+        guard !isFull(spaceID: spaceID, stateDirectory: stateDirectory) else { return }
         line.append(UInt8(ascii: "\n"))
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -55,7 +82,11 @@ enum LoopLog {
     /// The lines it can read, in the order they came.
     static func load(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> [Entry] {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
-              case .data(let data) = BoardConfigStore.read(url, maxBytes: maxFileBytes) else { return [] }
+              case .data(let data) = BoardConfigStore.read(url, maxBytes: readLimit) else { return [] }
+        return decode(data)
+    }
+
+    private static func decode(_ data: Data) -> [Entry] {
         let decoder = JSONDecoder()
         return data.split(separator: UInt8(ascii: "\n")).compactMap { try? decoder.decode(Entry.self, from: $0) }
     }
@@ -72,7 +103,9 @@ enum LoopLog {
         guard let first = head?.split(separator: UInt8(ascii: "\n"), maxSplits: 1).first else { return }
         let firstTime = (try? JSONDecoder().decode(Entry.self, from: first))?.time ?? -.infinity
         guard firstTime < now - Double(keptDays) * day else { return }
-        let kept = load(spaceID: spaceID, stateDirectory: stateDirectory).filter { $0.time >= now - Double(keptDays - 1) * day }
+        // Never over a file it couldn't read.
+        guard case .data(let data) = BoardConfigStore.read(url, maxBytes: readLimit) else { return }
+        let kept = decode(data).filter { $0.time >= now - Double(keptDays - 1) * day }
         let lines = kept.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }
         do {
             try SpaceDefaultsStore.writePrivately(lines.reduce(Data(), +), to: url)
