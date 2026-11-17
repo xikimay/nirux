@@ -460,10 +460,10 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertEqual(app.settingsTerminalOpacityLabel?.stringValue, "80%")
             XCTAssertEqual(shell.terminalOpacity, 0.8, "the terminals follow every step")
             XCTAssertNil(Persistence.load()?.settings?.terminalOpacity, "nothing saved mid-gesture")
-            waitUntil("80% saved") { Persistence.load()?.settings?.terminalOpacity == 0.8 }
+            waitUntil("80% saved", timeout: 10) { Persistence.load()?.settings?.terminalOpacity == 0.8 }
             XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(still), NiruxApp.terminalOpacitySaveDelay, "once the slider stayed still")
             move(to: 100)
-            waitUntil("100% saves no choice") { Persistence.load()?.settings?.terminalOpacity == nil }
+            waitUntil("100% saves no choice", timeout: 10) { Persistence.load()?.settings?.terminalOpacity == nil }
         }
     }
 
@@ -944,17 +944,6 @@ final class SettingsWindowTests: XCTestCase {
 
     private func changedKeys(_ before: [String: NSObject], _ after: [String: NSObject]) -> Set<String> {
         Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }
-    }
-
-    /// Spins the run loop until `condition` holds: the state, not a delay,
-    /// says when the app is done.
-    @MainActor
-    private func waitUntil(_ what: String, timeout: TimeInterval = 10, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertTrue(condition(), "timed out: \(what)")
     }
 
     /// `writable: false` points NIRUX_STATE_DIR at a regular file so every

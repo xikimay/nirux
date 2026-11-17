@@ -83,12 +83,9 @@ final class ReviewPage {
             """)
     }
 
-    func waitUntil(_ description: String, timeout: TimeInterval = 30, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail("timed out waiting for \(description)") }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
+    /// The tests' one wait (`waitUntil`), for a test holding a page.
+    func waitUntil(_ description: String, timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) {
+        NiruxTests.waitUntil(description, timeout: timeout, file: file, line: line, condition)
     }
 
     /// Waits until `condition`, a JavaScript expression, holds in the page,

@@ -132,11 +132,11 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertTrue(location.column === shell.activeWorkspace?.columns[location.workspace.focusedIndex],
                           "the board opens next to the focused column, focused")
             let board = location.board
-            try waitUntil("the pull requests are read") { BoardStagesClicks.wasUpdated(board) }
-            try waitUntil("the post-merge run is read") {
+            waitUntil("the pull requests are read") { BoardStagesClicks.wasUpdated(board) }
+            waitUntil("the post-merge run is read") {
                 board.view.stages.content?.sections.first?.status?.toolTip?.contains("success") == true
             }
-            try waitUntil("the worktrees are listed") { !board.view.stages.lineViews.isEmpty }
+            waitUntil("the worktrees are listed") { !board.view.stages.lineViews.isEmpty }
 
             XCTAssertEqual(board.view.header.context, "acme/widgets")
             XCTAssertNil(board.view.header.status, "the repository's header has the pill")
@@ -171,7 +171,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             dropWorkspaceSnapshots(shell)
             let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
             try BoardStagesClicks.click(board.view.refreshButton)
-            try waitUntil("Refresh reads the pull requests again") {
+            waitUntil("Refresh reads the pull requests again") {
                 client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
             }
 
@@ -231,7 +231,7 @@ final class ProjectBoardFlowTests: XCTestCase {
                 return .alertFirstButtonReturn
             }
             try BoardStagesClicks.click(scratchEntry.cleanUpButton)
-            try waitUntil("the worktree is checked") { !alerts.isEmpty }
+            waitUntil("the worktree is checked") { !alerts.isEmpty }
             XCTAssertEqual(alerts.map(\.messageText), ["Can’t clean up widgets.scratch · scratch"], "the #46 notice, for that folder")
             // Stopped before gh either way: not pushed to GitHub, or no gh.
             let problems = alerts.first?.informativeText ?? ""
@@ -240,7 +240,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             // Open, there: a workspace in that worktree.
             try BoardStagesClicks.click(scratchEntry.openButton)
-            try waitUntil("a workspace opens there") { shell.activeWorkspace?.cwd == scratch }
+            waitUntil("a workspace opens there") { shell.activeWorkspace?.cwd == scratch }
             XCTAssertEqual(shell.activeWorkspace?.profileID, space.id)
         }
     }
@@ -259,7 +259,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             // The class's first test: the first window, git and Settings window of its process take 10 s on a healthy
             // runner, and took over 30 s once with eight other test processes beside it.
-            try waitUntil("Board Settings opens", timeout: 90) { shell.boardSettingsPanel?.hostView != nil }
+            waitUntil("Board Settings opens", timeout: 90) { shell.boardSettingsPanel?.hostView != nil }
             let form = try XCTUnwrap(shell.boardSettingsPanel)
             XCTAssertEqual(form.spaceID, space.id)
             let message = try XCTUnwrap(board.view.stages.content?.message, "no message")
@@ -268,17 +268,17 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(client.calls, [], "no gh without a repository")
             // Closed, Board Settings… under the message opens it again.
             shell.spaceSettings?.close()
-            try waitUntil("Board Settings closes") { shell.spaceSettings == nil }
+            waitUntil("Board Settings closes") { shell.spaceSettings == nil }
             dropWorkspaceSnapshots(shell)
             try BoardStagesClicks.click(board.view.stages.messageView.settingsButton)
-            try waitUntil("Board Settings opens again") { shell.spaceSettings != nil && shell.boardSettingsPanel?.hostView != nil }
+            waitUntil("Board Settings opens again") { shell.spaceSettings != nil && shell.boardSettingsPanel?.hostView != nil }
             let reopened = try XCTUnwrap(shell.boardSettingsPanel)
             XCTAssertFalse(reopened === form)
 
             XCTAssertEqual(reopened.repositoryField.stringValue, "acme/widgets")
             try click(reopened.saveButton)
             XCTAssertEqual(BoardConfigStore(spaceID: space.id)?.load().config?.repository, "acme/widgets")
-            try waitUntil("the saved config is read, then the pull requests") {
+            waitUntil("the saved config is read, then the pull requests") {
                 BoardStagesClicks.wasUpdated(board) && !board.view.stages.lineViews.isEmpty
             }
             XCTAssertEqual(board.view.stages.lineViews.map(\.line.title), ["widgets"])
@@ -319,7 +319,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             dropWorkspaceSnapshots(shell)
-            try waitUntil("origin’s pull requests are read") {
+            waitUntil("origin’s pull requests are read") {
                 BoardStagesClicks.wasUpdated(board) && board.view.stages.lineViews.contains { $0.line.title == "login" }
             }
             XCTAssertNil(shell.boardSettingsPanel, "the board has lines: Board Settings doesn’t open over them")
@@ -340,13 +340,13 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(header.pill.status?.text, "No settings")
 
             try BoardStagesClicks.choose("Board Settings…", in: header.contextMenu())
-            try waitUntil("Board Settings opens") { shell.boardSettingsPanel?.hostView != nil }
+            waitUntil("Board Settings opens") { shell.boardSettingsPanel?.hostView != nil }
             let form = try XCTUnwrap(shell.boardSettingsPanel)
             XCTAssertEqual(shell.spaceSettings?.boardRepository, section.id, "on that repository")
             XCTAssertEqual(form.repositoryField.stringValue, "acme/widgets")
             XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path), "opening the form writes nothing")
             try click(form.saveButton)
-            try waitUntil("the saved settings set the queue up") { board.view.stages.content?.sections.first?.queue != nil }
+            waitUntil("the saved settings set the queue up") { board.view.stages.content?.sections.first?.queue != nil }
             section = try XCTUnwrap(board.view.stages.content?.sections.first)
             XCTAssertNotEqual(section.status?.text, "No settings", "nothing left to say")
             XCTAssertNotNil(try BoardStagesClicks.line("login", in: board).line.offer)
@@ -398,7 +398,7 @@ final class ProjectBoardFlowTests: XCTestCase {
                  "origin points to gitlab.com, not github.com: set its GitHub repository in Board Settings to see its pull requests."],
                 ["copy", "Not read", "Same GitHub repository as “front”: its pull requests show there."]
             ]
-            try waitUntil("both answers said, every repository listed") { pills() == expected }
+            waitUntil("both answers said, every repository listed") { pills() == expected }
             XCTAssertEqual(pills(), expected)
             let sections = try XCTUnwrap(board.view.stages.content?.sections)
             XCTAssertEqual(sections.map(\.detail), ["acme/saved", "acme/front", "acme/back", nil, nil])
@@ -413,7 +413,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertNil(shell.boardSettingsPanel)
 
             try BoardStagesClicks.choose("Board Settings…", in: board.view.stages.sectionHeader(section: sections[1].id)?.contextMenu())
-            try waitUntil("Board Settings opens on front") {
+            waitUntil("Board Settings opens on front") {
                 shell.boardSettingsPanel?.hostView != nil && shell.spaceSettings?.boardRepository == sections[1].id
             }
             XCTAssertEqual(shell.boardSettingsPanel?.repositoryField.stringValue, "acme/front")
@@ -437,7 +437,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             let backKey = try XCTUnwrap(backAnchor.key)
             XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor], forProfile: space.id))
             shell.showBoardSettings(profileID: space.id)
-            try waitUntil("front’s form") { shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front" }
+            waitUntil("front’s form") { shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front" }
             XCTAssertEqual(shell.boardSettingsPanel?.repositoryChoices.count, 0, "one repository: no pop-up")
             // On the repository it shows already, the form stays as it is.
             let frontForm = shell.boardSettingsPanel
@@ -446,7 +446,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, backAnchor], forProfile: space.id))
             shell.showBoardSettings(profileID: space.id, repository: backKey)
-            try waitUntil("back’s form") {
+            waitUntil("back’s form") {
                 shell.spaceSettings?.boardRepository == backKey
                     && shell.boardSettingsPanel?.repositoryField.stringValue == "acme/back"
             }
@@ -470,7 +470,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             let copyKey = try XCTUnwrap(copyAnchor.key)
             XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, copyAnchor], forProfile: space.id))
             shell.showBoardSettings(profileID: space.id, repository: copyKey)
-            try waitUntil("copy’s form") {
+            waitUntil("copy’s form") {
                 shell.spaceSettings?.boardRepository == copyKey
                     && shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front"
             }
@@ -486,7 +486,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             let frontKey = try XCTUnwrap(frontAnchor.key)
             shell.showBoardSettings(profileID: space.id, repository: frontKey)
-            try waitUntil("front’s form") {
+            waitUntil("front’s form") {
                 shell.spaceSettings?.boardRepository == frontKey && shell.boardSettingsPanel !== form
                     && shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front"
             }
@@ -494,7 +494,7 @@ final class ProjectBoardFlowTests: XCTestCase {
                 let frontForm = try XCTUnwrap(shell.boardSettingsPanel)
                 try click(frontForm.saveButton)
                 XCTAssertTrue(frontForm.errorLabel.isHidden, "\(round): \(frontForm.errorLabel.stringValue)")
-                try waitUntil("front \(round)") { shell.boardSettingsPanel !== frontForm && shell.boardSettingsPanel?.hostView != nil }
+                waitUntil("front \(round)") { shell.boardSettingsPanel !== frontForm && shell.boardSettingsPanel?.hostView != nil }
                 XCTAssertEqual(store.load().entries.map(\.config.repository), ["acme/front"], round)
             }
         }
@@ -515,7 +515,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("home", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("the reason") { board.view.stages.content?.sections.first?.status != nil }
+            waitUntil("the reason") { board.view.stages.content?.sections.first?.status != nil }
             let section = try XCTUnwrap(board.view.stages.content?.sections.first)
             XCTAssertEqual(section.status?.text, "Not read")
             XCTAssertEqual(
@@ -535,10 +535,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             try writeConfig(for: space, workflow: "ci.yml")
             shell.addWorkspace(title: "widgets", cwd: root, profileID: space.id)
             try runPaletteAction("Open Board", in: shell)
-            try waitUntil("the first post-merge run is read") {
+            waitUntil("the first post-merge run is read") {
                 client.calls.contains { $0.what == "run acme/widgets ci.yml main" }
             }
-            try waitUntil("every first read is back") {
+            waitUntil("every first read is back") {
                 shell.projectBoardLocation(projectID: space.id)?.board.schedule.inFlight.isEmpty == true
             }
             let before = client.calls.count
@@ -550,7 +550,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             board.reload()
             // As a status refresh would, on screen (this window never is).
             board.tick(onScreen: true)
-            try waitUntil("the new workflow's run is read") {
+            waitUntil("the new workflow's run is read") {
                 client.calls.contains { $0.what == "run acme/widgets nightly.yml main" }
             }
             XCTAssertFalse(client.calls[before...].contains { $0.what.contains("ci.yml") },
@@ -721,7 +721,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             dropWorkspaceSnapshots(shell)
 
             let lines = { (board.view.stages.content?.sections ?? []).map { $0.lines.units.flatMap(\.lines).map(\.pullRequest) } }
-            try waitUntil("both repositories read, docs’ remote too") {
+            waitUntil("both repositories read, docs’ remote too") {
                 lines() == [["#12"], ["#21"], []] && board.view.stages.content?.sections.last?.status != nil
             }
             let sections = try XCTUnwrap(board.view.stages.content?.sections)
@@ -744,7 +744,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(shell.mergeQueue(projectID: space.id, repository: frontRepository).selection, [])
             let backHeader = try XCTUnwrap(board.view.stages.sectionHeader(section: sections[1].id))
             let frontHeader = try XCTUnwrap(board.view.stages.sectionHeader(section: sections[0].id))
-            try waitUntil("back's header offers Start") { backHeader.startButton.isEnabled }
+            waitUntil("back's header offers Start") { backHeader.startButton.isEnabled }
             XCTAssertEqual(backHeader.startButton.title, "Start Dry Run… · 1")
             XCTAssertFalse(frontHeader.startButton.isEnabled, "front has nothing queued")
 
@@ -755,7 +755,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             // Back's main checkout has no workspace: Open Main Checkout opens a shell there.
             try BoardStagesClicks.choose("Open Main Checkout", in: backHeader.contextMenu())
-            try waitUntil("a workspace opens there") { shell.activeWorkspace?.cwd == back }
+            waitUntil("a workspace opens there") { shell.activeWorkspace?.cwd == back }
             XCTAssertEqual(shell.activeWorkspace?.profileID, space.id)
         }
     }
@@ -823,7 +823,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             // Once widgets' remote is read too, the clones are placed: no section of their own. Gadgets' pull requests
             // read, so that what it doesn't show is there to show.
             let gadgetsRead = { board.sections.first { $0.anchor?.name == "gadgets" }.flatMap { board.reads[$0.id] } }
-            try waitUntil("gadgets' section is read from its remote, the clones placed") {
+            waitUntil("gadgets' section is read from its remote, the clones placed") {
                 refresh()
                 return section("gadgets")?.status?.text == "Read-only" && titles() == ["widgets", "app-feature", "fork", "gadgets"]
                     && gadgetsRead()?.openPullRequests != nil && gadgetsRead()?.mergedPullRequests != nil
@@ -844,7 +844,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             for title in ["gadget", "gadget clone", "app", "fork"] {
                 shell.closeWorkspace(at: try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title && !$0.isClosing }))
             }
-            try waitUntil("the other repositories' sections go") {
+            waitUntil("the other repositories' sections go") {
                 refresh()
                 return titles() == ["widgets"]
             }
@@ -852,11 +852,11 @@ final class ProjectBoardFlowTests: XCTestCase {
             // Back, then made one of the space's repositories: no longer read-only, Board Settings… offered there.
             shell.addWorkspace(title: "gadget", cwd: gadgets, profileID: space.id)
             try select("widgets", in: shell)
-            try waitUntil("gadgets' section is back") {
+            waitUntil("gadgets' section is back") {
                 refresh()
                 return section("gadgets")?.status?.text == "Read-only"
             }
-            try waitUntil("gadgets' pull requests are read again") {
+            waitUntil("gadgets' pull requests are read again") {
                 refresh()
                 return gadgetsRead()?.openPullRequests != nil
             }
@@ -864,7 +864,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertTrue(shell.workspaceStore.setAnchors([widgetsAnchor, gadgetsAnchor], forProfile: space.id))
             // Its remote and its pull requests stay: the section never blanks on the way.
             var blanked = false
-            try waitUntil("gadgets is the space's repository") {
+            waitUntil("gadgets is the space's repository") {
                 refresh()
                 if gadgetsRead()?.openPullRequests == nil { blanked = true }
                 return section("gadgets")?.status?.text == "No settings" && !board.isReadingRemotes
@@ -902,7 +902,7 @@ final class ProjectBoardFlowTests: XCTestCase {
                                       postMergeWorkflow: .noWorkflow)
             XCTAssertNoThrow(try XCTUnwrap(BoardConfigStore(spaceID: space.id)).save(gadgets).get())
 
-            try waitUntil("a line at the foot shows the widgets queue") {
+            waitUntil("a line at the foot shows the widgets queue") {
                 shell.renderProjectBoard(board)
                 return board.view.stages.runningQueueViews.map(\.queue.title) == ["acme/widgets"]
                     && board.view.stages.content?.sections.first?.detail == "acme/gadgets"
@@ -917,7 +917,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(line.queue.tooltip, "Its queue runs, but it isn’t one of this board’s repositories now.")
             XCTAssertFalse(line.stopButton.isHidden)
             try BoardStagesClicks.click(line.stopButton)
-            try waitUntil("the widgets queue stops") { !queue.isRunning }
+            waitUntil("the widgets queue stops") { !queue.isRunning }
             MergeQueueController.waitForFiles()
         }
     }
@@ -943,7 +943,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             dropWorkspaceSnapshots(shell)
-            try waitUntil("the pull requests are read") {
+            waitUntil("the pull requests are read") {
                 BoardStagesClicks.wasUpdated(board) && board.view.stages.lineViews.contains { $0.line.pullRequest == "#12" }
             }
             var opened: [URL] = []
@@ -1020,7 +1020,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try select("widgets", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("the login task's line") { BoardStagesClicks.shownLine("login", in: board) != nil }
+            waitUntil("the login task's line") { BoardStagesClicks.shownLine("login", in: board) != nil }
             let column = try XCTUnwrap(shell.workspaces.first { $0.title == "login" }?.columns.first)
             let question = SidebarMissionQuestion(questionID: "q", parentTitle: "Lead", text: "Which base?", handOff: nil)
             let pass = NiruxShellView.SidebarPassReadings(
@@ -1086,7 +1086,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             dropWorkspaceSnapshots(shell)
             let section = { try BoardStagesClicks.section("widgets", in: board) }
-            try waitUntil("#12 merged today") {
+            waitUntil("#12 merged today") {
                 BoardStagesClicks.shownSection("widgets", in: board)?.lines.merged.map(\.number) == [12]
                     && board.view.stages.lineViews.count == 1
             }
@@ -1101,7 +1101,7 @@ final class ProjectBoardFlowTests: XCTestCase {
                 return .alertFirstButtonReturn
             }
             try BoardStagesClicks.pressCleanUp(entry)
-            try waitUntil("the worktree is checked") { !alerts.isEmpty }
+            waitUntil("the worktree is checked") { !alerts.isEmpty }
             XCTAssertEqual(alerts.map(\.messageText), ["Can’t clean up widgets.feat-login · feat/login"], "that task's worktree")
             XCTAssertTrue(shell.worktreeCleanupsInFlight.isEmpty)
         }
@@ -1137,7 +1137,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertNoThrow(try self.writeConfig(for: WorkspaceProfile.defaultProfile, workflow: "nightly.yml"))
         }) { shell, _ in
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: WorkspaceProfile.defaultID)?.board)
-            try waitUntil("the notes task's line") { board.view.stages.lineViews.contains { $0.line.title == "notes" } }
+            waitUntil("the notes task's line") { board.view.stages.lineViews.contains { $0.line.title == "notes" } }
             XCTAssertEqual(launches, [], "off screen, it waits")
             XCTAssertEqual(shell.boardOrder, .progress)
             XCTAssertEqual(board.view.stages.content?.order, .progress)
@@ -1225,15 +1225,6 @@ final class ProjectBoardFlowTests: XCTestCase {
     private func runPaletteAction(_ title: String, in shell: NiruxShellView) throws {
         let actions = shell.columnPaletteActions() + shell.agentPaletteActions() + shell.workspacePaletteActions()
         try XCTUnwrap(actions.first { $0.title == title }, "no “\(title)” in the palette").action()
-    }
-
-    @MainActor
-    private func waitUntil(_ what: String, timeout: TimeInterval = 30, _ condition: () -> Bool) throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertTrue(condition(), "timed out: \(what)")
     }
 
     /// The button must be what the window hit-tests under the pointer, as

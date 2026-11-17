@@ -270,15 +270,6 @@ final class StuckAgentSidebarTests: XCTestCase {
 
     // MARK: - Resume in a live terminal
 
-    private func waitUntil(timeout: TimeInterval = 3, _ condition: () -> Bool) async throws -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            if Date() >= deadline { return false }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        return true
-    }
-
     /// `continue` reaches the `claude` whose turn failed only once it is
     /// back at its prompt, and once per click.
     func testResumeTypesContinueOnlyAtTheFailedClaudesPrompt() async throws {
@@ -291,8 +282,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         let agent = AgentStandIn()
         defer { agent.remove() }
         pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
-        let started = try await waitUntil { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
-        XCTAssertTrue(started)
+        try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
         let now = Date().timeIntervalSince1970
         func hook(_ name: AgentHookEvent.Name, agent: String? = nil, tool: String? = nil) -> AgentHookEvent {
@@ -317,8 +307,7 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         pty.applyAgentHook(hook(.subagentStop, agent: "sub"), isUserFocused: false)
         XCTAssertNil(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 1))
-        let typed = try await waitUntil { agent.input.contains("continue") }
-        XCTAssertTrue(typed)
+        try await waitUntil("continue typed", timeout: 3) { agent.input.contains("continue") }
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 2), .alreadySent, "one click, one continue")
         XCTAssertNil(
             pty.agentResumeRefusal(
@@ -355,8 +344,7 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         let column = try XCTUnwrap(shell.workspaces.first?.columns.first)
         let pty = try XCTUnwrap(column.pty)
-        let started = try await waitUntil(timeout: 10) { pty.shellPID != nil }
-        XCTAssertTrue(started)
+        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
         let shellPID = try XCTUnwrap(pty.shellPID)
 
         // A claude in front of the column's shell, as the process table
@@ -431,8 +419,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         let column = try XCTUnwrap(workspace.columns.first)
         let agentUUID = try XCTUnwrap(column.agentUUID)
         let pty = try XCTUnwrap(column.pty)
-        let started = try await waitUntil(timeout: 10) { pty.shellPID != nil }
-        XCTAssertTrue(started)
+        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
         let shellPID = try XCTUnwrap(pty.shellPID)
         let now = Date().timeIntervalSince1970
         let claudePID: pid_t = 99_997
@@ -577,8 +564,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertTrue(shell.circlingHintEnabled, "on by default")
 
         let pty = try XCTUnwrap(shell.workspaces.first?.columns.first?.pty)
-        let started = try await waitUntil(timeout: 10) { pty.shellPID != nil }
-        XCTAssertTrue(started)
+        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
         let shellPID = try XCTUnwrap(pty.shellPID)
         // A claude in front of the column's shell, as the process table
         // would show it.
