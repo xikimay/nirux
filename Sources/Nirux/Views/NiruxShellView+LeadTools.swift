@@ -454,7 +454,16 @@ extension NiruxShellView {
     /// answers decides, and only one may answer it (a branch is the focused
     /// terminal's, which another workspace may share).
     func namedWorkspace(_ name: String, among candidates: [WorkspaceState]) -> WorkspaceState? {
-        let ranks: [(WorkspaceState) -> Bool] = [
+        for answers in Self.nameRanks(name) {
+            let found = candidates.filter(answers)
+            if !found.isEmpty { return found.count == 1 ? found[0] : nil }
+        }
+        return nil
+    }
+
+    /// How the Lead's tools read `name`, strongest first.
+    static func nameRanks(_ name: String) -> [(WorkspaceState) -> Bool] {
+        [
             { $0.gitBranch == name },
             { $0.taskFolder == name },
             { workspace in
@@ -462,18 +471,11 @@ extension NiruxShellView {
                     || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
             }
         ]
-        for answers in ranks {
-            let found = candidates.filter(answers)
-            if !found.isEmpty { return found.count == 1 ? found[0] : nil }
-        }
-        return nil
     }
 
     /// Whether the Lead's tools reach `workspace` by `name`.
     static func answers(_ workspace: WorkspaceState, to name: String) -> Bool {
-        workspace.gitBranch == name || workspace.taskFolder == name
-            || workspace.title.caseInsensitiveCompare(name) == .orderedSame
-            || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
+        nameRanks(name).contains { $0(workspace) }
     }
 
     private func noLeadTask(_ name: String) -> String {

@@ -283,10 +283,10 @@ enum LeadTools {
         return numbers
     }
 
-    /// rename_task's title on one line, whitespace folded; a longer one cut
-    /// past the limit, so a huge one isn't copied whole.
+    /// rename_task's title on one line, whitespace folded. A huge one is
+    /// cut past twice the limit, so a cut one is still refused as too long.
     static func title(_ arguments: [String: Any]) -> String? {
-        (arguments["title"] as? String).flatMap { AgentText.clean($0, maxLength: maxTitleLength + 1) }
+        (arguments["title"] as? String).flatMap { AgentText.clean($0, maxLength: maxTitleLength * 2) }
     }
 
     /// A whole positive number, as JSON gives it (not a boolean).
