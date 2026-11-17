@@ -102,6 +102,9 @@ struct StateIcon: Hashable, Sendable {
         station.map { $0.rawValue + 1 } ?? 0
     }
 
+    /// It waits for the user to allow a command.
+    var waitsOnCommand: Bool { kind == .needsYou(.command) }
+
     /// The state's colour, from `Theme`: the ring, the disc or the glyph.
     var color: NSColor {
         switch kind {

@@ -97,6 +97,15 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertEqual(line(folder).station, .code, "a task without a repository has no stations to go through")
     }
 
+    /// A line knows when its agent waits for a permission, for its icon's
+    /// glyph (the command's, as on the sidebar's row); a question, or a
+    /// line that doesn't need the user, never says so.
+    func testALineSaysWhenItsAgentWaitsOnACommand() {
+        XCTAssertTrue(line(facts(activity: .needsYou("Bash(swift test)", command: true))).waitsOnCommand)
+        XCTAssertFalse(line(facts(activity: .needsYou("a question"))).waitsOnCommand)
+        XCTAssertFalse(line(facts(activity: .working(since: nil))).waitsOnCommand)
+    }
+
     func testReviewsStaysCurrentWhileTheReviewsTurnIsNotOver() {
         // A pass is recorded as it starts: here its turn asks for a permission.
         var reviewing = facts(pullRequest(), activity: .needsYou("Bash(swift test)"))

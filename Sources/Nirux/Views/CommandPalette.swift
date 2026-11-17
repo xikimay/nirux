@@ -24,19 +24,22 @@ struct PaletteAction {
     }
 }
 
-/// A short colored label on the right of a row.
+/// A short label on the right of a row, after its state icon: one state
+/// language with the sidebar, the rail and the Board.
 struct PaletteBadge: Equatable {
     enum Tone { case working, waiting, failure }
     let text: String
     let tone: Tone
 
-    var color: NSColor {
+    var icon: StateIcon {
         switch tone {
-        case .working: return .systemGreen
-        case .waiting: return Theme.Color.waiting
-        case .failure: return .systemRed
+        case .working: return StateIcon(.working)
+        case .waiting: return StateIcon(.needsYou(.question))
+        case .failure: return StateIcon(.error)
         }
     }
+
+    var color: NSColor { icon.color }
 }
 
 /// Rows listed under their own header beside the actions: the active
@@ -78,6 +81,8 @@ struct PaletteFold {
 /// Raycast-style command palette — Cmd+P to open
 @MainActor
 final class CommandPalette: NSObject {
+    /// A badge's state icon: the size the sidebar gives its Lead's.
+    static let badgeIcon: CGFloat = 12
     /// The commands, searched with `sections`.
     var actions: [PaletteAction] = []
     /// Ranked with the actions (see `PaletteRanking.list`); each section
@@ -669,10 +674,12 @@ final class CommandPalette: NSObject {
         // Right side: the badge, else the shortcut.
         var textRight = width - padding
         let accessory: NSTextField?
+        var badgeIcon: StateIconView?
         if let badge = action.badge {
             accessory = NSTextField(labelWithString: badge.text)
             accessory?.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
             accessory?.textColor = badge.color
+            badgeIcon = StateIconView(badge.icon, size: Self.badgeIcon)
         } else if let chord = action.shortcut?.chord {
             accessory = NSTextField(labelWithString: chord.display)
             accessory?.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
@@ -685,6 +692,12 @@ final class CommandPalette: NSObject {
             onBaseline(accessory, x: width - padding - accessoryWidth, width: accessoryWidth)
             row.addSubview(accessory)
             textRight = accessory.frame.minX - Theme.Space.md
+            if let badgeIcon {
+                let side = Self.badgeIcon
+                badgeIcon.frame = NSRect(x: accessory.frame.minX - Theme.Space.xs - side, y: accessory.frame.midY - side / 2, width: side, height: side)
+                row.addSubview(badgeIcon)
+                textRight = badgeIcon.frame.minX - Theme.Space.md
+            }
         }
         let textWidth = max(0, textRight - textLeft)
 

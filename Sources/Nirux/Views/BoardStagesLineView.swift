@@ -191,7 +191,13 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
 
     // MARK: Layout
 
-    /// Where the dot's centre is: at the line's edge, or inset under a
+    /// The line's state icon, as the sidebar draws the task's: its state,
+    /// its station, why it waits.
+    var icon: StateIcon {
+        StateIcon(state: line.state, station: line.station, reason: line.waitsOnCommand ? .command : .question)
+    }
+
+    /// Where the icon's centre is: at the line's edge, or inset under a
     /// task or on a stack's rail.
     var dotCenter: NSPoint {
         NSPoint(x: Metrics.connectorX + (link.isInset ? Metrics.inset : 0), y: bounds.midY)
@@ -200,7 +206,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
     override func layout() {
         super.layout()
         let columns = BoardStagesView.Columns(width: bounds.width, height: bounds.height)
-        let titleX = dotCenter.x + Metrics.dot / 2 + 10
+        let titleX = dotCenter.x + Metrics.icon / 2 + 7
         titleLabel.frame = NSRect(x: titleX, y: 8, width: max(0, columns.task.maxX - titleX), height: 18)
         noRailLabel.frame = NSRect(x: columns.rail.minX, y: 10, width: columns.rail.width, height: 15)
         noRailLabel.isHidden = line.rail != nil || columns.rail.width == 0
@@ -331,7 +337,10 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
 
     override func draw(_ dirtyRect: NSRect) {
         drawConnectors()
-        Self.fill(circle: dotCenter, radius: Metrics.dot / 2, BoardStagesView.color(of: line.state))
+        if let context = NSGraphicsContext.current?.cgContext {
+            let side = Metrics.icon
+            icon.draw(in: context, rect: NSRect(x: dotCenter.x - side / 2, y: dotCenter.y - side / 2, width: side, height: side))
+        }
         if let rail = line.rail {
             let columns = BoardStagesView.Columns(width: bounds.width, height: bounds.height)
             Self.draw(rail, state: line.state, stations: columns.stations, y: bounds.midY, hovered: isStationHovered ? actingOffer?.change : nil)
@@ -350,7 +359,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
         case .none:
             return
         case .head:
-            path.move(to: NSPoint(x: x, y: midY + Metrics.dot))
+            path.move(to: NSPoint(x: x, y: midY + Metrics.icon / 2 + 1))
             path.line(to: NSPoint(x: x, y: bounds.maxY))
         case .subtask(let isLast):
             // Down from the task, then round the corner to the sub-task.

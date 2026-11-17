@@ -48,7 +48,7 @@ extension BoardStages.TaskReading {
     @MainActor
     private static func activity(of info: WorkspaceInfo, turnStartedAt: (UUID) -> TimeInterval?) -> BoardStages.Activity {
         switch info.agentStep {
-        case .needsYou(_, let words, _)?: return .needsYou(words)
+        case .needsYou(_, let words, _)?: return .needsYou(words, command: info.stateIcon.waitsOnCommand)
         case .broken(_, let sentence)?: return .failed(sentence)
         case .asking(_, let question)?: return .asking(question.parentTitle)
         case .working(let working)?:

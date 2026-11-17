@@ -239,6 +239,8 @@ extension BoardStages {
         /// A task's line, its id its workspace's; else a pull request's
         /// without a task.
         var hasTask = true
+        /// Its agent waits for a permission rather than an answer.
+        var waitsOnCommand = false
     }
 }
 
@@ -250,8 +252,9 @@ extension BoardStages {
     /// queue reads: there only a dialog waits, here a turn that ended on a
     /// question does too.
     enum Activity: Equatable, Sendable {
-        /// An agent waits for the user: "a question", the command to allow.
-        case needsYou(String)
+        /// An agent waits for the user: "a question", the command to allow;
+        /// `command` when it is a permission (its icon's glyph).
+        case needsYou(String, command: Bool = false)
         /// An agent stopped: "Stopped on an API error".
         case failed(String)
         /// An agent asked the agent that started it, named here, and
@@ -261,6 +264,11 @@ extension BoardStages {
         case working(since: TimeInterval?)
         /// At its prompt, or no agent.
         case idle
+
+        var isCommand: Bool {
+            if case .needsYou(_, let command) = self { return command }
+            return false
+        }
     }
 
     /// The pull request's checks as the merge queue counts them.
@@ -481,7 +489,8 @@ extension BoardStages {
             offer: offer,
             tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
             menu: menu(of: facts, rail: rail, offer: offer),
-            hasTask: facts.hasTask
+            hasTask: facts.hasTask,
+            waitsOnCommand: reading.state == .needsYou && facts.activity.isCommand
         )
     }
 
@@ -676,7 +685,7 @@ extension BoardStages {
     private static func reading(of facts: Facts, at station: Station, rules: Rules) -> Reading {
         let last = facts.lastActivityAt
         switch facts.activity {
-        case .needsYou(let what):
+        case .needsYou(let what, _):
             return Reading(.needsYou, text(what).map { "Needs you · \($0)" } ?? "Needs you", since: last)
         case .failed(let what):
             return Reading(.failed, text(what) ?? "Stopped", since: last)

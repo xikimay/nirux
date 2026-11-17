@@ -118,8 +118,8 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(frames[3].minY - frames[2].maxY, BoardStagesView.Metrics.captionHeight, "the stack's title sits above its lines")
         let inset = view.lineViews.map { $0.dotCenter.x - BoardStagesView.Metrics.connectorX }
         XCTAssertEqual(inset, [0, 26, 26, 26, 26, 0], "a sub-task and a stack's line sit in from their connector")
-        XCTAssertTrue(view.lineViews.allSatisfy { $0.titleLabel.frame.minX > $0.dotCenter.x + BoardStagesView.Metrics.dot / 2 },
-                      "a title after its dot")
+        XCTAssertTrue(view.lineViews.allSatisfy { $0.titleLabel.frame.minX > $0.dotCenter.x + BoardStagesView.Metrics.icon / 2 },
+                      "a title after its icon")
 
         let header = try XCTUnwrap(view.sectionHeader(section: "nirux"))
         XCTAssertEqual([header.titleLabel.stringValue, header.detailLabel.stringValue], ["nirux", "xikimay/nirux"])
@@ -2278,11 +2278,11 @@ final class BoardStagesViewTests: XCTestCase {
     func testTheHeaderGivesWayOnANarrowBoardTheNameLast() {
         let view = board(content([]))
         XCTAssertEqual([view.nameLabel.stringValue, view.leadLabel.stringValue], ["nirux-public", "Lead · reviewing #438"])
-        let whole: [NSView] = [view.nameLabel, view.summaryLabel, view.leadDot, view.leadLabel, view.orderSwitch]
+        let whole: [NSView] = [view.nameLabel, view.summaryLabel, view.leadIcon, view.leadLabel, view.orderSwitch]
         XCTAssertTrue(whole.allSatisfy { !$0.isHidden })
-        let row = [view.nameLabel.frame, view.summaryLabel.frame, view.leadDot.frame, view.leadLabel.frame, view.orderSwitch.frame]
+        let row = [view.nameLabel.frame, view.summaryLabel.frame, view.leadIcon.frame, view.leadLabel.frame, view.orderSwitch.frame]
         XCTAssertTrue(zip(row, row.dropFirst()).allSatisfy { $0.maxX <= $1.minX }, "name, summary, Lead, switch: none over another")
-        XCTAssertEqual(view.leadDot.toolTip, "Lead · reviewing #438", "the Lead's dot says its line where that one has no room")
+        XCTAssertEqual(view.leadIcon.toolTip, "Lead · reviewing #438", "the Lead's dot says its line where that one has no room")
         XCTAssertEqual(view.summaryLabel.stringValue, "1 repository · 3 tasks")
         XCTAssertEqual(view.spaceDot.layer?.backgroundColor, Theme.Color.accent.cgColor)
 
@@ -2290,35 +2290,37 @@ final class BoardStagesViewTests: XCTestCase {
         let name = ColumnHeaderView.textWidth(view.nameLabel)
         let lead = ColumnHeaderView.textWidth(view.leadLabel)
         let padding = BoardStagesView.Metrics.padding
+        // The Lead's icon and the room after it.
+        let leadRoom = BoardStagesView.Metrics.leadIcon + 8
         // The space's dot, the order switch and what is around them.
         let rest = 2 * padding + 18 + 12 + view.orderSwitch.frame.width
         let at = { (width: CGFloat) in self.board(self.content([], lead: .needsYou), width: width) }
         let shown = { (view: BoardStagesView) -> [Bool] in
-            let parts: [NSView] = [view.summaryLabel, view.leadLabel, view.leadDot, view.orderSwitch]
+            let parts: [NSView] = [view.summaryLabel, view.leadLabel, view.leadIcon, view.orderSwitch]
             return parts.map { !$0.isHidden }
         }
 
-        let withSummary = name + 12 + 60 + 12 + 16 + lead + rest
+        let withSummary = name + 12 + 60 + 12 + leadRoom + lead + rest
         XCTAssertEqual(shown(at(withSummary)), [true, true, true, true])
         let withoutSummary = at(withSummary - 1)
         XCTAssertEqual(shown(withoutSummary), [false, true, true, true], "the summary is the first to go")
         XCTAssertEqual(withoutSummary.leadLabel.frame.width, lead)
 
-        let cutLead = at(name + 12 + 16 + lead + rest - 1)
+        let cutLead = at(name + 12 + leadRoom + lead + rest - 1)
         XCTAssertEqual(shown(cutLead), [false, true, true, true])
         XCTAssertEqual(cutLead.leadLabel.frame.width, lead - 1, "then the Lead's line is cut")
-        let dotAlone = at(name + 12 + 16 + 60 + rest - 1)
+        let dotAlone = at(name + 12 + leadRoom + 60 + rest - 1)
         XCTAssertEqual(shown(dotAlone), [false, false, true, true], "then it goes: its dot stays, and the summary doesn't come back")
-        XCTAssertEqual(dotAlone.leadDot.layer?.backgroundColor, Theme.Color.waiting.cgColor, "amber is never hidden")
-        XCTAssertEqual(dotAlone.leadDot.frame.maxX, dotAlone.orderSwitch.frame.minX - 12)
+        XCTAssertEqual(dotAlone.leadIcon.icon.color, Theme.Color.waiting, "amber is never hidden")
+        XCTAssertEqual(dotAlone.leadIcon.frame.maxX, dotAlone.orderSwitch.frame.minX - 12)
         XCTAssertEqual(dotAlone.nameLabel.frame.width, name)
 
         // The switch goes before the name is cut: at no width are both true.
-        XCTAssertEqual(shown(at(name + 20 + rest)), [false, false, true, true])
-        let withoutSwitch = at(name + 20 + rest - 1)
+        XCTAssertEqual(shown(at(name + 12 + BoardStagesView.Metrics.leadIcon + rest)), [false, false, true, true])
+        let withoutSwitch = at(name + 12 + BoardStagesView.Metrics.leadIcon + rest - 1)
         XCTAssertEqual(shown(withoutSwitch), [false, false, true, false], "then the order switch")
         XCTAssertEqual(withoutSwitch.nameLabel.frame.width, name, "the name is the last to give way")
-        XCTAssertEqual(withoutSwitch.leadDot.frame.maxX, withoutSwitch.bounds.width - padding)
+        XCTAssertEqual(withoutSwitch.leadIcon.frame.maxX, withoutSwitch.bounds.width - padding)
         let narrowing = at(700)
         let cutBesideTheSwitch = stride(from: CGFloat(700), through: 100, by: -1).filter { width in
             narrowing.setFrameSize(NSSize(width: width, height: 600))
@@ -2326,15 +2328,15 @@ final class BoardStagesViewTests: XCTestCase {
         }
         XCTAssertEqual(cutBesideTheSwitch, [], "widths where the name is cut beside the order switch")
         let tiny = at(120)
-        XCTAssertEqual(tiny.nameLabel.frame.maxX, tiny.leadDot.frame.minX - 12, "cut before the Lead's dot")
-        XCTAssertFalse(tiny.leadDot.isHidden)
+        XCTAssertEqual(tiny.nameLabel.frame.maxX, tiny.leadIcon.frame.minX - 12, "cut before the Lead's dot")
+        XCTAssertFalse(tiny.leadIcon.isHidden)
 
         // A name longer than 160 pt keeps that much beside the switch.
         let long = board(content([], name: String(repeating: "nirux-", count: 12)), width: 600)
         XCTAssertFalse(long.orderSwitch.isHidden)
         XCTAssertGreaterThanOrEqual(long.nameLabel.frame.width, BoardStagesView.Metrics.minimumName)
         XCTAssertLessThan(long.nameLabel.frame.width, ColumnHeaderView.textWidth(long.nameLabel))
-        XCTAssertEqual(long.nameLabel.frame.maxX, long.leadDot.frame.minX - 12)
+        XCTAssertEqual(long.nameLabel.frame.maxX, long.leadIcon.frame.minX - 12)
         // A Lead's line shorter than 60 pt shows whole.
         let short = board(content([], leadText: "Lead"))
         XCTAssertFalse(short.leadLabel.isHidden)
@@ -2343,7 +2345,7 @@ final class BoardStagesViewTests: XCTestCase {
         var withoutLead = content([])
         withoutLead.header.lead = nil
         view.show(withoutLead)
-        XCTAssertTrue(view.leadLabel.isHidden && view.leadDot.isHidden, "a space without a Lead shows none")
+        XCTAssertTrue(view.leadLabel.isHidden && view.leadIcon.isHidden, "a space without a Lead shows none")
     }
 
     func testTheLeadInTheHeaderFocusesItWhereThePointerAimed() throws {
@@ -2364,7 +2366,7 @@ final class BoardStagesViewTests: XCTestCase {
         view.onLead = { focused += 1 }
         let button = view.leadButton
         XCTAssertFalse(button.isHidden)
-        XCTAssertTrue(button.frame.contains(view.leadDot.frame) && button.frame.contains(view.leadLabel.frame), "one target: its dot and its line")
+        XCTAssertTrue(button.frame.contains(view.leadIcon.frame) && button.frame.contains(view.leadLabel.frame), "one target: its dot and its line")
         XCTAssertEqual([button.toolTip, button.accessibilityLabel(), button.accessibilityHelp()],
                        ["Lead · reviewing #438", "Lead · reviewing #438", "Focus the Lead"])
         XCTAssertTrue(button.aim === view.aim)
@@ -2374,10 +2376,10 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(view.leadHand, button.frame, "a hand where a click acts")
         // Its dot alone where its line has no room (the widths of the header's own test).
         let rest = 2 * BoardStagesView.Metrics.padding + 18 + 12 + view.orderSwitch.frame.width
-        let narrow = board(lines, width: ColumnHeaderView.textWidth(view.nameLabel) + 12 + 16 + 60 + rest - 1)
+        let narrow = board(lines, width: ColumnHeaderView.textWidth(view.nameLabel) + 12 + BoardStagesView.Metrics.leadIcon + 8 + 60 + rest - 1)
         XCTAssertTrue(narrow.leadLabel.isHidden)
-        XCTAssertTrue(narrow.leadButton.frame.contains(narrow.leadDot.frame))
-        XCTAssertLessThan(narrow.leadButton.frame.width, 20)
+        XCTAssertTrue(narrow.leadButton.frame.contains(narrow.leadIcon.frame))
+        XCTAssertLessThan(narrow.leadButton.frame.width, BoardStagesView.Metrics.leadIcon + 12)
         let overLead = view.convert(NSPoint(x: button.frame.midX, y: button.frame.midY), to: nil)
         // A space without a Lead: nothing to click.
         var withoutLead = lines
@@ -2520,6 +2522,21 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(chosen.last, "nirux \(BoardStages.MenuItem.focus(workspaceID: "lead", columnID: nil))")
     }
 
+    /// A line's icon is the sidebar's for the same state (5.1): its station
+    /// fills the ring, a permission shows the command's glyph, and ready is
+    /// green with its check, as on a row, not the Board's old grey.
+    func testALinesIconIsTheStateIconOfTheSidebar() {
+        var line = BoardStages.Line(
+            id: "t", title: "T", station: .checks, state: .needsYou, rail: nil, phrase: BoardStages.Phrase(text: ""), pullRequest: ""
+        )
+        line.waitsOnCommand = true
+        let view = BoardStagesLineView(line, link: .none)
+        XCTAssertEqual(view.icon, StateIcon(state: .needsYou, station: .checks, reason: .command))
+        XCTAssertEqual(StateIcon(state: .ready, station: nil).color, Theme.Color.success)
+        XCTAssertEqual(BoardStagesView.color(of: .ready), Theme.Color.success, "the current station takes the same palette")
+        XCTAssertEqual(BoardStages.Activity.needsYou("allow `rm`", command: true).isCommand, true)
+    }
+
     func testAmberMeansAnAgentWaitsForTheUserAndNothingElse() throws {
         let states: [BoardStages.State] = [.needsYou, .failed, .working, .blocked, .waiting, .ready, .merged, .idle]
         XCTAssertEqual(states.filter { BoardStagesView.color(of: $0) == Theme.Color.waiting }, [.needsYou])
@@ -2528,13 +2545,13 @@ final class BoardStagesViewTests: XCTestCase {
         let merged = { (needsYou: Bool) in
             BoardStagesMergedEntryView(BoardStages.Merged(lineID: "t", title: "T", number: 1, mergedAt: 0, needsYou: needsYou), now: 0)
         }
-        XCTAssertEqual(merged(true).dotColor, Theme.Color.waiting, "a merged task whose agent asks: amber is never hidden")
-        XCTAssertEqual(merged(false).dotColor, Theme.Color.done)
+        XCTAssertEqual(merged(true).icon.color, Theme.Color.waiting, "a merged task whose agent asks: amber is never hidden")
+        XCTAssertEqual(merged(false).icon, StateIcon(.merged))
         for (needsYou, color) in [(true, Theme.Color.waiting), (false, Theme.Color.done)] {
             let entry = merged(needsYou)
             entry.frame = NSRect(x: 0, y: 0, width: 120, height: 18)
             let pixel = try paint(width: 120, height: 18) { entry.draw(entry.bounds) }
-            XCTAssertTrue(isClose(pixel(3, 9), to: color), "its dot painted in that colour")
+            XCTAssertTrue(isClose(pixel(1, 9), to: color), "its dot painted in that colour")
             XCTAssertEqual(entry.accessibilityLabel()?.hasSuffix(", needs you"), needsYou)
         }
     }
@@ -3049,7 +3066,7 @@ final class BoardStagesViewTests: XCTestCase {
         view.show(content([section(units: [], merged: [asking, cloud])]))
         view.layoutSubtreeIfNeeded()
         XCTAssertTrue(view.mergedView(section: "nirux") === merged && merged.entries.first === entry)
-        XCTAssertEqual(entry.dotColor, Theme.Color.waiting)
+        XCTAssertEqual(entry.icon.color, Theme.Color.waiting)
         XCTAssertTrue(layer.needsDisplay())
         entry.mouseUp(with: try mouse(.leftMouseUp, at: on, in: view.window))
         XCTAssertEqual(opened, ["telegram", "telegram"], "the press in flight isn't lost")
@@ -3253,16 +3270,16 @@ final class BoardStagesViewTests: XCTestCase {
         XCTAssertEqual(alone.hints.map(\.rect), [alone.bounds], "the title's alone, over the whole entry")
         XCTAssertEqual(alone.handRects, [])
         // The number and the time last, and never past the entry.
-        XCTAssertEqual(widths(16 + whole[1]), [0, whole[1], 0])
+        XCTAssertEqual(widths(22 + whole[1]), [0, whole[1], 0])
         XCTAssertEqual(alone.detailLabel.frame.maxX, alone.bounds.maxX)
         XCTAssertEqual(said(alone.detailLabel), long, "a title that gave way entirely is still said")
-        XCTAssertEqual(widths(16 + whole[1] - 10), [0, whole[1] - 10, 0])
+        XCTAssertEqual(widths(22 + whole[1] - 10), [0, whole[1] - 10, 0])
         // A short title is whole before the link shows.
         alone.show(BoardStages.Merged(lineID: "left", title: "Fix", number: 287, mergedAt: now - 3600, cleanUp: .offered), now: now)
         let short = ColumnHeaderView.textWidth(alone.titleLabel)
         XCTAssertLessThan(short, 40)
-        XCTAssertEqual(widths(16 + short + whole[1] + room), [short, whole[1], room])
-        XCTAssertEqual(widths(16 + short + whole[1] + room - 1), [short, whole[1], 0])
+        XCTAssertEqual(widths(22 + short + whole[1] + room), [short, whole[1], room])
+        XCTAssertEqual(widths(22 + short + whole[1] + room - 1), [short, whole[1], 0])
 
         // On a narrow Board the entries stay where they are whatever their links: a clean-up that ends
         // moves neither the block nor what comes under it. A link with no room beside the caption isn't shown.
@@ -3644,7 +3661,7 @@ final class BoardStagesViewTests: XCTestCase {
         let sub = view.lineViews[1]
         let station = BoardStagesView.Columns(width: 940).stations[2]
         var pixel = try paint(sub)
-        XCTAssertTrue(isClose(pixel(sub.dotCenter.x, 17), to: Theme.Color.waiting), "its dot in its state's colour")
+        XCTAssertTrue(isClose(pixel(sub.dotCenter.x - BoardStagesView.Metrics.icon / 2 + 1, 17), to: Theme.Color.waiting), "its dot in its state's colour")
         XCTAssertTrue(isClose(pixel(station, 17), to: Theme.Color.waiting), "as its current station")
 
         sub.wantsLayer = true
@@ -3654,7 +3671,7 @@ final class BoardStagesViewTests: XCTestCase {
         view.show(content([section(units: units(.failed))]))
         XCTAssertTrue(view.lineViews[1] === sub && layer.needsDisplay(), "a change of state paints the line again")
         pixel = try paint(sub)
-        XCTAssertTrue(isClose(pixel(sub.dotCenter.x, 17), to: Theme.Color.error))
+        XCTAssertTrue(isClose(pixel(sub.dotCenter.x - BoardStagesView.Metrics.icon / 2 + 1, 17), to: Theme.Color.error))
 
         // Too narrow for a rail: the dot, and nothing after.
         let tiny = BoardStagesLineView(line("alone"), link: .none)
