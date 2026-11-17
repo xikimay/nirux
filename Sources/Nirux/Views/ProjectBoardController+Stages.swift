@@ -4,7 +4,7 @@ import AppKit
 
 extension ProjectBoardController {
     /// What the shell holds of the space, beside what the controller read.
-    struct StagesInputs {
+    struct StagesInputs: Equatable {
         struct Space: Equatable {
             var name: String
             var color: NSColor
@@ -34,6 +34,22 @@ extension ProjectBoardController {
         /// The worktrees and folders a clean-up of which runs, by path.
         var cleaningUp: Set<String> = []
         var order: BoardStages.Order = .sidebar
+    }
+
+    /// Everything the stages are built from: the shell's inputs, the day
+    /// ("Merged today" ends at midnight) and what the Board read
+    /// (`displayNames` and `ownSections` follow from `sections` and
+    /// `extraIDs`). The same key builds the same stages.
+    struct StagesKey: Equatable {
+        var inputs: StagesInputs
+        var midnight: TimeInterval
+        var loaded: BoardConfigStore.Loaded?
+        var context: BoardSections.Context
+        var sections: [BoardSections.Section]
+        var extraIDs: Set<String>
+        var isReadingRemotes: Bool
+        var local: ProjectBoard.LocalSnapshot?
+        var reads: [String: RepositoryReads]
     }
 
     /// What the Board's clicks act on, as it last showed them: what the
@@ -75,10 +91,20 @@ extension ProjectBoardController {
     /// as stages. Its message (`bodyMessage`) takes the sections' place;
     /// the running queues' lines stay at its foot. With
     /// it, what its clicks act on (whoever shows it keeps them:
-    /// `stagesTargets`).
-    func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> (content: BoardStagesView.Content, targets: StagesTargets) {
+    /// `stagesTargets`). `reusing`: the stages last built, when built from
+    /// the same key (a Board not drawn, whose lines only give the rows
+    /// their stations).
+    func stagesContent(
+        _ inputs: StagesInputs, now: Date = Date(), reusing: Bool = false
+    ) -> (content: BoardStagesView.Content, targets: StagesTargets) {
+        let key = StagesKey(
+            inputs: inputs, midnight: BoardStages.midnight(of: now.timeIntervalSince1970), loaded: loaded, context: context,
+            sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
+        )
+        if reusing, let built = builtStages, built.key == key { return (built.content, built.targets) }
         var targets = StagesTargets()
         let content = stagesContent(inputs, now: now, targets: &targets)
+        builtStages = (key, content, targets)
         return (content, targets)
     }
 

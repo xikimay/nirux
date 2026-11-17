@@ -345,25 +345,19 @@ final class SidebarWorkspaceCardRenderer {
     /// isn't read again: nothing turns there for ever.
     private func buildChecksRing(center: NSPoint) -> NSView {
         let size = Metrics.stateIconSize
+        let icon = StateIcon(.waiting, stage: StateIcon.stage(of: workspace.station))
         guard animates, !workspace.isInactive else {
             // Still: the family's own dashed ring.
-            let still = Self.stateIconView(StateIcon(.waiting, stage: StateIcon.stage(of: workspace.station)), size: size, center: center)
+            let still = Self.stateIconView(icon, size: size, center: center)
             still.identifier = Self.checksRingID
             append(still)
             return still
         }
-        // One arc going round, where the family's ring is (`StateIcon`'s
-        // 16-unit grid: radius 6.25, line 1.5), in its grey.
-        let unit = size / 16
+        // One arc of the family's ring going round, its station inside.
         let host = SidebarBackgroundView(frame: NSRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size))
         host.identifier = Self.checksRingID
         host.wantsLayer = true
-        let ring = CAShapeLayer()
-        ring.frame = host.bounds
-        ring.path = CGPath(ellipseIn: host.bounds.insetBy(dx: 1.75 * unit, dy: 1.75 * unit), transform: nil)
-        ring.fillColor = nil
-        ring.strokeColor = StateIcon(.waiting).color.cgColor
-        ring.lineWidth = 1.5 * unit
+        let ring = icon.ringLayer(side: size)
         ring.lineCap = .round
         ring.strokeEnd = 0.37
         let turn = CABasicAnimation(keyPath: "transform.rotation.z")
@@ -380,21 +374,7 @@ final class SidebarWorkspaceCardRenderer {
         turn.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 15)
         ring.add(turn, forKey: Self.checksRingKey)
         host.layer?.addSublayer(ring)
-        // Its station inside, as the still icon's: under the turning arc.
-        let stage = StateIcon.stage(of: workspace.station)
-        if stage > 0 {
-            let station = CAShapeLayer()
-            station.frame = host.bounds
-            let middle = CGPoint(x: host.bounds.midX, y: host.bounds.midY)
-            let path = CGMutablePath()
-            path.move(to: middle)
-            // From 12 o'clock, clockwise on screen: y goes up here.
-            path.addArc(center: middle, radius: 3.5 * unit, startAngle: .pi / 2, endAngle: .pi / 2 - 2 * .pi * CGFloat(stage) / 4, clockwise: true)
-            path.closeSubpath()
-            station.path = path
-            station.fillColor = StateIcon(.waiting).color.cgColor
-            host.layer?.addSublayer(station)
-        }
+        if let pie = icon.pieLayer(side: size) { host.layer?.addSublayer(pie) }
         append(host)
         return host
     }

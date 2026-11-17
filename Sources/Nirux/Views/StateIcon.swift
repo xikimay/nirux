@@ -188,42 +188,40 @@ struct StateIcon: Hashable, Sendable {
     /// along the ring rather than inside it: a label takes the centre.
     private func drawFrameOnGrid(_ context: CGContext) {
         let color = self.color
-        let radius = Self.ringRadius
-        func ring(alpha: CGFloat = 1, dashed: Bool = false) {
-            context.setStrokeColor(color.withAlphaComponent(alpha).cgColor)
-            context.setLineWidth(Self.ringWidth)
-            context.setLineDash(phase: 0, lengths: dashed ? Self.dash : [])
-            context.strokeEllipse(in: CGRect(x: 8 - radius, y: 8 - radius, width: 2 * radius, height: 2 * radius))
-            context.setLineDash(phase: 0, lengths: [])
-        }
-        func arc(_ stage: Int) {
+        func arc() {
             guard stage > 0 else { return }
-            // From 12 o'clock, clockwise on screen: y goes down here.
-            let start = -CGFloat.pi / 2
             context.setStrokeColor(color.cgColor)
             context.setLineWidth(Self.ringWidth)
             context.setLineCap(.round)
-            context.addArc(center: CGPoint(x: 8, y: 8), radius: radius, startAngle: start,
-                           endAngle: start + 2 * .pi * CGFloat(stage) / 4, clockwise: false)
+            context.addPath(Self.arcs[stage - 1])
             context.strokePath()
         }
         switch kind {
         case .working:
             // Dimmed only to let a station's fill stand out.
-            ring(alpha: stage > 0 ? 0.45 : 1)
-            arc(stage)
+            strokeRing(context, alpha: stage > 0 ? 0.45 : 1)
+            arc()
         case .idle where stage > 0:
-            ring(alpha: 0.45)
-            arc(stage)
+            strokeRing(context, alpha: 0.45)
+            arc()
         case .waiting:
-            ring(dashed: true)
-            arc(stage)
+            strokeRing(context, dashed: true)
+            arc()
         case .merged:
             context.setFillColor(color.cgColor)
             context.fillEllipse(in: CGRect(x: 1, y: 1, width: 14, height: 14))
         case .idle, .asking, .readyToMerge, .finished, .blocked, .needsYou, .error:
-            ring()
+            strokeRing(context)
         }
+    }
+
+    private func strokeRing(_ context: CGContext, alpha: CGFloat = 1, dashed: Bool = false) {
+        context.setStrokeColor(color.withAlphaComponent(alpha).cgColor)
+        context.setLineWidth(Self.ringWidth)
+        context.setLineDash(phase: 0, lengths: dashed ? Self.dash : [])
+        context.addPath(Self.ring)
+        context.strokePath()
+        context.setLineDash(phase: 0, lengths: [])
     }
 
     private static let ringRadius: CGFloat = 6.25
@@ -234,32 +232,66 @@ struct StateIcon: Hashable, Sendable {
         let period = 2 * CGFloat.pi * ringRadius / 10
         return [period * 0.56, period * 0.44]
     }()
+    // Paths are immutable once built, as the glyphs' are.
+    nonisolated(unsafe) private static let ring = CGPath(
+        ellipseIn: CGRect(x: 8 - ringRadius, y: 8 - ringRadius, width: 2 * ringRadius, height: 2 * ringRadius), transform: nil
+    )
+    /// Each station's pie inside the ring, Code's first.
+    nonisolated(unsafe) private static let pies = (1...4).map { sweep($0, radius: 3.5, closed: true) }
+    /// Each station's arc along the ring, beside a label.
+    nonisolated(unsafe) private static let arcs = (1...4).map { sweep($0, radius: ringRadius, closed: false) }
+
+    /// `stage` quarters from 12 o'clock, clockwise on screen (y goes down
+    /// on the grid); `closed`, a pie.
+    private static func sweep(_ stage: Int, radius: CGFloat, closed: Bool) -> CGPath {
+        let center = CGPoint(x: 8, y: 8)
+        let start = -CGFloat.pi / 2
+        let path = CGMutablePath()
+        if closed { path.move(to: center) }
+        path.addArc(center: center, radius: radius, startAngle: start, endAngle: start + 2 * .pi * CGFloat(stage) / 4, clockwise: false)
+        if closed { path.closeSubpath() }
+        return path
+    }
+
+    /// The ring, solid, as a layer `side` points wide in the state's
+    /// colour, for a host that turns it (checks that run).
+    func ringLayer(side: CGFloat) -> CAShapeLayer {
+        let layer = Self.layer(Self.ring, side: side)
+        layer.fillColor = nil
+        layer.strokeColor = color.cgColor
+        layer.lineWidth = Self.ringWidth * side / 16
+        return layer
+    }
+
+    /// Its station's pie as a layer `side` points wide, as drawn inside the
+    /// ring; nil without a station.
+    func pieLayer(side: CGFloat) -> CAShapeLayer? {
+        guard stage > 0 else { return nil }
+        let layer = Self.layer(Self.pies[stage - 1], side: side)
+        layer.fillColor = color.cgColor
+        return layer
+    }
+
+    /// A grid's path in a layer `side` points wide, whose y goes up.
+    private static func layer(_ path: CGPath, side: CGFloat) -> CAShapeLayer {
+        var grid = CGAffineTransform(a: side / 16, b: 0, c: 0, d: -side / 16, tx: 0, ty: side)
+        let layer = CAShapeLayer()
+        layer.frame = CGRect(x: 0, y: 0, width: side, height: side)
+        layer.path = path.copy(using: &grid)
+        return layer
+    }
 
     /// Draws on the 16-unit grid, y going down.
     private func drawOnGrid(_ context: CGContext) {
-        let center = CGPoint(x: 8, y: 8)
         let color = self.color
         let ink = Theme.Color.canvas.cgColor
-        func ring(alpha: CGFloat = 1, dashed: Bool = false) {
-            let radius = Self.ringRadius
-            context.setStrokeColor(color.withAlphaComponent(alpha).cgColor)
-            context.setLineWidth(Self.ringWidth)
-            context.setLineDash(phase: 0, lengths: dashed ? Self.dash : [])
-            context.strokeEllipse(in: CGRect(x: 8 - radius, y: 8 - radius, width: 2 * radius, height: 2 * radius))
-            context.setLineDash(phase: 0, lengths: [])
-        }
         func disc() {
             context.setFillColor(color.cgColor)
             context.fillEllipse(in: CGRect(x: 1, y: 1, width: 14, height: 14))
         }
-        func pie(_ stage: Int) {
+        func pie() {
             guard stage > 0 else { return }
-            // From 12 o'clock, clockwise on screen: y goes down here.
-            let start = -CGFloat.pi / 2
-            context.move(to: center)
-            context.addArc(center: center, radius: 3.5, startAngle: start,
-                           endAngle: start + 2 * .pi * CGFloat(stage) / 4, clockwise: false)
-            context.closePath()
+            context.addPath(Self.pies[stage - 1])
             context.setFillColor(color.cgColor)
             context.fillPath()
         }
@@ -278,14 +310,14 @@ struct StateIcon: Hashable, Sendable {
         switch kind {
         case .working:
             // Dimmed only to let a station's fill stand out.
-            ring(alpha: stage > 0 ? 0.45 : 1)
-            pie(stage)
+            strokeRing(context, alpha: stage > 0 ? 0.45 : 1)
+            pie()
         case .idle:
-            ring()
-            pie(stage)
+            strokeRing(context)
+            pie()
         case .waiting:
-            ring(dashed: true)
-            pie(stage)
+            strokeRing(context, dashed: true)
+            pie()
         case .needsYou(.command):
             disc()
             glyph(Glyph.chevron, ink)
@@ -294,21 +326,21 @@ struct StateIcon: Hashable, Sendable {
             glyph(Glyph.question, ink)
             dot(Glyph.questionDot, ink)
         case .asking:
-            ring()
+            strokeRing(context)
             glyph(Glyph.question, color.cgColor)
             dot(Glyph.questionDot, color.cgColor)
         case .error:
-            ring()
+            strokeRing(context)
             glyph(Glyph.bang, color.cgColor)
             dot(Glyph.bangDot, color.cgColor)
         case .readyToMerge, .finished:
-            ring()
+            strokeRing(context)
             glyph(Glyph.check, color.cgColor)
         case .merged:
             disc()
             glyph(Glyph.check, ink)
         case .blocked:
-            ring()
+            strokeRing(context)
             glyph(Glyph.slash, color.cgColor)
         }
     }
