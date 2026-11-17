@@ -697,6 +697,20 @@ extension AgentHookInstallerTests {
         XCTAssertTrue(AgentHookInstaller.hasClaudeHooks(home: home))
     }
 
+    /// PermissionDenied (2.1.89) ends a call auto mode refused.
+    func testPermissionDeniedInstalledOnlyForAClaudeThatKnowsIt() {
+        installClaude("2.1.88")
+        XCTAssertNil(claudeHooks()["PermissionDenied"], "too old")
+        XCTAssertEqual(hookCommands(claudeSettings(), event: "StopFailure").count, 1, "StopFailure is older")
+        installClaude("2.1.89")
+        XCTAssertEqual(
+            hookCommands(claudeSettings(), event: "PermissionDenied"),
+            [AgentHookInstaller.claudeHookCommand(executablePath: "/Apps/Nirux")]
+        )
+        installClaude(nil)
+        XCTAssertNil(claudeHooks()["PermissionDenied"], "unknown version: taken back")
+    }
+
     func testStopFailureRefreshIsIdempotent() throws {
         installClaude("2.1.283")
         let first = read(".claude/settings.json")

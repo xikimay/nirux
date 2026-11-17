@@ -135,7 +135,7 @@ struct AgentSessionObservation: Sendable {
         case .sessionStart, .userPromptSubmit, .permissionRequest, .postToolUse, .stop, .stopFailure,
              .sessionEnd, .turnComplete:
             return true
-        case .preToolUse, .notification, .subagentStop, .approvalResolved:
+        case .preToolUse, .notification, .subagentStop, .approvalResolved, .permissionDenied:
             return false
         }
     }
@@ -293,7 +293,7 @@ extension AgentSessionRecord {
         case .postToolUse: return .working
         case .stop, .turnComplete: return .idle
         case .stopFailure: return .failed
-        case .sessionEnd, .preToolUse, .notification, .subagentStop, .approvalResolved: return nil
+        case .sessionEnd, .preToolUse, .notification, .subagentStop, .approvalResolved, .permissionDenied: return nil
         }
     }
 
@@ -307,7 +307,7 @@ extension AgentSessionRecord {
         case .sessionStart:
             guard let source = observation.source else { return false }
             return source != "startup" && source != "clear"
-        case .sessionEnd, .preToolUse, .notification, .subagentStop, .approvalResolved:
+        case .sessionEnd, .preToolUse, .notification, .subagentStop, .approvalResolved, .permissionDenied:
             return false
         }
     }

@@ -119,6 +119,7 @@ extension AgentAttentionReason {
         case .askedInReply: return "asks"
         case .apiError: return "stopped"
         case .exitedMidTurn: return "exited"
+        case .silent: return "silent"
         case .stillWaiting(let dialog, _): return dialog.chipLabel
         }
     }
@@ -132,6 +133,7 @@ extension SidebarStuckState {
         case .waiting(let reason, _): return reason.headline
         case .stoppedOnError: return "stopped on an API error"
         case .exitedMidTurn: return "exited mid-turn"
+        case .silent(let duration): return "silent for \(duration)"
         }
     }
 
@@ -141,7 +143,7 @@ extension SidebarStuckState {
         case .waiting(let reason, _): return reason.cleanDetailLine
         case .stoppedOnError(let kind, let detail, _, _):
             return AgentAttentionReason.apiError(kind: kind, detail: detail).cleanDetailLine
-        case .exitedMidTurn: return nil
+        case .exitedMidTurn, .silent: return nil
         }
     }
 
@@ -152,6 +154,7 @@ extension SidebarStuckState {
         case .waiting(_, let duration): return "waiting \(duration)"
         case .stoppedOnError: return "stopped"
         case .exitedMidTurn: return "exited"
+        case .silent(let duration): return "silent \(duration)"
         }
     }
 }

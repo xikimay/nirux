@@ -17,6 +17,8 @@ extension ProjectBoard {
         case waiting(AgentAttentionReason)
         /// A dialog has waited past the stuck-agent threshold.
         case waitingLong(AgentAttentionReason, duration: String)
+        /// A turn waits on the model with no sign of life, for how long.
+        case silent(duration: String)
         /// The agent died in the middle of a turn.
         case exitedMidTurn(processName: String)
         /// The turn ended on an API error; `resume` says whether Resume may
@@ -32,8 +34,9 @@ extension ProjectBoard {
             case .working: return 2
             case .waiting: return 3
             case .waitingLong: return 4
-            case .exitedMidTurn: return 5
-            case .stoppedOnError: return 6
+            case .silent: return 5
+            case .exitedMidTurn: return 6
+            case .stoppedOnError: return 7
             }
         }
 
@@ -88,6 +91,8 @@ extension ProjectBoard {
             return .stoppedOnError(kind: kind, resume: resume)
         case .exitedMidTurn(let processName)?:
             return .exitedMidTurn(processName: processName)
+        case .silent(let duration)?:
+            return .silent(duration: duration)
         case nil:
             break
         }

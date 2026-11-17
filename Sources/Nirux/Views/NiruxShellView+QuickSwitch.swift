@@ -4,12 +4,15 @@ import AppKit
 /// (⌘J) keep on the shell.
 @MainActor
 final class QuickSwitchState {
-    /// What blocks a column's agent on the user, given a process snapshot
-    /// and the time (see `AgentWait`). Tests set their own: a blocked
-    /// agent needs a real `claude` in front.
-    var agentWait: @MainActor (ColumnState, ProcessSnapshot, TimeInterval) -> AgentWait? = { column, snapshot, now in
+    /// What blocks a column's agent on the user, given a process snapshot,
+    /// the time and the stuck-agent setting's threshold (see `AgentWait`).
+    /// Tests set their own: a blocked agent needs a real `claude` in front.
+    var agentWait: @MainActor (ColumnState, ProcessSnapshot, TimeInterval, TimeInterval?) -> AgentWait? = {
+        column, snapshot, now, waitThreshold in
         guard let pty = column.pty,
-              let wait = pty.agentBlockedWait(now: now, foreground: pty.foregroundProcess(snapshot: snapshot)),
+              let wait = pty.agentBlockedWait(
+                  now: now, waitThreshold: waitThreshold, foreground: pty.foregroundProcess(snapshot: snapshot)
+              ),
               wait.blocks(whileStatus: pty.cachedAgentState) else { return nil }
         return wait
     }
@@ -82,7 +85,7 @@ extension NiruxShellView {
             .map { index in
                 let workspace = workspaces[index]
                 let space = profiles.first { $0.id == workspace.profileID } ?? WorkspaceProfile.defaultProfile
-                let waits = workspace.columns.compactMap { quickSwitch.agentWait($0, snapshot, now) }
+                let waits = workspace.columns.compactMap { quickSwitch.agentWait($0, snapshot, now, stuckAgentWaitThreshold) }
                 let isWorking = workspace.columns.contains { $0.pty?.cachedAgentState == .working }
                 var agent = QuickSwitchAgentState.summary(waits: waits, isWorking: isWorking)
                 // Its badge's glyph is its row's: one source for why it waits.

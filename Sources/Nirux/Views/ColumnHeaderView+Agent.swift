@@ -59,8 +59,10 @@ extension ColumnHeaderView.Status {
             )
         }
         if dialog.isFailure {
-            let text: String
-            if case .exitedMidTurn = dialog { text = dialog.shortLabel } else { text = "stopped" }
+            let text = switch dialog {
+            case .exitedMidTurn, .silent: dialog.shortLabel
+            default: "stopped"
+            }
             return Self(text, tone: .error, icon: icon(.error), toolTip: toolTip)
         }
         switch dialog {

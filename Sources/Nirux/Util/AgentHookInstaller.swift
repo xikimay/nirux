@@ -116,8 +116,12 @@ enum AgentHookInstaller {
     /// StopFailure (2.1.78) fires instead of Stop when a turn ends on an
     /// API error. Claude doesn't wait for it, so the receiver never slows
     /// the agent.
+    ///
+    /// PermissionDenied (2.1.89) ends a call auto mode refused, which gets
+    /// no PostToolUse: without it the call would read as still running.
     static let versionedClaudeHookEvents: [(event: String, minimumVersion: ClaudeCodeVersion)] = [
-        ("StopFailure", ClaudeCodeVersion(major: 2, minor: 1, patch: 78))
+        ("StopFailure", ClaudeCodeVersion(major: 2, minor: 1, patch: 78)),
+        ("PermissionDenied", ClaudeCodeVersion(major: 2, minor: 1, patch: 89))
     ]
 
     /// Every event to install for a `claude` of `version`.

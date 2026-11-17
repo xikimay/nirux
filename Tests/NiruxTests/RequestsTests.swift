@@ -46,7 +46,7 @@ final class RequestsTests: XCTestCase {
         let column = try XCTUnwrap(workspace.columns.first)
         shell.addWorkspace(title: "blocked", cwd: NSTemporaryDirectory())
         let blocked = try XCTUnwrap(shell.workspaces.last?.columns.first)
-        shell.quickSwitch.agentWait = { candidate, _, _ in
+        shell.quickSwitch.agentWait = { candidate, _, _, _ in
             candidate === blocked ? AgentWait(reason: .permission(tool: "Bash", summary: "rm"), since: 50) : nil
         }
         let asked = mission("q1", askedAt: 20)
@@ -67,7 +67,7 @@ final class RequestsTests: XCTestCase {
         XCTAssertEqual(requests.last?.taskTitle, "blocked")
 
         // Its agent waits on a permission meanwhile: that is what it asks.
-        shell.quickSwitch.agentWait = { candidate, _, _ in
+        shell.quickSwitch.agentWait = { candidate, _, _, _ in
             candidate === column ? AgentWait(reason: .permission(tool: "Bash", summary: "ls"), since: 80) : nil
         }
         let permission = shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100)
@@ -77,7 +77,7 @@ final class RequestsTests: XCTestCase {
             "the permission, not the question behind it"
         )
         // Its agent stopped on an error: its question for the user stays.
-        shell.quickSwitch.agentWait = { candidate, _, _ in
+        shell.quickSwitch.agentWait = { candidate, _, _, _ in
             candidate === column ? AgentWait(reason: .exitedMidTurn, since: 80) : nil
         }
         let stopped = NiruxShellView.requestedAgents(in: shell.waitingQueue(snapshot: ProcessSnapshot(entries: []), now: 100), onScreen: nil)
@@ -91,7 +91,7 @@ final class RequestsTests: XCTestCase {
         shell.selectProfile(home)
         // (The moves refreshed the sidebar, which read no Mission: only the
         // blocked agent waits now.)
-        shell.quickSwitch.agentWait = { candidate, _, _ in
+        shell.quickSwitch.agentWait = { candidate, _, _, _ in
             candidate === blocked ? AgentWait(reason: .permission(tool: "Bash", summary: "rm"), since: 50) : nil
         }
         let elsewhere = shell.waitingRequests(

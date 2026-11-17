@@ -645,7 +645,7 @@ extension WorkspaceState {
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
         case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
             return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
-        case .preToolUse, .postToolUse, .subagentStop, .approvalResolved:
+        case .preToolUse, .postToolUse, .permissionDenied, .subagentStop, .approvalResolved:
             return false
         }
     }

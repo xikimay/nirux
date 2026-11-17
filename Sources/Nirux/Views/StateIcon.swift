@@ -46,7 +46,7 @@ struct StateIcon: Hashable, Sendable {
             case .permission(let tool, _)?: self = tool == "ExitPlanMode" ? .question : .command
             case .question?, .askedInReply?, .message?, nil: self = .question
             case .stillWaiting(let dialog, _)?: self.init(dialog)
-            case .turnFinished?, .apiError?, .exitedMidTurn?: return nil
+            case .turnFinished?, .apiError?, .exitedMidTurn?, .silent?: return nil
             }
         }
     }

@@ -65,7 +65,9 @@ extension NiruxShellView {
         var blockedWaits: [ObjectIdentifier: AgentWait] = [:]
         for workspace in workspaces {
             for column in workspace.columns {
-                if let wait = column.pty?.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(column)]) {
+                if let wait = column.pty?.agentBlockedWait(
+                    now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcesses[ObjectIdentifier(column)]
+                ) {
                     blockedWaits[ObjectIdentifier(column)] = wait
                 }
             }

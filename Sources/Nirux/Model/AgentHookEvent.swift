@@ -15,6 +15,8 @@ struct AgentHookEvent: Codable, Equatable {
     enum Name: String, Codable {
         case sessionStart, userPromptSubmit, preToolUse, notification, stop, sessionEnd
         case permissionRequest, postToolUse, subagentStop
+        /// Auto mode refused a tool call: it ends without a PostToolUse.
+        case permissionDenied
         /// The turn ended on an API error (rate limit, auth, overload…):
         /// Claude fires it instead of Stop.
         case stopFailure
@@ -68,6 +70,9 @@ struct AgentHookEvent: Codable, Equatable {
     let toolEnd: String?
     let toolFamily: String?
     let toolCommandKey: String?
+    /// Claude's `tool_use_id` on the events of one tool call (PreToolUse,
+    /// PostToolUse*, PermissionDenied): what tells the calls still running.
+    let toolUseID: String?
     /// Subagent the event came from (Claude `agent_id`); nil on the main
     /// thread.
     let agentID: String?
@@ -192,6 +197,9 @@ struct AgentHookEvent: Codable, Equatable {
                 toolSummary = nil
                 toolKey = nil
             }
+            toolUseID = [.preToolUse, .postToolUse, .permissionDenied].contains(name)
+                ? (payload["tool_use_id"] as? String).flatMap { AgentText.clean($0, maxLength: 80) }
+                : nil
             if let toolName, name == .postToolUse {
                 let command = AgentToolInput.shellTools.contains(toolName)
                     ? ((payload["tool_input"] as? [String: Any])?["command"] as? String).map(AgentShellCommand.init)
@@ -260,6 +268,7 @@ struct AgentHookEvent: Codable, Equatable {
             toolEnd = nil
             toolFamily = nil
             toolCommandKey = nil
+            toolUseID = nil
             agentID = nil
             notificationType = nil
             errorKind = nil
@@ -370,6 +379,7 @@ struct AgentHookEvent: Codable, Equatable {
         case "PreToolUse": return .preToolUse
         case "PermissionRequest": return .permissionRequest
         case "PostToolUse", "PostToolUseFailure": return .postToolUse
+        case "PermissionDenied": return .permissionDenied
         case "Notification": return .notification
         case "SubagentStop": return .subagentStop
         case "Stop": return .stop
@@ -396,6 +406,7 @@ struct AgentHookEvent: Codable, Equatable {
         toolEnd: String? = nil,
         toolFamily: String? = nil,
         toolCommandKey: String? = nil,
+        toolUseID: String? = nil,
         agentID: String? = nil,
         notificationType: String? = nil,
         errorKind: String? = nil,
@@ -427,6 +438,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.toolEnd = toolEnd
         self.toolFamily = toolFamily
         self.toolCommandKey = toolCommandKey
+        self.toolUseID = toolUseID
         self.agentID = agentID
         self.notificationType = notificationType
         self.errorKind = errorKind

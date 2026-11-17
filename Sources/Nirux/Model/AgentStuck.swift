@@ -53,6 +53,53 @@ struct AgentMidTurnExit: Equatable, Sendable {
     var alerted = false
 }
 
+/// How long a Claude agent has shown no sign of life, on the awake clock
+/// (`ProcessInfo.systemUptime`, stopped while the Mac sleeps): a night's
+/// sleep is no silence.
+struct AgentSilence: Equatable, Sendable {
+    /// Awake seconds of the last sign of life (`AgentLifeSigns`).
+    let since: TimeInterval
+    let now: TimeInterval
+    /// Past it, a turn that waits on the model reads as silent.
+    let threshold: TimeInterval
+
+    var duration: TimeInterval { now - since }
+
+    /// Over 800 transcripts, the longest wait on a reply that came was 14
+    /// minutes of thinking: a turn reads as silent past 20 minutes at
+    /// least, whatever the stuck-agent setting says.
+    static let minimumThreshold: TimeInterval = 20 * 60
+
+    /// For the stuck-agent setting's dialog threshold: nil (off) stays off.
+    static func threshold(waitThreshold: TimeInterval?) -> TimeInterval? {
+        waitThreshold.map { max($0, minimumThreshold) }
+    }
+}
+
+/// A Claude agent's last sign of life, on the awake clock: a hook event, or
+/// its transcript growing. Not terminal output: its spinner redraws while
+/// a request hangs.
+struct AgentLifeSigns: Equatable, Sendable {
+    private(set) var lastAt: TimeInterval?
+    private var transcript: Transcript?
+
+    private struct Transcript: Equatable, Sendable {
+        let path: String
+        let size: UInt64
+    }
+
+    mutating func note(at awake: TimeInterval) {
+        lastAt = awake
+    }
+
+    /// The transcript at `path` measures `size` now: a change since the
+    /// last look at it is a sign. The first look only takes its measure.
+    mutating func noteTranscript(path: String, size: UInt64, at awake: TimeInterval) {
+        if let transcript, transcript.path == path, transcript.size != size { lastAt = awake }
+        transcript = Transcript(path: path, size: size)
+    }
+}
+
 /// An agent that won't go on by itself, beyond the ordinary attention
 /// states. Unlike `.needsAttention`, it outlasts focusing the column and
 /// activating the app: it ends only when the agent moves again.
@@ -61,6 +108,9 @@ enum AgentStuckState: Equatable, Sendable {
     case waiting(AgentAttentionReason, since: TimeInterval)
     case stoppedOnError(AgentTurnFailure)
     case exitedMidTurn(AgentMidTurnExit)
+    /// A turn has waited on the model past the silence threshold, with no
+    /// sign of life: the request may hang.
+    case silent(AgentSilence)
 }
 
 /// Why Resume won't type `continue` into a column.

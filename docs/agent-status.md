@@ -16,7 +16,7 @@ Settings › Agents sets the permission and sandbox mode Claude Code and Codex s
 
 Claude Code can run a command when a turn (one prompt and the work that follows) starts, stops or asks for permission, and Codex when a turn completes. Nirux adds itself as one such command. At every launch, the installed app writes to two files:
 
-- `~/.claude/settings.json` gains `hooks` entries that run `Nirux --hook claude` on session start, prompt submit, tool use, permission request, notification, subagent stop, stop and session end. Your own hooks are kept.
+- `~/.claude/settings.json` gains `hooks` entries that run `Nirux --hook claude` on session start, prompt submit, tool use, permission request, notification, subagent stop, stop and session end. When every `claude` a Nirux terminal could run is recent enough, two more: a turn that ends on an API error (2.1.78 or later) and a tool call auto mode refused (2.1.89 or later). Your own hooks are kept.
 - `~/.codex/config.toml` gains a `notify` entry that runs `Nirux --hook codex` when a turn completes. If you already have a `notify`, Nirux leaves the file alone.
 
 Both files are global, so every Claude Code and Codex session on the Mac runs these entries. Each entry first tests `NIRUX_AGENT_UUID`, a variable only Nirux terminals set, and does nothing anywhere else. Symlinked config files are updated in place and the link is kept.
@@ -49,6 +49,7 @@ While Nirux is in the background, it also sends a macOS notification (a click fo
 - **A long wait.** A Claude Code permission or question left open longer than **Settings › Agents › Flag a dialog waiting after** (10 minutes by default) keeps its row amber and notifies once. On the row of the workspace on screen, `waiting 2h05m` shows next to its column.
 - **An API error.** After a Claude Code turn that ended on an API error, the row reads `Stopped on an API error`. For transient errors (overloaded, server error) a **Resume** button types `continue`, only on your click and once Claude Code is back at an empty prompt. Nirux learns of these errors only when it can read the version of every `claude` a Nirux terminal could run, and each is 2.1.78 or later.
 - **An exit mid-turn.** A `claude` that died during a turn gets an overlay that resumes its conversation in the same permission mode.
+- **A silent turn.** A Claude Code request can hang without an error. When a turn waits on the model with no sign of life (no hook event, no new line in its transcript) for as long as **Settings › Agents › Flag a dialog waiting after**, and 20 minutes at least, its row reads `Silent for 4h45m` in red instead of `Working` and notifies once. A tool still running (a long build), an open dialog or an Esc you pressed is no silence, nor is time the Mac spends asleep. Press Esc in its terminal to stop the turn, then send your message again. With that setting off, nothing is flagged.
 
 ## After a restart
 

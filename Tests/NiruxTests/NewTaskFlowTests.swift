@@ -580,7 +580,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
                 status(of: task) == "Needs you · Trust this folder?"
             }
             let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
-            XCTAssertEqual(pty.agentBlockedWait(now: Date().timeIntervalSince1970, foreground: claude)?.reason, AgentTrustPrompt.reason)
+            XCTAssertEqual(pty.agentBlockedWait(now: Date().timeIntervalSince1970, waitThreshold: nil, foreground: claude)?.reason, AgentTrustPrompt.reason)
             // The other one shows the same screen, as long as two reads take.
             harness.waitUntil("the other agent's screen") {
                 elsewhere.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude"

@@ -25,6 +25,9 @@ enum AgentAttentionReason: Hashable, Sendable {
     /// The agent process exited in the middle of a turn, without ending
     /// its session.
     case exitedMidTurn
+    /// A turn has waited on the model this many seconds with no sign of
+    /// life (`AgentStuckState.silent`).
+    case silent(TimeInterval)
     /// A dialog still waits on the user after `waited` seconds: the
     /// dialog's own reason. Only ever an alert, never a column's state.
     indirect case stillWaiting(AgentAttentionReason, waited: TimeInterval)
@@ -34,7 +37,7 @@ enum AgentAttentionReason: Hashable, Sendable {
     var isBlockingDialog: Bool {
         switch self {
         case .permission, .question: return true
-        case .turnFinished, .askedInReply, .message, .apiError, .exitedMidTurn: return false
+        case .turnFinished, .askedInReply, .message, .apiError, .exitedMidTurn, .silent: return false
         case .stillWaiting(let dialog, _): return dialog.isBlockingDialog
         }
     }
@@ -52,7 +55,7 @@ enum AgentAttentionReason: Hashable, Sendable {
     /// red.
     var isFailure: Bool {
         switch self {
-        case .apiError, .exitedMidTurn: return true
+        case .apiError, .exitedMidTurn, .silent: return true
         default: return false
         }
     }
@@ -75,6 +78,7 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .message: return "needs you"
         case .apiError: return "API error"
         case .exitedMidTurn: return "exited mid-turn"
+        case .silent(let duration): return "silent \(SidebarRenderer.shortDuration(duration))"
         case .stillWaiting(let dialog, let waited):
             return "waiting \(SidebarRenderer.shortDuration(waited)) · \(dialog.shortLabel)"
         }
@@ -90,6 +94,7 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .message: return "needs you"
         case .apiError: return "stopped on an API error"
         case .exitedMidTurn: return "exited mid-turn"
+        case .silent(let duration): return "has been silent for \(SidebarRenderer.shortDuration(duration))"
         case .stillWaiting(let dialog, let waited):
             return "\(dialog.headline) — waiting \(SidebarRenderer.shortDuration(waited))"
         }
@@ -108,12 +113,17 @@ enum AgentAttentionReason: Hashable, Sendable {
             }
         case .question(let text), .message(let text), .askedInReply(let text): return text
         case .turnFinished, .exitedMidTurn: return nil
+        case .silent: return AgentAttentionReason.silentAdvice
         case .apiError(let kind, let detail):
             let parts = [kind, detail].compactMap { $0 }
             return parts.isEmpty ? nil : parts.joined(separator: ": ")
         case .stillWaiting(let dialog, _): return dialog.detailLine
         }
     }
+
+    /// What a silent turn's alert and tooltips add.
+    static let silentAdvice = "No reply, no tool call, no transcript line: its request may hang. "
+        + "Press Esc in its terminal, then send your message again."
 }
 
 /// What a lit attention signal asks of the user, least urgent first: the
@@ -161,7 +171,7 @@ extension AgentAttentionReason {
     var signal: AttentionSignal {
         switch self {
         case .permission, .question, .askedInReply, .message: return .waiting
-        case .apiError, .exitedMidTurn: return .error
+        case .apiError, .exitedMidTurn, .silent: return .error
         case .turnFinished: return .finished
         case .stillWaiting(let dialog, _): return dialog.signal
         }

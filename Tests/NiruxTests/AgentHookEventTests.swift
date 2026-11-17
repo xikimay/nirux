@@ -94,6 +94,26 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertNotEqual(other.toolKey, request.toolKey)
     }
 
+    /// What tells a call still running from one that ended: its id on each
+    /// of its events, a refusal by auto mode included.
+    func testToolCallEventsCarryTheirToolUseID() throws {
+        for (hook, name) in [
+            ("PreToolUse", AgentHookEvent.Name.preToolUse), ("PostToolUse", .postToolUse),
+            ("PostToolUseFailure", .postToolUse), ("PermissionDenied", .permissionDenied)
+        ] {
+            let event = try XCTUnwrap(claudeEvent([
+                "hook_event_name": hook, "tool_name": "Bash", "tool_input": ["command": "rm -rf build"],
+                "tool_use_id": "toolu_01A", "reason": "destructive"
+            ]), hook)
+            XCTAssertEqual(event.name, name, hook)
+            XCTAssertEqual(event.toolUseID, "toolu_01A", hook)
+        }
+        let request = try XCTUnwrap(claudeEvent([
+            "hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": ["command": "ls"], "tool_use_id": "toolu_01A"
+        ]))
+        XCTAssertNil(request.toolUseID, "only the call's own events")
+    }
+
     func testPreToolUseCarriesNoInputExcerpt() throws {
         let event = try XCTUnwrap(claudeEvent([
             "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": ["command": "ls"]

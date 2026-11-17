@@ -5,8 +5,10 @@ import Foundation
 extension AgentStatusMachine {
     /// What keeps the agent from going on, if anything. `foreground` is
     /// the column's foreground process now; `waitThreshold` nil turns the
-    /// long-wait check off.
-    func stuckState(now: TimeInterval, waitThreshold: TimeInterval?, foreground: ForegroundProcess?) -> AgentStuckState? {
+    /// long-wait check off, `silence` nil the silent-turn one.
+    func stuckState(
+        now: TimeInterval, waitThreshold: TimeInterval?, silence: AgentSilence? = nil, foreground: ForegroundProcess?
+    ) -> AgentStuckState? {
         if let midTurnExit {
             let agentInFront = foreground.map { Self.isRecognizedAgentProcess($0.name) } ?? false
             guard !agentInFront, now - midTurnExit.exitedAt >= Self.exitConfirmationDelay else { return nil }
@@ -20,6 +22,9 @@ extension AgentStatusMachine {
         if let waitThreshold, let dialog = visibleDialog(foreground: foreground),
            now - dialog.requestedAt >= waitThreshold {
             return .waiting(dialog.reason, since: dialog.requestedAt)
+        }
+        if let silence, silence.duration >= silence.threshold, awaitsModel(foreground: foreground) {
+            return .silent(silence)
         }
         return nil
     }
