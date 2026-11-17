@@ -47,7 +47,7 @@ final class NiruxShellView: NSView {
     let sidebarStaleLog = SidebarStaleLogState()
     let workspaceSwitch = WorkspaceSwitchState()
     let workspaceNameCard = WorkspaceNameCard()
-    /// Settings › General › "Animate the interface": off, states show
+    /// Settings › Appearance › "Animate the interface": off, states show
     /// without moving.
     var animatesInterface = NiruxShellView.currentAnimatesInterface() {
         didSet { if animatesInterface != oldValue { applyAgentLights() } }

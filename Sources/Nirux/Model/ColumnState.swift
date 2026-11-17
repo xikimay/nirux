@@ -259,12 +259,13 @@ final class ColumnState {
         showDeferredAgentNotice(deferredAgent)
     }
 
-    /// A column's view, opaque under its content: a terminal before its
-    /// first frame, or a page still loading, never lets the translucent
-    /// window through.
+    /// A column's view, opaque under its content in the canvas's colour,
+    /// which showed there before the window could be translucent: a
+    /// terminal before its first frame, or a page still loading, never
+    /// lets the desktop through.
     private static func filled<View: NSView>(_ view: View) -> View {
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor(hex: TerminalConfigBuilder.background).cgColor
+        view.layer?.backgroundColor = Theme.Color.canvas.cgColor
         return view
     }
 

@@ -75,8 +75,9 @@ canvas at the level's chrome alpha lets the desktop through, and the window
 turns non-opaque; the canvas and the sidebar let that frost show. The chrome
 lies on it: macOS 26's glass, or on macOS 14 and 15 its tint alone, since a
 frost of its own would blur twice. What floats in a window of its own (the
-inbox, a callout, ⌘P) keeps its frost and its thick tint. Every column is
-opaque under its content (the terminals' background), so a terminal before
+inbox, a callout, ⌘P) keeps its frost and its thick tint, and its window
+casts the shadow. Every column is opaque under its content (the canvas's
+colour, as before), so a terminal before
 its first frame or a page still loading never shows the desktop; the
 terminals' own opacity is 4.3. An inactive window goes flat, as macOS's own
 do. Reduce transparency and Increase contrast make the window opaque at
@@ -375,8 +376,8 @@ whose windows never show, reach the placement under the bar.
 space, in place of Settings' three toolbar tabs and Space Settings' seven:
 
 - **Sidebar** (`SettingsSidebar`, a table, so ↑ ↓ walk the panes and
-  VoiceOver reads a list): "Nirux" and its panes (General, Agents,
-  Appearance, Notifications), then the space's colour square
+  VoiceOver reads a list): "Nirux" and its panes (General, Appearance,
+  Agents, Notifications), then the space's colour square
   and name, a popup to pick another space, and its panes (General, Defaults,
   Lead, Brief, Memory, Board, Templates). Plain SF Symbols in the secondary
   text colour, no coloured tiles: colour stays for states. The pane shown

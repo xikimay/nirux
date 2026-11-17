@@ -46,10 +46,8 @@ enum TerminalConfigBuilder {
         // (Ghostty's former macOS default); Ghostty 1.4's default is none.
         "copy-on-select = clipboard"
     ]
-    /// The terminals' background, also under every column's content.
-    static let background: UInt32 = 0x212121
     static let niruxColors = [
-        "background = " + String(format: "%06X", background),
+        "background = 212121",
         "foreground = D0D0D0",
         "cursor-color = D0D0D0",
         "selection-background = 303030"

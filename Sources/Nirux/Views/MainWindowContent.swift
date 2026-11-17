@@ -51,11 +51,13 @@ final class MainWindowContent: NSView {
     /// The level drawn (macOS's Reduce transparency and Increase contrast
     /// already made it opaque).
     func show(_ drawn: InterfaceTransparency) {
+        let wasTranslucent = isTranslucent
         isTranslucent = drawn.usesGlass
         frost.isHidden = !isTranslucent
         tint.layer?.backgroundColor = Theme.Color.canvas
             .withAlphaComponent(GlassView.tintAlpha(for: drawn, role: .chrome)).cgColor
         window?.isOpaque = !isTranslucent
         window?.backgroundColor = isTranslucent ? .clear : Theme.Color.canvas
+        if isTranslucent != wasTranslucent { window?.invalidateShadow() }
     }
 }

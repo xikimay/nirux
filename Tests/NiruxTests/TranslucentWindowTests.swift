@@ -43,8 +43,11 @@ final class TranslucentWindowTests: XCTestCase {
         XCTAssertEqual(shell.sidebar.layer?.backgroundColor?.alpha, 0, "and the sidebar")
         XCTAssertEqual(shell.sidebar.iconRail.level, .glass, "the chrome draws the level")
         XCTAssertEqual(shell.commandBarToolbar?.bar.level, .glass)
+        let inbox = RequestInboxView(level: .glass)
+        shell.requestsState.inbox = inbox
 
         shell.interfaceTransparency = .opaque
+        XCTAssertEqual(inbox.level, .opaque, "the inbox, kept once made, follows")
         XCTAssertTrue(window.isOpaque)
         XCTAssertEqual(shell.sidebar.layer?.backgroundColor, Theme.Color.base.cgColor)
     }

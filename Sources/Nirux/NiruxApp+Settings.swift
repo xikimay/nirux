@@ -107,7 +107,7 @@ extension NiruxApp {
     /// How Nirux looks and moves: the interface's transparency, the
     /// animations.
     private func appearancePane() -> NSView {
-        let picker = TransparencyPicker(selection: NiruxShellView.currentInterfaceTransparency())
+        let picker = TransparencyPicker(selection: shell?.interfaceTransparency ?? NiruxShellView.currentInterfaceTransparency())
         let summary = SettingsForm.hint(picker.selection.summary)
         picker.onPick = { [weak self, weak picker, weak summary] level in
             guard let self else { return }

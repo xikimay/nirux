@@ -12,14 +12,16 @@ extension NiruxShellView {
 
     /// The level reaches the chrome (the command bar, the rail, the
     /// sidebar) and what floats over the work, which keeps its thick tint
-    /// (`GlassView.Role.floating`); panels opened later take it as they
-    /// open. Above Opaque the window lets the desktop through
-    /// (`MainWindowContent`), and the canvas and the sidebar let its frost
-    /// show.
+    /// (`GlassView.Role.floating`): the inbox and the callout, kept once
+    /// made; ⌘P takes the bar's as it opens. Above Opaque the window lets
+    /// the desktop through (`MainWindowContent`), and the canvas and the
+    /// sidebar let its frost show.
     func applyInterfaceTransparency() {
         let level = interfaceTransparency
         let translucent = drawnTransparency.usesGlass
         commandBarToolbar?.bar.level = level
+        requestsState.inbox?.level = level
+        requestsState.callout?.level = level
         sidebar.level = level
         sidebar.layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.base.cgColor
         layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.canvas.cgColor
