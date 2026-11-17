@@ -129,6 +129,13 @@ struct AgentHookEvent: Codable, Equatable {
     /// The call's exact text, as the receiver checked it.
     var approvalText: String?
     var approvalOutcome: PermissionApproval.Outcome?
+    /// On a PermissionRequest, what it is about, whether a line naming that
+    /// covers exactly what prompted (`promptTarget(toolName:input:cwd:)`),
+    /// and the session's mode (`permission_mode`), for the space's recap
+    /// (LoopLog). Nil from older receivers.
+    var promptTarget: String?
+    var promptExact: Bool?
+    var permissionMode: String?
     /// On the PermissionRequest of a question dialog (AskUserQuestion):
     /// its questions and the options each offers, bounded, for the row of
     /// its task. Nil from older receivers, and from a line this build
@@ -176,6 +183,10 @@ struct AgentHookEvent: Codable, Equatable {
                 toolKey = AgentToolInput.key(toolName: toolName, input: input)
                 if name == .permissionRequest, toolName == "AskUserQuestion" {
                     dialog = AgentDialog(toolInput: input)
+                }
+                if name == .permissionRequest {
+                    (promptTarget, promptExact) = Self.promptTarget(toolName: toolName, input: input, cwd: cwd)
+                    permissionMode = (payload["permission_mode"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
                 }
             } else {
                 toolSummary = nil
@@ -289,6 +300,56 @@ struct AgentHookEvent: Codable, Equatable {
            onNiruxAccount != true || !TurnEndMarker.allowsMessage(environment: environment, in: directory, running: running) {
             finalMessage = nil
         }
+    }
+
+    /// What a permission prompt is about: the program a shell command runs
+    /// (nil when nothing names it), a fetch's domain, whether a file tool
+    /// reaches outside the folder. `exact`: a line naming the target covers
+    /// exactly what prompted. A shell command must then be that program as
+    /// typed, alone, its options after the subcommand (`git -C app status`
+    /// or `rm x && swift build` aren't); nothing was cut or cleaned.
+    static func promptTarget(toolName: String, input: [String: Any], cwd: String?) -> (target: String?, exact: Bool) {
+        let raw: String?
+        var exact = true
+        switch toolName {
+        case _ where AgentToolInput.shellTools.contains(toolName):
+            guard let command = input["command"] as? String else { return (nil, false) }
+            if let wrapper = privilegeWrapper(in: command) {
+                (raw, exact) = (wrapper, false)
+            } else {
+                raw = AgentShellCommand(command).family
+                exact = raw.map { isWhole(command, startingWith: $0) } ?? false
+            }
+        case "WebFetch":
+            raw = (input["url"] as? String).flatMap(URL.init(string:))?.host?.lowercased()
+        case "Edit", "MultiEdit", "Write", "Read", "NotebookEdit":
+            guard let path = (input["file_path"] ?? input["notebook_path"]) as? String, let cwd, !cwd.isEmpty else { return (nil, false) }
+            raw = !path.hasPrefix("/") || path.hasPrefix(cwd + "/") ? "in the folder" : "outside the folder"
+        default:
+            raw = nil
+        }
+        let target = raw.flatMap { AgentText.clean($0, maxLength: 80) }
+        return (target, exact && target != nil && target == raw)
+    }
+
+    /// `sudo`, `doas` or `su` where a command starts, by name or path:
+    /// run as another user, a command is that, whatever it runs.
+    static func privilegeWrapper(in command: String) -> String? {
+        for part in command.components(separatedBy: CharacterSet(charactersIn: ";&|()\n")) {
+            // Past `NAME=value` assignments.
+            guard let first = part.split(whereSeparator: { $0 == " " || $0 == "\t" }).first(where: { !$0.contains("=") }) else { continue }
+            let name = first.split(separator: "/").last.map(String.init) ?? ""
+            if ["sudo", "doas", "su"].contains(name) { return name }
+        }
+        return nil
+    }
+
+    /// `command` is `family` as typed, then only its own arguments: no
+    /// other command, no redirection, no substitution.
+    static func isWhole(_ command: String, startingWith family: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed == family || trimmed.hasPrefix(family + " ") else { return false }
+        return !["&", "|", ";", "\n", "$(", "`", ">", "<"].contains(where: trimmed.contains)
     }
 
     /// Events that bind or confirm the column's session — where its

@@ -4,6 +4,8 @@ import AppKit
 
 extension NiruxShellView {
     func restoreState() {
+        // The spaces' prompt logs, whether or not Space Settings ever shows them.
+        defer { LoopLog.trimInBackground(spaceIDs: profiles.map(\.id)) }
         let persisted = Persistence.load()
         circlingHintEnabled = PersistedSettings.effective(persisted?.settings).agentCirclingHint
         turnStatusEnabled = PersistedSettings.effective(persisted?.settings).showTurnStatus
