@@ -735,7 +735,8 @@ final class SettingsWindowTests: XCTestCase {
     }
 
     /// Closing Settings leaves the keyboard of the main window where it was:
-    /// typing in an editor, ⌘, then ⌘W, the editor still has it.
+    /// typing in an editor, ⌘, then ⌘W, the editor still has it. Elsewhere
+    /// than the task on screen, the task's terminal takes it.
     @MainActor
     func testClosingSettingsLeavesTheMainWindowsKeyboard() throws {
         try withIsolatedState {
@@ -745,7 +746,7 @@ final class SettingsWindowTests: XCTestCase {
             main.contentView = shell
             defer { main.close() }
             let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
-            shell.addSubview(editor)
+            try XCTUnwrap(shell.activeWorkspace).containerView.addSubview(editor)
             XCTAssertTrue(main.makeFirstResponder(editor))
             let app = try openSettings(shell: shell)
             defer { close(app) }
@@ -753,6 +754,15 @@ final class SettingsWindowTests: XCTestCase {
             app.settingsPanel?.performClose(nil)
             XCTAssertNil(app.settingsPanel)
             XCTAssertIdentical(main.firstResponder, editor)
+
+            // Off the task on screen (a task no longer shown), the keyboard
+            // goes to the task's terminal.
+            let elsewhere = NSTextView(frame: editor.frame)
+            shell.addSubview(elsewhere)
+            XCTAssertTrue(main.makeFirstResponder(elsewhere))
+            app.showSettings(nil)
+            app.settingsPanel?.performClose(nil)
+            XCTAssertFalse(main.firstResponder === elsewhere)
         }
     }
 

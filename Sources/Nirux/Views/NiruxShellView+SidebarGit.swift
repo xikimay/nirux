@@ -529,7 +529,10 @@ extension NiruxShellView {
             self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
         }
-        workspace.onColumnsLaidOut = { [weak self] in self?.refreshSidebarNavigation() }
+        workspace.onColumnsLaidOut = { [weak self, weak workspace] in
+            guard let self, workspace === self.activeWorkspace else { return }
+            self.refreshSidebarNavigation()
+        }
         workspace.onGitContextChanged = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
             self.gitRefresh.gitContextChanged(workspace)
@@ -744,9 +747,12 @@ extension NiruxShellView {
     /// it).
     var sidebarNavigation: SidebarNavigation {
         guard let workspace = activeWorkspace, !workspace.isClosing else { return SidebarNavigation(boardShown: false, boardAvailable: false) }
-        let board = projectBoardLocation(projectID: workspace.profileID)
-        let index = board.flatMap { board in workspace.columns.firstIndex { $0 === board.column } }
-        return SidebarNavigation(boardShown: index.map(workspace.showsColumn(at:)) ?? false, boardAvailable: true)
+        // The space's own Board: not one a task moved here from another space holds.
+        let shown = workspace.columns.indices.contains { index in
+            let column = workspace.columns[index]
+            return !column.isClosing && column.projectBoard?.projectID == workspace.profileID && workspace.showsColumn(at: index)
+        }
+        return SidebarNavigation(boardShown: shown, boardAvailable: true)
     }
 
     /// The navigator rows follow the columns in view: a Board column
@@ -756,6 +762,8 @@ extension NiruxShellView {
         // Each frame of a resize lays the columns out: most change nothing.
         guard navigation != sidebar.navigation else { return }
         sidebar.navigation = navigation
-        sidebar.renderIfChanged()
+        // After the layout pass, and after an update the same change brings
+        // (a workspace switched to), which then rebuilt the rows already.
+        DispatchQueue.main.async { [weak self] in self?.sidebar.renderIfChanged() }
     }
 }

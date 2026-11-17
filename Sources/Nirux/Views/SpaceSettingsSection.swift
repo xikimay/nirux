@@ -64,8 +64,9 @@ final class SpaceSettingsSection: NSObject {
     /// content takes it if it is there (a load under way takes it as it
     /// lands).
     var onKeyboardFreed: ((Tab) -> Void)?
-    /// The alert saying why the window keeps this space.
-    weak var refusal: NSWindow?
+    /// The alert saying why the window keeps this space is up, or queued
+    /// behind a sheet.
+    var isRefusing = false
     /// The window closed (`windowClosed`), or showed another space.
     var onClose: ((_ windowClosed: Bool) -> Void)?
     /// Asks a question in a sheet on the window; the answer comes back

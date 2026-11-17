@@ -41,12 +41,12 @@ extension NiruxShellView {
     /// up there, else on the window; once, while it shows.
     private func refuseSpaceSwitch(_ reason: String, in settings: SpaceSettingsSection) {
         guard let panel = settings.panel else { return showToast(reason) }
-        guard settings.refusal?.sheetParent == nil else { return }
+        guard !settings.isRefusing else { return }
         let alert = NSAlert()
         alert.messageText = reason
         alert.addButton(withTitle: "OK")
-        settings.askInSheet(alert, settingsWindow.spaceSheet ?? panel) { _ in }
-        settings.refusal = alert.window
+        settings.isRefusing = true
+        settings.askInSheet(alert, settingsWindow.spaceSheet ?? panel) { [weak settings] _ in settings?.isRefusing = false }
     }
 
     func makeSettingsWindow() -> SettingsWindow {
@@ -146,7 +146,10 @@ extension NiruxShellView {
             case .general: self.refreshSpaceSettingsGitHub()
             // What another Nirux saved, and Settings' modes, as they are
             // now; variables typed and held back by a problem stay.
-            case .defaults: if !settings.defaults.hasUnsavedRows { settings.defaults.show(defaultsActions.reload()) }
+            case .defaults:
+                guard !settings.defaults.hasUnsavedRows else { return }
+                settings.defaults.show(defaultsActions.reload())
+                settings.fitToContent()
             case .lead: self.refreshSpaceSettingsLead()
             case .brief, .templates: break
             }
@@ -167,9 +170,11 @@ extension NiruxShellView {
             self.projectMemoryPanel?.dismiss()
             self.boardSettingsPanel?.dismiss()
             self.spaceSettings = nil
-            // The main window keeps what had its keyboard, unless that went
-            // meanwhile (its column closed).
-            if windowClosed, let window = self.window, (window.firstResponder as? NSView)?.window !== window {
+            // The main window keeps what had its keyboard in the task on
+            // screen (an editor); else, the task changed or its column went
+            // meanwhile, its terminal takes it.
+            if windowClosed, let window = self.window,
+               (window.firstResponder as? NSView)?.isDescendant(of: self.activeWorkspace?.containerView ?? self) != true {
                 self.focusActiveTerminal(in: window)
             }
         }

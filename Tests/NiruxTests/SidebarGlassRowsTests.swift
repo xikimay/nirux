@@ -338,10 +338,15 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertFalse(shell.sidebar.iconRail.boardButton.isSelected)
         XCTAssertFalse(shell.isMetadataRefreshScheduled, "no process-table scan for one row")
 
-        // The task moved to another space: the Board it holds is the old
-        // space's, not this one's.
+        // Closing, it no longer counts.
         handle.onDrag?(ColumnWidth.half.fraction)
         XCTAssertTrue(shell.sidebar.navigation.boardShown)
+        let board = try XCTUnwrap(workspace.columns.first { $0.projectBoard != nil })
+        board.isClosing = true
+        XCTAssertFalse(shell.sidebarNavigation.boardShown, "closing")
+        board.isClosing = false
+        // The task moved to another space: the Board it holds is the old
+        // space's, not this one's.
         workspace.profileID = "elsewhere"
         XCTAssertFalse(shell.sidebarNavigation.boardShown)
     }

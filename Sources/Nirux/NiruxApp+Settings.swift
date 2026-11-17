@@ -411,6 +411,7 @@ extension NiruxApp {
     /// isn't trusted yet: the ⌘N sheet says so again.
     @objc func settingsChangeTasksFolder(_ sender: NSButton) {
         guard let shell else { return }
+        let sheetBefore = settingsPanel?.attachedSheet
         shell.sideEffects.chooseFolder("Choose", settingsPanel) { [weak self] path in
             guard let self, let path else { return }
             // The default stays the default, made again if it goes; Start
@@ -425,7 +426,8 @@ extension NiruxApp {
             guard self.saveSetting(revert: {}, { $0.tasksFolder = chosen; $0.startedFolderTask = false }) else { return }
             self.settingsTasksFolderLabel?.stringValue = self.settingsTasksFolderText()
         }
-        settingsController?.appSheet = settingsPanel?.attachedSheet
+        // Nirux's, unless it waits behind a sheet already up.
+        if let sheet = settingsPanel?.attachedSheet, sheet !== sheetBefore { settingsController?.appSheet = sheet }
     }
 
     /// Read at the next launch. Only a changed choice is written: a value a
