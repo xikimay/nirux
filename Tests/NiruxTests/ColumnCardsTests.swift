@@ -12,6 +12,8 @@ final class ColumnCardsTests: XCTestCase {
 
     private func workspace(columns: Int, width: CGFloat = 0.5) -> WorkspaceState {
         let workspace = WorkspaceState(title: "cards", cwd: "/tmp")
+        // The viewport a resize drag lays the columns out in again.
+        workspace.containerView.frame = NSRect(x: 0, y: 0, width: 1000, height: 600)
         for _ in 1..<columns { workspace.addColumn() }
         for column in workspace.columns { column.widthFraction = width }
         workspace.focusedIndex = 0
@@ -116,14 +118,12 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertNil(closed.shadow?.superview, "its shadow goes with it")
     }
 
-    /// The shadow stays within the air (the strip clips at the viewport's
-    /// edge) and is cut out under its card, which may be translucent or
-    /// fading.
+    /// The shadow stays within the air: the strip clips at the viewport's
+    /// edge.
     func testTheShadowFollowsTheCardsShape() throws {
         XCTAssertLessThanOrEqual(Theme.Elevation.Level.column.reach, inset)
         let shadow = ColumnShadowView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
         XCTAssertEqual(shadow.shadowOpacity, Theme.Elevation.Level.column.opacity)
-        XCTAssertTrue(shadow.cutsOutItsShape)
         XCTAssertEqual(shadow.shadowPath?.boundingBox, NSRect(x: 0, y: 0, width: 300, height: 200))
         shadow.frame.size = NSSize(width: 120, height: 90)
         XCTAssertEqual(shadow.shadowPath?.boundingBox, NSRect(x: 0, y: 0, width: 120, height: 90))
@@ -133,10 +133,11 @@ final class ColumnCardsTests: XCTestCase {
     /// A translucent terminal's frost blends behind the window, which
     /// ignores the column's rounded clip: its mask holds the corners.
     func testATranslucentTerminalsFrostKeepsTheCardsCorners() throws {
+        // Made before the column has a size: the corners hold once it has one.
         let column = ColumnState(cwd: "/tmp")
-        column.view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
         column.surfaceChanged(attached: true)
         column.showTerminalOpacity(0.8, onScreen: true)
+        column.view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
         let frost = try XCTUnwrap(column.terminalFrost)
         let mask = try XCTUnwrap(frost.maskImage)
         XCTAssertEqual(mask.capInsets.top, GlassView.maskCorner(radius: Theme.Radius.column, in: column.view.bounds.size))
@@ -164,19 +165,18 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
-    /// A closing card shrinks and fades with its shadow.
-    func testAClosingCardTakesItsShadowAlong() throws {
+    /// A card's shadow hides while the card comes or goes: the fading card
+    /// would show it.
+    func testAShadowHidesWhileItsCardComesOrGoes() throws {
         try withShell { shell in
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            workspace.addColumn()
-            shell.relayout(animated: false)
-            let closing = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
-            let shadow = try XCTUnwrap(closing.shadow)
+            shell.addColumn()
+            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            XCTAssertEqual(added.shadow?.isHidden, true, "the new card fades in")
+
             shell.closeActiveColumn()
-            XCTAssertTrue(closing.isClosing)
-            let scale = CGAffineTransform(scaleX: 0.92, y: 0.92)
-            XCTAssertEqual(shadow.layer?.affineTransform(), closing.view.layer?.affineTransform())
-            XCTAssertEqual(shadow.layer?.affineTransform(), scale)
+            XCTAssertTrue(added.isClosing)
+            XCTAssertEqual(added.shadow?.isHidden, true, "the closing card fades out")
         }
     }
 
