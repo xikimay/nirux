@@ -39,11 +39,9 @@ final class ThemeGuardTests: XCTestCase {
     /// state's dot (`WorkspaceProfile.palette`; hex strings, not seen here).
     static let amberFiles: Set<String> = [
         "Views/BoardStagesLineView.swift", "Views/BoardStagesMergedView.swift", "Views/ColumnHeaderView.swift",
-        "Views/CountBadge.swift", "Views/IconRail.swift", "Views/MissionReplyViewController.swift",
-        "Views/NiruxShellView+WorkspaceSwitch.swift", "Views/SessionHistoryPanel.swift",
-        "Views/SidebarApprovalBlockRenderer.swift", "Views/SidebarCardLayout.swift", "Views/SidebarCatchUp.swift",
-        "Views/SidebarRenderer.swift", "Views/SidebarView+Rendering.swift", "Views/SidebarView+SpaceMenus.swift",
-        "Views/SidebarWorkspaceCardRenderer.swift", "Views/StateIcon.swift"
+        "Views/CountBadge.swift", "Views/IconRail.swift", "Views/SidebarApprovalBlockRenderer.swift",
+        "Views/SidebarCardLayout.swift", "Views/SidebarCatchUp.swift", "Views/SidebarRenderer.swift",
+        "Views/SidebarView+Rendering.swift", "Views/SidebarWorkspaceCardRenderer.swift", "Views/StateIcon.swift"
     ]
 
     func testOnlyWaitsOnTheUserPaintAmber() throws {
@@ -106,7 +104,6 @@ final class ThemeGuardTests: XCTestCase {
         "Views/FilePickerPanel.swift": 4,
         "Views/FindBar.swift": 4,
         "Views/LocalServerChipView.swift": 3,
-        "Views/MissionReplyViewController.swift": 1,
         "Views/NewSpacePanel.swift": 2,
         "Views/NewTaskPanel.swift": 1,
         "Views/NiruxShellView+SidebarGit.swift": 1,
@@ -133,7 +130,7 @@ final class ThemeGuardTests: XCTestCase {
         "Views/ColumnIndicatorView.swift": 1,
         "Views/ColumnInternalViews.swift": 4,
         "Views/CommandPalette+URLMode.swift": 1,
-        "Views/CommandPalette.swift": 6,
+        "Views/CommandPalette.swift": 4,
         "Views/EdgeGlowView.swift": 2,
         "Views/EditorColumn.swift": 1,
         "Views/EditorFileTree.swift": 8,

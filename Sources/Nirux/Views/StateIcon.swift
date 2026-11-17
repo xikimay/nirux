@@ -209,7 +209,8 @@ struct StateIcon: Hashable, Sendable {
         }
         switch kind {
         case .working:
-            ring(alpha: 0.45)
+            // Dimmed only to let a station's fill stand out.
+            ring(alpha: stage > 0 ? 0.45 : 1)
             arc(stage)
         case .idle where stage > 0:
             ring(alpha: 0.45)
@@ -276,7 +277,8 @@ struct StateIcon: Hashable, Sendable {
         }
         switch kind {
         case .working:
-            ring(alpha: 0.45)
+            // Dimmed only to let a station's fill stand out.
+            ring(alpha: stage > 0 ? 0.45 : 1)
             pie(stage)
         case .idle:
             ring()

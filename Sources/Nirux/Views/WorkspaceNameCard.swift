@@ -11,9 +11,8 @@ final class WorkspaceNameCard: NSView {
         /// The workspace it names: a card never stays over another one.
         let workspaceID: String
         let name: String
-        /// The workspace's state: green while it works, amber when it waits
-        /// on the user, red when it broke, else grey.
-        let state: NSColor
+        /// The workspace's row's state icon (`WorkspaceInfo.stateIcon`).
+        let state: StateIcon
         /// Its place among the space's workspaces, from 0.
         let position: Int
         let count: Int
@@ -34,12 +33,12 @@ final class WorkspaceNameCard: NSView {
     private static let paddingX: CGFloat = 22
     private static let paddingY: CGFloat = 14
     private static let rowGap: CGFloat = 9
-    private static let stateDot: CGFloat = 9
+    private static let stateIconSide: CGFloat = 14
     private static let positionDot: CGFloat = 6
     private static let positionGap: CGFloat = 6
 
     private let nameLabel = NSTextField(labelWithString: "")
-    private let stateView = NSView()
+    private let stateView = StateIconView(StateIcon(.idle), size: WorkspaceNameCard.stateIconSide)
     private let placeLabel = NSTextField(labelWithString: "")
     private var positionDots: [NSView] = []
     private(set) var content: Content?
@@ -63,8 +62,6 @@ final class WorkspaceNameCard: NSView {
         nameLabel.lineBreakMode = .byTruncatingMiddle
         placeLabel.font = Theme.Font.caption
         placeLabel.textColor = Theme.Color.textSecondary
-        stateView.wantsLayer = true
-        stateView.layer?.cornerRadius = Self.stateDot / 2
         for view in [stateView, nameLabel, placeLabel] {
             view.setAccessibilityElement(false)
             addSubview(view)
@@ -136,6 +133,7 @@ final class WorkspaceNameCard: NSView {
     var litDot: Int? { positionDots.firstIndex { $0.layer?.backgroundColor == Theme.Color.accent.cgColor } }
     var name: String { nameLabel.stringValue }
     var place: String { placeLabel.isHidden ? "" : placeLabel.stringValue }
+    var state: StateIcon { stateView.icon }
 
     /// Its dots fit in `width`, else it says the place in words.
     private static func dotsFit(_ count: Int, in width: CGFloat) -> Bool {
@@ -148,7 +146,7 @@ final class WorkspaceNameCard: NSView {
     private func configure(_ content: Content, width: CGFloat) {
         configuredWidth = width
         nameLabel.stringValue = content.name
-        stateView.layer?.backgroundColor = content.state.cgColor
+        stateView.icon = content.state
         positionDots.forEach { $0.removeFromSuperview() }
         positionDots = []
         let usesDots = Self.dotsFit(content.count, in: width)
@@ -168,7 +166,7 @@ final class WorkspaceNameCard: NSView {
 
     private func layOut(centredIn area: NSRect) {
         let nameSize = nameLabel.fittingSize
-        let maxNameWidth = max(0, area.width - Self.paddingX * 2 - Self.stateDot - 8)
+        let maxNameWidth = max(0, area.width - Self.paddingX * 2 - Self.stateIconSide - 8)
         let widest = content.map { content -> CGFloat in
             let probe = NSTextField(labelWithString: content.widestName)
             probe.font = nameLabel.font
@@ -176,8 +174,8 @@ final class WorkspaceNameCard: NSView {
         } ?? 0
         // Its own name, centred; the card as wide as the longest one.
         let nameWidth = min(ceil(nameSize.width), maxNameWidth)
-        let topWidth = Self.stateDot + 8 + nameWidth
-        let widestTop = Self.stateDot + 8 + min(max(nameWidth, widest), maxNameWidth)
+        let topWidth = Self.stateIconSide + 8 + nameWidth
+        let widestTop = Self.stateIconSide + 8 + min(max(nameWidth, widest), maxNameWidth)
         let placeSize = placeLabel.fittingSize
         let dotsWidth = positionDots.isEmpty
             ? ceil(placeSize.width)
@@ -192,9 +190,12 @@ final class WorkspaceNameCard: NSView {
         )
 
         let topY = bounds.height - Self.paddingY - nameHeight
-        let topX = (bounds.width - topWidth) / 2
-        stateView.frame = NSRect(x: topX, y: topY + (nameHeight - Self.stateDot) / 2, width: Self.stateDot, height: Self.stateDot)
-        nameLabel.frame = NSRect(x: topX + Self.stateDot + 8, y: topY, width: nameWidth, height: nameHeight)
+        let topX = ((bounds.width - topWidth) / 2).rounded()
+        // On whole points: a ring between two pixels blurs.
+        stateView.frame = NSRect(
+            x: topX, y: topY + ((nameHeight - Self.stateIconSide) / 2).rounded(), width: Self.stateIconSide, height: Self.stateIconSide
+        )
+        nameLabel.frame = NSRect(x: topX + Self.stateIconSide + 8, y: topY, width: nameWidth, height: nameHeight)
         let bottomX = (bounds.width - dotsWidth) / 2
         if positionDots.isEmpty {
             placeLabel.frame = NSRect(x: bottomX, y: Self.paddingY, width: dotsWidth, height: bottomHeight)

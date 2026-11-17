@@ -67,9 +67,11 @@ final class StateIconTests: XCTestCase {
         XCTAssertTrue(isFilled(code(NSPoint(x: 19, y: 12))), "top right: Code")
         XCTAssertFalse(isFilled(code(NSPoint(x: 12, y: 12))), "top left")
         XCTAssertFalse(isFilled(code(NSPoint(x: 19, y: 19))), "bottom right")
-        // Working with no station known: its ring alone, no quarter claimed.
+        // Working with no station known: its ring alone, drawn full, no quarter claimed.
         let working = try pixels(StateIcon(.working))
         XCTAssertFalse(isFilled(working(NSPoint(x: 19, y: 12))), "no station, no fill")
+        XCTAssertGreaterThan(working(NSPoint(x: 16, y: 4)).alphaComponent, 0.9, "the ring is the whole mark: full")
+        XCTAssertLessThan(try pixels(StateIcon(.working, stage: 1))(NSPoint(x: 16, y: 4)).alphaComponent, 0.6, "dimmed beside a station")
         XCTAssertTrue(isFilled(try pixels(StateIcon(.working, stage: 1))(NSPoint(x: 19, y: 12))), "Code fills its quarter")
         let wait = try pixels(StateIcon(.needsYou(.command)))
         let rim = try XCTUnwrap(wait(NSPoint(x: 16, y: 4)).usingColorSpace(.sRGB))

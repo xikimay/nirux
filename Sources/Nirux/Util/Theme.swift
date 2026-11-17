@@ -194,7 +194,6 @@ enum Theme {
         static let generalSpace = "tray"
         static let keepAwake = "cup.and.saucer.fill"
         static let permission = "hand.raised"
-        static let question = "bubble.left"
         static let prFeedback = "bubble.left"
         static let botFeedback = "cpu"
         static let agentError = "exclamationmark.triangle.fill"

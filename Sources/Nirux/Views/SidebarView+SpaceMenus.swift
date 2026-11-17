@@ -29,8 +29,8 @@ extension SidebarView {
     /// Shared with the menu bar's Space › Space Settings….
     static let spaceSettingsTitle = "Space Settings…"
 
-    /// One item per space, General first: its color, its name, an amber
-    /// dot while an agent there waits on the user, its task count, and
+    /// One item per space, General first: its color, its name, a state
+    /// icon while an agent there waits on the user or broke, its task count, and
     /// ⌥⌘1…⌥⌘9 for the first nine (the menu bar's Space menu binds them).
     func addSpaceList(to menu: NSMenu) {
         for (position, profile) in lastProfiles.enumerated() {
@@ -49,7 +49,7 @@ extension SidebarView {
         item.title = profile.name
         item.state = profile.isActive ? .on : .off
         let isGeneral = profile.id == WorkspaceProfile.defaultID
-        item.image = isGeneral
+        let image = isGeneral
             ? SidebarRenderer.symbol(Theme.Symbol.generalSpace, color: Theme.Color.textSecondary, pointSize: 12)
             : SidebarRenderer.dot(profileColor(hex: profile.colorHex), diameter: 9, isHollow: profile.workspaceCount == 0)
         if #available(macOS 14.4, *) {
@@ -57,17 +57,15 @@ extension SidebarView {
         }
         // Amber while an agent waits on the user; red once something broke
         // (an agent's error, a failed check), as the cards say it.
-        let mark: (color: NSColor, note: String)? = switch profile.attention {
-        case .waiting?: (Theme.Color.waiting, "An agent waits for you")
-        case .error?: (Theme.Color.error, "An agent stopped or a check failed")
+        let mark: (icon: StateIcon, note: String)? = switch profile.attention {
+        case .waiting?: (StateIcon(.needsYou(.question)), "An agent waits for you")
+        case .error?: (StateIcon(.error), "An agent stopped or a check failed")
         default: nil
         }
+        // The title stays the name (type-select, matching by name): the
+        // mark goes beside the space's own image.
+        item.image = image.flatMap { image in mark.map { Self.image(image, beside: $0.icon) } } ?? image
         if let mark {
-            // The menu's own font: an attributed title draws in its own.
-            let font = NSFont.menuFont(ofSize: 0)
-            let title = NSMutableAttributedString(string: profile.name, attributes: [.font: font])
-            title.append(NSAttributedString(string: "  ●", attributes: [.font: font, .foregroundColor: mark.color]))
-            item.attributedTitle = title
             item.toolTip = mark.note
             item.setAccessibilityLabel("\(profile.name), \(mark.note.lowercased())")
         } else {
@@ -81,6 +79,26 @@ extension SidebarView {
         } else {
             item.keyEquivalent = ""
         }
+    }
+
+    /// A state icon's side in a menu item's image.
+    static let menuIconSide: CGFloat = 12
+
+    /// `image`, then `icon` after a gap, both centred on one line; VoiceOver
+    /// reads the icon.
+    static func image(_ image: NSImage, beside icon: StateIcon) -> NSImage {
+        let side = menuIconSide
+        let gap = Theme.Space.xs
+        let size = NSSize(width: image.size.width + gap + side, height: max(image.size.height, side))
+        let joined = NSImage(size: size, flipped: false) { _ in
+            image.draw(in: NSRect(
+                x: 0, y: ((size.height - image.size.height) / 2).rounded(), width: image.size.width, height: image.size.height
+            ))
+            icon.image(size: side).draw(in: NSRect(x: image.size.width + gap, y: ((size.height - side) / 2).rounded(), width: side, height: side))
+            return true
+        }
+        joined.accessibilityDescription = icon.accessibilityText
+        return joined
     }
 
     /// ⌥⌘1 to ⌥⌘9: the first nine spaces. ⌘1…⌘9 focus columns.

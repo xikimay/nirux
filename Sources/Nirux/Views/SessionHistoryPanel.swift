@@ -526,8 +526,8 @@ private final class SessionHistoryCellView: NSTableCellView {
         needsLayout = true
     }
 
-    /// The column's live state, as ⌘P shows it, in one color per state:
-    /// amber only for an agent that waits on the user.
+    /// The column's live state: ⌘P's badge's words in its icon's colour
+    /// (`PaletteBadge`), amber only for an agent that waits on the user.
     private static func state(
         of held: HeldAgentSession, live: QuickSwitchAgentState?, now: TimeInterval
     ) -> (text: String, color: NSColor) {
@@ -536,13 +536,8 @@ private final class SessionHistoryCellView: NSTableCellView {
         case .exited: return ("exited mid-turn", Theme.Color.error)
         case .running:
             guard let live else { return ("running", Theme.Color.textSecondary) }
-            let color: NSColor
-            switch live {
-            case .working: color = Theme.Color.working
-            case .waiting: color = Theme.Color.waiting
-            case .failed: color = Theme.Color.error
-            }
-            return (live.label(now: now), color)
+            let badge = PaletteBadge(live, now: now)
+            return (badge.text, badge.color)
         }
     }
 }
