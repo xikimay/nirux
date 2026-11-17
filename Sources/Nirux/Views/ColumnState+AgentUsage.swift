@@ -58,9 +58,9 @@ extension ColumnState {
     func noteTranscriptGrowth(foreground: ForegroundProcess?) {
         guard let pty, let follow = claudeTranscript, follow.process == foreground?.instance,
               pty.agentAwaitsModel(foreground: foreground),
-              let size = (try? FileManager.default.attributesOfItem(atPath: follow.follower.path))?[.size] as? UInt64
+              let stamp = FileStamp(URL(fileURLWithPath: follow.follower.path))
         else { return }
-        pty.noteAgentTranscript(path: follow.follower.path, size: size)
+        pty.noteAgentTranscript(path: follow.follower.path, size: stamp.size)
     }
 
     /// Heartbeat, for columns on screen: read what the transcript gained.

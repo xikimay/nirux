@@ -538,7 +538,7 @@ final class PtySession: @unchecked Sendable {
     }
 
     /// The agent's transcript measures `size` now (see `AgentLifeSigns`).
-    func noteAgentTranscript(path: String, size: UInt64) {
+    func noteAgentTranscript(path: String, size: Int64) {
         state.lifeSigns.noteTranscript(path: path, size: size, at: awakeClock())
     }
 

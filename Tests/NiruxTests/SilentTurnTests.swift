@@ -14,15 +14,25 @@ final class SilentTurnTests: XCTestCase {
     /// The stuck-agent setting's default, 10 minutes.
     private let waitThreshold: TimeInterval = 600
 
-    private func event(_ name: AgentHookEvent.Name, at offset: TimeInterval, id: String? = nil, agent: String? = nil) -> AgentHookEvent {
+    private func event(
+        _ name: AgentHookEvent.Name, at offset: TimeInterval, id: String? = nil, agent: String? = nil, end: AgentToolEnd? = nil,
+        type: String? = nil
+    ) -> AgentHookEvent {
         AgentHookEvent(
-            kind: .claude, name: name, sessionID: "lead", toolName: id == nil ? nil : "Bash", toolUseID: id,
-            agentID: agent, timestamp: t0 + offset
+            kind: .claude, name: name, sessionID: "lead", toolName: id == nil ? nil : "Bash", toolKey: id, toolEnd: end?.rawValue,
+            toolUseID: id, agentID: agent, notificationType: type, timestamp: t0 + offset
         )
     }
 
-    private func apply(_ name: AgentHookEvent.Name, at offset: TimeInterval, id: String? = nil, agent: String? = nil) {
-        _ = machine.apply(event(name, at: offset, id: id, agent: agent), isUserFocused: false)
+    private func apply(
+        _ name: AgentHookEvent.Name, at offset: TimeInterval, id: String? = nil, agent: String? = nil, end: AgentToolEnd? = nil,
+        type: String? = nil
+    ) {
+        _ = machine.apply(event(name, at: offset, id: id, agent: agent, end: end, type: type), isUserFocused: false)
+    }
+
+    private func pressEsc(at offset: TimeInterval) {
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + offset), keys: Data([0x1B]))
     }
 
     /// A prompt went in at t0+1.
@@ -85,13 +95,22 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertTrue(isSilent())
     }
 
-    func testACallDeniedAtItsDialogIsForgottenAtTheNextPrompt() {
+    func testACallDeniedAtItsDialogIsForgottenWhenTheTurnEnds() {
         promptIn()
         apply(.preToolUse, at: 2, id: "push")
         // Denied at its dialog: no hook says so.
         XCTAssertFalse(isSilent())
+        apply(.stop, at: 50)
         apply(.userPromptSubmit, at: 60)
         XCTAssertTrue(isSilent())
+    }
+
+    func testAPromptWhileACallRunsLeavesItRunning() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "build")
+        // A peer's message, submitted as a prompt while the build runs.
+        apply(.userPromptSubmit, at: 300)
+        XCTAssertFalse(isSilent())
     }
 
     func testAnOpenDialogIsAWaitOnTheUser() {
@@ -105,10 +124,47 @@ final class SilentTurnTests: XCTestCase {
 
     func testAnEscSinceThePromptIsNoSilence() {
         promptIn()
-        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 5), keys: Data([0x1B]))
-        XCTAssertFalse(isSilent(), "interrupted: Claude fires no hook, its idle reminder ends the turn")
+        pressEsc(at: 5)
+        XCTAssertFalse(isSilent(), "interrupted: Claude fires no hook, and its idle reminder may never come")
         apply(.userPromptSubmit, at: 10)
         XCTAssertTrue(isSilent(), "the next prompt is watched again")
+    }
+
+    func testAnInterruptedCallIsNoSilence() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "build")
+        pressEsc(at: 5)
+        apply(.postToolUse, at: 6, id: "build", end: .interrupted)
+        XCTAssertFalse(isSilent(), "the call's end comes after the Esc")
+        // A stop Nirux didn't type (Remote Control): the end alone says so.
+        apply(.userPromptSubmit, at: 10)
+        apply(.preToolUse, at: 11, id: "test")
+        apply(.postToolUse, at: 12, id: "test", end: .interrupted)
+        XCTAssertFalse(isSilent())
+    }
+
+    func testADialogsReminderDoesNotTakeAnEscBack() {
+        promptIn()
+        pressEsc(at: 5)
+        // A background subagent's dialog, its reminder, then its answer.
+        _ = machine.apply(
+            AgentHookEvent(kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: "k", agentID: "sub", timestamp: t0 + 6),
+            isUserFocused: false
+        )
+        apply(.notification, at: 12, agent: "sub", type: "permission_prompt")
+        apply(.postToolUse, at: 20, id: "k", agent: "sub")
+        XCTAssertFalse(isSilent())
+    }
+
+    func testATurnItsIdleReminderEndedStaysEnded() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "read")
+        apply(.postToolUse, at: 3, id: "read")
+        // Its Stop got lost: Claude's idle reminder ends the turn.
+        apply(.notification, at: 70, type: "idle_prompt")
+        apply(.preToolUse, at: 80, id: "review", agent: "reviewer")
+        apply(.postToolUse, at: 81, id: "review", agent: "reviewer")
+        XCTAssertFalse(isSilent(), "a background subagent at work since")
     }
 
     func testAnEndedTurnIsNoSilenceWhateverItsSubagentsDo() {

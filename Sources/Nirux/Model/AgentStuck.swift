@@ -85,7 +85,7 @@ struct AgentLifeSigns: Equatable, Sendable {
 
     private struct Transcript: Equatable, Sendable {
         let path: String
-        let size: UInt64
+        let size: Int64
     }
 
     mutating func note(at awake: TimeInterval) {
@@ -94,7 +94,7 @@ struct AgentLifeSigns: Equatable, Sendable {
 
     /// The transcript at `path` measures `size` now: a change since the
     /// last look at it is a sign. The first look only takes its measure.
-    mutating func noteTranscript(path: String, size: UInt64, at awake: TimeInterval) {
+    mutating func noteTranscript(path: String, size: Int64, at awake: TimeInterval) {
         if let transcript, transcript.path == path, transcript.size != size { lastAt = awake }
         transcript = Transcript(path: path, size: size)
     }

@@ -127,12 +127,18 @@ struct AgentStatusMachine {
     /// The main thread's tool calls in flight, by `tool_use_id` ("" for a
     /// call an older receiver sent without one): from PreToolUse to its
     /// PostToolUse, or to the PermissionDenied of a call auto mode refused.
-    /// A call denied at a dialog fires neither: the next prompt or the
-    /// turn's end forgets it.
+    /// A call refused at a dialog, by a rule or a hook fires neither: the
+    /// turn's end forgets it. (A prompt doesn't: Claude submits peer
+    /// messages and poll results as prompts while a call runs.)
     private var mainCallsRunning: [String] = []
-    /// The main thread's last prompt or tool event: a turn end before it is
-    /// an earlier turn's.
-    private var mainThreadMovedAt: TimeInterval = 0
+    /// The main thread's last prompt or tool event in the turn in flight;
+    /// nil between turns.
+    private var mainTurnMovedAt: TimeInterval?
+    /// The last interrupt of a turn: an Esc or Ctrl-C (Claude fires no hook
+    /// for it, and its idle reminder may never come), or a main-thread call
+    /// that ended interrupted (a stop Nirux didn't type). Unlike
+    /// `lastCancelKeyAt`, no dialog's reminder takes it back.
+    private var turnInterruptedAt: TimeInterval = 0
     /// Agent kind ("claude") once this session has emitted a hook event —
     /// proof that hooks are installed and authoritative for this session.
     private(set) var hookKind: String?
@@ -349,6 +355,7 @@ struct AgentStatusMachine {
             }
             noteCallEnded(event, at: now)
             noteCallOver(event)
+            if event.agentID == nil, event.toolEnd == AgentToolEnd.interrupted.rawValue { turnInterruptedAt = now }
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionDenied:
@@ -436,8 +443,7 @@ struct AgentStatusMachine {
             askedQuestion = nil
             circling.reset()
             lastPromptAt = now
-            mainThreadMovedAt = now
-            mainCallsRunning = []
+            mainTurnMovedAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
         }
@@ -723,7 +729,7 @@ struct AgentStatusMachine {
     /// A main-thread tool event: the failed turn is behind.
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
-        mainThreadMovedAt = event.timestamp
+        mainTurnMovedAt = event.timestamp
         turnEndQuestionIsBehind = true
         turnFailure = nil
         // Went on by itself (a Stop hook blocked its end, a background
@@ -967,6 +973,7 @@ struct AgentStatusMachine {
         turnStartedAt = nil
         hookTurnInFlight = false
         mainCallsRunning = []
+        mainTurnMovedAt = nil
         circling.reset()
     }
 
@@ -978,13 +985,15 @@ struct AgentStatusMachine {
 
     /// The main thread's turn waits on the model: a prompt or a tool result
     /// went in, no call of its own runs (a build may run for an hour), no
-    /// dialog is open (a wait on the user), and no Esc or Ctrl-C went to
-    /// it since (Claude's interrupt fires no hook). Background subagents
-    /// at work after its turn ended don't make one.
+    /// dialog is open (a wait on the user), and nothing interrupted it
+    /// since. Background subagents at work after its turn ended don't make
+    /// one.
     func awaitsModel(foreground: ForegroundProcess?) -> Bool {
-        guard let foreground, foreground.name == "claude", hookKind == "claude", hookTurnInFlight else { return false }
-        return mainThreadMovedAt > mainTurnEndedAt && mainThreadMovedAt >= foreground.instance.startedAt
-            && mainCallsRunning.isEmpty && openDialogs.isEmpty && lastCancelKeyAt <= mainThreadMovedAt
+        guard let foreground, foreground.name == "claude", hookKind == "claude", hookTurnInFlight,
+              let moved = mainTurnMovedAt
+        else { return false }
+        return moved >= foreground.instance.startedAt && turnInterruptedAt < moved
+            && mainCallsRunning.isEmpty && openDialogs.isEmpty
     }
 
     /// The agent may be going in circles in the turn in flight: its
@@ -1192,7 +1201,10 @@ struct AgentStatusMachine {
         case .some:
             if keys.map(Self.answersApproval) ?? true { lastKeystrokeAt = time }
         }
-        if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
+        if keys.map(Self.isCancelKey) ?? true {
+            lastCancelKeyAt = time
+            turnInterruptedAt = time
+        }
         lastInputAt = time
         if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
@@ -1449,7 +1461,8 @@ struct AgentStatusMachine {
         longWaitAlerted = []
         silenceAlertedSince = nil
         mainCallsRunning = []
-        mainThreadMovedAt = 0
+        mainTurnMovedAt = nil
+        turnInterruptedAt = 0
         lastPromptAt = nil
         turnPromptID = nil
         recentPromptIDs = []

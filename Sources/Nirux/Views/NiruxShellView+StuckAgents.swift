@@ -36,7 +36,7 @@ extension NiruxShellView {
         appIsActive: Bool = NSApp.isActive
     ) {
         column.trackForegroundAgent(foregroundProcess, snapshot: snapshot, now: now)
-        column.noteTranscriptGrowth(foreground: foregroundProcess)
+        if stuckAgentWaitThreshold != nil { column.noteTranscriptGrowth(foreground: foregroundProcess) }
         guard let pty = column.pty else { return }
         let onScreen = appIsActive && workspace === activeWorkspace
             && workspace.columns[safe: workspace.focusedIndex] === column
