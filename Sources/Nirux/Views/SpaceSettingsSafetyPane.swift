@@ -26,6 +26,10 @@ final class SpaceSettingsSafetyPane: NSObject {
     let view = NSView()
     private(set) var switches: [ClaudeSpaceSettings.Part: NSSwitch] = [:]
     let repositoriesLabel = SpaceSettingsSafetyPane.detailLabel()
+    /// The deny rules, in a list that scrolls past `maxRulesHeight`: the
+    /// window can't grow past a 13-inch screen.
+    let rulesScroll = NSScrollView()
+    private static let maxRulesHeight: CGFloat = 112
     let problemLabel = NSTextField(wrappingLabelWithString: "")
 
     private(set) var model: Model
@@ -80,8 +84,9 @@ final class SpaceSettingsSafetyPane: NSObject {
         case .trustRepositories:
             return "Auto mode is told they are yours, so pushing a branch or opening a pull request there isn’t held up."
         case .denyIrreversible:
-            return "Refused in every permission mode, bypass included, even inside a longer command line: "
-                + ".env files, ~/.ssh, and git commands that lose work."
+            return "Their common forms are refused in every permission mode, bypass included, even inside a longer "
+                + "command line: .env files anywhere, ~/.ssh, and git commands that lose work. Shortened git options and "
+                + "grouped flags get past them; in auto mode, its own safety check is still behind them."
         case .sandbox:
             return "Limits network access and writes outside the working folder: builds that fetch packages "
                 + "or write caches may fail."
@@ -110,7 +115,12 @@ final class SpaceSettingsSafetyPane: NSObject {
             switch part {
             case .trustRepositories: texts.append(repositoriesLabel)
             case .denyIrreversible:
-                texts.append(Self.detailLabel(ClaudeSpaceSettings.denyRuleGroups.map { $0.joined(separator: "  ") }.joined(separator: "\n")))
+                let lines = NSStackView(views: ClaudeSpaceSettings.denyRuleGroups.map { Self.detailLabel($0.joined(separator: "  ")) })
+                lines.orientation = .vertical
+                lines.spacing = 2
+                let height = min(lines.fittingSize.height, Self.maxRulesHeight)
+                Self.scroll(lines, in: rulesScroll, width: Self.textWidth, height: rulesScroll.heightAnchor.constraint(equalToConstant: height))
+                texts.append(rulesScroll)
             case .sandbox: break
             }
             widths += texts.compactMap { ($0 as? NSTextField).map { $0.widthAnchor.constraint(lessThanOrEqualToConstant: Self.textWidth) } }
@@ -166,4 +176,46 @@ final class SpaceSettingsSafetyPane: NSObject {
         label.preferredMaxLayoutWidth = textWidth
         return label
     }
+}
+
+extension SpaceSettingsSafetyPane {
+    /// `rows` in `scroll`, `width` wide and as tall as `height` says.
+    fileprivate static func scroll(_ rows: NSStackView, in scroll: NSScrollView, width: CGFloat, height: NSLayoutConstraint) {
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        fillWidth(rows)
+        let document = SafetyFlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        rows.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(rows)
+        scroll.documentView = document
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        NSLayoutConstraint.activate([
+            rows.topAnchor.constraint(equalTo: document.topAnchor),
+            rows.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            rows.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            rows.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            scroll.widthAnchor.constraint(equalToConstant: width),
+            height
+        ])
+    }
+}
+
+extension SpaceSettingsSafetyPane {
+    /// Each row as wide as the list: the clip's width, whichever scroller
+    /// the user's setting shows. Call it again for rows set later.
+    fileprivate static func fillWidth(_ rows: NSStackView) {
+        for row in rows.arrangedSubviews { row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true }
+    }
+}
+
+/// A scrolled list's document: rows from the top.
+private final class SafetyFlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

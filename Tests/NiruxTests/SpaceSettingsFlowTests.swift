@@ -114,7 +114,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             try flip(.trustRepositories)
             try flip(.denyIrreversible)
             XCTAssertFalse(try launch("second").contains("--settings"))
-            XCTAssertEqual(try written().count, 0, "emptied for the commands that still name it")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "nothing on, no file")
         }
     }
 

@@ -137,26 +137,36 @@ extension NiruxShellView {
         return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).claudeMode(settings: currentClaudeLaunchMode())
     }
 
-    /// The space's Claude settings file, written now (see
-    /// `ClaudeSpaceSettings`); nil when the space hands none, and, like its
-    /// other defaults, for a workspace opened from outside Nirux.
-    func claudeSpaceSettingsFile(for workspace: WorkspaceState) -> String? {
-        guard !workspace.startedOutsideNirux else { return nil }
-        let defaults = SpaceDefaultsStore.defaults(forSpace: workspace.profileID)
+    /// The Claude settings file of each space `workspaces` launch in,
+    /// written once for the batch (see `ClaudeSpaceSettings`), by space id;
+    /// none for a space that hands none, nor, like its other defaults, for
+    /// a workspace opened from outside Nirux. A space whose file can't be
+    /// written says so once, and its launches pass none.
+    func claudeSpaceSettingsFiles(for workspaces: [WorkspaceState]) -> [String: String] {
         var userEnvironment: [String]?
         if case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser) {
             userEnvironment = ClaudeSpaceSettings.userEnvironment(settings)
         }
-        do {
-            return try ClaudeSpaceSettings.prepare(
-                spaceID: workspace.profileID, defaults: defaults,
-                anchors: profiles.first { $0.id == workspace.profileID }?.anchors ?? [], userEnvironment: userEnvironment
-            )
-        } catch {
-            NiruxDebugLog.log("ClaudeSpaceSettings: could not write the space's file: \(error)")
-            showToast("Claude starts without the space’s safety settings: Nirux couldn’t write them (\(error.localizedDescription))", tone: .error)
-            return nil
+        var files: [String: String] = [:]
+        for spaceID in Set(workspaces.filter { !$0.startedOutsideNirux }.map(\.profileID)) {
+            do {
+                files[spaceID] = try ClaudeSpaceSettings.prepare(
+                    spaceID: spaceID, defaults: SpaceDefaultsStore.defaults(forSpace: spaceID),
+                    anchors: profiles.first { $0.id == spaceID }?.anchors ?? [], userEnvironment: userEnvironment
+                )
+            } catch {
+                NiruxDebugLog.log("ClaudeSpaceSettings: could not write the file of space \(spaceID): \(error)")
+                showToast("Claude starts without the space’s safety settings: Nirux couldn’t write them (\(error.localizedDescription))", tone: .error)
+            }
         }
+        return files
+    }
+
+    /// The file one launch in `workspace` passes: `prepared` for a batch
+    /// (`claudeSpaceSettingsFiles`), else written now.
+    func claudeSpaceSettingsFile(for workspace: WorkspaceState, prepared: [String: String]? = nil) -> String? {
+        guard !workspace.startedOutsideNirux else { return nil }
+        return (prepared ?? claudeSpaceSettingsFiles(for: [workspace]))[workspace.profileID]
     }
 
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
