@@ -289,6 +289,7 @@ extension NiruxShellView {
                     isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
                 ),
                 briefFile: brief?.claudePromptFile,
+                settingsFile: claudeSpaceSettingsFile(for: workspace),
                 handoverPrompt: handoverPrompt
             )
         case .codex:

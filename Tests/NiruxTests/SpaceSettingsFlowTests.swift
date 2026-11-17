@@ -72,6 +72,50 @@ final class SpaceSettingsFlowTests: XCTestCase {
         }
     }
 
+    /// Space Settings › Safety writes each switch at once, and the next
+    /// Claude launch in the space passes the file it makes.
+    func testTheSafetyTabWritesEachSwitchAndLaunchesPassTheFile() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try anchoredSpace(harness)
+            let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: space.id))
+            let file = try XCTUnwrap(SpaceBrief.directory(spaceID: space.id, stateDirectory: Persistence.stateDirectory))
+                .appendingPathComponent(ClaudeSpaceSettings.fileName)
+            shell.showSpaceSettings(profileID: space.id, tab: .safety)
+            let pane = try XCTUnwrap(shell.spaceSettings).safety
+            XCTAssertEqual(pane.model.on, [.trustRepositories, .denyIrreversible])
+            XCTAssertEqual(pane.model.repositories.count, 1)
+
+            @MainActor func flip(_ part: ClaudeSpaceSettings.Part) throws {
+                let control = try XCTUnwrap(pane.switches[part])
+                control.state = control.state == .on ? .off : .on
+                control.sendAction(control.action, to: control.target)
+            }
+            @MainActor func launch(_ title: String) throws -> String {
+                let before = harness.agentLaunches.count
+                shell.addWorkspace(title: title, cwd: harness.repo, agent: .claude, profileID: space.id)
+                harness.waitUntil("the Claude launch") { harness.agentLaunches.count > before }
+                return try XCTUnwrap(harness.agentLaunches.last)
+            }
+            @MainActor func written() throws -> [String: Any] {
+                try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            }
+
+            try flip(.denyIrreversible)
+            XCTAssertEqual(store.load().defaults.claudeDeniesIrreversible, false)
+            XCTAssertEqual(pane.model.on, [.trustRepositories])
+            XCTAssertTrue(try launch("first").contains("'--settings=\(file.path)'"))
+            XCTAssertEqual(Set(try written().keys), ["autoMode"])
+
+            try flip(.denyIrreversible)
+            XCTAssertNil(store.load().defaults.claudeDeniesIrreversible, "its default writes nothing")
+            try flip(.trustRepositories)
+            try flip(.denyIrreversible)
+            XCTAssertFalse(try launch("second").contains("--settings"))
+            XCTAssertEqual(try written().count, 0, "emptied for the commands that still name it")
+        }
+    }
+
     /// A worktree Nirux makes runs its repository's script, then the agent;
     /// one asked for from outside Nirux, or an existing worktree opened,
     /// doesn't. Without an agent the script runs alone.

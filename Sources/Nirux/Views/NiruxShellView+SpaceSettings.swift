@@ -119,6 +119,8 @@ extension NiruxShellView {
         defaultsActions.settingsCodexMode = { Self.currentCodexLaunchMode() }
         // Read when its pane first shows (`onTabShown`), not for each ⌘,.
         let defaults = SpaceSettingsDefaultsPane(loaded: unread, actions: defaultsActions)
+        let safety = SpaceSettingsSafetyPane(model: spaceSettingsSafetyModel(for: space))
+        safety.actions.set = { [weak self] part, on in self?.setClaudeSafety(part, on: on, spaceID: spaceID) }
         let lead = SpaceSettingsLeadPane(model: spaceSettingsLeadModel(for: space))
         lead.actions.setLead = { [weak self] on in
             guard let self else { return }
@@ -126,7 +128,7 @@ extension NiruxShellView {
         }
         lead.actions.setStartsTasks = { [weak self] on in self?.setLeadStartsTasks(on, spaceID: spaceID) }
         let settings = SpaceSettingsSection(
-            spaceID: spaceID, general: general, defaults: defaults, lead: lead,
+            spaceID: spaceID, general: general, defaults: defaults, safety: safety, lead: lead,
             brief: SpaceFileEditorPane(source: Self.briefSource(for: space)),
             templates: SpaceFileEditorPane(source: Self.templatesSource(for: space))
         )
@@ -145,6 +147,7 @@ extension NiruxShellView {
                 guard !settings.defaults.hasUnsavedRows else { return }
                 settings.defaults.show(defaultsActions.reload())
                 settings.fitToContent()
+            case .safety: self.refreshSpaceSettingsSafety()
             case .lead: self.refreshSpaceSettingsLead()
             case .brief, .templates: break
             }

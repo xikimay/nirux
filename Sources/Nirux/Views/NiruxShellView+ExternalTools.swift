@@ -25,6 +25,8 @@ extension NiruxShellView {
     /// `briefFile` is the space brief (see `SpaceBrief`), appended to the
     /// system prompt on every launch: a resumed conversation keeps the prompt
     /// it recorded until it compacts, then uses this one.
+    /// `settingsFile` is the space's Claude settings (see
+    /// `ClaudeSpaceSettings`), merged over the user's own.
     /// `niruxExecutable` serves the agents' tools: the project's history
     /// search (see `NiruxMCPServer`). Every launch gets them by default.
     /// `handoverPrompt` is appended as a single-quoted positional argument
@@ -38,6 +40,7 @@ extension NiruxShellView {
         mode: ClaudeLaunchMode,
         sessionName: String? = nil,
         briefFile: String? = nil,
+        settingsFile: String? = nil,
         niruxExecutable: String? = NiruxShellView.niruxExecutable,
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
@@ -57,6 +60,9 @@ extension NiruxShellView {
         }
         if let briefFile {
             parts.append(contentsOf: Self.claudeAppendSystemPromptArguments(briefFile: briefFile, shell: shell))
+        }
+        if let settingsFile {
+            parts.append(Self.shellQuotedArgument("--settings=" + settingsFile))
         }
         if let niruxExecutable {
             parts.append(contentsOf: NiruxMCPServer.claudeArguments(executable: niruxExecutable).map(Self.shellQuotedArgument))
@@ -131,6 +137,16 @@ extension NiruxShellView {
         return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).claudeMode(settings: currentClaudeLaunchMode())
     }
 
+    /// The space's Claude settings file, written now (see
+    /// `ClaudeSpaceSettings`); nil when the space hands none.
+    func claudeSpaceSettingsFile(for workspace: WorkspaceState) -> String? {
+        ClaudeSpaceSettings.prepare(
+            spaceID: workspace.profileID,
+            defaults: SpaceDefaultsStore.defaults(forSpace: workspace.profileID),
+            anchors: profiles.first { $0.id == workspace.profileID }?.anchors ?? []
+        )
+    }
+
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
         guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
         return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
@@ -140,7 +156,8 @@ extension NiruxShellView {
         guard let workspace = activeWorkspace else { return }
         let cmd = Self.claudeCommand(
             mode: Self.claudeLaunchMode(for: workspace),
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+            settingsFile: claudeSpaceSettingsFile(for: workspace)
         )
         workspace.addColumn()
         relayout(animated: false)

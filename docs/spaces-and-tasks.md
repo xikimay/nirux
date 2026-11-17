@@ -18,6 +18,7 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 | --- | --- |
 | General | name, color, repositories and folders, the default one, each repository's setup script |
 | Defaults | the agent new tasks preselect, the Claude Code and Codex modes, environment variables for new shells |
+| Safety | what the space's Claude Code sessions are refused or trusted with ([below](#safety)) |
 | Lead | the space's [Lead](#the-lead) |
 | Brief | rules given to every agent the space starts |
 | Memory | what agents know about the repository ([Space memory](#space-memory)) |
@@ -31,6 +32,16 @@ Environment values are literal (`$PATH` isn't expanded) and names starting with 
 A repository's setup script runs once in each new worktree made for a task, before the agent starts, with `/bin/sh -e` and no input. A worktree made by **Existing Branch…** runs none. If the script fails, Nirux notifies you and the agent still starts.
 
 Deleting a space deletes its defaults and setup scripts but keeps its brief.
+
+#### Safety
+
+Each Claude Code session the space starts gets a settings file with `--settings`. Claude Code adds it to your own settings, which Nirux leaves as they are. Each part has its own switch:
+
+- **Trust this space's repositories in auto mode** (on): auto mode's `autoMode.environment` names each repository of the space, with its GitHub remotes, as yours, after Claude Code's own entries.
+- **Refuse what can't be undone** (on): deny rules that hold in every permission mode, bypass included, also inside a longer command line such as `cd app && git reset --hard`. They cover reading or editing `.env` and `.env.*` files (`.env.example` too) and `~/.ssh`, and `git push --force` or `-f` (`--force-with-lease` too), `git reset --hard`, `git checkout -- .`, `git restore .`, `git clean` with `-f`, `-d` (a dry run `git clean -dn` too), `-x` or `--force`, and `git worktree remove`.
+- **Run commands in Claude Code's sandbox** (off): limits network access and writes outside the working folder, so builds that fetch packages or write caches may fail.
+
+A change reaches sessions as they start. Codex, Gemini CLI and OpenCode don't read this file.
 
 ## Starting a task
 

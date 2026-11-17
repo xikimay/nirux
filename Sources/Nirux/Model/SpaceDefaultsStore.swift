@@ -138,7 +138,11 @@ struct SpaceDefaultsStore: Sendable {
         if top["codexLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.codexLaunchMode == nil {
             unknown.insert("codexLaunchMode")
         }
-        if let value = top["leadStartsTasks"], !(value is NSNull), decoded.leadStartsTasks == nil { unknown.insert("leadStartsTasks") }
+        let switches: [(String, Bool?)] = [
+            ("leadStartsTasks", decoded.leadStartsTasks), ("claudeTrustsRepositories", decoded.claudeTrustsRepositories),
+            ("claudeDeniesIrreversible", decoded.claudeDeniesIrreversible), ("claudeSandbox", decoded.claudeSandbox)
+        ]
+        for (key, value) in switches where value == nil && top[key].map({ !($0 is NSNull) }) == true { unknown.insert(key) }
         if let variables = top["environment"], !(variables is NSNull) {
             let entries = variables as? [Any] ?? []
             let readable = entries.allSatisfy { entry in

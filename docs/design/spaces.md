@@ -420,8 +420,8 @@ Mockups were validated in the design session. What changes:
   and its shortcut. ⌃⌘B opens the Board.
 - **Card menu:** state actions first (Review Branch, failed CI, Clean Up once
   merged), then an Organize submenu, then Rename, the context and Close.
-- **Space Settings:** one window with tabs (General, Defaults, Lead, Brief,
-  Memory, Board, Templates) instead of five separate panels; since the glass
+- **Space Settings:** one window with tabs (General, Defaults, Safety, Lead,
+  Brief, Memory, Board, Templates) instead of five separate panels; since the glass
   interface's 4.1, the space's panes of the one Settings window
   (docs/design/glass-interface.md). Shipped without
   Lead (S11): toolbar tabs like Nirux Settings, each change applied at once

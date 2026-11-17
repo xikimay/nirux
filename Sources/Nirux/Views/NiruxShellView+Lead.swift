@@ -104,12 +104,18 @@ extension NiruxShellView {
     /// "Starts tasks without asking", saved in the space's defaults.json
     /// (on is the default, so it writes nothing).
     func setLeadStartsTasks(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.leadStartsTasks = on ? nil : false }
+        refreshSpaceSettingsLead()
+    }
+
+    /// Saves `change` to the space's defaults.json at once. An unreadable
+    /// file is replaced (set aside first) even when nothing changes: what
+    /// it held reads as unset until then.
+    func changeSpaceDefaults(spaceID: String, _ change: (inout SpaceDefaults) -> Void) {
         guard let store = SpaceDefaultsStore(spaceID: spaceID) else { return }
         let loaded = store.load()
         var defaults = loaded.defaults
-        defaults.leadStartsTasks = on ? nil : false
-        // An unreadable file is replaced (set aside first) even with nothing
-        // to change: it reads as off until then.
+        change(&defaults)
         if defaults != loaded.defaults || loaded.status == .unreadable,
            case .failure(let error) = store.save(defaults, replacing: loaded) {
             showToast(error.message, tone: .error)
@@ -119,7 +125,6 @@ extension NiruxShellView {
         if let settings = spaceSettings, settings.spaceID == spaceID, !settings.defaults.hasUnsavedRows {
             settings.defaults.show(store.load())
         }
-        refreshSpaceSettingsLead()
     }
 
     /// Whether the space's Lead starts tasks itself. A defaults.json Nirux
