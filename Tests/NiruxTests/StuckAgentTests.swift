@@ -537,8 +537,10 @@ final class StuckAgentTests: XCTestCase {
     }
 
     func testClaudeLaunchModeFromArguments() {
-        XCTAssertEqual(ClaudeLaunchMode.detect(arguments: ["claude", "--dangerously-skip-permissions"]), .skipPermissions)
-        XCTAssertEqual(ClaudeLaunchMode.detect(arguments: ["claude", "--permission-mode", "plan"]), .plan)
+        for mode in ClaudeLaunchMode.allCases where mode != .default {
+            XCTAssertEqual(ClaudeLaunchMode.detect(arguments: ["claude"] + mode.cliArgs), mode)
+        }
+        XCTAssertEqual(ClaudeLaunchMode.detect(arguments: ["claude", "--permission-mode", "manual"]), .manual)
         XCTAssertNil(ClaudeLaunchMode.detect(arguments: ["claude", "--permission-mode"]))
         XCTAssertNil(ClaudeLaunchMode.detect(arguments: ["claude"]))
     }
