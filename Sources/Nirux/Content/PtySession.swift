@@ -390,6 +390,8 @@ final class PtySession: @unchecked Sendable {
 
     /// When a key or paste last reached the terminal.
     var lastInputAt: TimeInterval { state.machine.lastInputAt }
+    /// The same, for what may sit in the prompt (scrolled arrows too).
+    var lastDraftInputAt: TimeInterval { state.machine.lastDraftInputAt }
 
     /// A turn end waits for its verdict (see `AgentStatusMachine.awaitsAnyVerdict`).
     var awaitsTurnVerdict: Bool { state.machine.awaitsAnyVerdict }

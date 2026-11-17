@@ -967,7 +967,9 @@ struct AgentStatusMachine {
     /// it, and nobody is alerted. False when a newer prompt went in.
     mutating func noteInterrupted(promptAt: TimeInterval, now: TimeInterval) -> Bool {
         guard lastPromptAt == promptAt else { return false }
-        closeDialogs { $0.agentID == nil }
+        // The Esc stops a subagent's call too: no hook ends its answered dialog.
+        let stopped = Set(pendingDialogs.filter { $0.agentID == nil || !waitsForKeys($0) })
+        closeDialogs { stopped.contains($0) }
         endTurn()
         mainTurnEndedAt = now
         state = .idle

@@ -29,8 +29,7 @@ enum MissionEventCLI {
     /// types of it whole (`TypedPromptSanitizer.maxCharacters` scalars, a
     /// header aside): emoji and combining marks take several scalars.
     static func fits(_ message: String, limit: Int) -> Bool {
-        !message.isEmpty && message.count <= limit
-            && message.unicodeScalars.count <= min(limit * 2, TypedPromptSanitizer.maxCharacters - 500)
+        !message.isEmpty && message.count <= limit && message.unicodeScalars.count <= TypedPromptSanitizer.maxCharacters - 500
     }
     /// Agent shell tools stop foreground commands after a few minutes (two
     /// by default in Claude Code), so a wait never lasts longer than this and
