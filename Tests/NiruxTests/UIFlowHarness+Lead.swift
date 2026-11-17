@@ -23,10 +23,11 @@ extension UIFlowHarness {
         return Lead(space: space, workspace: workspace, agentUUID: try XCTUnwrap(workspace.columns.first?.agentUUID))
     }
 
-    /// The answer to a request from `workspace`'s column, once it comes.
+    /// The answer to a request from `workspace`'s column, once it comes,
+    /// within `timeout` seconds.
     func callLeadTool(
         _ tool: String, _ arguments: [String: Any] = [:], from workspace: WorkspaceState, agentUUID: String,
-        file: StaticString = #filePath, line: UInt = #line
+        timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line
     ) throws -> (text: String, isError: Bool) {
         let json = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: arguments), encoding: .utf8))
         let request = LeadChannel.Request(
@@ -35,13 +36,14 @@ extension UIFlowHarness {
         )
         var answer: (text: String, isError: Bool)?
         shell.handleLeadRequest(request) { text, isError in answer = (text, isError) }
-        waitUntil("the answer to \(tool)", file: file, line: line) { answer != nil }
+        waitUntil("the answer to \(tool)", timeout: timeout, file: file, line: line) { answer != nil }
         return try XCTUnwrap(answer, file: file, line: line)
     }
 
     func callLeadTool(
-        _ tool: String, _ arguments: [String: Any] = [:], lead: Lead, file: StaticString = #filePath, line: UInt = #line
+        _ tool: String, _ arguments: [String: Any] = [:], lead: Lead, timeout: TimeInterval = 30,
+        file: StaticString = #filePath, line: UInt = #line
     ) throws -> (text: String, isError: Bool) {
-        try callLeadTool(tool, arguments, from: lead.workspace, agentUUID: lead.agentUUID, file: file, line: line)
+        try callLeadTool(tool, arguments, from: lead.workspace, agentUUID: lead.agentUUID, timeout: timeout, file: file, line: line)
     }
 }

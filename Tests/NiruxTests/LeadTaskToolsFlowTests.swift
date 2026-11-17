@@ -141,7 +141,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             for (title, cwd) in [("Merged work", merged), ("Base work", base), ("Flow work", harness.worktree)] {
                 shell.addWorkspace(title: title, cwd: cwd, profileID: lead.space)
             }
-            let close = { (task: String) in try harness.callLeadTool(LeadTools.closeTask, ["task": task], lead: lead) }
+            // GitHub and git answer first: a cold CI runner's first git
+            // calls take seconds each (the tool itself waits 300 s).
+            let close = { (task: String) in try harness.callLeadTool(LeadTools.closeTask, ["task": task], lead: lead, timeout: 180) }
             let closed = { (title: String) in
                 harness.waitUntil("“\(title)” to close") { !shell.workspaces.contains { $0.title == title } }
             }
