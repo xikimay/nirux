@@ -454,12 +454,15 @@ extension NiruxShellView {
     /// or its folder's name. Two answering the name is no answer: a branch
     /// is the focused terminal's, which another workspace may share.
     func namedWorkspace(_ name: String, among candidates: [WorkspaceState]) -> WorkspaceState? {
-        let found = candidates.filter { workspace in
-            workspace.gitBranch == name || workspace.taskFolder == name
-                || workspace.title.caseInsensitiveCompare(name) == .orderedSame
-                || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
-        }
+        let found = candidates.filter { Self.answers($0, to: name) }
         return found.count == 1 ? found.first : nil
+    }
+
+    /// Whether the Lead's tools reach `workspace` by `name`.
+    static func answers(_ workspace: WorkspaceState, to name: String) -> Bool {
+        workspace.gitBranch == name || workspace.taskFolder == name
+            || workspace.title.caseInsensitiveCompare(name) == .orderedSame
+            || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
     }
 
     private func noLeadTask(_ name: String) -> String {

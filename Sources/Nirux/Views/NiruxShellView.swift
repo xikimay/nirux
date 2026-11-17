@@ -793,8 +793,6 @@ extension NiruxShellView {
         workspaceContextPanel?.show(relativeTo: window, configuration: configuration)
     }
 
-    /// Rename a workspace by index; defaults to the active one (main menu,
-    /// command palette). The sidebar context menu passes an explicit index.
     /// A name the user or the Lead gave: kept over the agents' titles.
     func renameWorkspace(_ workspace: WorkspaceState, to title: String) {
         workspace.title = title
@@ -803,6 +801,8 @@ extension NiruxShellView {
         saveState()
     }
 
+    /// Rename a workspace by index; defaults to the active one (main menu,
+    /// command palette). The sidebar context menu passes an explicit index.
     func showRenamePanel(workspaceIndex: Int? = nil) {
         guard let window, let workspace = workspaces[safe: workspaceIndex ?? activeWSIndex] else { return }
         if nameInputPanel == nil {

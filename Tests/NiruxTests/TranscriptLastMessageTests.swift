@@ -24,6 +24,10 @@ final class TranscriptLastMessageTests: XCTestCase {
         sidechain["isSidechain"] = true
         var failure = assistant("e1", [text("API Error: overloaded")])
         failure["isApiErrorMessage"] = true
+        // Claude Code's own placeholder, after a prompt queued meanwhile.
+        let placeholder: [String: Any] = [
+            "type": "assistant", "message": ["id": "p1", "model": "<synthetic>", "role": "assistant", "content": [text("No response requested.")]]
+        ]
         let lines = [
             assistant("m1", [text("An earlier answer.")]),
             ["type": "user", "message": ["role": "user", "content": "Go on."]],
@@ -33,7 +37,8 @@ final class TranscriptLastMessageTests: XCTestCase {
             sidechain,
             ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "t1", "content": "ok"]]]],
             failure,
-            assistant("m3", [toolCall])
+            assistant("m3", [toolCall]),
+            placeholder
         ]
         let message = try XCTUnwrap(TranscriptLastMessage.last(in: Data(try lines.map(line).joined(separator: "\n").utf8)))
         XCTAssertEqual(message.text, "Part one.\n\nPart two.")
@@ -48,6 +53,7 @@ final class TranscriptLastMessageTests: XCTestCase {
         let last = try line(assistant("m2", [text("The end.")]))
         try (early + "\n" + last + "\n").write(toFile: path, atomically: true, encoding: .utf8)
         XCTAssertEqual(TranscriptLastMessage.read(path: path, tailBytes: 2_000)?.text, "The end.")
+        XCTAssertEqual(TranscriptLastMessage.read(path: path, tailBytes: last.utf8.count + 1)?.text, "The end.", "a window starting a line keeps it")
         XCTAssertNil(TranscriptLastMessage.read(path: path, tailBytes: 20), "a window inside the last line holds no message")
     }
 
