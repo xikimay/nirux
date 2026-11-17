@@ -347,6 +347,41 @@ final class SidebarGlassRowsTests: XCTestCase {
         board.isClosing = false
     }
 
+    /// A row's icon fills up to its task's station (5.1b): the one its
+    /// space's Board shows, never another; without the Board, read the
+    /// Board's way from what the row holds; without a repository, none.
+    func testARowShowsItsBoardLinesStation() throws {
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let workspace = try XCTUnwrap(shell.activeWorkspace)
+        var info = row([column(.working)], id: workspace.id, pullRequest: pullRequest(ci: "SUCCESS"))
+        info = WorkspaceInfo(
+            id: workspace.id, index: info.index, title: info.title, profileID: workspace.profileID, isInactive: false,
+            columnCount: 1, focusedColumn: 0, gitBranch: "feat/checkout", notification: nil, isActive: true,
+            columns: info.columns, prInfo: info.prInfo, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        let alone = shell.withStation(info).station
+        XCTAssertEqual(alone, NiruxShellView.station(of: info, reviewsInFlight: []), "the Board's rule, from the row")
+        XCTAssertEqual(alone, .reviews, "open, out of draft, its review not run yet")
+
+        let board = shell.makeProjectBoard(projectID: workspace.profileID, offersSettings: true)
+        workspace.addProjectBoardColumn(board)
+        board.stations[workspace.id] = .merge
+        XCTAssertEqual(shell.withStation(info).station, .merge, "the Board's line's, never two for one task")
+        XCTAssertEqual(shell.withStation(info).stateIcon, StateIcon(.working, stage: 4))
+
+        let folder = WorkspaceInfo(
+            id: "folder", index: 1, title: "notes", profileID: workspace.profileID, isInactive: false,
+            columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
+            columns: info.columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        XCTAssertNil(shell.withStation(folder).station, "no repository, no stations")
+        XCTAssertEqual(shell.withStation(folder).stateIcon, StateIcon(.working), "and no fill")
+    }
+
     /// A row of the list out of view takes no press, no hover and no menu
     /// where the window shows something else (under the sidebar here).
     func testRowsOutOfViewTakeNoPress() throws {

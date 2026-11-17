@@ -84,6 +84,9 @@ final class ProjectBoardController {
     /// What the Board's clicks act on, as it last showed them
     /// (`stagesContent`).
     var stagesTargets = StagesTargets()
+    /// The station of each task line it last showed, by workspace id: a
+    /// row shows the same (`NiruxShellView.station(of:)`).
+    var stations: [String: BoardStages.Station] = [:]
     private let client: any ProjectBoardGitHub
 
     /// board.json as last read; nil until it is.

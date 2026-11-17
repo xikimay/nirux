@@ -219,6 +219,10 @@ extension NiruxShellView {
         board.view.show(header: board.columnHeader(spaceName: spaceName, now: Date(timeIntervalSince1970: now)), stages: content)
         // What the clicks act on is what the Board shows.
         board.stagesTargets = targets
+        board.stations = Dictionary(
+            content.sections.flatMap { $0.lines.units.flatMap(\.lines) }.filter { $0.hasTask && $0.rail != nil }.map { ($0.id, $0.station) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     /// What runs in front in each open column of `members`, as the process table says.
