@@ -511,8 +511,7 @@ final class UIFlowHarness {
 
     // MARK: - Waiting
 
-    /// Spins the main run loop until `condition` holds, failing after
-    /// `timeout`.
+    /// The tests' one wait (`waitUntil`), for a test holding a harness.
     @discardableResult
     func waitUntil(
         _ description: String,
@@ -521,11 +520,10 @@ final class UIFlowHarness {
         line: UInt = #line,
         _ condition: () -> Bool
     ) -> Bool {
-        Self.waitUntil(description, timeout: timeout, file: file, line: line, condition)
+        NiruxTests.waitUntil(description, timeout: timeout, file: file, line: line, condition)
     }
 
-    /// `waitUntil` for a test without a harness. `description` is read at
-    /// the failure, so it can tell what the test saw last.
+    /// The tests' one wait (`waitUntil`), as the harness's callers have it.
     @discardableResult
     static func waitUntil(
         _ description: @autoclosure () -> String,
@@ -534,15 +532,7 @@ final class UIFlowHarness {
         line: UInt = #line,
         _ condition: () -> Bool
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            guard Date() < deadline else {
-                XCTFail("timed out waiting for \(description())", file: file, line: line)
-                return false
-            }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        return true
+        NiruxTests.waitUntil(description(), timeout: timeout, file: file, line: line, condition)
     }
 
     // MARK: - Repository

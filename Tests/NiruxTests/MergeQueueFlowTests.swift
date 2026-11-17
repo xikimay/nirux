@@ -205,14 +205,6 @@ final class MergeQueueFlowTests: XCTestCase {
         return controller
     }
 
-    @MainActor
-    private func waitUntil(_ condition: () -> Bool, timeout: TimeInterval = 30) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
-    }
-
     // MARK: Tests
 
     @MainActor
@@ -238,7 +230,7 @@ final class MergeQueueFlowTests: XCTestCase {
         XCTAssertTrue(MergeQueueLock.isHeld(repository: MQ.widgets, folder: lockFolder))
         XCTAssertEqual(queue.start(settings: MQ.settings(), entries: [MQ.entry(54, head: a)]), .alreadyRunning)
 
-        waitUntil { !queue.isRunning }
+        waitUntil("the queue to stop") { !queue.isRunning }
         XCTAssertEqual(queue.engine?.phase, .finished)
         XCTAssertEqual(world.mergedNumbers, [52, 53])
         XCTAssertTrue(world.forbiddenCalls.isEmpty, "\(world.forbiddenCalls)")
@@ -284,7 +276,7 @@ final class MergeQueueFlowTests: XCTestCase {
             queue.stop()
         }
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: a)]))
-        waitUntil { !queue.isRunning }
+        waitUntil("the queue to stop") { !queue.isRunning }
         XCTAssertTrue(stoppedWhileRunning)
         XCTAssertEqual(queue.engine?.phase, .stopped(MergeQueue.StopReason(kind: .user, message: "Stopped by the user.")))
         XCTAssertFalse(MergeQueueLock.isHeld(repository: MQ.widgets, folder: lockFolder))
@@ -319,7 +311,7 @@ final class MergeQueueFlowTests: XCTestCase {
             driver?.stop()
         }
         driver.start()
-        waitUntil { !driver.engine.phase.isActive }
+        waitUntil("the driver to stop") { !driver.engine.phase.isActive }
         XCTAssertEqual(phaseWhenSent, .running)
         guard case .stopped(let reason) = driver.engine.phase else { return XCTFail("\(driver.engine.phase)") }
         XCTAssertEqual(reason.kind, .user)
@@ -339,7 +331,7 @@ final class MergeQueueFlowTests: XCTestCase {
         XCTAssertTrue(queue.isDryRun)
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: a)]))
         XCTAssertFalse(MergeQueueLock.isHeld(repository: MQ.widgets, folder: lockFolder))
-        waitUntil { !queue.isRunning }
+        waitUntil("the queue to stop") { !queue.isRunning }
         guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("\(String(describing: queue.engine?.phase))") }
         XCTAssertEqual(reason.kind, .dryRun)
         XCTAssertTrue(reason.message.contains("gh pr merge 52 --repo github.com/acme/widgets --merge --match-head-commit \(a)"))

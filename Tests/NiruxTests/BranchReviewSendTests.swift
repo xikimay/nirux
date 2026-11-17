@@ -17,16 +17,6 @@ final class BranchReviewSendTests: XCTestCase {
         if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 
-    @MainActor
-    private func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) async throws -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            if Date() >= deadline { return false }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        return true
-    }
-
     // MARK: - The paste
 
     /// A terminal whose program reads only after a second, raw: nothing
@@ -57,20 +47,16 @@ final class BranchReviewSendTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "the app isn't held while the agent doesn't read")
         // A byte at a time as the terminal frees one: a slow runner takes more than 10 s for these 192 KB. Whatever
         // happens, the paste ends by its own deadline, so its outcome comes before this wait does.
-        let done = try await waitUntil(timeout: PtySession.pasteTimeout + 5) { outcome != nil }
-        XCTAssertTrue(done)
+        try await waitUntil("the paste's outcome", timeout: PtySession.pasteTimeout + 5) { outcome != nil }
         XCTAssertEqual(outcome, .pasted)
-        let received = try await waitUntil { (try? Data(contentsOf: file))?.count == text.utf8.count }
-        XCTAssertTrue(received, "every byte, through short writes")
+        try await waitUntil("every byte, through short writes", timeout: 10) { (try? Data(contentsOf: file))?.count == text.utf8.count }
         XCTAssertEqual(try Data(contentsOf: file), Data(text.utf8))
 
         outcome = nil
         pty.pasteInBackground("again", keepingInFront: nil, cancelled: { false }) { outcome = $0 }
-        let again = try await waitUntil { outcome != nil }
-        XCTAssertTrue(again)
+        try await waitUntil("the second paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .pasted)
-        let both = try await waitUntil { (try? Data(contentsOf: file))?.count == text.utf8.count + 5 }
-        XCTAssertTrue(both)
+        try await waitUntil("the second paste's bytes", timeout: 10) { (try? Data(contentsOf: file))?.count == text.utf8.count + 5 }
     }
 
     /// A terminal that isn't running takes nothing, and says so.
@@ -79,8 +65,7 @@ final class BranchReviewSendTests: XCTestCase {
         let pty = PtySession()
         var outcome: PtySession.PasteOutcome?
         pty.pasteInBackground("hi", keepingInFront: nil, cancelled: { false }) { outcome = $0 }
-        let done = try await waitUntil { outcome != nil }
-        XCTAssertTrue(done)
+        try await waitUntil("the paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .closed)
         XCTAssertEqual(pty.reviewSendRefusal(snapshot: ProcessSnapshot()), .noAgent)
     }
@@ -170,8 +155,7 @@ final class BranchReviewSendTests: XCTestCase {
 
         var outcome: PtySession.PasteOutcome?
         pty.pasteInBackground("c", keepingInFront: ProcessInstance(pid: 999_999, startedAt: 0), cancelled: { false }) { outcome = $0 }
-        let done = try await waitUntil { outcome != nil }
-        XCTAssertTrue(done)
+        try await waitUntil("the paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .agentLeft)
     }
 
@@ -287,8 +271,7 @@ final class BranchReviewSendTests: XCTestCase {
         pty?.settlePromptWatchers(snapshot: ProcessSnapshot())
         XCTAssertEqual(settled.withLock { $0 }, [false])
         pty = nil
-        let closed = try await waitUntil { settled.withLock { $0 } == [false, false] }
-        XCTAssertTrue(closed)
+        try await waitUntil("both pastes to settle", timeout: 10) { settled.withLock { $0 } == [false, false] }
     }
 
     // MARK: - The sheet

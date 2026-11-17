@@ -108,13 +108,4 @@ final class BranchReviewPersistenceTests: XCTestCase {
         }
         try body(shell)
     }
-
-    @MainActor
-    private func waitUntil(_ description: String, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(30)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail("timed out waiting for \(description)") }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-    }
 }

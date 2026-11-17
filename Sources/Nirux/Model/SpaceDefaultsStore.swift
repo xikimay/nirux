@@ -39,8 +39,15 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed; its brief stays.
+    /// proposed; its brief stays. Its Claude settings are emptied, not
+    /// removed: its workspaces go on in General, and their columns' launch
+    /// lines name the file.
     static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
+        do {
+            try ClaudeSpaceSettings.empty(spaceID: spaceID, stateDirectory: stateDirectory)
+        } catch {
+            NiruxDebugLog.log("SpaceDefaultsStore: could not empty the Claude settings of a deleted space: \(error)")
+        }
         guard let folder = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory),
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
@@ -75,6 +82,15 @@ struct SpaceDefaultsStore: Sendable {
             if case .readOnly = status { return false }
             return true
         }
+
+        /// Why the file is used only in part, or not at all.
+        var problem: String? {
+            switch status {
+            case .readOnly(let reason): return reason.message
+            case .unreadable: return "defaults.json can’t be read: the next change keeps a copy of it (defaults.corrupt.….json) and replaces it."
+            case .missing, .loaded: return nil
+            }
+        }
     }
 
     enum ReadOnlyReason: Equatable, Sendable {
@@ -100,26 +116,39 @@ struct SpaceDefaultsStore: Sendable {
         }
     }
 
+    /// What a file, or a switch, Nirux can't read holds is unknown: each
+    /// switch takes its safe side (`SpaceDefaults.switches`), and a save
+    /// replacing the file keeps it.
+    static var unreadDefaults: SpaceDefaults {
+        var defaults = SpaceDefaults()
+        for item in SpaceDefaults.switches { defaults[keyPath: item.key] = item.safe }
+        return defaults
+    }
+
     func load() -> Loaded {
         switch BoardConfigStore.read(fileURL, maxBytes: Self.maxFileBytes) {
         case .missing: return Loaded(defaults: SpaceDefaults(), status: .missing)
-        case .notARegularFile: return Loaded(defaults: SpaceDefaults(), status: .readOnly(.notARegularFile))
-        case .tooLarge: return Loaded(defaults: SpaceDefaults(), status: .readOnly(.tooLarge))
-        case .unreadableBytes: return Loaded(defaults: SpaceDefaults(), status: .unreadable)
+        case .notARegularFile: return Loaded(defaults: Self.unreadDefaults, status: .readOnly(.notARegularFile))
+        case .tooLarge: return Loaded(defaults: Self.unreadDefaults, status: .readOnly(.tooLarge))
+        case .unreadableBytes: return Loaded(defaults: Self.unreadDefaults, status: .unreadable)
         case .data(let data): return Self.decode(data)
         }
     }
 
     static func decode(_ data: Data) -> Loaded {
         guard let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let defaults = try? JSONDecoder().decode(SpaceDefaults.self, from: data)
-        else { return Loaded(defaults: SpaceDefaults(), status: .unreadable, contents: data) }
+              var defaults = try? JSONDecoder().decode(SpaceDefaults.self, from: data)
+        else { return Loaded(defaults: unreadDefaults, status: .unreadable, contents: data) }
+        let unknown = unknownSettings(in: top, decoded: defaults)
+        for item in SpaceDefaults.switches where defaults[keyPath: item.key] == nil
+            && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
+            defaults[keyPath: item.key] = item.safe
+        }
         if let version = top["schemaVersion"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
            version.doubleValue > Double(schemaVersion) {
             let newer = Int(exactly: version.doubleValue.rounded(.down)) ?? Int.max
             return Loaded(defaults: defaults, status: .readOnly(.newerSchema(newer)), contents: data)
         }
-        let unknown = unknownSettings(in: top, decoded: defaults)
         if !unknown.isEmpty {
             return Loaded(defaults: defaults, status: .readOnly(.unknownSettings(unknown)), contents: data)
         }
@@ -138,7 +167,10 @@ struct SpaceDefaultsStore: Sendable {
         if top["codexLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.codexLaunchMode == nil {
             unknown.insert("codexLaunchMode")
         }
-        if let value = top["leadStartsTasks"], !(value is NSNull), decoded.leadStartsTasks == nil { unknown.insert("leadStartsTasks") }
+        for item in SpaceDefaults.switches where decoded[keyPath: item.key] == nil
+            && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
+            unknown.insert(item.name.rawValue)
+        }
         if let variables = top["environment"], !(variables is NSNull) {
             let entries = variables as? [Any] ?? []
             let readable = entries.allSatisfy { entry in

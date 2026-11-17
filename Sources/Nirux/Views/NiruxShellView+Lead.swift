@@ -104,38 +104,34 @@ extension NiruxShellView {
     /// "Starts tasks without asking", saved in the space's defaults.json
     /// (on is the default, so it writes nothing).
     func setLeadStartsTasks(_ on: Bool, spaceID: String) {
+        changeSpaceDefaults(spaceID: spaceID) { $0.leadStartsTasks = on ? nil : false }
+        refreshSpaceSettingsLead()
+    }
+
+    /// Saves `change` to the space's defaults.json at once. An unreadable
+    /// file is replaced (set aside first) even when nothing changes: what
+    /// it held reads as unset until then.
+    func changeSpaceDefaults(spaceID: String, _ change: (inout SpaceDefaults) -> Void) {
         guard let store = SpaceDefaultsStore(spaceID: spaceID) else { return }
         let loaded = store.load()
         var defaults = loaded.defaults
-        defaults.leadStartsTasks = on ? nil : false
-        // An unreadable file is replaced (set aside first) even with nothing
-        // to change: it reads as off until then.
+        change(&defaults)
         if defaults != loaded.defaults || loaded.status == .unreadable,
            case .failure(let error) = store.save(defaults, replacing: loaded) {
             showToast(error.message, tone: .error)
         }
-        // The Defaults tab shows the file as it is now, unless it holds
-        // variables being typed.
-        if let settings = spaceSettings, settings.spaceID == spaceID, !settings.defaults.hasUnsavedRows {
-            settings.defaults.show(store.load())
+        // The Defaults tab shows the file as it is now, under the variables
+        // being typed.
+        if let settings = spaceSettings, settings.spaceID == spaceID {
+            let saved = store.load()
+            if settings.defaults.hasUnsavedRows { settings.defaults.rebase(on: saved) } else { settings.defaults.show(saved) }
         }
-        refreshSpaceSettingsLead()
     }
 
     /// Whether the space's Lead starts tasks itself. A defaults.json Nirux
-    /// can't read asks first: off is the safe side.
+    /// can't read asks first: off is the safe side (`SpaceDefaults.switches`).
     func leadStartsTasksWithoutAsking(spaceID: String) -> Bool {
-        guard let loaded = SpaceDefaultsStore(spaceID: spaceID)?.load() else { return false }
-        switch loaded.status {
-        case .missing, .loaded:
-            return loaded.defaults.leadStartsTasksWithoutAsking
-        case .unreadable, .readOnly(.notARegularFile), .readOnly(.tooLarge):
-            return false
-        case .readOnly:
-            if let value = loaded.defaults.leadStartsTasks { return value }
-            let raw = loaded.contents.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
-            return raw?["leadStartsTasks"] == nil
-        }
+        SpaceDefaultsStore(spaceID: spaceID)?.load().defaults.leadStartsTasksWithoutAsking ?? false
     }
 
     /// Where the running Lead works (`leadFolder`), else where a new one

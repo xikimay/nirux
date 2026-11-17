@@ -73,7 +73,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "widgets" }))
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("the pull requests and the post-merge run are read, the worktrees listed, gadgets read too") {
+            waitUntil("the pull requests and the post-merge run are read, the worktrees listed, gadgets read too") {
                 board.reads["legacy"]?.openPullRequests != nil && board.reads["legacy"]?.mergedPullRequests != nil
                     && board.local != nil && !board.view.stages.lineViews.isEmpty
                     && board.view.stages.content?.sections.first?.status?.toolTip?.contains("success") == true
@@ -180,7 +180,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try index("widgets"))
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("#12 read, the worktrees listed") {
+            waitUntil("#12 read, the worktrees listed") {
                 board.reads["legacy"]?.openPullRequests != nil && board.local != nil && !board.view.stages.lineViews.isEmpty
             }
             let task = shell.workspaces[try index("login")]
@@ -214,7 +214,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             board.switchProject(to: WorkspaceProfile.defaultID)
             XCTAssertEqual(board.keptStagesContent(inputs, now: Date(timeIntervalSince1970: now + 7)).now, now + 7)
             // Its board.json read lands here, not in a later test.
-            try waitUntil("General's board.json read") { board.loaded != nil }
+            waitUntil("General's board.json read") { board.loaded != nil }
         }
     }
 
@@ -233,7 +233,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.sideEffects.runModal = { _ in .alertSecondButtonReturn }
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("board.json is read") { board.loaded != nil }
+            waitUntil("board.json is read") { board.loaded != nil }
             shell.spaceSettings?.close()
             let message = try stages(of: board, in: shell).message
             shell.renderProjectBoard(board)
@@ -260,7 +260,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "widgets" }))
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("the read fails and the worktrees are listed") {
+            waitUntil("the read fails and the worktrees are listed") {
                 board.reads.values.first?.errors.isEmpty == false && board.local != nil
             }
             XCTAssertEqual(try stages(of: board, in: shell).sections.map(\.id), ["legacy"], "no No repository, no Other workspaces: none")
@@ -272,7 +272,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(try stages(of: board, in: shell).sections.first?.queue?.start?.title.hasSuffix(" · 1"), true)
             // Unless only its task knows it merged: none left to start. Its git context in, which names its root as /var
             // where git lists the worktree under /private/var.
-            try waitUntil("its git context") { shell.workspaces.first { $0.title == "widgets" }?.gitContext != nil }
+            waitUntil("its git context") { shell.workspaces.first { $0.title == "widgets" }?.gitContext != nil }
             let start = try stages(of: board, in: shell) { readings in
                 readings[shell.workspaces.first { $0.title == "widgets" }?.id ?? "", default: BoardStages.TaskReading()].mergedPullRequest = 12
             }.sections.first?.queue?.start
@@ -289,7 +289,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "plain" }))
             try runPaletteAction("Open Board", in: shell)
             let emptyBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: empty.id)?.board)
-            try waitUntil("the read fails again, for that space") {
+            waitUntil("the read fails again, for that space") {
                 // As a status refresh would, on screen (this window never is).
                 emptyBoard.tick(onScreen: true)
                 return emptyBoard.loaded != nil && emptyBoard.local != nil && emptyBoard.reads.values.first?.errors.isEmpty == false
@@ -311,7 +311,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "gadget" }))
             try runPaletteAction("Open Board", in: shell)
             let unsaved = try XCTUnwrap(shell.projectBoardLocation(projectID: other.id)?.board)
-            try waitUntil("its remote's pull requests are read") { unsaved.reads.values.first?.openPullRequests != nil && unsaved.local != nil }
+            waitUntil("its remote's pull requests are read") { unsaved.reads.values.first?.openPullRequests != nil && unsaved.local != nil }
             XCTAssertEqual(try stages(of: unsaved, in: shell).sections.first?.title, "gadgets-app", "its anchor's name")
             let pill = try XCTUnwrap(try stages(of: unsaved, in: shell).sections.first?.status)
             XCTAssertEqual(pill.text, "No settings")
@@ -339,7 +339,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "tool" }))
             try runPaletteAction("Open Board", in: shell)
             let readOnly = try XCTUnwrap(shell.projectBoardLocation(projectID: locked.id)?.board)
-            try waitUntil("board.json is read, the worktrees listed, the other repository placed") {
+            waitUntil("board.json is read, the worktrees listed, the other repository placed") {
                 readOnly.loaded != nil && readOnly.local != nil
                     && (try? stages(of: readOnly, in: shell).sections.map(\.title)) == ["tools-app", "outside-app", "Other workspaces"]
             }
@@ -363,7 +363,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "doc" }))
             try runPaletteAction("Open Board", in: shell)
             let folderBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: folderSpace.id)?.board)
-            try waitUntil("the other repository placed beside a board.json read-only without a config") {
+            waitUntil("the other repository placed beside a board.json read-only without a config") {
                 (try? stages(of: folderBoard, in: shell).sections.map(\.title)) == ["docs-app", "outside-app"]
             }
             // A Refresh keeps its remote meanwhile (its section never blanks), and reads it again: a remote changed lands.
@@ -371,7 +371,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             let outsideRead = { folderBoard.sections.first { $0.anchor?.name == "outside-app" }.flatMap { folderBoard.reads[$0.id] } }
             var blanked = false
             folderBoard.reload()
-            try waitUntil("the other repository read from its new remote after a Refresh") {
+            waitUntil("the other repository read from its new remote after a Refresh") {
                 folderBoard.tick(onScreen: true)
                 if outsideRead() == nil { blanked = true }
                 return client.calls.contains { $0.what == "pr open acme/outside-renamed" }
@@ -394,7 +394,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "site" }))
             try runPaletteAction("Open Board", in: shell)
             let invalidBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: invalid.id)?.board)
-            try waitUntil("board.json is read and the worktrees listed") { invalidBoard.loaded != nil && invalidBoard.local != nil }
+            waitUntil("board.json is read and the worktrees listed") { invalidBoard.loaded != nil && invalidBoard.local != nil }
             let invalidSection = try XCTUnwrap(try stages(of: invalidBoard, in: shell).sections.first)
             XCTAssertEqual(invalidSection.status?.text, "Invalid settings")
             XCTAssertEqual(invalidSection.status?.toolTip, "Board Settings has no valid GitHub repository for it: set one to see its pull requests.")
@@ -469,14 +469,5 @@ final class BoardStagesContentFlowTests: XCTestCase {
     private func runPaletteAction(_ title: String, in shell: NiruxShellView) throws {
         let actions = shell.columnPaletteActions() + shell.agentPaletteActions() + shell.workspacePaletteActions()
         try XCTUnwrap(actions.first { $0.title == title }, "no “\(title)” in the palette").action()
-    }
-
-    @MainActor
-    private func waitUntil(_ what: String, timeout: TimeInterval = 30, _ condition: () -> Bool) throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertTrue(condition(), "timed out: \(what)")
     }
 }

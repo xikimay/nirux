@@ -57,8 +57,13 @@ final class LazyRestoreTests: XCTestCase {
         PersistedWorkspace(id: title, title: title, cwd: root, columns: columns, focusedColumnIndex: focused)
     }
 
+    /// The space's settings file every Claude launch names (ClaudeSpaceSettings).
+    private static var settings: String {
+        " '--settings=\(ClaudeSpaceSettings.fileURL(spaceID: WorkspaceProfile.defaultID)?.path ?? "")'"
+    }
+
     private static func resume(_ sessionID: String) -> String {
-        "command claude --resume '\(sessionID)' --permission-mode auto"
+        "command claude --resume '\(sessionID)' --permission-mode auto\(Self.settings)"
     }
 
     /// Three half-width agents in the workspace on screen (the third only
@@ -178,7 +183,7 @@ final class LazyRestoreTests: XCTestCase {
             shell.switchToWorkspace(2)
             XCTAssertEqual(recorder.launches.count, 2, "not before the column stayed on screen")
             settle(shell)
-            XCTAssertEqual(recorder.commands.last, "command claude --permission-mode auto")
+            XCTAssertEqual(recorder.commands.last, "command claude --permission-mode auto\(Self.settings)")
             XCTAssertTrue(try column(shell, 1, 0).isAwaitingResume, "the workspace passed through")
         }
     }
@@ -237,7 +242,7 @@ final class LazyRestoreTests: XCTestCase {
             XCTAssertEqual(Set(recorder.commands.dropFirst(2)), [
                 Self.resume(Self.sessionC),
                 "command codex resume '\(Self.thread)'",
-                "command claude --permission-mode auto"
+                "command claude --permission-mode auto\(Self.settings)"
             ])
             XCTAssertEqual(shell.deferredAgentCount, 0)
             XCTAssertFalse(shell.resumeAllDeferredAgents())
@@ -265,7 +270,7 @@ final class LazyRestoreTests: XCTestCase {
         )
         state.activeWorkspaceID = "b"
         try withRestoredShell(state) { shell, recorder in
-            XCTAssertEqual(recorder.commands, ["command claude --resume --permission-mode auto"])
+            XCTAssertEqual(recorder.commands, ["command claude --resume --permission-mode auto\(Self.settings)"])
             shell.switchToWorkspace(0)
             settle(shell)
             XCTAssertEqual(recorder.commands.last, Self.resume(Self.sessionA))
@@ -294,7 +299,7 @@ final class LazyRestoreTests: XCTestCase {
             XCTAssertTrue(runsSession(), "the other column's shell didn't start")
 
             XCTAssertTrue(shell.resumeAllDeferredAgents())
-            XCTAssertTrue(recorder.commands.contains("command claude --resume --permission-mode auto"), "\(recorder.commands)")
+            XCTAssertTrue(recorder.commands.contains("command claude --resume --permission-mode auto\(Self.settings)"), "\(recorder.commands)")
             XCTAssertFalse(recorder.commands.contains(Self.resume(Self.sessionD)))
         }
         XCTAssertEqual(
@@ -334,7 +339,7 @@ final class LazyRestoreTests: XCTestCase {
             XCTAssertTrue(runsInBackground(), "the stand-in didn't start behind the shell")
 
             XCTAssertTrue(shell.resumeDeferredAgent(try column(shell, 1, 0), in: shell.workspaces[1]))
-            XCTAssertEqual(recorder.commands.last, "command claude --resume --permission-mode auto")
+            XCTAssertEqual(recorder.commands.last, "command claude --resume --permission-mode auto\(Self.settings)")
         }
     }
 
