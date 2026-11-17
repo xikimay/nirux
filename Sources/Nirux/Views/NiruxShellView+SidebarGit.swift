@@ -762,8 +762,8 @@ extension NiruxShellView {
         // Each frame of a resize lays the columns out: most change nothing.
         guard navigation != sidebar.navigation else { return }
         sidebar.navigation = navigation
-        // After the layout pass, and after an update the same change brings
-        // (a workspace switched to), which then rebuilt the rows already.
+        // Not inside the layout pass: on the next turn, where nothing is
+        // left to do if an update meanwhile rebuilt the rows.
         DispatchQueue.main.async { [weak self] in self?.sidebar.renderIfChanged() }
     }
 }

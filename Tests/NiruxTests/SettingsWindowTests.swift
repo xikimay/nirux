@@ -735,8 +735,8 @@ final class SettingsWindowTests: XCTestCase {
     }
 
     /// Closing Settings leaves the keyboard of the main window where it was:
-    /// typing in an editor, ⌘, then ⌘W, the editor still has it. Elsewhere
-    /// than the task on screen, the task's terminal takes it.
+    /// typing in an editor, or in the sidebar, ⌘, then ⌘W, it still has it.
+    /// In a task no longer on screen, the task on screen takes it.
     @MainActor
     func testClosingSettingsLeavesTheMainWindowsKeyboard() throws {
         try withIsolatedState {
@@ -755,14 +755,22 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertNil(app.settingsPanel)
             XCTAssertIdentical(main.firstResponder, editor)
 
-            // Off the task on screen (a task no longer shown), the keyboard
-            // goes to the task's terminal.
-            let elsewhere = NSTextView(frame: editor.frame)
-            shell.addSubview(elsewhere)
-            XCTAssertTrue(main.makeFirstResponder(elsewhere))
+            let sidebarField = NSTextView(frame: editor.frame)
+            shell.sidebar.addSubview(sidebarField)
+            XCTAssertTrue(main.makeFirstResponder(sidebarField))
             app.showSettings(nil)
             app.settingsPanel?.performClose(nil)
-            XCTAssertFalse(main.firstResponder === elsewhere)
+            XCTAssertIdentical(main.firstResponder, sidebarField, "the sidebar's field")
+
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "Other")
+            let other = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertFalse(other === first, "another task on screen")
+            XCTAssertTrue(main.makeFirstResponder(editor))
+            app.showSettings(nil)
+            app.settingsPanel?.performClose(nil)
+            let focused = try XCTUnwrap(main.firstResponder as? NSView)
+            XCTAssertTrue(focused.isDescendant(of: other.containerView), "\(focused)")
         }
     }
 

@@ -41,12 +41,12 @@ extension NiruxShellView {
     /// up there, else on the window; once, while it shows.
     private func refuseSpaceSwitch(_ reason: String, in settings: SpaceSettingsSection) {
         guard let panel = settings.panel else { return showToast(reason) }
-        guard !settings.isRefusing else { return }
+        guard settings.refusal == nil else { return }
         let alert = NSAlert()
         alert.messageText = reason
         alert.addButton(withTitle: "OK")
-        settings.isRefusing = true
-        settings.askInSheet(alert, settingsWindow.spaceSheet ?? panel) { [weak settings] _ in settings?.isRefusing = false }
+        settings.askInSheet(alert, settingsWindow.spaceSheet ?? panel) { _ in }
+        settings.refusal = alert
     }
 
     func makeSettingsWindow() -> SettingsWindow {
@@ -170,15 +170,17 @@ extension NiruxShellView {
             self.projectMemoryPanel?.dismiss()
             self.boardSettingsPanel?.dismiss()
             self.spaceSettings = nil
-            // The main window keeps what had its keyboard in the task on
-            // screen (an editor); else, the task changed or its column went
-            // meanwhile, its terminal takes it.
-            if windowClosed, let window = self.window,
-               (window.firstResponder as? NSView)?.isDescendant(of: self.activeWorkspace?.containerView ?? self) != true {
-                self.focusActiveTerminal(in: window)
-            }
+            if windowClosed, let window = self.window, !self.keepsKeyboard(window) { self.focusActiveTerminal(in: window) }
         }
         return settings
+    }
+
+    /// Whether the main window, back from Settings, keeps what had its
+    /// keyboard: still in it (its column didn't close), and not in a task
+    /// no longer on screen.
+    private func keepsKeyboard(_ window: NSWindow) -> Bool {
+        guard let focused = window.firstResponder as? NSView, focused.window === window else { return false }
+        return !workspaces.contains { $0 !== activeWorkspace && focused.isDescendant(of: $0.containerView) }
     }
 
     private static func briefSource(for space: WorkspaceProfile) -> SpaceFileEditorPane.Source {
