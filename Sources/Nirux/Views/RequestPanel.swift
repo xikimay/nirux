@@ -87,6 +87,13 @@ final class RequestPanel {
 
     /// Shows it at `frame` (screen coordinates) over `window`, `responder`
     /// taking the keyboard.
+    /// The panel's shadow follows its rounded glass (the content's alpha):
+    /// computed again once the content has drawn, after a show or a new
+    /// level.
+    func invalidateShadowWhenDrawn() {
+        DispatchQueue.main.async { [weak panel] in panel?.invalidateShadow() }
+    }
+
     func show(frame: NSRect, over window: NSWindow, responder: NSView) {
         panel.setFrame(frame, display: true)
         if panel.parent !== window {
@@ -95,6 +102,7 @@ final class RequestPanel {
         }
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(responder)
+        invalidateShadowWhenDrawn()
         self.responder = responder
         isOpen = true
         if keyObservers.isEmpty { observeKey() }

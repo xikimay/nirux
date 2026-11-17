@@ -32,9 +32,10 @@ final class MainWindowContent: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The shell follows the area below the toolbar, in and out of full
-    /// screen.
+    /// screen; the window takes the level shown before it held this view.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        applyToWindow()
         guard !shellPinned, let guide = window?.contentLayoutGuide as? NSLayoutGuide else { return }
         shellPinned = true
         NSLayoutConstraint.activate([
@@ -51,13 +52,18 @@ final class MainWindowContent: NSView {
     /// The level drawn (macOS's Reduce transparency and Increase contrast
     /// already made it opaque).
     func show(_ drawn: InterfaceTransparency) {
-        let wasTranslucent = isTranslucent
         isTranslucent = drawn.usesGlass
         frost.isHidden = !isTranslucent
         tint.layer?.backgroundColor = Theme.Color.canvas
             .withAlphaComponent(GlassView.tintAlpha(for: drawn, role: .chrome)).cgColor
-        window?.isOpaque = !isTranslucent
-        window?.backgroundColor = isTranslucent ? .clear : Theme.Color.canvas
-        if isTranslucent != wasTranslucent { window?.invalidateShadow() }
+        applyToWindow()
+    }
+
+    private func applyToWindow() {
+        guard let window, window.isOpaque == isTranslucent else { return }
+        window.isOpaque = !isTranslucent
+        window.backgroundColor = isTranslucent ? .clear : Theme.Color.canvas
+        // Once the window has drawn the new level.
+        DispatchQueue.main.async { [weak window] in window?.invalidateShadow() }
     }
 }

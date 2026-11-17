@@ -22,6 +22,8 @@ extension NiruxShellView {
         commandBarToolbar?.bar.level = level
         requestsState.inbox?.level = level
         requestsState.callout?.level = level
+        requestsState.inboxPanel?.invalidateShadowWhenDrawn()
+        requestsState.calloutPanel?.invalidateShadowWhenDrawn()
         sidebar.level = level
         sidebar.layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.base.cgColor
         layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.canvas.cgColor

@@ -15,7 +15,7 @@ import AppKit
 /// (isOverlayActive).
 @MainActor
 final class SettingsWindow: NSObject, NSWindowDelegate {
-    /// A pane of Nirux's own: General, Agents, Notifications.
+    /// A pane of Nirux's own: General, Appearance, Agents, Notifications.
     struct AppPane {
         let id: String
         let title: String

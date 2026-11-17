@@ -2,8 +2,8 @@ import AppKit
 
 // MARK: - Settings window
 
-/// Nirux's panes of the Settings window (`SettingsWindow`): General, Agents,
-/// Notifications. Every control applies at once — no Save or Cancel. Each
+/// Nirux's panes of the Settings window (`SettingsWindow`): General,
+/// Appearance, Agents, Notifications. Every control applies at once — no Save or Cancel. Each
 /// change writes only its own setting, so opening Settings, or touching one
 /// control, never saves another value nobody chose. A failed write puts the
 /// control back.

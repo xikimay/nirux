@@ -13,7 +13,7 @@ Standard macOS shortcuts (copy, paste, quit) work as usual and are not listed. M
 | `Ctrl+Cmd+B` | Board of the current space |
 | `Ctrl+Cmd+L` | The space's Lead |
 | `Ctrl+Cmd+S` | Collapse or expand the sidebar |
-| `Cmd+,` | Settings: Nirux's panes (General, Agents, Notifications), then the space's. A change applies at once |
+| `Cmd+,` | Settings: Nirux's panes (General, Appearance, Agents, Notifications), then the space's. A change applies at once |
 | `Ctrl+Cmd+F` | Enter or leave full screen |
 | `Cmd+M` | Minimize the window |
 
