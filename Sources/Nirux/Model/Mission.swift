@@ -95,6 +95,10 @@ struct MissionEvent: Codable, Equatable {
     /// until then (`MissionEventCLI.instructionLifetime` after it was sent).
     /// Nil on one an older build recorded, which had an hour.
     var typableUntil: TimeInterval?
+    /// On an instruction: the conversation its child's `claude` held when
+    /// Nirux recorded it. A `claude` holding it after a restart (resuming
+    /// it) takes it too.
+    var childSessionID: String?
     /// On an instruction still untyped `MissionEventCLI.instructionHeldNotice`
     /// after it was sent: when its sender heard what held it.
     var heldNoticeAt: TimeInterval?
@@ -354,7 +358,10 @@ final class MissionStore {
                 && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
-        if event.kind == .instruction { event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime }
+        if event.kind == .instruction {
+            event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime
+            event.childSessionID = incoming.childSessionID
+        }
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
         if event.kind == .completed {
@@ -585,6 +592,19 @@ final class MissionStore {
             mission.events.filter { $0.kind == .instruction && $0.childConsumedAt == nil && $0.expiredAt == nil }
                 .map { AcceptedEvent(mission: mission, event: $0) }
         }
+    }
+
+    /// Records the conversation an instruction is for (`MissionEvent.childSessionID`),
+    /// unless one is already.
+    func noteConversation(_ sessionID: String, ofInstruction eventID: String) -> Bool {
+        guard ensureLoaded(),
+              let missionIndex = missions.firstIndex(where: { $0.events.contains { $0.id == eventID } }),
+              let eventIndex = missions[missionIndex].events.firstIndex(where: { $0.id == eventID && $0.kind == .instruction }),
+              missions[missionIndex].events[eventIndex].childSessionID == nil
+        else { return false }
+        var updated = missions
+        updated[missionIndex].events[eventIndex].childSessionID = sessionID
+        return commit(updated)
     }
 
     /// Marks the instructions whose sender heard they still wait, and those

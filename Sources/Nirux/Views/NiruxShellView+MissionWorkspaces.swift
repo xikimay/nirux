@@ -290,7 +290,9 @@ extension NiruxShellView {
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
             guard let recipient = missionRecipient(of: delivery), let pty = recipient.pty,
-                  pty.acceptsMissionMessage(runningSince: Self.runningSince(of: delivery.event, now: now), snapshot: snapshot),
+                  pty.acceptsMissionMessage(
+                      runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now), snapshot: snapshot
+                  ),
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
                   ),
@@ -358,11 +360,20 @@ extension NiruxShellView {
         return (workspace, workspace.columns.first { $0.agentUUID == agentUUID })
     }
 
-    /// A `tell` goes only to the `claude` that ran when it was sent. The
+    /// A `tell` goes only to the `claude` that ran when it was sent, or one
+    /// holding the conversation it was sent to (a restart resuming it). The
     /// rest goes to whichever runs now: the child ended its turn to wait for
     /// its answer, and a parent restored since resumed its conversation.
-    nonisolated static func runningSince(of event: MissionEvent, now: TimeInterval) -> TimeInterval {
-        event.kind == .instruction ? event.timestamp : now
+    func runningSince(of event: MissionEvent, in column: ColumnState?, snapshot: ProcessSnapshot, now: TimeInterval) -> TimeInterval {
+        guard event.kind == .instruction else { return now }
+        let held = column.flatMap { conversation(of: $0, snapshot: snapshot) }
+        return held != nil && held == event.childSessionID ? now : event.timestamp
+    }
+
+    /// The conversation `column`'s `claude` confirmed through its own
+    /// hooks, while it runs.
+    func conversation(of column: ColumnState, snapshot: ProcessSnapshot) -> String? {
+        column.confirmedClaudeSessionID(foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot))
     }
 
     /// Types each Lead notice whose Lead's prompt is free; the others wait

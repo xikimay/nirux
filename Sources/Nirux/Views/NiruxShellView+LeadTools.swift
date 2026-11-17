@@ -498,12 +498,13 @@ extension NiruxShellView {
         guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
             return answer("Nirux types messages only into a Claude Code task; “\(workspace.title)” runs \(mission.childAgentKind).", true)
         }
-        let instruction = MissionEvent(
+        var instruction = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
             parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
             kind: .instruction, message: message, timestamp: Date().timeIntervalSince1970
         )
+        instruction.childSessionID = missionEnd(mission, parent: false)?.column.flatMap { conversation(of: $0, snapshot: ProcessSnapshot()) }
         guard case .accepted = MissionStore.shared.process(instruction, enabled: Self.currentMissionHandoffsEnabled()) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }

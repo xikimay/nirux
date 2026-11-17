@@ -116,7 +116,7 @@ extension NiruxShellView {
     /// Tells a `tell`'s sender, once, what holds it when it is still
     /// untyped `MissionEventCLI.instructionHeldNotice` after it was sent;
     /// gives it up, telling the sender, once its task closed, its Claude Code
-    /// restarted, or its day ran out. One whose day ran out long ago (an
+    /// restarted on another conversation, or its day ran out. One whose day ran out long ago (an
     /// older build's, kept an hour) is given up silently.
     func sweepWaitingInstructions(now: TimeInterval, snapshot: ProcessSnapshot, store: MissionStore = .shared) {
         var held: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
@@ -130,7 +130,8 @@ extension NiruxShellView {
                 givenUp.append((delivery, "\(yours) was never typed: its task closed first."))
                 continue
             }
-            let refusal = column.pty?.missionPromptRefusal(runningSince: event.timestamp, snapshot: snapshot) ?? .noClaude
+            let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
+            let refusal = column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot) ?? .noClaude
             let holder = mission.childAgentKind != NiruxApp.WorkspaceAgent.claude.rawValue
                 ? "its agent hasn't collected it"
                 : !mission.isCarried(handoffsEnabled: missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled())
@@ -138,9 +139,13 @@ extension NiruxShellView {
                 : SidebarWaitingMessages.why(
                     refusal, untypable: missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries
                 ).short
-            if refusal == .restarted, mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue {
-                givenUp.append((delivery, "\(yours) won't be typed: its Claude Code restarted since, and Nirux types a message "
-                    + "only into the one it was sent to. Send it again if it still applies."))
+            // Restarted on another conversation: one not confirmed yet may
+            // still resume this one.
+            let other = event.childSessionID == nil || conversation(of: column, snapshot: snapshot) != nil
+            if refusal == .restarted, other, mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue {
+                givenUp.append((delivery, "\(yours) won't be typed: its Claude Code restarted "
+                    + (event.childSessionID == nil ? "since" : "on another conversation")
+                    + ", and Nirux types a message only into the conversation it was sent to. Send it again if it still applies."))
             } else if now >= event.instructionDeadline {
                 givenUp.append((delivery, "\(yours) was never typed: its prompt wasn't free for a day (\(holder)). "
                     + "Send it again if it still applies."))
@@ -191,9 +196,10 @@ extension NiruxShellView {
                 guard Self.goesToParent(delivery.event)
                     || delivery.mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
                 else { continue }
-                add(missionRecipient(of: delivery), WaitingMessage(
+                let recipient = missionRecipient(of: delivery)
+                add(recipient, WaitingMessage(
                     id: delivery.event.id, kind: delivery.event.kind.rawValue, sentAt: delivery.event.timestamp,
-                    runningSince: Self.runningSince(of: delivery.event, now: now)
+                    runningSince: runningSince(of: delivery.event, in: recipient, snapshot: snapshot, now: now)
                 ))
             }
         }

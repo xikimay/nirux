@@ -679,4 +679,72 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(notices().last?.contains("was never typed: its task closed first.") == true, notices().last ?? "")
         }
     }
+
+    /// A tell is for the conversation it was sent to: a restarted Claude
+    /// that hasn't said which it holds keeps it waiting, one resuming it
+    /// takes it, one on another conversation gives it up.
+    func testATellFollowsItsConversationAcrossARestart() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Busy", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let pty = try XCTUnwrap(task.column.pty)
+            let shellPID = try XCTUnwrap(pty.shellPID)
+            let sentAt = Date().timeIntervalSince1970
+            func inFront(_ pid: pid_t, startedAt: TimeInterval) -> (claude: ForegroundProcess, snapshot: ProcessSnapshot) {
+                let snapshot = ProcessSnapshot(entries: [
+                    ProcessSnapshot.Entry(
+                        pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: pid,
+                        name: "zsh", startedAt: sentAt - 600, arguments: ["zsh"]
+                    ),
+                    ProcessSnapshot.Entry(
+                        pid: pid, parentPID: shellPID, processGroupID: pid, terminalForegroundProcessGroupID: pid,
+                        name: "claude", startedAt: startedAt, arguments: ["claude"]
+                    )
+                ])
+                return (ForegroundProcess(instance: ProcessInstance(pid: pid, startedAt: startedAt), name: "claude", arguments: ["claude"]), snapshot)
+            }
+            @MainActor func confirm(_ session: String, by claude: ForegroundProcess, in snapshot: ProcessSnapshot) {
+                for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+                    let event = AgentHookEvent(
+                        kind: .claude, name: name, agentUUID: task.column.agentUUID, sessionID: session, emitterProcess: claude.instance,
+                        source: name == .sessionStart ? "resume" : nil, timestamp: Date().timeIntervalSince1970
+                    )
+                    _ = task.column.admitClaudeHook(event, foregroundProcess: claude, snapshot: snapshot)
+                    pty.applyAgentHook(event, isUserFocused: false)
+                }
+            }
+            let live = ProcessSnapshot()
+            confirm("first", by: try XCTUnwrap(pty.foregroundProcess(snapshot: live)), in: live)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Review this."], lead: lead).isError)
+            let instructions = { MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID } }
+            XCTAssertEqual(instructions().map(\.childSessionID), ["first"], "the conversation it is for")
+            // One from the CLI learns it as Nirux takes it.
+            let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childAgentUUID == task.column.agentUUID })
+            guard case .accepted(let fromCLI?) = MissionStore.shared.process(MissionEvent(
+                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
+                parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
+                kind: .instruction, message: "And this.", timestamp: sentAt
+            ), enabled: true) else { return XCTFail("not recorded") }
+            _ = harness.shell.handleMissionEvent(fromCLI.mission, event: fromCLI.event)
+            XCTAssertEqual(instructions().map(\.childSessionID), ["first", "first"])
+
+            let notices = { harness.shell.pendingLeadNotices.filter { $0.workspaceID == lead.workspace.id }.map(\.text) }
+            let sweep = { (snapshot: ProcessSnapshot) in harness.shell.sweepWaitingInstructions(now: sentAt + 60, snapshot: snapshot) }
+            sweep(inFront(99_981, startedAt: sentAt + 5).snapshot)
+            XCTAssertTrue(notices().isEmpty, "restarted, it hasn't said which conversation it holds: " + notices().joined())
+            let resumed = inFront(99_982, startedAt: sentAt + 10)
+            confirm("first", by: resumed.claude, in: resumed.snapshot)
+            let first = try XCTUnwrap(instructions().first)
+            XCTAssertEqual(harness.shell.runningSince(of: first, in: task.column, snapshot: resumed.snapshot, now: sentAt + 20), sentAt + 20)
+            sweep(resumed.snapshot)
+            XCTAssertTrue(notices().isEmpty, "resuming it, the same recipient: " + notices().joined())
+            let other = inFront(99_983, startedAt: sentAt + 30)
+            confirm("second", by: other.claude, in: other.snapshot)
+            XCTAssertEqual(harness.shell.runningSince(of: first, in: task.column, snapshot: other.snapshot, now: sentAt + 40), first.timestamp)
+            sweep(other.snapshot)
+            XCTAssertEqual(notices().count, 2)
+            XCTAssertTrue(notices().allSatisfy { $0.contains("won't be typed: its Claude Code restarted on another conversation") }, notices().joined())
+        }
+    }
 }

@@ -52,7 +52,11 @@ child's prompt.
   sender gets one `[Nirux Mission]` line saying what holds it
   (`heldNoticeAt`). Nirux gives it up, telling the sender (`expiredAt`), once
   its day ran out, its task closed, or a `claude` started after the message
-  (restarted, or restored after Nirux relaunched), which never gets it. Until
+  confirmed another conversation. The message is for the conversation its
+  child held when Nirux recorded it (`MissionEvent.childSessionID`): a
+  restart resuming it, as Nirux's relaunch does, still gets it, once that
+  `claude` took a prompt (a resumed one may show a dialog its hooks don't
+  tell); one that hasn't said yet which it holds keeps it waiting. Until
   2026-11-17 an untyped message was dropped silently after an hour: a review
   the Lead sent at the start of a task's 75-minute turn was lost that way.
   The missions log now records a turn at work holding a message too, once per
