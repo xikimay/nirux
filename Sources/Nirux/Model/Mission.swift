@@ -91,9 +91,21 @@ struct MissionEvent: Codable, Equatable {
     /// On a question: the parent (a space's Lead, `ask_user`) handed it to
     /// the user, for this reason. Its row turns amber at once.
     var handedToUserBecause: String?
-    /// On an instruction never typed within `MissionEventCLI.instructionLifetime`:
-    /// when Nirux gave it up (and told its sender).
+    /// On an instruction: Nirux types it at the child's next free prompt
+    /// until then (`MissionEventCLI.instructionLifetime` after it was sent).
+    /// Nil on one an older build recorded, which had an hour.
+    var typableUntil: TimeInterval?
+    /// On an instruction still untyped `MissionEventCLI.instructionHeldNotice`
+    /// after it was sent: when its sender heard what held it.
+    var heldNoticeAt: TimeInterval?
+    /// On an instruction Nirux gave up untyped (its time ran out, or its
+    /// child can't take it any more): when, its sender told.
     var expiredAt: TimeInterval?
+
+    /// Until when Nirux may type this instruction.
+    var instructionDeadline: TimeInterval {
+        typableUntil ?? timestamp + MissionEventCLI.olderInstructionLifetime
+    }
 
     init(
         id: String,
@@ -323,7 +335,7 @@ final class MissionStore {
             return processAcknowledgement(incoming, missionIndex: index)
         }
 
-        let event = MissionEvent(
+        var event = MissionEvent(
             id: incoming.id,
             missionID: incoming.missionID,
             childWorkspaceID: incoming.childWorkspaceID,
@@ -342,6 +354,7 @@ final class MissionStore {
                 && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
+        if event.kind == .instruction { event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime }
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
         if event.kind == .completed {
@@ -467,7 +480,7 @@ final class MissionStore {
     /// instruction into the child's. Questions and completions are typed
     /// within `MissionEventCLI.parentMessageLifetime` (a parent busy longer
     /// leaves the question to the user, see `waitingQuestion`), instructions
-    /// within `instructionLifetime`; an answer is typed whenever the child is
+    /// until `MissionEvent.instructionDeadline` unless given up; an answer is typed whenever the child is
     /// free, since the child ended its turn to wait for it.
     func pendingPromptDeliveries(now: TimeInterval = Date().timeIntervalSince1970) -> [AcceptedEvent] {
         missions.flatMap { mission in
@@ -492,7 +505,7 @@ final class MissionStore {
     private static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
         switch event.kind {
         case .instruction:
-            return event.childConsumedAt == nil && now - event.timestamp < MissionEventCLI.instructionLifetime
+            return event.childConsumedAt == nil && event.expiredAt == nil && now < event.instructionDeadline
         case .response:
             // Not once the child completed after asking: a `tell` may have
             // reopened the Mission since, for other work.
@@ -564,30 +577,29 @@ final class MissionStore {
     }
 
     @discardableResult
-    /// The instructions whose hour ran out untyped since the last call,
-    /// marked expired: their senders weren't told. One that ran out long
-    /// ago (before a relaunch, or a build that didn't mark them) is marked
-    /// without being returned: nobody waits on it any more.
-    func expireInstructions(now: TimeInterval = Date().timeIntervalSince1970) -> [AcceptedEvent] {
+    /// The instructions not typed nor given up yet, for the sweep that
+    /// tells their senders (`NiruxShellView.sweepWaitingInstructions`).
+    func untypedInstructions() -> [AcceptedEvent] {
         guard ensureLoaded() else { return [] }
-        let lifetime = MissionEventCLI.instructionLifetime
+        return missions.flatMap { mission in
+            mission.events.filter { $0.kind == .instruction && $0.childConsumedAt == nil && $0.expiredAt == nil }
+                .map { AcceptedEvent(mission: mission, event: $0) }
+        }
+    }
+
+    /// Marks the instructions whose sender heard they still wait, and those
+    /// Nirux gave up. False when the ledger isn't written.
+    func noteInstructions(heldNotice: Set<String>, expired: Set<String>, at now: TimeInterval) -> Bool {
+        guard ensureLoaded() else { return false }
         var updated = missions
-        var expired: [AcceptedEvent] = []
-        var changed = false
         for missionIndex in updated.indices {
-            for eventIndex in updated[missionIndex].events.indices {
-                let event = updated[missionIndex].events[eventIndex]
-                guard event.kind == .instruction, event.childConsumedAt == nil, event.expiredAt == nil,
-                      now - event.timestamp >= lifetime else { continue }
-                updated[missionIndex].events[eventIndex].expiredAt = now
-                changed = true
-                if now - event.timestamp < lifetime + MissionEventCLI.parentMessageLifetime {
-                    expired.append(AcceptedEvent(mission: updated[missionIndex], event: updated[missionIndex].events[eventIndex]))
-                }
+            for eventIndex in updated[missionIndex].events.indices where updated[missionIndex].events[eventIndex].kind == .instruction {
+                let id = updated[missionIndex].events[eventIndex].id
+                if heldNotice.contains(id) { updated[missionIndex].events[eventIndex].heldNoticeAt = now }
+                if expired.contains(id) { updated[missionIndex].events[eventIndex].expiredAt = now }
             }
         }
-        guard changed else { return [] }
-        return commit(updated) ? expired : []
+        return commit(updated)
     }
 
     func markDelivered(

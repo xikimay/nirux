@@ -11,7 +11,7 @@ struct SidebarWaitingMessages: Hashable {
     let since: TimeInterval
     /// Why the oldest isn't typed; nil: the prompt is free.
     let refusal: AgentPromptRefusal?
-    /// The prompt looks free, yet the tries at typing them failed.
+    /// The prompt looks free, yet the tries at typing failed.
     var untypable = false
     /// "2 messages waiting since 22:21 · a dialog may be open", written at
     /// the check: the day shows once it is another.
@@ -31,7 +31,7 @@ struct SidebarWaitingMessages: Hashable {
     }
 
     /// Why they wait: a few words for the row, the whole of it for the tooltip.
-    private static func why(_ refusal: AgentPromptRefusal?, untypable: Bool) -> (short: String, long: String) {
+    static func why(_ refusal: AgentPromptRefusal?, untypable: Bool) -> (short: String, long: String) {
         switch refusal {
         case .noClaude?: ("no Claude Code there", "its terminal doesn't run Claude Code")
         case .restarted?: (
@@ -50,7 +50,7 @@ struct SidebarWaitingMessages: Hashable {
         )
         case .working?, .verdict?: ("its turn isn't over", "its turn isn't over yet")
         case nil where untypable: (
-            "typing them failed",
+            "typing failed",
             "its prompt looks free, but typing them failed; they go in at its next turn end if they can"
         )
         case nil: ("Nirux tries again", "its prompt looks free, and Nirux tries again")
@@ -113,6 +113,50 @@ extension NiruxShellView {
         let runningSince: TimeInterval
     }
 
+    /// Tells a `tell`'s sender, once, what holds it when it is still
+    /// untyped `MissionEventCLI.instructionHeldNotice` after it was sent;
+    /// gives it up, telling the sender, once its task closed, its Claude Code
+    /// restarted, or its day ran out. One whose day ran out long ago (an
+    /// older build's, kept an hour) is given up silently.
+    func sweepWaitingInstructions(now: TimeInterval, snapshot: ProcessSnapshot, store: MissionStore = .shared) {
+        var held: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
+        var givenUp: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
+        for delivery in store.untypedInstructions() {
+            let (mission, event) = (delivery.mission, delivery.event)
+            let child = missionEnd(mission, parent: false)
+            let sent = ProjectBoard.clockTime(Date(timeIntervalSince1970: event.timestamp), now: Date(timeIntervalSince1970: now))
+            let yours = "Your message to “\(MissionPromptText.quoted(child?.workspace.title ?? mission.branch))” (sent \(sent))"
+            guard let child, !child.workspace.isClosing, let column = child.column else {
+                givenUp.append((delivery, "\(yours) was never typed: its task closed first."))
+                continue
+            }
+            let refusal = column.pty?.missionPromptRefusal(runningSince: event.timestamp, snapshot: snapshot) ?? .noClaude
+            let holder = mission.childAgentKind != NiruxApp.WorkspaceAgent.claude.rawValue
+                ? "its agent hasn't collected it"
+                : !mission.isCarried(handoffsEnabled: missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled())
+                ? "Mission handoffs are off"
+                : SidebarWaitingMessages.why(
+                    refusal, untypable: missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries
+                ).short
+            if refusal == .restarted, mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue {
+                givenUp.append((delivery, "\(yours) won't be typed: its Claude Code restarted since, and Nirux types a message "
+                    + "only into the one it was sent to. Send it again if it still applies."))
+            } else if now >= event.instructionDeadline {
+                givenUp.append((delivery, "\(yours) was never typed: its prompt wasn't free for a day (\(holder)). "
+                    + "Send it again if it still applies."))
+            } else if event.heldNoticeAt == nil, now - event.timestamp >= MissionEventCLI.instructionHeldNotice {
+                held.append((delivery, "\(yours) isn't typed yet: \(holder). Nirux keeps it for its next free prompt, "
+                    + "a day at most."))
+            }
+        }
+        guard !(held.isEmpty && givenUp.isEmpty), store.noteInstructions(
+            heldNotice: Set(held.map(\.delivery.event.id)), expired: Set(givenUp.map(\.delivery.event.id)), at: now
+        ) else { return }
+        for (delivery, text) in held + givenUp where now - delivery.event.instructionDeadline < MissionEventCLI.parentMessageLifetime {
+            tellProposer(NewTask.MissionParent(workspaceID: delivery.mission.parentWorkspaceID, agentUUID: delivery.mission.parentAgentUUID), text)
+        }
+    }
+
     /// Keeps, for the sidebar to read (`missionWaits.shown`, by
     /// `ColumnState.id`), the Mission messages and Lead notices waiting for
     /// each column's prompt past `missionMessageStallAge` while its agent
@@ -125,41 +169,11 @@ extension NiruxShellView {
     /// can free up with no turn end to try at (a subagent's dialog closing
     /// after the turn). The heartbeat runs it, the stuck watch in the
     /// background.
-    /// Tells the sender of each message whose hour ran out untyped, and what
-    /// held its recipient's prompt then: it may send it again.
-    func noticeExpiredInstructions(now: TimeInterval, snapshot: ProcessSnapshot, store: MissionStore = .shared) {
-        for delivery in store.expireInstructions(now: now) {
-            let mission = delivery.mission
-            let receiver = MissionPromptText.quoted(workspaces.first { $0.id == mission.childWorkspaceID }?.title ?? mission.branch)
-            let refusal = missionRecipient(of: delivery)?.pty?.missionPromptRefusal(runningSince: delivery.event.timestamp, snapshot: snapshot)
-            let sent = ProjectBoard.clockTime(Date(timeIntervalSince1970: delivery.event.timestamp), now: Date(timeIntervalSince1970: now))
-            tellProposer(
-                NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID),
-                "Your message to “\(receiver)” (sent \(sent)) was never typed: its prompt wasn't free for an hour "
-                    + "(\(Self.heldWords(refusal)) when Nirux gave it up). Send it again if it still applies."
-            )
-        }
-    }
-
-    /// What held a prompt, in a few words.
-    static func heldWords(_ refusal: AgentPromptRefusal?) -> String {
-        switch refusal {
-        case .working?: "its agent was working"
-        case .dialog?: "a dialog waited on the user"
-        case .draft?: "text typed into it wasn't sent"
-        case .restarted?: "its agent had restarted since"
-        case .noPromptYet?: "its agent had taken no prompt since it started"
-        case .failedTurn?: "its last turn had failed"
-        case .verdict?: "its last turn was still being read"
-        case .noClaude?, nil: "its agent wasn't running"
-        }
-    }
-
     func checkMissionWaits(snapshot: ProcessSnapshot, now: TimeInterval, store: MissionStore = .shared) {
         guard !snapshot.isEmpty else { return }
         if let checkedAt = missionWaits.checkedAt, (0..<Self.missionWaitCheckInterval).contains(now - checkedAt) { return }
         missionWaits.checkedAt = now
-        noticeExpiredInstructions(now: now, snapshot: snapshot, store: store)
+        sweepWaitingInstructions(now: now, snapshot: snapshot, store: store)
         missionWaits.typedAt = missionWaits.typedAt.filter { now - $0.value < Self.typedTextGrace }
         var waiting: [UUID: (column: ColumnState, messages: [WaitingMessage])] = [:]
         func add(_ column: ColumnState?, _ message: WaitingMessage) {
@@ -199,16 +213,10 @@ extension NiruxShellView {
                 return (message, refusal)
             }
             // A draft or a free prompt, which nothing on screen explains, says
-            // so within seconds; a turn at work only once no hook came for a
+            // so within seconds; anything else, a long turn too, after a
             // stall's length.
-            let silentFor = now - (pty?.lastAgentHookAt ?? 0)
             let overdue = refused.filter { message, refusal in
-                let age = now - message.sentAt
-                switch refusal {
-                case nil, .draft?: return age >= Self.missionWaitLogAge
-                case .working?: return age >= Self.missionMessageStallAge && silentFor >= Self.missionMessageStallAge
-                default: return age >= Self.missionMessageStallAge
-                }
+                now - message.sentAt >= (refusal == nil || refusal == .draft ? Self.missionWaitLogAge : Self.missionMessageStallAge)
             }
             retries += overdue.filter { $0.refusal == nil && missionWaits.tries[$0.message.id, default: 0] < Self.missionTypingTries }
                 .map(\.message.id)

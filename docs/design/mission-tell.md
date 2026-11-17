@@ -46,13 +46,17 @@ child's prompt.
   `completed`, so once the message is typed the Mission is `active` again and
   the child can `ask` and `completed` again. A message still waiting doesn't
   reopen anything.
-- **An hour at most.** A message not typed within an hour is dropped: nobody
-  may want it any more. A `claude` started after the message (restarted, or
-  restored after Nirux relaunched) never gets it. Since
-  2026-11-17 its sender hears it: a `[Nirux Mission]` line naming what held
-  the prompt when Nirux gave it up (`MissionEvent.expiredAt` marks it, once).
-  A tell sent at the start of an agent's turn that runs past an hour was lost
-  silently before (the Lead's review of #586).
+- **A day at most, its sender told.** A message waits for the child's next
+  free prompt, however long its turn runs, up to a day
+  (`MissionEvent.typableUntil`). An hour after it was sent, still untyped, its
+  sender gets one `[Nirux Mission]` line saying what holds it
+  (`heldNoticeAt`). Nirux gives it up, telling the sender (`expiredAt`), once
+  its day ran out, its task closed, or a `claude` started after the message
+  (restarted, or restored after Nirux relaunched), which never gets it. Until
+  2026-11-17 an untyped message was dropped silently after an hour: a review
+  the Lead sent at the start of a task's 75-minute turn was lost that way.
+  The missions log now records a turn at work holding a message too, once per
+  message, after `missionMessageStallAge`.
 - **`/clear` counts as a prompt.** It fires SessionStart (`source: clear`),
   not UserPromptSubmit; without this, a `tell` of `/clear` would block every
   later one. Other built-in commands (`/model`) fire neither: the next `tell`

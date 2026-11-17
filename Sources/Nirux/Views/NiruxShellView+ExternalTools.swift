@@ -371,7 +371,8 @@ extension NiruxShellView {
           same question instead of sending it twice, and prints the answer if it arrived meanwhile.
           For `reply`, 3 means Nirux has not confirmed the answer yet: do not send it again. For
           `tell`, 3 means the message is not typed yet; an identical `tell` resumes the wait. Nirux
-          drops a `tell` it could not type within an hour.
+          keeps a `tell` for the child's next free prompt, a day at most, and tells you if it waits
+          past an hour or is given up.
         - 4: do not retry that command. Mission handoffs are off, the Mission has ended, the
           terminal is not part of it, (for `reply`) the question no longer waits for an answer,
           for example because the user answered it in Nirux, or (for `tell`) no Mission on that

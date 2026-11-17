@@ -42,9 +42,16 @@ enum MissionEventCLI {
     /// typed, so rerunning a command whose output the shell tool cut short
     /// is harmless. After that, the same text is a new question or message.
     static let answerReplayWindow: TimeInterval = 60
-    /// How long Nirux keeps trying to type a `tell`. Past it, the message is
-    /// never typed: nobody may want it any more.
-    static let instructionLifetime: TimeInterval = 3600
+    /// How long Nirux keeps a `tell` to type at the child's next free
+    /// prompt (a turn may run long). Past it, Nirux gives it up and tells
+    /// its sender.
+    static let instructionLifetime: TimeInterval = 24 * 3600
+    /// What a `tell` an older build recorded had (see
+    /// `MissionEvent.typableUntil`).
+    static let olderInstructionLifetime: TimeInterval = 3600
+    /// A `tell` still untyped this long after it was sent: its sender hears
+    /// what holds it, once.
+    static let instructionHeldNotice: TimeInterval = 3600
     /// How long Nirux keeps trying to type a child's question or completion
     /// into its parent's prompt. A question then waits on the user alone.
     static let parentMessageLifetime: TimeInterval = 3600
@@ -375,8 +382,8 @@ enum MissionEventCLI {
             let receivedAt = now()
             if !missions.isEmpty, !missions.contains(where: { mission in
                 mission.status == .active || mission.events.contains {
-                    $0.kind == .instruction && $0.childConsumedAt == nil
-                        && receivedAt - $0.timestamp < instructionLifetime
+                    $0.kind == .instruction && $0.childConsumedAt == nil && $0.expiredAt == nil
+                        && receivedAt < $0.instructionDeadline
                 }
             }) {
                 writeStandardError("No active Mission for this terminal; stop waiting.")
@@ -716,7 +723,8 @@ extension MissionEventCLI {
         }
         writeStandardError(
             "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
-                + "Nirux types it once the child's turn ends, within an hour of the first `tell`. Run the "
+                + "Nirux types it at the child's next free prompt, for a day at most; past an hour, a line tells you "
+                + "what holds it. Run the "
                 + "exact same command again to keep waiting; it does not send the message twice."
         )
         return 3
@@ -742,7 +750,7 @@ extension MissionEventCLI {
         let recorded = Set(instructions.map(\.id))
         let settled = Set(instructions.compactMap { event -> String? in
             let over = event.childConsumedAt.map { now - $0 >= answerReplayWindow }
-                ?? (now - event.timestamp >= instructionLifetime)
+                ?? (now >= event.instructionDeadline || event.expiredAt != nil)
             return over ? event.id : nil
         })
         var current = derivedID(0)

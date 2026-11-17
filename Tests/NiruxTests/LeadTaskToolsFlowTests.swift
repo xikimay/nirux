@@ -601,25 +601,41 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A tell its recipient's prompt never took within the hour is given
-    /// up, and its sender hears it once, with what held the prompt.
-    func testAnExpiredTellTellsItsSender() throws {
+    /// A tell waits for its task's next free prompt, a day at most: past an
+    /// hour its sender hears once what holds it, and why it was given up.
+    func testAWaitingTellTellsItsSenderWhatHoldsIt() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
             let task = try reportingTask("Busy", lead: lead, harness: harness)
             defer { task.agent.remove() }
             task.hook(.userPromptSubmit)
             XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Review this."], lead: lead).isError)
-            let given = { harness.shell.pendingLeadNotices.filter { $0.text.contains("was never typed") } }
-            harness.shell.noticeExpiredInstructions(now: Date().timeIntervalSince1970 + 60, snapshot: ProcessSnapshot())
-            XCTAssertTrue(given().isEmpty, "within the hour it still waits")
-            let later = Date().timeIntervalSince1970 + MissionEventCLI.instructionLifetime + 1
-            harness.shell.noticeExpiredInstructions(now: later, snapshot: ProcessSnapshot())
-            XCTAssertEqual(given().count, 1)
-            XCTAssertEqual(given().first?.workspaceID, lead.workspace.id)
-            XCTAssertTrue(given().first?.text.contains("(its agent was working when Nirux gave it up)") == true, given().first?.text ?? "")
-            harness.shell.noticeExpiredInstructions(now: later + 10, snapshot: ProcessSnapshot())
-            XCTAssertEqual(given().count, 1, "once")
+            let sentAt = Date().timeIntervalSince1970
+            let notices = { harness.shell.pendingLeadNotices.filter { $0.workspaceID == lead.workspace.id }.map(\.text) }
+            let sweep = { (after: TimeInterval) in harness.shell.sweepWaitingInstructions(now: sentAt + after, snapshot: ProcessSnapshot()) }
+            let queued = { (after: TimeInterval) in
+                MissionStore.shared.pendingPromptDeliveries(now: sentAt + after).filter { $0.event.kind == .instruction }.count
+            }
+            sweep(60)
+            XCTAssertTrue(notices().isEmpty, "within the hour it waits quietly")
+            sweep(MissionEventCLI.instructionHeldNotice + 1)
+            sweep(MissionEventCLI.instructionHeldNotice + 10)
+            XCTAssertEqual(notices().count, 1, "once")
+            XCTAssertTrue(notices().last?.contains("(sent ") == true && notices().last?.contains(") isn't typed yet: its turn isn't over.") == true,
+                          notices().last ?? "")
+            XCTAssertEqual(queued(MissionEventCLI.instructionHeldNotice + 10), 1, "still queued past the hour")
+            sweep(MissionEventCLI.instructionLifetime + 1)
+            XCTAssertEqual(notices().count, 2)
+            XCTAssertTrue(notices().last?.contains("was never typed: its prompt wasn't free for a day (its turn isn't over).") == true,
+                          notices().last ?? "")
+            XCTAssertEqual(queued(MissionEventCLI.instructionLifetime + 1), 0)
+            // Its task closing gives the next one up at once.
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Then this."], lead: lead).isError)
+            let index = try XCTUnwrap(harness.shell.workspaces.firstIndex { $0.columns.contains { $0 === task.column } })
+            harness.shell.closeWorkspace(at: index, refocusing: false)
+            sweep(60)
+            XCTAssertEqual(notices().count, 3)
+            XCTAssertTrue(notices().last?.contains("was never typed: its task closed first.") == true, notices().last ?? "")
         }
     }
 }
