@@ -86,12 +86,15 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         select(selection ?? remembered ?? defaultSelection)
         if !panel.isVisible { panel.center() }
         panel.makeKeyAndOrderFront(nil)
-        // After the window is up, which hands the sidebar the keyboard.
-        if let selection, Self.panesTakingKeyboard.contains(selection), let pane = shownPane,
-           !panel.keyboardIsFree(for: pane) {
+        // After the window is up, which hands the sidebar the keyboard: the
+        // pane takes it now if its content is there, else once it comes;
+        // one that can't (a Board file it can't write) leaves it there.
+        if let selection, case .space(let tab) = selection, Self.panesTakingKeyboard.contains(selection),
+           let pane = shownPane, !panel.keyboardIsFree(for: pane) {
+            let holder = panel.firstResponder
             panel.makeFirstResponder(nil)
+            if space?.keyboardFreed(for: tab) != true { panel.makeFirstResponder(holder) }
         }
-        space?.windowShown()
     }
 
     /// The pane last shown, if the window can show it: a space's only for
@@ -120,13 +123,13 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     /// replaces is told (`SpaceSettingsSection.detach`). A space's pane
     /// shown goes with it: the caller shows the pane it wants
     /// (`SpaceSettingsSection.show`), once, for the new space.
-    func setSpace(_ section: SpaceSettingsSection?) {
+    func setSpace(_ section: SpaceSettingsSection) {
         guard section !== space else { return }
         // Told while it still has the window: a sheet of its own ends there.
         space?.detach(windowClosed: false)
         space?.host = nil
         space = section
-        section?.host = self
+        section.host = self
         paneWidth = nil
         guard panel != nil else { return }
         if case .space? = selection {
@@ -134,14 +137,12 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             shownPane = nil
             selection = nil
         }
-        if section != nil, sidebar.hasSpace {
+        if sidebar.hasSpace {
             sidebar.updateSpace(spaceHeader)
         } else {
             sidebar.reload(appPanes: appPanes, space: spaceHeader)
         }
         sidebar.select(selection)
-        if section == nil, selection == nil { select(lastAppSelection.flatMap(available) ?? defaultSelection) }
-        space?.windowShown()
     }
 
     /// The space's name, colour or the spaces changed: the sidebar and the

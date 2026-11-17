@@ -202,6 +202,9 @@ final class WorkspaceState {
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
+    /// The columns were laid out (`layoutAndScroll`): which ones show may
+    /// have changed.
+    var onColumnsLaidOut: (() -> Void)?
     var onGitContextChanged: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
@@ -989,6 +992,7 @@ extension WorkspaceState {
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
         fitAll: Bool = false, skipTerminalResize: Bool = false
     ) {
+        defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
 
         let gap = columns.count > 1 ? Self.columnGap : 0

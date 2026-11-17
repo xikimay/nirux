@@ -51,6 +51,37 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
     }
 
+    /// Board settings asked for again, on the form already shown, gives it
+    /// the keyboard: the form isn't read again, and the keyboard is never
+    /// left nowhere.
+    @MainActor
+    func testBoardSettingsAgainGivesTheFormTheKeyboard() throws {
+        try withShell { shell, space in
+            let form = try open(shell, space)
+            let panel = try XCTUnwrap(shell.spaceSettings?.panel)
+            panel.makeFirstResponder(shell.settingsWindow.sidebar.table)
+            shell.showBoardSettings(profileID: space.id)
+            XCTAssertIdentical(shell.boardSettingsPanel, form, "not read again")
+            XCTAssertIdentical((panel.firstResponder as? NSTextView)?.delegate as? NSTextField, form.repositoryField)
+        }
+    }
+
+    /// A Board file it can't write takes no keyboard: asked for again, the
+    /// form leaves it with the sidebar, never nowhere.
+    @MainActor
+    func testAFormThatCantBeWrittenLeavesTheKeyboardToTheSidebar() throws {
+        try withShell { shell, space in
+            try write(#"{"schemaVersion": 3, "repository": "acme/widgets"}"#, for: space)
+            let form = try open(shell, space)
+            XCTAssertFalse(form.isWritable)
+            let panel = try XCTUnwrap(shell.spaceSettings?.panel)
+            let table = shell.settingsWindow.sidebar.table
+            panel.makeFirstResponder(table)
+            shell.showBoardSettings(profileID: space.id)
+            XCTAssertIdentical(panel.firstResponder, table)
+        }
+    }
+
     // MARK: - Saving
 
     @MainActor

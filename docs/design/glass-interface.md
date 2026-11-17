@@ -112,7 +112,9 @@ merge sweep, the birth), and changes what frames them:
   The selection's glass stays the task's, whose workspace the main area
   shows: one selection, as in Mail (the user's call, 2026-11-16: "the best,
   UX-wise"). It can't be pressed while no task is open (its tooltip says
-  so). Both rows scroll with the list, as in Mail and Finder. **History**, at the bottom with Archived
+  so), and then takes the click and does nothing. It follows the columns as
+  they are laid out (scrolled, resized, moved).
+  Both rows scroll with the list, as in Mail and Finder. **History**, at the bottom with Archived
   above it, opens the Session History panel and is never selected. They
   replace 3.4's Tasks · Board · History capsule, which looked like tabs
   ("Tasks" stayed selected) while its other segments opened things
@@ -349,15 +351,21 @@ space, in place of Settings' three toolbar tabs and Space Settings' seven:
 - **One space at a time:** the active one, or the one whose Space Settings…
   was chosen. The popup lists the spaces as they are when it opens; from
   one of Nirux's panes it changes the space listed, not the pane. Text
-  typed and not saved, or a sheet up (Add Repository…, a setup script),
-  keeps its space: picking another shows that text and says why, in the
-  window when it has the keyboard, else in a toast. A space deleted while
-  it shows gives way to the active space; Nirux's pane shown stays.
-  Closing and quitting ask, as before.
+  typed and not saved, or a sheet of the space's panes, up or queued (Add
+  Repository…, a setup script, a question; the space's section records
+  each until it ends), keeps its space: picking another shows that text and
+  says why, in the window, over that sheet if one is up. A sheet of Nirux's own
+  (the tasks folder's chooser) belongs to no space: it keeps none, and
+  stays when the space shown is deleted, which gives way to the active
+  space and ends the space's sheets; Nirux's pane shown stays. Closing and
+  quitting ask, as before; the main window keeps what had its keyboard, or
+  the task's terminal takes it if nothing had.
 - **Keyboard:** the sidebar has it when the window opens, so ↑ ↓ walk the
-  panes (over the space's header); Tab goes on into the pane shown. A pane
-  that loads (Memory, Board) takes it only when the sidebar hasn't it, as
-  when Space Memory… or Board settings opened the window.
+  panes (over the space's header); Tab goes on into the pane shown. Memory
+  and Board take it when Space Memory… or Board settings asks for them, at
+  once if their content shows, else as it comes; one that can't (a Board
+  file it can't write, no memory to list) leaves it with the sidebar, as
+  they do when walked to from it.
 - **Size:** fixed width (the sidebar and the widest pane, Memory's list),
   narrower panes centred, never wider than the screen; the height fits each
   pane, or the sidebar's list, top edge fixed.

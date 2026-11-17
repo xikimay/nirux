@@ -529,6 +529,10 @@ extension NiruxShellView {
             self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
         }
+        workspace.onColumnsLaidOut = { [weak self, weak workspace] in
+            guard let self, workspace === self.activeWorkspace else { return }
+            self.refreshSidebarNavigation()
+        }
         workspace.onGitContextChanged = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
             self.gitRefresh.gitContextChanged(workspace)
@@ -748,5 +752,17 @@ extension NiruxShellView {
             return column.projectBoard != nil && !column.isClosing && workspace.showsColumn(at: index)
         }
         return SidebarNavigation(boardShown: shown, boardAvailable: true)
+    }
+
+    /// The navigator rows follow the columns in view: a Board column
+    /// scrolled, resized or moved into or out of view.
+    func refreshSidebarNavigation() {
+        let navigation = sidebarNavigation
+        // Each frame of a resize lays the columns out: most change nothing.
+        guard navigation != sidebar.navigation else { return }
+        sidebar.navigation = navigation
+        // Not inside the layout pass: on the next turn, where nothing is
+        // left to do if an update meanwhile rebuilt the rows.
+        DispatchQueue.main.async { [weak self] in self?.sidebar.renderIfChanged() }
     }
 }

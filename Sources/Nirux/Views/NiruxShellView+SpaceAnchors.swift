@@ -96,13 +96,16 @@ extension NiruxShellView {
     /// space (or the folder, when it is in none and the user agrees), then
     /// offers to move that repository's workspaces in. From the ⌘N sheet,
     /// the folder picker opens over `sheet`: the window has one already.
-    func addRepository(toSpace spaceID: String, sheet: NSWindow? = nil) {
+    /// From Space Settings, the picker is that space's sheet (`notingIn`).
+    func addRepository(toSpace spaceID: String, sheet: NSWindow? = nil, notingIn section: SpaceSettingsSection? = nil) {
         guard spaceID != WorkspaceProfile.defaultID, profiles.contains(where: { $0.id == spaceID }),
               canChangeAnchors()
         else { return }
         // From the sheet: what it adds is the sheet's choice.
         let pickedInSheet = sheet != nil
+        let ended = section?.noteSheet()
         sideEffects.chooseFolder("Add Repository", sheet ?? window) { [weak self] folder in
+            ended?()
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: true) { [weak self] pick in
                 self?.runFromRunLoop { [weak self] in
