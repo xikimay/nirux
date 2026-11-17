@@ -128,8 +128,9 @@ struct AgentStatusMachine {
     /// call an older receiver sent without one): from PreToolUse to its
     /// PostToolUse, or to the PermissionDenied of a call auto mode refused.
     /// A call refused at a dialog, by a rule or a hook fires neither: the
-    /// turn's end forgets it. (A prompt doesn't: Claude submits peer
-    /// messages and poll results as prompts while a call runs.)
+    /// turn's end forgets it, or a prompt after an interrupt. (A prompt
+    /// alone doesn't: Claude submits peer messages and poll results as
+    /// prompts while a call runs.)
     private var mainCallsRunning: [String] = []
     /// The main thread's last prompt or tool event in the turn in flight;
     /// nil between turns.
@@ -443,6 +444,9 @@ struct AgentStatusMachine {
             askedQuestion = nil
             circling.reset()
             lastPromptAt = now
+            // An interrupt since the main thread last moved ended its calls:
+            // one waiting at a dialog says so with no hook.
+            if turnInterruptedAt >= mainTurnMovedAt ?? 0 { mainCallsRunning = [] }
             mainTurnMovedAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }

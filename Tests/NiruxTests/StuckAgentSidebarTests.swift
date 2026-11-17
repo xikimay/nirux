@@ -391,6 +391,77 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertNil(shell.stuckWatchTimer)
     }
 
+    /// The stuck pass, as the heartbeat and the background watch run it,
+    /// hears the transcript grow and sends the silence's one alert.
+    func testTheStuckPassHearsTheTranscriptAndAlertsOnce() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-silent-pass-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", root.path, 1)
+        defer {
+            if let previousStateDirectory { setenv("NIRUX_STATE_DIR", previousStateDirectory, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let transcript = root.appendingPathComponent("lead.jsonl")
+        try Data("{}\n".utf8).write(to: transcript)
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = shell
+        defer { window.close() }
+
+        let column = try XCTUnwrap(shell.workspaces.first?.columns.first)
+        let pty = try XCTUnwrap(column.pty)
+        try await waitUntil("the column's shell", timeout: 10) { pty.shellPID != nil }
+        let shellPID = try XCTUnwrap(pty.shellPID)
+        let now = Date().timeIntervalSince1970
+        let snapshot = ProcessSnapshot(entries: [
+            ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: 99_999,
+                name: "zsh", startedAt: now - 8_000, arguments: ["zsh"]
+            ),
+            ProcessSnapshot.Entry(
+                pid: 99_999, parentPID: shellPID, processGroupID: 99_999, terminalForegroundProcessGroupID: 99_999,
+                name: "claude", startedAt: now - 7_200, arguments: ["claude"]
+            )
+        ])
+        let front = try XCTUnwrap(pty.foregroundProcess(snapshot: snapshot))
+        let clock = AwakeClock()
+        clock.now = 100
+        pty.awakeClock = { clock.now }
+        for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+            let event = AgentHookEvent(
+                kind: .claude, name: name, agentUUID: column.agentUUID, sessionID: "lead", emitterProcess: front.instance,
+                source: name == .sessionStart ? "startup" : nil, transcriptPath: transcript.path, timestamp: now - 3_000
+            )
+            _ = column.admitClaudeHook(event, foregroundProcess: front, snapshot: snapshot)
+            pty.applyAgentHook(event, isUserFocused: false)
+        }
+        var notified: [AgentAttentionReason?] = []
+        column.onAgentAttention = { notified.append($0) }
+        shell.stuckAgentWaitThreshold = 600
+        func pass(at awake: TimeInterval) {
+            clock.now = awake
+            shell.refreshStuckAgents(snapshot: snapshot, now: now, appIsActive: false)
+        }
+
+        pass(at: 100)
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{}\n".utf8))
+        try handle.close()
+        pass(at: 1_000)
+        pass(at: 2_199)
+        XCTAssertEqual(notified, [], "20 minutes from the last line, not from the prompt")
+        pass(at: 2_200)
+        pass(at: 2_300)
+        XCTAssertEqual(notified, [.silent(1_200)], "once")
+    }
+
     // MARK: - Mission messages that wait
 
     /// A Mission message that waits too long for an idle agent's prompt
