@@ -241,6 +241,9 @@ extension BoardStages {
         var hasTask = true
         /// Its agent waits for a permission rather than an answer.
         var waitsOnCommand = false
+        /// Its agent asked the agent that started it (a grey ring and a
+        /// question, as on the sidebar's row).
+        var asksParent = false
     }
 }
 
@@ -267,6 +270,11 @@ extension BoardStages {
 
         var isCommand: Bool {
             if case .needsYou(_, let command) = self { return command }
+            return false
+        }
+
+        var isAsking: Bool {
+            if case .asking = self { return true }
             return false
         }
     }
@@ -490,7 +498,8 @@ extension BoardStages {
             tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
             menu: menu(of: facts, rail: rail, offer: offer),
             hasTask: facts.hasTask,
-            waitsOnCommand: reading.state == .needsYou && facts.activity.isCommand
+            waitsOnCommand: facts.activity.isCommand,
+            asksParent: reading.state == .waiting && facts.activity.isAsking
         )
     }
 

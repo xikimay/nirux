@@ -192,9 +192,11 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
     // MARK: Layout
 
     /// The line's state icon, as the sidebar draws the task's: its state,
-    /// its station, why it waits.
+    /// its station (none without a rail), why it waits.
     var icon: StateIcon {
-        StateIcon(state: line.state, station: line.station, reason: line.waitsOnCommand ? .command : .question)
+        let station = line.rail == nil ? nil : line.station
+        if line.asksParent { return StateIcon(.asking, stage: StateIcon.stage(of: station)) }
+        return StateIcon(state: line.state, station: station, reason: line.waitsOnCommand ? .command : .question)
     }
 
     /// Where the icon's centre is: at the line's edge, or inset under a

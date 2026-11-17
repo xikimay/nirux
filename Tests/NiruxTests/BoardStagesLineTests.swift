@@ -104,6 +104,8 @@ final class BoardStagesLineTests: XCTestCase {
         XCTAssertTrue(line(facts(activity: .needsYou("Bash(swift test)", command: true))).waitsOnCommand)
         XCTAssertFalse(line(facts(activity: .needsYou("a question"))).waitsOnCommand)
         XCTAssertFalse(line(facts(activity: .working(since: nil))).waitsOnCommand)
+        XCTAssertTrue(line(facts(activity: .asking("Ship checkout"))).asksParent)
+        XCTAssertFalse(line(facts(activity: .idle)).asksParent)
     }
 
     func testReviewsStaysCurrentWhileTheReviewsTurnIsNotOver() {

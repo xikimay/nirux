@@ -14,6 +14,8 @@ final class BoardStagesView: NSView {
         var state: BoardStages.State
         /// "Lead · reviewing #438".
         var text: String
+        /// It waits for a permission: the command's glyph, as on its row.
+        var waitsOnCommand = false
     }
 
     struct Header: Equatable {
@@ -384,7 +386,9 @@ final class BoardStagesView: NSView {
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
-        if let lead = content.header.lead { leadIcon.icon = StateIcon(state: lead.state, station: nil) }
+        if let lead = content.header.lead {
+            leadIcon.icon = StateIcon(state: lead.state, station: nil, reason: lead.waitsOnCommand ? .command : .question)
+        }
         leadLabel.stringValue = content.header.lead?.text ?? ""
         // Where the Lead's line has no room, its dot says it.
         leadIcon.toolTip = content.header.lead?.text

@@ -30,11 +30,13 @@ struct PaletteBadge: Equatable {
     enum Tone { case working, waiting, failure }
     let text: String
     let tone: Tone
+    /// What an agent waits on: a permission shows the command's glyph.
+    var reason: StateIcon.Reason = .question
 
     var icon: StateIcon {
         switch tone {
         case .working: return StateIcon(.working)
-        case .waiting: return StateIcon(.needsYou(.question))
+        case .waiting: return StateIcon(.needsYou(reason))
         case .failure: return StateIcon(.error)
         }
     }
@@ -694,7 +696,9 @@ final class CommandPalette: NSObject {
             textRight = accessory.frame.minX - Theme.Space.md
             if let badgeIcon {
                 let side = Self.badgeIcon
-                badgeIcon.frame = NSRect(x: accessory.frame.minX - Theme.Space.xs - side, y: accessory.frame.midY - side / 2, width: side, height: side)
+                // On the text's capitals, not the field's frame.
+                let capsMidY = accessory.frame.maxY - accessory.firstBaselineOffsetFromTop + (accessory.font?.capHeight ?? 0) / 2
+                badgeIcon.frame = NSRect(x: accessory.frame.minX - Theme.Space.xs - side, y: capsMidY - side / 2, width: side, height: side)
                 row.addSubview(badgeIcon)
                 textRight = badgeIcon.frame.minX - Theme.Space.md
             }

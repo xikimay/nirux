@@ -184,11 +184,14 @@ extension NiruxShellView {
 extension PaletteBadge {
     init(_ state: QuickSwitchAgentState, now: TimeInterval) {
         let tone: Tone
+        var reason = StateIcon.Reason.question
         switch state {
         case .working: tone = .working
-        case .waiting: tone = .waiting
+        case .waiting(_, let attention):
+            tone = .waiting
+            reason = StateIcon.Reason(attention) ?? .question
         case .failed: tone = .failure
         }
-        self.init(text: state.label(now: now), tone: tone)
+        self.init(text: state.label(now: now), tone: tone, reason: reason)
     }
 }

@@ -251,7 +251,7 @@ final class BoardStagesMergedEntryView: BoardStagesKeyView, NSViewToolTipOwner {
 
     /// Merged, or amber while an agent of its task needs the user: never
     /// hidden.
-    var icon: StateIcon { pullRequest.needsYou ? StateIcon(.needsYou(.question)) : StateIcon(.merged) }
+    var icon: StateIcon { pullRequest.needsYou ? StateIcon(.needsYou(pullRequest.waitsOnCommand ? .command : .question)) : StateIcon(.merged) }
 
     override func layout() {
         super.layout()

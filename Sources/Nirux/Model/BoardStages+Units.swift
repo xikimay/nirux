@@ -30,6 +30,8 @@ extension BoardStages {
         var mergedAt: TimeInterval
         /// An agent of its task waits for the user: amber is never hidden.
         var needsYou = false
+        /// For a permission: its icon shows the command's glyph.
+        var waitsOnCommand = false
         /// Its worktree is still there.
         var cleanUp: CleanUp?
     }
@@ -169,6 +171,7 @@ extension BoardStages {
                     number: pullRequest.number,
                     mergedAt: pullRequest.mergedAt,
                     needsYou: gone.contains { lines[$0].state == .needsYou },
+                    waitsOnCommand: gone.contains { lines[$0].waitsOnCommand },
                     cleanUp: task.flatMap { facts.lines[$0].cleanUp }
                 )
             },

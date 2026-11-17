@@ -2527,14 +2527,21 @@ final class BoardStagesViewTests: XCTestCase {
     /// green with its check, as on a row, not the Board's old grey.
     func testALinesIconIsTheStateIconOfTheSidebar() {
         var line = BoardStages.Line(
-            id: "t", title: "T", station: .checks, state: .needsYou, rail: nil, phrase: BoardStages.Phrase(text: ""), pullRequest: ""
+            id: "t", title: "T", station: .checks, state: .needsYou, rail: BoardStages.Rail(marks: [.done, .done, .current, .ahead]),
+            phrase: BoardStages.Phrase(text: ""), pullRequest: "#52"
         )
         line.waitsOnCommand = true
         let view = BoardStagesLineView(line, link: .none)
         XCTAssertEqual(view.icon, StateIcon(state: .needsYou, station: .checks, reason: .command))
         XCTAssertEqual(StateIcon(state: .ready, station: nil).color, Theme.Color.success)
         XCTAssertEqual(BoardStagesView.color(of: .ready), Theme.Color.success, "the current station takes the same palette")
-        XCTAssertEqual(BoardStages.Activity.needsYou("allow `rm`", command: true).isCommand, true)
+        line.waitsOnCommand = false
+        line.state = .waiting
+        line.asksParent = true
+        XCTAssertEqual(BoardStagesLineView(line, link: .none).icon, StateIcon(.asking, stage: 3), "asking its parent, as on the row")
+        line.asksParent = false
+        line.rail = nil
+        XCTAssertEqual(BoardStagesLineView(line, link: .none).icon, StateIcon(.waiting), "no rail, no station")
     }
 
     func testAmberMeansAnAgentWaitsForTheUserAndNothingElse() throws {
