@@ -33,9 +33,13 @@ func testBundleDidLoad() {
     // add, so it never moves; a test that adds and removes its own variables
     // only touches entries past Ghostty's copy.
     let environment = ProcessInfo.processInfo.environment
-    let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"]
+    let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"] + UIFlowHarness.gitHubLogin
         + environment.keys.filter { $0.hasPrefix("CLAUDE_CODE_") || $0.hasPrefix("GIT_") }
     cleared.forEach { unsetenv($0) }
+    // gh finds no login, outside the flow harness's fake home too.
+    let ghConfig = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-tests-gh-\(getpid())")
+    try? FileManager.default.createDirectory(at: ghConfig, withIntermediateDirectories: true)
+    setenv("GH_CONFIG_DIR", ghConfig.path, 1)
     let room = (0..<64).map { "NIRUX_TESTS_ENVIRONMENT_ROOM_\($0)" }
     room.forEach { setenv($0, "", 1) }
     room.reversed().forEach { unsetenv($0) }

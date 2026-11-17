@@ -32,7 +32,7 @@ extension NiruxShellView {
         case LeadTools.tell, LeadTools.askUser:
             let name = LeadTools.string(arguments, "task") ?? ""
             guard let (subtask, mission) = taskSubtask(name, for: parent, among: subtasks) else {
-                return answer("No sub-task of yours is named “\(name)”, or several share that title: use its branch or title "
+                return answer("No sub-task of yours is named “\(name)”, or several share that name: use its branch or title "
                     + "from list_tasks (its folder, for a sub-task without a repository).", true)
             }
             if request.tool == LeadTools.tell {

@@ -16,7 +16,8 @@ import XCTest
 /// - agent launches, the home folder, browser cookies and app-modal alerts
 ///   go through `ShellSideEffects` doubles that record what they got;
 /// - the workspace sits in a temporary git repository with no remote, so
-///   git, gh and the worktree clean-up never reach the network.
+///   git, gh and the worktree clean-up never reach the network; gh finds
+///   no login in the fake home, and no token in the environment.
 ///
 /// Every wait is a bounded spin of the main run loop, never a fixed sleep:
 /// work a panel sends off the main thread really runs, so a closure that
@@ -40,6 +41,9 @@ final class UIFlowHarness {
     /// A committed file, the only one holding `searchNeedle`.
     static let searchTarget = "docs/search-target.txt"
     static let searchNeedle = "flow-harness-needle"
+    /// The tokens gh would log in with, cleared for the tests (its
+    /// configuration folder is an empty one, see TestBootstrap).
+    nonisolated static let gitHubLogin = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]
 
     let shell: NiruxShellView
     let window: NSWindow
@@ -588,8 +592,9 @@ private struct IsolatedEnvironment {
             try? FileManager.default.createDirectory(atPath: root + "/" + folder, withIntermediateDirectories: true)
         }
         let environment = ProcessInfo.processInfo.environment
-        // Claude Code's settings and memory come from the fake home only.
-        let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"]
+        // Claude Code's settings and memory come from the fake home only; gh
+        // finds no login there, nor a token.
+        let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"] + UIFlowHarness.gitHubLogin
             + environment.keys.filter { $0.hasPrefix("CLAUDE_CODE_") }
             + environment.keys.filter { $0.hasPrefix("GIT_") }
         let names = ["NIRUX_STATE_DIR", "HOME"] + cleared

@@ -58,9 +58,9 @@ enum NiruxMCPServer {
         current with set_task_context, as the user reads them on its row: after its question is answered, when \
         it completes, and when you notice a blocker (clear it once it is gone). When tasks are ready to merge, \
         propose them with queue_merge: the user starts the queue. When a second task gets the same kind of finding, \
-        propose a rule for the space brief with propose_rule: the user decides. Never merge a pull request, remove a worktree or a \
-        branch, or act on another space: leave those to the user. After a /clear, list_tasks shows where \
-        things stand.
+        propose a rule for the space brief with propose_rule: the user decides. Close a merged or abandoned task \
+        with close_task, never by removing its worktree or branch yourself. Never merge a pull request or act \
+        on another space: leave those to the user. After a /clear, list_tasks shows where things stand.
         """
 
     /// The instructions for whoever launched the server: the Lead's role

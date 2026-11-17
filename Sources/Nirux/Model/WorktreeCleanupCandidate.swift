@@ -45,8 +45,8 @@ struct WorktreeCleanupCandidate: Equatable {
         case blocked([String])
     }
 
-    var availability: Availability {
-        guard let inspection else { return .checking }
+    /// What deleting the folder would lose or pull from under someone.
+    var inUseProblems: [String] {
         var problems: [String] = []
         if !unsavedEditors.isEmpty {
             problems.append("Unsaved editor changes in \(Self.quotedList(unsavedEditors)).")
@@ -54,6 +54,12 @@ struct WorktreeCleanupCandidate: Equatable {
         if !foreignAgents.isEmpty {
             problems.append("Running in this folder from another workspace: \(foreignAgents.joined(separator: ", ")).")
         }
+        return problems
+    }
+
+    var availability: Availability {
+        guard let inspection else { return .checking }
+        var problems = inUseProblems
         switch inspection {
         case .folderMissing:
             return problems.isEmpty ? .closeOnly : .blocked(problems)
