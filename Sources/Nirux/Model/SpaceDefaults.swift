@@ -21,9 +21,32 @@ struct SpaceDefaults: Equatable, Sendable {
     /// Space Settings › Lead, "Starts tasks without asking". Nil: on. Off,
     /// the Lead's `start_task` opens the New sheet for the user to start.
     var leadStartsTasks: Bool?
+    /// Space Settings › Safety, one per `ClaudeSpaceSettings.Part`. Nil:
+    /// its default.
+    var claudeTrustsRepositories: Bool?
+    var claudeDeniesIrreversible: Bool?
+    var claudeSandbox: Bool?
 
     /// Whether the space's Lead starts its tasks itself.
     var leadStartsTasksWithoutAsking: Bool { leadStartsTasks ?? true }
+
+    func isOn(_ part: ClaudeSpaceSettings.Part) -> Bool { self[keyPath: part.key] ?? part.isOnByDefault }
+
+    /// Nothing is written for a part set to its default.
+    mutating func set(_ part: ClaudeSpaceSettings.Part, on: Bool) {
+        self[keyPath: part.key] = on == part.isOnByDefault ? nil : on
+    }
+
+    /// Each on/off switch the file holds, with its value when Nirux can't
+    /// read it: the safe side (SpaceDefaultsStore).
+    static var switches: [(key: WritableKeyPath<SpaceDefaults, Bool?>, name: CodingKeys, safe: Bool)] {
+        [
+            (\.leadStartsTasks, .leadStartsTasks, false),
+            (\.claudeTrustsRepositories, .claudeTrustsRepositories, false),
+            (\.claudeDeniesIrreversible, .claudeDeniesIrreversible, true),
+            (\.claudeSandbox, .claudeSandbox, true)
+        ]
+    }
 
     struct EnvironmentVariable: Equatable, Sendable {
         var name: String
@@ -120,13 +143,15 @@ struct SpaceDefaults: Equatable, Sendable {
 
 /// `{"schemaVersion": 1, "agent": "codex", "claudeLaunchMode": "plan",
 /// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}],
-/// "leadStartsTasks": false}`,
+/// "leadStartsTasks": false, "claudeTrustsRepositories": false,
+/// "claudeDeniesIrreversible": false, "claudeSandbox": true}`,
 /// every key optional, nothing written for what isn't set. Unknown keys and
 /// values are read-only reasons (see SpaceDefaultsStore), not decoding
 /// errors.
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks
+        case claudeTrustsRepositories, claudeDeniesIrreversible, claudeSandbox
     }
 
     private struct StoredVariable: Codable {
@@ -144,6 +169,9 @@ extension SpaceDefaults: Codable {
         environment = ((try? container.decodeIfPresent([StoredVariable].self, forKey: .environment)) ?? nil)?
             .map { EnvironmentVariable(name: $0.name, value: $0.value) } ?? []
         leadStartsTasks = (try? container.decodeIfPresent(Bool.self, forKey: .leadStartsTasks)) ?? nil
+        claudeTrustsRepositories = (try? container.decodeIfPresent(Bool.self, forKey: .claudeTrustsRepositories)) ?? nil
+        claudeDeniesIrreversible = (try? container.decodeIfPresent(Bool.self, forKey: .claudeDeniesIrreversible)) ?? nil
+        claudeSandbox = (try? container.decodeIfPresent(Bool.self, forKey: .claudeSandbox)) ?? nil
     }
 
     func encode(to encoder: Encoder) throws {
@@ -156,5 +184,8 @@ extension SpaceDefaults: Codable {
             try container.encode(environment.map { StoredVariable(name: $0.name, value: $0.value) }, forKey: .environment)
         }
         try container.encodeIfPresent(leadStartsTasks, forKey: .leadStartsTasks)
+        try container.encodeIfPresent(claudeTrustsRepositories, forKey: .claudeTrustsRepositories)
+        try container.encodeIfPresent(claudeDeniesIrreversible, forKey: .claudeDeniesIrreversible)
+        try container.encodeIfPresent(claudeSandbox, forKey: .claudeSandbox)
     }
 }

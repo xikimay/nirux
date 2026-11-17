@@ -494,7 +494,8 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(harness.restoredAgentLaunches, [])
 
             harness.runPaletteCommand("Resume All Agents")
-            XCTAssertEqual(harness.restoredAgentLaunches, ["command claude --resume '\(session)'"])
+            let settings = try XCTUnwrap(ClaudeSpaceSettings.fileURL(spaceID: restored.profileID)).path
+            XCTAssertEqual(harness.restoredAgentLaunches, ["command claude --resume '\(session)' '--settings=\(settings)'"])
             XCTAssertEqual(shell.deferredAgentCount, 0)
             XCTAssertIdentical(shell.activeWorkspace, onScreen, "agents resume where they are")
         }

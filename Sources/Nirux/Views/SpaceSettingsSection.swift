@@ -10,12 +10,13 @@ import AppKit
 @MainActor
 final class SpaceSettingsSection: NSObject {
     enum Tab: String, CaseIterable {
-        case general, defaults, lead, brief, memory, board, templates
+        case general, defaults, safety, lead, brief, memory, board, templates
 
         var title: String {
             switch self {
             case .general: return "General"
             case .defaults: return "Defaults"
+            case .safety: return "Safety"
             case .lead: return "Lead"
             case .brief: return "Brief"
             case .memory: return "Memory"
@@ -28,6 +29,7 @@ final class SpaceSettingsSection: NSObject {
             switch self {
             case .general: return "gearshape"
             case .defaults: return "slider.horizontal.3"
+            case .safety: return "lock.shield"
             case .lead: return "sparkle"
             case .brief: return "text.alignleft"
             case .memory: return "brain"
@@ -40,6 +42,7 @@ final class SpaceSettingsSection: NSObject {
     let spaceID: String
     let general: SpaceSettingsGeneralPane
     let defaults: SpaceSettingsDefaultsPane
+    let safety: SpaceSettingsSafetyPane
     let lead: SpaceSettingsLeadPane
     let brief: SpaceFileEditorPane
     let templates: SpaceFileEditorPane
@@ -136,10 +139,12 @@ final class SpaceSettingsSection: NSObject {
     var hasUnsavedChanges: Bool { !unsavedParts.isEmpty }
 
     init(spaceID: String, general: SpaceSettingsGeneralPane, defaults: SpaceSettingsDefaultsPane,
+         safety: SpaceSettingsSafetyPane,
          lead: SpaceSettingsLeadPane, brief: SpaceFileEditorPane, templates: SpaceFileEditorPane) {
         self.spaceID = spaceID
         self.general = general
         self.defaults = defaults
+        self.safety = safety
         self.lead = lead
         self.brief = brief
         self.templates = templates
@@ -176,6 +181,7 @@ final class SpaceSettingsSection: NSObject {
         switch tab {
         case .general: return general.view
         case .defaults: return defaults.view
+        case .safety: return safety.view
         case .lead: return lead.view
         case .brief: return brief.view
         case .memory: return memoryHost

@@ -40,6 +40,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             shell.addWorkspace(title: "claude", cwd: harness.repo, agent: .claude, profileID: space.id)
             harness.waitUntil("the Claude launch") { harness.agentLaunches.contains { $0.hasPrefix("command claude") } }
             XCTAssertTrue(harness.agentLaunches.last?.contains("--permission-mode plan") == true, harness.agentLaunches.last ?? "")
+            XCTAssertTrue(harness.agentLaunches.last?.contains("'--settings=") == true, harness.agentLaunches.last ?? "")
             let claude = try XCTUnwrap(workspace(harness, "claude"))
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === claude }))
             shell.openCodex()
@@ -66,9 +67,56 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertEqual(outside.profileID, space.id)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
             XCTAssertFalse(harness.agentLaunches.last?.contains("--permission-mode plan") == true, harness.agentLaunches.last ?? "")
+            XCTAssertFalse(harness.agentLaunches.last?.contains("--settings") == true, harness.agentLaunches.last ?? "")
             XCTAssertNil(outside.terminalEnvironment(agentUUID: "A-3")["API_URL"])
             let persisted = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == outside.id })
             XCTAssertTrue(persisted.startedOutsideNirux)
+        }
+    }
+
+    /// Space Settings › Safety writes each switch at once, and the next
+    /// Claude launch in the space passes the file it makes.
+    func testTheSafetyTabWritesEachSwitchAndLaunchesPassTheFile() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let space = try anchoredSpace(harness)
+            let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: space.id))
+            let file = try XCTUnwrap(SpaceBrief.directory(spaceID: space.id, stateDirectory: Persistence.stateDirectory))
+                .appendingPathComponent(ClaudeSpaceSettings.fileName)
+            shell.showSpaceSettings(profileID: space.id, tab: .safety)
+            let pane = try XCTUnwrap(shell.spaceSettings).safety
+            XCTAssertEqual(pane.model.on, [.trustRepositories, .denyIrreversible])
+            XCTAssertEqual(pane.model.repositories.count, 1)
+
+            @MainActor func flip(_ part: ClaudeSpaceSettings.Part) throws {
+                let control = try XCTUnwrap(pane.switches[part])
+                control.state = control.state == .on ? .off : .on
+                control.sendAction(control.action, to: control.target)
+            }
+            @MainActor func launch(_ title: String) throws -> String {
+                let before = harness.agentLaunches.count
+                shell.addWorkspace(title: title, cwd: harness.repo, agent: .claude, profileID: space.id)
+                harness.waitUntil("the Claude launch") { harness.agentLaunches.count > before }
+                return try XCTUnwrap(harness.agentLaunches.last)
+            }
+            @MainActor func written() throws -> [String: Any] {
+                try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            }
+
+            try flip(.denyIrreversible)
+            XCTAssertEqual(store.load().defaults.claudeDeniesIrreversible, false)
+            XCTAssertEqual(pane.model.on, [.trustRepositories])
+            let first = try launch("first")
+            XCTAssertTrue(first.contains("'--settings=\(file.path)'"))
+            XCTAssertEqual(Set(try written().keys), ["autoMode"])
+
+            try flip(.denyIrreversible)
+            XCTAssertNil(store.load().defaults.claudeDeniesIrreversible, "its default writes nothing")
+            try flip(.trustRepositories)
+            try flip(.denyIrreversible)
+            XCTAssertFalse(try launch("second").contains("--settings"))
+            // The first column's restart replays its line, which names the file.
+            XCTAssertEqual(try written().count, 0, "still there, empty, for \(first)")
         }
     }
 
