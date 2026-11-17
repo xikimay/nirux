@@ -148,7 +148,9 @@ extension NiruxShellView {
         saveState()
     }
 
-    func closeWorkspace(at index: Int) {
+    /// `refocusing`: false for a close the user didn't make (a Lead's
+    /// tool), which leaves the keyboard where it is.
+    func closeWorkspace(at index: Int, refocusing: Bool = true) {
         guard workspaceStore.remainingWorkspaceCount > 1,
               let wsToRemove = workspaces[safe: index], !wsToRemove.isClosing
         else { return }
@@ -170,7 +172,7 @@ extension NiruxShellView {
         } else {
             relayout(animated: true)
             updateSidebar()
-            focusActiveTerminal(in: window)
+            if refocusing { focusActiveTerminal(in: window) }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in

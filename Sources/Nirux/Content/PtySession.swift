@@ -369,6 +369,8 @@ final class PtySession: @unchecked Sendable {
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
+    /// A turn end waits for its verdict (see `AgentStatusMachine.awaitsAnyVerdict`).
+    var awaitsTurnVerdict: Bool { state.machine.awaitsAnyVerdict }
 
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).

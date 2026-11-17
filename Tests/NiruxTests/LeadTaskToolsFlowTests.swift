@@ -29,90 +29,136 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             try FileManager.default.moveItem(at: url, to: target)
             return target
         }
-        harness.shell.worktreeCleanupTools = tools
+        let stubbed = tools
+        harness.shell.worktreeCleanupTools = { stubbed }
         return trash
     }
 
-    /// close_task closes the Lead's tasks and the user's: a merged one's
-    /// worktree and branch go, as Clean Up Worktree… does once confirmed;
-    /// an unmerged one's stay, and the answer says why. Never a main
-    /// checkout, a task with sub-tasks, or another space's workspace.
-    func testTheLeadClosesTasksAndCleansUpMergedOnes() throws {
+    /// Pushed to GitHub as gh sees it: a worktree of the harness's
+    /// repository on `branch` in `folder`, one commit ahead, with a merged
+    /// pull request holding its tip.
+    private func mergedWorktree(_ branch: String, in folder: String, number: Int, harness: UIFlowHarness) throws {
+        try UIFlowHarness.git(["worktree", "add", "-q", "-b", branch, folder], at: harness.repo)
+        try UIFlowHarness.git(
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "work"], at: folder
+        )
+        try UIFlowHarness.git(["config", "branch.\(branch).pushRemote", "acme"], at: harness.repo)
+        let tip = try UIFlowHarness.git(["rev-parse", "HEAD"], at: folder).trimmingCharacters(in: .whitespacesAndNewlines)
+        let pullRequest: [String: Any] = [
+            "number": number, "state": "MERGED", "headRefOid": tip, "url": "https://github.com/acme/widgets/pull/\(number)",
+            "headRepositoryOwner": ["login": "acme"], "headRepository": ["name": "widgets"]
+        ]
+        try JSONSerialization.data(withJSONObject: [pullRequest])
+            .write(to: URL(fileURLWithPath: harness.root + "/prs/" + branch.replacingOccurrences(of: "/", with: "-") + ".json"))
+    }
+
+    /// close_task never closes the Lead, another space's workspace, a main
+    /// checkout, a task with sub-tasks, a name two workspaces answer, nor
+    /// one whose terminals still work: a program, its agent's turn, an
+    /// agent paused since a relaunch that was last seen working.
+    func testCloseTaskRefusesWhatTheUserStillNeeds() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            let subFolder = harness.root + "/repo.feat-sub"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/sub", subFolder], at: harness.repo)
+            for (title, cwd) in [("Work", harness.worktree), ("Checkout", harness.repo), ("Peek", harness.worktree), ("Later", harness.worktree)] {
+                shell.addWorkspace(title: title, cwd: cwd, profileID: lead.space)
+            }
+            let named = { (title: String) in try XCTUnwrap(shell.workspaces.first { $0.title == title }) }
+            let work = try named("Work")
+            shell.addWorkspace(title: "Sub", cwd: subFolder, profileID: lead.space, parentWorkspaceID: work.id)
+            let sub = try named("Sub")
+            let refusal: (String, String) throws -> Void = { task, words in
+                let answer = try harness.callLeadTool(LeadTools.closeTask, ["task": task], lead: lead)
+                XCTAssertTrue(answer.isError, answer.text)
+                XCTAssertTrue(answer.text.contains(words), answer.text)
+            }
+
+            try refusal("Lead", "No task in Tools is named “Lead”")
+            try refusal("repo", "No task in Tools is named “repo”")
+            try refusal("Checkout", "isn't a task")
+            try refusal("Work", "still has sub-tasks (“Sub”)")
+            // The user's own workspace in that worktree shows its branch too.
+            let peek = try named("Peek")
+            shell.refreshGitContextNow(for: work)
+            shell.refreshGitContextNow(for: peek)
+            harness.waitUntil("their branch") { work.gitBranch == harness.worktreeBranch && peek.gitBranch == harness.worktreeBranch }
+            try refusal(harness.worktreeBranch, "several share that name")
+
+            peek.addColumn(command: "sleep 60", cwd: harness.worktree)
+            let sleeper = try XCTUnwrap(peek.columns.last?.pty)
+            harness.waitUntil("the program") { sleeper.foregroundProcess(snapshot: ProcessSnapshot())?.name == "sleep" }
+            try refusal("Peek", "runs sleep in a terminal")
+
+            let agent = AgentStandIn()
+            defer { agent.remove() }
+            let agentUUID = UUID().uuidString
+            sub.addColumn(command: agent.command(), agentUUID: agentUUID, cwd: subFolder)
+            let pty = try XCTUnwrap(sub.columns.first { $0.agentUUID == agentUUID }?.pty)
+            harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+            for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+                _ = pty.applyAgentHook(AgentHookEvent(
+                    kind: .claude, name: name, agentUUID: agentUUID, sessionID: "sub", emitterProcess: claude,
+                    timestamp: Date().timeIntervalSince1970
+                ), isUserFocused: false)
+            }
+            try refusal("Sub", "agent is working")
+
+            // Not on screen: its agent stays paused.
+            let later = try named("Later")
+            shell.workspaceStore.selectWorkspace(id: lead.workspace.id)
+            later.addColumn(
+                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: .working),
+                agentUUID: UUID().uuidString, cwd: harness.worktree
+            )
+            try refusal("Later", "hasn't resumed since Nirux restarted, last seen working")
+            XCTAssertEqual(shell.workspaces.filter { $0.profileID == lead.space && !$0.isClosing }.count, 6, "nothing closed")
+        }
+    }
+
+    /// A merged task's worktree and branch go with it, as Clean Up
+    /// Worktree… does once confirmed; an unmerged one's stay, and so do
+    /// those of a folder named for another branch (a base reused across
+    /// branches): the answer says why.
+    func testCloseTaskCleansUpOnlyMergedTaskWorktrees() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
             _ = try stubCleanupTools(harness)
-            // Pushed to GitHub as gh sees it, its pull request merged.
-            let merged = harness.root + "/repo.feat-merged"
-            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/merged", merged], at: harness.repo)
-            try UIFlowHarness.git(
-                ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "work"], at: merged
-            )
             try UIFlowHarness.git(["remote", "add", "acme", "https://github.com/acme/widgets.git"], at: harness.repo)
-            try UIFlowHarness.git(["config", "branch.feat/merged.pushRemote", "acme"], at: harness.repo)
-            let tip = try UIFlowHarness.git(["rev-parse", "HEAD"], at: merged).trimmingCharacters(in: .whitespacesAndNewlines)
-            let pullRequest: [String: Any] = [
-                "number": 7, "state": "MERGED", "headRefOid": tip, "url": "https://github.com/acme/widgets/pull/7",
-                "headRepositoryOwner": ["login": "acme"], "headRepository": ["name": "widgets"]
-            ]
-            try JSONSerialization.data(withJSONObject: [pullRequest])
-                .write(to: URL(fileURLWithPath: harness.root + "/prs/feat-merged.json"))
-
-            shell.addWorkspace(title: "Merged work", cwd: merged, profileID: lead.space)
-            let mergedTask = try XCTUnwrap(shell.workspaces.first { $0.title == "Merged work" })
-            shell.addWorkspace(title: "Flow work", cwd: harness.worktree, profileID: lead.space, parentWorkspaceID: mergedTask.id)
-            let flowTask = try XCTUnwrap(shell.workspaces.first { $0.title == "Flow work" })
-            shell.addWorkspace(title: "Checkout", cwd: harness.repo, profileID: lead.space)
+            let merged = harness.root + "/repo.feat-merged"
+            let base = harness.root + "/repo-base"
+            try mergedWorktree("feat/merged", in: merged, number: 7, harness: harness)
+            try mergedWorktree("feat/base", in: base, number: 8, harness: harness)
+            for (title, cwd) in [("Merged work", merged), ("Base work", base), ("Flow work", harness.worktree)] {
+                shell.addWorkspace(title: title, cwd: cwd, profileID: lead.space)
+            }
             let close = { (task: String) in try harness.callLeadTool(LeadTools.closeTask, ["task": task], lead: lead) }
+            let closed = { (title: String) in
+                harness.waitUntil("“\(title)” to close") { !shell.workspaces.contains { $0.title == title } }
+            }
 
-            let itself = try close("Lead")
-            XCTAssertTrue(itself.isError, itself.text)
-            let elsewhere = try close("repo")
-            XCTAssertTrue(elsewhere.text.hasPrefix("No task in Tools is named “repo”"), elsewhere.text)
-            let checkout = try close("Checkout")
-            XCTAssertTrue(checkout.isError)
-            XCTAssertTrue(checkout.text.contains("isn't a task"), checkout.text)
-            let parent = try close("Merged work")
-            XCTAssertTrue(parent.isError)
-            XCTAssertTrue(parent.text.contains("still has sub-tasks (“Flow work”)"), parent.text)
-            XCTAssertEqual(shell.workspaces.filter { $0.profileID == lead.space && !$0.isClosing }.count, 4, "nothing closed")
-
-            // Not merged (not even pushed): it closes, its worktree and branch stay.
             let unmerged = try close("Flow work")
             XCTAssertFalse(unmerged.isError, unmerged.text)
             XCTAssertTrue(unmerged.text.hasPrefix("Closed “Flow work”. Its worktree and branch stay: feat/flow isn't pushed"), unmerged.text)
-            harness.waitUntil("the unmerged task to close") { !shell.workspaces.contains { $0 === flowTask } }
+            closed("Flow work")
             XCTAssertTrue(FileManager.default.fileExists(atPath: harness.worktree))
 
-            // Its agent's turn runs: never closed under it; once over, it may be.
-            let agent = AgentStandIn()
-            defer { agent.remove() }
-            let agentUUID = UUID().uuidString
-            mergedTask.addColumn(command: agent.command(), agentUUID: agentUUID, cwd: merged)
-            let pty = try XCTUnwrap(mergedTask.columns.first { $0.agentUUID == agentUUID }?.pty)
-            harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
-            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
-            @MainActor func hook(_ name: AgentHookEvent.Name) {
-                _ = pty.applyAgentHook(AgentHookEvent(
-                    kind: .claude, name: name, agentUUID: agentUUID, sessionID: "task", emitterProcess: claude,
-                    timestamp: Date().timeIntervalSince1970
-                ), isUserFocused: false)
-            }
-            hook(.sessionStart)
-            hook(.userPromptSubmit)
-            let working = try close("Merged work")
-            XCTAssertTrue(working.isError)
-            XCTAssertTrue(working.text.contains("agent is working"), working.text)
-            hook(.stop)
+            let reused = try close("Base work")
+            XCTAssertFalse(reused.isError, reused.text)
+            XCTAssertTrue(reused.text.contains("Its worktree and branch stay: Its folder isn't named for its branch"), reused.text)
+            closed("Base work")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: base))
 
-            // Merged: its worktree and branch go with it.
             let cleaned = try close("Merged work")
             XCTAssertFalse(cleaned.isError, cleaned.text)
             XCTAssertTrue(cleaned.text.hasPrefix("Closed “Merged work” and cleaned it up (pull request #7 merged)"), cleaned.text)
-            harness.waitUntil("the merged task to close") { !shell.workspaces.contains { $0 === mergedTask } }
+            closed("Merged work")
             XCTAssertFalse(FileManager.default.fileExists(atPath: merged))
             XCTAssertEqual(try UIFlowHarness.git(["branch", "--list", "feat/merged"], at: harness.repo), "")
-            XCTAssertNotEqual(try UIFlowHarness.git(["branch", "--list", "feat/flow"], at: harness.repo), "")
+            XCTAssertNotEqual(try UIFlowHarness.git(["branch", "--list", "feat/base"], at: harness.repo), "")
         }
     }
 

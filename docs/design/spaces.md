@@ -291,10 +291,19 @@ New flow, built on the guarded typing `tell` already uses
     too (the call stands in for the alert's click); a task without a
     repository has its folder moved to the Trash (for this tool only: Close
     and Archive keep it). Otherwise they stay and the answer says why: not
-    merged, uncommitted changes, another workspace open in it… Refused while
-    its agent works or waits on the user (a dialog, a question handed over),
-    or Nirux can't tell (no hooks), with unsaved editor changes, with
-    sub-tasks open, and for a workspace that isn't a task (a main checkout).
+    merged, uncommitted changes, another workspace open in it, a folder named
+    for another branch (a base reused across branches)… The task closes
+    before git runs, so no turn starts in a folder going away. Refused while
+    the user has it on screen (Nirux active), while its agent works or waits
+    on the user (a dialog, a question it ended on or handed over, a turn end
+    still being read), hasn't resumed since a relaunch and was last seen
+    working or waiting, or can't be told idle (no hooks); while a program
+    runs in its terminals; with unsaved editor changes; for a sub-task whose
+    parent's agent waits for it, a task with sub-tasks open, and a workspace
+    that isn't a task (a main checkout). A name two workspaces answer is no
+    answer (a workspace's branch is its focused terminal's). A folder task's
+    folder stays when another workspace or task works in it, and is moved
+    once its terminals are gone.
   - `move_task(task, position)`: moves a task among its siblings (the
     space's tasks, a task's sub-tasks, or the archived ones), 1 for the top,
     as dragging its row does: its sub-tasks follow, and the Lead stays first.

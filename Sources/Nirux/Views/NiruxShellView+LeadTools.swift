@@ -446,24 +446,21 @@ extension NiruxShellView {
         return owned.first { $0.workspace === workspace }
     }
 
-    /// The workspace of `candidates` named by its branch, its folder, or
-    /// its title or folder's name when only one has it.
+    /// The one workspace of `candidates` named by its branch, its folder (a
+    /// task without a repository, by path as list_tasks shows it), its title
+    /// or its folder's name. Two answering the name is no answer: a branch
+    /// is the focused terminal's, which another workspace may share.
     func namedWorkspace(_ name: String, among candidates: [WorkspaceState]) -> WorkspaceState? {
-        if let first = candidates.first(where: { $0.gitBranch == name }) { return first }
-        // A task without a repository has its folder instead, by path as
-        // list_tasks shows it.
-        if let first = candidates.first(where: { $0.taskFolder == name }) { return first }
-        // Then a title, or a folder's name, only one task having it: a
-        // title and a folder's name naming two tasks is no answer.
         let found = candidates.filter { workspace in
-            workspace.title.caseInsensitiveCompare(name) == .orderedSame
+            workspace.gitBranch == name || workspace.taskFolder == name
+                || workspace.title.caseInsensitiveCompare(name) == .orderedSame
                 || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
         }
         return found.count == 1 ? found.first : nil
     }
 
     private func noLeadTask(_ name: String) -> String {
-        "No task of yours is named “\(name)”, or several share that title: use its branch or title from list_tasks "
+        "No task of yours is named “\(name)”, or several share that name: use its title or branch from list_tasks "
             + "(its folder, for a task without a repository). "
             + "A task the user started without you doesn't report to you."
     }

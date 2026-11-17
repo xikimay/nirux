@@ -171,8 +171,9 @@ enum LeadTools {
                     Close a task's workspace once it is merged or abandoned: its agent's session ends. When its pull \
                     request is merged (Nirux asks GitHub, as Clean Up Worktree… does), Nirux also deletes its worktree \
                     and local branch; a task without a repository has its folder moved to the Trash. Otherwise they \
-                    stay, and the answer says why. Any task of this space, the user's too, but never while its agent \
-                    works or waits on the user, with unsaved editor changes, or with sub-tasks open.
+                    stay, and the answer says why. Any task of this space, the user's too, but never while the user has \
+                    it on screen, its agent works or waits on the user, a program runs in its terminals, with unsaved \
+                    editor changes, or with sub-tasks open.
                     """,
                 properties: ["task": ["type": "string", "description": taskDescription]],
                 required: ["task"], destructive: true

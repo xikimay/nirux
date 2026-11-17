@@ -33,7 +33,7 @@ func testBundleDidLoad() {
     // add, so it never moves; a test that adds and removes its own variables
     // only touches entries past Ghostty's copy.
     let environment = ProcessInfo.processInfo.environment
-    let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"]
+    let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"] + UIFlowHarness.gitHubTokens
         + environment.keys.filter { $0.hasPrefix("CLAUDE_CODE_") || $0.hasPrefix("GIT_") }
     cleared.forEach { unsetenv($0) }
     let room = (0..<64).map { "NIRUX_TESTS_ENVIRONMENT_ROOM_\($0)" }
