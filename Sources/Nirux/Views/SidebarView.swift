@@ -114,7 +114,18 @@ final class SidebarView: NSView {
     let iconRail = IconRail(level: .opaque)
     /// Settings › Appearance's level, which the rail draws.
     var level: InterfaceTransparency = .opaque {
-        didSet { iconRail.level = level }
+        didSet {
+            iconRail.level = level
+            showBackground()
+        }
+    }
+    /// The level drawn for the one picked: made opaque where macOS asks
+    /// (`ShellSideEffects.drawnTransparency`).
+    var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() } {
+        didSet {
+            iconRail.resolveLevel = resolveLevel
+            showBackground()
+        }
     }
     var isExpanded: Bool = false {
         didSet {

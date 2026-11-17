@@ -50,7 +50,33 @@ final class TranslucentWindowTests: XCTestCase {
         shell.interfaceTransparency = .opaque
         XCTAssertEqual(inbox.level, .opaque, "the inbox, kept once made, follows")
         XCTAssertTrue(window.isOpaque)
-        XCTAssertEqual(shell.sidebar.layer?.backgroundColor, Theme.Color.base.cgColor)
+        XCTAssertEqual(shell.sidebar.layer?.backgroundColor?.alpha, 1, "the sidebar opaque again")
+    }
+
+    /// The sidebar keeps the level drawn through its rebuilds (each status
+    /// refresh may rebuild it), folded or not: the frost above Opaque; at
+    /// Opaque, the cards on the sidebar's colour and the rail on the
+    /// window's. Where macOS asks for opaque, the same as Opaque.
+    func testTheSidebarKeepsTheLevelThroughItsRebuilds() {
+        let opaque = (cards: Theme.Color.base.cgColor, rail: Theme.Color.canvas.cgColor)
+        for asks in [false, true] {
+            let (window, _, shell) = mainWindow(asks: { asks ? .opaque : $0 })
+            defer { window.close() }
+            for level in InterfaceTransparency.allCases {
+                shell.interfaceTransparency = level
+                for expanded in [true, false] {
+                    shell.sidebar.isExpanded = expanded
+                    shell.sidebar.rebuildContent()
+                    let drawn = shell.sidebar.layer?.backgroundColor
+                    let state = "\(level), \(expanded ? "unfolded" : "folded"), macOS asks \(asks ? "opaque" : "nothing")"
+                    if level.usesGlass && !asks {
+                        XCTAssertEqual(drawn?.alpha, 0, state)
+                    } else {
+                        XCTAssertEqual(drawn, expanded ? opaque.cards : opaque.rail, state)
+                    }
+                }
+            }
+        }
     }
 
     /// Reduce transparency or Increase contrast: opaque, whatever was picked,

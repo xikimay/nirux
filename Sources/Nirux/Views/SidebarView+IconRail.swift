@@ -44,6 +44,22 @@ extension SidebarView {
         }
     }
 
+    /// Above Opaque, nothing: the window's frost shows through, the rail's
+    /// as the cards'. At Opaque, the rail on the window's colour, where its
+    /// capsule reads as in the approved renders, and the cards on the
+    /// sidebar's.
+    static func background(drawn: InterfaceTransparency, railShown: Bool) -> NSColor {
+        if drawn.usesGlass { return .clear }
+        return railShown ? Theme.Color.canvas : Theme.Color.base
+    }
+
+    /// Folded and not faded out for an unfold.
+    var showsRail: Bool { !isExpanded && !isRailHidden }
+
+    func showBackground() {
+        layer?.backgroundColor = Self.background(drawn: resolveLevel(level), railShown: showsRail).cgColor
+    }
+
     /// A click on an icon: what a click on its row does (`clickRow`).
     private func selectFromRail(_ id: String) {
         notePointer(.press)
@@ -52,12 +68,11 @@ extension SidebarView {
     }
 
     /// Folded and not faded out for an unfold: the rail shows what the
-    /// sidebar lists, on the window's colour, where its capsule reads as in
-    /// the approved renders (at Opaque the capsule is the sidebar's colour).
-    /// Fading out, the picture of the rail fades over the cards' colour.
+    /// sidebar lists. Fading out, the picture of the rail fades over the
+    /// cards' colour.
     func showIconRail() {
-        iconRail.isHidden = isExpanded || isRailHidden
-        layer?.backgroundColor = (iconRail.isHidden ? Theme.Color.base : Theme.Color.canvas).cgColor
+        iconRail.isHidden = !showsRail
+        showBackground()
         // Hidden, its icons stop breathing.
         iconRail.animates = animates && !iconRail.isHidden
         guard !iconRail.isHidden else { return }
