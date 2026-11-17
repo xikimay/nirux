@@ -77,7 +77,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             let palette = try search("billing", in: harness)
             XCTAssertEqual(headers(palette), [space])
             XCTAssertEqual(palette.filteredActions.first?.title, "billing-fix")
-            XCTAssertEqual(palette.filteredActions.first?.badge, PaletteBadge(text: "waiting 12m", tone: .waiting))
+            XCTAssertEqual(palette.filteredActions.first?.badge, PaletteBadge(text: "waiting 12m", tone: .waiting, reason: .command))
             XCTAssertEqual(palette.selectedIndex, 0)
             harness.press(.returnKey, in: palette.panel)
 
