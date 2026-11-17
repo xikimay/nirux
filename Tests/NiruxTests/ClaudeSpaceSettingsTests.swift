@@ -11,12 +11,14 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
     /// `git reset -q --hard`, `cd x && git reset --hard`, `git --no-pager
     /// push --force origin main`, `git push origin main --force`, `git push
     /// --force-with-lease`, `git -c core.x=y push -f`, `git push origin
-    /// +main`, `git checkout .`, `git checkout -- .`, `git -C x restore .`,
-    /// `git clean -qfd`, `git clean -e keep -fd`, `git -C x clean --force`,
-    /// `git clean -n`, `git -C . worktree remove ../elsewhere`, `cat
-    /// x/../.env`. These still ran: `git commit -m "clean up the docs"`, `git
-    /// push --follow-tags`, `git push origin feature-foo`, `git restore
-    /// .gitignore`, `git checkout -- a.txt`, `git status --short`.
+    /// +main`, `git checkout .`, `git checkout -- ./`, `git checkout HEAD --
+    /// .`, `git restore -- .`, `git restore --worktree .`, `git -C x restore
+    /// .`, `git restore --staged .`, `git clean -qfd`, `git clean -e keep
+    /// -fd`, `git -C x clean --force`, `git clean -n`, `git -C . worktree
+    /// remove ../elsewhere`, `cat x/../.env`. These still ran: `git commit -m
+    /// "clean up the docs"`, `git push --follow-tags`, `git push origin
+    /// feature-foo`, `git restore .gitignore`, `git restore --staged a.txt`,
+    /// `git checkout -- a.txt`, `git checkout -b feat/x`, `git status`.
     func testTheDefaultFileTrustsTheRepositoriesAndRefusesWhatCantBeUndone() throws {
         let file = try XCTUnwrap(ClaudeSpaceSettings.file(SpaceDefaults(), repositories: [app]))
         XCTAssertEqual(file.autoMode?.environment, [
@@ -29,7 +31,7 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
             "Bash(git *push --force*)", "Bash(git *push -f*)",
             "Bash(git *push * --force*)", "Bash(git *push * -f*)", "Bash(git *push * +*)",
             "Bash(git *reset *--hard*)", "Bash(git *clean -*)", "Bash(git *worktree remove*)",
-            "Bash(git *checkout -- .)", "Bash(git *checkout .)", "Bash(git *restore .)"
+            "Bash(git *checkout *.)", "Bash(git *checkout *./)", "Bash(git *restore *.)", "Bash(git *restore *./)"
         ])
         XCTAssertNil(file.sandbox, "the user's own sandbox setting holds")
 
@@ -74,17 +76,21 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         XCTAssertNil(ClaudeSpaceSettings.userEnvironment(["permissions": [:]]))
     }
 
-    /// A defaults.json Nirux can't read trusts nothing; one it reads in part
-    /// keeps what it read.
-    func testAnUnreadFileTrustsNothing() {
-        for status: SpaceDefaultsStore.Loaded.Status in [.unreadable, .readOnly(.notARegularFile), .readOnly(.tooLarge)] {
-            let switches = ClaudeSpaceSettings.switches(SpaceDefaultsStore.Loaded(defaults: SpaceDefaults(), status: status))
-            XCTAssertFalse(switches.isOn(.trustRepositories), "\(status)")
-            XCTAssertTrue(switches.isOn(.denyIrreversible), "\(status)")
+    /// A defaults.json, or a trust switch, Nirux can't read trusts nothing,
+    /// and so does a save that replaces it; the deny rules stay.
+    func testWhatNiruxCantReadTrustsNothing() throws {
+        for text in ["{ not json", #"{"schemaVersion": 1, "claudeTrustsRepositories": "no"}"#] {
+            let loaded = SpaceDefaultsStore.decode(Data(text.utf8))
+            XCTAssertFalse(loaded.defaults.isOn(.trustRepositories), text)
+            XCTAssertTrue(loaded.defaults.isOn(.denyIrreversible), text)
         }
-        let partly = SpaceDefaultsStore.Loaded(defaults: SpaceDefaults(), status: .readOnly(.unknownSettings(["x"])))
-        XCTAssertTrue(ClaudeSpaceSettings.switches(partly).isOn(.trustRepositories))
-        XCTAssertTrue(ClaudeSpaceSettings.switches(nil).isOn(.trustRepositories))
+        XCTAssertTrue(SpaceDefaultsStore.decode(Data(#"{"schemaVersion": 1, "later": 1}"#.utf8)).defaults.isOn(.trustRepositories))
+
+        let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-unread-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: state) }
+        let store = try XCTUnwrap(SpaceDefaultsStore(spaceID: "S1", stateDirectory: state))
+        try FileManager.default.createDirectory(at: store.fileURL, withIntermediateDirectories: true)
+        XCTAssertFalse(store.load().defaults.isOn(.trustRepositories), "not a regular file")
     }
 
     /// A switch at its default writes nothing; the others round-trip and
@@ -128,7 +134,7 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         XCTAssertNil(ClaudeSpaceSettings.origin(gitConfig: "[remote \"upstream\"]\n\turl = git@github.com:a/b.git"))
     }
 
-    /// The file a launch names is rewritten each time; switched off, it
+    /// The file a launch names is rewritten when it changes; switched off, it
     /// holds `{}` for the commands that still name it.
     func testPrepareWritesTheFileAndEmptiesItWhenNothingIsOn() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-claude-settings-\(UUID().uuidString)")

@@ -76,14 +76,6 @@ struct SpaceDefaultsStore: Sendable {
             return true
         }
 
-        /// Nothing of the file could be read: what it holds is unknown.
-        var isUnread: Bool {
-            switch status {
-            case .unreadable, .readOnly(.notARegularFile), .readOnly(.tooLarge): return true
-            default: return false
-            }
-        }
-
         /// Why the file is used only in part, or not at all.
         var problem: String? {
             switch status {
@@ -117,26 +109,38 @@ struct SpaceDefaultsStore: Sendable {
         }
     }
 
+    /// What a file, or a switch, Nirux can't read holds is unknown: it
+    /// trusts nothing more (Space Settings › Safety), and a save replacing
+    /// the file keeps that.
+    static var unreadDefaults: SpaceDefaults {
+        var defaults = SpaceDefaults()
+        defaults.set(.trustRepositories, on: false)
+        return defaults
+    }
+
     func load() -> Loaded {
         switch BoardConfigStore.read(fileURL, maxBytes: Self.maxFileBytes) {
         case .missing: return Loaded(defaults: SpaceDefaults(), status: .missing)
-        case .notARegularFile: return Loaded(defaults: SpaceDefaults(), status: .readOnly(.notARegularFile))
-        case .tooLarge: return Loaded(defaults: SpaceDefaults(), status: .readOnly(.tooLarge))
-        case .unreadableBytes: return Loaded(defaults: SpaceDefaults(), status: .unreadable)
+        case .notARegularFile: return Loaded(defaults: Self.unreadDefaults, status: .readOnly(.notARegularFile))
+        case .tooLarge: return Loaded(defaults: Self.unreadDefaults, status: .readOnly(.tooLarge))
+        case .unreadableBytes: return Loaded(defaults: Self.unreadDefaults, status: .unreadable)
         case .data(let data): return Self.decode(data)
         }
     }
 
     static func decode(_ data: Data) -> Loaded {
         guard let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let defaults = try? JSONDecoder().decode(SpaceDefaults.self, from: data)
-        else { return Loaded(defaults: SpaceDefaults(), status: .unreadable, contents: data) }
+              var defaults = try? JSONDecoder().decode(SpaceDefaults.self, from: data)
+        else { return Loaded(defaults: unreadDefaults, status: .unreadable, contents: data) }
         if let version = top["schemaVersion"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
            version.doubleValue > Double(schemaVersion) {
             let newer = Int(exactly: version.doubleValue.rounded(.down)) ?? Int.max
             return Loaded(defaults: defaults, status: .readOnly(.newerSchema(newer)), contents: data)
         }
         let unknown = unknownSettings(in: top, decoded: defaults)
+        if unknown.contains(SpaceDefaults.CodingKeys.claudeTrustsRepositories.rawValue) {
+            defaults.claudeTrustsRepositories = false
+        }
         if !unknown.isEmpty {
             return Loaded(defaults: defaults, status: .readOnly(.unknownSettings(unknown)), contents: data)
         }

@@ -142,7 +142,7 @@ extension NiruxShellView {
     /// other defaults, for a workspace opened from outside Nirux.
     func claudeSpaceSettingsFile(for workspace: WorkspaceState) -> String? {
         guard !workspace.startedOutsideNirux else { return nil }
-        let defaults = ClaudeSpaceSettings.switches(SpaceDefaultsStore(spaceID: workspace.profileID)?.load())
+        let defaults = SpaceDefaultsStore.defaults(forSpace: workspace.profileID)
         var userEnvironment: [String]?
         if case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser) {
             userEnvironment = ClaudeSpaceSettings.userEnvironment(settings)

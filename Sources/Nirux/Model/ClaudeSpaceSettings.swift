@@ -31,14 +31,16 @@ enum ClaudeSpaceSettings {
     /// Refused in every permission mode, bypass included, as Space Settings
     /// lists them: secrets, then git commands that lose work. Claude Code
     /// checks each command of a compound line (`cd x && git reset --hard`);
-    /// `git *` also takes options before the subcommand (`git -C x`).
+    /// `git *` also takes options before the subcommand (`git -C x`), and
+    /// a rule without a final `*` matches the end of the command: `*.`
+    /// discards every change, not `.gitignore`'s.
     static let denyRuleGroups: [[String]] = [
         ["Read(**/.env)", "Read(**/.env.*)", "Edit(**/.env)", "Edit(**/.env.*)"],
         ["Read(~/.ssh/**)", "Edit(~/.ssh/**)"],
         ["Bash(git *push --force*)", "Bash(git *push -f*)"],
         ["Bash(git *push * --force*)", "Bash(git *push * -f*)", "Bash(git *push * +*)"],
         ["Bash(git *reset *--hard*)", "Bash(git *clean -*)", "Bash(git *worktree remove*)"],
-        ["Bash(git *checkout -- .)", "Bash(git *checkout .)", "Bash(git *restore .)"]
+        ["Bash(git *checkout *.)", "Bash(git *checkout *./)", "Bash(git *restore *.)", "Bash(git *restore *./)"]
     ]
 
     static var denyRules: [String] { denyRuleGroups.flatMap { $0 } }
@@ -114,14 +116,6 @@ enum ClaudeSpaceSettings {
             return "\(repository.host)/\(repository.owner)/\(repository.name)"
         }
         return nil
-    }
-
-    /// The space's switches as a launch reads them: a defaults.json Nirux
-    /// can't read trusts nothing.
-    static func switches(_ loaded: SpaceDefaultsStore.Loaded?) -> SpaceDefaults {
-        var defaults = loaded?.defaults ?? SpaceDefaults()
-        if loaded?.isUnread == true { defaults.set(.trustRepositories, on: false) }
-        return defaults
     }
 
     /// `autoMode.environment` of the user's Claude Code settings.
