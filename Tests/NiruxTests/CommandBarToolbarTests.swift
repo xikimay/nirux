@@ -82,6 +82,19 @@ final class CommandBarToolbarTests: XCTestCase {
         }
     }
 
+    /// The level switched on one open window, as Settings › Appearance does:
+    /// the widest bar after each switch, whatever the glass rebuilt or
+    /// restyled.
+    func testTheBarKeepsItsWidthAsTheLevelChanges() {
+        let (window, toolbar, _) = window(width: 1560)
+        defer { window.close() }
+        for level: InterfaceTransparency in [.opaque, .glass, .clear, .tinted, .glass, .opaque] {
+            toolbar.bar.level = level
+            window.contentView?.superview?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(toolbar.bar.frame.width, CommandBarToolbar.maximumBarWidth, accuracy: 0.5, "after switching to \(level)")
+        }
+    }
+
     /// At the minimum width, the cup coming after the bar was laid out makes
     /// the bar give it room, and its going gives the room back.
     func testTheBarMakesRoomWhenTheCupComes() throws {

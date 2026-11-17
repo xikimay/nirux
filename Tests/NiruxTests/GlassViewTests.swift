@@ -88,10 +88,9 @@ final class GlassViewTests: XCTestCase {
     /// The glass is a background: it asks its host for no size. Measured as
     /// a toolbar measures an item at its widest (pulled wide at the fitting
     /// priority), the host takes its whole range at every level. On macOS 26
-    /// and later this is macOS's glass, drawn through views of its own that
-    /// hug their size: should a later macOS move or rebuild them out of
-    /// `GlassView`'s reach, the host comes back at its minimum here, as the
-    /// command bar did (280 pt). macOS 15 checks the other backings.
+    /// and later this is macOS's glass, drawn through views that hug their
+    /// size; tied to the host, they held it at its minimum, as they held the
+    /// command bar at 280 pt. macOS 15 checks the other backings.
     func testTheGlassAsksItsHostForNoSize() throws {
         for level in InterfaceTransparency.allCases {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 100), styleMask: .borderless, backing: .buffered, defer: true)
@@ -121,6 +120,10 @@ final class GlassViewTests: XCTestCase {
             container.layoutSubtreeIfNeeded()
             if GlassView.systemHasGlass, level.usesGlass { XCTAssertEqual(glass.backing, .glass, "\(level): macOS's glass") }
             XCTAssertEqual(host.frame.width, 500, accuracy: 0.5, "\(level)")
+            let backings = glass.subviews.filter { $0 is NSVisualEffectView || String(describing: type(of: $0)).contains("Glass") }
+            XCTAssertTrue(backings.allSatisfy { $0.frame == glass.bounds }, "\(level): the backing follows the glass, which sizes it")
+            glass.setFrameSize(NSSize(width: 320, height: 36))
+            XCTAssertTrue(backings.allSatisfy { $0.frame == glass.bounds }, "\(level): at once, before any layout pass")
             XCTAssertEqual(label.contentHuggingPriority(for: .horizontal), hug, "\(level): what it holds keeps its own")
         }
     }

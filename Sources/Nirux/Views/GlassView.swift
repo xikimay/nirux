@@ -168,7 +168,7 @@ final class GlassView: NSView {
             break
         case .glass:
             if #available(macOS 26, *) {
-                let glass = BackgroundGlass(frame: bounds)
+                let glass = NSGlassEffectView(frame: bounds)
                 install(glass)
                 // Inside the glass, so that what it holds stays legible on it.
                 contentView.frame = glass.bounds
@@ -240,8 +240,13 @@ final class GlassView: NSView {
         return responder as? NSView
     }
 
+    /// Sized by this view (`layout`, `setFrameSize`), not by autoresizing:
+    /// its size constraints are constants, so nothing inside it (macOS 26's
+    /// glass draws through views that hug their size) sizes this view's
+    /// host. A toolbar measured the command bar at its minimum that way.
     private func install(_ view: NSView) {
-        view.autoresizingMask = [.width, .height]
+        view.autoresizingMask = []
+        view.frame = bounds
         addSubview(view, positioned: .below, relativeTo: contentView)
         backingView = view
     }
@@ -310,34 +315,10 @@ final class GlassView: NSView {
     }
 
     /// A frame change without a layout pass (autoresizing, `setFrameSize`)
-    /// still reshapes the corners and the shadow.
+    /// still sizes the backing and reshapes the corners and the shadow.
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        backingView?.frame = bounds
         applyShape()
     }
-}
-
-/// macOS 26's glass as a background: it asks its host's layout for no size.
-/// It draws through views of its own; one hugs a 10 pt width at the default
-/// priority, above the priority a toolbar measures its items at, and the
-/// command bar's item measured its minimum as its maximum (280 pt). Every
-/// view the glass adds, at any depth, but what it holds, hugs at 1 from
-/// each constraints pass on, however late AppKit sets its own.
-@available(macOS 26, *)
-private final class BackgroundGlass: NSGlassEffectView {
-    override func updateConstraints() {
-        lowerHugs(under: self)
-        super.updateConstraints()
-    }
-
-    private func lowerHugs(under view: NSView) {
-        for subview in view.subviews where subview !== contentView {
-            for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] where subview.contentHuggingPriority(for: axis) > Self.hug {
-                subview.setContentHuggingPriority(Self.hug, for: axis)
-            }
-            lowerHugs(under: subview)
-        }
-    }
-
-    private static let hug = NSLayoutConstraint.Priority(1)
 }

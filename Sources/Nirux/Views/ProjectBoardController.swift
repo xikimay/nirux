@@ -84,8 +84,8 @@ final class ProjectBoardController {
     /// What the Board's clicks act on, as it last showed them
     /// (`stagesContent`).
     var stagesTargets = StagesTargets()
-    /// The stages last built, and what from (`stagesContent`).
-    private(set) var builtStages: (key: StagesKey, content: BoardStagesView.Content)?
+    /// The stages last built, and what from.
+    let builtStages = BuiltStages()
     private let client: any ProjectBoardGitHub
 
     /// board.json as last read; nil until it is.
@@ -637,30 +637,6 @@ final class ProjectBoardController {
     }
 
     // MARK: - Drawing
-
-    /// The stages and what their clicks act on, built
-    /// (`stagesContent(_:now:targets:)`) and kept with their key.
-    func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> (content: BoardStagesView.Content, targets: StagesTargets) {
-        var targets = StagesTargets()
-        let content = stagesContent(inputs, now: now, targets: &targets)
-        builtStages = (stagesKey(inputs, now: now), content)
-        return (content, targets)
-    }
-
-    /// The stages last built, while built from the same key; else built
-    /// again. For a Board not drawn, whose lines only give the rows their
-    /// stations: it takes no click.
-    func keptStagesContent(_ inputs: StagesInputs, now: Date) -> BoardStagesView.Content {
-        if let built = builtStages, built.key == stagesKey(inputs, now: now) { return built.content }
-        return stagesContent(inputs, now: now).content
-    }
-
-    private func stagesKey(_ inputs: StagesInputs, now: Date) -> StagesKey {
-        StagesKey(
-            inputs: inputs, midnight: BoardStages.midnight(of: now.timeIntervalSince1970), loaded: loaded, context: context,
-            sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
-        )
-    }
 
     /// The comparable form of a workspace folder, as the worktrees were
     /// listed (symlinks resolved).

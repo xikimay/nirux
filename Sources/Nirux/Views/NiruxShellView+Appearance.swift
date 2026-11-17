@@ -24,13 +24,12 @@ extension NiruxShellView {
         commandBarToolbar?.bar.resolveLevel = resolve
         requestsState.inbox?.resolveLevel = resolve
         requestsState.callout?.resolveLevel = resolve
-        sidebar.resolveLevel = resolve
         commandBarToolbar?.bar.level = level
         requestsState.inbox?.level = level
         requestsState.callout?.level = level
         requestsState.inboxPanel?.invalidateShadowWhenDrawn()
         requestsState.calloutPanel?.invalidateShadowWhenDrawn()
-        sidebar.level = level
+        sidebar.show(level: level, resolveLevel: resolve)
         layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.canvas.cgColor
         applyTerminalOpacity()
     }

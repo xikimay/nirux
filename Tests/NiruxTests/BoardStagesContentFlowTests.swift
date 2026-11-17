@@ -192,7 +192,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             let pass = NiruxShellView.SidebarPassReadings(infos: [], foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:])
             let builtAt: @MainActor (TimeInterval) -> TimeInterval? = { now in
                 _ = shell.readProjectBoards(snapshot: ProcessSnapshot(entries: []), now: now, pass: pass)
-                return board.builtStages?.content.now
+                return board.builtStages.last?.content.now
             }
             let kept = try XCTUnwrap(builtAt(now))
             XCTAssertNotNil(shell.taskStations[task.id], "#12's station")
@@ -200,9 +200,9 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertNotNil(shell.taskStations[task.id], "and their stations")
             task.title = "login form"
             XCTAssertEqual(builtAt(now + 2), now + 2, "an input changed")
-            let today = try XCTUnwrap(board.builtStages?.key.inputs)
+            let today = try XCTUnwrap(board.builtStages.last?.key.inputs)
             XCTAssertEqual(builtAt(now + 86_400), now + 86_400, "the next day, as Merged today ends")
-            XCTAssertEqual(board.builtStages?.key.inputs, today, "the same inputs: the day alone built them again")
+            XCTAssertEqual(board.builtStages.last?.key.inputs, today, "the same inputs: the day alone built them again")
 
             shell.switchToWorkspace(try index("widgets"))
             XCTAssertTrue(shell.isProjectBoardShown(board))
@@ -210,7 +210,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(builtAt(now + 6), now + 6, "drawn: built at every pass")
 
             // What the Board read counts too: the same inputs, once it read another space, build again.
-            let inputs = try XCTUnwrap(board.builtStages?.key.inputs)
+            let inputs = try XCTUnwrap(board.builtStages.last?.key.inputs)
             board.switchProject(to: WorkspaceProfile.defaultID)
             XCTAssertEqual(board.keptStagesContent(inputs, now: Date(timeIntervalSince1970: now + 7)).now, now + 7)
             // Its board.json read lands here, not in a later test.

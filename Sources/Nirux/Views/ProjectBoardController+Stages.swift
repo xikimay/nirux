@@ -87,11 +87,46 @@ extension ProjectBoardController {
     /// The id of the section of the workspaces in no repository.
     static let noRepositoryID = "no-repository"
 
+    /// The stages last built and what from, which only this file's builders
+    /// set.
+    final class BuiltStages {
+        fileprivate(set) var last: (key: StagesKey, content: BoardStagesView.Content)?
+    }
+
+    /// The stages and what their clicks act on, built and kept with their
+    /// key.
+    func stagesContent(_ inputs: StagesInputs, now: Date = Date()) -> (content: BoardStagesView.Content, targets: StagesTargets) {
+        build(inputs, now: now, key: stagesKey(inputs, now: now))
+    }
+
+    /// The stages last built, while built from the same key; else built
+    /// again. For a Board not drawn, whose lines only give the rows their
+    /// stations: it takes no click.
+    func keptStagesContent(_ inputs: StagesInputs, now: Date) -> BoardStagesView.Content {
+        let key = stagesKey(inputs, now: now)
+        if let last = builtStages.last, last.key == key { return last.content }
+        return build(inputs, now: now, key: key).content
+    }
+
+    private func build(_ inputs: StagesInputs, now: Date, key: StagesKey) -> (content: BoardStagesView.Content, targets: StagesTargets) {
+        var targets = StagesTargets()
+        let content = stagesContent(inputs, now: now, targets: &targets)
+        builtStages.last = (key, content)
+        return (content, targets)
+    }
+
+    private func stagesKey(_ inputs: StagesInputs, now: Date) -> StagesKey {
+        StagesKey(
+            inputs: inputs, midnight: BoardStages.midnight(of: now.timeIntervalSince1970), loaded: loaded, context: context,
+            sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
+        )
+    }
+
     /// What the Board as stages shows of the space: its rows (`listedRows`),
     /// as stages. Its message (`bodyMessage`) takes the sections' place;
     /// the running queues' lines stay at its foot. With it, what its clicks
     /// act on (whoever shows it keeps them: `stagesTargets`).
-    func stagesContent(_ inputs: StagesInputs, now: Date, targets: inout StagesTargets) -> BoardStagesView.Content {
+    private func stagesContent(_ inputs: StagesInputs, now: Date, targets: inout StagesTargets) -> BoardStagesView.Content {
         var content = BoardStagesView.Content(
             header: stagesHeader(inputs), order: inputs.order, sections: [], now: now.timeIntervalSince1970,
             runningQueues: inputs.runningQueues

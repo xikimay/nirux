@@ -60,6 +60,7 @@ final class TranslucentWindowTests: XCTestCase {
     /// window's. Where macOS asks for opaque, the same as Opaque.
     func testTheSidebarKeepsTheLevelThroughItsRebuilds() {
         let opaque = (cards: Theme.Color.base.cgColor, rail: Theme.Color.canvas.cgColor)
+        XCTAssertEqual(SidebarView(frame: .zero).layer?.backgroundColor, opaque.rail, "a new sidebar starts folded, at Opaque")
         for asks in [false, true] {
             let (window, _, shell) = mainWindow(asks: { asks ? .opaque : $0 })
             defer { window.close() }
