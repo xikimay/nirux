@@ -252,7 +252,8 @@ final class SpaceSettingsFlowTests: XCTestCase {
             shell.showSpaceSettings(profileID: second.id)
             XCTAssertIdentical(shell.spaceSettings, settings)
             XCTAssertEqual(settings.spaceID, first.id)
-            XCTAssertTrue(shell.toast?.message.contains("Save or revert") == true)
+            XCTAssertEqual(questions, ["Save or revert the changes in this space’s settings first"], "said in the window")
+            questions = []
 
             // The main window's close button quits: it stays until the
             // question is answered.

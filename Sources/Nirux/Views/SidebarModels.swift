@@ -447,6 +447,10 @@ enum SidebarHitRegion {
     case board
     /// The History row, at the bottom: Session History.
     case history
+    /// A row that can't be pressed now (the Board row while no task is
+    /// open): it takes the click, the drag and the right-click, and does
+    /// nothing.
+    case inert
     case link(url: String, label: NSTextField)
     case column(workspaceIndex: Int, columnIndex: Int)
     case workspace(Int)
@@ -468,6 +472,8 @@ enum SidebarHitRegion {
     /// (a press meant for a button that just moved must not reach the card
     /// below).
     case actionBlock(workspaceIndex: Int)
+
+    var isInert: Bool { if case .inert = self { true } else { false } }
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a
@@ -577,10 +583,15 @@ enum SidebarTurnAnswer: String, Hashable {
 }
 
 /// What the sidebar's navigator rows say (docs/design/glass-interface.md,
-/// 3.4b): the Board row is selected while the space's Board column shows on
-/// screen, as a task row is while its task is on screen; it can't be
-/// pressed while no task is open (the Board opens beside one).
+/// 3.4b): the Board row reads open while the space's Board column shows on
+/// screen; it can't be pressed while no task is open (the Board opens
+/// beside one).
 struct SidebarNavigation: Hashable {
     var boardShown = false
     var boardAvailable = true
+
+    /// The Board's tooltip, on the row and on the folded rail's button.
+    var boardTip: String {
+        boardAvailable ? "Board (\(NiruxShortcuts.board.chord.display))" : "Open a task to show its space’s Board"
+    }
 }

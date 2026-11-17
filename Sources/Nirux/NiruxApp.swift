@@ -5,7 +5,10 @@ import Sparkle
 @main @MainActor
 final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMenuItemValidation {
     var mainWindow: NSWindow?
-    var shell: NiruxShellView?
+    var shell: NiruxShellView? {
+        // Its Settings window holds Nirux's panes too.
+        didSet { if let shell, shell !== oldValue { wireSettings(shell.settingsWindow) } }
+    }
     var updaterController: SPUStandardUpdaterController?
     var updateDot: NSView?
     /// Settings without a shell (tests); the app's are the shell's.
@@ -157,7 +160,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
-        wireSettings(shellView.settingsWindow)
         shellView.installCommandBar(in: window)
         // The frame the screen leaves, now that the toolbar set the title
         // bar's height: even margins all round.

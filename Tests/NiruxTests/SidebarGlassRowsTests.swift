@@ -279,32 +279,72 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertFalse(try control(at: board).accessibilityPerformPress())
         XCTAssertFalse(try control(at: board).acceptsFirstMouse(for: nil))
         XCTAssertEqual(try control(at: board).toolTip, "Open a task to show its space’s Board")
+        XCTAssertTrue(sidebar.hitAreas.contains { $0.frame == board && $0.region.isInert }, "it takes the click and does nothing")
         XCTAssertEqual(opened, 1)
         XCTAssertFalse(sidebar.iconRail.boardButton.isEnabled)
         XCTAssertFalse(sidebar.iconRail.boardButton.isSelected)
+        XCTAssertEqual(sidebar.iconRail.boardButton.toolTip, "Open a task to show its space’s Board", "the rail says why too")
     }
 
-    /// The shell selects the Board row while the space's Board column shows
-    /// on screen, whichever column has the focus, and makes it pressable
-    /// while a task is open.
-    func testTheShellSaysWhenTheBoardShows() throws {
+    /// A double-click on Board or History acts once: its second press would
+    /// focus the Board just opened, or show the panel again.
+    func testADoubleClickOnANavigatorRowActsOnce() throws {
+        let (sidebar, window) = windowed([row([column()], active: true)])
+        defer { window.close() }
+        var opened = 0
+        var shown = 0
+        sidebar.onOpenBoard = { opened += 1 }
+        sidebar.onShowHistory = { shown += 1 }
+        // Seconds apart: one double-click never covers the other's.
+        var start = ProcessInfo.processInfo.systemUptime
+        func doubleClick(_ region: (SidebarHitRegion) -> Bool) throws {
+            let frame = try frame(of: region, in: sidebar)
+            let point = sidebar.contentDocumentView.convert(NSPoint(x: frame.midX, y: frame.midY), to: nil)
+            start += 10
+            for clicks in 1...2 {
+                sidebar.mouseDown(with: try XCTUnwrap(NSEvent.mouseEvent(
+                    with: .leftMouseDown, location: point, modifierFlags: [], timestamp: start + Double(clicks) / 10,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
+                )))
+            }
+        }
+        try doubleClick { if case .board = $0 { true } else { false } }
+        try doubleClick { if case .history = $0 { true } else { false } }
+        XCTAssertEqual([opened, shown], [1, 1])
+    }
+
+    /// The Board row reads open while the space's Board column shows, and
+    /// follows it as the columns are laid out: an edge dragged pushes the
+    /// Board out of view at once, with no refresh of the whole sidebar.
+    func testTheBoardRowFollowsItsColumn() throws {
         _ = NSApplication.shared
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
         shell.stopHeartbeat()
         let workspace = try XCTUnwrap(shell.activeWorkspace)
-        XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: false, boardAvailable: true))
         workspace.addProjectBoardColumn(shell.makeProjectBoard(projectID: workspace.profileID, offersSettings: true))
-        shell.isMetadataRefreshScheduled = false
+        let agent = try XCTUnwrap(workspace.columns.firstIndex { $0.projectBoard == nil })
+        workspace.focusedIndex = agent
         shell.relayout(animated: false)
-        XCTAssertTrue(shell.isMetadataRefreshScheduled, "the Board came into view: the rows follow at the next refresh")
-        let boardIndex = try XCTUnwrap(workspace.columns.firstIndex { $0.projectBoard != nil })
-        XCTAssertTrue(workspace.showsColumn(at: boardIndex))
-        XCTAssertEqual(shell.sidebarNavigation, SidebarNavigation(boardShown: true, boardAvailable: true))
-        workspace.focusedIndex = boardIndex == 0 ? 1 : 0
-        XCTAssertTrue(shell.sidebarNavigation.boardShown, "the agent in focus, the Board beside it")
-        workspace.columns[boardIndex].isClosing = true
+        XCTAssertEqual(shell.sidebar.navigation, SidebarNavigation(boardShown: true, boardAvailable: true), "beside the agent")
+        XCTAssertTrue(shell.sidebar.iconRail.boardButton.isSelected)
+
+        shell.isMetadataRefreshScheduled = false
+        let agentView = workspace.columns[agent].view
+        let handle = try XCTUnwrap(agentView.superview?.subviews.compactMap { $0 as? ColumnResizeHandle }.first {
+            $0.frame.minX <= agentView.frame.maxX && agentView.frame.maxX <= $0.frame.maxX
+        }, "the handle on the agent's right edge")
+        handle.onDrag?(WorkspaceState.maxWidthFraction)
+        XCTAssertFalse(shell.sidebar.navigation.boardShown, "pushed out of view")
+        XCTAssertFalse(shell.sidebar.iconRail.boardButton.isSelected)
+        XCTAssertFalse(shell.isMetadataRefreshScheduled, "no process-table scan for one row")
+
+        // Closing, it no longer counts.
+        handle.onDrag?(ColumnWidth.half.fraction)
+        XCTAssertTrue(shell.sidebar.navigation.boardShown)
+        let board = try XCTUnwrap(workspace.columns.first { $0.projectBoard != nil })
+        board.isClosing = true
         XCTAssertFalse(shell.sidebarNavigation.boardShown, "closing")
-        workspace.columns[boardIndex].isClosing = false
+        board.isClosing = false
     }
 
     /// A row of the list out of view takes no press, no hover and no menu

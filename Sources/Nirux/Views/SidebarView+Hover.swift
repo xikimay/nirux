@@ -75,10 +75,18 @@ extension SidebarView {
         guard let window else { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
         let point = contentDocumentView.convert(windowPoint, from: nil)
-        guard let area = hitArea(at: point) else { return }
+        let area = hitArea(at: point)
+        // What the pointing hand was over went (a link, a row that can't be
+        // pressed any more): the pointer is an arrow again. The checklist's
+        // buttons keep their own.
+        let overPressable: Bool = area.map { !$0.region.isInert } ?? false
+        let pointing: Bool = NSCursor.current === NSCursor.pointingHand
+        let overChecklistButton: Bool = onboardingCardView?.hasButton(at: point) ?? false
+        if !overPressable, pointing, !overChecklistButton, bounds.contains(convert(windowPoint, from: nil)) {
+            NSCursor.arrow.set()
+        }
+        guard let area else { return }
         switch area.region {
-        case .board where !navigation.boardAvailable:
-            return
         case .spacePicker, .newTask, .archivedToggle, .board, .history:
             setHoverTarget(Self.hoverTarget(of: area.region))
         case .workspace(let workspaceIndex):
@@ -96,7 +104,7 @@ extension SidebarView {
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
             if let card = cardIndex(at: point) { setHoverTarget(.workspaceCard(card)) }
-        case .catchUp:
+        case .catchUp, .inert:
             setHoverTarget(nil)
         }
     }

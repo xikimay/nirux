@@ -99,7 +99,7 @@ final class IconRail: NSView {
         newButton = RailRoundButton(symbol: Theme.Symbol.add, label: "New task", level: level)
         boardButton = RailRoundButton(symbol: Theme.Symbol.projectBoard, label: "Board", level: level)
         newButton.toolTip = "New task (\(NiruxShortcuts.newWorkspaceDisplay))"
-        boardButton.toolTip = "Board (\(NiruxShortcuts.board.chord.display))"
+        boardButton.toolTip = SidebarNavigation().boardTip
         super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 480))
         addSubview(glass)
         scroll.drawsBackground = false
