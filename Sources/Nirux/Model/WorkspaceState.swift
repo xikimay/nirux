@@ -977,9 +977,6 @@ extension WorkspaceState {
 
     private static let columnGap: CGFloat = 2
     private static let resizeHandleWidth: CGFloat = 9
-    private static let focusBorderWidth: CGFloat = 2
-    private static let focusCornerRadius: CGFloat = 6
-    private static let focusColor = Theme.Color.accent.withAlphaComponent(0.7)
 
     /// The size `layoutAndScroll` gives `column` (outside fit-all).
     func size(of column: ColumnState, viewportWidth: CGFloat, height: CGFloat) -> NSSize {

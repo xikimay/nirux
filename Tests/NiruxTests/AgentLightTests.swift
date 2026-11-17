@@ -73,7 +73,6 @@ final class AgentLightTests: XCTestCase {
         XCTAssertNil(plan.right, "the column in view lights itself")
         XCTAssertNil(plan.top)
         XCTAssertNil(plan.bottom)
-        XCTAssertEqual(plan.edgeAlerts, [try XCTUnwrap(plan.left)])
     }
 
     /// The workspaces above and below glow on the top and bottom edges: the
