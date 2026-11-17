@@ -212,8 +212,7 @@ final class BoardStagesContentFlowTests: XCTestCase {
             // What the Board read counts too: the same inputs, once it read another space, build again.
             let inputs = try XCTUnwrap(board.builtStages?.key.inputs)
             board.switchProject(to: WorkspaceProfile.defaultID)
-            let again = board.stagesContent(inputs, now: Date(timeIntervalSince1970: now + 7), reusing: true)
-            XCTAssertEqual(again.content.now, now + 7)
+            XCTAssertEqual(board.keptStagesContent(inputs, now: Date(timeIntervalSince1970: now + 7)).now, now + 7)
             // Its board.json read lands here, not in a later test.
             try waitUntil("General's board.json read") { board.loaded != nil }
         }

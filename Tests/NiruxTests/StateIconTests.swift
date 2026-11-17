@@ -87,16 +87,19 @@ final class StateIconTests: XCTestCase {
             data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ))
-        context.move(to: CGPoint(x: 0, y: 30))
-        context.addLine(to: CGPoint(x: 32, y: 30))
-        for kind in [StateIcon.Kind.idle, .asking] {
-            StateIcon(kind).draw(in: context, rect: CGRect(x: 0, y: 0, width: 16, height: 16))
-            StateIcon(kind).draw(in: context, rect: CGRect(x: 0, y: 0, width: 16, height: 16), labelled: true)
+        let kinds: [StateIcon.Kind] = [
+            .working, .needsYou(.command), .needsYou(.question), .asking, .error, .waiting, .readyToMerge, .merged, .blocked, .finished, .idle,
+        ]
+        for kind in kinds {
+            for labelled in [false, true] {
+                context.move(to: CGPoint(x: 0, y: 30))
+                context.addLine(to: CGPoint(x: 32, y: 30))
+                StateIcon(kind, stage: 2).draw(in: context, rect: CGRect(x: 0, y: 0, width: 16, height: 16), labelled: labelled)
+                let rep = NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
+                // y counts from the top in the bitmap: the open line was 2 px from it.
+                XCTAssertEqual(rep.colorAt(x: 28, y: 1)?.alphaComponent ?? 0, 0, "\(kind), labelled \(labelled): the caller's line, never stroked")
+            }
         }
-        let image = try XCTUnwrap(context.makeImage())
-        let rep = NSBitmapImageRep(cgImage: image)
-        // y counts from the top in the bitmap: the open line was 2 px from the top.
-        XCTAssertEqual(rep.colorAt(x: 28, y: 1)?.alphaComponent ?? 0, 0, "the caller's line, never stroked")
     }
 
     /// The view keeps quiet for VoiceOver unless its host makes it speak,

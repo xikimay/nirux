@@ -178,6 +178,8 @@ struct StateIcon: Hashable, Sendable {
     func draw(in context: CGContext, rect: CGRect, labelled: Bool = false) {
         let side = min(rect.width, rect.height)
         context.saveGState()
+        // Its own paths only: not one its caller left open.
+        context.beginPath()
         context.translateBy(x: rect.midX - side / 2, y: rect.midY - side / 2)
         context.scaleBy(x: side / 16, y: side / 16)
         if labelled, admitsLabel { drawFrameOnGrid(context) } else { drawOnGrid(context) }
@@ -216,8 +218,6 @@ struct StateIcon: Hashable, Sendable {
     }
 
     private func strokeRing(_ context: CGContext, alpha: CGFloat = 1, dashed: Bool = false) {
-        // Its path alone, as `strokeEllipse(in:)` was.
-        context.beginPath()
         context.setStrokeColor(color.withAlphaComponent(alpha).cgColor)
         context.setLineWidth(Self.ringWidth)
         context.setLineDash(phase: 0, lengths: dashed ? Self.dash : [])
