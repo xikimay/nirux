@@ -200,7 +200,9 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertNotNil(shell.taskStations[task.id], "and their stations")
             task.title = "login form"
             XCTAssertEqual(builtAt(now + 2), now + 2, "an input changed")
+            let today = try XCTUnwrap(board.builtStages?.key.inputs)
             XCTAssertEqual(builtAt(now + 86_400), now + 86_400, "the next day, as Merged today ends")
+            XCTAssertEqual(board.builtStages?.key.inputs, today, "the same inputs: the day alone built them again")
 
             shell.switchToWorkspace(try index("widgets"))
             XCTAssertTrue(shell.isProjectBoardShown(board))

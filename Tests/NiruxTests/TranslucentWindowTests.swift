@@ -50,7 +50,10 @@ final class TranslucentWindowTests: XCTestCase {
         shell.interfaceTransparency = .opaque
         XCTAssertEqual(inbox.level, .opaque, "the inbox, kept once made, follows")
         XCTAssertTrue(window.isOpaque)
-        XCTAssertEqual(shell.sidebar.layer?.backgroundColor?.alpha, 1, "the sidebar opaque again")
+        XCTAssertEqual(
+            shell.sidebar.layer?.backgroundColor, (shell.sidebar.showsRail ? Theme.Color.canvas : Theme.Color.base).cgColor,
+            "the sidebar opaque again: the rail on the window's colour, the cards on the sidebar's"
+        )
     }
 
     /// The sidebar keeps the level drawn through its rebuilds (each status

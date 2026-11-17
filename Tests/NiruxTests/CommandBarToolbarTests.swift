@@ -66,7 +66,8 @@ final class CommandBarToolbarTests: XCTestCase {
 
     /// At every level the bar takes the strip's width, the widest in a wide
     /// window and less in a narrow one: macOS 26's glass, which draws it
-    /// above Opaque, asks the toolbar for no size.
+    /// above Opaque, asks the toolbar for no size. Only macOS 26 and later
+    /// draw that glass: on macOS 15 this checks the other backings.
     func testTheBarTakesTheStripsWidthAtEveryLevel() {
         for level in InterfaceTransparency.allCases {
             let (wide, toolbar, _) = window(width: 1560, level: level)

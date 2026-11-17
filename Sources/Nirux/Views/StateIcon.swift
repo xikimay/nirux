@@ -216,6 +216,8 @@ struct StateIcon: Hashable, Sendable {
     }
 
     private func strokeRing(_ context: CGContext, alpha: CGFloat = 1, dashed: Bool = false) {
+        // Its path alone, as `strokeEllipse(in:)` was.
+        context.beginPath()
         context.setStrokeColor(color.withAlphaComponent(alpha).cgColor)
         context.setLineWidth(Self.ringWidth)
         context.setLineDash(phase: 0, lengths: dashed ? Self.dash : [])

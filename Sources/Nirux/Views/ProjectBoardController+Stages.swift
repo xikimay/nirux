@@ -89,26 +89,9 @@ extension ProjectBoardController {
 
     /// What the Board as stages shows of the space: its rows (`listedRows`),
     /// as stages. Its message (`bodyMessage`) takes the sections' place;
-    /// the running queues' lines stay at its foot. With
-    /// it, what its clicks act on (whoever shows it keeps them:
-    /// `stagesTargets`). `reusing`: the stages last built, when built from
-    /// the same key (a Board not drawn, whose lines only give the rows
-    /// their stations).
-    func stagesContent(
-        _ inputs: StagesInputs, now: Date = Date(), reusing: Bool = false
-    ) -> (content: BoardStagesView.Content, targets: StagesTargets) {
-        let key = StagesKey(
-            inputs: inputs, midnight: BoardStages.midnight(of: now.timeIntervalSince1970), loaded: loaded, context: context,
-            sections: sections, extraIDs: extraIDs, isReadingRemotes: isReadingRemotes, local: local, reads: reads
-        )
-        if reusing, let built = builtStages, built.key == key { return (built.content, built.targets) }
-        var targets = StagesTargets()
-        let content = stagesContent(inputs, now: now, targets: &targets)
-        builtStages = (key, content, targets)
-        return (content, targets)
-    }
-
-    private func stagesContent(_ inputs: StagesInputs, now: Date, targets: inout StagesTargets) -> BoardStagesView.Content {
+    /// the running queues' lines stay at its foot. With it, what its clicks
+    /// act on (whoever shows it keeps them: `stagesTargets`).
+    func stagesContent(_ inputs: StagesInputs, now: Date, targets: inout StagesTargets) -> BoardStagesView.Content {
         var content = BoardStagesView.Content(
             header: stagesHeader(inputs), order: inputs.order, sections: [], now: now.timeIntervalSince1970,
             runningQueues: inputs.runningQueues

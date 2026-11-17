@@ -325,6 +325,8 @@ final class GlassView: NSView {
 private final class BackgroundGlass: NSGlassEffectView {
     override func didAddSubview(_ subview: NSView) {
         super.didAddSubview(subview)
+        // What the glass holds keeps its own.
+        guard subview !== contentView else { return }
         for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
             subview.setContentHuggingPriority(.init(1), for: axis)
         }
