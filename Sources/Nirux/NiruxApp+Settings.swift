@@ -230,7 +230,8 @@ extension NiruxApp {
                 SettingsForm.row("Launch mode", claudeMode),
                 noFlicker,
                 SettingsForm.hint(
-                    "Launch mode: Claude Code default passes no flag; the others pass --permission-mode. "
+                    "Launch mode: Claude Code default passes no flag, so your defaultMode applies, else Auto where "
+                        + "auto mode is available. The others pass --permission-mode, or the flag they name. "
                         + "No-flicker: sets CLAUDE_CODE_NO_FLICKER=1."
                 ),
                 usageLimits,

@@ -10,7 +10,7 @@ Nirux shows what each agent is doing, tells you when one needs you, and brings a
 | Codex | yes (`Cmd+N`, `Open Codex`) | the end of a turn is exact; "working" is estimated from terminal output |
 | Gemini CLI, OpenCode | no, start them in a terminal | estimated from terminal output |
 
-Settings › Agents sets the permission and sandbox mode Claude Code and Codex start with. For Claude Code, **Claude Code default** passes no flag, so a session follows `permissions.defaultMode` in your Claude Code settings, else starts in Auto; **Manual** asks before edits and commands.
+Settings › Agents sets the permission and sandbox mode Claude Code and Codex start with. For Claude Code, **Claude Code default** passes no flag, so a session follows `permissions.defaultMode` in your Claude Code settings, else starts in Auto where auto mode is available; **Manual** asks before edits and commands.
 
 ## Status hooks
 

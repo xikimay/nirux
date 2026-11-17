@@ -500,16 +500,19 @@ struct PersistedSettings: Codable {
         case tasksFolder
         case startedFolderTask
         case boardOrder
+        case claudeManualMode
         case claudeBypassPermissions // legacy
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        if let mode = try container.decodeIfPresent(ClaudeLaunchMode.self, forKey: .claudeLaunchMode) {
+        if (try? container.decodeIfPresent(Bool.self, forKey: .claudeManualMode)) == true {
+            claudeLaunchMode = .manual
+        } else if let mode = try container.decodeIfPresent(ClaudeLaunchMode.self, forKey: .claudeLaunchMode) {
             claudeLaunchMode = mode
         } else if let legacy = try container.decodeIfPresent(Bool.self, forKey: .claudeBypassPermissions) {
             // Old `claudeBypassPermissions: true` emitted `--dangerously-skip-permissions`,
-            // so migrate it to `.skipPermissions` rather than the milder `.bypassPermissions`.
+            // which `.skipPermissions` keeps.
             claudeLaunchMode = legacy ? .skipPermissions : .default
         } else {
             claudeLaunchMode = nil
@@ -560,7 +563,14 @@ struct PersistedSettings: Codable {
     /// the synthesized encoder rejects that.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
+        // Builds before Manual fail on an unknown `claudeLaunchMode`, and
+        // with it the whole state file: they read this key's absence as
+        // Claude Code default.
+        if claudeLaunchMode == .manual {
+            try container.encode(true, forKey: .claudeManualMode)
+        } else {
+            try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
+        }
         try container.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)

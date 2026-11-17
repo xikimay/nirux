@@ -481,8 +481,8 @@ final class PersistedStateCodingTests: XCTestCase {
     // MARK: - Legacy migration
 
     /// Old state.json format: `claudeBypassPermissions: true` was emitted as
-    /// `--dangerously-skip-permissions`, so it must decode to `.skipPermissions`
-    /// (the more aggressive bypass), not the milder `.bypassPermissions`.
+    /// `--dangerously-skip-permissions`, so it must decode to `.skipPermissions`,
+    /// which keeps that flag.
     func testLegacyClaudeBypassPermissionsTrueMigratesToSkipPermissions() throws {
         let settingsJSON = Data("""
         { "claudeBypassPermissions": true, "claudeNoFlicker": true }
@@ -615,6 +615,15 @@ extension PersistedStateCodingTests {
     func testCirclingHintIsOnForAStateFileThatPredatesIt() throws {
         let legacy = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeNoFlicker":true}"#.utf8))
         XCTAssertTrue(legacy.agentCirclingHint)
+    }
+
+    /// Builds before Manual can't decode it under `claudeLaunchMode`, and
+    /// would lose the whole state file.
+    func testManualLaunchModeIsSavedUnderAKeyOlderBuildsIgnore() throws {
+        let data = try JSONEncoder().encode(PersistedSettings(claudeLaunchMode: .manual))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(json["claudeLaunchMode"])
+        XCTAssertEqual(try JSONDecoder().decode(PersistedSettings.self, from: data).claudeLaunchMode, .manual)
     }
 
     // MARK: - cliArgs wire format
