@@ -17,7 +17,7 @@ import AppKit
 @MainActor
 final class ProjectBoardController {
     /// What one configured section read from GitHub.
-    struct RepositoryReads: Sendable {
+    struct RepositoryReads: Equatable, Sendable {
         /// As saved (or as its remote spells it), for `gh --repo` and display.
         var name: String
         let gitHub: GitHubRepository
@@ -84,6 +84,8 @@ final class ProjectBoardController {
     /// What the Board's clicks act on, as it last showed them
     /// (`stagesContent`).
     var stagesTargets = StagesTargets()
+    /// The stages last built, and what from: only `stagesContent` sets it.
+    var builtStages: (key: StagesKey, content: BoardStagesView.Content, targets: StagesTargets)?
     private let client: any ProjectBoardGitHub
 
     /// board.json as last read; nil until it is.
@@ -99,7 +101,7 @@ final class ProjectBoardController {
     private(set) var extraRepositories: [SpaceAnchor] = []
     /// The sections `extraRepositories` made at the last `apply`: the ids
     /// of the read-only ones (one made an anchor since isn't).
-    private var extraIDs: Set<String> = []
+    private(set) var extraIDs: Set<String> = []
     /// The sections that are the space's own: its anchors', or the one
     /// board.json names; `sections` without the read-only ones.
     private(set) var ownSections: [BoardSections.Section] = []

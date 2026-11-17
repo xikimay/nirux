@@ -218,13 +218,14 @@ extension NiruxShellView {
 
     /// The board's tasks as the sidebar's pass read them (`pass`), else as
     /// the last pass did. A Board shown lists its worktrees again when its
-    /// workspaces moved.
+    /// workspaces moved; one not shown builds its stages again only when
+    /// what they are built from changed.
     private func projectBoardStages(
         _ board: ProjectBoardController, isShown: Bool, snapshot: ProcessSnapshot, now: TimeInterval, pass: SidebarPassReadings?
     ) -> BoardShown {
         let members = projectWorkspaces(of: board.projectID)
         let foreground = pass?.foregroundProcesses ?? foregroundProcesses(of: members, snapshot: snapshot)
-        let inputs = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
+        let boardWorkspaces = projectBoardWorkspaces(members, of: board, snapshot: snapshot, now: now, foregroundProcesses: foreground)
         if isShown {
             // A workspace opened in a folder not listed yet, or one closed or moved away: list them again.
             board.expireWorktreesIfWorkspacesLeft(members.map(\.cwd))
@@ -245,8 +246,8 @@ extension NiruxShellView {
             now: now
         )
         return board.stagesContent(
-            stagesInputs(of: board, members: members, workspaces: inputs, readings: readings, order: boardOrder),
-            now: Date(timeIntervalSince1970: now)
+            stagesInputs(of: board, members: members, workspaces: boardWorkspaces, readings: readings, order: boardOrder),
+            now: Date(timeIntervalSince1970: now), reusing: !isShown
         )
     }
 

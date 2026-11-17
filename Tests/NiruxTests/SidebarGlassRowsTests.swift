@@ -111,6 +111,20 @@ final class SidebarGlassRowsTests: XCTestCase {
         let turningAtChecks = try XCTUnwrap(views(atChecks).first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID })
         XCTAssertEqual(turningAtChecks.layer?.sublayers?.count, 2, "the arc and its station")
         XCTAssertEqual(ring.layer?.sublayers?.count, 1, "no station: the arc alone")
+        // The icon's own ring and pie, where it draws them: the arc on the ring, Code's quarter from 12 to 3 o'clock (the
+        // layer's y goes up).
+        var atCode = running
+        atCode.station = .code
+        let layers = try XCTUnwrap(views(atCode).first { $0.identifier == SidebarWorkspaceCardRenderer.checksRingID }?.layer?.sublayers)
+        let unit = size.width / 16
+        let arc = try XCTUnwrap((layers.first as? CAShapeLayer)?.path?.boundingBoxOfPath)
+        XCTAssertEqual(arc.minX, 1.75 * unit, accuracy: 0.01)
+        XCTAssertEqual(arc.width, 12.5 * unit, accuracy: 0.01)
+        let quarter = try XCTUnwrap((layers.last as? CAShapeLayer)?.path?.boundingBoxOfPath)
+        XCTAssertEqual(quarter.minX, 8 * unit, accuracy: 0.01)
+        XCTAssertEqual(quarter.minY, 8 * unit, accuracy: 0.01)
+        XCTAssertEqual(quarter.width, 3.5 * unit, accuracy: 0.01)
+        XCTAssertEqual(quarter.height, 3.5 * unit, accuracy: 0.01)
     }
 
     /// The catch-up card's rows show their rows' icons; a turn over, the
