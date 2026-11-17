@@ -157,8 +157,9 @@ extension NiruxShellView {
                 guard let form = self.boardSettingsPanel, form.hostView === settings.boardHost else { return true }
                 return form.takeKeyboardIfFree()
             case .memory:
-                guard let memory = self.projectMemoryPanel, memory.shows(in: settings.memoryHost) else { return false }
-                return memory.takeKeyboardIfFree()
+                if let memory = self.projectMemoryPanel, memory.shows(in: settings.memoryHost) { return memory.takeKeyboardIfFree() }
+                // A list still being read takes it as it lands; nothing to list takes none.
+                return !settings.showsMemoryPlaceholder
             default:
                 return false
             }

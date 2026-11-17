@@ -315,6 +315,9 @@ final class SpaceSettingsSection: NSObject {
         memoryPlaceholder.removeFromSuperview()
     }
 
+    /// The Memory tab says why it has nothing to list.
+    var showsMemoryPlaceholder: Bool { memoryPlaceholder.superview === memoryHost }
+
     /// Said in the Board tab while its form loads, or why it can't.
     func showBoardPlaceholder(_ text: String) {
         showPlaceholder(boardPlaceholder, text, in: boardHost)
