@@ -284,6 +284,11 @@ enum TranscriptSearch {
         (try? JSONSerialization.jsonObject(with: Data(bytes))) as? [String: Any]
     }
 
+    /// A line's `timestamp`.
+    static func date(_ text: String) -> Date? {
+        dateStyles.lazy.compactMap { try? $0.parse(text) }.first
+    }
+
     /// A line the conversation doesn't show as the user's or Claude's: a
     /// subagent's, a summary, a harness note, an API error.
     static func isAside(_ object: [String: Any]) -> Bool {
@@ -328,10 +333,7 @@ enum TranscriptSearch {
         }
         let text = (role == .user ? texts.compactMap(typed) : texts).joined(separator: "\n")
         guard !text.isEmpty else { return nil }
-        let date = (timestamp as? String).flatMap { text in
-            dateStyles.lazy.compactMap { try? $0.parse(text) }.first
-        }
-        return Message(role: role, text: text, timestamp: date)
+        return Message(role: role, text: text, timestamp: (timestamp as? String).flatMap(date))
     }
 
     /// What the user typed of a prompt's text: nil for what a harness

@@ -16,6 +16,14 @@ import Foundation
 /// 4 stop (handoffs off, Mission over, or not this terminal's to answer).
 enum MissionEventCLI {
     static let maxMessageLength = 500
+    /// A parent's message to its child (`tell`, `reply`): typed into the
+    /// child's prompt as the agent reads it, so it may be longer.
+    static let maxInstructionLength = 4_000
+
+    /// The longest message of an event of `kind`.
+    static func maxLength(of kind: MissionEvent.Kind) -> Int {
+        [.instruction, .response].contains(kind) ? maxInstructionLength : maxMessageLength
+    }
     /// Agent shell tools stop foreground commands after a few minutes (two
     /// by default in Claude Code), so a wait never lasts longer than this and
     /// the agent runs the same command again to keep waiting.
@@ -415,9 +423,9 @@ enum MissionEventCLI {
         guard let options = parseOptions(arguments, allowed: ["--event", "--message"]),
               let eventID = options["--event"],
               UUID(uuidString: eventID) != nil,
-              let message = validMessage(options["--message"])
+              let message = validMessage(options["--message"], limit: maxInstructionLength)
         else {
-            return usage("reply --event <question-event-id> --message <1-\(maxMessageLength) characters>")
+            return usage("reply --event <question-event-id> --message <1-\(maxInstructionLength) characters>")
         }
         var ledger = MissionLedgerReader(url: missionsURL)
         guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
@@ -533,10 +541,10 @@ enum MissionEventCLI {
         return result
     }
 
-    private static func validMessage(_ raw: String?) -> String? {
+    private static func validMessage(_ raw: String?, limit: Int = maxMessageLength) -> String? {
         guard let raw else { return nil }
         let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !message.isEmpty && message.count <= maxMessageLength ? message : nil
+        return !message.isEmpty && message.count <= limit ? message : nil
     }
 
     /// `--timeout` can shorten a wait but never extend it past the default:
@@ -651,11 +659,11 @@ extension MissionEventCLI {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
         guard let options = parseOptions(arguments, allowed: ["--branch", "--message", "--timeout"]),
               let branch = options["--branch"],
-              let message = validMessage(options["--message"]),
+              let message = validMessage(options["--message"], limit: maxInstructionLength),
               let timeout = validTimeout(options["--timeout"])
         else {
             return usage(
-                "tell --branch <child-branch> --message <1-\(maxMessageLength) characters> [--timeout <seconds>]"
+                "tell --branch <child-branch> --message <1-\(maxInstructionLength) characters> [--timeout <seconds>]"
             )
         }
         var ledger = MissionLedgerReader(url: missionsURL)

@@ -196,7 +196,7 @@ final class MissionTellTests: XCTestCase {
         XCTAssertTrue(try queuedEvents(in: codex).isEmpty)
 
         for arguments in [["--branch", "feat/mission"], ["--message", "Hi"],
-                          ["--branch", "feat/mission", "--message", String(repeating: "x", count: 501)]] {
+                          ["--branch", "feat/mission", "--message", String(repeating: "x", count: MissionEventCLI.maxInstructionLength + 1)]] {
             XCTAssertEqual(MissionEventCLI.tell(
                 arguments: arguments,
                 environment: parentEnvironment(),

@@ -376,4 +376,106 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(try read().text.contains("isn't on disk any more"))
         }
     }
+
+    /// A task of the Lead's whose `claude` is a stand-in in a column of its
+    /// own, its session started: what it is sent, and its hooks.
+    private func reportingTask(
+        _ title: String, lead: UIFlowHarness.Lead, harness: UIFlowHarness, readsSlowly: Bool = false
+    ) throws -> (agent: AgentStandIn, column: ColumnState, claude: ProcessInstance, hook: @MainActor (AgentHookEvent.Name) -> Void) {
+        let workspaceID = UUID().uuidString
+        let agentUUID = UUID().uuidString
+        let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+            id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+            childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+            branch: harness.worktreeBranch, reportsToLead: true
+        ), enabled: true))
+        harness.shell.addWorkspace(
+            title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID,
+            missionID: mission.id, reportsToLead: true
+        )
+        let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+        let agent = AgentStandIn()
+        task.addColumn(command: agent.command(slowly: readsSlowly), agentUUID: agentUUID, cwd: harness.worktree)
+        let column = try XCTUnwrap(task.columns.first { $0.agentUUID == agentUUID })
+        let pty = try XCTUnwrap(column.pty)
+        harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+        let hook: @MainActor (AgentHookEvent.Name) -> Void = { name in
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: name, agentUUID: agentUUID, sessionID: "task", emitterProcess: claude,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+        hook(.sessionStart)
+        return (agent, column, claude, hook)
+    }
+
+    /// tell carries up to 4,000 characters: typed as the agent reads it,
+    /// past what one write to the terminal takes, then Enter. An agent slow
+    /// to read never holds the app meanwhile.
+    func testALongTellIsTypedWhole() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Reader", lead: lead, harness: harness, readsSlowly: true)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            XCTAssertGreaterThan(message.utf8.count, PtySession.inputQueueBytes * 3)
+            let start = Date()
+            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead)
+            XCTAssertFalse(told.isError, told.text)
+            XCTAssertLessThan(Date().timeIntervalSince(start), 2, "the app isn't held while the agent reads")
+            harness.waitUntil("all of it, then Enter") { task.agent.input.contains("\u{1B}[201~") && task.agent.input.hasSuffix("\n") }
+            XCTAssertTrue(task.agent.input.contains("Line 70: read the file and add up the totals."))
+            XCTAssertTrue(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": String(repeating: "x", count: 4_001)], lead: lead).isError)
+        }
+    }
+
+    /// interrupt_task presses Esc only once the turn called a tool and
+    /// nothing was typed since its prompt; the turn is over once Claude's
+    /// transcript shows the interrupt, and a tell goes in at once.
+    func testTheLeadInterruptsATurn() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Builder", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let transcript = harness.root + "/builder.jsonl"
+            try "".write(toFile: transcript, atomically: true, encoding: .utf8)
+            task.column.followClaudeTranscript(at: transcript, sessionID: "task", process: task.claude)
+            let interrupt = { try harness.callLeadTool(LeadTools.interruptTask, ["task": "Builder"], lead: lead) }
+
+            XCTAssertTrue(try interrupt().text.contains("isn't working"))
+            task.hook(.userPromptSubmit)
+            XCTAssertTrue(try interrupt().text.contains("hasn't called a tool since its prompt"))
+            task.hook(.preToolUse)
+            // Claude writes its interrupt line once the Esc reaches it.
+            let agent = task.agent
+            let writer = Timer(timeInterval: 0.05, repeats: true) { timer in
+                guard agent.input.contains("\u{1B}"), let handle = FileHandle(forWritingAtPath: transcript) else { return }
+                let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+                let line = #"{"type":"user","timestamp":"\#(time)","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
+                handle.seekToEndOfFile()
+                handle.write(Data((line + "\n").utf8))
+                try? handle.close()
+                timer.invalidate()
+            }
+            RunLoop.main.add(writer, forMode: .common)
+            let done = try interrupt()
+            XCTAssertFalse(done.isError, done.text)
+            XCTAssertTrue(done.text.contains("puts a prompt it hadn't answered, and messages queued meanwhile, back in its prompt box"), done.text)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Builder", "message": "Build the docs instead."], lead: lead).isError)
+            harness.waitUntil("the tell, at once") { task.agent.input.contains("Build the docs instead.") }
+
+            // Keys typed since its prompt: they would come back to the box.
+            task.hook(.userPromptSubmit)
+            task.hook(.preToolUse)
+            task.column.pty?.sendRaw("y")
+            XCTAssertTrue(try interrupt().text.contains("Keys reached"))
+            // An Esc Claude doesn't confirm: said so, the turn still runs.
+            task.hook(.userPromptSubmit)
+            task.hook(.preToolUse)
+            XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
+        }
+    }
 }

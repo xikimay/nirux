@@ -294,16 +294,30 @@ extension NiruxShellView {
                   let text = MissionPromptText.text(
                       for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
                   ),
-                  let input = TypedPromptSanitizer.terminalInput(for: text),
+                  let paste = TypedPromptSanitizer.bracketedPaste(for: text),
                   // Recorded first: a failed save must not type it twice.
                   MissionStore.shared.markTyped(delivery, at: now)
             else { continue }
-            pty.sendRaw(input)
+            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance)
             missionWaits.noteTyped(into: recipient, at: now)
             typedAny = true
         }
         // The cards' "Asking …" and "Answer … ready" rows follow.
         if typedAny { updateSidebar(snapshot: snapshot) }
+    }
+
+    /// `paste` (a bracketed paste) and Enter into `pty`: in one write when
+    /// the terminal's input queue holds it, else as the agent reads it
+    /// (`PtySession.pasteInBackground`), Enter once it is all in. A paste
+    /// cut short is ended and left unsent in the prompt, for the user.
+    func typeMissionPrompt(_ paste: String, into pty: PtySession, keepingInFront process: ProcessInstance?) {
+        guard paste.utf8.count > PtySession.inputQueueBytes else { return pty.sendRaw(paste + "\r") }
+        pty.pasteInBackground(paste, keepingInFront: process, cancelled: { false }) { outcome in
+            guard outcome == .pasted else {
+                return MissionWaitLog.logger.notice("A long Mission message wasn't typed whole: \(String(describing: outcome), privacy: .public)")
+            }
+            pty.sendRaw("\r")
+        }
     }
 
     /// The column a Mission message is typed into: the parent's for a

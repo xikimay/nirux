@@ -25,7 +25,8 @@ child's prompt.
   `"$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "<text>"`.
   The branch names the child among this parent's Missions (the parent knows
   branches, not Mission IDs); the newest Mission wins when a branch had
-  several. Same 500-character limit as the other commands.
+  several. Same 500-character limit as the other commands (4,000 since
+  2026-11-17, see below).
 - **Delivery is guarded typing, not a hook.** Nirux types the text and Enter
   into the child's prompt, like the Resume button, only when
   `AgentStatusMachine.isPromptFree` holds: the column's interactive `claude`
@@ -74,3 +75,21 @@ child's prompt.
   prompt is free.
 - **Messages over 500 characters.** Long review output goes in a file; the
   `tell` gives its path.
+
+## Longer messages (2026-11-17)
+
+The Lead hit the limit daily and wrote scratchpad files for it. Why 500: the
+CLI's `--message` limit, shared by every command. The real constraint was
+the typing: one `write` on the main thread, while the terminal's input queue
+holds about a kilobyte and empties only as the agent reads (see Branch
+Review's send).
+
+- `tell` and `reply` (the Lead's and a task's tools, the CLI, the user's
+  answer popover) hold 4,000 characters; questions and results stay at 500
+  (folded onto one line, repeated by `list_tasks`).
+- A message past `PtySession.inputQueueBytes` is typed with
+  `pasteInBackground` (off the main thread, as the agent reads it, 30 s at
+  most), Enter once it is all in. One cut short is ended and left unsent.
+- A file the message points to was rejected: one in the task's worktree shows
+  in git status and can get committed; one in Nirux's state folder sits
+  outside the task's project, so Claude asks the user before reading it.

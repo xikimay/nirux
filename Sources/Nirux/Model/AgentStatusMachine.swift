@@ -152,6 +152,9 @@ struct AgentStatusMachine {
     /// event's name.
     private(set) var lastDraftKind: String?
     private(set) var lastEventName: String?
+    /// The main thread's last tool call (pre or post): its reply had
+    /// begun, so an Esc can't give its prompt back (`interruptRefusal`).
+    private(set) var lastMainToolAt: TimeInterval = 0
     /// The agent process seen asking whether to trust its folder, and when
     /// (see AgentTrustPrompt): no hook reports that question.
     var trustPromptSighting: AgentTrustPrompt.Sighting?
@@ -321,12 +324,14 @@ struct AgentStatusMachine {
             startTurn(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .preToolUse:
             hookKind = event.kind.rawValue
+            if event.agentID == nil { lastMainToolAt = now }
             noteTurnActivity(at: now)
             noteMainThreadMoved(event)
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .postToolUse:
             hookKind = event.kind.rawValue
+            if event.agentID == nil { lastMainToolAt = now }
             noteTurnActivity(at: now)
             noteMainThreadMoved(event)
             // The call ran: its dialog, if it had one, was answered.
@@ -946,6 +951,13 @@ struct AgentStatusMachine {
         circling.reset()
     }
 
+    /// Claude stopped the turn at Nirux's Esc (its transcript says so): the
+    /// turn is over with no Stop to say it, and nobody is alerted.
+    mutating func noteInterrupted() {
+        endTurn()
+        state = .idle
+    }
+
     /// The agent may be going in circles in the turn in flight: its
     /// commands keep hanging, or one keeps failing (see
     /// `AgentCirclingHint`). Shown while the column works.
@@ -1382,6 +1394,7 @@ struct AgentStatusMachine {
         lastDialogClosedAt = 0
         lastClosedDialogRequestedAt = 0
         lastEventAt = 0
+        lastMainToolAt = 0
         turnEndedAt = 0
         mainTurnEndedAt = 0
         stopHooksKeepGoing = false

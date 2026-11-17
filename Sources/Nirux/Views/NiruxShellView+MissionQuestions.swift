@@ -255,8 +255,8 @@ extension NiruxShellView {
             showToast("Type an answer first")
             return false
         }
-        guard reply.count <= MissionEventCLI.maxMessageLength else {
-            showToast("Answers are limited to \(MissionEventCLI.maxMessageLength) characters")
+        guard reply.count <= MissionEventCLI.maxInstructionLength else {
+            showToast("Answers are limited to \(MissionEventCLI.maxInstructionLength) characters")
             return false
         }
         let store = MissionStore.shared

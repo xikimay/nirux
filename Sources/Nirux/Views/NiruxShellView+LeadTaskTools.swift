@@ -401,4 +401,69 @@ extension NiruxShellView {
                 + (working ? "\nIts agent is working: it may write more." : ""), false)
         }
     }
+
+    // MARK: interrupt_task
+
+    func leadInterruptTask(_ arguments: [String: Any], in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
+        let name = LeadTools.string(arguments, "task") ?? ""
+        guard let task = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
+        let title = MissionPromptText.quoted(task.title)
+        let snapshot = ProcessSnapshot()
+        guard !snapshot.isEmpty else { return answer("Nirux couldn't read the running processes: call again in a moment.", true) }
+        // Its own agent (the one its Mission names), else the Claude in front.
+        _ = MissionStore.shared.ensureLoaded()
+        let own = MissionStore.shared.missions.filter { $0.childWorkspaceID == task.id }.max { $0.createdAt < $1.createdAt }?.childAgentUUID
+        let agents = task.openColumns.filter { $0.pty?.foregroundProcess(snapshot: snapshot)?.name == "claude" }
+        guard let column = agents.first(where: { $0.agentUUID == own }) ?? agents.first, let pty = column.pty else {
+            return answer("“\(title)” runs no Claude Code agent: Nirux interrupts only that.", true)
+        }
+        if let refusal = pty.interruptRefusal(snapshot: snapshot) { return answer(Self.interruptRefusal(refusal, title: title), true) }
+        guard let transcript = column.claudeTranscript?.follower.path else {
+            return answer("Nirux doesn't follow “\(title)”'s conversation yet, so it couldn't tell whether Esc stopped it: ask the user.", true)
+        }
+        let sentAt = Date()
+        pty.sendInterrupt()
+        confirmInterrupt(of: column, transcript: transcript, since: sentAt, title: title, tries: Self.interruptChecks, answer: answer)
+    }
+
+    /// Reads of the transcript, half a second apart, before Nirux says the
+    /// Esc didn't take.
+    private static let interruptChecks = 8
+
+    /// The turn is over once the transcript shows the interrupt (Claude
+    /// fires no Stop for it): only then may a message be typed.
+    private func confirmInterrupt(
+        of column: ColumnState, transcript: String, since sentAt: Date, title: String, tries: Int, answer: @escaping LeadAnswer
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak column] in
+            Self.offMain({ TranscriptLastMessage.showsInterrupt(path: transcript, since: sentAt) }) { shown in
+                guard let self, let column else { return answer("“\(title)” closed meanwhile.", true) }
+                guard shown else {
+                    guard tries > 1 else {
+                        return answer("Esc went to “\(title)”, but its conversation shows no interrupt: call list_tasks before telling it more.", true)
+                    }
+                    return self.confirmInterrupt(of: column, transcript: transcript, since: sentAt, title: title, tries: tries - 1, answer: answer)
+                }
+                column.pty?.noteInterrupted()
+                self.updateSidebar()
+                answer("Interrupted “\(title)”'s turn. Claude Code puts a prompt it hadn't answered, and messages queued meanwhile, back "
+                    + "in its prompt box; this turn had called a tool and nothing was typed since, so the box is empty. "
+                    + "Tell it what to do instead.", false)
+            }
+        }
+    }
+
+    private static func interruptRefusal(_ refusal: AgentInterruptRefusal, title: String) -> String {
+        switch refusal {
+        case .noClaude: "“\(title)”'s agent isn't a Claude Code that Nirux follows with its hooks: Nirux interrupts only that."
+        case .notWorking: "“\(title)”'s agent isn't working: there is no turn to interrupt."
+        case .dialog: "“\(title)”'s agent waits on a dialog: Esc would answer it, which is the user's call."
+        case .notAnswered:
+            "“\(title)”'s agent hasn't called a tool since its prompt: Claude Code would put that unanswered prompt back in its "
+                + "box, and your next message would join it. Call again once it works on something, or ask the user."
+        case .typed:
+            "Keys reached “\(title)”'s prompt since its prompt went in: Claude Code would put what was queued back in its box. "
+                + "Ask the user."
+        }
+    }
 }

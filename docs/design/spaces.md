@@ -261,7 +261,8 @@ New flow, built on the guarded typing `tell` already uses
     the user starts it. One sheet at a time: later proposals wait their turn.
   - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
     and checks, the question waiting or the result) and repositories.
-  - `tell(task, message)`, `reply(question, message)`: Missions. A task is named
+  - `tell(task, message)`, `reply(question, message)`: Missions, 4,000
+    characters at most (see mission-tell.md, "Longer messages"). A task is named
     by its branch or title; the Lead reaches only the tasks it started that
     are still in its space. A question typed into the Lead names `reply`.
   - `ask_user(task, why)`: hands the question the task waits on to the user
@@ -314,6 +315,13 @@ New flow, built on the guarded typing `tell` already uses
     space, or at the top level without `parent`, within the sub-task rules
     (the parent a task, two levels, six sub-tasks). Who it reports to
     doesn't change.
+  - `interrupt_task(task)`: Esc into the turn of the task's Claude Code, as
+    the key, without closing anything. Claude Code gives the prompt box back a
+    prompt it hasn't begun answering and the prompts queued meanwhile, and
+    fires no Stop: so only once the turn called a tool and nothing was typed
+    since its prompt, and the turn is over once its transcript shows
+    "[Request interrupted by user". The Esc counts as no draft, and the next
+    `tell` goes in at once.
   - `read_task(task)`: the last message of the task's newest Claude Code
     conversation (the session history keeps its transcript, across
     relaunches), up to 6,000 characters, its start and end past that.

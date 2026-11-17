@@ -19,9 +19,10 @@ enum LeadTools {
     static let renameTask = "rename_task"
     static let setTaskParent = "set_task_parent"
     static let readTask = "read_task"
+    static let interruptTask = "interrupt_task"
     static let names = [
         startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule,
-        closeTask, moveTask, renameTask, setTaskParent, readTask
+        closeTask, moveTask, renameTask, setTaskParent, readTask, interruptTask
     ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
@@ -91,7 +92,7 @@ enum LeadTools {
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
-                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxMessageLength) characters."]
+                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxInstructionLength) characters."]
                 ],
                 required: ["task", "message"]
             ),
@@ -100,7 +101,7 @@ enum LeadTools {
                 description: "Answer the question a task asked you, by its id (in the [Nirux Mission] message and list_tasks).",
                 properties: [
                     "question": ["type": "string", "description": "The question's id."],
-                    "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxMessageLength) characters."]
+                    "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxInstructionLength) characters."]
                 ],
                 required: ["question", "message"]
             ),
@@ -235,6 +236,17 @@ enum LeadTools {
                     """,
                 properties: ["task": ["type": "string", "description": taskDescription]],
                 required: ["task"], readOnly: true
+            ),
+            definition(
+                interruptTask, title: "Interrupt a task's turn",
+                description: """
+                    Stop the turn a task's Claude Code agent is working on, as Esc does, without closing anything; \
+                    then tell it what to do instead. Only once the turn has called a tool and nothing was typed into \
+                    its prompt since: Claude Code puts a prompt it hasn't answered, and messages queued meanwhile, \
+                    back in its prompt box, where your next message would join them.
+                    """,
+                properties: ["task": ["type": "string", "description": taskDescription]],
+                required: ["task"], destructive: true
             )
         ]
     }
@@ -298,7 +310,7 @@ enum LeadTools {
 
     /// What's wrong with a call's arguments before it reaches the app, or nil.
     static func problem(tool: String, arguments: [String: Any]) -> String? {
-        let messageLimit = MissionEventCLI.maxMessageLength
+        let messageLimit = MissionEventCLI.maxInstructionLength
         switch tool {
         case startTask:
             return string(arguments, "description") == nil ? "description must say what the task must do." : nil
@@ -325,7 +337,7 @@ enum LeadTools {
                 return "title must hold 1 to \(maxTitleLength) characters."
             }
             return nil
-        case setTaskParent, readTask:
+        case setTaskParent, readTask, interruptTask:
             return string(arguments, "task") == nil ? "task is missing." : nil
         case queueMerge:
             return pullRequestNumbers(arguments) == nil ? "prs must list pull request numbers." : nil

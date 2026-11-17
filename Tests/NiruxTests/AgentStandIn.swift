@@ -8,9 +8,13 @@ struct AgentStandIn {
     let received = FileManager.default.temporaryDirectory
         .appendingPathComponent("nirux-agent-stand-in-\(UUID().uuidString).txt")
 
-    /// The shell command that becomes it.
-    func command(named name: String = "claude") -> String {
-        "stty -icanon min 1 time 0; exec -a \(name) /bin/cat > '\(received.path)'"
+    /// The shell command that becomes it. `slowly`: it takes 128 bytes a
+    /// quarter of a second, as an agent busy drawing.
+    func command(named name: String = "claude", slowly: Bool = false) -> String {
+        guard slowly else { return "stty -icanon min 1 time 0; exec -a \(name) /bin/cat > '\(received.path)'" }
+        let reader = #"open(my $o, ">", $ARGV[0]); $o->autoflush(1); "#
+            + #"while (sysread(STDIN, my $b, 128)) { print $o $b; select(undef, undef, undef, 0.25) }"#
+        return "stty -icanon min 1 time 0; exec -a \(name) /usr/bin/perl -e '\(reader)' '\(received.path)'"
     }
 
     /// What it was sent so far.

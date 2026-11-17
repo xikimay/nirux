@@ -357,7 +357,8 @@ extension NiruxShellView {
         "$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "<instruction or /command>"
         ```
 
-        Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `tell` waits at most
+        Questions and results hold at most \(MissionEventCLI.maxMessageLength) characters, `tell` and `reply`
+        \(MissionEventCLI.maxInstructionLength). `tell` waits at most
         \(Int(MissionEventCLI.defaultWaitTimeout)) seconds for Nirux to type the message, and a Codex
         child's `ask` and `receive` as long for an event, under the default 2-minute limit of the Claude
         Code shell tool; if your shell tool takes a timeout, allow at least 120 seconds. Exit statuses:

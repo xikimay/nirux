@@ -282,7 +282,7 @@ final class MissionStore {
         }
 
         let message = incoming.message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, message.count <= MissionEventCLI.maxMessageLength else {
+        guard !message.isEmpty, message.count <= MissionEventCLI.maxLength(of: incoming.kind) else {
             return .rejected
         }
 

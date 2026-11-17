@@ -369,6 +369,23 @@ final class PtySession: @unchecked Sendable {
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
+    /// Why Nirux may not press Esc in the agent's turn now (see
+    /// `AgentStatusMachine.interruptRefusal`).
+    func interruptRefusal(snapshot: ProcessSnapshot) -> AgentInterruptRefusal? {
+        state.machine.interruptRefusal(foreground: foregroundProcess(snapshot: snapshot))
+    }
+
+    /// Esc, as the key, but not noted as one: `interruptRefusal` vouched
+    /// that it leaves the prompt box empty, so it is no draft.
+    func sendInterrupt() {
+        state.writeToPty(Data([0x1B]))
+    }
+
+    /// Claude confirmed the interrupt: its turn is over.
+    func noteInterrupted() {
+        state.machine.noteInterrupted()
+    }
+
     /// A turn end waits for its verdict (see `AgentStatusMachine.awaitsAnyVerdict`).
     var awaitsTurnVerdict: Bool { state.machine.awaitsAnyVerdict }
 
@@ -646,6 +663,10 @@ final class PtySession: @unchecked Sendable {
         let fd = hasExited ? nil : state.descriptorForWrite(of: data)
         Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled, done: done)
     }
+
+    /// What one write to the terminal surely takes: about what its input
+    /// queue holds. A longer text goes through `pasteInBackground`.
+    nonisolated static let inputQueueBytes = 1_024
 
     /// `ESC[200~` and `ESC[201~`.
     private nonisolated static let markerLength = 6
