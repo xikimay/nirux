@@ -108,14 +108,14 @@ extension NiruxApp {
     /// animations.
     private func appearancePane() -> NSView {
         let picker = TransparencyPicker(selection: shell?.interfaceTransparency ?? NiruxShellView.currentInterfaceTransparency())
-        let summary = SettingsForm.hint(picker.selection.summary)
-        picker.onPick = { [weak self, weak picker, weak summary] level in
+        let summary = TransparencySummary(level: picker.selection)
+        summary.onResize = { [weak self] in self?.settingsController?.fitToContent() }
+        picker.onPick = { [weak self, weak picker, weak summary] level, previous in
             guard let self else { return }
-            let previous = self.shell?.interfaceTransparency ?? NiruxShellView.currentInterfaceTransparency()
-            summary?.stringValue = level.summary
+            summary?.show(level)
             let putBack = {
                 picker?.show(previous)
-                summary?.stringValue = previous.summary
+                summary?.show(previous)
             }
             guard self.saveSetting(revert: putBack, { $0.interfaceTransparency = level }) else { return }
             self.shell?.interfaceTransparency = level
@@ -129,7 +129,7 @@ extension NiruxApp {
         settingsAnimationsCheckbox = animations
 
         return SettingsForm.pane([
-            [SettingsForm.header("Interface"), picker, summary, ForcedOpaqueNote()],
+            [SettingsForm.header("Interface"), picker, summary],
             [
                 animations,
                 SettingsForm.hint(

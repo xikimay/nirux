@@ -71,6 +71,15 @@ final class IconRail: NSView {
             for button in roundButtons { button.level = newValue }
         }
     }
+    /// Turns the picked level into the one drawn (the shell's, so that the
+    /// window and its chrome agree).
+    var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency {
+        get { glass.resolveLevel }
+        set {
+            glass.resolveLevel = newValue
+            for button in roundButtons { button.resolveLevel = newValue }
+        }
+    }
 
     private(set) var content = Content(lead: nil, tasks: [])
     /// The Lead, then the tasks, top to bottom.
@@ -436,6 +445,10 @@ final class RailRoundButton: NSView {
     var level: InterfaceTransparency {
         get { glass.level }
         set { glass.level = newValue }
+    }
+    var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency {
+        get { glass.resolveLevel }
+        set { glass.resolveLevel = newValue }
     }
     private let glass: GlassView
     private let button: NiruxButton

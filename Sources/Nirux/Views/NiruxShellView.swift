@@ -49,12 +49,12 @@ final class NiruxShellView: NSView {
     let workspaceNameCard = WorkspaceNameCard()
     /// Settings › Appearance › "Animate the interface": off, states show
     /// without moving.
-    var animatesInterface = NiruxShellView.currentAnimatesInterface() {
+    var animatesInterface: Bool {
         didSet { if animatesInterface != oldValue { applyAgentLights() } }
     }
     /// Settings › Appearance: how much of the desktop shows through the
     /// chrome (NiruxShellView+Appearance).
-    var interfaceTransparency = NiruxShellView.currentInterfaceTransparency() {
+    var interfaceTransparency: InterfaceTransparency {
         didSet { if interfaceTransparency != oldValue { applyInterfaceTransparency() } }
     }
 
@@ -268,6 +268,10 @@ final class NiruxShellView: NSView {
     private var observesDisplays = false
 
     override init(frame: NSRect) {
+        // How Nirux looks, from one read of the settings.
+        let settings = Persistence.load()?.settings
+        animatesInterface = settings?.animatesInterface ?? true
+        interfaceTransparency = settings?.interfaceTransparency ?? .defaultValue
         super.init(frame: frame)
         // A Board shows its workspace's space, every way a workspace changes space.
         workspaceStore.onWorkspacesChangedSpace = { [weak self] change in self?.boardsFollowTheirWorkspaces(change) }

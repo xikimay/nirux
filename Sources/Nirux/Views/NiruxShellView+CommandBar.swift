@@ -8,6 +8,7 @@ extension NiruxShellView {
     /// its menu, ⌘P, and the agents waiting for the user (⌘J).
     func installCommandBar(in window: NSWindow) {
         let bar = CommandBarView(level: interfaceTransparency)
+        bar.resolveLevel = sideEffects.drawnTransparency
         let toolbar = CommandBarToolbar(bar: bar)
         toolbar.install(in: window)
         commandBarToolbar = toolbar

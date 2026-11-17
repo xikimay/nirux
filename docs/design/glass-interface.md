@@ -73,8 +73,11 @@ included (a full-size content view); the shell sits below the toolbar.
 Above Opaque, one behind-window frost (`NSVisualEffectView`) tinted with the
 canvas at the level's chrome alpha lets the desktop through, and the window
 turns non-opaque; the canvas and the sidebar let that frost show. The chrome
-lies on it: macOS 26's glass, or on macOS 14 and 15 its tint alone, since a
-frost of its own would blur twice. What floats in a window of its own (the
+lies on it: macOS 26's glass (kept until the user's look and the bench; else
+tint and rim as on 14 and 15), or on macOS 14 and 15 only its rim, so that
+one level reads the same on the bar, the rail and the open sidebar, and
+nothing blurs twice. The window and its glass draw the level through one
+resolver (the shell's). What floats in a window of its own (the
 inbox, a callout, ⌘P) keeps its frost and its thick tint, and its window
 casts the shadow. Every column is opaque under its content (the canvas's
 colour, as before), so a terminal before

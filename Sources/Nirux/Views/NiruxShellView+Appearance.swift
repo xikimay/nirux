@@ -19,6 +19,12 @@ extension NiruxShellView {
     func applyInterfaceTransparency() {
         let level = interfaceTransparency
         let translucent = drawnTransparency.usesGlass
+        // One resolver for the window and its glass.
+        let resolve = sideEffects.drawnTransparency
+        commandBarToolbar?.bar.resolveLevel = resolve
+        requestsState.inbox?.resolveLevel = resolve
+        requestsState.callout?.resolveLevel = resolve
+        sidebar.iconRail.resolveLevel = resolve
         commandBarToolbar?.bar.level = level
         requestsState.inbox?.level = level
         requestsState.callout?.level = level

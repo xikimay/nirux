@@ -52,14 +52,18 @@ final class TranslucentWindowTests: XCTestCase {
         XCTAssertEqual(shell.sidebar.layer?.backgroundColor, Theme.Color.base.cgColor)
     }
 
-    /// Reduce transparency or Increase contrast: opaque, whatever was picked.
-    func testMacOSAccessibilityKeepsTheWindowOpaque() {
+    /// Reduce transparency or Increase contrast: opaque, whatever was picked,
+    /// the window and its chrome alike (one resolver).
+    func testMacOSAccessibilityKeepsTheWindowOpaque() throws {
         let (window, content, shell) = mainWindow(asks: { _ in .opaque })
         defer { window.close() }
         shell.interfaceTransparency = .clear
         XCTAssertTrue(window.isOpaque)
         XCTAssertFalse(content.isTranslucent)
         XCTAssertEqual(shell.layer?.backgroundColor, Theme.Color.canvas.cgColor)
+        let bar = try XCTUnwrap(shell.commandBarToolbar?.bar)
+        XCTAssertEqual(bar.resolveLevel(.clear), .opaque, "the bar draws what the window does")
+        XCTAssertEqual(shell.sidebar.iconRail.resolveLevel(.clear), .opaque, "and the rail")
     }
 
     /// Every kind of column is opaque under its content: a terminal before

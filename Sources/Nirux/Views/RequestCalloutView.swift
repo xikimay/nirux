@@ -20,6 +20,12 @@ final class RequestCalloutView: NSView {
         get { glass.level }
         set { glass.level = newValue }
     }
+    /// Turns the picked level into the one drawn (the shell's, so that the
+    /// window and its chrome agree).
+    var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency {
+        get { glass.resolveLevel }
+        set { glass.resolveLevel = newValue }
+    }
 
     private(set) var request: WaitingRequest?
     private(set) var othersWaiting = 0

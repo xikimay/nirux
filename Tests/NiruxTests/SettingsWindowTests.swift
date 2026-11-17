@@ -394,6 +394,12 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertEqual(picker.tiles.map { $0.accessibilityValue() as? Int }, [0, 0, 1, 0])
             XCTAssertEqual(NiruxShellView.currentInterfaceTransparency(), .glass)
             XCTAssertNotNil(app.settingsAnimationsCheckbox, "Animate the interface moved here")
+            // What the level shows and macOS's note are one block: the
+            // section's gap below stays when the note hides.
+            let summary = try XCTUnwrap(picker.superview?.subviews.compactMap { $0 as? TransparencySummary }.first)
+            XCTAssertEqual(summary.line.stringValue, InterfaceTransparency.glass.summary)
+            XCTAssertEqual((summary.superview as? NSStackView)?.customSpacing(after: summary), 22)
+            XCTAssertFalse(summary.forcedOpaque.isBezeled, "a hint, as the others")
 
             let stateFile = Persistence.stateDirectory.appendingPathComponent("state.json")
             try Data(#"{"workspaces":[],"activeWorkspaceIndex":0,"settings":{"interfaceTransparency":"frosted"}}"#.utf8)
@@ -407,13 +413,13 @@ final class SettingsWindowTests: XCTestCase {
     /// macOS's Reduce transparency or Increase contrast: the pane says Nirux
     /// draws opaque.
     func testTheForcedOpaqueNoteNamesWhatMacOSDoes() {
-        XCTAssertNil(ForcedOpaqueNote.text(reducesTransparency: false, increasesContrast: false))
+        XCTAssertNil(TransparencySummary.forcedOpaqueText(reducesTransparency: false, increasesContrast: false))
         XCTAssertEqual(
-            ForcedOpaqueNote.text(reducesTransparency: true, increasesContrast: true),
+            TransparencySummary.forcedOpaqueText(reducesTransparency: true, increasesContrast: true),
             "Reduce transparency is on in System Settings › Accessibility › Display: Nirux draws opaque."
         )
         XCTAssertEqual(
-            ForcedOpaqueNote.text(reducesTransparency: false, increasesContrast: true),
+            TransparencySummary.forcedOpaqueText(reducesTransparency: false, increasesContrast: true),
             "Increase contrast is on in System Settings › Accessibility › Display: Nirux draws opaque."
         )
     }

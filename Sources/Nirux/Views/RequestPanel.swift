@@ -85,8 +85,6 @@ final class RequestPanel {
         (panel as? Panel)?.onPerformClose = { [weak self] in self?.close() }
     }
 
-    /// Shows it at `frame` (screen coordinates) over `window`, `responder`
-    /// taking the keyboard.
     /// The panel's shadow follows its rounded glass (the content's alpha):
     /// computed again once the content has drawn, after a show or a new
     /// level.
@@ -94,6 +92,8 @@ final class RequestPanel {
         DispatchQueue.main.async { [weak panel] in panel?.invalidateShadow() }
     }
 
+    /// Shows it at `frame` (screen coordinates) over `window`, `responder`
+    /// taking the keyboard.
     func show(frame: NSRect, over window: NSWindow, responder: NSView) {
         panel.setFrame(frame, display: true)
         if panel.parent !== window {

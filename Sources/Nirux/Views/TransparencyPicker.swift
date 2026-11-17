@@ -8,8 +8,8 @@ final class TransparencyPicker: NSView {
     static let tileSize = NSSize(width: 96, height: 64)
 
     private(set) var selection: InterfaceTransparency
-    /// The user picked another level.
-    var onPick: ((InterfaceTransparency) -> Void)?
+    /// The user picked another level: (picked, the one before).
+    var onPick: ((InterfaceTransparency, InterfaceTransparency) -> Void)?
     private(set) var tiles: [Tile] = []
 
     init(selection: InterfaceTransparency) {
@@ -38,8 +38,9 @@ final class TransparencyPicker: NSView {
 
     private func pick(_ level: InterfaceTransparency) {
         guard level != selection else { return }
+        let previous = selection
         show(level)
-        onPick?(level)
+        onPick?(level, previous)
     }
 
     /// Shows `level` picked, without telling (a write that failed puts the
@@ -157,18 +158,24 @@ final class TransparencyPicker: NSView {
     }
 }
 
-/// Says when macOS makes every level opaque (Reduce transparency, Increase
-/// contrast), and follows those settings while it shows.
-final class ForcedOpaqueNote: NSTextField {
-    init() {
+/// Under the tiles: what the level picked shows and, while macOS's Reduce
+/// transparency or Increase contrast is on, that Nirux draws opaque. One
+/// block, so that the section keeps its gap below when that note hides;
+/// `onResize` after the note shows or hides, for the window to fit.
+final class TransparencySummary: NSStackView {
+    let line = SettingsForm.hint("")
+    let forcedOpaque = SettingsForm.hint("")
+    var onResize: (() -> Void)?
+
+    init(level: InterfaceTransparency) {
         super.init(frame: .zero)
-        isEditable = false
-        isSelectable = false
-        isBordered = false
-        drawsBackground = false
-        font = Theme.Font.caption
-        textColor = Theme.Color.textSecondary
-        update()
+        orientation = .vertical
+        alignment = .leading
+        spacing = Theme.Space.sm
+        addArrangedSubview(line)
+        addArrangedSubview(forcedOpaque)
+        show(level)
+        updateNote()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(accessibilityDisplayOptionsChanged),
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil
@@ -177,21 +184,26 @@ final class ForcedOpaqueNote: NSTextField {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    @objc private func accessibilityDisplayOptionsChanged(_ notification: Notification) {
-        update()
+    func show(_ level: InterfaceTransparency) {
+        line.stringValue = level.summary
     }
 
-    private func update() {
+    @objc private func accessibilityDisplayOptionsChanged(_ notification: Notification) {
+        updateNote()
+        onResize?()
+    }
+
+    private func updateNote() {
         let workspace = NSWorkspace.shared
-        let text = Self.text(
+        let text = Self.forcedOpaqueText(
             reducesTransparency: workspace.accessibilityDisplayShouldReduceTransparency,
             increasesContrast: workspace.accessibilityDisplayShouldIncreaseContrast
         )
-        stringValue = text ?? ""
-        isHidden = text == nil
+        forcedOpaque.stringValue = text ?? ""
+        forcedOpaque.isHidden = text == nil
     }
 
-    static func text(reducesTransparency: Bool, increasesContrast: Bool) -> String? {
+    static func forcedOpaqueText(reducesTransparency: Bool, increasesContrast: Bool) -> String? {
         let setting = reducesTransparency ? "Reduce transparency" : increasesContrast ? "Increase contrast" : nil
         return setting.map { "\($0) is on in System Settings › Accessibility › Display: Nirux draws opaque." }
     }

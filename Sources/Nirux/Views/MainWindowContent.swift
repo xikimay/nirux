@@ -54,6 +54,7 @@ final class MainWindowContent: NSView {
     func show(_ drawn: InterfaceTransparency) {
         isTranslucent = drawn.usesGlass
         frost.isHidden = !isTranslucent
+        tint.isHidden = !isTranslucent
         tint.layer?.backgroundColor = Theme.Color.canvas
             .withAlphaComponent(GlassView.tintAlpha(for: drawn, role: .chrome)).cgColor
         applyToWindow()
