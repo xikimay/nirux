@@ -26,8 +26,7 @@ extension NiruxShellView {
     }
 
     /// What the bar shows: the space's name and colour; the task's title,
-    /// its row's state as an icon (the station waits for a follow-up: an
-    /// empty ring) and its status as the row says it ("Working 12m": the
+    /// its row's state as an icon, at its task's station, and its status as the row says it ("Working 12m": the
     /// turn's time only while it works); and how many agents wait for the
     /// user.
     static func commandBarContent(space: WorkspaceProfile, task: WorkspaceInfo?, waitingCount: Int) -> CommandBarView.Content {

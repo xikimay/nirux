@@ -213,7 +213,7 @@ final class SidebarWorkspaceCardRenderer {
         if mark == .checksRunning { return buildChecksRing(center: center) }
         // Only the row's own mark waits for the user: a compact row's is
         // merged or grey. The status line says it to VoiceOver.
-        let icon = mark == .needsYou ? workspace.stateIcon(summary: layout.summary) : StateIcon(mark: mark)
+        let icon = mark == .needsYou ? workspace.stateIcon(summary: layout.summary) : StateIcon(mark: mark, station: workspace.station)
         let host = Self.stateIconView(icon, size: Metrics.stateIconSize, center: center)
         append(host)
         // Drawn once, when the checks pass in front of the user.

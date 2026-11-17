@@ -159,7 +159,7 @@ extension NiruxShellView {
     }
 
     /// The queue shown: running here, running elsewhere, or the last one.
-    private func queueState(of controller: MergeQueueController) -> ProjectBoard.QueueState {
+    func queueState(of controller: MergeQueueController) -> ProjectBoard.QueueState {
         var state = ProjectBoard.QueueState(isDryRun: controller.isDryRun, dryRunReason: controller.dryRunReason)
         state.selection = controller.selection(for: controller.queueRepository)
         state.isConfirming = mergeQueueConfirmation != nil

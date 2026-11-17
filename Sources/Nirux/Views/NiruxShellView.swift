@@ -200,6 +200,9 @@ final class NiruxShellView: NSView {
     var boardEntriesBySpace: [String: [BoardConfigStore.Entry]] = [:]
     /// The spaces whose board.json is being read for the rows.
     var boardEntriesReading: Set<String> = []
+    /// Each task's Board station by workspace id, every space's, from the
+    /// last sidebar pass (`refreshTaskStations`).
+    var taskStations: [String: BoardStages.Station] = [:]
     /// The Board tab reading board.json and the checkouts: one read at a
     /// time.
     var isReadingBoardSettings = false

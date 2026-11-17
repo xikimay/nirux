@@ -372,8 +372,8 @@ struct WorkspaceInfo: Hashable {
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
     var reviewBadges: ReviewBadges? = nil
-    /// The Board's station of its task (`NiruxShellView.station(of:)`):
-    /// its icon's ring fills up to it.
+    /// Its task's Board station (`NiruxShellView.taskStations`): its
+    /// icon's ring fills up to it.
     var station: BoardStages.Station?
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?

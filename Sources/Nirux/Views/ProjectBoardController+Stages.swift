@@ -27,6 +27,8 @@ extension ProjectBoardController {
         var readings: [String: BoardStages.TaskReading] = [:]
         /// Each section's merge queue, by section id.
         var queues: [String: ProjectBoard.QueueState] = [:]
+        /// Each task's station (`NiruxShellView.taskStations`): its line's.
+        var stations: [String: BoardStages.Station] = [:]
         /// The queues that run, here or in another Nirux
         /// (`NiruxShellView.projectBoardQueues`): a section's, or one left
         /// on a repository no section has.
@@ -187,7 +189,7 @@ extension ProjectBoardController {
             title: (section.anchor == nil ? reads.flatMap(Self.savedName) : nil) ?? displayNames[section.id] ?? section.name ?? "Repository",
             detail: reads?.name,
             status: stagesStatus(section, now: now),
-            lines: BoardStages.section(facts, order: inputs.order, now: now.timeIntervalSince1970)
+            lines: BoardStages.section(facts, order: inputs.order, stations: inputs.stations, now: now.timeIntervalSince1970)
         )
         if readOnly { shown.lines.merged.removeAll { $0.lineID == nil } }
         for line in (shown.lines.units + shown.lines.withoutTask).flatMap(\.lines) {

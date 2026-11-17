@@ -10,6 +10,8 @@ extension NiruxShellView {
         let now = Date().timeIntervalSince1970
         let visibleIndices = visibleWorkspaceIndices
         let parents = workspaceStore.activeParents(in: activeProfileID)
+        // Before anything draws: every surface shows these.
+        refreshTaskStations()
         let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
         followReviewPasses(snapshot: snapshot)
@@ -91,15 +93,14 @@ extension NiruxShellView {
         }
         sidebar.catchUp = sidebarCatchUp(infos: infos)
         sidebar.navigation = sidebarNavigation
-        let rows = infos.map(withStation)
-        sidebar.update(profiles: profileInfos, workspaces: rows)
+        sidebar.update(profiles: profileInfos, workspaces: infos)
         // The requests: what ⌘J would visit, through ⌘J's own queue, that
         // waits for the user's answer; the command bar counts them.
         let requested = Self.requestedAgents(
             in: waitingQueue(snapshot: snapshot, now: now), onScreen: activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
         )
         requestsState.requests = waitingRequests(requested, approvalHolds: approvalHolds, foregroundProcesses: foregroundProcesses)
-        updateCommandBar(task: rows.first { $0.index == activeWSIndex }, waitingCount: requestsState.requests.count)
+        updateCommandBar(task: infos.first { $0.index == activeWSIndex }, waitingCount: requestsState.requests.count)
         refreshRequestPanels()
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
@@ -109,85 +110,10 @@ extension NiruxShellView {
         refreshProjectBoards(snapshot: snapshot, now: now, pass: SidebarPassReadings(
             infos: infos, foregroundProcesses: foregroundProcesses, approvalHolds: approvalHolds, missionQuestions: missionQuestions
         ))
-        // A Board drawn just now with another station: the rows follow in
-        // this same pass, never two stations for one task.
-        let followingBoards = infos.map(withStation)
-        if followingBoards != rows { sidebar.update(profiles: profileInfos, workspaces: followingBoards) }
     }
 
     /// `info` with its task's station: the one its space's Board showed,
     /// else read the Board's way from what the row holds.
-    func withStation(_ info: WorkspaceInfo) -> WorkspaceInfo {
-        var info = info
-        if let shown = projectBoardLocation(projectID: info.profileID)?.board.stations[info.id] {
-            info.station = shown
-        } else if let entries = boardEntries(of: info.profileID) {
-            let reviewsInFlight = workspaces.first { $0.id == info.id }.map { Set($0.reviewsRunning.map(\.pass)) } ?? []
-            info.station = Self.station(
-                of: info, required: Self.requiredChecks(of: info.prInfo, in: entries), reviewsInFlight: reviewsInFlight
-            )
-        } else {
-            // Its space's checks not read yet: no station known.
-            info.station = nil
-        }
-        return info
-    }
-
-    /// `spaceID`'s board.json entries; nil while they are read, once, off
-    /// the main thread (its Board and Board Settings keep them current).
-    func boardEntries(of spaceID: String) -> [BoardConfigStore.Entry]? {
-        if let entries = boardEntriesBySpace[spaceID] { return entries }
-        guard let store = BoardConfigStore(spaceID: spaceID) else { return [] }
-        guard boardEntriesReading.insert(spaceID).inserted else { return nil }
-        ProjectBoardController.readOffMain({ store.load() }, then: { [weak self] loaded in
-            guard let self else { return }
-            self.boardEntriesReading.remove(spaceID)
-            // Its Board may have read the file meanwhile.
-            if self.boardEntriesBySpace[spaceID] == nil {
-                self.boardEntriesBySpace[spaceID] = loaded.status == .unreadable ? [] : loaded.entries
-            }
-        })
-        return nil
-    }
-
-    /// The checks a pull request must pass on its Board: the config naming
-    /// its repository, an anchor's before schema 1's (`BoardSections`
-    /// gives the latter only to an anchor without its own). None named: the
-    /// Board's section has no config, every check counts.
-    static func requiredChecks(of pullRequest: PRInfo?, in entries: [BoardConfigStore.Entry]) -> [String] {
-        guard let path = pullRequest.flatMap({ URL(string: $0.url) }).map(\.pathComponents), path.count >= 3,
-              let repository = GitHubRepository(ownerAndName: "\(path[1])/\(path[2])")
-        else { return [] }
-        let naming = entries.filter { $0.config.gitHubRepository == repository }
-        return (naming.first { $0.slot != .legacy } ?? naming.first)?.config.requiredChecks ?? []
-    }
-
-    /// A task's station from its row alone, through the Board's own rule
-    /// (`BoardStages.station(of:rules:)`), with no read of its own: the pull
-    /// request as the row knows it, the space's `required` checks, the
-    /// Board's review rules, no queue (a pull request ready shows at
-    /// Merge). Nil without a repository: no stations.
-    static func station(
-        of info: WorkspaceInfo, required: [String], reviewsInFlight: Set<ReviewPass>
-    ) -> BoardStages.Station? {
-        guard info.gitBranch != nil else { return nil }
-        var facts = BoardStages.Facts(id: info.id, title: info.title)
-        let reading = BoardStages.TaskReading(info, summary: nil, gitRoot: nil, reviewsInFlight: reviewsInFlight)
-        facts.activity = reading.activity
-        // Only the runs recorded on its branch count, as on its Board's line.
-        facts.reviews = reading.reviews.map { ReviewBadges(runs: $0.runs, head: $0.head, branch: info.gitBranch) }
-        facts.reviewsInFlight = reading.reviewsInFlight
-        facts.pullRequest = info.prInfo.map { pr in
-            let isMerged = pr.state == "MERGED"
-            var pullRequest = BoardStages.PullRequest(number: pr.number, base: "")
-            pullRequest.isMerged = isMerged
-            pullRequest.isDraft = pr.isDraft
-            pullRequest.checks = isMerged ? .passed : BoardStages.checks(latest: ProjectBoard.latest(pr.checks), required: required)
-            return pullRequest
-        }
-        return BoardStages.station(of: facts, rules: BoardStages.Rules())
-    }
-
     /// A running pass ends once the process that sent its event exited (a
     /// Ctrl-Z leaves it there), it named none, or its column closed. An
     /// empty process table says nothing.
@@ -269,6 +195,7 @@ extension NiruxShellView {
                       lastSummary: turnStatusEnabled || !workspace.lastSummaryIsStatus ? workspace.lastSummary : nil,
                       lastActivityAt: workspace.lastActivityAt,
                       reviewBadges: workspace.reviewBadges,
+                      station: taskStations[workspace.id],
                       mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                       isLead: workspace.isLead,
                       parentTitle: parentTitle,
