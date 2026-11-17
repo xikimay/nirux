@@ -106,7 +106,7 @@ final class EditorSearchPanel: NSObject {
         fieldRow.addSubview(PaletteIconView(.symbol("magnifyingglass"), frame: NSRect(x: 14, y: 10, width: 24, height: 24)))
 
         let field = NSTextField()
-        field.font = .systemFont(ofSize: 15)
+        field.font = Theme.Font.input
         field.textColor = .white
         field.backgroundColor = .clear
         field.isBezeled = false

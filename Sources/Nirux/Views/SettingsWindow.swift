@@ -39,7 +39,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     static let sidebarWidth: CGFloat = 200
     /// The panes that put the keyboard in a field of theirs once loaded.
     static let panesTakingKeyboard: [Selection] = [.space(.memory), .space(.board)]
-    static let firstAppPane = "general"
 
     /// Nirux's panes, built each time the window opens (the app).
     var makeAppPanes: (() -> [AppPane])?

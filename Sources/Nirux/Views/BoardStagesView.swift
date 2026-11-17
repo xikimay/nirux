@@ -312,7 +312,7 @@ final class BoardStagesView: NSView {
         appearance = Theme.appearance
 
         spaceDot.wantsLayer = true
-        spaceDot.layer?.cornerRadius = 3
+        spaceDot.layer?.cornerRadius = Theme.Radius.spaceMark
         nameLabel.font = Theme.Font.display
         nameLabel.textColor = Theme.Color.textPrimary
         for label in [summaryLabel, leadLabel] {
@@ -1418,13 +1418,13 @@ final class BoardStagesSectionHeaderView: NSView {
             label.allowsExpansionToolTips = true
         }
         // A badge, not a colour: amber is an agent waiting for the user.
-        dryRunBadge.font = .systemFont(ofSize: 9, weight: .bold)
+        dryRunBadge.font = Theme.Font.label
         dryRunBadge.textColor = Theme.Color.textSecondary
         dryRunBadge.alignment = .center
         dryRunBadge.wantsLayer = true
         dryRunBadge.layer?.borderWidth = 1
         dryRunBadge.layer?.borderColor = Theme.Color.textTertiary.cgColor
-        dryRunBadge.layer?.cornerRadius = 3
+        dryRunBadge.layer?.cornerRadius = Theme.Radius.chip
         for button in [startButton, stopButton] {
             button.bezelStyle = .rounded
             button.controlSize = .small

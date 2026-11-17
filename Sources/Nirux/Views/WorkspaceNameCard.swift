@@ -136,7 +136,6 @@ final class WorkspaceNameCard: NSView {
     var litDot: Int? { positionDots.firstIndex { $0.layer?.backgroundColor == Theme.Color.accent.cgColor } }
     var name: String { nameLabel.stringValue }
     var place: String { placeLabel.isHidden ? "" : placeLabel.stringValue }
-    var stateColor: CGColor? { stateView.layer?.backgroundColor }
 
     /// Its dots fit in `width`, else it says the place in words.
     private static func dotsFit(_ count: Int, in width: CGFloat) -> Bool {
