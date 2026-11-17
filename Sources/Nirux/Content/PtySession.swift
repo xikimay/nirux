@@ -157,6 +157,21 @@ final class ProcessSnapshot {
     /// gating a destructive action must not read that as "no agent".
     var isEmpty: Bool { commMap.isEmpty }
 
+    /// `rootPID` and its descendants, with their names: what its terminal
+    /// runs, `limit` of them at most.
+    func tree(of rootPID: pid_t, limit: Int = 256) -> [(process: ProcessInstance, name: String)] {
+        var pending = [rootPID]
+        var found: [(process: ProcessInstance, name: String)] = []
+        var next = 0
+        while next < pending.count, found.count < limit {
+            let pid = pending[next]
+            next += 1
+            if let instance = instanceMap[pid] { found.append((instance, commMap[pid] ?? "")) }
+            pending.append(contentsOf: childrenMap[pid] ?? [])
+        }
+        return found
+    }
+
     /// First process name among `rootPID`'s descendants (children,
     /// grandchildren, …) that `matches`. Unlike `foregroundProcess`, this
     /// also sees stopped (^Z) and background jobs and processes under a
@@ -369,8 +384,8 @@ final class PtySession: @unchecked Sendable {
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
-    /// A turn end waits for its verdict (see `AgentStatusMachine.awaitsAnyVerdict`).
-    var awaitsTurnVerdict: Bool { state.machine.awaitsAnyVerdict }
+    /// See `AgentStatusMachine.hold`.
+    var agentHold: AgentHold? { state.machine.hold }
 
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).
@@ -1163,6 +1178,12 @@ final class PtySession: @unchecked Sendable {
         }
 
         return paths.joined(separator: ":")
+    }
+
+    /// The shell hangs up, as when its window closes: it hangs its jobs up,
+    /// then exits. (Its last release would SIGTERM it, whenever that comes.)
+    func hangUp() {
+        if state.childPid > 0 { kill(state.childPid, SIGHUP) }
     }
 
     deinit {
