@@ -447,6 +447,12 @@ final class MissionTellTests: XCTestCase {
             idle.noteKeystroke(now: at(30), keys: key)
             XCTAssertEqual(refusal(idle), .draft, "\(name) at an idle prompt")
         }
+        var background = idleMachine()
+        _ = background.apply(AgentHookEvent(
+            kind: .claude, name: .preToolUse, sessionID: "lead", toolName: "Bash", agentID: "sub", timestamp: t0 + 25
+        ), isUserFocused: false)
+        background.noteKeystroke(now: at(30), keys: enter)
+        XCTAssertTrue(background.hasDraft, "a background subagent at work after the Stop: the prompt is idle")
 
         var approval = idleMachine()
         _ = approval.apply(hook(.userPromptSubmit, at: 10), isUserFocused: false)

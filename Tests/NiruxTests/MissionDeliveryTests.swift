@@ -457,6 +457,9 @@ final class MissionDeliveryTests: XCTestCase {
             $0.stringValue == waiting.line
         })
         XCTAssertEqual(label.frame.height, 2 * SidebarExpandedMetrics.actionLineHeight, "its reason wraps to a second line")
+        XCTAssertEqual(SidebarExpandedMetrics.height(
+            of: .waitingMessages(columnIndex: 0, waiting), width: label.frame.width, textWidth: label.frame.width
+        ), label.frame.height, "and the card counts it")
         XCTAssertEqual(label.toolTip, waiting.tooltip)
         let frame = try XCTUnwrap(label.superview).convert(label.frame, to: sidebar.contentDocumentView)
         XCTAssertTrue(sidebar.hitAreas.contains { area in
