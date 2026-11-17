@@ -232,7 +232,9 @@ extension NiruxShellView {
         let programs = columns.compactMap { column -> String? in
             guard let pty = column.pty, pty.runningAgentName(snapshot: snapshot) == nil,
                   let name = pty.foregroundProcess(snapshot: snapshot)?.name else { return nil }
-            return Self.interactiveShells.contains(name.hasPrefix("-") ? String(name.dropFirst()) : name) ? nil : name
+            let program = name.hasPrefix("-") ? String(name.dropFirst()) : name
+            // A terminal just opened: its fork bears this app's name until its shell starts.
+            return Self.interactiveShells.contains(program) || program == ProcessInfo.processInfo.processName ? nil : name
         }
         if let program = programs.first {
             return "“\(title)” runs \(program) in a terminal: ask the user to close it."
