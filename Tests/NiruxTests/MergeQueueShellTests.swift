@@ -65,15 +65,6 @@ final class MergeQueueShellTests: XCTestCase {
         return queue
     }
 
-    @MainActor
-    private func waitUntil(_ what: String, timeout: TimeInterval = 10, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
-        XCTAssertTrue(condition(), "timed out: \(what)")
-    }
-
     // MARK: - Status bar
 
     @MainActor
@@ -305,7 +296,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertEqual(shell.projectBoardLocations.map(\.board.projectID), [other.id])
         // It reads the new space now (let that read land within the test), and asks for its settings, as a Board
         // opened there.
-        waitUntil("Gadgets' board.json is read") { board.loaded != nil }
+        waitUntil("Gadgets' board.json is read", timeout: 10) { board.loaded != nil }
         XCTAssertNotNil(shell.spaceSettings)
         shell.spaceSettings?.close()
     }
@@ -392,7 +383,7 @@ final class MergeQueueShellTests: XCTestCase {
 
         XCTAssertEqual(shell.mergeQueueTerminateReply { replies.append($0) }, .terminateLater)
         XCTAssertTrue(question.asked.isEmpty, "asked after AppKit hears .terminateLater")
-        waitUntil("the question") { !question.asked.isEmpty }
+        waitUntil("the question", timeout: 10) { !question.asked.isEmpty }
         XCTAssertTrue(question.asked[0].hasPrefix("A dry-run merge queue is running\nacme/widgets: "), question.asked[0])
         XCTAssertEqual(shell.mergeQueueTerminateReply { _ in XCTFail("a second quit waits for the first") }, .terminateCancel)
 
@@ -408,18 +399,18 @@ final class MergeQueueShellTests: XCTestCase {
         let shell = makeShell(client)
         let question = recordQuitQuestions(shell)
         let queue = start(shell)
-        waitUntil("the merge is sent") { client.isHoldingMutation }
+        waitUntil("the merge is sent", timeout: 10) { client.isHoldingMutation }
         var replies: [Bool] = []
 
         XCTAssertEqual(shell.mergeQueueTerminateReply { replies.append($0) }, .terminateLater)
-        waitUntil("the question") { question.answer != nil }
+        waitUntil("the question", timeout: 10) { question.answer != nil }
         XCTAssertTrue(question.asked[0].hasPrefix("A merge queue is running\n"), question.asked[0])
         try XCTUnwrap(question.answer)(true)
         XCTAssertEqual(queue.engine?.phase, .stopping, "a merge can't be taken back: its answer is awaited")
         XCTAssertEqual(replies, [], "Nirux doesn't quit before the merge answers")
 
         client.release()
-        waitUntil("the queue stops once the merge answered") { !queue.isRunning }
+        waitUntil("the queue stops once the merge answered", timeout: 10) { !queue.isRunning }
         XCTAssertEqual(replies, [true])
         guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("not stopped") }
         XCTAssertTrue(reason.message.contains("Check #52 on GitHub: it may be merged."), reason.message)
@@ -507,7 +498,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertTrue(question.asked.isEmpty, "the quit asks, not the close button")
         var replies: [Bool] = []
         XCTAssertEqual(shell.mergeQueueTerminateReply { replies.append($0) }, .terminateLater)
-        waitUntil("the question") { question.answer != nil }
+        waitUntil("the question", timeout: 10) { question.answer != nil }
         try XCTUnwrap(question.answer)(true)
         XCTAssertFalse(queue.isRunning)
         XCTAssertEqual(replies, [true])

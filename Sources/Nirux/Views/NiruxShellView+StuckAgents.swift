@@ -167,7 +167,8 @@ extension NiruxShellView {
         let command = Self.claudeCommand(
             resume: exit.sessionID.map { .session($0) } ?? .picker,
             mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default,
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+            settingsFile: claudeSpaceSettingsFile(for: workspace)
         )
         if let sessionID = exit.sessionID {
             column.prepareClaudeResume(sessionID: sessionID)

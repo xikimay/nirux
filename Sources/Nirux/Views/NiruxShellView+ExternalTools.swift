@@ -25,6 +25,8 @@ extension NiruxShellView {
     /// `briefFile` is the space brief (see `SpaceBrief`), appended to the
     /// system prompt on every launch: a resumed conversation keeps the prompt
     /// it recorded until it compacts, then uses this one.
+    /// `settingsFile` is the space's Claude settings (see
+    /// `ClaudeSpaceSettings`), merged over the user's own.
     /// `niruxExecutable` serves the agents' tools: the project's history
     /// search (see `NiruxMCPServer`). Every launch gets them by default.
     /// `handoverPrompt` is appended as a single-quoted positional argument
@@ -38,6 +40,7 @@ extension NiruxShellView {
         mode: ClaudeLaunchMode,
         sessionName: String? = nil,
         briefFile: String? = nil,
+        settingsFile: String? = nil,
         niruxExecutable: String? = NiruxShellView.niruxExecutable,
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
@@ -57,6 +60,9 @@ extension NiruxShellView {
         }
         if let briefFile {
             parts.append(contentsOf: Self.claudeAppendSystemPromptArguments(briefFile: briefFile, shell: shell))
+        }
+        if let settingsFile {
+            parts.append(Self.shellQuotedArgument("--settings=" + settingsFile))
         }
         if let niruxExecutable {
             parts.append(contentsOf: NiruxMCPServer.claudeArguments(executable: niruxExecutable).map(Self.shellQuotedArgument))
@@ -131,6 +137,38 @@ extension NiruxShellView {
         return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).claudeMode(settings: currentClaudeLaunchMode())
     }
 
+    /// The Claude settings file of each space `workspaces` launch in,
+    /// written once for the batch (see `ClaudeSpaceSettings`), by space id;
+    /// none for a space that hands none, nor, like its other defaults, for
+    /// a workspace opened from outside Nirux. A space whose file can't be
+    /// written says so once, and its launches pass none.
+    func claudeSpaceSettingsFiles(for workspaces: [WorkspaceState]) -> [String: String] {
+        var userEnvironment: [String]?
+        if case .parsed(let settings, _) = AgentHookInstaller.readClaudeSettings(home: FileManager.default.homeDirectoryForCurrentUser) {
+            userEnvironment = ClaudeSpaceSettings.userEnvironment(settings)
+        }
+        var files: [String: String] = [:]
+        for spaceID in Set(workspaces.filter { !$0.startedOutsideNirux }.map(\.profileID)) {
+            do {
+                files[spaceID] = try ClaudeSpaceSettings.prepare(
+                    spaceID: spaceID, defaults: SpaceDefaultsStore.defaults(forSpace: spaceID),
+                    anchors: profiles.first { $0.id == spaceID }?.anchors ?? [], userEnvironment: userEnvironment
+                )
+            } catch {
+                NiruxDebugLog.log("ClaudeSpaceSettings: could not write the file of space \(spaceID): \(error)")
+                showToast("Claude starts without the space’s safety settings: Nirux couldn’t write them (\(error.localizedDescription))", tone: .error)
+            }
+        }
+        return files
+    }
+
+    /// The file one launch in `workspace` passes: `prepared` for a batch
+    /// (`claudeSpaceSettingsFiles`), else written now.
+    func claudeSpaceSettingsFile(for workspace: WorkspaceState, prepared: [String: String]? = nil) -> String? {
+        guard !workspace.startedOutsideNirux else { return nil }
+        return (prepared ?? claudeSpaceSettingsFiles(for: [workspace]))[workspace.profileID]
+    }
+
     static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
         guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
         return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
@@ -140,7 +178,8 @@ extension NiruxShellView {
         guard let workspace = activeWorkspace else { return }
         let cmd = Self.claudeCommand(
             mode: Self.claudeLaunchMode(for: workspace),
-            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
+            settingsFile: claudeSpaceSettingsFile(for: workspace)
         )
         workspace.addColumn()
         relayout(animated: false)

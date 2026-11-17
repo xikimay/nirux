@@ -18,6 +18,7 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 | --- | --- |
 | General | name, color, repositories and folders, the default one, each repository's setup script |
 | Defaults | the agent new tasks preselect, the Claude Code and Codex modes, environment variables for new shells |
+| Safety | what the space's Claude Code sessions are refused or trusted with ([below](#safety)) |
 | Lead | the space's [Lead](#the-lead) |
 | Brief | rules given to every agent the space starts |
 | Memory | what agents know about the repository ([Space memory](#space-memory)) |
@@ -31,6 +32,16 @@ Environment values are literal (`$PATH` isn't expanded) and names starting with 
 A repository's setup script runs once in each new worktree made for a task, before the agent starts, with `/bin/sh -e` and no input. A worktree made by **Existing Branch…** runs none. If the script fails, Nirux notifies you and the agent still starts.
 
 Deleting a space deletes its defaults and setup scripts but keeps its brief.
+
+#### Safety
+
+Each Claude Code session the space starts gets a settings file with `--settings`. Claude Code adds it to your own settings, which Nirux leaves as they are. Each part has its own switch:
+
+- **Trust this space's repositories in auto mode** (on): auto mode's `autoMode.environment` names each repository of the space, with where its `origin` pushes (host and whole path, its `pushurl` when set), as yours. Claude Code's own entries stay, unless your settings already list an environment of your own.
+- **Refuse what can't be undone** (on): deny rules for the common forms, which hold in every permission mode, bypass included, also inside a longer command line such as `cd app && git reset --hard`, and with options before the git command (`git -C app …`). They cover reading or editing `.env` and `.env.*` files anywhere (`.env.example` too) and `~/.ssh`; `git push --force`, `-f` or `+branch` (`--force-with-lease` too), `--delete` or `-d`, `--mirror`; `git reset --hard`; `git checkout` or `git restore` of the whole folder (`.` or `./`, `git restore --staged .` too); `git checkout -f`, `git switch -f` or `--discard-changes`; every `git clean` with an option (a dry run `git clean -n` too); `git stash drop` and `clear`; and `git worktree remove`. git's shortened options (`--forc`) and grouped flags (`-uf`) get past them; in auto mode, its own safety check is still behind them.
+- **Run commands in Claude Code's sandbox** (off): limits network access and writes outside the working folder, so builds that fetch packages or write caches may fail.
+
+A change reaches sessions as they start: a running session keeps the file it read. With every switch off, new sessions get no file, and the one earlier sessions name holds `{}`, so that restarting their column still works. A workspace opened from outside Nirux (a `nirux://` request) gets none of it, like the space's other defaults. When `defaults.json` can't be read, each switch takes its safe side (no trust, deny rules and sandbox on), and the tab says why. Codex, Gemini CLI and OpenCode don't read this file.
 
 ## Starting a task
 

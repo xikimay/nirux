@@ -162,15 +162,7 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
     }
 
     private func waitForClosesToEnd(in shell: NiruxShellView) {
-        waitUntil { !shell.workspaces.contains(where: \.isClosing) }
-        XCTAssertFalse(shell.workspaces.contains(where: \.isClosing), "a close never ended")
-    }
-
-    private func waitUntil(_ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(30)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        }
+        waitUntil("every close to end") { !shell.workspaces.contains(where: \.isClosing) }
     }
 
     func testCommandWAndSidebarCloseSelectTheNeighbourInTheSidebar() throws {
@@ -269,8 +261,7 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
 
             // The clean-up saves once they're gone: it must land before
             // NIRUX_STATE_DIR is restored, or it would write the real state.
-            waitUntil { !savedClosedWorkspace() }
-            XCTAssertFalse(savedClosedWorkspace(), "the clean-up's save never landed")
+            waitUntil("the clean-up's save to land") { !savedClosedWorkspace() }
         }
     }
 }

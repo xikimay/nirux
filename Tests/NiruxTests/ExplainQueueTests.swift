@@ -19,11 +19,11 @@ final class ExplainQueueTests: XCTestCase {
             return 2
         }, completion: { order.append("second done \($0.map(String.init) ?? "nil")") })
 
-        waitUntil { order.values == ["first runs"] }
+        waitUntil("only “first runs” (saw \(order.values))", timeout: 10) { order.values == ["first runs"] }
         XCTAssertEqual(queue.waitingCount, 1)
         XCTAssertFalse(second.isRunning)
         gate.signal()
-        waitUntil { order.values.count == 4 }
+        waitUntil("4 steps (saw \(order.values))", timeout: 10) { order.values.count == 4 }
         XCTAssertEqual(order.values, ["first runs", "first done", "second runs", "second done 2"])
     }
 
@@ -43,13 +43,13 @@ final class ExplainQueueTests: XCTestCase {
             return "ran"
         }, completion: { order.append("second \($0 ?? "nil")") })
 
-        waitUntil { order.values == ["first runs"] }
+        waitUntil("only “first runs” (saw \(order.values))", timeout: 10) { order.values == ["first runs"] }
         second.cancel()
         XCTAssertEqual(order.values, ["first runs", "second nil"])
         XCTAssertEqual(queue.waitingCount, 0)
         XCTAssertTrue(first.isRunning)
         first.cancel()
-        waitUntil { order.values.count == 3 }
+        waitUntil("3 steps (saw \(order.values))", timeout: 10) { order.values.count == 3 }
         XCTAssertEqual(order.values, ["first runs", "second nil", "first stopped"])
     }
 
@@ -70,7 +70,7 @@ final class ExplainQueueTests: XCTestCase {
         })
         queue.submit({ _ in "b" }, onStart: { order.append("b starts") }, completion: { _ in order.append("b done") })
         gate.signal()
-        waitUntil { order.values.count == 6 }
+        waitUntil("6 steps (saw \(order.values))", timeout: 10) { order.values.count == 6 }
         XCTAssertEqual(order.values, ["a done begins", "a done ends", "b starts", "b done", "c starts", "c done"])
     }
 
@@ -84,9 +84,9 @@ final class ExplainQueueTests: XCTestCase {
             return "stopped"
         }, onStart: { order.append("first starts") }, completion: { order.append("first \($0 ?? "nil")") })
         queue.submit({ _ in "ran" }, completion: { order.append("second \($0 ?? "nil")") })
-        waitUntil { order.values == ["first starts"] }
+        waitUntil("only “first starts” (saw \(order.values))", timeout: 10) { order.values == ["first starts"] }
         queue.cancelAll()
-        waitUntil { order.values.count == 3 }
+        waitUntil("3 steps (saw \(order.values))", timeout: 10) { order.values.count == 3 }
         XCTAssertEqual(order.values, ["first starts", "second nil", "first stopped"])
     }
 
@@ -103,7 +103,7 @@ final class ExplainQueueTests: XCTestCase {
             order.append("returned")
             return 1
         }, onStart: { order.append("starts") }, completion: { _ in })
-        waitUntil { order.values == ["starts"] }
+        waitUntil("only “starts” (saw \(order.values))", timeout: 10) { order.values == ["starts"] }
         queue.cancelAll(waitingUpTo: 5)
         XCTAssertEqual(order.values, ["starts", "returned"])
     }
@@ -126,14 +126,14 @@ final class ExplainQueueTests: XCTestCase {
             order.append("b runs")
             return "ran"
         }, completion: { order.append("b \($0 ?? "nil")") })
-        waitUntil { order.values == ["a runs"] }
+        waitUntil("only “a runs” (saw \(order.values))", timeout: 10) { order.values == ["a runs"] }
 
         queue.stop(worktree: "/a") { order.append("clean up") }
         XCTAssertEqual(order.values, ["a runs", "a2 nil"])
         XCTAssertEqual(queue.waitingCount, 1)
         queue.submit(worktree: "/a", { _ in "ran" }, completion: { order.append("a3 \($0 ?? "nil")") })
         XCTAssertEqual(order.values, ["a runs", "a2 nil", "a3 nil"])
-        waitUntil { order.values.count == 7 }
+        waitUntil("7 steps (saw \(order.values))", timeout: 10) { order.values.count == 7 }
         XCTAssertEqual(order.values, ["a runs", "a2 nil", "a3 nil", "a stopped", "clean up", "b runs", "b ran"])
 
         // Nothing under way for it: at once.
@@ -145,7 +145,7 @@ final class ExplainQueueTests: XCTestCase {
         XCTAssertFalse(order.values.contains("a4 ran"), "still stopped once")
         queue.resume(worktree: "/a")
         queue.submit(worktree: "/a", { _ in "ran" }, completion: { order.append("a5 \($0 ?? "nil")") })
-        waitUntil { order.values.contains("a5 ran") }
+        waitUntil("“a5 ran” (saw \(order.values))", timeout: 10) { order.values.contains("a5 ran") }
         XCTAssertTrue(order.values.contains("a4 nil"))
     }
 
@@ -162,26 +162,19 @@ final class ExplainQueueTests: XCTestCase {
             order.append("run returned")
             return 0
         }, onStart: { order.append("runs") }, completion: { _ in })
-        waitUntil { order.values == ["runs"] }
+        waitUntil("only “runs” (saw \(order.values))", timeout: 10) { order.values == ["runs"] }
         var resume: (@MainActor () -> Void)?
         NiruxShellView.stoppingExplains(in: "/w/", queue: queue) { letGo in
             order.append("clean up")
             resume = letGo
         }
-        waitUntil { order.values.count == 3 }
+        waitUntil("3 steps (saw \(order.values))", timeout: 10) { order.values.count == 3 }
         XCTAssertEqual(order.values, ["runs", "run returned", "clean up"])
         queue.submit(worktree: ExplainQueue.worktreeKey("/w"), { _ in 1 }, completion: { order.append("refused \($0 == nil)") })
         XCTAssertEqual(order.values.last, "refused true")
         resume?()
         queue.submit(worktree: ExplainQueue.worktreeKey("/w"), { _ in 1 }, completion: { order.append("ran \($0 ?? 0)") })
-        waitUntil { order.values.last == "ran 1" }
-    }
-
-    @MainActor
-    private func waitUntil(_ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(10)
-        while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
-        XCTAssertTrue(condition())
+        waitUntil("“ran 1” last (saw \(order.values))", timeout: 10) { order.values.last == "ran 1" }
     }
 }
 

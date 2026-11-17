@@ -69,9 +69,9 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         try withBoard(world: world) { shell, board in
             // A click on a line's Merge station, Add to Queue in another's menu: the list goes by number.
             try BoardStagesClicks.pressMerge(try line("feat/api", in: board))
-            try waitUntil("#14 is queued") { (BoardStagesClicks.shownLine("feat/api", in: board)?.line.offer?.change) == .remove }
+            waitUntil("#14 is queued") { (BoardStagesClicks.shownLine("feat/api", in: board)?.line.offer?.change) == .remove }
             try BoardStagesClicks.choose("Add to Queue", in: try line("login", in: board).contextMenu())
-            try waitUntil("#12 is queued") { (BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change) == .remove }
+            waitUntil("#12 is queued") { (BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change) == .remove }
             let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
             XCTAssertEqual(queue.selection, [12, 14])
             XCTAssertEqual(try line("login", in: board).line.tooltips.stations[.merge], "Remove from Queue")
@@ -86,7 +86,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             try BoardStagesClicks.click(header.startButton)
             let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
             XCTAssertFalse(header.startButton.isEnabled, "one sheet at a time")
-            try waitUntil("the sheet read GitHub") { sheet.confirmation != nil }
+            waitUntil("the sheet read GitHub") { sheet.confirmation != nil }
             let confirmation = try XCTUnwrap(sheet.confirmation)
             XCTAssertEqual(confirmation.refusals, [])
             XCTAssertEqual(confirmation.entries.map(\.number), [12, 14])
@@ -107,7 +107,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertNil(shell.mergeQueueConfirmation, "started: the sheet is gone")
 
             XCTAssertEqual(queue.engine?.entries.map(\.number), [14, 12])
-            try waitUntil("the dry run stops at its first mutation") { !queue.isRunning }
+            waitUntil("the dry run stops at its first mutation") { !queue.isRunning }
             guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("not stopped") }
             XCTAssertEqual(reason.kind, .dryRun)
             XCTAssertTrue(reason.message.contains("gh pr merge 14"), reason.message)
@@ -115,7 +115,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertEqual(world.forbiddenCalls, [])
             XCTAssertFalse(world.allCalls.contains { $0.first == "pr" && $0.dropFirst().first == "merge" })
 
-            try waitUntil("the board shows where it stopped") { header.queueLabel.stringValue.hasPrefix("Stopped: Dry run") }
+            waitUntil("the board shows where it stopped") { header.queueLabel.stringValue.hasPrefix("Stopped: Dry run") }
             XCTAssertEqual(queue.selection, [14, 12], "both still in the next Start's list, in the user's order")
             XCTAssertEqual(header.startButton.title, "Start Dry Run… · 2")
             let notice = try XCTUnwrap(shell.statusBar.queueNotice)
@@ -129,19 +129,19 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b], testConclusion: nil)
         try withBoard(world: world) { shell, board in
             try BoardStagesClicks.pressMerge(try line("login", in: board))
-            try waitUntil("#12 is queued") { (BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change) == .remove }
+            waitUntil("#12 is queued") { (BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change) == .remove }
             let header = try self.header(of: board)
             try BoardStagesClicks.click(header.startButton)
             let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
-            try waitUntil("the sheet read GitHub") { sheet.startButton?.isEnabled == true }
+            waitUntil("the sheet read GitHub") { sheet.startButton?.isEnabled == true }
             try click(try XCTUnwrap(sheet.startButton))
 
             let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
-            try waitUntil("the queue waits for the checks") {
+            waitUntil("the queue waits for the checks") {
                 if case .waitingForChecks? = queue.engine?.currentEntry?.step { return true }
                 return false
             }
-            try waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Waiting for checks" }
+            waitUntil("the line says so") { (BoardStagesClicks.shownLine("login", in: board)?.line.phrase.text) == "Waiting for checks" }
             BoardStagesClicks.layOut(header)
             XCTAssertTrue(header.startButton.isHidden)
             XCTAssertFalse(header.stopButton.isHidden, "Stop is in reach while it runs")
@@ -167,7 +167,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         )
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
         try withBoard(world: world, boardClient: client, isDryRun: false) { shell, board in
-            try waitUntil("#10 reads merged") {
+            waitUntil("#10 reads merged") {
                 (BoardStagesClicks.shownLine("feat/api", in: board)?.line.phrase.link) == .retarget(number: 14, onto: "main")
             }
             XCTAssertEqual(try line("feat/api", in: board).line.phrase.text, "Base #10 merged · Retarget to main")
@@ -175,16 +175,16 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             client.retargetFailure = .failed("HTTP 422: Validation Failed")
             try BoardStagesClicks.pressLink(try line("feat/api", in: board))
             let header = try self.header(of: board)
-            try waitUntil("the refusal shows") { header.pill.status?.toolTip?.contains("Retarget #14: gh: HTTP 422") == true }
+            waitUntil("the refusal shows") { header.pill.status?.toolTip?.contains("Retarget #14: gh: HTTP 422") == true }
             XCTAssertEqual(header.pill.status?.tone, .error)
             XCTAssertTrue(board.view.refreshButton.toolTip?.contains("Retarget #14: gh: HTTP 422") == true, "and under Refresh")
             client.retargetFailure = nil
             try BoardStagesClicks.click(board.view.refreshButton)
-            try waitUntil("Refresh clears it") { header.pill.status?.tone != .error && BoardStagesClicks.wasUpdated(board) }
+            waitUntil("Refresh clears it") { header.pill.status?.tone != .error && BoardStagesClicks.wasUpdated(board) }
 
             let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
             try BoardStagesClicks.choose("Retarget to main", in: try line("feat/api", in: board).contextMenu())
-            try waitUntil("the pull requests are read again") {
+            waitUntil("the pull requests are read again") {
                 client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
             }
             XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.map(\.what),
@@ -198,10 +198,10 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             // The confirmation sheet locks the list: the link held under the pointer, or the offer of a line held so,
             // changes nothing, and says why.
             try BoardStagesClicks.pressMerge(try line("login", in: board))
-            try waitUntil("#12 is queued") { (BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change) == .remove }
+            waitUntil("#12 is queued") { (BoardStagesClicks.shownLine("login", in: board)?.line.offer?.change) == .remove }
             try BoardStagesClicks.click(header.startButton)
             XCTAssertNotNil(shell.mergeQueueConfirmation)
-            try waitUntil("the link goes") { (BoardStagesClicks.shownLine("feat/api", in: board)?.line.phrase.link) == nil }
+            waitUntil("the link goes") { (BoardStagesClicks.shownLine("feat/api", in: board)?.line.phrase.link) == nil }
             let locked = "The confirmation sheet is open: change the list once it closes."
             shell.performBoardLink(.retarget(number: 14, onto: "main"), line: nil, section: section, board: board)
             XCTAssertEqual(shell.toast?.message, locked)
@@ -226,7 +226,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         )
         let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
         try withBoard(world: world, boardClient: client) { shell, board in
-            try waitUntil("#10 reads merged") {
+            waitUntil("#10 reads merged") {
                 (BoardStagesClicks.shownLine("feat/api", in: board)?.line.phrase.text) == "Base #10 merged · Retarget to main"
             }
             let api = try line("feat/api", in: board)
@@ -302,7 +302,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         shell.viewport.subviews.filter { $0 is NSImageView }.forEach { $0.removeFromSuperview() }
         shell.openProjectBoard()
         let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-        try waitUntil("the lines") {
+        waitUntil("the lines") {
             board.view.stages.content?.sections.first?.lines.withoutTask.flatMap(\.lines).contains { $0.pullRequest == "#14" } == true
         }
         // #14 has no worktree: under "Pull requests without a task", folded.
@@ -321,15 +321,6 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     private func header(of board: ProjectBoardController) throws -> BoardStagesSectionHeaderView {
         let section = try XCTUnwrap(board.view.stages.content?.sections.first?.id)
         return try XCTUnwrap(board.view.stages.sectionHeader(section: section))
-    }
-
-    @MainActor
-    private func waitUntil(_ what: String, timeout: TimeInterval = 30, _ condition: () throws -> Bool) throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while (try? condition()) != true, Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertTrue(try condition(), "timed out: \(what)")
     }
 
     /// The button must be what its window hit-tests under the pointer, as

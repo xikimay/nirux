@@ -160,10 +160,10 @@ final class GitRepositoryWatcherTests: XCTestCase {
         changes.removeAll()
 
         try "edited\n".write(to: root.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
-        XCTAssertTrue(waitUntil { changes.contains(.worktree) }, "no worktree event: \(changes)")
+        waitUntil("a worktree event (saw \(changes))", timeout: 10) { changes.contains(.worktree) }
 
         try git(["add", "tracked.txt"], at: root)
-        XCTAssertTrue(waitUntil { changes.contains(.metadata) }, "no metadata event: \(changes)")
+        waitUntil("a metadata event (saw \(changes))", timeout: 10) { changes.contains(.metadata) }
     }
 
     // MARK: - Read-only git reads
@@ -233,13 +233,5 @@ final class GitRepositoryWatcherTests: XCTestCase {
     private func inode(of path: String) throws -> UInt64 {
         let attributes = try FileManager.default.attributesOfItem(atPath: path)
         return try XCTUnwrap((attributes[.systemFileNumber] as? NSNumber)?.uint64Value)
-    }
-
-    private func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        }
-        return condition()
     }
 }
