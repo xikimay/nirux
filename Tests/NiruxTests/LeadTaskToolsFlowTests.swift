@@ -34,6 +34,25 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         return trash
     }
 
+    /// A `claude` stand-in that `command` starts in a new column of
+    /// `workspace`, its session begun: its terminal, and its hooks.
+    private func startAgent(
+        _ command: String, in workspace: WorkspaceState, harness: UIFlowHarness
+    ) throws -> (pty: PtySession, hook: @MainActor (AgentHookEvent.Name) -> Void) {
+        let agentUUID = UUID().uuidString
+        workspace.addColumn(command: command, agentUUID: agentUUID, cwd: workspace.cwd)
+        let pty = try XCTUnwrap(workspace.columns.first { $0.agentUUID == agentUUID }?.pty)
+        harness.waitUntil("its claude") { pty.runningAgentName(snapshot: ProcessSnapshot()) == "claude" }
+        let hook: @MainActor (AgentHookEvent.Name) -> Void = { name in
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: name, agentUUID: agentUUID, sessionID: agentUUID,
+                toolName: name == .permissionRequest ? "Bash" : nil, timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+        hook(.sessionStart)
+        return (pty, hook)
+    }
+
     /// Pushed to GitHub as gh sees it: a worktree of the harness's
     /// repository on `branch` in `folder`, one commit ahead, with a merged
     /// pull request holding its tip.
@@ -62,7 +81,10 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             let lead = try harness.makeLead()
             let subFolder = harness.root + "/repo.feat-sub"
             try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/sub", subFolder], at: harness.repo)
-            for (title, cwd) in [("Work", harness.worktree), ("Checkout", harness.repo), ("Peek", harness.worktree), ("Later", harness.worktree)] {
+            for (title, cwd) in [
+                ("Work", harness.worktree), ("Checkout", harness.repo), ("Peek", harness.worktree), ("Later", harness.worktree),
+                ("Typed", harness.worktree), ("Wrapped", harness.worktree)
+            ] {
                 shell.addWorkspace(title: title, cwd: cwd, profileID: lead.space)
             }
             let named = { (title: String) in try XCTUnwrap(shell.workspaces.first { $0.title == title }) }
@@ -120,7 +142,26 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 agentUUID: UUID().uuidString, cwd: harness.worktree
             )
             try refusal("Later", "hasn't resumed since Nirux restarted, last seen working")
-            XCTAssertEqual(shell.workspaces.filter { $0.profileID == lead.space && !$0.isClosing }.count, 6, "nothing closed")
+
+            // Text typed at its prompt and not sent would be lost.
+            let typedAgent = AgentStandIn()
+            defer { typedAgent.remove() }
+            let typed = try startAgent(typedAgent.command(), in: try named("Typed"), harness: harness)
+            typed.hook(.userPromptSubmit)
+            typed.hook(.stop)
+            typed.pty.sendRaw("half a prompt")
+            try refusal("Typed", "text typed into its prompt and not sent")
+            // Under a launcher, waiting on a permission: its hooks say so,
+            // no screen read does.
+            let wrappedAgent = AgentStandIn()
+            defer { wrappedAgent.remove() }
+            let launcher = "stty -icanon min 1 time 0; exec -a node /bin/sh -c '(exec -a claude /bin/cat > \"\(wrappedAgent.received.path)\"); true'"
+            let wrapped = try startAgent(launcher, in: try named("Wrapped"), harness: harness)
+            XCTAssertEqual(wrapped.pty.foregroundProcess(snapshot: ProcessSnapshot())?.name, "node", "a launcher in front")
+            wrapped.hook(.userPromptSubmit)
+            wrapped.hook(.permissionRequest)
+            try refusal("Wrapped", "waits for the user")
+            XCTAssertEqual(shell.workspaces.filter { $0.profileID == lead.space && !$0.isClosing }.count, 8, "nothing closed")
         }
     }
 
@@ -171,14 +212,15 @@ final class LeadTaskToolsFlowTests: XCTestCase {
     }
 
     /// A task without a repository: it closes, and its folder goes to the
-    /// Trash, where the user can put it back, unless another workspace is
-    /// open in it.
+    /// Trash once its processes ended, where Put Back restores it; unless
+    /// another workspace is open in it, a process outlives the task, or it
+    /// holds git work no remote has.
     func testClosingATaskWithoutARepositoryTrashesItsFolder() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
             let trash = try stubCleanupTools(harness)
-            for description in ["Compare two parsers", "Draft the notes"] {
+            for description in ["Compare two parsers", "Draft the notes", "Keep it busy", "Start a repo"] {
                 let started = try harness.callLeadTool(LeadTools.startTask, ["description": description, "repo": "none"], lead: lead)
                 XCTAssertFalse(started.isError, started.text)
             }
@@ -190,7 +232,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
 
             let trashed = try harness.callLeadTool(LeadTools.closeTask, ["task": "Compare two parsers"], lead: lead)
             XCTAssertFalse(trashed.isError, trashed.text)
-            XCTAssertTrue(trashed.text.contains("moved its folder to the Trash"), trashed.text)
+            XCTAssertTrue(trashed.text.hasSuffix("moved its folder to the Trash (\(trash)/Compare two parsers): Finder's Put Back restores it to \(folder)."), trashed.text)
             harness.waitUntil("its folder to go to the Trash") { !FileManager.default.fileExists(atPath: folder) }
             XCTAssertTrue(FileManager.default.fileExists(atPath: trash + "/Compare two parsers/.claude-handover.md"))
             harness.waitUntil("the task to close") { !shell.workspaces.contains { $0 === parsers } }
@@ -200,6 +242,51 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertEqual(kept.text, "Closed “Draft the notes”. Its folder stays (\(notesFolder)): Other workspaces are open in it: “Peek”.")
             harness.waitUntil("the second task to close") { !shell.workspaces.contains { $0 === notes } }
             XCTAssertTrue(FileManager.default.fileExists(atPath: notesFolder))
+
+            // A job its shell left running past the close.
+            let busy = try XCTUnwrap(shell.workspaces.first { $0.title == "Keep it busy" })
+            let busyFolder = try XCTUnwrap(busy.taskFolder)
+            let shellPID = try XCTUnwrap(busy.columns.first?.pty?.shellPID)
+            busy.columns.first?.pty?.sendRaw("nohup sleep 60 >/dev/null 2>&1 &\r")
+            harness.waitUntil("the job") { ProcessSnapshot().tree(of: shellPID).contains { $0.name == "sleep" } }
+            let job = try XCTUnwrap(ProcessSnapshot().tree(of: shellPID).first { $0.name == "sleep" }).process
+            defer { kill(job.pid, SIGKILL) }
+            let waited = try harness.callLeadTool(LeadTools.closeTask, ["task": "Keep it busy"], lead: lead, timeout: 60)
+            XCTAssertEqual(waited.text, "Closed “Keep it busy”. Its folder stays (\(busyFolder)): Its processes (sleep) still ran 10 s after it closed.")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: busyFolder))
+
+            // An agent's git repository with work no remote has.
+            let repo = try XCTUnwrap(shell.workspaces.first { $0.title == "Start a repo" })
+            let repoFolder = try XCTUnwrap(repo.taskFolder)
+            try UIFlowHarness.git(["init", "-q"], at: repoFolder)
+            let gitKept = try harness.callLeadTool(LeadTools.closeTask, ["task": "Start a repo"], lead: lead)
+            XCTAssertEqual(gitKept.text, "Closed “Start a repo”. Its folder stays (\(repoFolder)): It holds a git repository with uncommitted changes.")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: repoFolder))
+        }
+    }
+
+    /// Closing the task the user had selected (Nirux in the background)
+    /// selects the next one, but gives no terminal the keyboard: the user
+    /// comes back to no agent's prompt.
+    func testClosingTheSelectedTaskGivesNoTerminalTheKeyboard() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.addWorkspace(title: "Selected", cwd: harness.worktree, profileID: lead.space)
+            shell.addWorkspace(title: "Next", cwd: harness.repo, profileID: lead.space)
+            let selected = try XCTUnwrap(shell.workspaces.first { $0.title == "Selected" })
+            shell.workspaceStore.selectWorkspace(id: selected.id)
+            shell.refreshAfterWorkspaceSelection(animated: false)
+            let typing = { (harness.window.firstResponder as? NSView).flatMap { responder in
+                shell.workspaces.first { responder.isDescendant(of: $0.containerView) }
+            } }
+            XCTAssertTrue(typing() === selected, "its terminal has the keyboard")
+            let closed = try harness.callLeadTool(LeadTools.closeTask, ["task": "Selected"], lead: lead)
+            XCTAssertFalse(closed.isError, closed.text)
+            XCTAssertFalse(shell.activeWorkspace === selected)
+            XCTAssertNil(typing(), "no terminal took the keyboard")
+            harness.waitUntil("it closes") { !shell.workspaces.contains { $0 === selected } }
+            XCTAssertNil(typing())
         }
     }
 
@@ -230,7 +317,13 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertEqual(try move("Sub", 1).text, "“Sub” is 1 of 1 among the sub-tasks of “One”, as it was.")
             XCTAssertTrue(try move("Lead", 1).isError)
             XCTAssertTrue(try move("Two", 0).isError)
-            XCTAssertEqual(titles(), ["Lead", "Three", "Two", "One", "Sub"])
+            // A branch names before a title does.
+            shell.addWorkspace(title: harness.worktreeBranch, cwd: harness.repo, profileID: lead.space)
+            shell.workspaceStore.selectWorkspace(id: elsewhere.id)
+            shell.refreshGitContextNow(for: one)
+            harness.waitUntil("its branch") { one.gitBranch == harness.worktreeBranch }
+            XCTAssertEqual(try move(harness.worktreeBranch, 1).text, "“One” is 1 of 4 among the tasks of Tools.")
+            XCTAssertEqual(titles(), ["Lead", "One", "Sub", "Three", "Two", harness.worktreeBranch])
             XCTAssertTrue(shell.activeWorkspace === elsewhere, "the user stays where they are")
         }
     }

@@ -34,10 +34,19 @@ extension UIFlowHarness {
             id: UUID().uuidString, tool: tool, arguments: json,
             workspaceID: workspace.id, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
         )
-        var answer: (text: String, isError: Bool)?
-        shell.handleLeadRequest(request) { text, isError in answer = (text, isError) }
-        waitUntil("the answer to \(tool)", timeout: timeout, file: file, line: line) { answer != nil }
-        return try XCTUnwrap(answer, file: file, line: line)
+        final class Answer: @unchecked Sendable {
+            var value: (text: String, isError: Bool)?
+        }
+        let answer = Answer()
+        let shell = self.shell
+        // From the run loop, as LeadRequestCenter hands requests over.
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                shell.handleLeadRequest(request) { text, isError in answer.value = (text, isError) }
+            }
+        }
+        waitUntil("the answer to \(tool)", timeout: timeout, file: file, line: line) { answer.value != nil }
+        return try XCTUnwrap(answer.value, file: file, line: line)
     }
 
     func callLeadTool(

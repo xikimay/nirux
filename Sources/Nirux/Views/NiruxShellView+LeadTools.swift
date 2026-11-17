@@ -438,9 +438,8 @@ extension NiruxShellView {
         return namedTask(name, among: candidates, mission: mission)
     }
 
-    /// The task of `candidates` named by its branch, its folder, or its
-    /// title or folder's name when only one has it, with `mission(of:)`'s
-    /// Mission: the caller's own tasks only.
+    /// The task of `candidates` named as `namedWorkspace` reads names, with
+    /// `mission(of:)`'s Mission: the caller's own tasks only.
     func namedTask(
         _ name: String, among candidates: [WorkspaceState], mission: (WorkspaceState) -> Mission?
     ) -> (workspace: WorkspaceState, mission: Mission)? {
@@ -449,13 +448,25 @@ extension NiruxShellView {
         return owned.first { $0.workspace === workspace }
     }
 
-    /// The one workspace of `candidates` named by its branch, its folder (a
-    /// task without a repository, by path as list_tasks shows it), its title
-    /// or its folder's name. Two answering the name is no answer: a branch
-    /// is the focused terminal's, which another workspace may share.
+    /// The workspace of `candidates` named by its branch, else its folder
+    /// (a task without a repository, by path as list_tasks shows it), else
+    /// its title or folder's name: the first of these that any workspace
+    /// answers decides, and only one may answer it (a branch is the focused
+    /// terminal's, which another workspace may share).
     func namedWorkspace(_ name: String, among candidates: [WorkspaceState]) -> WorkspaceState? {
-        let found = candidates.filter { Self.answers($0, to: name) }
-        return found.count == 1 ? found.first : nil
+        let ranks: [(WorkspaceState) -> Bool] = [
+            { $0.gitBranch == name },
+            { $0.taskFolder == name },
+            { workspace in
+                workspace.title.caseInsensitiveCompare(name) == .orderedSame
+                    || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
+            }
+        ]
+        for answers in ranks {
+            let found = candidates.filter(answers)
+            if !found.isEmpty { return found.count == 1 ? found[0] : nil }
+        }
+        return nil
     }
 
     /// Whether the Lead's tools reach `workspace` by `name`.

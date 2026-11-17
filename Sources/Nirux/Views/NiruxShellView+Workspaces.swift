@@ -365,14 +365,16 @@ extension NiruxShellView {
         return nil
     }
 
-    func refreshAfterWorkspaceSelection(animated: Bool, editorTakesKeyboard: Bool = true) {
+    /// `focusing`: false for a selection the user didn't make (a Lead's
+    /// tool): the new workspace's terminal doesn't take the keyboard.
+    func refreshAfterWorkspaceSelection(animated: Bool, editorTakesKeyboard: Bool = true, focusing: Bool = true) {
         quickSwitch.focusMoved()
         guard let workspace = activeWorkspace else {
             // An empty space: its view shows and takes the keyboard (see
             // EmptySpaceView).
             relayout(animated: animated)
             updateSidebar()
-            focusActiveTerminal(in: window)
+            if focusing { focusActiveTerminal(in: window) }
             return
         }
         workspace.notification = nil
@@ -382,7 +384,7 @@ extension NiruxShellView {
         // them (and their agent usage) up to date now, not on the next
         // heartbeat. Also refreshes the sidebar.
         refreshMetadata()
-        focusActiveTerminal(in: window, editorTakesKeyboard: editorTakesKeyboard)
+        if focusing { focusActiveTerminal(in: window, editorTakesKeyboard: editorTakesKeyboard) }
     }
 
     func selectProfile(_ profileID: String) {

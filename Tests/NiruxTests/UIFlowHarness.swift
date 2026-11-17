@@ -41,8 +41,9 @@ final class UIFlowHarness {
     /// A committed file, the only one holding `searchNeedle`.
     static let searchTarget = "docs/search-target.txt"
     static let searchNeedle = "flow-harness-needle"
-    /// Where gh would find a login, cleared for the tests.
-    nonisolated static let gitHubLogin = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR"]
+    /// The tokens gh would log in with, cleared for the tests (its
+    /// configuration folder is an empty one, see TestBootstrap).
+    nonisolated static let gitHubLogin = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]
 
     let shell: NiruxShellView
     let window: NSWindow
