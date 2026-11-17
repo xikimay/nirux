@@ -140,24 +140,33 @@ enum Theme {
         static let panel: CGFloat = 12
     }
 
-    /// What floats over the work casts one shadow (the glass interface's
-    /// floating glass; docs/design/glass-interface.md).
+    /// How high something lies over the window, told by its shadow
+    /// (docs/design/glass-interface.md).
     enum Elevation {
-        static let floatingOpacity: Float = 0.38
-        static let floatingRadius: CGFloat = 16
-        static let floatingDrop: CGFloat = 12
+        struct Level: Equatable, Sendable {
+            let opacity: Float
+            let radius: CGFloat
+            let drop: CGFloat
+            /// How far past its shape the shadow reaches.
+            var reach: CGFloat { radius * 2 + drop }
 
-        /// Gives `layer` the floating shadow along `path`, the shape in the
-        /// layer's own coordinates; call it again when the shape changes.
-        /// The layer must not mask to its bounds, which would cut the shadow
-        /// off.
-        static func applyFloating(to layer: CALayer, path: CGPath) {
+            /// What floats over the work: the glass interface's floating glass.
+            static let floating = Level(opacity: 0.38, radius: 16, drop: 12)
+            /// A column, a card resting on the window.
+            static let column = Level(opacity: 0.32, radius: 7, drop: 3)
+        }
+
+        /// Gives `layer` the shadow of `level` along `path`, the shape in
+        /// the layer's own coordinates; call it again when the shape
+        /// changes. The layer must not mask to its bounds, which would cut
+        /// the shadow off.
+        static func apply(_ level: Level, to layer: CALayer, path: CGPath) {
             layer.shadowColor = NSColor.black.cgColor
-            layer.shadowOpacity = floatingOpacity
-            layer.shadowRadius = floatingRadius
+            layer.shadowOpacity = level.opacity
+            layer.shadowRadius = level.radius
             // Below the shape, whichever way the layer counts y: a view's
             // backing layer is flipped exactly when the view is.
-            layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? floatingDrop : -floatingDrop)
+            layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? level.drop : -level.drop)
             layer.shadowPath = path
         }
     }

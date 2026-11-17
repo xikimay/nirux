@@ -296,9 +296,9 @@ final class GlassView: NSView {
         shadowLayer.isHidden = false
         shadowLayer.frame = bounds
         let shape = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        Theme.Elevation.applyFloating(to: shadowLayer, path: shape)
+        Theme.Elevation.apply(.floating, to: shadowLayer, path: shape)
         // The mask spans the shadow's reach, with the shape cut out.
-        let reach = Theme.Elevation.floatingRadius * 2 + Theme.Elevation.floatingDrop
+        let reach = Theme.Elevation.Level.floating.reach
         let outside = CGMutablePath()
         outside.addRect(bounds.insetBy(dx: -reach, dy: -reach))
         outside.addPath(shape)

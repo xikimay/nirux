@@ -429,6 +429,30 @@ space, in place of Settings' three toolbar tabs and Space Settings' seven:
   else Nirux's pane last shown); Space Settings… on the space's General;
   Board settings and Space Memory… on their panes.
 
+## Columns as cards
+
+From the depth study (2026-11-17, approved by the user: P1, 8 pt of air):
+the columns rest on the window as cards. At rest only light gives depth;
+the text stays flat and sharp.
+
+- **Air:** `Theme.Space.sm` between the columns and around them
+  (`WorkspaceState.columnGap`, `columnInset`). At Opaque the air is the
+  canvas; from Tinted up, the desktop's frost shows through it. The resize
+  handles straddle the air, and the camera brings the focused card in with
+  its air.
+- **Corners:** `Theme.Radius.card`, continuous. Each column clips its
+  content to them, as the focused column already did; a translucent
+  terminal's frost takes a mask of the shape, since blending behind the
+  window ignores the clip.
+- **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
+  one keeps its accent edge.
+- **Shadow:** `Theme.Elevation.Level.column`, cast by a view of its own
+  under every column of the strip (`ColumnShadowView`), along a path so
+  that the terminals never get an offscreen pass for it. It falls only on
+  the air, and fades with its column when the column comes or goes.
+- **Next (P1, second PR):** the focused card one level higher, its shadow
+  passing from card to card when the focus moves.
+
 ## Plan
 
 1. Foundations, nothing on screen: tokens and the transparency levels, the

@@ -951,6 +951,7 @@ extension WorkspaceState {
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
         col.light?.removeFromSuperview()
+        col.shadow?.removeFromSuperview()
         if resizeHandles.indices.contains(index) {
             let handle = resizeHandles.remove(at: index)
             handle.removeFromSuperview()
@@ -975,14 +976,21 @@ extension WorkspaceState {
 
     // MARK: - Layout & Scroll
 
-    private static let columnGap: CGFloat = 2
+    /// Air between the columns and around them: each rests on the window
+    /// as a card (docs/design/glass-interface.md, depth study P1).
+    static let columnGap = Theme.Space.sm
+    static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
 
-    /// The size `layoutAndScroll` gives `column` (outside fit-all).
+    /// The width the columns share in a viewport `viewportWidth` wide.
+    private func sharedWidth(_ viewportWidth: CGFloat) -> CGFloat {
+        viewportWidth - Self.columnInset * 2 - Self.columnGap * CGFloat(max(columns.count - 1, 0))
+    }
+
+    /// The size `layoutAndScroll` gives `column` (outside fit-all) in a
+    /// viewport `viewportWidth` by `height`.
     func size(of column: ColumnState, viewportWidth: CGFloat, height: CGFloat) -> NSSize {
-        let gap = columns.count > 1 ? Self.columnGap : 0
-        let totalGaps = gap * CGFloat(columns.count - 1)
-        return NSSize(width: floor(column.widthFraction * (viewportWidth - totalGaps)), height: height)
+        NSSize(width: floor(column.widthFraction * sharedWidth(viewportWidth)), height: height - Self.columnInset * 2)
     }
 
     func layoutAndScroll(
@@ -992,43 +1000,34 @@ extension WorkspaceState {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
 
-        let gap = columns.count > 1 ? Self.columnGap : 0
-        let totalGaps = gap * CGFloat(columns.count - 1)
-
-        var widths: [CGFloat] = []
-        var totalWidth: CGFloat = 0
-
-        if fitAll {
-            let columnWidth = floor((viewportWidth - totalGaps) / CGFloat(columns.count))
-            for _ in columns { widths.append(columnWidth); totalWidth += columnWidth }
-        } else {
-            for col in columns {
-                let width = size(of: col, viewportWidth: viewportWidth, height: height).width
-                widths.append(width); totalWidth += width
-            }
-        }
-        totalWidth += totalGaps
+        let gap = Self.columnGap, inset = Self.columnInset
+        let innerHeight = height - inset * 2
+        let widths = fitAll
+            ? Array(repeating: floor(sharedWidth(viewportWidth) / CGFloat(columns.count)), count: columns.count)
+            : columns.map { size(of: $0, viewportWidth: viewportWidth, height: height).width }
+        let totalWidth = widths.reduce(0, +) + gap * CGFloat(columns.count - 1) + inset * 2
 
         NiruxDebugLog.log("layoutAndScroll ws=\(id.prefix(8)) viewportW=\(viewportWidth) h=\(height) "
             + "widths=\(widths.map { Int($0) }) fitAll=\(fitAll)")
 
-        // 2. Position each column with gap
-        var xOffset: CGFloat = 0
+        // 2. Position each column, a card with air around it
+        var xOffset = inset
         for (index, col) in columns.enumerated() {
             // Terminal frames are always set explicitly by layoutWithHeader;
             // autoresizing would push intermediate sizes to Ghostty during a
             // window resize before this layout pass runs (garbled display).
             col.terminalView?.autoresizingMask = []
-            col.view.frame = NSRect(x: xOffset, y: 0, width: widths[index], height: height)
+            col.view.frame = NSRect(x: xOffset, y: inset, width: widths[index], height: innerHeight)
             col.light?.frame = col.view.frame
-            col.layoutWithHeader(width: widths[index], height: height, resizeTerminal: !skipTerminalResize)
+            shadow(for: col).frame = col.view.frame
+            col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
+            // Its content clipped to its corners; its border (the focus) is
+            // the shell's.
             col.view.layer?.masksToBounds = true
+            col.view.layer?.cornerRadius = Theme.Radius.card
+            col.view.layer?.cornerCurve = .continuous
 
-            col.view.layer?.cornerRadius = 0
-            col.view.layer?.borderWidth = 0
-            col.view.layer?.borderColor = nil
-
-            // Resize handle straddling this column's right boundary.
+            // Resize handle straddling the air at this column's right edge.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
                 handle.referenceWidth = max(viewportWidth, 1)
@@ -1048,20 +1047,19 @@ extension WorkspaceState {
         for handle in resizeHandles { stripView.addSubview(handle) }
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
-        // 3. Camera (scroll to keep focused column visible)
+        // 3. Camera (scroll to keep the focused card visible, with its air)
         let cameraX: CGFloat
         if fitAll || totalWidth <= viewportWidth {
             cameraX = 0
         } else {
-            var focusedLeft: CGFloat = 0
-            for index in 0..<focusedIndex { focusedLeft += widths[index] + gap }
-            let focusedRight = focusedLeft + widths[focusedIndex]
+            let left = widths[..<focusedIndex].reduce(0) { $0 + $1 + gap }
+            let right = left + widths[focusedIndex] + inset * 2
 
             var camera = lastCameraX
-            if focusedLeft < camera {
-                camera = focusedLeft
-            } else if focusedRight > camera + viewportWidth {
-                camera = focusedRight - viewportWidth
+            if left < camera {
+                camera = left
+            } else if right > camera + viewportWidth {
+                camera = right - viewportWidth
             }
             cameraX = max(0, min(camera, totalWidth - viewportWidth))
         }
@@ -1081,6 +1079,16 @@ extension WorkspaceState {
             anim.isRemovedOnCompletion = true
             layer.add(anim, forKey: "colSlide")
         }
+    }
+
+    /// The column's shadow, made on first use: under every column of the
+    /// strip, so that it falls only on the air around them.
+    func shadow(for column: ColumnState) -> ColumnShadowView {
+        if let shadow = column.shadow { return shadow }
+        let shadow = ColumnShadowView(frame: column.view.frame)
+        stripView.addSubview(shadow, positioned: .below, relativeTo: nil)
+        column.shadow = shadow
+        return shadow
     }
 
     /// The column's light (see `EdgeGlowView`), made on first use. It lies

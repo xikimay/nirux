@@ -680,16 +680,16 @@ extension NiruxShellView {
         // Animated path: a vertical slide over the direct frame change.
         slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
-        // Focus border and header icon. The agents' lights lie over the
-        // columns, in views of their own (NiruxShellView+AgentLights).
+        // Each card's edge, the focus's in the accent, and the header icon.
+        // The agents' lights lie over the columns, in views of their own
+        // (NiruxShellView+AgentLights).
         let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
         for (wsIndex, workspace) in workspaces.enumerated() {
             for (colIndex, col) in workspace.columns.enumerated() {
                 let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
                 col.setHeaderFocused(isFocus)
-                col.view.layer?.cornerRadius = isFocus ? 6 : 0
-                col.view.layer?.borderWidth = isFocus ? 2 : 0
-                col.view.layer?.borderColor = isFocus ? accent : nil
+                col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : 1
+                col.view.layer?.borderColor = isFocus ? accent : Theme.Color.line.cgColor
             }
         }
     }

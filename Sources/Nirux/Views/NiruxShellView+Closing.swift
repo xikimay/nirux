@@ -11,6 +11,7 @@ extension NiruxShellView {
     private func abortColumnClose(_ column: ColumnState) {
         column.isClosing = false
         column.view.alphaValue = 1
+        column.shadow?.alphaValue = 1
         applyAgentLights()
     }
 
@@ -32,6 +33,7 @@ extension NiruxShellView {
             ctx.duration = 0.2
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             closingView.animator().alphaValue = 0
+            closingColumn.shadow?.animator().alphaValue = 0
             closingView.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
         }, completionHandler: {
             DispatchQueue.main.async { [weak self] in self?.finishColumnClose(closingColumn, in: workspace) }

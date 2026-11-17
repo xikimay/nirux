@@ -34,7 +34,8 @@ final class EdgeGlowView: NSView {
     /// is at most there: text under it keeps its contrast.
     static let columnGlowDepth: CGFloat = 12
     static let columnGlowAlpha: CGFloat = 0.08
-    static let cornerRadius: CGFloat = 6
+    /// A column's corners (`WorkspaceState.layoutAndScroll`).
+    static let cornerRadius = Theme.Radius.card
 
     let edge: Edge
     private(set) var light: AgentLight?

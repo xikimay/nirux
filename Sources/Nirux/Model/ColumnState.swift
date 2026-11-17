@@ -122,6 +122,9 @@ final class ColumnState {
     /// The agent's state as light, laid over the column in its workspace's
     /// strip once it first shows (`WorkspaceState.light(for:)`).
     var light: EdgeGlowView?
+    /// The column's shadow, under every column of its strip
+    /// (`WorkspaceState.shadow(for:)`).
+    var shadow: ColumnShadowView?
 
     /// ⌘F find bar, created on first use, and the terminal search it
     /// drives; a browser column's bar drives its `pageFind`
@@ -293,6 +296,9 @@ final class ColumnState {
         if wanted {
             let frost = NSVisualEffectView()
             MainWindowContent.makeDesktopFrost(frost, in: view.bounds)
+            // Blending behind the window ignores the column's rounded
+            // clip: the mask holds the corners.
+            frost.maskImage = GlassView.mask(radius: Theme.Radius.card, in: view.bounds.size)
             view.addSubview(frost, positioned: .below, relativeTo: nil)
             terminalFrost = frost
             view.layer?.backgroundColor = NSColor.clear.cgColor
