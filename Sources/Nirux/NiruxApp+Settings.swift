@@ -131,6 +131,12 @@ extension NiruxApp {
         slider.allowsTickMarkValuesOnly = true
         slider.setAccessibilityLabel("Terminal background opacity")
         let percent = NSTextField(labelWithString: Self.percent(opacity))
+        let terminalsNote = TransparencySummary(text:
+            "Below 100%, the desktop shows through each terminal's background, blurred, whatever the interface's "
+                + "level, and text keeps a minimum contrast unless your Ghostty config sets one. Ghostty's own "
+                + "background-opacity isn't used."
+        )
+        terminalsNote.onResize = { [weak self] in self?.settingsController?.fitToContent() }
         percent.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         settingsTerminalOpacitySlider = slider
         settingsTerminalOpacityLabel = percent
@@ -149,11 +155,7 @@ extension NiruxApp {
             [
                 SettingsForm.header("Terminals"),
                 SettingsForm.row("Background", opacityControl),
-                SettingsForm.hint(
-                    "Below 100 %, the desktop shows through each terminal's background, blurred, whatever the "
-                        + "interface's level, and text keeps a minimum contrast unless your Ghostty config sets one. "
-                        + "Ghostty's own background-opacity isn't used."
-                )
+                terminalsNote
             ],
             [
                 animations,
@@ -441,20 +443,32 @@ extension NiruxApp {
         keepAwakeController?.setEnabled(enabled)
     }
 
-    /// "80 %".
-    static func percent(_ opacity: Double) -> String { "\(Int((opacity * 100).rounded())) %" }
+    /// "80%".
+    static func percent(_ opacity: Double) -> String { "\(Int((opacity * 100).rounded()))%" }
 
-    /// The terminals follow the slider as it moves; the value is saved once
-    /// the drag ends (or at once, from the keyboard or VoiceOver).
+    /// How long the slider stays still before its value is saved.
+    static let terminalOpacitySaveDelay: TimeInterval = 0.4
+
+    /// The terminals follow the slider at every step; the value is saved
+    /// once it stays still a moment, whatever moved it (a drag, the wheel,
+    /// the keyboard, VoiceOver): one write per gesture.
     @objc func settingsTerminalOpacityChanged(_ sender: NSSlider) {
         let opacity = TerminalOpacity.clamped(sender.doubleValue / 100)
         settingsTerminalOpacityLabel?.stringValue = Self.percent(opacity)
         shell?.terminalOpacity = opacity
-        guard NSApp.currentEvent?.type != .leftMouseDragged else { return }
+        settingsTerminalOpacitySave?.cancel()
+        let save = DispatchWorkItem { [weak self, weak sender] in
+            MainActor.assumeIsolated { self?.saveTerminalOpacity(opacity, slider: sender) }
+        }
+        settingsTerminalOpacitySave = save
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.terminalOpacitySaveDelay, execute: save)
+    }
+
+    private func saveTerminalOpacity(_ opacity: Double, slider: NSSlider?) {
         let saved = Persistence.load()?.settings?.terminalOpacity ?? 1
         guard opacity != saved else { return }
         let putBack = { [weak self] in
-            sender.doubleValue = saved * 100
+            slider?.doubleValue = saved * 100
             self?.settingsTerminalOpacityLabel?.stringValue = Self.percent(saved)
             self?.shell?.terminalOpacity = saved
         }

@@ -158,23 +158,28 @@ final class TransparencyPicker: NSView {
     }
 }
 
-/// Under the tiles: what the level picked shows and, while macOS's Reduce
-/// transparency or Increase contrast is on, that Nirux draws opaque. One
-/// block, so that the section keeps its gap below when that note hides;
-/// `onResize` after the note shows or hides, for the window to fit.
+/// A section's hint and, while macOS's Reduce transparency or Increase
+/// contrast is on, that Nirux draws opaque (under Interface's tiles, under
+/// the terminals' slider). One block, so that the section keeps its gap
+/// below when that note hides; `onResize` after the note shows or hides, for
+/// the window to fit.
 final class TransparencySummary: NSStackView {
     let line = SettingsForm.hint("")
     let forcedOpaque = SettingsForm.hint("")
     var onResize: (() -> Void)?
 
-    init(level: InterfaceTransparency) {
+    convenience init(level: InterfaceTransparency) {
+        self.init(text: level.summary)
+    }
+
+    init(text: String) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .leading
         spacing = Theme.Space.sm
         addArrangedSubview(line)
         addArrangedSubview(forcedOpaque)
-        show(level)
+        line.stringValue = text
         updateNote()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(accessibilityDisplayOptionsChanged),

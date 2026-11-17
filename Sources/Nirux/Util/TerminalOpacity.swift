@@ -14,9 +14,9 @@ enum TerminalOpacity {
     /// user's Ghostty config sets its own `minimum-contrast`.
     static let minimumContrast = 3.0
 
-    /// On a step, within the range.
+    /// On an exact step (0.6, not 0.6000000000000001), within the range.
     static func clamped(_ value: Double) -> Double {
-        min(range.upperBound, max(range.lowerBound, (value / step).rounded() * step))
+        min(range.upperBound, max(range.lowerBound, (value * 20).rounded() / 20))
     }
 
     /// The per-terminal override at `opacity`: none at 100 %. Cells a
@@ -31,5 +31,11 @@ enum TerminalOpacity {
     /// Ghostty config: Nirux's own lines never do).
     static func setsContrast(_ config: String) -> Bool {
         config.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("minimum-contrast") }
+    }
+
+    /// Whether the config a terminal opened with sets it.
+    static func setsContrast(_ source: TerminalController.ConfigSource) -> Bool {
+        if case .generated(let config) = source { return setsContrast(config) }
+        return false
     }
 }

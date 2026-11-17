@@ -74,7 +74,8 @@ final class TranslucentWindowTests: XCTestCase {
     /// Ghostty config sets its own; at 100 %, none.
     func testTheTerminalsOpacityAndItsOverride() {
         XCTAssertEqual(TerminalOpacity.clamped(0.3), 0.6)
-        XCTAssertEqual(TerminalOpacity.clamped(0.82), 0.8, accuracy: 0.0001)
+        XCTAssertEqual(TerminalOpacity.clamped(0.62), 0.6, "an exact step, saved as such")
+        XCTAssertEqual(TerminalOpacity.clamped(0.82), 0.8)
         XCTAssertEqual(TerminalOpacity.clamped(1.4), 1)
         XCTAssertEqual(TerminalOpacity.configuration(1, userSetsContrast: false), TerminalConfiguration())
         let translucent = TerminalConfiguration().backgroundOpacity(0.8).custom("background-opacity-cells", "true")
@@ -82,16 +83,22 @@ final class TranslucentWindowTests: XCTestCase {
         XCTAssertEqual(TerminalOpacity.configuration(0.8, userSetsContrast: true), translucent, "a TUI's own cells too")
         XCTAssertTrue(TerminalOpacity.setsContrast("font-size = 14\nminimum-contrast = 1.1\n"))
         XCTAssertFalse(TerminalOpacity.setsContrast(TerminalConfigBuilder.render([])))
+        XCTAssertTrue(TerminalOpacity.setsContrast(.generated("minimum-contrast = 1.1")), "the terminal's own config")
+        XCTAssertFalse(TerminalOpacity.setsContrast(.none))
     }
 
-    /// "80 %" is 80 % over the desktop's blur: the column's own frost under
+    /// "80%" is 80% over the desktop's blur: the column's own frost under
     /// the terminal, nothing of the window between them (no canvas fill, no
-    /// window tint), at any interface level. At 100 % the column is opaque
-    /// again; a column without a terminal never changes.
+    /// window tint), at any interface level; only once the terminal draws,
+    /// and on screen. At 100% the column is opaque again; a column without a
+    /// terminal never changes.
     func testATranslucentTerminalLiesOnTheDesktopsBlurAlone() throws {
         _ = NSApplication.shared
         let column = ColumnState(cwd: NSTemporaryDirectory())
-        column.showTerminalOpacity(0.8, userSetsContrast: false)
+        column.showTerminalOpacity(0.8, onScreen: true)
+        XCTAssertNil(column.terminalFrost, "before its first frame, the opaque fill")
+        XCTAssertEqual(column.view.layer?.backgroundColor?.alpha, 1)
+        column.surfaceChanged(attached: true)
         let frost = try XCTUnwrap(column.terminalFrost)
         XCTAssertIdentical(column.view.subviews.first, frost, "under everything in the column")
         XCTAssertEqual(frost.blendingMode, .behindWindow)
@@ -100,13 +107,23 @@ final class TranslucentWindowTests: XCTestCase {
         XCTAssertEqual(column.terminalView?.controller?.terminalConfiguration, TerminalOpacity.configuration(0.8, userSetsContrast: false))
         XCTAssertNil(column.terminalView?.controller?.lastConfigurationIssue, "libghostty takes every key")
 
-        column.showTerminalOpacity(1, userSetsContrast: false)
+        column.showTerminalOpacity(0.8, onScreen: false)
+        XCTAssertNil(column.terminalFrost, "off screen, no blur to compute")
+        column.showTerminalOpacity(1, onScreen: true)
         XCTAssertNil(column.terminalFrost)
         XCTAssertEqual(column.view.layer?.backgroundColor?.alpha, 1)
         XCTAssertEqual(column.terminalView?.controller?.terminalConfiguration, TerminalConfiguration())
 
+        // A terminal whose own Ghostty config sets a minimum contrast keeps it.
+        let own = ColumnState(cwd: NSTemporaryDirectory())
+        own.terminalView?.controller = TerminalController(
+            configSource: .generated(TerminalConfigBuilder.render([]) + "minimum-contrast = 1.1\n"), theme: TerminalTheme()
+        )
+        own.showTerminalOpacity(0.8, onScreen: true)
+        XCTAssertEqual(own.terminalView?.controller?.terminalConfiguration, TerminalOpacity.configuration(0.8, userSetsContrast: true))
+
         let page = ColumnState(url: "about:blank")
-        page.showTerminalOpacity(0.6, userSetsContrast: false)
+        page.showTerminalOpacity(0.6, onScreen: true)
         XCTAssertNil(page.terminalFrost)
         XCTAssertEqual(page.view.layer?.backgroundColor?.alpha, 1)
     }

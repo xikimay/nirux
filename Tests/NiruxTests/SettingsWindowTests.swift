@@ -422,15 +422,21 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertEqual(slider.doubleValue, 100)
             XCTAssertEqual(slider.minValue, 60)
             XCTAssertEqual(slider.numberOfTickMarks, 9)
-            XCTAssertEqual(app.settingsTerminalOpacityLabel?.stringValue, "100 %")
-            slider.doubleValue = 80
-            XCTAssertTrue(slider.sendAction(slider.action, to: slider.target))
-            XCTAssertEqual(app.settingsTerminalOpacityLabel?.stringValue, "80 %")
-            XCTAssertEqual(shell.terminalOpacity, 0.8, accuracy: 0.0001)
-            XCTAssertEqual(try XCTUnwrap(Persistence.load()?.settings?.terminalOpacity), 0.8, accuracy: 0.0001)
-            slider.doubleValue = 100
-            XCTAssertTrue(slider.sendAction(slider.action, to: slider.target))
-            XCTAssertNil(Persistence.load()?.settings?.terminalOpacity, "100 % saves no choice")
+            XCTAssertEqual(app.settingsTerminalOpacityLabel?.stringValue, "100%")
+            @MainActor func move(to value: Double) {
+                slider.doubleValue = value
+                XCTAssertTrue(slider.sendAction(slider.action, to: slider.target))
+            }
+            move(to: 90)
+            move(to: 80)
+            XCTAssertEqual(app.settingsTerminalOpacityLabel?.stringValue, "80%")
+            XCTAssertEqual(shell.terminalOpacity, 0.8, "the terminals follow every step")
+            XCTAssertNil(Persistence.load()?.settings?.terminalOpacity, "nothing saved mid-gesture")
+            RunLoop.main.run(until: Date().addingTimeInterval(NiruxApp.terminalOpacitySaveDelay + 0.2))
+            XCTAssertEqual(Persistence.load()?.settings?.terminalOpacity, 0.8, "once, when the slider stays still")
+            move(to: 100)
+            RunLoop.main.run(until: Date().addingTimeInterval(NiruxApp.terminalOpacitySaveDelay + 0.2))
+            XCTAssertNil(Persistence.load()?.settings?.terminalOpacity, "100% saves no choice")
         }
     }
 

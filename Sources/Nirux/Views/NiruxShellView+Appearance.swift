@@ -41,16 +41,19 @@ extension NiruxShellView {
     var drawnTerminalOpacity: Double { sideEffects.drawnTransparency(.clear).usesGlass ? terminalOpacity : 1 }
 
     /// Every terminal shows the opacity drawn, a new one too (called from
-    /// each layout: a column already showing it is left alone), and the
-    /// window lets the desktop through when the interface or a terminal does.
+    /// each layout: a column already showing it is left alone); only the
+    /// task on screen builds the desktop's blur. The window lets the desktop
+    /// through when the interface does, or a terminal on screen does.
     func applyTerminalOpacity() {
         let opacity = drawnTerminalOpacity
-        let pending = workspaces.flatMap(\.columns).filter { $0.terminalView != nil && $0.terminalOpacity != opacity }
-        if !pending.isEmpty {
-            let userSetsContrast = TerminalOpacity.setsContrast(TerminalAppearance.currentConfig())
-            for column in pending { column.showTerminalOpacity(opacity, userSetsContrast: userSetsContrast) }
+        let active = activeWorkspace
+        for workspace in workspaces {
+            for column in workspace.columns where column.terminalView != nil {
+                column.showTerminalOpacity(opacity, onScreen: workspace === active)
+            }
         }
-        (window?.contentView as? MainWindowContent)?.show(drawnTransparency, terminalsTranslucent: opacity < 1)
+        let terminalOnScreen = active?.columns.contains { $0.terminalView != nil } ?? false
+        (window?.contentView as? MainWindowContent)?.show(drawnTransparency, terminalsTranslucent: opacity < 1 && terminalOnScreen)
     }
 
     /// Reduce transparency and Increase contrast make the window opaque at

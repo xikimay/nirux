@@ -18,6 +18,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsTransparencyPicker: TransparencyPicker?
     weak var settingsTerminalOpacitySlider: NSSlider?
     weak var settingsTerminalOpacityLabel: NSTextField?
+    /// The terminals' opacity, saved once the slider stays still.
+    var settingsTerminalOpacitySave: DispatchWorkItem?
     weak var settingsTasksFolderLabel: NSTextField?
     weak var settingsUsageLimitsCheckbox: NSButton?
     weak var settingsAgentResumePopup: NSPopUpButton?

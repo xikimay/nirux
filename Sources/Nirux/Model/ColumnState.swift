@@ -259,23 +259,40 @@ final class ColumnState {
         showDeferredAgentNotice(deferredAgent)
     }
 
-    /// The terminal's background opacity shown (Settings › Appearance ›
+    /// The terminal's background opacity (Settings › Appearance ›
     /// Terminals); 1, opaque on the canvas fill.
     private(set) var terminalOpacity: Double = 1
-    /// Below 100 %: the desktop's blur under the terminal, in place of the
-    /// canvas fill, so that nothing of the window lies between them.
+    /// Whether the shell last said the column is on screen.
+    private var terminalOnScreen = false
+    /// The desktop's blur under the terminal, in place of the canvas fill,
+    /// so that nothing of the window lies between them: below 100 %, on
+    /// screen, once the terminal draws.
     private(set) var terminalFrost: NSVisualEffectView?
 
     /// Shows the terminal's background at `opacity` over the desktop's blur
-    /// (`TerminalOpacity`); a column without a terminal stays opaque.
-    func showTerminalOpacity(_ opacity: Double, userSetsContrast: Bool) {
-        guard let terminal = terminalView, opacity != terminalOpacity else { return }
-        terminalOpacity = opacity
-        terminal.controller?.setTerminalConfiguration(TerminalOpacity.configuration(opacity, userSetsContrast: userSetsContrast))
-        if opacity < 1 {
-            let frost = terminalFrost ?? NSVisualEffectView()
+    /// (`TerminalOpacity`), with the minimum contrast its own config allows;
+    /// a column without a terminal stays opaque.
+    func showTerminalOpacity(_ opacity: Double, onScreen: Bool) {
+        guard let terminal = terminalView else { return }
+        terminalOnScreen = onScreen
+        if opacity != terminalOpacity, let controller = terminal.controller {
+            terminalOpacity = opacity
+            controller.setTerminalConfiguration(TerminalOpacity.configuration(
+                opacity, userSetsContrast: TerminalOpacity.setsContrast(controller.currentConfigSource)
+            ))
+        }
+        updateTerminalFrost()
+    }
+
+    /// The frost goes in once the terminal can draw over it: before its
+    /// first frame the opaque fill stays, rather than the bare blur.
+    private func updateTerminalFrost() {
+        let wanted = terminalOpacity < 1 && terminalOnScreen && hasSurface
+        guard wanted != (terminalFrost != nil) else { return }
+        if wanted {
+            let frost = NSVisualEffectView()
             MainWindowContent.makeDesktopFrost(frost, in: view.bounds)
-            if frost.superview == nil { view.addSubview(frost, positioned: .below, relativeTo: nil) }
+            view.addSubview(frost, positioned: .below, relativeTo: nil)
             terminalFrost = frost
             view.layer?.backgroundColor = NSColor.clear.cgColor
         } else {
@@ -283,6 +300,12 @@ final class ColumnState {
             terminalFrost = nil
             view.layer?.backgroundColor = Theme.Color.canvas.cgColor
         }
+    }
+
+    /// The terminal's surface came or went.
+    func surfaceChanged(attached: Bool) {
+        hasSurface = attached
+        updateTerminalFrost()
     }
 
     /// A column's view, opaque under its content in the canvas's colour,
@@ -658,8 +681,8 @@ final class ColumnState {
 // MARK: - Surface
 
 extension ColumnState: TerminalSurfaceLifecycleDelegate {
-    func terminalDidAttachSurface(_ surface: TerminalSurface) { hasSurface = true }
-    func terminalDidDetachSurface() { hasSurface = false }
+    func terminalDidAttachSurface(_ surface: TerminalSurface) { surfaceChanged(attached: true) }
+    func terminalDidDetachSurface() { surfaceChanged(attached: false) }
 }
 
 // MARK: - Clipboard confirmation
