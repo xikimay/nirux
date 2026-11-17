@@ -168,7 +168,7 @@ final class GlassView: NSView {
             break
         case .glass:
             if #available(macOS 26, *) {
-                let glass = NSGlassEffectView(frame: bounds)
+                let glass = BackgroundGlass(frame: bounds)
                 install(glass)
                 // Inside the glass, so that what it holds stays legible on it.
                 contentView.frame = glass.bounds
@@ -314,5 +314,19 @@ final class GlassView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         applyShape()
+    }
+}
+
+/// macOS 26's glass as a background: it asks its host's layout for no size.
+/// It draws through a view that hugs a 10 pt width at the default priority,
+/// above the priority a toolbar measures its items at: the command bar's
+/// item measured its minimum as its maximum, and stayed at 280 pt.
+@available(macOS 26, *)
+private final class BackgroundGlass: NSGlassEffectView {
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            subview.setContentHuggingPriority(.init(1), for: axis)
+        }
     }
 }
