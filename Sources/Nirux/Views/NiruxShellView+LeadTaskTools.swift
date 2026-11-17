@@ -225,7 +225,8 @@ extension NiruxShellView {
         }
         let subtasks = subtasks(of: task).filter { !$0.isInactive }
         if !subtasks.isEmpty {
-            return "“\(title)” still has sub-tasks (\(WorktreeCleanupCandidate.quotedList(subtasks.map(\.title)))): close them first."
+            return "“\(title)” still has sub-tasks (\(WorktreeCleanupCandidate.quotedList(subtasks.map(\.title)))): "
+                + "close them, or move them out with set_task_parent, first."
         }
         return nil
     }
@@ -257,5 +258,84 @@ extension NiruxShellView {
         let group = task.isInactive ? "the archived tasks" : parent.map { "the sub-tasks of “\($0)”" } ?? "the tasks of \(space.name)"
         answer("“\(MissionPromptText.quoted(task.title))” is \(place + 1) of \(siblings.count) among \(group)"
             + (moved ? "." : ", as it was."), false)
+    }
+
+    // MARK: rename_task
+
+    func leadRenameTask(_ arguments: [String: Any], in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
+        let name = LeadTools.string(arguments, "task") ?? ""
+        guard let task = spaceTask(name, in: space), let title = LeadTools.title(arguments) else {
+            return answer(noSpaceTask(name, in: space), true)
+        }
+        let old = MissionPromptText.quoted(task.title)
+        renameWorkspace(task, to: title)
+        answer("Renamed “\(old)” to “\(MissionPromptText.quoted(title))”.", false)
+    }
+
+    // MARK: set_task_parent
+
+    func leadSetTaskParent(_ arguments: [String: Any], in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
+        let name = LeadTools.string(arguments, "task") ?? ""
+        guard let task = spaceTask(name, in: space), let index = workspaces.firstIndex(where: { $0 === task }) else {
+            return answer(noSpaceTask(name, in: space), true)
+        }
+        let title = MissionPromptText.quoted(task.title)
+        let reports = "Who it reports to doesn't change."
+        guard let parentName = LeadTools.string(arguments, "parent") else {
+            guard workspaceStore.setParent(at: index, to: nil) else { return answer("“\(title)” is a task of its own already.", false) }
+            refreshAfterWorkspaceMutation(refocusing: false)
+            return answer("“\(title)” is a task of its own now. \(reports)", false)
+        }
+        guard let parent = spaceTask(parentName, in: space) else { return answer(noSpaceTask(parentName, in: space), true) }
+        if let refusal = parentRefusal(of: task, under: parent) { return answer(refusal, true) }
+        let moved = workspaceStore.setParent(at: index, to: parent.id)
+        if moved { refreshAfterWorkspaceMutation(refocusing: false) }
+        answer("“\(title)” is a sub-task of “\(MissionPromptText.quoted(parent.title))” \(moved ? "now" : "already"). \(reports)", false)
+    }
+
+    /// Why `task` can't be listed under `parent`, nil when it can: two
+    /// levels, a task (not a main checkout) as the parent, at most
+    /// `TaskTools.maxRunningSubtasks` sub-tasks.
+    private func parentRefusal(of task: WorkspaceState, under parent: WorkspaceState) -> String? {
+        let (title, parentTitle) = (MissionPromptText.quoted(task.title), MissionPromptText.quoted(parent.title))
+        guard parent !== task else { return "A task can't be its own sub-task." }
+        guard Self.isTask(parent), !parent.isInactive else {
+            return "“\(parentTitle)” can't have sub-tasks: it isn't a task (a worktree of one of the space's repositories, "
+                + "or a task's folder), or it is archived."
+        }
+        guard !isSubtask(parent) else { return "“\(parentTitle)” is a sub-task itself: two levels at most." }
+        let own = subtasks(of: task)
+        guard own.isEmpty else {
+            return "“\(title)” has sub-tasks of its own (\(WorktreeCleanupCandidate.quotedList(own.map(\.title)))): two levels at most."
+        }
+        let siblings = subtasks(of: parent).filter { !$0.isInactive && $0 !== task }
+        guard siblings.count < TaskTools.maxRunningSubtasks else {
+            return "“\(parentTitle)” already has \(siblings.count) sub-tasks, the most a task may."
+        }
+        return nil
+    }
+
+    // MARK: read_task
+
+    func leadReadTask(_ arguments: [String: Any], in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
+        let name = LeadTools.string(arguments, "task") ?? ""
+        guard let task = spaceTask(name, in: space) else { return answer(noSpaceTask(name, in: space), true) }
+        let title = MissionPromptText.quoted(task.title)
+        // Its newest Claude Code conversation, running or ended, since a
+        // relaunch or before.
+        let record = sessionLedger.sessions(inSpace: space.id, matching: AgentSessionLedger.Query(agent: .claude))
+            .first { $0.workspaceID == task.id && $0.transcriptPath != nil }
+        guard let path = record?.transcriptPath else {
+            return answer("Nirux knows no Claude Code conversation of “\(title)” (a Codex task has none, nor an agent that took no prompt).", true)
+        }
+        let working = agentReadings(of: task, snapshot: ProcessSnapshot()).contains { $0.status == .working }
+        Self.offMain({ TranscriptLastMessage.read(path: path) }) { message in
+            let limit = LeadTools.maxReadLength
+            guard let message, let text = TurnEndText.excerpt(message.text, limit: limit, headLength: limit / 4) else {
+                return answer("“\(title)”'s agent hasn't written a message yet.", true)
+            }
+            let when = message.timestamp.map { " (\(ProjectBoard.clockTime($0, now: Date())))" } ?? ""
+            answer("“\(title)”'s last message\(when):\n\(text)" + (working ? "\nIts agent is working: it may write more." : ""), false)
+        }
     }
 }

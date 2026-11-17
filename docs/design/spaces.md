@@ -308,6 +308,15 @@ New flow, built on the guarded typing `tell` already uses
   - `move_task(task, position)`: moves a task among its siblings (the
     space's tasks, a task's sub-tasks, or the archived ones), 1 for the top,
     as dragging its row does: its sub-tasks follow, and the Lead stays first.
+  - `rename_task(task, title)`: as Rename…, one line of 80 characters at
+    most; agents' titles no longer replace it.
+  - `set_task_parent(task, parent?)`: lists a task under another of the
+    space, or at the top level without `parent`, within the sub-task rules
+    (the parent a task, two levels, six sub-tasks). Who it reports to
+    doesn't change.
+  - `read_task(task)`: the last message of the task's newest Claude Code
+    conversation (the session history keeps its transcript, across
+    relaunches), up to 6,000 characters, its start and end past that.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state

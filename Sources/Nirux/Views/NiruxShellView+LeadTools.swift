@@ -37,6 +37,9 @@ extension NiruxShellView {
         case LeadTools.proposeRule: leadProposeRule(arguments, in: space, parent: parent, answer: answer)
         case LeadTools.closeTask: leadCloseTask(arguments, in: space, answer: answer)
         case LeadTools.moveTask: leadMoveTask(arguments, in: space, answer: answer)
+        case LeadTools.renameTask: leadRenameTask(arguments, in: space, answer: answer)
+        case LeadTools.setTaskParent: leadSetTaskParent(arguments, in: space, answer: answer)
+        case LeadTools.readTask: leadReadTask(arguments, in: space, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }

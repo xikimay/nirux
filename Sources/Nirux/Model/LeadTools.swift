@@ -16,7 +16,13 @@ enum LeadTools {
     static let proposeRule = "propose_rule"
     static let closeTask = "close_task"
     static let moveTask = "move_task"
-    static let names = [startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule, closeTask, moveTask]
+    static let renameTask = "rename_task"
+    static let setTaskParent = "set_task_parent"
+    static let readTask = "read_task"
+    static let names = [
+        startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext, proposeRule,
+        closeTask, moveTask, renameTask, setTaskParent, readTask
+    ]
 
     /// `start_task`'s `repo` for a task without a repository: a new folder
     /// of its own (unless a repository of the space has that name).
@@ -28,6 +34,12 @@ enum LeadTools {
 
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
+
+    /// A task's title, as the rename panel takes it.
+    static let maxTitleLength = 80
+
+    /// What read_task returns of a message, its start and its end.
+    static let maxReadLength = 6_000
 
     /// How long a call waits for a Nirux to take it: a running app takes
     /// it at once.
@@ -192,6 +204,37 @@ enum LeadTools {
                     ]
                 ],
                 required: ["task", "position"]
+            ),
+            definition(
+                renameTask, title: "Rename a task",
+                description: "Give a task of this space the title its row shows, as Rename… does: agents' titles no longer replace it.",
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "title": ["type": "string", "description": "The new title, one line, at most \(maxTitleLength) characters."]
+                ],
+                required: ["task", "title"]
+            ),
+            definition(
+                setTaskParent, title: "Put a task under another, or take it out",
+                description: """
+                    List a task under another task of this space as its sub-task, or at the top level when parent is \
+                    left out. Two levels at most: the parent can't be a sub-task, nor the task have sub-tasks; a task \
+                    holds at most \(TaskTools.maxRunningSubtasks) sub-tasks. Who a task reports to doesn't change.
+                    """,
+                properties: [
+                    "task": ["type": "string", "description": taskDescription],
+                    "parent": ["type": "string", "description": "The task to list it under, named the same way; left out, the top level."]
+                ],
+                required: ["task"]
+            ),
+            definition(
+                readTask, title: "Read a task's last message",
+                description: """
+                    The last message a task's Claude Code agent wrote, in full up to \(maxReadLength) characters (its \
+                    start and end past that): what list_tasks sums up in a line. Any task of this space.
+                    """,
+                properties: ["task": ["type": "string", "description": taskDescription]],
+                required: ["task"], readOnly: true
             )
         ]
     }
@@ -240,6 +283,12 @@ enum LeadTools {
         return numbers
     }
 
+    /// rename_task's title on one line, whitespace folded; a longer one cut
+    /// past the limit, so a huge one isn't copied whole.
+    static func title(_ arguments: [String: Any]) -> String? {
+        (arguments["title"] as? String).flatMap { AgentText.clean($0, maxLength: maxTitleLength + 1) }
+    }
+
     /// A whole positive number, as JSON gives it (not a boolean).
     static func positiveInteger(_ value: Any?) -> Int? {
         guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
@@ -270,6 +319,14 @@ enum LeadTools {
         case moveTask:
             guard string(arguments, "task") != nil else { return "task is missing." }
             return positiveInteger(arguments["position"]) == nil ? "position must be a whole number, 1 for the top." : nil
+        case renameTask:
+            guard string(arguments, "task") != nil else { return "task is missing." }
+            guard let title = title(arguments), title.count <= maxTitleLength else {
+                return "title must hold 1 to \(maxTitleLength) characters."
+            }
+            return nil
+        case setTaskParent, readTask:
+            return string(arguments, "task") == nil ? "task is missing." : nil
         case queueMerge:
             return pullRequestNumbers(arguments) == nil ? "prs must list pull request numbers." : nil
         case setTaskContext:

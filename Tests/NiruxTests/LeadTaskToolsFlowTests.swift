@@ -234,4 +234,88 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(shell.activeWorkspace === elsewhere, "the user stays where they are")
         }
     }
+
+    /// rename_task renames as Rename… does; set_task_parent lists a task
+    /// under another within the sub-task rules (a task as the parent, two
+    /// levels, six sub-tasks), and takes it out again.
+    func testTheLeadRenamesAndReparentsTasks() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            for branch in ["second", "third"] {
+                try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/\(branch)", harness.root + "/repo.feat-\(branch)"], at: harness.repo)
+            }
+            for (title, cwd) in [
+                ("First", harness.worktree), ("Second", harness.root + "/repo.feat-second"),
+                ("Third", harness.root + "/repo.feat-third"), ("Checkout", harness.repo)
+            ] {
+                shell.addWorkspace(title: title, cwd: cwd, profileID: lead.space)
+            }
+            let call = { (tool: String, arguments: [String: Any]) in try harness.callLeadTool(tool, arguments, lead: lead) }
+            let parents = {
+                Dictionary(uniqueKeysWithValues: shell.workspaceStore.activeParents(in: lead.space).map {
+                    (shell.workspaces[$0.key].title, shell.workspaces[$0.value].title)
+                })
+            }
+
+            XCTAssertEqual(try call(LeadTools.renameTask, ["task": "First", "title": "Import orders"]).text, "Renamed “First” to “Import orders”.")
+            let first = try XCTUnwrap(shell.workspaces.first { $0.title == "Import orders" })
+            XCTAssertTrue(first.titleIsManual, "agents' titles no longer replace it")
+            XCTAssertTrue(try call(LeadTools.renameTask, ["task": "Second", "title": String(repeating: "x", count: 81)]).isError)
+
+            XCTAssertTrue(try call(LeadTools.setTaskParent, ["task": "Second", "parent": "Checkout"]).text.contains("can't have sub-tasks"))
+            XCTAssertTrue(try call(LeadTools.setTaskParent, ["task": "Second", "parent": "Second"]).isError)
+            let under = try call(LeadTools.setTaskParent, ["task": "Second", "parent": "Import orders"])
+            XCTAssertEqual(under.text, "“Second” is a sub-task of “Import orders” now. Who it reports to doesn't change.")
+            XCTAssertEqual(parents(), ["Second": "Import orders"])
+            XCTAssertTrue(try call(LeadTools.setTaskParent, ["task": "Third", "parent": "Second"]).text.contains("is a sub-task itself"))
+            XCTAssertTrue(
+                try call(LeadTools.setTaskParent, ["task": "Import orders", "parent": "Third"]).text
+                    .contains("has sub-tasks of its own (“Second”)")
+            )
+            for number in 1...5 {
+                shell.addWorkspace(title: "Sub \(number)", cwd: harness.repo, profileID: lead.space, parentWorkspaceID: first.id)
+            }
+            XCTAssertTrue(
+                try call(LeadTools.setTaskParent, ["task": "Checkout", "parent": "Import orders"]).text.contains("already has 6 sub-tasks")
+            )
+
+            XCTAssertEqual(try call(LeadTools.setTaskParent, ["task": "Second"]).text, "“Second” is a task of its own now. Who it reports to doesn't change.")
+            XCTAssertNil(parents()["Second"])
+            XCTAssertTrue(try call(LeadTools.setTaskParent, ["task": "Second"]).text.contains("already"))
+        }
+    }
+
+    /// read_task gives the last message of the task's newest Claude Code
+    /// conversation, an invented transcript here, whole and with its lines.
+    func testTheLeadReadsATasksLastMessage() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try harness.makeLead()
+            shell.addWorkspace(title: "Writer", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Writer" })
+            let unknown = try harness.callLeadTool(LeadTools.readTask, ["task": "Writer"], lead: lead)
+            XCTAssertTrue(unknown.isError, unknown.text)
+
+            let transcript = harness.root + "/writer.jsonl"
+            let lines = [
+                #"{"type":"user","message":{"role":"user","content":"Write the summary."}}"#,
+                #"{"type":"assistant","timestamp":"2026-11-17T10:00:00.000Z","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"The summary:\n- one\n- two"}]}}"#
+            ]
+            try (lines.joined(separator: "\n") + "\n").write(toFile: transcript, atomically: true, encoding: .utf8)
+            let now = Date().timeIntervalSince1970
+            for (event, source) in [(AgentHookEvent.Name.sessionStart, "startup"), (.userPromptSubmit, nil), (.stop, nil)] {
+                shell.sessionLedger.record(AgentSessionObservation(
+                    agent: .claude, sessionID: "writer", event: event, source: source, timestamp: now,
+                    agentProcess: ProcessInstance(pid: 4242, startedAt: 1), name: nil, cwd: harness.worktree,
+                    transcriptPath: transcript, checkout: nil, pullRequest: nil, workspaceID: task.id,
+                    workspaceTitle: task.title, agentUUID: task.columns.first?.agentUUID, columnIndex: 0
+                ), spaceID: lead.space)
+            }
+            let read = try harness.callLeadTool(LeadTools.readTask, ["task": "Writer"], lead: lead)
+            XCTAssertFalse(read.isError, read.text)
+            XCTAssertTrue(read.text.hasPrefix("“Writer”'s last message ("), read.text)
+            XCTAssertTrue(read.text.hasSuffix("):\nThe summary:\n- one\n- two"), read.text)
+        }
+    }
 }

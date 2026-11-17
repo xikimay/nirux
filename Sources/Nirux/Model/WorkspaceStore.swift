@@ -410,6 +410,17 @@ final class WorkspaceStore {
         return true
     }
 
+    /// Lists the workspace at `index` under the task `parentID`, or at the
+    /// top level for nil, as Move Out does: the caller checks the sub-task
+    /// rules. False when nothing changes.
+    @discardableResult
+    func setParent(at index: Int, to parentID: String?) -> Bool {
+        guard workspaces.indices.contains(index), workspaces[index].parentWorkspaceID != parentID else { return false }
+        workspaces[index].parentWorkspaceID = parentID
+        keepTreeOrder(in: workspaces[index].profileID)
+        return true
+    }
+
     /// The sidebar's order: the Lead, the active workspaces, each followed
     /// by its sub-tasks (depth first), the inactive ones.
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
