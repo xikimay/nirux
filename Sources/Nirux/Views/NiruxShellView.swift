@@ -57,6 +57,11 @@ final class NiruxShellView: NSView {
     var interfaceTransparency: InterfaceTransparency {
         didSet { if interfaceTransparency != oldValue { applyInterfaceTransparency() } }
     }
+    /// Settings › Appearance › Terminals: the terminals' background opacity,
+    /// apart from the interface's level (`TerminalOpacity`).
+    var terminalOpacity: Double {
+        didSet { if terminalOpacity != oldValue { applyTerminalOpacity() } }
+    }
 
     let workspaceStore = WorkspaceStore()
     let projectStore = ProjectStore()
@@ -271,6 +276,7 @@ final class NiruxShellView: NSView {
         let settings = Persistence.load()?.settings
         animatesInterface = settings?.animatesInterface ?? true
         interfaceTransparency = settings?.interfaceTransparency ?? .defaultValue
+        terminalOpacity = settings?.terminalOpacity ?? 1
         super.init(frame: frame)
         // A Board shows its workspace's space, every way a workspace changes space.
         workspaceStore.onWorkspacesChangedSpace = { [weak self] change in self?.boardsFollowTheirWorkspaces(change) }
@@ -493,6 +499,8 @@ final class NiruxShellView: NSView {
         scheduleDeferredAgentsOnScreen()
         scheduleBranchReviewsOnScreen()
         refreshStaleBranchReviewsOnScreen()
+        // A column opened since takes the terminals' opacity.
+        applyTerminalOpacity()
     }
 
     // MARK: - Terminal Occlusion

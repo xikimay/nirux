@@ -426,6 +426,9 @@ struct PersistedSettings: Codable {
     var interfaceTransparency: InterfaceTransparency?
     /// A value a newer build wrote, kept so saving doesn't erase it.
     private var unknownInterfaceTransparencyRawValue: String?
+    /// The terminals' background opacity (Settings › Appearance ›
+    /// Terminals), 0.6 to 1; nil means 1.
+    var terminalOpacity: Double?
     /// Branch Review's Explain: the account each project (space) accepted
     /// the first-use notice for (`ExplainAccount.identity`), by project id.
     /// Asked again when the account changes.
@@ -481,6 +484,7 @@ struct PersistedSettings: Codable {
         case onboardingChecklist
         case agentResumeOnLaunch
         case interfaceTransparency
+        case terminalOpacity
         case explainNoticeAccounts
         case explainModel
         case explainEffort
@@ -529,6 +533,7 @@ struct PersistedSettings: Codable {
             interfaceTransparency = InterfaceTransparency(rawValue: raw)
             if interfaceTransparency == nil { unknownInterfaceTransparencyRawValue = raw }
         }
+        terminalOpacity = (try? container.decodeIfPresent(Double.self, forKey: .terminalOpacity)).flatMap { $0 }.map(TerminalOpacity.clamped)
         explainNoticeAccounts = (try? container.decodeIfPresent([String: String].self, forKey: .explainNoticeAccounts)) ?? [:]
         explainModel = try? container.decodeIfPresent(String.self, forKey: .explainModel)
         explainEffort = try? container.decodeIfPresent(String.self, forKey: .explainEffort)
@@ -570,6 +575,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(
             interfaceTransparency?.rawValue ?? unknownInterfaceTransparencyRawValue, forKey: .interfaceTransparency
         )
+        try container.encodeIfPresent(terminalOpacity, forKey: .terminalOpacity)
         if !explainNoticeAccounts.isEmpty { try container.encode(explainNoticeAccounts, forKey: .explainNoticeAccounts) }
         try container.encodeIfPresent(explainModel, forKey: .explainModel)
         try container.encodeIfPresent(explainEffort, forKey: .explainEffort)

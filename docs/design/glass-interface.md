@@ -1,7 +1,7 @@
 # Glass interface
 
-> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3), the rows on glass (3.4); phase 4 brings one Settings window (4.1), then the Appearance pane and the translucent window (4.2).\
-> **Differs today:** Opaque stays the default until the energy bench and the user say Tinted; the terminals' own opacity comes in 4.3.
+> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3), the rows on glass (3.4); phase 4 brings one Settings window (4.1), the Appearance pane and the translucent window (4.2), the terminals' opacity (4.3).\
+> **Differs today:** Opaque stays the default until the energy bench and the user say Tinted.
 
 Status: design validated by the user on 2026-11-14, after six rounds of
 studies (renders of today's app, mockups and the plan:
@@ -65,8 +65,22 @@ and moves:
   once and is saved (`settings.interfaceTransparency`, a raw string a newer
   build's level survives). While Reduce transparency or Increase contrast is
   on, a line says Nirux draws opaque, and the tiles stay pickable.
+- **Terminals** (4.3): a "Background" slider from 60 to 100%, by fives,
+  100% by default, apart from the interface's level; the terminals follow it
+  at every step, and it is saved once it stays still. Below 100% each
+  terminal column of the task on screen lies on a frost of its own
+  (behind-window, in place of the canvas fill, once the terminal draws its
+  first frame) and Ghostty draws the terminal's background at that opacity
+  over it (`background-opacity`, with `background-opacity-cells` so that a
+  TUI's own backgrounds take it too: a per-terminal override applied live), so
+  "80%" is 80% over the desktop's blur at any interface level, with no
+  window tint stacked under it. Text keeps a minimum contrast of 3 unless the
+  terminal's own Ghostty config sets one; Ghostty's own `background-opacity` and
+  `background-blur` aren't used. Reduce transparency and Increase contrast
+  keep the terminals opaque, and the section says so; editor, web, Board and
+  review columns stay opaque. The window is non-opaque only while a terminal
+  of the task on screen is.
 - **Animate the interface**, moved here from General.
-- No terminal controls before 4.3.
 
 **The window.** `MainWindowContent` lies under the whole window, title bar
 included (a full-size content view); the shell sits below the toolbar.
