@@ -133,7 +133,6 @@ extension NiruxShellView {
             let entries = BoardSections.entries(saving: config, as: read.section, in: kept, context: read.context)
             switch store.save(entries: entries, replacing: read.loaded) {
             case .success:
-                self?.boardEntriesBySpace[profileID] = entries
                 // A new form from the file: the next save compares with it.
                 self?.loadBoardTab(spaceID: profileID, status: "Saved.")
                 return nil

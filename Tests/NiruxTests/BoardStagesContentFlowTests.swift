@@ -137,6 +137,16 @@ final class BoardStagesContentFlowTests: XCTestCase {
             XCTAssertEqual(gadgetsSection.status?.toolTip, "Read-only, from origin: not one of this space’s repositories, so no merge queue here.")
             XCTAssertNil(content.sections.first { $0.kind == .otherWorkspaces }, "no Other workspaces")
 
+            // Each task's row stands at its line's station: the Board's reading, read by the sidebar's pass.
+            shell.updateSidebar(snapshot: ProcessSnapshot(entries: []))
+            let lines = try stages(of: board, in: shell).sections.flatMap { $0.lines.units.flatMap(\.lines) }
+            let rows = shell.sidebar.lastInfos.filter { info in lines.contains { $0.id == info.id } }
+            XCTAssertFalse(rows.isEmpty)
+            for row in rows {
+                let line = try XCTUnwrap(lines.first { $0.id == row.id })
+                XCTAssertEqual(row.station, line.rail == nil ? nil : line.station, line.title)
+            }
+
             // Start says what the next one takes.
             shell.addToMergeQueue(12, board: board, section: "legacy")
             shell.addToMergeQueue(40, board: board, section: "legacy")

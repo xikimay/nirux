@@ -10,8 +10,6 @@ extension NiruxShellView {
         let now = Date().timeIntervalSince1970
         let visibleIndices = visibleWorkspaceIndices
         let parents = workspaceStore.activeParents(in: activeProfileID)
-        // Before anything draws: every surface shows these.
-        refreshTaskStations()
         let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
         followReviewPasses(snapshot: snapshot)
@@ -26,7 +24,7 @@ extension NiruxShellView {
         // Seen ones no longer handed off are forgotten.
         requestsState.seenHandedOff.formIntersection(requestsState.handedOff.values.map(\.question.questionID))
         let appIsActive = sideEffects.appIsActive()
-        let infos = visibleIndices.map { index in
+        let built = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
@@ -72,6 +70,16 @@ extension NiruxShellView {
                 }
             }
         }
+        // Every Board reads its tasks before the rows draw: a row shows its
+        // line's station.
+        let stages = readProjectBoards(snapshot: snapshot, now: now, pass: SidebarPassReadings(
+            infos: built, foregroundProcesses: foregroundProcesses, approvalHolds: approvalHolds, missionQuestions: missionQuestions
+        ))
+        let infos = built.map { info in
+            var info = info
+            info.station = taskStations[info.id]
+            return info
+        }
         updateColumnHeaders(infos: infos, blockedWaits: blockedWaits, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
@@ -107,13 +115,9 @@ extension NiruxShellView {
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions, foregroundProcesses: foregroundProcesses)
         closeStaleTurnReply()
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
-        refreshProjectBoards(snapshot: snapshot, now: now, pass: SidebarPassReadings(
-            infos: infos, foregroundProcesses: foregroundProcesses, approvalHolds: approvalHolds, missionQuestions: missionQuestions
-        ))
+        drawProjectBoards(stages, now: now)
     }
 
-    /// `info` with its task's station: the one its space's Board showed,
-    /// else read the Board's way from what the row holds.
     /// A running pass ends once the process that sent its event exited (a
     /// Ctrl-Z leaves it there), it named none, or its column closed. An
     /// empty process table says nothing.

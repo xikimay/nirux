@@ -81,7 +81,6 @@ extension NiruxShellView {
             lead: members.first { $0.isLead }?.id,
             readings: readings,
             queues: queues.states,
-            stations: taskStations,
             runningQueues: queues.running,
             cleaningUp: worktreeCleanupsInFlight,
             order: order
