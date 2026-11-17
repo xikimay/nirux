@@ -283,14 +283,14 @@ enum ClaudeLaunchMode: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .default: return "Claude Code default (your defaultMode, else Auto)"
+        case .default: return "Claude Code default (your defaultMode, else Auto if available)"
         case .manual: return "Manual (asks before edits and commands)"
         case .acceptEdits: return "Accept edits (edits and file commands run; others ask)"
         case .auto: return "Auto (a safety check allows or blocks risky actions)"
         case .plan: return "Plan (read-only)"
         case .dontAsk: return "Don't ask (denies unless pre-approved)"
         case .bypassPermissions: return "Bypass permissions (skips permission checks)"
-        case .skipPermissions: return "Bypass permissions (--dangerously-skip-permissions)"
+        case .skipPermissions: return "Bypass permissions (saved as Skip all)"
         }
     }
 
@@ -506,11 +506,14 @@ struct PersistedSettings: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        if (try? container.decodeIfPresent(Bool.self, forKey: .claudeManualMode)) == true {
-            claudeLaunchMode = .manual
-        } else if let mode = try container.decodeIfPresent(ClaudeLaunchMode.self, forKey: .claudeLaunchMode) {
+        // A mode this build doesn't know reads as none, not as a file that
+        // can't be read.
+        if let mode = (try? container.decodeIfPresent(ClaudeLaunchMode.self, forKey: .claudeLaunchMode)) ?? nil {
             claudeLaunchMode = mode
-        } else if let legacy = try container.decodeIfPresent(Bool.self, forKey: .claudeBypassPermissions) {
+        } else if !container.contains(.claudeLaunchMode),
+                  (try? container.decodeIfPresent(Bool.self, forKey: .claudeManualMode)) == true {
+            claudeLaunchMode = .manual
+        } else if let legacy = (try? container.decodeIfPresent(Bool.self, forKey: .claudeBypassPermissions)) ?? nil {
             // Old `claudeBypassPermissions: true` emitted `--dangerously-skip-permissions`,
             // which `.skipPermissions` keeps.
             claudeLaunchMode = legacy ? .skipPermissions : .default
@@ -518,7 +521,7 @@ struct PersistedSettings: Codable {
             claudeLaunchMode = nil
         }
         claudeNoFlicker = try container.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
-        codexLaunchMode = try container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        codexLaunchMode = (try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)) ?? nil
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
@@ -565,7 +568,8 @@ struct PersistedSettings: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         // Builds before Manual fail on an unknown `claudeLaunchMode`, and
         // with it the whole state file: they read this key's absence as
-        // Claude Code default.
+        // Claude Code default. This one reads an unknown mode as none, so
+        // the next mode needs no key of its own.
         if claudeLaunchMode == .manual {
             try container.encode(true, forKey: .claudeManualMode)
         } else {

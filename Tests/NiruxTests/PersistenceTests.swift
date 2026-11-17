@@ -626,6 +626,19 @@ extension PersistedStateCodingTests {
         XCTAssertEqual(try JSONDecoder().decode(PersistedSettings.self, from: data).claudeLaunchMode, .manual)
     }
 
+    /// A mode a newer build saved costs that setting only, not the file;
+    /// an explicit mode beats the Manual key.
+    func testLaunchModesThisBuildCantReadCostOnlyThemselves() throws {
+        let newer = try JSONDecoder().decode(
+            PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"turbo","codexLaunchMode":"warp","claudeNoFlicker":false}"#.utf8)
+        )
+        XCTAssertNil(newer.claudeLaunchMode)
+        XCTAssertNil(newer.codexLaunchMode)
+        XCTAssertEqual(newer.claudeNoFlicker, false, "the rest of the settings stays")
+        let both = try JSONDecoder().decode(PersistedSettings.self, from: Data(#"{"claudeLaunchMode":"plan","claudeManualMode":true}"#.utf8))
+        XCTAssertEqual(both.claudeLaunchMode, .plan)
+    }
+
     // MARK: - cliArgs wire format
 
     /// Lock down the CLI flag mapping so a future rename in the enum doesn't
