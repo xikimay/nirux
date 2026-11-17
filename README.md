@@ -2,18 +2,20 @@
 
 Nirux is a macOS app for running coding agents, Claude Code and Codex, on several tasks at once.
 
-![Nirux with demo data: tasks and their status in the sidebar, an agent's terminal, and the diff of the file it changed](docs/images/nirux.png)
+![Nirux with demo data at the Glass level: the command bar at the top, the sidebar on glass with each task's state icon, an agent's terminal, and the diff of the file it changed](docs/images/nirux.png)
 
 Each task runs in its own git worktree, a separate checkout of the repository, so agents don't touch each other's files. Nirux is alpha software and changes often.
 
 ## What you can do
 
 - Give each task its own workspace: terminals, a browser and an editor side by side.
-- See which agent is working, waiting for you, or stopped on an error.
+- See where each task stands from its state icon: working, waiting for you, stopped on an error, checks running, ready to merge.
+- When a Claude Code agent asks to run a command, allow or deny it from the sidebar, without opening its terminal (not in Auto mode, Claude Code's default).
 - Start a task with `Cmd+N`: Nirux creates the worktree and starts the agent in it.
 - Have a Lead agent start tasks, follow them and bring you only what needs you.
 - Follow each task's pull request from the sidebar, including CI failures that look flaky.
 - Read a branch's whole diff on one page.
+- Choose how much of your desktop shows through the window, from Opaque, the default, to Clear, in **Settings › Appearance**.
 
 ## Install
 
@@ -32,7 +34,7 @@ To start agents, Nirux needs `claude` or `codex` installed. Pull request and CI 
 2. Choose **Space › New Space…**, name the space and add your repository. A space groups the work on one product.
 3. Press `Cmd+N`, describe a task and press Return. Nirux fetches the base branch, creates a worktree on a new branch and starts the agent there with your description.
 
-A task's sidebar row turns amber when its agent needs you, and `Cmd+J` goes to the agent that has waited longest, those you have not seen yet first. `Cmd+P` opens the command palette, which also switches workspaces.
+A task's row turns amber when its agent needs you, and the command bar at the top of the window counts the agents waiting in every space. `Cmd+J` goes to the one that has waited longest, those you have not seen yet first. `Cmd+P`, or the search in the command bar, opens the command palette, which also switches workspaces. `Ctrl+Cmd+S` folds the sidebar into a rail of icons; `Cmd+J` then lists the waiting requests under the command bar.
 
 ## Agent status hooks
 
@@ -43,7 +45,7 @@ To know when an agent starts working, waits for you or stops, Nirux adds entries
 ## Documentation
 
 - [Getting started](docs/getting-started.md): the first launch and the first task
-- [Workspaces and columns](docs/workspaces-and-columns.md): the sidebar, the editor, the browser, search
+- [Workspaces and columns](docs/workspaces-and-columns.md): the sidebar and the command bar, the editor, the browser, search
 - [Spaces and tasks](docs/spaces-and-tasks.md): repositories, `Cmd+N`, worktrees and their cleanup, the Lead
 - [Agent status](docs/agent-status.md): what the lights mean, notifications, resuming after a restart
 - [Pull requests](docs/pull-requests.md): checks, CI failures, review badges, Branch Review
