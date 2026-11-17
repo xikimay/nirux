@@ -85,6 +85,46 @@ final class GlassViewTests: XCTestCase {
         XCTAssertTrue(view.castsShadow)
     }
 
+    /// The glass is a background: it asks its host for no size. Measured as
+    /// a toolbar measures an item at its widest (pulled wide at the fitting
+    /// priority), the host takes its whole range at every level. On macOS 26
+    /// and later this is macOS's glass, drawn through views of its own that
+    /// hug their size: should a later macOS move or rebuild them out of
+    /// `GlassView`'s reach, the host comes back at its minimum here, as the
+    /// command bar did (280 pt). macOS 15 checks the other backings.
+    func testTheGlassAsksItsHostForNoSize() throws {
+        for level in InterfaceTransparency.allCases {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 100), styleMask: .borderless, backing: .buffered, defer: true)
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
+            let container = try XCTUnwrap(window.contentView)
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 36))
+            host.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(host)
+            let glass = GlassView(role: .chrome, level: level, cornerRadius: 18, resolveLevel: { $0 })
+            glass.frame = host.bounds
+            glass.autoresizingMask = [.width, .height]
+            host.addSubview(glass)
+            let label = NSTextField(labelWithString: "Fix checkout rounding")
+            let hug = label.contentHuggingPriority(for: .horizontal)
+            glass.contentView.addSubview(label)
+            let widest = host.widthAnchor.constraint(equalToConstant: 500)
+            widest.priority = .fittingSizeCompression
+            NSLayoutConstraint.activate([
+                host.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                host.topAnchor.constraint(equalTo: container.topAnchor),
+                host.heightAnchor.constraint(equalToConstant: 36),
+                host.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+                host.widthAnchor.constraint(lessThanOrEqualToConstant: 500),
+                widest,
+            ])
+            container.layoutSubtreeIfNeeded()
+            if GlassView.systemHasGlass, level.usesGlass { XCTAssertEqual(glass.backing, .glass, "\(level): macOS's glass") }
+            XCTAssertEqual(host.frame.width, 500, accuracy: 0.5, "\(level)")
+            XCTAssertEqual(label.contentHuggingPriority(for: .horizontal), hug, "\(level): what it holds keeps its own")
+        }
+    }
+
     /// Reduce transparency or Increase contrast turn any level solid.
     func testMacOSAccessibilityTurnsTheGlassSolid() {
         let view = GlassView(role: .chrome, level: .clear, cornerRadius: 14) {

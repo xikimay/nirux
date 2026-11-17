@@ -318,17 +318,26 @@ final class GlassView: NSView {
 }
 
 /// macOS 26's glass as a background: it asks its host's layout for no size.
-/// It draws through a view that hugs a 10 pt width at the default priority,
-/// above the priority a toolbar measures its items at: the command bar's
-/// item measured its minimum as its maximum, and stayed at 280 pt.
+/// It draws through views of its own; one hugs a 10 pt width at the default
+/// priority, above the priority a toolbar measures its items at, and the
+/// command bar's item measured its minimum as its maximum (280 pt). Every
+/// view the glass adds, at any depth, but what it holds, hugs at 1 from
+/// each constraints pass on, however late AppKit sets its own.
 @available(macOS 26, *)
 private final class BackgroundGlass: NSGlassEffectView {
-    override func didAddSubview(_ subview: NSView) {
-        super.didAddSubview(subview)
-        // What the glass holds keeps its own.
-        guard subview !== contentView else { return }
-        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
-            subview.setContentHuggingPriority(.init(1), for: axis)
+    override func updateConstraints() {
+        lowerHugs(under: self)
+        super.updateConstraints()
+    }
+
+    private func lowerHugs(under view: NSView) {
+        for subview in view.subviews where subview !== contentView {
+            for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] where subview.contentHuggingPriority(for: axis) > Self.hug {
+                subview.setContentHuggingPriority(Self.hug, for: axis)
+            }
+            lowerHugs(under: subview)
         }
     }
+
+    private static let hug = NSLayoutConstraint.Priority(1)
 }
