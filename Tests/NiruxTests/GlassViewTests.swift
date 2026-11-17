@@ -7,13 +7,32 @@ import XCTest
 @MainActor
 final class GlassViewTests: XCTestCase {
     /// Opaque is solid on every Mac; the other levels are glass where macOS
-    /// has it, frost where it doesn't.
+    /// has it. Where it doesn't, the chrome is only its rim on the window's
+    /// frost, and what floats has a frost of its own.
     func testTheBackingFollowsTheLevelAndTheMac() {
         for hasGlass in [true, false] {
-            XCTAssertEqual(GlassView.backing(for: .opaque, hasGlass: hasGlass), .solid)
-            for level in [InterfaceTransparency.tinted, .glass, .clear] {
-                XCTAssertEqual(GlassView.backing(for: level, hasGlass: hasGlass), hasGlass ? .glass : .frosted, "\(level)")
+            for role in [GlassView.Role.chrome, .floating] {
+                XCTAssertEqual(GlassView.backing(for: .opaque, role: role, hasGlass: hasGlass), .solid)
+                for level in [InterfaceTransparency.tinted, .glass, .clear] {
+                    let expected: GlassView.Backing = hasGlass ? .glass : role == .chrome ? .rim : .frosted
+                    XCTAssertEqual(GlassView.backing(for: level, role: role, hasGlass: hasGlass), expected, "\(level) \(role)")
+                }
             }
+        }
+    }
+
+    /// On the window's frost (macOS 14 and 15) the chrome adds no tint of its
+    /// own: the bar and the rail read at the window's level, as the open
+    /// sidebar does, not at twice it.
+    func testOnTheWindowsFrostTheChromeAddsNoTint() {
+        for level in [InterfaceTransparency.tinted, .glass, .clear] {
+            let chrome = GlassView(role: .chrome, level: level, cornerRadius: 8, hasGlass: false, resolveLevel: { $0 })
+            chrome.frame = NSRect(x: 0, y: 0, width: 100, height: 30)
+            XCTAssertEqual(chrome.backing, .rim, "\(level)")
+            let fill = chrome.layer?.backgroundColor?.alpha ?? 0
+            let window = GlassView.tintAlpha(for: level, role: .chrome)
+            XCTAssertEqual(1 - (1 - window) * (1 - fill), window, accuracy: 0.001, "composed at the window's level: \(level)")
+            XCTAssertEqual(chrome.layer?.borderWidth, 1, "its rim")
         }
     }
 

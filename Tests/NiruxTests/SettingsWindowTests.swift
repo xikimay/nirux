@@ -367,6 +367,63 @@ final class SettingsWindowTests: XCTestCase {
         }
     }
 
+    // MARK: - Appearance
+
+    /// Settings › Appearance, second: four tiles, Opaque until the user
+    /// picks (the default flips only with the user's OK). A pick applies to
+    /// the window at once and is saved; VoiceOver reads a radio group. A level
+    /// a newer build saved survives a save of another setting.
+    @MainActor
+    func testAppearancePicksTheInterfacesTransparency() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            let app = try openSettings(shell: shell)
+            defer { close(app) }
+            let settings = try XCTUnwrap(app.settingsController)
+            XCTAssertEqual(settings.appPanes.map(\.title), ["General", "Appearance", "Agents", "Notifications"])
+            let picker = try XCTUnwrap(app.settingsTransparencyPicker)
+            XCTAssertEqual(picker.selection, .opaque)
+            XCTAssertEqual(picker.accessibilityRole(), .radioGroup)
+            XCTAssertEqual(picker.tiles.map { $0.accessibilityLabel() ?? "" }, ["Opaque", "Tinted", "Glass", "Clear"])
+            XCTAssertEqual(picker.tiles.map { $0.accessibilityValue() as? Int }, [1, 0, 0, 0])
+
+            XCTAssertTrue(picker.tiles[2].accessibilityPerformPress())
+            XCTAssertEqual(picker.selection, .glass)
+            XCTAssertEqual(shell.interfaceTransparency, .glass, "at once")
+            XCTAssertEqual(Persistence.load()?.settings?.interfaceTransparency, .glass)
+            XCTAssertEqual(picker.tiles.map { $0.accessibilityValue() as? Int }, [0, 0, 1, 0])
+            XCTAssertEqual(NiruxShellView.currentInterfaceTransparency(), .glass)
+            XCTAssertNotNil(app.settingsAnimationsCheckbox, "Animate the interface moved here")
+            // What the level shows and macOS's note are one block: the
+            // section's gap below stays when the note hides.
+            let summary = try XCTUnwrap(picker.superview?.subviews.compactMap { $0 as? TransparencySummary }.first)
+            XCTAssertEqual(summary.line.stringValue, InterfaceTransparency.glass.summary)
+            XCTAssertEqual((summary.superview as? NSStackView)?.customSpacing(after: summary), 22)
+            XCTAssertFalse(summary.forcedOpaque.isBezeled, "a hint, as the others")
+
+            let stateFile = Persistence.stateDirectory.appendingPathComponent("state.json")
+            try Data(#"{"workspaces":[],"activeWorkspaceIndex":0,"settings":{"interfaceTransparency":"frosted"}}"#.utf8)
+                .write(to: stateFile)
+            XCTAssertEqual(NiruxShellView.currentInterfaceTransparency(), .opaque, "an unknown level reads as no choice")
+            try click(app.settingsNoFlickerCheckbox)
+            XCTAssertTrue(try String(contentsOf: stateFile, encoding: .utf8).contains(#""interfaceTransparency":"frosted""#))
+        }
+    }
+
+    /// macOS's Reduce transparency or Increase contrast: the pane says Nirux
+    /// draws opaque.
+    func testTheForcedOpaqueNoteNamesWhatMacOSDoes() {
+        XCTAssertNil(TransparencySummary.forcedOpaqueText(reducesTransparency: false, increasesContrast: false))
+        XCTAssertEqual(
+            TransparencySummary.forcedOpaqueText(reducesTransparency: true, increasesContrast: true),
+            "Reduce transparency is on in System Settings › Accessibility › Display: Nirux draws opaque."
+        )
+        XCTAssertEqual(
+            TransparencySummary.forcedOpaqueText(reducesTransparency: false, increasesContrast: true),
+            "Increase contrast is on in System Settings › Accessibility › Display: Nirux draws opaque."
+        )
+    }
+
     // MARK: - Branch Review's Explain
 
     /// Opus 5.5 at medium unless chosen otherwise; Explain's next run takes
@@ -481,7 +538,7 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertTrue(window is NSPanel)
             XCTAssertNil(window.toolbar, "no tabs")
             let panes = settings.sidebar.rows.compactMap(\.selection)
-            XCTAssertEqual(panes.count, 3 + SpaceSettingsSection.Tab.allCases.count)
+            XCTAssertEqual(panes.count, 4 + SpaceSettingsSection.Tab.allCases.count)
 
             // Tallest first, so a window that keeps the previous size would cut the next pane.
             @MainActor func height(_ selection: SettingsWindow.Selection) -> CGFloat {
@@ -562,7 +619,7 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertIdentical(settings, shell.settingsWindow, "the shell's window, for the space's panes")
             let window = try XCTUnwrap(app.settingsPanel)
             XCTAssertEqual(settings.sidebar.rows.map(Self.title), [
-                "Nirux", "General", "Agents", "Notifications",
+                "Nirux", "General", "Appearance", "Agents", "Notifications",
                 "Acme", "General", "Defaults", "Lead", "Brief", "Memory", "Board", "Templates"
             ])
             XCTAssertEqual(settings.selection, .app("general"), "Nirux's first pane")

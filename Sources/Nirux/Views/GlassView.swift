@@ -7,10 +7,10 @@ import AppKit
 ///
 /// The tints are provisional: offscreen renders can't show the glass (the
 /// window server draws it), so they get tuned with the user on a demo at the
-/// end of phase 2. The frost blends within the window; the translucent
-/// window (plan step 4.2) moves the chrome to blending behind it, and a glass
-/// that is its window's background (⌘P's panel, `fillsWindow`) blends behind
-/// its window and leaves the shadow to it.
+/// end of phase 2. On macOS 14 and 15 the chrome is its tint over the
+/// translucent window's frost (`MainWindowContent`); what floats has a frost
+/// of its own, and a glass that is its window's background (⌘P's panel,
+/// `fillsWindow`) blends behind its window and leaves the shadow to it.
 final class GlassView: NSView {
     enum Role: Sendable {
         /// The sidebar, the command bar, the rail: it follows the level.
@@ -21,9 +21,12 @@ final class GlassView: NSView {
         case floating
     }
 
-    /// How the glass is drawn.
+    /// How the glass is drawn: `solid`, a fill; `glass`, macOS 26's;
+    /// `frosted`, a blur of its own under the tint; `rim`, only its edge,
+    /// for the chrome on the translucent window's frost, whose tint is
+    /// already the level's.
     enum Backing: Equatable, Sendable {
-        case solid, glass, frosted
+        case solid, glass, frosted, rim
     }
 
     let role: Role
@@ -47,9 +50,13 @@ final class GlassView: NSView {
     }
 
     /// Turns the picked level into the one to draw: macOS's settings as they
-    /// are now, unless a test says otherwise (CI's runners reduce
-    /// transparency).
-    private let resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency
+    /// are now, or the shell's resolver for its own chrome
+    /// (`ShellSideEffects.drawnTransparency`).
+    var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency {
+        didSet { update() }
+    }
+    /// Whether macOS draws `NSGlassEffectView` (26 and later); tests say.
+    private let hasGlass: Bool
 
     private(set) var backing: Backing?
     private var backingView: NSView?
@@ -63,10 +70,12 @@ final class GlassView: NSView {
 
     init(
         role: Role, level: InterfaceTransparency, cornerRadius: CGFloat, fillsWindow: Bool = false,
+        hasGlass: Bool = GlassView.systemHasGlass,
         resolveLevel: @escaping @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
     ) {
         self.role = role
         self.fillsWindow = fillsWindow
+        self.hasGlass = hasGlass
         self.level = level
         self.cornerRadius = cornerRadius
         self.resolveLevel = resolveLevel
@@ -93,11 +102,16 @@ final class GlassView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Solid at Opaque; otherwise the glass where macOS has it, the frost
-    /// where it doesn't.
-    static func backing(for level: InterfaceTransparency, hasGlass: Bool) -> Backing {
+    /// Solid at Opaque; otherwise the glass where macOS has it. Where it
+    /// doesn't, the chrome lies on the window's own frost
+    /// (`MainWindowContent`), already tinted at the level: only its rim, so
+    /// that one level reads the same on the bar, the rail and the open
+    /// sidebar (a frost of its own would also blur twice). What floats in a
+    /// window of its own keeps its frost.
+    static func backing(for level: InterfaceTransparency, role: Role, hasGlass: Bool) -> Backing {
         guard level.usesGlass else { return .solid }
-        return hasGlass ? .glass : .frosted
+        if hasGlass { return .glass }
+        return role == .chrome ? .rim : .frosted
     }
 
     /// Opacity of the tint over the glass: the chrome lets more through as
@@ -117,7 +131,7 @@ final class GlassView: NSView {
         role == .floating ? Theme.Color.raised : Theme.Color.base
     }
 
-    private static var hasGlass: Bool {
+    static var systemHasGlass: Bool {
         if #available(macOS 26, *) { return true }
         return false
     }
@@ -125,7 +139,7 @@ final class GlassView: NSView {
     /// Rebuilds the backing only when its kind changes; a new tint, style or
     /// radius is applied in place.
     private func update() {
-        let wanted = Self.backing(for: resolveLevel(level), hasGlass: Self.hasGlass)
+        let wanted = Self.backing(for: resolveLevel(level), role: role, hasGlass: hasGlass)
         if wanted != backing { rebuild(wanted) }
         applyStyle()
         applyShape()
@@ -150,7 +164,7 @@ final class GlassView: NSView {
         }
         backing = wanted
         switch wanted {
-        case .solid:
+        case .solid, .rim:
             break
         case .glass:
             if #available(macOS 26, *) {
@@ -236,6 +250,8 @@ final class GlassView: NSView {
         let level = resolveLevel(self.level)
         let tint = Self.tintColor(for: role).withAlphaComponent(Self.tintAlpha(for: level, role: role))
         layer?.backgroundColor = backing == .solid ? tint.cgColor : nil
+        layer?.borderWidth = backing == .rim ? 1 : 0
+        layer?.borderColor = backing == .rim ? Theme.Color.line.cgColor : nil
         tintView?.layer?.backgroundColor = tint.cgColor
         if #available(macOS 26, *), let glass = backingView as? NSGlassEffectView {
             // What floats stays the thicker glass at every level.

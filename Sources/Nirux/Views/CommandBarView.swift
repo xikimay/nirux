@@ -47,6 +47,12 @@ final class CommandBarView: NSView {
         get { glass.level }
         set { glass.level = newValue }
     }
+    /// Turns the picked level into the one drawn (the shell's, so that the
+    /// window and its chrome agree).
+    var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency {
+        get { glass.resolveLevel }
+        set { glass.resolveLevel = newValue }
+    }
 
     private(set) var content: Content?
     private let glass: GlassView

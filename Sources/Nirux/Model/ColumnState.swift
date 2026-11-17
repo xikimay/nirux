@@ -259,6 +259,16 @@ final class ColumnState {
         showDeferredAgentNotice(deferredAgent)
     }
 
+    /// A column's view, opaque under its content in the canvas's colour,
+    /// which showed there before the window could be translucent: a
+    /// terminal before its first frame, or a page still loading, never
+    /// lets the desktop through.
+    private static func filled<View: NSView>(_ view: View) -> View {
+        view.wantsLayer = true
+        view.layer?.backgroundColor = Theme.Color.canvas.cgColor
+        return view
+    }
+
     /// The login shell's arguments to run `command`, then stay as a shell.
     /// The shell path is single-quoted — an unquoted path with spaces or
     /// metacharacters would be word-split by the -c string.
@@ -273,8 +283,7 @@ final class ColumnState {
     private init(cwd: String, shellArgs: [String]?, environment: [String: String]) {
         terminalSpec = (cwd, shellArgs ?? [], environment)
         agentUUID = environment["NIRUX_AGENT_UUID"]
-        let dropView = DropTargetView()
-        dropView.wantsLayer = true
+        let dropView = Self.filled(DropTargetView())
         view = dropView
 
         let ptySession = PtySession()
@@ -384,8 +393,7 @@ final class ColumnState {
     /// WebView column
     init(url: String) {
         agentUUID = nil
-        view = NSView()
-        view.wantsLayer = true
+        view = Self.filled(NSView())
 
         let webView = WebViewColumn(url: url)
         webView.autoresizingMask = [.width, .height]
@@ -396,8 +404,7 @@ final class ColumnState {
     /// Editor column (Monaco-backed). Scoped to a workspace cwd.
     init(editorWorkspaceCwd: String) {
         agentUUID = nil
-        view = NSView()
-        view.wantsLayer = true
+        view = Self.filled(NSView())
 
         let editor = EditorColumn(workspaceCwd: editorWorkspaceCwd)
         editor.autoresizingMask = [.width, .height]
@@ -408,8 +415,7 @@ final class ColumnState {
     /// Project Board column: a project's branches, agents and pull requests.
     init(projectBoard: ProjectBoardController) {
         agentUUID = nil
-        view = NSView()
-        view.wantsLayer = true
+        view = Self.filled(NSView())
 
         let board = projectBoard.view
         board.autoresizingMask = [.width, .height]
@@ -420,8 +426,7 @@ final class ColumnState {
     /// Branch Review column: one branch, read-only.
     init(branchReview: BranchReviewController) {
         agentUUID = nil
-        view = NSView()
-        view.wantsLayer = true
+        view = Self.filled(NSView())
 
         let review = branchReview.view
         review.autoresizingMask = [.width, .height]

@@ -22,6 +22,12 @@ final class RequestInboxView: NSView {
         get { glass.level }
         set { glass.level = newValue }
     }
+    /// Turns the picked level into the one drawn (the shell's, so that the
+    /// window and its chrome agree).
+    var resolveLevel: @MainActor (InterfaceTransparency) -> InterfaceTransparency {
+        get { glass.resolveLevel }
+        set { glass.resolveLevel = newValue }
+    }
 
     private(set) var requests: [WaitingRequest] = []
     private(set) var chosenID: String?
@@ -46,7 +52,9 @@ final class RequestInboxView: NSView {
 
     /// `now`: the clock the answers' arming reads (a test's own).
     init(level: InterfaceTransparency, now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
-        glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel)
+        // The background of its panel: the frost blends what is behind the
+        // panel, and the panel casts the shadow.
+        glass = GlassView(role: .floating, level: level, cornerRadius: Theme.Radius.panel, fillsWindow: true)
         arming = RequestArming(now: now)
         super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 200))
         glass.autoresizingMask = [.width, .height]

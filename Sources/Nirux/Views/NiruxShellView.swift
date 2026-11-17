@@ -47,10 +47,15 @@ final class NiruxShellView: NSView {
     let sidebarStaleLog = SidebarStaleLogState()
     let workspaceSwitch = WorkspaceSwitchState()
     let workspaceNameCard = WorkspaceNameCard()
-    /// Settings › General › "Animate the interface": off, states show
+    /// Settings › Appearance › "Animate the interface": off, states show
     /// without moving.
-    var animatesInterface = NiruxShellView.currentAnimatesInterface() {
+    var animatesInterface: Bool {
         didSet { if animatesInterface != oldValue { applyAgentLights() } }
+    }
+    /// Settings › Appearance: how much of the desktop shows through the
+    /// chrome (NiruxShellView+Appearance).
+    var interfaceTransparency: InterfaceTransparency {
+        didSet { if interfaceTransparency != oldValue { applyInterfaceTransparency() } }
     }
 
     let workspaceStore = WorkspaceStore()
@@ -262,6 +267,10 @@ final class NiruxShellView: NSView {
     private var observesDisplays = false
 
     override init(frame: NSRect) {
+        // How Nirux looks, from one read of the settings.
+        let settings = Persistence.load()?.settings
+        animatesInterface = settings?.animatesInterface ?? true
+        interfaceTransparency = settings?.interfaceTransparency ?? .defaultValue
         super.init(frame: frame)
         // A Board shows its workspace's space, every way a workspace changes space.
         workspaceStore.onWorkspacesChangedSpace = { [weak self] change in self?.boardsFollowTheirWorkspaces(change) }
@@ -273,6 +282,7 @@ final class NiruxShellView: NSView {
         verticalStrip.wantsLayer = true
         viewport.addSubview(verticalStrip)
         viewport.addSubview(emptySpaceView)
+        sidebar.level = interfaceTransparency
         addSubview(sidebar)
         addSubview(divider)
         addSubview(viewport)
@@ -352,6 +362,7 @@ final class NiruxShellView: NSView {
         }
         wireDeferredAgentResume()
         wireAgentLights()
+        wireAppearance()
         wireSidebarStaleLog()
         sidebar.onCatchUpAction = { [weak self] action in self?.handleCatchUpAction(action) }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in

@@ -66,6 +66,10 @@ struct ShellSideEffects {
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
     var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
+    /// The transparency level drawn: the one picked, made opaque where macOS
+    /// asks (Reduce transparency, Increase contrast; CI's runners do).
+    var drawnTransparency: @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
+
     /// Nirux is the app in front. Tests set it: an xctest never is.
     var appIsActive: @MainActor () -> Bool = { NSApp.isActive }
 

@@ -34,7 +34,8 @@ extension NiruxShellView {
     }
 
     private func makeInbox() -> RequestInboxView {
-        let inbox = RequestInboxView(level: .opaque)
+        let inbox = RequestInboxView(level: interfaceTransparency)
+        inbox.resolveLevel = sideEffects.drawnTransparency
         inbox.onAnswer = { [weak self] request, choice, button in self?.answerRequest(request, choice, button: button) }
         inbox.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         inbox.onClose = { [weak self] in self?.closeInbox() }
@@ -109,7 +110,8 @@ extension NiruxShellView {
     }
 
     private func makeCallout() -> RequestCalloutView {
-        let callout = RequestCalloutView(level: .opaque)
+        let callout = RequestCalloutView(level: interfaceTransparency)
+        callout.resolveLevel = sideEffects.drawnTransparency
         callout.onAnswer = { [weak self] request, choice, button in self?.answerRequest(request, choice, button: button) }
         callout.onOpenTask = { [weak self] request in self?.goToRequest(request) }
         callout.onClose = { [weak self] in self?.closeCallout() }
