@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyTerminal
 import XCTest
 @testable import Nirux
 
@@ -64,6 +65,69 @@ final class TranslucentWindowTests: XCTestCase {
         let bar = try XCTUnwrap(shell.commandBarToolbar?.bar)
         XCTAssertEqual(bar.resolveLevel(.clear), .opaque, "the bar draws what the window does")
         XCTAssertEqual(shell.sidebar.iconRail.resolveLevel(.clear), .opaque, "and the rail")
+    }
+
+    // MARK: - Terminals (4.3)
+
+    /// 60 to 100 %, by fives; below 100 % the terminal's override sets the
+    /// background's opacity and a minimum contrast, unless the user's
+    /// Ghostty config sets its own; at 100 %, none.
+    func testTheTerminalsOpacityAndItsOverride() {
+        XCTAssertEqual(TerminalOpacity.clamped(0.3), 0.6)
+        XCTAssertEqual(TerminalOpacity.clamped(0.82), 0.8, accuracy: 0.0001)
+        XCTAssertEqual(TerminalOpacity.clamped(1.4), 1)
+        XCTAssertEqual(TerminalOpacity.configuration(1, userSetsContrast: false), TerminalConfiguration())
+        XCTAssertEqual(
+            TerminalOpacity.configuration(0.8, userSetsContrast: false),
+            TerminalConfiguration().backgroundOpacity(0.8).minimumContrast(3)
+        )
+        XCTAssertEqual(TerminalOpacity.configuration(0.8, userSetsContrast: true), TerminalConfiguration().backgroundOpacity(0.8))
+        XCTAssertTrue(TerminalOpacity.setsContrast("font-size = 14\nminimum-contrast = 1.1\n"))
+        XCTAssertFalse(TerminalOpacity.setsContrast(TerminalConfigBuilder.render([])))
+    }
+
+    /// "80 %" is 80 % over the desktop's blur: the column's own frost under
+    /// the terminal, nothing of the window between them (no canvas fill, no
+    /// window tint), at any interface level. At 100 % the column is opaque
+    /// again; a column without a terminal never changes.
+    func testATranslucentTerminalLiesOnTheDesktopsBlurAlone() throws {
+        _ = NSApplication.shared
+        let column = ColumnState(cwd: NSTemporaryDirectory())
+        column.showTerminalOpacity(0.8, userSetsContrast: false)
+        let frost = try XCTUnwrap(column.terminalFrost)
+        XCTAssertIdentical(column.view.subviews.first, frost, "under everything in the column")
+        XCTAssertEqual(frost.blendingMode, .behindWindow)
+        let between = column.view.layer?.backgroundColor?.alpha ?? 0
+        XCTAssertEqual(1 - (1 - between) * (1 - 0.8), 0.8, accuracy: 0.001, "composed at the terminal's opacity")
+        XCTAssertEqual(column.terminalView?.controller?.terminalConfiguration, TerminalOpacity.configuration(0.8, userSetsContrast: false))
+
+        column.showTerminalOpacity(1, userSetsContrast: false)
+        XCTAssertNil(column.terminalFrost)
+        XCTAssertEqual(column.view.layer?.backgroundColor?.alpha, 1)
+        XCTAssertEqual(column.terminalView?.controller?.terminalConfiguration, TerminalConfiguration())
+
+        let page = ColumnState(url: "about:blank")
+        page.showTerminalOpacity(0.6, userSetsContrast: false)
+        XCTAssertNil(page.terminalFrost)
+        XCTAssertEqual(page.view.layer?.backgroundColor?.alpha, 1)
+    }
+
+    /// The shell gives every terminal the opacity, one opened later too; the
+    /// window lets the desktop through at interface Opaque; Reduce
+    /// transparency keeps the terminals opaque.
+    func testTheShellsTerminalsFollowTheOpacity() throws {
+        let (window, _, shell) = mainWindow()
+        defer { window.close() }
+        let first = try XCTUnwrap(shell.activeWorkspace?.columns.first)
+        shell.terminalOpacity = 0.8
+        XCTAssertEqual(first.terminalOpacity, 0.8)
+        XCTAssertFalse(window.isOpaque, "at interface Opaque too")
+        shell.addColumn()
+        XCTAssertEqual(shell.activeWorkspace?.columns.last?.terminalOpacity, 0.8, "a column opened since")
+        shell.sideEffects.drawnTransparency = { _ in .opaque }
+        shell.applyInterfaceTransparency()
+        XCTAssertEqual(first.terminalOpacity, 1, "macOS asks for opaque")
+        XCTAssertTrue(window.isOpaque)
     }
 
     /// Every kind of column is opaque under its content: a terminal before

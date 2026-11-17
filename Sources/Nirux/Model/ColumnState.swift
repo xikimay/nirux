@@ -259,6 +259,36 @@ final class ColumnState {
         showDeferredAgentNotice(deferredAgent)
     }
 
+    /// The terminal's background opacity shown (Settings › Appearance ›
+    /// Terminals); 1, opaque on the canvas fill.
+    private(set) var terminalOpacity: Double = 1
+    /// Below 100 %: the desktop's blur under the terminal, in place of the
+    /// canvas fill, so that nothing of the window lies between them.
+    private(set) var terminalFrost: NSVisualEffectView?
+
+    /// Shows the terminal's background at `opacity` over the desktop's blur
+    /// (`TerminalOpacity`); a column without a terminal stays opaque.
+    func showTerminalOpacity(_ opacity: Double, userSetsContrast: Bool) {
+        guard let terminal = terminalView, opacity != terminalOpacity else { return }
+        terminalOpacity = opacity
+        terminal.controller?.setTerminalConfiguration(TerminalOpacity.configuration(opacity, userSetsContrast: userSetsContrast))
+        if opacity < 1 {
+            let frost = terminalFrost ?? NSVisualEffectView(frame: view.bounds)
+            frost.blendingMode = .behindWindow
+            frost.material = .underWindowBackground
+            frost.state = .followsWindowActiveState
+            frost.autoresizingMask = [.width, .height]
+            frost.frame = view.bounds
+            if frost.superview == nil { view.addSubview(frost, positioned: .below, relativeTo: nil) }
+            terminalFrost = frost
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+        } else {
+            terminalFrost?.removeFromSuperview()
+            terminalFrost = nil
+            view.layer?.backgroundColor = Theme.Color.canvas.cgColor
+        }
+    }
+
     /// A column's view, opaque under its content in the canvas's colour,
     /// which showed there before the window could be translucent: a
     /// terminal before its first frame, or a page still loading, never

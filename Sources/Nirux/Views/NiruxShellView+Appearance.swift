@@ -33,7 +33,24 @@ extension NiruxShellView {
         sidebar.level = level
         sidebar.layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.base.cgColor
         layer?.backgroundColor = translucent ? NSColor.clear.cgColor : Theme.Color.canvas.cgColor
-        (window?.contentView as? MainWindowContent)?.show(drawnTransparency)
+        applyTerminalOpacity()
+    }
+
+    /// The terminals' opacity drawn: the one picked, opaque where macOS asks
+    /// (the same resolver as the interface's level).
+    var drawnTerminalOpacity: Double { sideEffects.drawnTransparency(.clear).usesGlass ? terminalOpacity : 1 }
+
+    /// Every terminal shows the opacity drawn, a new one too (called from
+    /// each layout: a column already showing it is left alone), and the
+    /// window lets the desktop through when the interface or a terminal does.
+    func applyTerminalOpacity() {
+        let opacity = drawnTerminalOpacity
+        let pending = workspaces.flatMap(\.columns).filter { $0.terminalView != nil && $0.terminalOpacity != opacity }
+        if !pending.isEmpty {
+            let userSetsContrast = TerminalOpacity.setsContrast(TerminalAppearance.currentConfig())
+            for column in pending { column.showTerminalOpacity(opacity, userSetsContrast: userSetsContrast) }
+        }
+        (window?.contentView as? MainWindowContent)?.show(drawnTransparency, terminalsTranslucent: opacity < 1)
     }
 
     /// Reduce transparency and Increase contrast make the window opaque at

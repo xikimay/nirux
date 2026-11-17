@@ -122,6 +122,22 @@ extension NiruxApp {
         }
         settingsTransparencyPicker = picker
 
+        let opacity = shell?.terminalOpacity ?? Persistence.load()?.settings?.terminalOpacity ?? 1
+        let slider = NSSlider(
+            value: opacity * 100, minValue: TerminalOpacity.range.lowerBound * 100, maxValue: 100,
+            target: self, action: #selector(settingsTerminalOpacityChanged(_:))
+        )
+        slider.numberOfTickMarks = Int((1 - TerminalOpacity.range.lowerBound) / TerminalOpacity.step) + 1
+        slider.allowsTickMarkValuesOnly = true
+        slider.setAccessibilityLabel("Terminal background opacity")
+        let percent = NSTextField(labelWithString: Self.percent(opacity))
+        percent.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        settingsTerminalOpacitySlider = slider
+        settingsTerminalOpacityLabel = percent
+        let opacityControl = NSStackView(views: [slider, percent])
+        opacityControl.orientation = .horizontal
+        opacityControl.spacing = Theme.Space.sm
+
         let animations = SettingsForm.checkbox(
             "Animate the interface", target: self, action: #selector(settingsAnimationsChanged(_:))
         )
@@ -130,6 +146,15 @@ extension NiruxApp {
 
         return SettingsForm.pane([
             [SettingsForm.header("Interface"), picker, summary],
+            [
+                SettingsForm.header("Terminals"),
+                SettingsForm.row("Background", opacityControl),
+                SettingsForm.hint(
+                    "Below 100 %, the desktop shows through each terminal's background, blurred, whatever the "
+                        + "interface's level, and text keeps a minimum contrast unless your Ghostty config sets one. "
+                        + "Ghostty's own background-opacity isn't used."
+                )
+            ],
             [
                 animations,
                 SettingsForm.hint(
@@ -416,6 +441,22 @@ extension NiruxApp {
         keepAwakeController?.setEnabled(enabled)
     }
 
+    /// "80 %".
+    static func percent(_ opacity: Double) -> String { "\(Int((opacity * 100).rounded())) %" }
+
+    @objc func settingsTerminalOpacityChanged(_ sender: NSSlider) {
+        let opacity = TerminalOpacity.clamped(sender.doubleValue / 100)
+        let previous = shell?.terminalOpacity ?? Persistence.load()?.settings?.terminalOpacity ?? 1
+        guard opacity != previous else { return }
+        settingsTerminalOpacityLabel?.stringValue = Self.percent(opacity)
+        let putBack = { [weak self] in
+            sender.doubleValue = previous * 100
+            self?.settingsTerminalOpacityLabel?.stringValue = Self.percent(previous)
+        }
+        guard saveSetting(revert: putBack, { $0.terminalOpacity = opacity < 1 ? opacity : nil }) else { return }
+        shell?.terminalOpacity = opacity
+    }
+
     @objc func settingsAnimationsChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
         guard saveSetting(revert: Self.toggledBack(sender), { $0.animatesInterface = enabled }) else { return }
@@ -665,6 +706,8 @@ extension NiruxApp {
         settingsKeepAwakeCheckbox = nil
         settingsAnimationsCheckbox = nil
         settingsTransparencyPicker = nil
+        settingsTerminalOpacitySlider = nil
+        settingsTerminalOpacityLabel = nil
         settingsTasksFolderLabel = nil
         settingsAgentResumePopup = nil
         settingsLaunchModePopup = nil

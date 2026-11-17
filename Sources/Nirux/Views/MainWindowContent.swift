@@ -49,9 +49,14 @@ final class MainWindowContent: NSView {
     /// Whether the window lets the desktop through.
     private(set) var isTranslucent = false
 
+    /// Whether a terminal lets the desktop through (`TerminalOpacity`):
+    /// the window is non-opaque then too, whatever the interface's level.
+    private var terminalsTranslucent = false
+
     /// The level drawn (macOS's Reduce transparency and Increase contrast
-    /// already made it opaque).
-    func show(_ drawn: InterfaceTransparency) {
+    /// already made it opaque), and whether a terminal is translucent.
+    func show(_ drawn: InterfaceTransparency, terminalsTranslucent: Bool = false) {
+        self.terminalsTranslucent = terminalsTranslucent
         isTranslucent = drawn.usesGlass
         frost.isHidden = !isTranslucent
         tint.isHidden = !isTranslucent
@@ -61,9 +66,10 @@ final class MainWindowContent: NSView {
     }
 
     private func applyToWindow() {
-        guard let window, window.isOpaque == isTranslucent else { return }
-        window.isOpaque = !isTranslucent
-        window.backgroundColor = isTranslucent ? .clear : Theme.Color.canvas
+        let lets = isTranslucent || terminalsTranslucent
+        guard let window, window.isOpaque == lets else { return }
+        window.isOpaque = !lets
+        window.backgroundColor = lets ? .clear : Theme.Color.canvas
         // Once the window has drawn the new level.
         DispatchQueue.main.async { [weak window] in window?.invalidateShadow() }
     }

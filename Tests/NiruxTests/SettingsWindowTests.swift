@@ -410,6 +410,30 @@ final class SettingsWindowTests: XCTestCase {
         }
     }
 
+    /// Appearance › Terminals: a slider from 60 to 100 %, by fives; a move
+    /// saves and reaches the shell at once.
+    @MainActor
+    func testTheTerminalsBackgroundSlider() throws {
+        try withIsolatedState {
+            let shell = makeShell()
+            let app = try openSettings(shell: shell)
+            defer { close(app) }
+            let slider = try XCTUnwrap(app.settingsTerminalOpacitySlider)
+            XCTAssertEqual(slider.doubleValue, 100)
+            XCTAssertEqual(slider.minValue, 60)
+            XCTAssertEqual(slider.numberOfTickMarks, 9)
+            XCTAssertEqual(app.settingsTerminalOpacityLabel?.stringValue, "100 %")
+            slider.doubleValue = 80
+            XCTAssertTrue(slider.sendAction(slider.action, to: slider.target))
+            XCTAssertEqual(app.settingsTerminalOpacityLabel?.stringValue, "80 %")
+            XCTAssertEqual(shell.terminalOpacity, 0.8, accuracy: 0.0001)
+            XCTAssertEqual(try XCTUnwrap(Persistence.load()?.settings?.terminalOpacity), 0.8, accuracy: 0.0001)
+            slider.doubleValue = 100
+            XCTAssertTrue(slider.sendAction(slider.action, to: slider.target))
+            XCTAssertNil(Persistence.load()?.settings?.terminalOpacity, "100 % saves no choice")
+        }
+    }
+
     /// macOS's Reduce transparency or Increase contrast: the pane says Nirux
     /// draws opaque.
     func testTheForcedOpaqueNoteNamesWhatMacOSDoes() {
