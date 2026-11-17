@@ -40,7 +40,8 @@ enum ClaudeSpaceSettings {
         ["Bash(git *push --force*)", "Bash(git *push -f*)"],
         ["Bash(git *push * --force*)", "Bash(git *push * -f*)", "Bash(git *push * +*)"],
         ["Bash(git *reset *--hard*)", "Bash(git *clean -*)", "Bash(git *worktree remove*)"],
-        ["Bash(git *checkout *.)", "Bash(git *checkout *./)", "Bash(git *restore *.)", "Bash(git *restore *./)"]
+        ["Bash(git *checkout *.)", "Bash(git *checkout *./)"],
+        ["Bash(git *restore *.)", "Bash(git *restore *./)"]
     ]
 
     static var denyRules: [String] { denyRuleGroups.flatMap { $0 } }
