@@ -315,13 +315,17 @@ New flow, built on the guarded typing `tell` already uses
     space, or at the top level without `parent`, within the sub-task rules
     (the parent a task, two levels, six sub-tasks). Who it reports to
     doesn't change.
-  - `interrupt_task(task)`: Esc into the turn of the task's Claude Code, as
-    the key, without closing anything. Claude Code gives the prompt box back a
-    prompt it hasn't begun answering and the prompts queued meanwhile, and
-    fires no Stop: so only once the turn called a tool and nothing was typed
-    since its prompt, and the turn is over once its transcript shows
-    "[Request interrupted by user". The Esc counts as no draft, and the next
-    `tell` goes in at once.
+  - `interrupt_task(task)`: Esc into the turn of one of the Lead's tasks, in
+    the column its Mission names (as `tell`), without closing anything.
+    Claude Code gives the prompt box back a prompt it hasn't begun answering
+    and the prompts queued meanwhile, and fires no Stop: so only once the
+    main thread's turn called a tool and nothing was typed since its prompt,
+    with no dialog waiting for a key, not while the user has the task on
+    screen, and one Esc per turn (a second opens the rewind). The turn is
+    over once its transcript shows "[Request interrupted by user" stamped
+    after the Esc (watched 30 s; the Lead hears within 4), unless a newer
+    prompt went in; the messages waiting for it go in then. The Esc counts
+    as no draft, and the next `tell` goes in at once.
   - `read_task(task)`: the last message of the task's newest Claude Code
     conversation (the session history keeps its transcript, across
     relaunches), up to 6,000 characters, its start and end past that.

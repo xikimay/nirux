@@ -155,6 +155,8 @@ struct AgentStatusMachine {
     /// The main thread's last tool call (pre or post): its reply had
     /// begun, so an Esc can't give its prompt back (`interruptRefusal`).
     private(set) var lastMainToolAt: TimeInterval = 0
+    /// The Esc Nirux pressed in a turn (`interruptRefusal`): one per turn.
+    private(set) var interruptSentAt: TimeInterval = 0
     /// The agent process seen asking whether to trust its folder, and when
     /// (see AgentTrustPrompt): no hook reports that question.
     var trustPromptSighting: AgentTrustPrompt.Sighting?
@@ -870,7 +872,7 @@ struct AgentStatusMachine {
             // have worked on after its Stop. Otherwise the turn's Stop got
             // lost, and this is its end.
             let promptAt = lastPromptAt ?? 0
-            if lastInputAt > promptAt || mainTurnEndedAt >= promptAt {
+            if lastInputAt > promptAt || mainTurnEndedAt >= promptAt || interruptSentAt >= promptAt {
                 _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
                 return
             }
@@ -951,11 +953,25 @@ struct AgentStatusMachine {
         circling.reset()
     }
 
-    /// Claude stopped the turn at Nirux's Esc (its transcript says so): the
-    /// turn is over with no Stop to say it, and nobody is alerted.
-    mutating func noteInterrupted() {
+    /// Nirux pressed Esc in the turn: no draft (`interruptRefusal` vouched
+    /// the box stays empty), but it closes a question dialog as the key
+    /// does. The prompt whose turn it interrupts.
+    mutating func noteInterruptSent(now: TimeInterval) -> TimeInterval? {
+        interruptSentAt = now
+        lastCancelKeyAt = now
+        return lastPromptAt
+    }
+
+    /// Claude stopped the turn of `promptAt` at Nirux's Esc (its transcript
+    /// says so): the turn is over with no Stop to say it, its dialogs with
+    /// it, and nobody is alerted. False when a newer prompt went in.
+    mutating func noteInterrupted(promptAt: TimeInterval, now: TimeInterval) -> Bool {
+        guard lastPromptAt == promptAt else { return false }
+        closeDialogs { $0.agentID == nil }
         endTurn()
+        mainTurnEndedAt = now
         state = .idle
+        return true
     }
 
     /// The agent may be going in circles in the turn in flight: its
@@ -1104,7 +1120,7 @@ struct AgentStatusMachine {
     /// The turn the last prompt started still runs, by hook evidence: no
     /// main-thread turn end since (a background subagent at work after its
     /// Stop doesn't count), nor an idle reminder that ended it.
-    private var promptTurnInFlight: Bool {
+    var promptTurnInFlight: Bool {
         hookTurnInFlight && mainTurnEndedAt < (lastPromptAt ?? 0)
     }
 
@@ -1395,6 +1411,7 @@ struct AgentStatusMachine {
         lastClosedDialogRequestedAt = 0
         lastEventAt = 0
         lastMainToolAt = 0
+        interruptSentAt = 0
         turnEndedAt = 0
         mainTurnEndedAt = 0
         stopHooksKeepGoing = false

@@ -40,7 +40,7 @@ extension NiruxShellView {
         case LeadTools.renameTask: leadRenameTask(arguments, in: space, answer: answer)
         case LeadTools.setTaskParent: leadSetTaskParent(arguments, in: space, answer: answer)
         case LeadTools.readTask: leadReadTask(arguments, in: space, answer: answer)
-        case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, answer: answer)
+        case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, lead: lead.id, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
@@ -428,7 +428,7 @@ extension NiruxShellView {
     /// The task named by its branch or title, among the space's workspaces,
     /// and its latest Mission whose parent is this Lead: a Lead started
     /// again doesn't take the former one's tasks over.
-    private func leadTask(_ name: String, in space: WorkspaceProfile, lead leadID: String) -> (workspace: WorkspaceState, mission: Mission)? {
+    func leadTask(_ name: String, in space: WorkspaceProfile, lead leadID: String) -> (workspace: WorkspaceState, mission: Mission)? {
         _ = MissionStore.shared.ensureLoaded()
         let candidates = workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing }
         func mission(of workspace: WorkspaceState) -> Mission? {
@@ -466,7 +466,7 @@ extension NiruxShellView {
             || workspace.taskFolder.map { ($0 as NSString).lastPathComponent == name } ?? false
     }
 
-    private func noLeadTask(_ name: String) -> String {
+    func noLeadTask(_ name: String) -> String {
         "No task of yours is named “\(name)”, or several share that name: use its title or branch from list_tasks "
             + "(its folder, for a task without a repository). "
             + "A task the user started without you doesn't report to you."

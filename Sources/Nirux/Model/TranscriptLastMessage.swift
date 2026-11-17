@@ -54,10 +54,12 @@ enum TranscriptLastMessage {
     /// Claude stamps once it read the key (milliseconds, this Mac's clock).
     static func showsInterrupt(path: String, since date: Date) -> Bool {
         guard let tail = tail(of: path, bytes: 256 * 1024) else { return false }
+        // Claude stamps milliseconds, cut.
+        let sentAt = Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1_000).rounded(.down) / 1_000)
         return lines(of: tail.data, startsMidLine: tail.startsMidLine).reversed().contains { line in
             guard line.withUnsafeBytes({ TranscriptSearch.contains($0, interruptMarker) }),
                   let object = line.withUnsafeBytes(TranscriptSearch.object), object["type"] as? String == "user",
-                  let time = (object["timestamp"] as? String).flatMap(TranscriptSearch.date), time >= date
+                  let time = (object["timestamp"] as? String).flatMap(TranscriptSearch.date), time >= sentAt
             else { return false }
             let content = (object["message"] as? [String: Any])?["content"]
             let texts = (content as? String).map { [$0] }

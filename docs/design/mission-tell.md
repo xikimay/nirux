@@ -89,7 +89,11 @@ Review's send).
   (folded onto one line, repeated by `list_tasks`).
 - A message past `PtySession.inputQueueBytes` is typed with
   `pasteInBackground` (off the main thread, as the agent reads it, 30 s at
-  most), Enter once it is all in. One cut short is ended and left unsent.
+  most), Enter once it is all in, still all the prompt holds (no input
+  since, no dialog, the same agent in front). Otherwise it stays unsent and
+  its sender hears it in a `[Nirux Mission]` line.
+- Limits count characters, and scalars too: what Nirux types stops at
+  `TypedPromptSanitizer.maxCharacters` scalars.
 - A file the message points to was rejected: one in the task's worktree shows
   in git status and can get committed; one in Nirux's state folder sits
   outside the task's project, so Claude asks the user before reading it.

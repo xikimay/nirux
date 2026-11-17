@@ -298,7 +298,14 @@ extension NiruxShellView {
                   // Recorded first: a failed save must not type it twice.
                   MissionStore.shared.markTyped(delivery, at: now)
             else { continue }
-            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance)
+            let sender = NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID)
+            let toChild = !Self.goesToParent(delivery.event)
+            let receiver = MissionPromptText.quoted(childWorkspace?.title ?? mission.branch)
+            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] why in
+                // Its sender hears it; a child's question or result is in its parent's prompt, unsent.
+                guard toChild else { return }
+                self?.tellProposer(sender, "Your message to “\(receiver)” wasn't sent: \(why). Send it again once its prompt is clear.")
+            }
             missionWaits.noteTyped(into: recipient, at: now)
             typedAny = true
         }
@@ -308,14 +315,24 @@ extension NiruxShellView {
 
     /// `paste` (a bracketed paste) and Enter into `pty`: in one write when
     /// the terminal's input queue holds it, else as the agent reads it
-    /// (`PtySession.pasteInBackground`), Enter once it is all in. A paste
-    /// cut short is ended and left unsent in the prompt, for the user.
-    func typeMissionPrompt(_ paste: String, into pty: PtySession, keepingInFront process: ProcessInstance?) {
+    /// (`PtySession.pasteInBackground`), Enter once it is all in and still
+    /// all the prompt holds, for the agent it went to. Otherwise it stays
+    /// unsent, and `unsent` says why.
+    func typeMissionPrompt(
+        _ paste: String, into pty: PtySession, keepingInFront process: ProcessInstance?,
+        unsent: @escaping @MainActor @Sendable (String) -> Void
+    ) {
         guard paste.utf8.count > PtySession.inputQueueBytes else { return pty.sendRaw(paste + "\r") }
-        pty.pasteInBackground(paste, keepingInFront: process, cancelled: { false }) { outcome in
+        pty.pasteInBackground(paste, keepingInFront: process, cancelled: { false }) { outcome, typedAt in
             guard outcome == .pasted else {
-                return MissionWaitLog.logger.notice("A long Mission message wasn't typed whole: \(String(describing: outcome), privacy: .public)")
+                MissionWaitLog.logger.notice("A long Mission message wasn't typed whole: \(String(describing: outcome), privacy: .public)")
+                return unsent(outcome == .timedOut ? "its agent stopped reading it, so its start may sit in its prompt" : "its agent left")
             }
+            let snapshot = ProcessSnapshot()
+            // The paste's own keys are its draft: anything since is someone's.
+            guard pty.lastInputAt == typedAt, pty.foregroundProcess(snapshot: snapshot)?.instance == process,
+                  pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: snapshot) == .draft
+            else { return unsent("it is in its prompt, but someone typed meanwhile or a dialog opened, so Nirux didn't press Enter") }
             pty.sendRaw("\r")
         }
     }

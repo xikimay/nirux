@@ -255,7 +255,7 @@ extension NiruxShellView {
             showToast("Type an answer first")
             return false
         }
-        guard reply.count <= MissionEventCLI.maxInstructionLength else {
+        guard MissionEventCLI.fits(reply, limit: MissionEventCLI.maxInstructionLength) else {
             showToast("Answers are limited to \(MissionEventCLI.maxInstructionLength) characters")
             return false
         }

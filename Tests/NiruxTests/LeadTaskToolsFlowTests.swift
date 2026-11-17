@@ -429,6 +429,14 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             harness.waitUntil("all of it, then Enter") { task.agent.input.contains("\u{1B}[201~") && task.agent.input.hasSuffix("\n") }
             XCTAssertTrue(task.agent.input.contains("Line 70: read the file and add up the totals."))
             XCTAssertTrue(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": String(repeating: "x", count: 4_001)], lead: lead).isError)
+
+            // A key of the user's while it goes in: Enter would send it too.
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            task.column.pty?.sendRaw("z")
+            harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
+            XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 2, "the second went in without Enter")
         }
     }
 
@@ -446,9 +454,29 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             let interrupt = { try harness.callLeadTool(LeadTools.interruptTask, ["task": "Builder"], lead: lead) }
 
             XCTAssertTrue(try interrupt().text.contains("isn't working"))
+            // A turn over, a background subagent at work: no turn of its own.
+            task.hook(.userPromptSubmit)
+            task.hook(.preToolUse)
+            task.hook(.stop)
+            let pty = try XCTUnwrap(task.column.pty)
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .preToolUse, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
+                agentID: "subagent", timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            XCTAssertTrue(try interrupt().text.contains("isn't working"))
             task.hook(.userPromptSubmit)
             XCTAssertTrue(try interrupt().text.contains("hasn't called a tool since its prompt"))
             task.hook(.preToolUse)
+            // A dialog waits on the user; answered at the terminal, its
+            // command runs on, and that turn may be stopped.
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .permissionRequest, agentUUID: task.column.agentUUID, sessionID: "task",
+                emitterProcess: task.claude, toolName: "Bash", toolKey: "swift test", timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            XCTAssertTrue(try interrupt().text.contains("waits on a dialog"))
+            pty.sendRaw("1")
+            // A message sent while it works waits for the turn's end.
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Builder", "message": "Build the docs instead."], lead: lead).isError)
             // Claude writes its interrupt line once the Esc reaches it.
             let agent = task.agent
             let writer = Timer(timeInterval: 0.05, repeats: true) { timer in
@@ -464,8 +492,8 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             let done = try interrupt()
             XCTAssertFalse(done.isError, done.text)
             XCTAssertTrue(done.text.contains("puts a prompt it hadn't answered, and messages queued meanwhile, back in its prompt box"), done.text)
-            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Builder", "message": "Build the docs instead."], lead: lead).isError)
-            harness.waitUntil("the tell, at once") { task.agent.input.contains("Build the docs instead.") }
+            XCTAssertTrue(done.text.contains("The message waiting for it goes in now."), done.text)
+            harness.waitUntil("the waiting tell, at once") { task.agent.input.contains("Build the docs instead.") }
 
             // Keys typed since its prompt: they would come back to the box.
             task.hook(.userPromptSubmit)
@@ -476,6 +504,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.hook(.userPromptSubmit)
             task.hook(.preToolUse)
             XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
+            XCTAssertTrue(try interrupt().text.contains("Esc already went into this turn"), "a second Esc would open the rewind")
         }
     }
 }
