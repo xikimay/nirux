@@ -103,7 +103,7 @@ extension NSView {
     /// Says why an action did nothing or failed without stopping anyone: a
     /// toast at the bottom of the Nirux window, a beep outside one.
     func showToast(_ message: String, tone: ToastView.Tone = .info) {
-        guard let shell = window?.contentView as? NiruxShellView else { return NSSound.beep() }
+        guard let shell = NiruxShellView.of(window) else { return NSSound.beep() }
         shell.presentToast(message, tone: tone)
     }
 }

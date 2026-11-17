@@ -7,12 +7,16 @@ import XCTest
 @MainActor
 final class GlassViewTests: XCTestCase {
     /// Opaque is solid on every Mac; the other levels are glass where macOS
-    /// has it, frost where it doesn't.
+    /// has it. Where it doesn't, the chrome is its tint on the window's
+    /// frost, and what floats has a frost of its own.
     func testTheBackingFollowsTheLevelAndTheMac() {
         for hasGlass in [true, false] {
-            XCTAssertEqual(GlassView.backing(for: .opaque, hasGlass: hasGlass), .solid)
-            for level in [InterfaceTransparency.tinted, .glass, .clear] {
-                XCTAssertEqual(GlassView.backing(for: level, hasGlass: hasGlass), hasGlass ? .glass : .frosted, "\(level)")
+            for role in [GlassView.Role.chrome, .floating] {
+                XCTAssertEqual(GlassView.backing(for: .opaque, role: role, hasGlass: hasGlass), .solid)
+                for level in [InterfaceTransparency.tinted, .glass, .clear] {
+                    let expected: GlassView.Backing = hasGlass ? .glass : role == .chrome ? .solid : .frosted
+                    XCTAssertEqual(GlassView.backing(for: level, role: role, hasGlass: hasGlass), expected, "\(level) \(role)")
+                }
             }
         }
     }

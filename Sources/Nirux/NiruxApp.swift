@@ -129,7 +129,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     static func makeMainWindow(contentRect: NSRect) -> NSWindow {
         let window = NSWindow(
             contentRect: contentRect,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
         window.titlebarAppearsTransparent = true
@@ -158,9 +158,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         window.delegate = self
 
         let shellView = NiruxShellView(frame: rect)
-        shellView.autoresizingMask = [.width, .height]
-        window.contentView = shellView
+        window.contentView = MainWindowContent(shell: shellView)
         shell = shellView
+        shellView.applyInterfaceTransparency()
         shellView.installCommandBar(in: window)
         // The frame the screen leaves, now that the toolbar set the title
         // bar's height: even margins all round.

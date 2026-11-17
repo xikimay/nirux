@@ -359,6 +359,7 @@ final class NiruxShellView: NSView {
         }
         wireDeferredAgentResume()
         wireAgentLights()
+        wireAppearance()
         wireSidebarStaleLog()
         sidebar.onCatchUpAction = { [weak self] action in self?.handleCatchUpAction(action) }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
