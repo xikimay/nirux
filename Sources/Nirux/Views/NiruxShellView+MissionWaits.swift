@@ -13,8 +13,8 @@ struct SidebarWaitingMessages: Hashable {
     let refusal: AgentPromptRefusal?
     /// The prompt looks free, yet the tries at typing them failed.
     var untypable = false
-    /// "2 messages waiting since 22:21", written at the check: the day
-    /// shows once it is another.
+    /// "2 messages waiting since 22:21 · a dialog may be open", written at
+    /// the check: the day shows once it is another.
     let line: String
 
     init(count: Int, since: TimeInterval, refusal: AgentPromptRefusal?, untypable: Bool = false, now: TimeInterval) {
@@ -23,22 +23,38 @@ struct SidebarWaitingMessages: Hashable {
         self.refusal = refusal
         self.untypable = untypable
         let time = ProjectBoard.clockTime(Date(timeIntervalSince1970: since), now: Date(timeIntervalSince1970: now))
-        line = "\(count == 1 ? "1 message" : "\(count) messages") waiting since \(time)"
+        line = "\(count == 1 ? "1 message" : "\(count) messages") waiting since \(time) · \(Self.why(refusal, untypable: untypable).short)"
     }
 
     var tooltip: String {
-        let why = switch refusal {
-        case .noClaude?: "its terminal doesn't run Claude Code"
-        case .restarted?: "its Claude Code restarted since, and Nirux types a message sent to the one before into no other"
-        case .noPromptYet?: "its Claude Code hasn't taken a prompt since it started; they go in after its first one"
-        case .dialog?: "a dialog may be open there; they go in once it closes and the turn ends"
-        case .failedTurn?: "its last turn failed; they go in after its next turn"
-        case .draft?: "keys reached its prompt since its last prompt, so it may hold a draft; they go in after its next prompt"
-        case .working?, .verdict?: "its turn isn't over yet"
-        case nil where untypable: "its prompt looks free, but typing them failed; they go in at its next turn end if they can"
-        case nil: "its prompt looks free, and Nirux tries again"
+        "Mission messages not typed into this agent's prompt yet: \(Self.why(refusal, untypable: untypable).long)."
+    }
+
+    /// Why they wait: a few words for the row, the whole of it for the tooltip.
+    private static func why(_ refusal: AgentPromptRefusal?, untypable: Bool) -> (short: String, long: String) {
+        switch refusal {
+        case .noClaude?: ("no Claude Code there", "its terminal doesn't run Claude Code")
+        case .restarted?: (
+            "its Claude Code restarted",
+            "its Claude Code restarted since, and Nirux types a message sent to the one before into no other"
+        )
+        case .noPromptYet?: (
+            "no prompt since it started",
+            "its Claude Code hasn't taken a prompt since it started; they go in after its first one"
+        )
+        case .dialog?: ("a dialog may be open", "a dialog may be open there; they go in once it closes and the turn ends")
+        case .failedTurn?: ("its last turn failed", "its last turn failed; they go in after its next turn")
+        case .draft?: (
+            "held by a draft until its next prompt",
+            "keys reached its prompt since its last prompt, so it may hold a draft; they go in after its next prompt"
+        )
+        case .working?, .verdict?: ("its turn isn't over", "its turn isn't over yet")
+        case nil where untypable: (
+            "typing them failed",
+            "its prompt looks free, but typing them failed; they go in at its next turn end if they can"
+        )
+        case nil: ("Nirux tries again", "its prompt looks free, and Nirux tries again")
         }
-        return "Mission messages not typed into this agent's prompt yet: \(why)."
     }
 }
 

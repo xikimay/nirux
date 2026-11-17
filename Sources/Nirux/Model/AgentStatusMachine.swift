@@ -983,6 +983,7 @@ struct AgentStatusMachine {
     }
 
     private static let modeSwitchKey = Data([0x1B, 0x5B, 0x5A])
+    private static let enterKey = Data([0x0D])
 
     /// Esc or Ctrl-C pressed, as Claude Code reads them: the plain byte,
     /// the kitty keyboard protocol's `ESC [ code ; mods u`, or xterm's
@@ -1048,7 +1049,7 @@ struct AgentStatusMachine {
     /// text (Tab's amendment) reads as its answer, and what follows as a
     /// draft; so does the number after an Esc that only left that text.
     static func answersApproval(_ keys: Data) -> Bool {
-        keys == Data([0x0D]) || isCancelKey(keys) || (keys.count == 1 && (0x31...0x39).contains(keys[keys.startIndex]))
+        keys == enterKey || isCancelKey(keys) || (keys.count == 1 && (0x31...0x39).contains(keys[keys.startIndex]))
     }
 
     /// Keys that leave the prompt as it was, with Claude Code's default
@@ -1076,6 +1077,25 @@ struct AgentStatusMachine {
         }
     }
 
+    /// Whether `keys`, reaching Claude's prompt with no dialog waiting for
+    /// them, may leave text there or open a screen no hook tells of (Esc Esc's
+    /// rewind picker, Ctrl-O's transcript, a slash command's). Not those that
+    /// leave it as it was, nor Enter while a turn is in flight: an empty prompt
+    /// queues nothing then, and what earlier keys left is a draft already. At
+    /// an idle prompt Enter may run text Nirux never saw (a slash command
+    /// picked with the mouse) into a picker no hook tells of.
+    static func mayLeaveDraft(_ keys: Data?, turnInFlight: Bool) -> Bool {
+        guard let keys else { return true }
+        return !leavesPromptAsItWas(keys) && !(turnInFlight && keys == enterKey)
+    }
+
+    /// The turn the last prompt started still runs, by hook evidence: no
+    /// main-thread turn end since (a background subagent at work after its
+    /// Stop doesn't count), nor an idle reminder that ended it.
+    private var promptTurnInFlight: Bool {
+        hookTurnInFlight && mainTurnEndedAt < (lastPromptAt ?? 0)
+    }
+
     /// One key's bytes: a character, a short escape sequence, or one
     /// control sequence however long its parameters (a key the kitty
     /// keyboard protocol or modifyOtherKeys reports). A bracketed paste is
@@ -1096,7 +1116,7 @@ struct AgentStatusMachine {
     /// What kind of key a write was, for the log: never its characters.
     static func keyKind(_ keys: Data?) -> String {
         guard let keys else { return "key" }
-        if keys == Data([0x0D]) { return "enter" }
+        if keys == enterKey { return "enter" }
         if isCancelKey(keys) { return "cancel" }
         if keys.first == 0x1B {
             guard isOneKey(keys) else { return "paste" }
@@ -1133,10 +1153,7 @@ struct AgentStatusMachine {
         }
         if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
         lastInputAt = time
-        // Any other key may leave text at the prompt, or open a screen no hook
-        // tells of (Esc Esc's rewind picker, Ctrl-O's transcript, a slash
-        // command's), but those that leave it as it was.
-        if inFront == nil, !(keys.map(Self.leavesPromptAsItWas) ?? false) {
+        if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
             lastDraftKind = Self.keyKind(keys)
         }
