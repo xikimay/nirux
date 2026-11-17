@@ -747,10 +747,9 @@ extension NiruxShellView {
     /// it).
     var sidebarNavigation: SidebarNavigation {
         guard let workspace = activeWorkspace, !workspace.isClosing else { return SidebarNavigation(boardShown: false, boardAvailable: false) }
-        // The space's own Board: not one a task moved here from another space holds.
         let shown = workspace.columns.indices.contains { index in
             let column = workspace.columns[index]
-            return !column.isClosing && column.projectBoard?.projectID == workspace.profileID && workspace.showsColumn(at: index)
+            return column.projectBoard != nil && !column.isClosing && workspace.showsColumn(at: index)
         }
         return SidebarNavigation(boardShown: shown, boardAvailable: true)
     }

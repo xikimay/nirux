@@ -66,6 +66,22 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
     }
 
+    /// A Board file it can't write takes no keyboard: asked for again, the
+    /// form leaves it with the sidebar, never nowhere.
+    @MainActor
+    func testAFormThatCantBeWrittenLeavesTheKeyboardToTheSidebar() throws {
+        try withShell { shell, space in
+            try write(#"{"schemaVersion": 3, "repository": "acme/widgets"}"#, for: space)
+            let form = try open(shell, space)
+            XCTAssertFalse(form.isWritable)
+            let panel = try XCTUnwrap(shell.spaceSettings?.panel)
+            let table = shell.settingsWindow.sidebar.table
+            panel.makeFirstResponder(table)
+            shell.showBoardSettings(profileID: space.id)
+            XCTAssertIdentical(panel.firstResponder, table)
+        }
+    }
+
     // MARK: - Saving
 
     @MainActor

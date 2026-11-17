@@ -124,6 +124,7 @@ extension NiruxShellView {
         let panel = BoardSettingsPanel()
         boardSettingsPanel = panel
         settings.boardForm = panel
+        panel.askInSheet = { [weak settings] alert, window, answer in settings?.ask(alert, on: window, answer: answer) }
         panel.onSave = { [weak self] config in
             if let refusal = Self.boardSaveRefusal(config, read: read) { return refusal }
             // The other repositories' configs stay as read; refused if

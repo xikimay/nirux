@@ -72,16 +72,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     var isVisible: Bool { panel?.isVisible == true }
 
-    /// The sheet one of Nirux's panes put up (the tasks folder's chooser, a
-    /// write that failed); any other sheet on the window is the space's.
-    weak var appSheet: NSWindow?
-
-    /// A sheet of the space's panes, up on the window.
-    var spaceSheet: NSWindow? {
-        guard let sheet = panel?.attachedSheet, sheet !== appSheet else { return nil }
-        return sheet
-    }
-
     /// The pane shown now.
     var selectedView: NSView? { shownPane }
 
@@ -97,11 +87,13 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         if !panel.isVisible { panel.center() }
         panel.makeKeyAndOrderFront(nil)
         // After the window is up, which hands the sidebar the keyboard: the
-        // pane takes it now if its content is there, else once it comes.
-        if let selection, Self.panesTakingKeyboard.contains(selection), let pane = shownPane,
-           !panel.keyboardIsFree(for: pane) {
+        // pane takes it now if its content is there, else once it comes;
+        // one that can't (a Board file it can't write) leaves it there.
+        if let selection, case .space(let tab) = selection, Self.panesTakingKeyboard.contains(selection),
+           let pane = shownPane, !panel.keyboardIsFree(for: pane) {
+            let holder = panel.firstResponder
             panel.makeFirstResponder(nil)
-            if case .space(let tab) = selection { space?.keyboardFreed(for: tab) }
+            if space?.keyboardFreed(for: tab) != true { panel.makeFirstResponder(holder) }
         }
     }
 

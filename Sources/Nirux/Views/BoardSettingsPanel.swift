@@ -57,6 +57,11 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     lazy var askToSaveChanges: (String, @escaping (ChangesAnswer) -> Void) -> Void = { [weak self] name, answer in
         self?.askToSave(name, answer: answer)
     }
+    /// Puts that question up in a sheet on the window (the space's section
+    /// records it).
+    var askInSheet: (NSAlert, NSWindow, @escaping (NSApplication.ModalResponse) -> Void) -> Void = { alert, window, answer in
+        alert.beginSheetModal(for: window, completionHandler: answer)
+    }
 
     /// The tab's view the form fills; nil once dismissed.
     private(set) weak var hostView: NSView?
@@ -128,10 +133,10 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
     /// The keyboard goes to the first field, unless something outside the
     /// form has it: the Settings sidebar, where ↑ and ↓ walk the panes.
-    func takeKeyboardIfFree() {
-        if let host = hostView, let window = host.window, isWritable, window.keyboardIsFree(for: host) {
-            window.makeFirstResponder(repositoryField)
-        }
+    @discardableResult
+    func takeKeyboardIfFree() -> Bool {
+        guard let host = hostView, let window = host.window, isWritable, window.keyboardIsFree(for: host) else { return false }
+        return window.makeFirstResponder(repositoryField)
     }
 
     func dismiss() {
@@ -253,7 +258,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Don’t Save")
-        alert.beginSheetModal(for: window) { response in
+        askInSheet(alert, window) { response in
             switch response {
             case .alertFirstButtonReturn: answer(.save)
             case .alertThirdButtonReturn: answer(.discard)

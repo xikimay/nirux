@@ -17,7 +17,6 @@ extension SidebarView {
         // Before the rows go: what the list hangs by.
         let anchor = scrollAnchor()
         builtRowIDs = Dictionary(lastInfos.map { ($0.index, $0.id) }, uniquingKeysWith: { first, _ in first })
-        let wasLit = hoveredTarget != nil
         resetRenderState()
         showIconRail()
         guard isExpanded else {
@@ -85,7 +84,7 @@ extension SidebarView {
         buildHistoryRow()
 
         restoreScroll(to: anchor)
-        refreshHoverTargetFromMouse(wasLit: wasLit)
+        refreshHoverTargetFromMouse()
         refreshApprovalArming()
         followActiveWorkspace(docHeight: docHeight)
         applyBirthMotion()
@@ -514,13 +513,13 @@ extension SidebarView {
     /// A navigator row: its symbol in the marks' column, its title, an
     /// optional trailing count, its hover, and the control VoiceOver presses
     /// (which takes the first click on a window in the background). With
-    /// `press` nil it takes no click, no hover and no press.
+    /// `press` nil it is inert: no press, no hover.
     private func buildNavigatorRow(
         title: String, symbol: String, frame: NSRect, region: SidebarHitRegion, color: NSColor, iconColor: NSColor? = nil,
         label: String, tip: String? = nil, trailing: String? = nil, press: (() -> Void)?
     ) -> NavigatorRow {
         typealias Metrics = SidebarExpandedMetrics
-        if press != nil { hitAreas.append(SidebarHitArea(frame: frame, region: region)) }
+        hitAreas.append(SidebarHitArea(frame: frame, region: press == nil ? .inert : region))
         let hover = addRowHover(frame: frame)
         let icon = SidebarImageView(image: SidebarRenderer.symbol(symbol, color: iconColor ?? color, pointSize: 12))
         icon.identifier = NSUserInterfaceItemIdentifier("nirux.sidebar.navigator.\(title)")

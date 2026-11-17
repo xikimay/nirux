@@ -70,18 +70,22 @@ extension SidebarView {
 
     /// Re-derive the hover highlight from the live mouse position. Called
     /// after every rebuild — the registered backing views are new, and rows
-    /// may have shifted under a stationary pointer. `wasLit`: something was
-    /// lit before the rebuild.
-    func refreshHoverTargetFromMouse(wasLit: Bool = false) {
+    /// may have shifted under a stationary pointer.
+    func refreshHoverTargetFromMouse() {
         guard let window else { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
         let point = contentDocumentView.convert(windowPoint, from: nil)
-        guard let area = hitArea(at: point) else {
-            // What was lit under the pointer went (the Board row can't be
-            // pressed any more): the pointer is an arrow again.
-            if wasLit, bounds.contains(convert(windowPoint, from: nil)) { NSCursor.arrow.set() }
-            return
+        let area = hitArea(at: point)
+        // What the pointing hand was over went (a link, a row that can't be
+        // pressed any more): the pointer is an arrow again. The checklist's
+        // buttons keep their own.
+        let overPressable: Bool = area.map { !$0.region.isInert } ?? false
+        let pointing: Bool = NSCursor.current === NSCursor.pointingHand
+        let overChecklistButton: Bool = onboardingCardView?.hasButton(at: point) ?? false
+        if !overPressable, pointing, !overChecklistButton, bounds.contains(convert(windowPoint, from: nil)) {
+            NSCursor.arrow.set()
         }
+        guard let area else { return }
         switch area.region {
         case .spacePicker, .newTask, .archivedToggle, .board, .history:
             setHoverTarget(Self.hoverTarget(of: area.region))
@@ -100,7 +104,7 @@ extension SidebarView {
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
             if let card = cardIndex(at: point) { setHoverTarget(.workspaceCard(card)) }
-        case .catchUp:
+        case .catchUp, .inert:
             setHoverTarget(nil)
         }
     }

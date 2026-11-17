@@ -644,8 +644,8 @@ final class SettingsWindowTests: XCTestCase {
 
             // Text typed and not saved keeps its space: the popup says so.
             let section = try XCTUnwrap(shell.spaceSettings)
-            // In the window while it has the keyboard (never in xctest).
-            section.askInSheet = { _, _, _ in }
+            // Said in the window; the user dismisses it.
+            section.askInSheet = { _, _, answer in answer(.alertFirstButtonReturn) }
             section.brief.textView.string += "Draft.\n"
             section.brief.textDidChange(Notification(name: NSText.didChangeNotification))
             let unsaved = try spacePopup(settings)
@@ -666,13 +666,21 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertEqual(settings.selection, .app("notifications"))
             XCTAssertEqual(window.title, "Notifications")
 
-            // A sheet up on the window keeps its space.
+            // A sheet of the space's panes keeps its space.
             let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             sheet.isReleasedWhenClosed = false
-            window.beginSheet(sheet)
+            /// As the space's panes put one up: recorded until it ends.
+            @MainActor func beginSpaceSheet() throws {
+                let ended = try XCTUnwrap(shell.spaceSettings).noteSheet(sheet, on: window)
+                window.beginSheet(sheet) { _ in MainActor.assumeIsolated { ended() } }
+            }
+            try beginSpaceSheet()
             XCTAssertIdentical(window.attachedSheet, sheet)
             var refusal: (reason: String, window: NSWindow)?
-            shell.spaceSettings?.askInSheet = { alert, parent, _ in refusal = (alert.messageText, parent) }
+            shell.spaceSettings?.askInSheet = { alert, parent, answer in
+                refusal = (alert.messageText, parent)
+                answer(.alertFirstButtonReturn)
+            }
             shell.showSpaceSettings(profileID: acme.id)
             XCTAssertEqual(shell.spaceSettings?.spaceID, beta.id)
             XCTAssertIdentical(window.attachedSheet, sheet, "still up")
@@ -696,9 +704,19 @@ final class SettingsWindowTests: XCTestCase {
             window.endSheet(chooser)
             shell.showSpaceSettings(profileID: beta.id, tab: nil)
 
+            // A question of the space's queued behind Nirux's sheet keeps
+            // the space too.
+            window.beginSheet(chooser)
+            let queued = NSAlert()
+            try XCTUnwrap(shell.spaceSettings).ask(queued, on: window) { _ in }
+            shell.showSpaceSettings(profileID: acme.id, tab: nil)
+            XCTAssertEqual(shell.spaceSettings?.spaceID, beta.id, "kept by its queued question")
+            window.endSheet(chooser)
+            if let up = window.attachedSheet { window.endSheet(up) }
+
             // The space shown is deleted: the window stays, on the active
-            // space, Nirux's pane still shown; a sheet up there goes.
-            window.beginSheet(sheet)
+            // space, Nirux's pane still shown; a sheet of its panes goes.
+            try beginSpaceSheet()
             shell.deleteSpace(profileID: beta.id)
             XCTAssertNil(window.attachedSheet)
             XCTAssertIdentical(app.settingsPanel, window)
@@ -715,13 +733,13 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertEqual(settings.selection, .app("notifications"), "Nirux's pane last shown")
 
             // Space Settings… opens with the sidebar's keyboard; Space Memory…
-            // frees it for its list.
+            // with no list to show (no folder) leaves it there, never nowhere.
             app.settingsPanel?.performClose(nil)
             shell.showSpaceSettings(profileID: acme.id)
             let reopened = try XCTUnwrap(app.settingsPanel)
             XCTAssertIdentical(reopened.firstResponder, settings.sidebar.table)
             shell.showSpaceSettings(profileID: acme.id, tab: .memory)
-            XCTAssertIdentical(reopened.firstResponder, reopened)
+            XCTAssertIdentical(reopened.firstResponder, settings.sidebar.table)
 
             // Closed, ⌘, opens it again on the pane last shown.
             settings.select(.app("agents"))
@@ -736,7 +754,7 @@ final class SettingsWindowTests: XCTestCase {
 
     /// Closing Settings leaves the keyboard of the main window where it was:
     /// typing in an editor, or in the sidebar, ⌘, then ⌘W, it still has it.
-    /// In a task no longer on screen, the task on screen takes it.
+    /// With nothing holding it, the task's terminal takes it.
     @MainActor
     func testClosingSettingsLeavesTheMainWindowsKeyboard() throws {
         try withIsolatedState {
@@ -762,15 +780,11 @@ final class SettingsWindowTests: XCTestCase {
             app.settingsPanel?.performClose(nil)
             XCTAssertIdentical(main.firstResponder, sidebarField, "the sidebar's field")
 
-            let first = try XCTUnwrap(shell.activeWorkspace)
-            shell.addWorkspace(title: "Other")
-            let other = try XCTUnwrap(shell.activeWorkspace)
-            XCTAssertFalse(other === first, "another task on screen")
-            XCTAssertTrue(main.makeFirstResponder(editor))
+            main.makeFirstResponder(nil)
             app.showSettings(nil)
             app.settingsPanel?.performClose(nil)
-            let focused = try XCTUnwrap(main.firstResponder as? NSView)
-            XCTAssertTrue(focused.isDescendant(of: other.containerView), "\(focused)")
+            let focused = try XCTUnwrap(main.firstResponder as? NSView, "the task's terminal")
+            XCTAssertTrue(focused.isDescendant(of: try XCTUnwrap(shell.activeWorkspace).containerView), "\(focused)")
         }
     }
 

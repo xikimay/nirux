@@ -279,7 +279,7 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertFalse(try control(at: board).accessibilityPerformPress())
         XCTAssertFalse(try control(at: board).acceptsFirstMouse(for: nil))
         XCTAssertEqual(try control(at: board).toolTip, "Open a task to show its space’s Board")
-        XCTAssertFalse(sidebar.hitAreas.contains { if case .board = $0.region { true } else { false } }, "no click, no hover")
+        XCTAssertTrue(sidebar.hitAreas.contains { $0.frame == board && $0.region.isInert }, "it takes the click and does nothing")
         XCTAssertEqual(opened, 1)
         XCTAssertFalse(sidebar.iconRail.boardButton.isEnabled)
         XCTAssertFalse(sidebar.iconRail.boardButton.isSelected)
@@ -313,7 +313,7 @@ final class SidebarGlassRowsTests: XCTestCase {
         XCTAssertEqual([opened, shown], [1, 1])
     }
 
-    /// The Board row reads open while this space's Board column shows, and
+    /// The Board row reads open while the space's Board column shows, and
     /// follows it as the columns are laid out: an edge dragged pushes the
     /// Board out of view at once, with no refresh of the whole sidebar.
     func testTheBoardRowFollowsItsColumn() throws {
@@ -345,10 +345,6 @@ final class SidebarGlassRowsTests: XCTestCase {
         board.isClosing = true
         XCTAssertFalse(shell.sidebarNavigation.boardShown, "closing")
         board.isClosing = false
-        // The task moved to another space: the Board it holds is the old
-        // space's, not this one's.
-        workspace.profileID = "elsewhere"
-        XCTAssertFalse(shell.sidebarNavigation.boardShown)
     }
 
     /// A row of the list out of view takes no press, no hover and no menu

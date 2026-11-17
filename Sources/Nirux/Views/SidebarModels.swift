@@ -447,6 +447,10 @@ enum SidebarHitRegion {
     case board
     /// The History row, at the bottom: Session History.
     case history
+    /// A row that can't be pressed now (the Board row while no task is
+    /// open): it takes the click, the drag and the right-click, and does
+    /// nothing.
+    case inert
     case link(url: String, label: NSTextField)
     case column(workspaceIndex: Int, columnIndex: Int)
     case workspace(Int)
@@ -468,6 +472,8 @@ enum SidebarHitRegion {
     /// (a press meant for a button that just moved must not reach the card
     /// below).
     case actionBlock(workspaceIndex: Int)
+
+    var isInert: Bool { if case .inert = self { true } else { false } }
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a

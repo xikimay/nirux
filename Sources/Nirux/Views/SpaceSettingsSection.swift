@@ -60,13 +60,11 @@ final class SpaceSettingsSection: NSObject {
 
     /// A pane was picked (or shown first).
     var onTabShown: ((Tab) -> Void)?
-    /// The window freed the keyboard for the pane, asked for by name: its
-    /// content takes it if it is there (a load under way takes it as it
-    /// lands).
-    var onKeyboardFreed: ((Tab) -> Void)?
-    /// The alert saying why the window keeps this space, while AppKit holds
-    /// it: up, or queued behind a sheet.
-    weak var refusal: NSAlert?
+    /// The window freed the keyboard for the pane, asked for by name: true
+    /// if its content took it, or will as it lands; false gives it back.
+    var onKeyboardFreed: ((Tab) -> Bool)?
+    /// The question saying why the window keeps this space.
+    private weak var refusal: NSWindow?
     /// The window closed (`windowClosed`), or showed another space.
     var onClose: ((_ windowClosed: Bool) -> Void)?
     /// Asks a question in a sheet on the window; the answer comes back
@@ -146,6 +144,9 @@ final class SpaceSettingsSection: NSObject {
         self.brief = brief
         self.templates = templates
         super.init()
+        for pane in [brief, templates] {
+            pane.askInSheet = { [weak self] alert, window, answer in self?.ask(alert, on: window, answer: answer) }
+        }
     }
 
     /// Shows the window on `tab`. The shell made this section the window's
@@ -199,8 +200,71 @@ final class SpaceSettingsSection: NSObject {
         onTabShown?(tab)
     }
 
-    func keyboardFreed(for tab: Tab) {
-        onKeyboardFreed?(tab)
+    func keyboardFreed(for tab: Tab) -> Bool {
+        onKeyboardFreed?(tab) ?? false
+    }
+
+    // MARK: - Sheets
+
+    /// A sheet put up for this space's panes, from its start to its end.
+    private final class Sheet {
+        weak var window: NSWindow?
+        /// The window it is put up on, or queued for.
+        weak var parent: NSWindow?
+
+        init(_ window: NSWindow?, on parent: NSWindow?) {
+            self.window = window
+            self.parent = parent
+        }
+    }
+
+    private var sheets: [Sheet] = []
+
+    /// Records a sheet put up for this space on `parent` (its window, when
+    /// known, ends with the space); call what it returns as the sheet ends.
+    func noteSheet(_ window: NSWindow? = nil, on parent: NSWindow? = nil) -> @MainActor () -> Void {
+        let sheet = Sheet(window, on: parent)
+        sheets.append(sheet)
+        return { [weak self] in self?.sheets.removeAll { $0 === sheet } }
+    }
+
+    /// A sheet of this space's panes is up or queued: the space keeps the
+    /// window.
+    var hasSheet: Bool { !sheets.isEmpty }
+
+    /// The front one of this space's sheets on screen, to ask over it.
+    var frontSheet: NSWindow? { sheets.reversed().lazy.compactMap(\.window).first { $0.sheetParent != nil } }
+
+    /// Ends this space's sheets, the front one first, queued ones too: the
+    /// space went.
+    func endSheets() {
+        for sheet in sheets.reversed() {
+            guard let window = sheet.window, let parent = window.sheetParent ?? sheet.parent else { continue }
+            parent.endSheet(window, returnCode: .cancel)
+        }
+        sheets.removeAll()
+    }
+
+    /// Says why the window keeps this space, over its front sheet: once,
+    /// while that question is up or queued.
+    func refuse(_ reason: String) {
+        guard !sheets.contains(where: { $0.window != nil && $0.window === refusal }) else { return }
+        let alert = NSAlert()
+        alert.messageText = reason
+        alert.addButton(withTitle: "OK")
+        refusal = alert.window
+        ask(alert, on: frontSheet) { _ in }
+    }
+
+    /// Asks in a sheet on `window` (else the Settings window), recorded as
+    /// this space's until answered.
+    func ask(_ alert: NSAlert, on window: NSWindow? = nil, answer: @escaping (NSApplication.ModalResponse) -> Void) {
+        guard let parent = window ?? panel else { return answer(.cancel) }
+        let ended = noteSheet(alert.window, on: parent)
+        askInSheet(alert, parent) { response in
+            ended()
+            answer(response)
+        }
     }
 
     /// The window fits the pane's content again (a list grew, a banner
@@ -309,7 +373,7 @@ final class SpaceSettingsSection: NSObject {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Don’t Save").hasDestructiveAction = true
-        askInSheet(alert, window) { [weak self] response in
+        ask(alert, on: window) { [weak self] response in
             guard let self else { return }
             switch response {
             case .alertFirstButtonReturn:

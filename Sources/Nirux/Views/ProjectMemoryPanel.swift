@@ -145,9 +145,10 @@ final class ProjectMemoryPanel: NSObject {
 
     /// The keyboard goes to the search field, unless something outside the
     /// list has it: the Settings sidebar, where ↑ and ↓ walk the panes.
-    func takeKeyboardIfFree() {
-        guard let host, let window = host.window, window.keyboardIsFree(for: host) else { return }
-        window.makeFirstResponder(searchField)
+    @discardableResult
+    func takeKeyboardIfFree() -> Bool {
+        guard let host, let window = host.window, window.keyboardIsFree(for: host) else { return false }
+        return window.makeFirstResponder(searchField)
     }
 
     /// Its window closed: an edit or an addition in progress is dropped.

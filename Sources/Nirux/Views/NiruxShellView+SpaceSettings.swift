@@ -14,7 +14,7 @@ extension NiruxShellView {
         if let open = spaceSettings, open.spaceID != profileID, let panel = open.panel {
             // A name or a value still being typed counts.
             panel.makeFirstResponder(nil)
-            if settingsWindow.spaceSheet != nil {
+            if open.hasSheet {
                 panel.makeKeyAndOrderFront(nil)
                 return refuseSpaceSwitch("Finish what is open in this space’s settings first", in: open)
             }
@@ -40,13 +40,8 @@ extension NiruxShellView {
     /// Why the window keeps its space, said in it: over the space's sheet
     /// up there, else on the window; once, while it shows.
     private func refuseSpaceSwitch(_ reason: String, in settings: SpaceSettingsSection) {
-        guard let panel = settings.panel else { return showToast(reason) }
-        guard settings.refusal == nil else { return }
-        let alert = NSAlert()
-        alert.messageText = reason
-        alert.addButton(withTitle: "OK")
-        settings.askInSheet(alert, settingsWindow.spaceSheet ?? panel) { _ in }
-        settings.refusal = alert
+        guard settings.panel != nil else { return showToast(reason) }
+        settings.refuse(reason)
     }
 
     func makeSettingsWindow() -> SettingsWindow {
@@ -155,11 +150,17 @@ extension NiruxShellView {
             }
         }
         settings.onKeyboardFreed = { [weak self, weak settings] tab in
-            guard let self, let settings, self.spaceSettings === settings else { return }
+            guard let self, let settings, self.spaceSettings === settings else { return false }
             switch tab {
-            case .board: if self.boardSettingsPanel?.hostView === settings.boardHost { self.boardSettingsPanel?.takeKeyboardIfFree() }
-            case .memory: if let memory = self.projectMemoryPanel, memory.shows(in: settings.memoryHost) { memory.takeKeyboardIfFree() }
-            default: break
+            case .board:
+                // Its form still being read takes the keyboard as it lands.
+                guard let form = self.boardSettingsPanel, form.hostView === settings.boardHost else { return true }
+                return form.takeKeyboardIfFree()
+            case .memory:
+                guard let memory = self.projectMemoryPanel, memory.shows(in: settings.memoryHost) else { return false }
+                return memory.takeKeyboardIfFree()
+            default:
+                return false
             }
         }
         settings.onClose = { [weak self, weak settings] windowClosed in
@@ -170,17 +171,13 @@ extension NiruxShellView {
             self.projectMemoryPanel?.dismiss()
             self.boardSettingsPanel?.dismiss()
             self.spaceSettings = nil
-            if windowClosed, let window = self.window, !self.keepsKeyboard(window) { self.focusActiveTerminal(in: window) }
+            // Something of the main window's own has its keyboard (an editor,
+            // a sidebar field): it keeps it.
+            if windowClosed, let window = self.window, (window.firstResponder as? NSView)?.window !== window {
+                self.focusActiveTerminal(in: window)
+            }
         }
         return settings
-    }
-
-    /// Whether the main window, back from Settings, keeps what had its
-    /// keyboard: still in it (its column didn't close), and not in a task
-    /// no longer on screen.
-    private func keepsKeyboard(_ window: NSWindow) -> Bool {
-        guard let focused = window.firstResponder as? NSView, focused.window === window else { return false }
-        return !workspaces.contains { $0 !== activeWorkspace && focused.isDescendant(of: $0.containerView) }
     }
 
     private static func briefSource(for space: WorkspaceProfile) -> SpaceFileEditorPane.Source {
@@ -227,7 +224,8 @@ extension NiruxShellView {
         }
         actions.recolor = { [weak self] hex in self?.recolorSpace(profileID: spaceID, colorHex: hex) }
         actions.addRepository = { [weak self] in
-            self?.addRepository(toSpace: spaceID, sheet: self?.spaceSettings?.panel)
+            guard let self, let settings = self.spaceSettings else { return }
+            self.addRepository(toSpace: spaceID, sheet: settings.panel, notingIn: settings)
         }
         actions.addFolder = { [weak self] in self?.addFolder(toSpace: spaceID) }
         actions.remove = { [weak self] key in self?.removeSpaceAnchor(key: key, fromSpace: spaceID) }
@@ -248,7 +246,7 @@ extension NiruxShellView {
             // What was typed there has no space left to go to, nor what a
             // sheet of its panes would add; Nirux's own sheet stays, and so
             // does the window.
-            if let sheet = settingsWindow.spaceSheet { settings.panel?.endSheet(sheet, returnCode: .cancel) }
+            settings.endSheets()
             let tab = settings.selectedTab
             let replacement = makeSpaceSettings(for: active)
             settingsWindow.setSpace(replacement)
@@ -333,6 +331,7 @@ extension NiruxShellView {
         sheet.contentView = editor.view
         setupScriptSheet = (sheet, editor)
         settings.setupScriptEditor = editor
+        editor.askInSheet = { [weak settings] alert, parent, answer in settings?.ask(alert, on: parent, answer: answer) }
         let close = { [weak self, weak window, weak sheet] in
             guard let self, let sheet else { return }
             window?.endSheet(sheet)
@@ -341,7 +340,8 @@ extension NiruxShellView {
         }
         editor.onSaved = close
         editor.onCancel = close
-        window.beginSheet(sheet)
+        let ended = settings.noteSheet(sheet, on: window)
+        window.beginSheet(sheet) { _ in MainActor.assumeIsolated { ended() } }
         sheet.makeFirstResponder(editor.textView)
     }
 
@@ -351,7 +351,9 @@ extension NiruxShellView {
     /// most specific anchor wins), never the home folder or one holding it.
     func addFolder(toSpace spaceID: String) {
         guard spaceID != WorkspaceProfile.defaultID, profiles.contains(where: { $0.id == spaceID }), canChangeAnchors() else { return }
+        let ended = spaceSettings?.noteSheet()
         sideEffects.chooseFolder("Add Folder", spaceSettings?.panel ?? window) { [weak self] folder in
+            ended?()
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: false) { [weak self] pick in
                 self?.runFromRunLoop { [weak self] in

@@ -680,6 +680,10 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.workspaceCard(workspaceIndex))
             NSCursor.arrow.set()
+        case .inert:
+            clearHover()
+            setHoverTarget(nil)
+            NSCursor.arrow.set()
         }
     }
 
@@ -740,7 +744,7 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .permissionDecision, .agentResume, .deferredAgentResume, .turnAnswer, .actionBlock:
+        case .permissionDecision, .agentResume, .deferredAgentResume, .turnAnswer, .actionBlock, .inert:
             break // buttons go through trackApprovalClick; the block is inert
         }
     }
@@ -922,7 +926,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spacePicker, .newTask, .archivedToggle, .board, .history, .link, .catchUp:
+            case .spacePicker, .newTask, .archivedToggle, .board, .history, .inert, .link, .catchUp:
                 continue
             }
         }
