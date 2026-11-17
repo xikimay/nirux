@@ -163,9 +163,10 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         XCTAssertEqual(ClaudeSpaceSettings.originPushTargets(gitConfig: "[remote \"upstream\"]\n\turl = git@github.com:a/b.git"), [])
     }
 
-    /// The file a launch names is rewritten when it changes, and goes when
-    /// nothing is on: the launch then passes none.
-    func testPrepareWritesTheFileAndRemovesItWhenNothingIsOn() throws {
+    /// The file a launch names is rewritten when it changes; with nothing
+    /// on, a new launch passes none, and the file holds `{}` for the launch
+    /// lines that still name it (a column's restart replays its line).
+    func testPrepareWritesTheFileAndEmptiesItWhenNothingIsOn() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-claude-settings-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: state) }
         let gitDir = state.appendingPathComponent("app/.git")
@@ -191,7 +192,8 @@ final class ClaudeSpaceSettingsTests: XCTestCase {
         off.set(.trustRepositories, on: false)
         off.set(.denyIrreversible, on: false)
         XCTAssertNil(try ClaudeSpaceSettings.prepare(spaceID: "S1", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        let emptied = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any]
+        XCTAssertEqual(emptied?.isEmpty, true, "a replayed launch line still finds its file")
         XCTAssertNil(try ClaudeSpaceSettings.prepare(spaceID: "S2", defaults: off, anchors: anchors, userEnvironment: nil, stateDirectory: state))
         XCTAssertFalse(FileManager.default.fileExists(atPath: state.appendingPathComponent("projects/S2").path))
 

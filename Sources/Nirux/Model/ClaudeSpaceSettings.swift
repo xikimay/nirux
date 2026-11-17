@@ -197,25 +197,38 @@ enum ClaudeSpaceSettings {
     }
 
     /// Writes the file a launch in the space passes, when it changed, and
-    /// returns its path. With nothing on, the file goes and the launch
-    /// passes none. Claude Code reads it as a session starts: a running
-    /// session keeps what it read. Throws when it can't be written.
+    /// returns its path; nil when the space hands nothing. A file left by an
+    /// earlier launch then holds `{}` rather than going (`empty`). Claude
+    /// Code reads it as a session starts: a running session keeps what it
+    /// read. Throws when it can't be written.
     static func prepare(
         spaceID: String, defaults: SpaceDefaults, anchors: [SpaceAnchor], userEnvironment: [String]?,
         stateDirectory: URL = Persistence.stateDirectory
     ) throws -> String? {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory) else { return nil }
         guard let content = file(defaults, repositories: repositories(anchors), userEnvironment: userEnvironment) else {
-            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            try empty(spaceID: spaceID, stateDirectory: stateDirectory)
             return nil
         }
+        try write(content, to: url)
+        return url.path
+    }
+
+    /// The space's file, if any, holds `{}`: restarting a column replays its
+    /// launch line, which still names it, and Claude refuses to start when
+    /// a file it names is missing.
+    static func empty(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) throws {
+        guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        try write(File(), to: url)
+    }
+
+    private static func write(_ content: File, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(content)
-        if data != (try? Data(contentsOf: url)) {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: url, options: .atomic)
-        }
-        return url.path
+        guard data != (try? Data(contentsOf: url)) else { return }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
     }
 }
