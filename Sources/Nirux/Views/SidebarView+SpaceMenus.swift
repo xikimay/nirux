@@ -29,8 +29,8 @@ extension SidebarView {
     /// Shared with the menu bar's Space › Space Settings….
     static let spaceSettingsTitle = "Space Settings…"
 
-    /// One item per space, General first: its color, its name, an amber
-    /// dot while an agent there waits on the user, its task count, and
+    /// One item per space, General first: its color, its name, a state
+    /// icon while an agent there waits on the user or broke, its task count, and
     /// ⌥⌘1…⌥⌘9 for the first nine (the menu bar's Space menu binds them).
     func addSpaceList(to menu: NSMenu) {
         for (position, profile) in lastProfiles.enumerated() {
@@ -57,16 +57,22 @@ extension SidebarView {
         }
         // Amber while an agent waits on the user; red once something broke
         // (an agent's error, a failed check), as the cards say it.
-        let mark: (color: NSColor, note: String)? = switch profile.attention {
-        case .waiting?: (Theme.Color.waiting, "An agent waits for you")
-        case .error?: (Theme.Color.error, "An agent stopped or a check failed")
+        let mark: (icon: StateIcon, note: String)? = switch profile.attention {
+        case .waiting?: (StateIcon(.needsYou(.question)), "An agent waits for you")
+        case .error?: (StateIcon(.error), "An agent stopped or a check failed")
         default: nil
         }
         if let mark {
             // The menu's own font: an attributed title draws in its own.
             let font = NSFont.menuFont(ofSize: 0)
-            let title = NSMutableAttributedString(string: profile.name, attributes: [.font: font])
-            title.append(NSAttributedString(string: "  ●", attributes: [.font: font, .foregroundColor: mark.color]))
+            let title = NSMutableAttributedString(string: "\(profile.name)  ", attributes: [.font: font])
+            let icon = NSTextAttachment()
+            icon.image = mark.icon.image(size: Self.menuIconSide)
+            // On the capitals' middle, on whole points.
+            icon.bounds = NSRect(
+                x: 0, y: ((font.capHeight - Self.menuIconSide) / 2).rounded(), width: Self.menuIconSide, height: Self.menuIconSide
+            )
+            title.append(NSAttributedString(attachment: icon))
             item.attributedTitle = title
             item.toolTip = mark.note
             item.setAccessibilityLabel("\(profile.name), \(mark.note.lowercased())")
@@ -82,6 +88,9 @@ extension SidebarView {
             item.keyEquivalent = ""
         }
     }
+
+    /// A state icon's side in a menu item's title.
+    static let menuIconSide: CGFloat = 12
 
     /// ⌥⌘1 to ⌥⌘9: the first nine spaces. ⌘1…⌘9 focus columns.
     static func spaceKeyEquivalent(position: Int) -> String? {

@@ -244,7 +244,7 @@ extension NiruxShellView {
             guard let workspace = workspaces[safe: info.index] else { continue }
             for column in info.columns {
                 guard let state = workspace.columns[safe: column.index], state.pty != nil else { continue }
-                state.updateHeaderAgentState(column, wait: blockedWaits[ObjectIdentifier(state)], now: now)
+                state.updateHeaderAgentState(column, wait: blockedWaits[ObjectIdentifier(state)], now: now, station: info.station)
             }
         }
     }

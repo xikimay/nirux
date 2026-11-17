@@ -210,7 +210,7 @@ final class ColumnHeaderViewTests: XCTestCase {
             info(.needsAttention, reason: .permission(tool: "Bash", summary: "git push")), wait: nil, now: 0
         ))
         XCTAssertEqual(permission.text, "permission · Bash")
-        XCTAssertEqual(permission.symbol, Theme.Symbol.permission)
+        XCTAssertEqual(permission.icon, StateIcon(.needsYou(.command)), "the row's glyph")
         XCTAssertEqual(permission.toolTip, "needs permission — Bash: git push")
 
         let apiError = AgentAttentionReason.apiError(kind: "overloaded", detail: nil)
@@ -221,8 +221,27 @@ final class ColumnHeaderViewTests: XCTestCase {
 
         let working = try XCTUnwrap(ColumnHeaderView.Status.agent(info(.working), wait: nil, now: 0))
         XCTAssertEqual(working.text, "working · 12m")
-        XCTAssertNil(working.symbol, "a dot, which breathes")
+        XCTAssertEqual(working.icon, StateIcon(.working), "no station known: its ring alone")
+        let atReviews = ColumnHeaderView.Status.agent(info(.working), wait: nil, now: 0, station: .reviews)
+        XCTAssertEqual(atReviews?.icon, StateIcon(.working, stage: 2), "its task's station")
+        let question = ColumnHeaderView.Status.agent(info(.needsAttention, reason: .question("Which base?")), wait: nil, now: 0)
+        XCTAssertEqual(question?.icon, StateIcon(.needsYou(.question)))
+        XCTAssertEqual(fromStatus?.icon, StateIcon(.error))
         XCTAssertNil(ColumnHeaderView.Status.agent(info(.idle, process: "zsh"), wait: nil, now: 0))
+    }
+
+    /// An agent's icon takes the dot's place, and breathes as it did while
+    /// it works.
+    func testThePillDrawsTheAgentsIcon() {
+        let pill = ColumnStatusPill(frame: NSRect(x: 0, y: 0, width: 120, height: ColumnStatusPill.height))
+        pill.status = ColumnHeaderView.Status("working", tone: .working, icon: StateIcon(.working, stage: 2))
+        pill.layoutSubtreeIfNeeded()
+        XCTAssertEqual(pill.iconView.icon, StateIcon(.working, stage: 2))
+        XCTAssertFalse(pill.iconView.isHidden)
+        XCTAssertTrue(pill.isBreathing)
+        pill.status = ColumnHeaderView.Status("permission", tone: .waiting, icon: StateIcon(.needsYou(.command)))
+        XCTAssertEqual(pill.iconView.icon, StateIcon(.needsYou(.command)))
+        XCTAssertFalse(pill.isBreathing, "a wait holds still")
     }
 
     /// A dialog on screen stays amber while the user looks at its column
@@ -252,12 +271,13 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(column.terminalView?.frame.height, 370, "the terminal starts under the header")
 
         column.terminalTitle = "claude"
-        column.updateHeaderAgentState(info(.working), wait: nil, now: 0)
+        column.updateHeaderAgentState(info(.working), wait: nil, now: 0, station: .merge)
         XCTAssertEqual(header.title, "claude")
         XCTAssertNotEqual(header.icon, .symbol(Theme.Symbol.terminal), "the agent's logo")
         XCTAssertEqual(header.status?.tone, .working)
+        XCTAssertEqual(header.status?.icon, StateIcon(.working, stage: 4), "its task's station")
 
-        column.updateHeaderAgentState(info(.idle, process: "zsh"), wait: nil, now: 0)
+        column.updateHeaderAgentState(info(.idle, process: "zsh"), wait: nil, now: 0, station: nil)
         XCTAssertEqual(header.icon, .symbol(Theme.Symbol.terminal))
         XCTAssertNil(header.status)
         XCTAssertEqual(header.currentMenu().items.first?.title, "Find in Terminal…")

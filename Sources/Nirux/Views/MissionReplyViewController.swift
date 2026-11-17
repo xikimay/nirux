@@ -81,15 +81,21 @@ final class MissionReplyViewController: NSViewController {
 
     // MARK: - Parts
 
-    /// A dot (amber once the question waits on the user), the child's
-    /// title, and who it asks.
+    /// A child's question as its row shows it: asking its parent, or
+    /// waiting on the user once handed to them.
+    static func icon(handedOff: Bool) -> StateIcon {
+        StateIcon(handedOff ? .needsYou(.question) : .asking)
+    }
+
+    /// The child's state icon (the asking ring while its parent has the
+    /// question, amber once it waits on the user), its title, and who it
+    /// asks.
     private func header() -> NSView {
-        let dot = NSView()
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 4
-        dot.layer?.backgroundColor = (question.handOff == nil ? Theme.Color.textTertiary : Theme.Color.waiting).cgColor
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([dot.widthAnchor.constraint(equalToConstant: 8), dot.heightAnchor.constraint(equalToConstant: 8)])
+        let icon = StateIconView(Self.icon(handedOff: question.handOff != nil))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: icon.frame.width), icon.heightAnchor.constraint(equalToConstant: icon.frame.height)
+        ])
 
         let title = NSTextField(labelWithString: childTitle)
         title.font = Theme.Font.title
@@ -103,7 +109,7 @@ final class MissionReplyViewController: NSViewController {
         asks.lineBreakMode = .byTruncatingTail
         asks.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
 
-        let row = NSStackView(views: [dot, title, asks])
+        let row = NSStackView(views: [icon, title, asks])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Theme.Space.sm

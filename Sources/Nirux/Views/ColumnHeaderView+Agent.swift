@@ -8,8 +8,11 @@ extension ColumnHeaderView.Status {
     /// `wait` is what blocks the agent on the user now
     /// (`PtySession.agentBlockedWait`): unlike `column.agentStatus`, it
     /// stays while the user looks at the column, as long as the dialog is
-    /// open, like ⌘J and the sidebar's dialog block.
-    static func agent(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval) -> Self? {
+    /// open, like ⌘J and the sidebar's dialog block. Its mark is the state
+    /// icon its row draws; working, at its task's `station`.
+    static func agent(
+        _ column: ColumnInfo, wait: AgentWait?, now: TimeInterval, station: BoardStages.Station? = nil
+    ) -> Self? {
         if let deferred = column.deferredAgent {
             return Self("not resumed", tone: .neutral, symbol: Theme.Symbol.resume, toolTip: deferred.tooltip)
         }
@@ -20,12 +23,18 @@ extension ColumnHeaderView.Status {
         case .idle:
             return nil
         case .working:
-            return Self(column.elapsedDisplay.map { "working · \($0)" } ?? "working", tone: .working)
+            return Self(
+                column.elapsedDisplay.map { "working · \($0)" } ?? "working", tone: .working,
+                icon: StateIcon(.working, stage: StateIcon.stage(of: station))
+            )
         case .needsAttention:
             // An agent without hooks that falls silent may sit in its own
             // approval prompt: amber, so a dialog is never missed.
             guard let reason = column.attentionReason else {
-                return Self("needs you", tone: .waiting, toolTip: "The agent went quiet: it may wait for you, or have finished.")
+                return Self(
+                    "needs you", tone: .waiting, icon: StateIcon(.needsYou(.question)),
+                    toolTip: "The agent went quiet: it may wait for you, or have finished."
+                )
             }
             return attention(reason, waited: nil)
         }
@@ -39,21 +48,19 @@ extension ColumnHeaderView.Status {
         let toolTip = [dialog.headline, detail].compactMap { $0 }.joined(separator: " — ")
         if dialog.isBlockingDialog {
             let duration = waited.flatMap { $0 >= 60 ? SidebarRenderer.shortDuration($0) : nil }
-            let symbol: String
-            if case .question = dialog { symbol = Theme.Symbol.question } else { symbol = Theme.Symbol.permission }
             return Self(
                 [dialog.shortLabel, duration].compactMap { $0 }.joined(separator: " · "),
-                tone: .waiting, symbol: symbol, toolTip: toolTip
+                tone: .waiting, icon: StateIcon(.needsYou(StateIcon.Reason(dialog) ?? .question)), toolTip: toolTip
             )
         }
         if dialog.isFailure {
             let text: String
             if case .exitedMidTurn = dialog { text = dialog.shortLabel } else { text = "stopped" }
-            return Self(text, tone: .error, symbol: Theme.Symbol.agentError, toolTip: toolTip)
+            return Self(text, tone: .error, icon: StateIcon(.error), toolTip: toolTip)
         }
         switch dialog {
         case .message, .askedInReply:
-            return Self(dialog.shortLabel, tone: .waiting, toolTip: toolTip)
+            return Self(dialog.shortLabel, tone: .waiting, icon: StateIcon(.needsYou(.question)), toolTip: toolTip)
         default:
             return nil
         }

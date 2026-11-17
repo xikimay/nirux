@@ -392,14 +392,14 @@ final class WorkspaceSwitchTests: XCTestCase {
         let card = WorkspaceNameCard()
         let area = NSRect(x: 0, y: 0, width: 900, height: 600)
         card.show(
-            .init(workspaceID: "a", name: "big", state: Theme.Color.working, position: 3, count: 30), centredIn: area,
+            .init(workspaceID: "a", name: "big", state: StateIcon(.working), position: 3, count: 30), centredIn: area,
             animated: false
         )
         XCTAssertEqual(card.dotCount, 0)
         XCTAssertEqual(card.place, "4 of 30")
         XCTAssertNil(card.layer?.animation(forKey: WorkspaceNameCard.showKey), "not animated when asked not to")
         card.show(
-            .init(workspaceID: "b", name: "small", state: Theme.Color.working, position: 0, count: 14), centredIn: area,
+            .init(workspaceID: "b", name: "small", state: StateIcon(.working), position: 0, count: 14), centredIn: area,
             animated: false
         )
         XCTAssertEqual(card.dotCount, 14, "a space of fourteen still shows its dots")
@@ -410,19 +410,19 @@ final class WorkspaceSwitchTests: XCTestCase {
         // As wide as the space's longest name, whichever it names.
         let longest = "feat/a-branch-name-as-long-as-they-come"
         card.show(
-            .init(workspaceID: "c", name: longest, state: Theme.Color.idle, position: 1, count: 14, widestName: longest),
+            .init(workspaceID: "c", name: longest, state: StateIcon(.idle), position: 1, count: 14, widestName: longest),
             centredIn: area, animated: false
         )
         let width = card.frame.width
         card.show(
-            .init(workspaceID: "c", name: "x", state: Theme.Color.idle, position: 1, count: 14, widestName: longest),
+            .init(workspaceID: "c", name: "x", state: StateIcon(.idle), position: 1, count: 14, widestName: longest),
             centredIn: area, animated: false
         )
         XCTAssertEqual(card.frame.width, width, "a short name doesn't make it jump")
 
         // Twenty dots don't fit a narrow viewport: the place in words.
         card.show(
-            .init(workspaceID: "e", name: "x", state: Theme.Color.idle, position: 4, count: 20),
+            .init(workspaceID: "e", name: "x", state: StateIcon(.idle), position: 4, count: 20),
             centredIn: NSRect(x: 0, y: 0, width: 200, height: 300), animated: false
         )
         XCTAssertEqual(card.dotCount, 0)
@@ -430,7 +430,7 @@ final class WorkspaceSwitchTests: XCTestCase {
 
         // A very long name stays inside the area.
         let long = String(repeating: "a long workspace name ", count: 20)
-        card.show(.init(workspaceID: "d", name: long, state: Theme.Color.idle, position: 0, count: 3), centredIn: area, animated: false)
+        card.show(.init(workspaceID: "d", name: long, state: StateIcon(.idle), position: 0, count: 3), centredIn: area, animated: false)
         XCTAssertLessThanOrEqual(card.frame.width, area.width)
         XCTAssertTrue(area.contains(card.frame))
     }
@@ -457,22 +457,16 @@ final class WorkspaceSwitchTests: XCTestCase {
         )
     }
 
-    /// The card's dot says what the workspace's row says: amber only for a
-    /// wait on the user, red when something broke, green while an agent
-    /// works, else grey.
-    func testTheCardsDotSaysTheWorkspacesState() {
-        XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle])), Theme.Color.idle)
-        XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle, .working])), Theme.Color.working)
-        XCTAssertEqual(
-            NiruxShellView.cardStateColor(info([.working, .needsAttention], reason: .permission(tool: "Bash", summary: "x"))),
-            Theme.Color.waiting
+    /// The card shows its workspace's row's icon: its state, why it waits,
+    /// its station.
+    func testTheCardShowsTheRowsIcon() {
+        var row = info([.working, .needsAttention], reason: .permission(tool: "Bash", summary: "x"))
+        row.station = .checks
+        let card = WorkspaceNameCard()
+        card.show(
+            .init(workspaceID: "a", name: "checkout", state: row.stateIcon, position: 0, count: 3),
+            centredIn: NSRect(x: 0, y: 0, width: 900, height: 600), animated: false
         )
-        XCTAssertEqual(
-            NiruxShellView.cardStateColor(info([.needsAttention], reason: .apiError(kind: nil, detail: "overloaded"))),
-            Theme.Color.error
-        )
-        XCTAssertEqual(NiruxShellView.cardStateColor(info([.needsAttention], reason: .turnFinished)), Theme.Color.idle)
-        XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle], ci: "FAILURE")), Theme.Color.error, "as its row says")
-        XCTAssertEqual(NiruxShellView.cardStateColor(info([.idle], ci: "SUCCESS")), Theme.Color.success, "ready to merge")
+        XCTAssertEqual(card.state, StateIcon(.needsYou(.command), stage: 3))
     }
 }

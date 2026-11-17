@@ -63,16 +63,21 @@ final class ColumnHeaderView: NSView {
     struct Status: Equatable {
         var text: String
         var tone: Tone
-        /// SF Symbol before the text; nil draws a dot.
+        /// An agent's state icon before the text, as its row draws it.
+        var icon: StateIcon?
+        /// SF Symbol before the text, without an icon; neither draws a dot.
         var symbol: String?
         /// The symbol's own tone when it differs from the pill's (a green
         /// check on a neutral pill).
         var symbolTone: Tone?
         var toolTip: String?
 
-        init(_ text: String, tone: Tone, symbol: String? = nil, symbolTone: Tone? = nil, toolTip: String? = nil) {
+        init(
+            _ text: String, tone: Tone, icon: StateIcon? = nil, symbol: String? = nil, symbolTone: Tone? = nil, toolTip: String? = nil
+        ) {
             self.text = text
             self.tone = tone
+            self.icon = icon
             self.symbol = symbol
             self.symbolTone = symbolTone
             self.toolTip = toolTip
@@ -637,8 +642,9 @@ final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
     }
 }
 
-/// The header's status: a dot or a symbol, then a short text, on a pill
-/// tinted by the state. A working agent's dot breathes.
+/// The header's status: an agent's state icon, a symbol or a dot, then a
+/// short text, on a pill tinted by the state. A working agent's mark
+/// breathes.
 @MainActor
 final class ColumnStatusPill: NSView {
     static let height: CGFloat = 18
@@ -656,12 +662,15 @@ final class ColumnStatusPill: NSView {
     var animates = true {
         didSet { if animates != oldValue { updateBreathing() } }
     }
-    /// The dot breathes now, for tests.
-    var isBreathing: Bool { dot.layer?.animation(forKey: "breathe") != nil }
+    /// The mark breathes now, for tests.
+    var isBreathing: Bool { mark.layer?.animation(forKey: "breathe") != nil }
 
     let label = NSTextField(labelWithString: "")
     private let symbolView = NSImageView()
     private let dot = NSView()
+    let iconView = StateIconView(StateIcon(.idle), size: ColumnStatusPill.symbolSize)
+    /// What stands before the text now.
+    private var mark: NSView { status?.icon != nil ? iconView : status?.symbol != nil ? symbolView : dot }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -676,6 +685,8 @@ final class ColumnStatusPill: NSView {
         dot.wantsLayer = true
         dot.layer?.cornerRadius = Self.dotSize / 2
         addSubview(dot)
+        iconView.wantsLayer = true
+        addSubview(iconView)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
     }
@@ -685,7 +696,7 @@ final class ColumnStatusPill: NSView {
 
     var idealWidth: CGFloat {
         guard status != nil else { return 0 }
-        let markWidth = status?.symbol == nil ? Self.dotSize : Self.symbolSize
+        let markWidth = status?.icon == nil && status?.symbol == nil ? Self.dotSize : Self.symbolSize
         return Self.padding * 2 + markWidth + Self.gap - 2 * 2 + ColumnHeaderView.textWidth(label)
     }
 
@@ -713,7 +724,7 @@ final class ColumnStatusPill: NSView {
 
     private func apply() {
         guard let status else {
-            dot.layer?.removeAnimation(forKey: "breathe")
+            for view in [dot, iconView] { view.layer?.removeAnimation(forKey: "breathe") }
             return
         }
         layer?.backgroundColor = Self.fill(status.tone).cgColor
@@ -722,7 +733,9 @@ final class ColumnStatusPill: NSView {
         toolTip = status.toolTip
         setAccessibilityLabel(status.toolTip ?? status.text)
         let markColor = Self.color(status.symbolTone ?? status.tone)
-        if let symbol = status.symbol {
+        if let icon = status.icon {
+            iconView.icon = icon
+        } else if let symbol = status.symbol {
             symbolView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: Self.symbolSize, weight: .regular))
             assert(symbolView.image != nil, "No SF Symbol named \(symbol)")
@@ -730,21 +743,24 @@ final class ColumnStatusPill: NSView {
         } else {
             dot.layer?.backgroundColor = markColor.cgColor
         }
-        symbolView.isHidden = status.symbol == nil
-        dot.isHidden = status.symbol != nil
+        iconView.isHidden = mark !== iconView
+        symbolView.isHidden = mark !== symbolView
+        dot.isHidden = mark !== dot
         updateBreathing()
         needsLayout = true
     }
 
-    /// A working agent's dot breathes with its column's light, while
+    /// A working agent's mark breathes with its column's light, while
     /// `animates` allows it.
     private func updateBreathing() {
-        guard let dotLayer = dot.layer else { return }
         let breathes = animates && status?.tone == .working && status?.symbol == nil
-        if breathes, dotLayer.animation(forKey: "breathe") == nil {
-            dotLayer.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe")
-        } else if !breathes {
-            dotLayer.removeAnimation(forKey: "breathe")
+        for view in [dot, iconView] {
+            guard let layer = view.layer else { continue }
+            if breathes && view === mark {
+                if layer.animation(forKey: "breathe") == nil { layer.add(CABasicAnimation.lightMovement(for: .working), forKey: "breathe") }
+            } else {
+                layer.removeAnimation(forKey: "breathe")
+            }
         }
     }
 
@@ -752,13 +768,11 @@ final class ColumnStatusPill: NSView {
         super.layout()
         let height = bounds.height
         var x = Self.padding
-        if status?.symbol == nil {
+        if mark === dot {
             dot.frame = NSRect(x: x, y: ((height - Self.dotSize) / 2).rounded(), width: Self.dotSize, height: Self.dotSize)
             x += Self.dotSize + Self.gap
         } else {
-            symbolView.frame = NSRect(
-                x: x, y: ((height - Self.symbolSize) / 2).rounded(), width: Self.symbolSize, height: Self.symbolSize
-            )
+            mark.frame = NSRect(x: x, y: ((height - Self.symbolSize) / 2).rounded(), width: Self.symbolSize, height: Self.symbolSize)
             x += Self.symbolSize + Self.gap
         }
         // The label's cell margin is part of the gap and the padding.

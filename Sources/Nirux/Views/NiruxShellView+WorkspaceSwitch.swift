@@ -170,7 +170,7 @@ extension NiruxShellView {
         let info = sidebar.lastInfos.first { $0.id == workspace.id }
         let names = visibleWorkspaceIndices.map { workspaces[$0].title }
         let content = WorkspaceNameCard.Content(
-            workspaceID: workspace.id, name: workspace.title, state: info.map(Self.cardStateColor) ?? Theme.Color.idle,
+            workspaceID: workspace.id, name: workspace.title, state: info?.stateIcon ?? StateIcon(.idle),
             position: position, count: names.count, widestName: names.max { $0.count < $1.count } ?? workspace.title
         )
         workspaceNameCard.show(content, centredIn: viewport.frame.insetBy(dx: 24, dy: 24), animated: true)
@@ -221,19 +221,5 @@ extension NiruxShellView {
             return hideWorkspaceCard(animated: false)
         }
         workspaceNameCard.show(content, centredIn: viewportFrame.insetBy(dx: 24, dy: 24), animated: false)
-    }
-
-    /// The card's dot says what the workspace's row says: amber when it
-    /// waits on the user, red when something broke, green while it works,
-    /// else grey.
-    static func cardStateColor(_ info: WorkspaceInfo) -> NSColor {
-        switch info.rowSummary.mark {
-        case .needsYou: return Theme.Color.waiting
-        case .error: return Theme.Color.error
-        case .working: return Theme.Color.working
-        case .readyToMerge: return Theme.Color.success
-        case .merged: return Theme.Color.done
-        default: return Theme.Color.idle
-        }
     }
 }

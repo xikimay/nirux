@@ -176,11 +176,12 @@ final class ColumnState {
     }
 
     /// The terminal header's agent icon and status, from the sidebar's
-    /// reading of the column and what blocks its agent on the user.
-    func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval) {
+    /// reading of the column, what blocks its agent on the user, and its
+    /// task's station.
+    func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval, station: BoardStages.Station?) {
         guard let header = terminalHeader else { return }
         header.icon = .terminal(processName: column.deferredAgent?.processName ?? column.processName)
-        header.status = .agent(column, wait: wait, now: now)
+        header.status = .agent(column, wait: wait, now: now, station: station)
     }
 
     /// Position the header and optionally resize terminal to fit. Called from layoutAndScroll.

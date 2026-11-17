@@ -11,9 +11,8 @@ final class WorkspaceNameCard: NSView {
         /// The workspace it names: a card never stays over another one.
         let workspaceID: String
         let name: String
-        /// The workspace's state: green while it works, amber when it waits
-        /// on the user, red when it broke, else grey.
-        let state: NSColor
+        /// The workspace's row's state icon (`WorkspaceInfo.stateIcon`).
+        let state: StateIcon
         /// Its place among the space's workspaces, from 0.
         let position: Int
         let count: Int
@@ -34,12 +33,12 @@ final class WorkspaceNameCard: NSView {
     private static let paddingX: CGFloat = 22
     private static let paddingY: CGFloat = 14
     private static let rowGap: CGFloat = 9
-    private static let stateDot: CGFloat = 9
+    private static let stateDot: CGFloat = 14
     private static let positionDot: CGFloat = 6
     private static let positionGap: CGFloat = 6
 
     private let nameLabel = NSTextField(labelWithString: "")
-    private let stateView = NSView()
+    private let stateView = StateIconView(StateIcon(.idle), size: 14)
     private let placeLabel = NSTextField(labelWithString: "")
     private var positionDots: [NSView] = []
     private(set) var content: Content?
@@ -63,8 +62,6 @@ final class WorkspaceNameCard: NSView {
         nameLabel.lineBreakMode = .byTruncatingMiddle
         placeLabel.font = Theme.Font.caption
         placeLabel.textColor = Theme.Color.textSecondary
-        stateView.wantsLayer = true
-        stateView.layer?.cornerRadius = Self.stateDot / 2
         for view in [stateView, nameLabel, placeLabel] {
             view.setAccessibilityElement(false)
             addSubview(view)
@@ -136,7 +133,7 @@ final class WorkspaceNameCard: NSView {
     var litDot: Int? { positionDots.firstIndex { $0.layer?.backgroundColor == Theme.Color.accent.cgColor } }
     var name: String { nameLabel.stringValue }
     var place: String { placeLabel.isHidden ? "" : placeLabel.stringValue }
-    var stateColor: CGColor? { stateView.layer?.backgroundColor }
+    var state: StateIcon { stateView.icon }
 
     /// Its dots fit in `width`, else it says the place in words.
     private static func dotsFit(_ count: Int, in width: CGFloat) -> Bool {
@@ -149,7 +146,7 @@ final class WorkspaceNameCard: NSView {
     private func configure(_ content: Content, width: CGFloat) {
         configuredWidth = width
         nameLabel.stringValue = content.name
-        stateView.layer?.backgroundColor = content.state.cgColor
+        stateView.icon = content.state
         positionDots.forEach { $0.removeFromSuperview() }
         positionDots = []
         let usesDots = Self.dotsFit(content.count, in: width)
