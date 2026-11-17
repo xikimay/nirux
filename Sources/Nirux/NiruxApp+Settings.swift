@@ -40,6 +40,7 @@ extension NiruxApp {
     func settingsAppPanes() -> [SettingsWindow.AppPane] {
         [
             SettingsWindow.AppPane(id: "general", title: "General", symbol: "gearshape", view: generalPane()),
+            SettingsWindow.AppPane(id: "appearance", title: "Appearance", symbol: "circle.lefthalf.filled", view: appearancePane()),
             SettingsWindow.AppPane(id: "agents", title: "Agents", symbol: "sparkles", view: agentsPane()),
             SettingsWindow.AppPane(id: "notifications", title: "Notifications", symbol: "bell", view: notificationsPane())
         ]
@@ -62,12 +63,6 @@ extension NiruxApp {
         }
         SettingsForm.select(NiruxShellView.currentAgentResumeOnLaunch().rawValue, in: resume)
         settingsAgentResumePopup = resume
-
-        let animations = SettingsForm.checkbox(
-            "Animate the interface", target: self, action: #selector(settingsAnimationsChanged(_:))
-        )
-        animations.state = NiruxShellView.currentAnimatesInterface() ? .on : .off
-        settingsAnimationsCheckbox = animations
 
         let tasksFolder = NSTextField(labelWithString: settingsTasksFolderText())
         tasksFolder.lineBreakMode = .byTruncatingMiddle
@@ -92,15 +87,6 @@ extension NiruxApp {
                 )
             ],
             [
-                animations,
-                SettingsForm.hint(
-                    "A column's edge breathes in green while its agent works and pulses in amber when it waits for "
-                        + "you, and a working task's row runs a line of light. Off, the same colors show without "
-                        + "moving, as they do while macOS reduces motion.",
-                    under: animations
-                )
-            ],
-            [
                 SettingsForm.row("Tasks without a repository", tasksFolderControl),
                 SettingsForm.hint(
                     "Each one gets a new folder here, named after it, instead of a worktree. Nirux never deletes "
@@ -113,6 +99,44 @@ extension NiruxApp {
                     "When Nirux reopens your workspaces, each Claude Code or Codex column resumes once it shows on "
                         + "screen, or when you click Resume (Resume All Agents starts the rest). All at once resumes "
                         + "every agent with the window."
+                )
+            ]
+        ])
+    }
+
+    /// How Nirux looks and moves: the interface's transparency, the
+    /// animations.
+    private func appearancePane() -> NSView {
+        let picker = TransparencyPicker(selection: NiruxShellView.currentInterfaceTransparency())
+        let summary = SettingsForm.hint(picker.selection.summary)
+        picker.onPick = { [weak self, weak picker, weak summary] level in
+            guard let self else { return }
+            let previous = self.shell?.interfaceTransparency ?? NiruxShellView.currentInterfaceTransparency()
+            summary?.stringValue = level.summary
+            let putBack = {
+                picker?.show(previous)
+                summary?.stringValue = previous.summary
+            }
+            guard self.saveSetting(revert: putBack, { $0.interfaceTransparency = level }) else { return }
+            self.shell?.interfaceTransparency = level
+        }
+        settingsTransparencyPicker = picker
+
+        let animations = SettingsForm.checkbox(
+            "Animate the interface", target: self, action: #selector(settingsAnimationsChanged(_:))
+        )
+        animations.state = NiruxShellView.currentAnimatesInterface() ? .on : .off
+        settingsAnimationsCheckbox = animations
+
+        return SettingsForm.pane([
+            [SettingsForm.header("Interface"), picker, summary, ForcedOpaqueNote()],
+            [
+                animations,
+                SettingsForm.hint(
+                    "A column's edge breathes in green while its agent works and pulses in amber when it waits for "
+                        + "you, and a working task's row runs a line of light. Off, the same colors show without "
+                        + "moving, as they do while macOS reduces motion.",
+                    under: animations
                 )
             ]
         ])
@@ -640,6 +664,7 @@ extension NiruxApp {
     private func clearSettingsWindowReferences() {
         settingsKeepAwakeCheckbox = nil
         settingsAnimationsCheckbox = nil
+        settingsTransparencyPicker = nil
         settingsTasksFolderLabel = nil
         settingsAgentResumePopup = nil
         settingsLaunchModePopup = nil

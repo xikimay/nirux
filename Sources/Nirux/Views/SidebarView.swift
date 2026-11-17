@@ -112,6 +112,10 @@ final class SidebarView: NSView {
     }
     /// Folded, the sidebar is this rail (see SidebarView+IconRail).
     let iconRail = IconRail(level: .opaque)
+    /// Settings › Appearance's level, which the rail draws.
+    var level: InterfaceTransparency = .opaque {
+        didSet { iconRail.level = level }
+    }
     var isExpanded: Bool = false {
         didSet {
             isRailHidden = false

@@ -421,6 +421,11 @@ struct PersistedSettings: Codable {
     var agentResumeOnLaunch: AgentResumeOnLaunch?
     /// A value a newer build wrote, kept so saving doesn't erase it.
     private var unknownAgentResumeOnLaunchRawValue: String?
+    /// How much of the desktop shows through the chrome (Settings ›
+    /// Appearance); nil means `InterfaceTransparency.defaultValue`.
+    var interfaceTransparency: InterfaceTransparency?
+    /// A value a newer build wrote, kept so saving doesn't erase it.
+    private var unknownInterfaceTransparencyRawValue: String?
     /// Branch Review's Explain: the account each project (space) accepted
     /// the first-use notice for (`ExplainAccount.identity`), by project id.
     /// Asked again when the account changes.
@@ -475,6 +480,7 @@ struct PersistedSettings: Codable {
         case agentCirclingHint
         case onboardingChecklist
         case agentResumeOnLaunch
+        case interfaceTransparency
         case explainNoticeAccounts
         case explainModel
         case explainEffort
@@ -519,6 +525,10 @@ struct PersistedSettings: Codable {
             agentResumeOnLaunch = AgentResumeOnLaunch(rawValue: raw)
             if agentResumeOnLaunch == nil { unknownAgentResumeOnLaunchRawValue = raw }
         }
+        if let raw = try? container.decodeIfPresent(String.self, forKey: .interfaceTransparency) {
+            interfaceTransparency = InterfaceTransparency(rawValue: raw)
+            if interfaceTransparency == nil { unknownInterfaceTransparencyRawValue = raw }
+        }
         explainNoticeAccounts = (try? container.decodeIfPresent([String: String].self, forKey: .explainNoticeAccounts)) ?? [:]
         explainModel = try? container.decodeIfPresent(String.self, forKey: .explainModel)
         explainEffort = try? container.decodeIfPresent(String.self, forKey: .explainEffort)
@@ -556,6 +566,9 @@ struct PersistedSettings: Codable {
         )
         try container.encodeIfPresent(
             agentResumeOnLaunch?.rawValue ?? unknownAgentResumeOnLaunchRawValue, forKey: .agentResumeOnLaunch
+        )
+        try container.encodeIfPresent(
+            interfaceTransparency?.rawValue ?? unknownInterfaceTransparencyRawValue, forKey: .interfaceTransparency
         )
         if !explainNoticeAccounts.isEmpty { try container.encode(explainNoticeAccounts, forKey: .explainNoticeAccounts) }
         try container.encodeIfPresent(explainModel, forKey: .explainModel)

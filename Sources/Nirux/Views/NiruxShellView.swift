@@ -52,6 +52,11 @@ final class NiruxShellView: NSView {
     var animatesInterface = NiruxShellView.currentAnimatesInterface() {
         didSet { if animatesInterface != oldValue { applyAgentLights() } }
     }
+    /// Settings › Appearance: how much of the desktop shows through the
+    /// chrome (NiruxShellView+Appearance).
+    var interfaceTransparency = NiruxShellView.currentInterfaceTransparency() {
+        didSet { if interfaceTransparency != oldValue { applyInterfaceTransparency() } }
+    }
 
     let workspaceStore = WorkspaceStore()
     let projectStore = ProjectStore()
@@ -274,6 +279,7 @@ final class NiruxShellView: NSView {
         verticalStrip.wantsLayer = true
         viewport.addSubview(verticalStrip)
         viewport.addSubview(emptySpaceView)
+        sidebar.level = interfaceTransparency
         addSubview(sidebar)
         addSubview(divider)
         addSubview(viewport)

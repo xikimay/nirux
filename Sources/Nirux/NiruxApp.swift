@@ -15,6 +15,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var standaloneSettings: SettingsWindow?
     weak var settingsKeepAwakeCheckbox: NSButton?
     weak var settingsAnimationsCheckbox: NSButton?
+    weak var settingsTransparencyPicker: TransparencyPicker?
     weak var settingsTasksFolderLabel: NSTextField?
     weak var settingsUsageLimitsCheckbox: NSButton?
     weak var settingsAgentResumePopup: NSPopUpButton?

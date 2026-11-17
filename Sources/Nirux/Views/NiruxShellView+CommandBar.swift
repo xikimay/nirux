@@ -7,7 +7,7 @@ extension NiruxShellView {
     /// glass-interface.md): the space and its menu, the task on screen and
     /// its menu, ⌘P, and the agents waiting for the user (⌘J).
     func installCommandBar(in window: NSWindow) {
-        let bar = CommandBarView(level: .opaque)
+        let bar = CommandBarView(level: interfaceTransparency)
         let toolbar = CommandBarToolbar(bar: bar)
         toolbar.install(in: window)
         commandBarToolbar = toolbar
