@@ -14,6 +14,8 @@ final class BoardStagesView: NSView {
         var state: BoardStages.State
         /// "Lead · reviewing #438".
         var text: String
+        /// Why it waits for the user: its icon's glyph, as on its row.
+        var reason: StateIcon.Reason = .question
     }
 
     struct Header: Equatable {
@@ -235,9 +237,9 @@ final class BoardStagesView: NSView {
     let spaceDot = NSView()
     let nameLabel = NSTextField(labelWithString: "")
     let summaryLabel = NSTextField(labelWithString: "")
-    let leadDot = NSView()
+    let leadIcon = StateIconView(StateIcon(.idle), size: Metrics.leadIcon)
     let leadLabel = NSTextField(labelWithString: "")
-    /// Over the Lead's dot and line: a click focuses the Lead.
+    /// Over the Lead's icon and line: a click focuses the Lead.
     let leadButton = BoardStagesButton(title: "", target: nil, action: nil)
     /// The space whose Lead the button shows, as laid out: another space's
     /// Lead is another target.
@@ -309,9 +311,8 @@ final class BoardStagesView: NSView {
         layer?.backgroundColor = Theme.Color.canvas.cgColor
         appearance = Theme.appearance
 
-        for dot in [spaceDot, leadDot] { dot.wantsLayer = true }
+        spaceDot.wantsLayer = true
         spaceDot.layer?.cornerRadius = Theme.Radius.spaceMark
-        leadDot.layer?.cornerRadius = Metrics.dot / 2
         nameLabel.font = Theme.Font.display
         nameLabel.textColor = Theme.Color.textPrimary
         for label in [summaryLabel, leadLabel] {
@@ -361,7 +362,7 @@ final class BoardStagesView: NSView {
         for name in [NSApplication.didResignActiveNotification, NSApplication.didBecomeActiveNotification] {
             center.addObserver(self, selector: #selector(refreshHover), name: name, object: nil)
         }
-        ([spaceDot, nameLabel, summaryLabel, leadDot, leadLabel, leadButton, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
+        ([spaceDot, nameLabel, summaryLabel, leadIcon, leadLabel, leadButton, orderSwitch, separator, scrollView] + columnTitles + stationTitles)
             .forEach(addSubview)
     }
 
@@ -385,10 +386,12 @@ final class BoardStagesView: NSView {
         spaceDot.layer?.backgroundColor = content.header.color.cgColor
         nameLabel.stringValue = content.header.name
         summaryLabel.stringValue = content.header.summary
-        leadDot.layer?.backgroundColor = content.header.lead.map { Self.color(of: $0.state).cgColor }
+        if let lead = content.header.lead {
+            leadIcon.icon = StateIcon(state: lead.state, station: nil, reason: lead.reason)
+        }
         leadLabel.stringValue = content.header.lead?.text ?? ""
-        // Where the Lead's line has no room, its dot says it.
-        leadDot.toolTip = content.header.lead?.text
+        // Where the Lead's line has no room, its icon says it.
+        leadIcon.toolTip = content.header.lead?.text
         leadButton.toolTip = content.header.lead?.text
         leadButton.setAccessibilityLabel(content.header.lead?.text)
         orderSwitch.selectedSegment = content.order == .sidebar ? 0 : 1
@@ -761,7 +764,10 @@ final class BoardStagesView: NSView {
         /// A running queue's line, at the Board's foot.
         static let queueLineHeight: CGFloat = 30
         static let captionHeight: CGFloat = 28
-        static let dot: CGFloat = 8
+        /// A line's state icon, and the Lead's: the sizes the sidebar's
+        /// rows and its Lead give theirs, one state language everywhere.
+        static let icon: CGFloat = 14
+        static let leadIcon: CGFloat = 12
         /// The rail at ease, and tightened on a narrow Board.
         static let railWidth: CGFloat = 180
         static let compactRailWidth: CGFloat = 116
@@ -785,7 +791,7 @@ final class BoardStagesView: NSView {
         static let minimumName: CGFloat = 160
         /// A sub-task's or a stack line's inset, and its connector's x.
         static let inset: CGFloat = 26
-        static let connectorX: CGFloat = padding + dot / 2
+        static let connectorX: CGFloat = padding + icon / 2
     }
 
     /// A line's columns for a width: task, rail, phrase, pull request,
@@ -800,7 +806,7 @@ final class BoardStagesView: NSView {
     /// - A phrase under `shortestPhrase` says nothing: it goes, and the
     ///   title takes its place (below about 390 pt).
     /// - A Board too narrow for a rail beside a title (about 300 pt) keeps
-    ///   each line's dot and title.
+    ///   each line's icon and title.
     struct Columns: Equatable {
         var task: NSRect
         /// No width when the Board is too narrow for it.
@@ -955,7 +961,7 @@ final class BoardStagesView: NSView {
     /// switch, before it the Lead, and what the space holds in what is
     /// left. On a narrow Board they give way in this order: the summary,
     /// the Lead's line, the order switch; the name is the last to (a long
-    /// one keeps `minimumName` beside the switch). The Lead's dot keeps
+    /// one keeps `minimumName` beside the switch). The Lead's icon keeps
     /// its place: its state is never hidden.
     private func layoutHeader(width: CGFloat) {
         let pad = Metrics.padding
@@ -963,37 +969,37 @@ final class BoardStagesView: NSView {
         spaceDot.frame = NSRect(x: pad, y: midY - 5, width: 10, height: 10)
         let nameX = spaceDot.frame.maxX + 8
         let hasLead = content?.header.lead != nil
-        let dotRoom = hasLead ? Metrics.dot + 12 : 0
+        let iconRoom = hasLead ? Metrics.leadIcon + 12 : 0
         var right = width - pad
         let switchWidth = ceil(orderSwitch.fittingSize.width)
         let wholeName = ColumnHeaderView.textWidth(nameLabel)
-        orderSwitch.isHidden = right - switchWidth - 12 - dotRoom - nameX < min(wholeName, Metrics.minimumName)
+        orderSwitch.isHidden = right - switchWidth - 12 - iconRoom - nameX < min(wholeName, Metrics.minimumName)
         if !orderSwitch.isHidden {
             orderSwitch.frame = NSRect(x: right - switchWidth, y: midY - 11, width: switchWidth, height: 22)
             right = orderSwitch.frame.minX - 12
         }
-        let nameWidth = min(wholeName, max(0, right - dotRoom - nameX))
+        let nameWidth = min(wholeName, max(0, right - iconRoom - nameX))
         nameLabel.frame = NSRect(x: nameX, y: midY - 10, width: nameWidth, height: 20)
 
         let free = right - nameLabel.frame.maxX - 12
         let wholeLead = ColumnHeaderView.textWidth(leadLabel)
-        let leadWidth = min(wholeLead, free - Metrics.dot - 8)
+        let leadWidth = min(wholeLead, free - Metrics.leadIcon - 8)
         // Whole, or 60 pt of it at least.
         let showsLeadLine = hasLead && !orderSwitch.isHidden && leadWidth >= min(wholeLead, 60)
         leadLabel.isHidden = !showsLeadLine
-        leadDot.isHidden = !hasLead
+        leadIcon.isHidden = !hasLead
         if showsLeadLine {
             leadLabel.frame = NSRect(x: right - leadWidth, y: midY - 8, width: leadWidth, height: 16)
             right = leadLabel.frame.minX - 8
         }
-        if !leadDot.isHidden {
-            leadDot.frame = NSRect(x: right - Metrics.dot, y: midY - Metrics.dot / 2, width: Metrics.dot, height: Metrics.dot)
-            right = leadDot.frame.minX - 12
+        if !leadIcon.isHidden {
+            leadIcon.frame = NSRect(x: right - Metrics.leadIcon, y: midY - Metrics.leadIcon / 2, width: Metrics.leadIcon, height: Metrics.leadIcon)
+            right = leadIcon.frame.minX - 12
         }
         // The dot and the line, as one target, as tall as the line.
         leadButton.isHidden = !hasLead
-        let leadEnd = showsLeadLine ? leadLabel.frame.maxX : leadDot.frame.maxX
-        leadButton.frame = hasLead ? NSRect(x: leadDot.frame.minX - 4, y: midY - 10, width: leadEnd - leadDot.frame.minX + 8, height: 20) : .zero
+        let leadEnd = showsLeadLine ? leadLabel.frame.maxX : leadIcon.frame.maxX
+        leadButton.frame = hasLead ? NSRect(x: leadIcon.frame.minX - 4, y: midY - 10, width: leadEnd - leadIcon.frame.minX + 8, height: 20) : .zero
         leadSpace = content?.header.name ?? ""
         leadHandChanged()
         // What the space holds, where 60 pt are left for it: never beside
@@ -1014,18 +1020,11 @@ final class BoardStagesView: NSView {
         }
     }
 
-    /// A state's colour, for the line's dot and its current station.
-    /// Amber is "needs you" and nothing else.
+    /// A state's colour, for the current station: its state icon's, the
+    /// one palette of the sidebar, the rail and the bar. Amber is "needs
+    /// you" and nothing else.
     static func color(of state: BoardStages.State) -> NSColor {
-        switch state {
-        case .needsYou: return Theme.Color.waiting
-        case .failed: return Theme.Color.error
-        case .working: return Theme.Color.working
-        case .blocked: return Theme.Color.textDisabled
-        case .waiting, .idle: return Theme.Color.textTertiary
-        case .ready: return Theme.Color.textSecondary
-        case .merged: return Theme.Color.done
-        }
+        StateIcon(state: state, station: nil).color
     }
 
     /// The Board's time column: "now", "12 min", "3 h", "2 d".

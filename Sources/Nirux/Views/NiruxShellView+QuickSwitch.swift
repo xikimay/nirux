@@ -62,7 +62,7 @@ extension NiruxShellView {
                     return PaletteFold.Summary(
                         title: folded.title,
                         subtitle: folded.subtitle,
-                        badge: folded.attention.map { PaletteBadge(text: $0, tone: folded.hasFailure ? .failure : .waiting) }
+                        badge: folded.attention.map { PaletteBadge(text: $0, tone: folded.hasFailure ? .failure : .waiting(.question)) }
                     )
                 }
             ),
@@ -78,12 +78,17 @@ extension NiruxShellView {
         let spaces = [activeProfileID] + profiles.map(\.id).filter { $0 != activeProfileID }
         let current = activeWorkspace
         return spaces.flatMap { workspaceStore.visibleWorkspaceIndices(in: $0) }
-            .map { workspaces[$0] }
-            .filter { !$0.isClosing }
-            .map { workspace in
+            .filter { !workspaces[$0].isClosing }
+            .map { index in
+                let workspace = workspaces[index]
                 let space = profiles.first { $0.id == workspace.profileID } ?? WorkspaceProfile.defaultProfile
                 let waits = workspace.columns.compactMap { quickSwitch.agentWait($0, snapshot, now) }
                 let isWorking = workspace.columns.contains { $0.pty?.cachedAgentState == .working }
+                var agent = QuickSwitchAgentState.summary(waits: waits, isWorking: isWorking)
+                // Its badge's glyph is its row's: one source for why it waits.
+                if case .waiting(let since, _)? = agent, case .needsYou(let reason) = rowIcon(of: index, snapshot: snapshot, now: now).kind {
+                    agent = .waiting(since: since, reason: reason)
+                }
                 return QuickSwitchWorkspace(
                     id: workspace.id,
                     title: workspace.title,
@@ -94,9 +99,25 @@ extension NiruxShellView {
                     isInactive: workspace.isInactive,
                     isCurrent: workspace === current,
                     isInOtherSpace: workspace.profileID != activeProfileID,
-                    agent: .summary(waits: waits, isWorking: isWorking)
+                    agent: agent
                 )
             }
+    }
+
+    /// The icon of the workspace at `index`'s row: the sidebar's, else one
+    /// built as the Board builds the rows of other spaces.
+    func rowIcon(of index: Int, snapshot: ProcessSnapshot, now: TimeInterval) -> StateIcon {
+        let workspace = workspaces[index]
+        if let row = sidebar.lastInfos.first(where: { $0.id == workspace.id }) { return row.stateIcon }
+        let isActive = index == activeWSIndex
+        let columns = workspace.columns.enumerated().map { colIndex, col in
+            sidebarColumnInfo(
+                col, at: colIndex, isUserFocused: colIndex == workspace.focusedIndex && isActive,
+                agentStatus: col.pty?.cachedAgentState ?? .idle, foregroundProcess: col.pty?.foregroundProcess(snapshot: snapshot),
+                approvalHold: nil, missionQuestion: nil, showsDialog: false, snapshot: snapshot, now: now
+            )
+        }
+        return sidebarWorkspaceInfo(at: index, columns: columns, isActive: isActive, parentTitle: nil).stateIcon
     }
 
     static let otherSpacesPaletteSectionTitle = "Other Spaces"
@@ -186,7 +207,7 @@ extension PaletteBadge {
         let tone: Tone
         switch state {
         case .working: tone = .working
-        case .waiting: tone = .waiting
+        case .waiting(_, let reason): tone = .waiting(reason)
         case .failed: tone = .failure
         }
         self.init(text: state.label(now: now), tone: tone)

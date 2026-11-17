@@ -239,6 +239,11 @@ extension BoardStages {
         /// A task's line, its id its workspace's; else a pull request's
         /// without a task.
         var hasTask = true
+        /// Why its agent waits for the user, for its icon's glyph.
+        var reason: StateIcon.Reason = .question
+        /// Its agent asked the agent that started it, and the line says so
+        /// (a grey ring and a question, as on the sidebar's row).
+        var asksParent = false
     }
 }
 
@@ -250,8 +255,9 @@ extension BoardStages {
     /// queue reads: there only a dialog waits, here a turn that ended on a
     /// question does too.
     enum Activity: Equatable, Sendable {
-        /// An agent waits for the user: "a question", the command to allow.
-        case needsYou(String)
+        /// An agent waits for the user: "a question", the command to allow;
+        /// `reason`, its icon's glyph, as the row's.
+        case needsYou(String, reason: StateIcon.Reason = .question)
         /// An agent stopped: "Stopped on an API error".
         case failed(String)
         /// An agent asked the agent that started it, named here, and
@@ -261,6 +267,7 @@ extension BoardStages {
         case working(since: TimeInterval?)
         /// At its prompt, or no agent.
         case idle
+
     }
 
     /// The pull request's checks as the merge queue counts them.
@@ -481,7 +488,9 @@ extension BoardStages {
             offer: offer,
             tooltips: tooltips(of: facts, rail: rail, offer: offer, rules: rules),
             menu: menu(of: facts, rail: rail, offer: offer),
-            hasTask: facts.hasTask
+            hasTask: facts.hasTask,
+            reason: reading.reason,
+            asksParent: reading.asksParent
         )
     }
 
@@ -656,6 +665,10 @@ extension BoardStages {
         var state: State
         var phrase: Phrase
         var since: TimeInterval?
+        /// Set by the branch that read it: why its agent waits, and whether
+        /// it says the agent asks its parent.
+        var reason: StateIcon.Reason = .question
+        var asksParent = false
 
         init(_ state: State, _ text: String, since: TimeInterval? = nil, link: Link? = nil, detail: String? = nil) {
             self.state = state
@@ -676,8 +689,10 @@ extension BoardStages {
     private static func reading(of facts: Facts, at station: Station, rules: Rules) -> Reading {
         let last = facts.lastActivityAt
         switch facts.activity {
-        case .needsYou(let what):
-            return Reading(.needsYou, text(what).map { "Needs you · \($0)" } ?? "Needs you", since: last)
+        case .needsYou(let what, let reason):
+            var reading = Reading(.needsYou, text(what).map { "Needs you · \($0)" } ?? "Needs you", since: last)
+            reading.reason = reason
+            return reading
         case .failed(let what):
             return Reading(.failed, text(what) ?? "Stopped", since: last)
         case .working(let since):
@@ -700,7 +715,9 @@ extension BoardStages {
             }
         }
         if case .asking(let parent) = facts.activity {
-            return Reading(.waiting, text(parent).map { "Asking \($0)" } ?? "Asking its parent", since: last)
+            var reading = Reading(.waiting, text(parent).map { "Asking \($0)" } ?? "Asking its parent", since: last)
+            reading.asksParent = true
+            return reading
         }
         if let blocker = text(facts.blocker) { return Reading(.blocked, "Blocked · \(blocker)") }
         if let pullRequest {

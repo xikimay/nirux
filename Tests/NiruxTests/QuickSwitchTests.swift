@@ -275,6 +275,9 @@ final class QuickSwitchTests: XCTestCase {
 
         XCTAssertEqual(QuickSwitchAgentState.summary(waits: [dialog, older, failure], isWorking: true), .failed(failure.reason))
         XCTAssertEqual(QuickSwitchAgentState.summary(waits: [dialog, older], isWorking: true), .waiting(since: 400))
+        // Its badge's icon takes the glyph its row gives (the shell reads it there).
+        XCTAssertEqual(PaletteBadge(.waiting(since: 1_000, reason: .command), now: 1_100).icon, StateIcon(.needsYou(.command)))
+        XCTAssertEqual(PaletteBadge(.waiting(since: 400), now: 1_100).icon, StateIcon(.needsYou(.question)))
         XCTAssertEqual(QuickSwitchAgentState.summary(waits: [], isWorking: true), .working)
         XCTAssertNil(QuickSwitchAgentState.summary(waits: [], isWorking: false))
 

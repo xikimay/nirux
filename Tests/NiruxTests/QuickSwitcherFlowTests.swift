@@ -77,7 +77,8 @@ final class QuickSwitcherFlowTests: XCTestCase {
             let palette = try search("billing", in: harness)
             XCTAssertEqual(headers(palette), [space])
             XCTAssertEqual(palette.filteredActions.first?.title, "billing-fix")
-            XCTAssertEqual(palette.filteredActions.first?.badge, PaletteBadge(text: "waiting 12m", tone: .waiting))
+            // The row shows no permission here (the wait is a test's): its glyph says a question.
+            XCTAssertEqual(palette.filteredActions.first?.badge, PaletteBadge(text: "waiting 12m", tone: .waiting(.question)))
             XCTAssertEqual(palette.selectedIndex, 0)
             harness.press(.returnKey, in: palette.panel)
 
@@ -147,7 +148,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             let folded = try XCTUnwrap(all.filteredActions.last)
             XCTAssertEqual(folded.title, "Show 1 Workspace")
             XCTAssertEqual(folded.subtitle, "Clients")
-            XCTAssertEqual(folded.badge, PaletteBadge(text: "1 needs you", tone: .waiting))
+            XCTAssertEqual(folded.badge, PaletteBadge(text: "1 needs you", tone: .waiting(.question)))
             XCTAssertFalse(all.filteredActions.contains { $0.title == "acme" })
             for _ in 1..<all.filteredActions.count { harness.press(.down, in: all.panel) }
             harness.press(.returnKey, in: all.panel)

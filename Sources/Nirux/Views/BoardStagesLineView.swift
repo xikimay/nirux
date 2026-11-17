@@ -1,7 +1,7 @@
 import AppKit
 
-/// One line: its dot and title, its rail, its phrase, its pull request and
-/// its time. It draws the dot, the rail and what joins it to the lines
+/// One line: its icon and title, its rail, its phrase, its pull request and
+/// its time. It draws the icon, the rail and what joins it to the lines
 /// around it; the words are labels. It takes the mouse for its words and
 /// shows their tooltips. A click opens its task, but on its Merge station
 /// where that changes the queue's list, and on the link ending its phrase
@@ -191,7 +191,15 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
 
     // MARK: Layout
 
-    /// Where the dot's centre is: at the line's edge, or inset under a
+    /// The line's state icon, as the sidebar draws the task's: its state,
+    /// its station (none without a rail), why it waits.
+    var icon: StateIcon {
+        let station = line.rail == nil ? nil : line.station
+        if line.asksParent { return StateIcon(.asking, stage: StateIcon.stage(of: station)) }
+        return StateIcon(state: line.state, station: station, reason: line.reason)
+    }
+
+    /// Where the icon's centre is: at the line's edge, or inset under a
     /// task or on a stack's rail.
     var dotCenter: NSPoint {
         NSPoint(x: Metrics.connectorX + (link.isInset ? Metrics.inset : 0), y: bounds.midY)
@@ -200,7 +208,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
     override func layout() {
         super.layout()
         let columns = BoardStagesView.Columns(width: bounds.width, height: bounds.height)
-        let titleX = dotCenter.x + Metrics.dot / 2 + 10
+        let titleX = dotCenter.x + Metrics.icon / 2 + 7
         titleLabel.frame = NSRect(x: titleX, y: 8, width: max(0, columns.task.maxX - titleX), height: 18)
         noRailLabel.frame = NSRect(x: columns.rail.minX, y: 10, width: columns.rail.width, height: 15)
         noRailLabel.isHidden = line.rail != nil || columns.rail.width == 0
@@ -331,7 +339,10 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
 
     override func draw(_ dirtyRect: NSRect) {
         drawConnectors()
-        Self.fill(circle: dotCenter, radius: Metrics.dot / 2, BoardStagesView.color(of: line.state))
+        if let context = NSGraphicsContext.current?.cgContext {
+            let side = Metrics.icon
+            icon.draw(in: context, rect: NSRect(x: dotCenter.x - side / 2, y: dotCenter.y - side / 2, width: side, height: side))
+        }
         if let rail = line.rail {
             let columns = BoardStagesView.Columns(width: bounds.width, height: bounds.height)
             Self.draw(rail, state: line.state, stations: columns.stations, y: bounds.midY, hovered: isStationHovered ? actingOffer?.change : nil)
@@ -340,7 +351,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
 
     /// The elbow that joins a sub-task to its task, the line a task sends
     /// down to its sub-tasks, a stack's numbered rail. Half a point off
-    /// the dots' centre, so a 1 pt stroke fills whole pixels.
+    /// the icons' centre, so a 1 pt stroke fills whole pixels.
     private func drawConnectors() {
         let x = Metrics.connectorX - 0.5
         let midY = bounds.midY - 0.5
@@ -350,7 +361,7 @@ final class BoardStagesLineView: BoardStagesKeyView, NSViewToolTipOwner {
         case .none:
             return
         case .head:
-            path.move(to: NSPoint(x: x, y: midY + Metrics.dot))
+            path.move(to: NSPoint(x: x, y: midY + Metrics.icon / 2 + 1))
             path.line(to: NSPoint(x: x, y: bounds.maxY))
         case .subtask(let isLast):
             // Down from the task, then round the corner to the sub-task.

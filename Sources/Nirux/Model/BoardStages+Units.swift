@@ -30,6 +30,8 @@ extension BoardStages {
         var mergedAt: TimeInterval
         /// An agent of its task waits for the user: amber is never hidden.
         var needsYou = false
+        /// Why, from the same line: its icon's glyph.
+        var reason: StateIcon.Reason = .question
         /// Its worktree is still there.
         var cleanUp: CleanUp?
     }
@@ -163,12 +165,15 @@ extension BoardStages {
                 // One place per pull request: not here while its line is listed.
                 guard !gone.isEmpty || !listed.contains(pullRequest.number) else { return nil }
                 let task = gone.first { facts.lines[$0].hasTask }
+                // One line says it: the one the entry opens, else another that waits.
+                let waiting = ((task.map { [$0] } ?? []) + gone).first { lines[$0].state == .needsYou }
                 return Merged(
                     lineID: task.map { facts.lines[$0].id },
                     title: task.map { facts.lines[$0].title } ?? text(pullRequest.title) ?? "#\(pullRequest.number)",
                     number: pullRequest.number,
                     mergedAt: pullRequest.mergedAt,
-                    needsYou: gone.contains { lines[$0].state == .needsYou },
+                    needsYou: waiting != nil,
+                    reason: waiting.map { lines[$0].reason } ?? .question,
                     cleanUp: task.flatMap { facts.lines[$0].cleanUp }
                 )
             },

@@ -38,9 +38,9 @@ final class ThemeGuardTests: XCTestCase {
     /// stay, user-chosen colours on a square mark that doesn't read as a
     /// state's dot (`WorkspaceProfile.palette`; hex strings, not seen here).
     static let amberFiles: Set<String> = [
-        "Views/BoardStagesLineView.swift", "Views/BoardStagesMergedView.swift", "Views/BoardStagesView.swift",
-        "Views/ColumnHeaderView.swift", "Views/CommandPalette.swift", "Views/CountBadge.swift", "Views/IconRail.swift",
-        "Views/MissionReplyViewController.swift", "Views/NiruxShellView+WorkspaceSwitch.swift", "Views/SessionHistoryPanel.swift",
+        "Views/BoardStagesLineView.swift", "Views/BoardStagesMergedView.swift", "Views/ColumnHeaderView.swift",
+        "Views/CountBadge.swift", "Views/IconRail.swift", "Views/MissionReplyViewController.swift",
+        "Views/NiruxShellView+WorkspaceSwitch.swift", "Views/SessionHistoryPanel.swift",
         "Views/SidebarApprovalBlockRenderer.swift", "Views/SidebarCardLayout.swift", "Views/SidebarCatchUp.swift",
         "Views/SidebarRenderer.swift", "Views/SidebarView+Rendering.swift", "Views/SidebarView+SpaceMenus.swift",
         "Views/SidebarWorkspaceCardRenderer.swift", "Views/StateIcon.swift"

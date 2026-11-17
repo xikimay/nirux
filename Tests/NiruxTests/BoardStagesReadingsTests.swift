@@ -68,7 +68,10 @@ final class BoardStagesReadingsTests: XCTestCase {
         XCTAssertEqual(reading(handed).activity, needsYou(handed))
         var behindDialog = column(0, question: handedOff)
         behindDialog.openDialog = .permission(tool: "Bash", summary: "git push")
-        XCTAssertEqual(reading(row([behindDialog])).activity, .needsYou("Which base?"), "the question, whatever else the column shows")
+        XCTAssertEqual(
+            reading(row([behindDialog])).activity, .needsYou("Which base?", reason: .command),
+            "the question's words, whatever else the column shows; the dialog's glyph, as on its row"
+        )
         let broken = row([column(0, status: .working, id: first), stopped])
         XCTAssertEqual(reading(broken).activity, .failed(broken.rowSummary.status.text))
         XCTAssertEqual(reading(row([column(0, status: .working, id: first), column(1, question: asking)])).activity, .asking("Lead"))
