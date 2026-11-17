@@ -20,6 +20,7 @@ final class TranslucentWindowTests: XCTestCase {
         let content = MainWindowContent(shell: shell)
         window.contentView = content
         shell.installCommandBar(in: window)
+        shell.interfaceTransparency = .opaque
         shell.applyInterfaceTransparency()
         window.contentView?.superview?.layoutSubtreeIfNeeded()
         return (window, content, shell)

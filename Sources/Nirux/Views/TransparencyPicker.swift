@@ -134,20 +134,23 @@ final class TransparencyPicker: NSView {
             return true
         }
 
-        /// The window in miniature over an invented desktop: the sidebar
-        /// and the bar at the level's chrome tint, a column of work, solid.
+        /// The window in miniature over an invented desktop: its backdrop
+        /// and the bar at the level's tint, a column of work solid.
         static func miniature(_ level: InterfaceTransparency) -> NSImage {
             let size = TransparencyPicker.tileSize
             return NSImage(size: size, flipped: true) { rect in
-                NSGradient(colors: [NSColor(hex: 0x3A5F8F), NSColor(hex: 0xC27A4E)])?.draw(in: rect, angle: 35)
-                let tint = GlassView.tintColor(for: .chrome).withAlphaComponent(GlassView.tintAlpha(for: level, role: .chrome))
-                let bar = NSRect(x: 0, y: 0, width: rect.width, height: 12)
-                let sidebar = NSRect(x: 0, y: bar.maxY, width: rect.width * 0.3, height: rect.height - bar.maxY)
-                tint.setFill()
-                bar.fill(using: .sourceOver)
-                sidebar.fill(using: .sourceOver)
+                NSGradient(colors: Theme.Color.previewDesktop)?.draw(in: rect, angle: 35)
+                let alpha = GlassView.tintAlpha(for: level, role: .chrome)
+                Theme.Color.canvas.withAlphaComponent(alpha).setFill()
+                rect.fill(using: .sourceOver)
+                let sidebarWidth = rect.width * 0.3
+                Theme.Color.line.setFill()
+                NSRect(x: sidebarWidth, y: 12, width: 1, height: rect.height - 12).fill(using: .sourceOver)
+                GlassView.tintColor(for: .chrome).withAlphaComponent(alpha).setFill()
+                let bar = NSRect(x: rect.midX - 22, y: 3, width: 44, height: 6)
+                NSBezierPath(roundedRect: bar, xRadius: bar.height / 2, yRadius: bar.height / 2).fill()
                 Theme.Color.surface.setFill()
-                NSRect(x: sidebar.maxX + 3, y: bar.maxY + 3, width: rect.maxX - sidebar.maxX - 6, height: rect.height - bar.maxY - 6).fill()
+                NSRect(x: sidebarWidth + 4, y: 14, width: rect.maxX - sidebarWidth - 7, height: rect.height - 17).fill()
                 return true
             }
         }

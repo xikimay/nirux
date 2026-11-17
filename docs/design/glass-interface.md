@@ -1,7 +1,7 @@
 # Glass interface
 
-> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3), the rows on glass (3.4); phase 4 starts with one Settings window (4.1).\
-> **Differs today:** the app draws every level as Opaque until phase 4 brings the Appearance page and the translucent window.
+> **Design record:** in progress. Phases 1 and 2 add tokens and views; phase 3 puts them in the window: the command bar (3.1), the icon rail as the folded sidebar (3.2), the requests and the new ⌘J (3.3), the rows on glass (3.4); phase 4 brings one Settings window (4.1), then the Appearance pane and the translucent window (4.2).\
+> **Differs today:** Opaque stays the default until the energy bench and the user say Tinted; the terminals' own opacity comes in 4.3.
 
 Status: design validated by the user on 2026-11-14, after six rounds of
 studies (renders of today's app, mockups and the plan:
@@ -51,6 +51,42 @@ requests; phases 1 and 2 run while the Board's swap ends.
   Mac, never by CI. macOS 27's concentric corners
   (`NSView.cornerConfiguration`) wait for Xcode 27 on CI: computed by hand
   meanwhile, from the window's radius measured on renders.
+
+## Appearance and the translucent window
+
+Settings › Appearance (4.2), second in Nirux's panes, holds how Nirux looks
+and moves:
+
+- **Interface:** four tiles, Opaque, Tinted, Glass and Clear, as macOS's own
+  Appearance pane shows Light and Dark. Each is a miniature drawn in code: the
+  sidebar and the bar at the level's tint over an invented desktop, a column
+  of work solid. One line says what the level picked shows. VoiceOver reads
+  a radio group; with Full Keyboard Access, ← and → pick. A pick applies at
+  once and is saved (`settings.interfaceTransparency`, a raw string a newer
+  build's level survives). While Reduce transparency or Increase contrast is
+  on, a line says Nirux draws opaque, and the tiles stay pickable.
+- **Animate the interface**, moved here from General.
+- No terminal controls before 4.3.
+
+**The window.** `MainWindowContent` lies under the whole window, title bar
+included (a full-size content view); the shell sits below the toolbar.
+Above Opaque, one behind-window frost (`NSVisualEffectView`) tinted with the
+canvas at the level's chrome alpha lets the desktop through, and the window
+turns non-opaque; the canvas and the sidebar let that frost show. The chrome
+lies on it: macOS 26's glass, or on macOS 14 and 15 its tint alone, since a
+frost of its own would blur twice. What floats in a window of its own (the
+inbox, a callout, ⌘P) keeps its frost and its thick tint. Every column is
+opaque under its content (the terminals' background), so a terminal before
+its first frame or a page still loading never shows the desktop; the
+terminals' own opacity is 4.3. An inactive window goes flat, as macOS's own
+do. Reduce transparency and Increase contrast make the window opaque at
+once. The Settings window and the other panels stay opaque.
+
+**Energy.** Tinted becomes the default only if, against Opaque, it adds at
+most 2 points of WindowServer CPU and 20 % of GPU time, medians, measured
+idle and with a terminal printing, the levels interleaved (Opaque, Tinted,
+Glass, Clear, then back). The user runs the bench; the default flips only
+with their OK.
 
 ## Glass view
 
@@ -340,7 +376,7 @@ space, in place of Settings' three toolbar tabs and Space Settings' seven:
 
 - **Sidebar** (`SettingsSidebar`, a table, so ↑ ↓ walk the panes and
   VoiceOver reads a list): "Nirux" and its panes (General, Agents,
-  Notifications; Appearance comes in 4.2), then the space's colour square
+  Appearance, Notifications), then the space's colour square
   and name, a popup to pick another space, and its panes (General, Defaults,
   Lead, Brief, Memory, Board, Templates). Plain SF Symbols in the secondary
   text colour, no coloured tiles: colour stays for states. The pane shown

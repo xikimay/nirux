@@ -28,6 +28,8 @@ enum Theme {
         /// sidebar's selected row, rimmed with `line`, with `lineStrong`
         /// along its top edge.
         static let selectionGlass = NSColor.white.withAlphaComponent(0.10)
+        /// An invented desktop, under the Appearance pane's miniatures.
+        static let previewDesktop = [NSColor(hex: 0x3A5F8F), NSColor(hex: 0xC27A4E)]
         static let line = NSColor.white.withAlphaComponent(0.07)
         static let lineStrong = NSColor.white.withAlphaComponent(0.12)
 

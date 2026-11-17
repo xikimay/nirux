@@ -36,7 +36,7 @@ Each agent's column carries a light at its edge:
 
 When an agent that is waiting or stopped on an error is out of view (a column scrolled away, another workspace), the window's edge on that side lights up. The command bar counts the agents waiting for you, and `Cmd+J` goes to them and to those stopped on an error.
 
-With **Settings › General › Animate the interface** off, or macOS's Reduce motion on, the same colors show without moving.
+With **Settings › Appearance › Animate the interface** off, or macOS's Reduce motion on, the same colors show without moving.
 
 While Nirux is in the background, it also sends a macOS notification (a click focuses the right workspace and column) and shows on its Dock icon how many workspaces need attention.
 
