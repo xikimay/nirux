@@ -139,8 +139,8 @@ centred item of an empty unified toolbar: the title bar grows from 32 to
 52 pt and sets it level with the traffic lights, the empty strip on either
 side drags the window (the segments' buttons don't), and the toolbar stays
 in full screen. The space segment opens the space menu, the task segment the
-task's menu (its row's ⋯), the search ⌘P under the bar, and the count goes to
-the next agent waiting (⌘J) until 3.3 brings the inbox; with nothing open,
+task's menu (its row's ⋯), the search ⌘P under the bar, and the count does
+what ⌘J does (the inbox, below); with nothing open,
 the task segment opens the New sheet. The count is what ⌘J reaches, in every
 space, that waits for the user's answer (amber): not the agents stopped on an
 error or exited, which ⌘J also visits, nor the column on screen, which it
@@ -186,8 +186,8 @@ of the archived ones the task on screen and those whose agent waits on the
 user or broke, never the whole archived list (it has nowhere to show). Its
 icons are the rows' states: the row's mark, a wait's reason from the column
 that waits, and amber for a question a Mission child handed to the user. A
-click does what a click on the row does: a task whose agent waits goes to
-that column, until the callout of 3.3 takes the amber icons. A right-click
+click on a task whose agent waits opens its request's callout, and a
+double-click goes to the task; on any other task, a click goes to it. A right-click
 opens the task's menu, which holds Rename; dragging and renaming in place
 stay in the unfolded sidebar, and the rail of initials' rich tooltip goes for
 a short one: the name and what the row says ("Needs you · Bash: npm run
@@ -323,7 +323,7 @@ the field and the rows sit inside floating glass that fills the panel (macOS
 transparent, in another window than the palette's, or its window ordered
 out, minimized or on another Space), the palette opens centred. Today's centred palette stays the
 default and doesn't change. A press on the bar's search segment closes an
-open palette, as the title bar's Search does. The scopes (tasks, sessions,
+open palette. The scopes (tasks, sessions,
 files, actions) come later. For the demo at the end of phase 2: macOS 26's
 glass in a window of its own (that it shows what is behind the window, and
 whether the window's shadow doubles its edge). For phase 3: the level

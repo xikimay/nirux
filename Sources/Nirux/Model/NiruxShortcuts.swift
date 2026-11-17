@@ -81,7 +81,6 @@ enum NiruxShortcuts: CaseIterable {
         }
     }
 
-    // Used by the sidebar's shortcut hints.
-    static let newTerminalDisplay = newTerminal.chord.display
+    /// The new-task buttons' tooltips.
     static let newWorkspaceDisplay = newWorkspace.chord.display
 }

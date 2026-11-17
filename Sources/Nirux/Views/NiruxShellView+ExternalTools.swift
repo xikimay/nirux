@@ -766,20 +766,6 @@ extension NiruxShellView {
         }
     }
 
-    // MARK: - URL Input
-
-    func showURLInput() {
-        guard let window else { return }
-        if urlPanel == nil {
-            let panel = URLInputPanel()
-            panel.onSubmit = { [weak self] url in
-                self?.openWebView(url: url)
-            }
-            urlPanel = panel
-        }
-        urlPanel?.show(relativeTo: window)
-    }
-
     func openWebView(url: String, in workspace: WorkspaceState? = nil) {
         guard let workspace = workspace ?? activeWorkspace else { return }
         workspace.addColumn(webViewURL: url)

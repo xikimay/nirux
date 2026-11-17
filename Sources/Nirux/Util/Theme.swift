@@ -48,8 +48,8 @@ enum Theme {
         /// Not for agent states: an agent that finished is idle, not green.
         static let success = working
         /// Something waits for the user's answer: an agent's permission or
-        /// question, the editor's file conflict. Amber means nothing else:
-        /// not warnings, not pending checks.
+        /// question. Amber means nothing else: not warnings, not pending
+        /// checks, not a file conflict (`ThemeGuardTests` lists who may use it).
         static let waiting = NSColor(hex: 0xF5A623)
         /// An agent stopped on an error, a failed check, a refusal.
         static let error = NSColor(hex: 0xF0656B)
@@ -92,7 +92,7 @@ enum Theme {
         static var bodyEmphasized: NSFont { NSFont.systemFont(ofSize: 12, weight: .semibold) }
         /// Durations, counts, chips, tooltips.
         static var caption: NSFont { NSFont.systemFont(ofSize: 11) }
-        /// The collapsed sidebar's tile initials.
+        /// Count badges and small headings.
         static var captionEmphasized: NSFont { NSFont.systemFont(ofSize: 11, weight: .semibold) }
         /// Times, counts and line numbers that change in place: digits of
         /// one width, so the text beside them doesn't shift.
@@ -171,15 +171,11 @@ enum Theme {
         static let newWorkspace = "plus.rectangle.on.rectangle"
         /// The collapsed rail's "+".
         static let add = "plus"
-        static let rename = "pencil"
         static let search = "magnifyingglass"
-        static let resizeColumn = "arrow.left.and.right"
         static let diff = "plus.forwardslash.minus"
         static let webInspector = "ladybug"
-        static let file = "doc.text"
         static let branch = "arrow.triangle.branch"
         static let openWorktree = "folder"
-        static let cleanUp = "trash"
         static let pullRequest = "arrow.triangle.pull"
         static let merged = "arrow.triangle.merge"
         static let checksPassed = "checkmark"
@@ -187,7 +183,6 @@ enum Theme {
         /// Closes what the sidebar shows for a while (the catch-up card).
         static let dismiss = "xmark"
         static let checksRunning = "circle.dashed"
-        static let sidebar = "sidebar.left"
         static let inactiveWorkspaces = "archivebox"
         /// A space's Lead: its row and its rail tile.
         static let lead = "sparkle"
@@ -195,10 +190,6 @@ enum Theme {
         static let spacePicker = "chevron.up.chevron.down"
         /// General in the space picker's menu: what has no other space.
         static let generalSpace = "tray"
-        static let settings = "gearshape"
-        static let agentSkills = "puzzlepiece.extension"
-        static let gettingStarted = "checklist"
-        static let browserCookies = "key"
         static let keepAwake = "cup.and.saucer.fill"
         static let permission = "hand.raised"
         static let question = "bubble.left"
@@ -216,7 +207,6 @@ enum Theme {
         static let back = "chevron.left"
         static let forward = "chevron.right"
         static let reload = "arrow.clockwise"
-        static let localServer = "arrow.up.right.square"
     }
 }
 
