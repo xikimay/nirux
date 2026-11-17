@@ -121,6 +121,9 @@ extension NiruxShellView {
         let defaults = SpaceSettingsDefaultsPane(loaded: unread, actions: defaultsActions)
         let safety = SpaceSettingsSafetyPane(model: spaceSettingsSafetyModel(for: space))
         safety.actions.set = { [weak self] part, on in self?.setClaudeSafety(part, on: on, spaceID: spaceID) }
+        safety.actions.setPeriod = { [weak self] days in self?.refreshSpaceSettingsSafety(periodDays: days) }
+        safety.actions.add = { [weak self] line in self?.changeClaudeLines(spaceID: spaceID) { $0.add(line) } }
+        safety.actions.remove = { [weak self] line in self?.changeClaudeLines(spaceID: spaceID) { $0.remove(line) } }
         let lead = SpaceSettingsLeadPane(model: spaceSettingsLeadModel(for: space))
         lead.actions.setLead = { [weak self] on in
             guard let self else { return }
@@ -261,7 +264,7 @@ extension NiruxShellView {
         }
         settings.general.update(spaceSettingsGeneralModel(for: space))
         settings.lead.update(spaceSettingsLeadModel(for: space))
-        settings.safety.update(spaceSettingsSafetyModel(for: space))
+        refreshSpaceSettingsSafety()
         settings.setTitle(Self.spaceSettingsTitle(space.id, in: profiles))
         // Their templates name the space.
         settings.brief.replaceSource(Self.briefSource(for: space))

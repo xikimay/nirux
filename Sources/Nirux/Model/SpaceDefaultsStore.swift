@@ -39,9 +39,9 @@ struct SpaceDefaultsStore: Sendable {
 
     /// A deleted space's defaults (copies set aside included) and setup
     /// scripts, which may hold secrets, go with it, and the rules its Lead
-    /// proposed; its brief stays. Its Claude settings are emptied, not
-    /// removed: its workspaces go on in General, and their columns' launch
-    /// lines name the file.
+    /// proposed and its prompts' log; its brief stays. Its Claude settings
+    /// are emptied, not removed: its workspaces go on in General, and their
+    /// columns' launch lines name the file.
     static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
         do {
             try ClaudeSpaceSettings.empty(spaceID: spaceID, stateDirectory: stateDirectory)
@@ -52,7 +52,7 @@ struct SpaceDefaultsStore: Sendable {
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
         for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName
-            || name == RuleProposalStore.fileName {
+            || name == RuleProposalStore.fileName || name == LoopLog.fileName {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {
@@ -170,6 +170,9 @@ struct SpaceDefaultsStore: Sendable {
         for item in SpaceDefaults.switches where decoded[keyPath: item.key] == nil
             && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
             unknown.insert(item.name.rawValue)
+        }
+        for key in [SpaceDefaults.CodingKeys.claudeAllow, .claudeEnvironment] {
+            if let value = top[key.rawValue], !(value is NSNull), !(value is [String]) { unknown.insert(key.rawValue) }
         }
         if let variables = top["environment"], !(variables is NSNull) {
             let entries = variables as? [Any] ?? []
