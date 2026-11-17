@@ -291,6 +291,19 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 shell.addWorkspace(title: "Sub \(number)", cwd: harness.repo, profileID: lead.space, parentWorkspaceID: first.id)
             }
             XCTAssertTrue(try call(LeadTools.setTaskParent, ["task": "Third", "parent": "Import orders"]).text.contains("already has 6 sub-tasks"))
+            // A sub-task Third's agent follows, listed elsewhere, still counts.
+            let third = try XCTUnwrap(shell.workspaces.first { $0.title == "Third" })
+            let helperID = UUID().uuidString
+            let helperMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: third.id, parentAgentUUID: try XCTUnwrap(third.columns.first?.agentUUID),
+                childWorkspaceID: helperID, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/helper", reportsToTask: true
+            ), enabled: true))
+            shell.addWorkspace(title: "Helper", cwd: harness.repo, profileID: lead.space, workspaceID: helperID, missionID: helperMission.id, reportsToTask: true)
+            XCTAssertTrue(
+                try call(LeadTools.setTaskParent, ["task": "Third", "parent": "Import orders"]).text.contains("has sub-tasks of its own (“Helper”)")
+            )
+            XCTAssertTrue(try call(LeadTools.closeTask, ["task": "Third"]).text.contains("its agent waits for some of them"))
 
             XCTAssertEqual(try call(LeadTools.setTaskParent, ["task": "Second"]).text, "“Second” is a task of its own now. Who it reports to doesn't change.")
             XCTAssertNil(parents()["Second"])
@@ -324,13 +337,16 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                     workspaceTitle: task.title, agentUUID: task.columns.first?.agentUUID, columnIndex: 0
                 ), spaceID: lead.space)
             }
-            @MainActor func session(_ id: String, agent: AgentHookEvent.Kind = .claude, transcript: String?, at time: TimeInterval) {
+            let ownAgent = try XCTUnwrap(task.columns.first?.agentUUID)
+            @MainActor func session(
+                _ id: String, agent: AgentHookEvent.Kind = .claude, transcript: String?, at time: TimeInterval, column: String? = nil
+            ) {
                 for (event, source) in [(AgentHookEvent.Name.sessionStart, "startup"), (.userPromptSubmit, nil), (.stop, nil)] {
                     shell.sessionLedger.record(AgentSessionObservation(
                         agent: agent, sessionID: id, event: event, source: source, timestamp: time,
                         agentProcess: ProcessInstance(pid: 4242, startedAt: 1), name: nil, cwd: harness.worktree,
                         transcriptPath: transcript, checkout: nil, pullRequest: nil, workspaceID: task.id,
-                        workspaceTitle: task.title, agentUUID: task.columns.first?.agentUUID, columnIndex: 0
+                        workspaceTitle: task.title, agentUUID: column ?? ownAgent, columnIndex: 0
                     ), spaceID: lead.space)
                 }
             }
@@ -346,11 +362,18 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 .write(toFile: cleared, atomically: true, encoding: .utf8)
             session("writer-2", transcript: cleared, at: now + 10)
             XCTAssertTrue(try read().text.contains(", from an earlier conversation"))
+            // Codex in a column of its own, newest: the task's own agent
+            // decides once its Mission names it.
+            session("side-codex", agent: .codex, transcript: nil, at: now + 20, column: UUID().uuidString)
+            XCTAssertTrue(try read().text.contains("runs codex"))
+            XCTAssertNotNil(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: task.id, childAgentUUID: ownAgent, childAgentKind: "claude", branch: "feat/flow", reportsToLead: true
+            ), enabled: true))
+            XCTAssertTrue(try read().text.contains(", from an earlier conversation"))
             try FileManager.default.removeItem(atPath: cleared)
             try FileManager.default.removeItem(atPath: transcript)
             XCTAssertTrue(try read().text.contains("isn't on disk any more"))
-            session("writer-codex", agent: .codex, transcript: nil, at: now + 20)
-            XCTAssertTrue(try read().text.contains("runs codex"))
         }
     }
 }
