@@ -263,7 +263,9 @@ New flow, built on the guarded typing `tell` already uses
     and checks, the question waiting or the result) and repositories.
   - `tell(task, message)`, `reply(question, message)`: Missions, 4,000
     characters at most (see mission-tell.md, "Longer messages"). A task is named
-    by its branch or title; the Lead reaches only the tasks it started that
+    by its branch, else its folder, else its title or folder's name; within
+    the first that any task answers, only one may (a workspace's branch is
+    its focused terminal's, which another may share); the Lead reaches only the tasks it started that
     are still in its space. A question typed into the Lead names `reply`.
   - `ask_user(task, why)`: hands the question the task waits on to the user
     (amber row at once, the popover saying why). The answer is typed into the
@@ -293,17 +295,22 @@ New flow, built on the guarded typing `tell` already uses
     repository has its folder moved to the Trash (for this tool only: Close
     and Archive keep it). Otherwise they stay and the answer says why: not
     merged, uncommitted changes, another workspace open in it, a folder named
-    for another branch (a base reused across branches)… The task closes
-    before git runs, so no turn starts in a folder going away. Refused while
-    the user has it on screen (Nirux active), while its agent works or waits
-    on the user (a dialog, a question it ended on or handed over, a turn end
-    still being read), hasn't resumed since a relaunch and was last seen
-    working or waiting, or can't be told idle (no hooks); while a program
-    is in front of one of its terminals (a job sent to the background with
-    & or ^Z isn't seen); with unsaved editor changes; for a sub-task whose
+    for another branch (a base reused across branches)… The task closes and
+    its shells hang up first; git runs, or the folder goes to the Trash,
+    once all their processes ended (10 s at most, else the folder stays and
+    the answer names them). A folder task's folder holding a git repository
+    with uncommitted changes or commits no remote has stays; the answer
+    names where the Trash took the rest, which Put Back restores. Refused
+    while the user has it on screen (Nirux active), and while its agent's own
+    state holds something (`AgentStatusMachine.hold`, under a launcher too):
+    a turn, a dialog, a question it ended on, any attention but a finished
+    turn, a draft typed and not sent, a turn end still being read; also a
+    question handed over, an agent paused since a relaunch last seen working
+    or waiting, or one that can't be told idle (no hooks); while a program
+    is in front of one of its terminals; with unsaved editor changes; for a sub-task whose
     parent's agent waits for it, a task with sub-tasks open, and a workspace
-    that isn't a task (a main checkout). A name two workspaces answer is no
-    answer (a workspace's branch is its focused terminal's). A folder task's
+    that isn't a task (a main checkout). Closing the selected task selects
+    the next without giving its terminal the keyboard. A folder task's
     folder stays when another workspace or task works in it, and is moved
     once its terminals are gone.
   - `move_task(task, position)`: moves a task among its siblings (the

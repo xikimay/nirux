@@ -74,16 +74,24 @@ extension NiruxShellView {
         candidate.inspection = inspection
         let others = candidate.workspaces.filter { $0.id != taskID }
         let availability = others.isEmpty ? candidate.availability : .blocked([Self.openInIt(others.map(\.title))])
-        closeLeadTask(task)
         // A folder named for another branch may be a base reused across
         // branches, which the alert warns about.
         guard case .ready(let plan, _) = availability, plan.worktree.folderMatchesBranch else {
+            closeLeadTask(task)
             worktreeCleanupsInFlight.remove(key)
             return answer(Self.closedWithout(title, availability), false)
         }
-        executeWorktreeCleanup(plan, of: candidate) { [weak self] outcome in
-            self?.worktreeCleanupsInFlight.remove(key)
-            answer(Self.cleanedUp(title, plan: plan, outcome: outcome), outcome?.succeeded != true)
+        // git runs once nothing of the task works in the folder.
+        closeLeadTask(task) { [weak self] stillRunning in
+            guard let self else { return answer("Nirux closed meanwhile: nothing was cleaned up.", true) }
+            guard stillRunning.isEmpty else {
+                self.worktreeCleanupsInFlight.remove(key)
+                return answer(Self.closedKeeping(title, because: Self.stillRunning(stillRunning)), false)
+            }
+            self.executeWorktreeCleanup(plan, of: candidate) { [weak self] outcome in
+                self?.worktreeCleanupsInFlight.remove(key)
+                answer(Self.cleanedUp(title, plan: plan, outcome: outcome), outcome?.succeeded != true)
+            }
         }
     }
 
@@ -109,19 +117,50 @@ extension NiruxShellView {
             return answer("Closed “\(title)”. Its folder stays (\(folder)): " + problems.joined(separator: " "), false)
         }
         let tools = worktreeCleanupTools()
-        // Once its terminals are gone: nothing writes in it as it moves.
-        closeLeadTask(task) {
-            Self.offMain({ () -> String? in
-                do {
-                    _ = try tools.trash(URL(fileURLWithPath: folder))
-                    return nil
-                } catch {
-                    return error.localizedDescription
-                }
-            }) { problem in
-                answer(problem.map { "Closed “\(title)”, but its folder couldn't go to the Trash (\($0)): it stays at \(folder)." }
-                    ?? "Closed “\(title)” and moved its folder to the Trash (\(folder)): the user can put it back from there.", false)
+        // Once nothing of the task runs: nothing writes in it as it moves.
+        closeLeadTask(task) { stillRunning in
+            guard stillRunning.isEmpty else {
+                return answer("Closed “\(title)”. Its folder stays (\(folder)): " + Self.stillRunning(stillRunning), false)
             }
+            Self.offMain({ Self.trash(folder, tools: tools) }) { trashed in
+                switch trashed {
+                case .success(let place):
+                    answer("Closed “\(title)” and moved its folder to the Trash (\(place)): Finder's Put Back restores it to \(folder).", false)
+                case .failure(let why):
+                    answer("Closed “\(title)”. Its folder stays (\(folder)): \(why.reason)", false)
+                }
+            }
+        }
+    }
+
+    private static func stillRunning(_ names: [String]) -> String {
+        "Its processes (\(names.joined(separator: ", "))) still ran \(Int(exitTimeout)) s after it closed."
+    }
+
+    /// Why a folder task's folder stays.
+    struct KeptFolder: Error {
+        let reason: String
+    }
+
+    /// `folder` to the Trash, where it went; kept when it holds git work no
+    /// remote has (an agent's `git init`), as a worktree would be.
+    nonisolated static func trash(_ folder: String, tools: WorktreeCleanup.Tools) -> Result<String, KeptFolder> {
+        if FileManager.default.fileExists(atPath: (folder as NSString).appendingPathComponent(".git")) {
+            let status = WorktreeCleanup.git(["status", "--porcelain"], in: folder, tools: tools)
+            let unpushed = WorktreeCleanup.git(["rev-list", "-n", "1", "HEAD", "--not", "--remotes"], in: folder, tools: tools)
+            guard status.status == 0 else { return .failure(KeptFolder(reason: "It holds a git repository Nirux couldn't read.")) }
+            if !status.stdout.isEmpty {
+                return .failure(KeptFolder(reason: "It holds a git repository with uncommitted changes."))
+            }
+            // No commit yet reads as an error: nothing to lose.
+            if unpushed.status == 0, !unpushed.stdout.isEmpty {
+                return .failure(KeptFolder(reason: "It holds a git repository with commits no remote has."))
+            }
+        }
+        do {
+            return .success(try tools.trash(URL(fileURLWithPath: folder)).path)
+        } catch {
+            return .failure(KeptFolder(reason: "It couldn't go to the Trash (\(error.localizedDescription))."))
         }
     }
 
@@ -171,21 +210,16 @@ extension NiruxShellView {
         }
         // A failed read sees no agent at all.
         guard !snapshot.isEmpty else { return "Nirux couldn't read the running processes: call again in a moment." }
-        let readings = agentReadings(of: task, snapshot: snapshot)
-        // A turn that just ended reads "needs the user" until they look:
-        // only what they must answer counts.
-        if let dialog = readings.lazy.compactMap(\.dialog).first {
-            return "“\(title)” waits for the user (\(dialog)): leave it to them."
-        }
         let columns = task.openColumns
-        // Also one under a launcher (npx), which the readings don't see.
+        // What its agents hold, as their own state says: one under a
+        // launcher (npx) too. The screen adds what no hook reports.
+        let dialog = agentReadings(of: task, snapshot: snapshot).lazy.compactMap(\.dialog).first
+        for column in columns {
+            guard let pty = column.pty, pty.runningAgentName(snapshot: snapshot) != nil, let hold = pty.agentHold else { continue }
+            return Self.closeRefusal(hold, title: title, dialog: dialog)
+        }
+        if let dialog { return "“\(title)” waits for the user (\(dialog)): leave it to them." }
         let agents = columns.compactMap { $0.liveAgent(snapshot: snapshot) }
-        if readings.contains(where: { $0.status == .working }) || agents.contains(where: { $0.status == .working }) {
-            return "“\(title)”'s agent is working: wait for its turn to end, then close it."
-        }
-        if columns.contains(where: { $0.pty?.awaitsTurnVerdict == true }) {
-            return "“\(title)”'s last turn is still being read (it may ask the user something): call again in a moment."
-        }
         if let paused = columns.compactMap(\.deferredAgent).first(where: { [.working, .needsAttention].contains($0.lastStatus) }) {
             return "“\(title)” hasn't resumed since Nirux restarted, \(paused.lastStatusText ?? ""): leave it to the user."
         }
@@ -248,25 +282,53 @@ extension NiruxShellView {
             .compactMap { mission in workspaces.first { $0.id == mission.childWorkspaceID && !$0.isClosing } }
     }
 
+    private static func closeRefusal(_ hold: AgentHold, title: String, dialog: String?) -> String {
+        switch hold {
+        case .working: "“\(title)”'s agent is working: wait for its turn to end, then close it."
+        case .waitsOnUser(let reason): "“\(title)” waits for the user (\(dialog ?? reason?.shortLabel ?? "in its terminal")): leave it to them."
+        case .draft: "“\(title)”'s agent has text typed into its prompt and not sent: ask the user."
+        case .verdict: "“\(title)”'s last turn is still being read (it may ask the user something): call again in a moment."
+        }
+    }
+
+    /// How long a closed task's processes may take to end before Nirux
+    /// leaves its folder alone.
+    static let exitTimeout: TimeInterval = 10
+
     /// Closes `task` as Close Workspace does once confirmed, leaving the
-    /// keyboard where it is; once it's gone, saves and runs `then`.
-    private func closeLeadTask(_ task: WorkspaceState, then: (@MainActor () -> Void)? = nil) {
+    /// keyboard where it is. `then` runs once its terminals' processes (its
+    /// shells, its agents and what they run) have ended, with the names of
+    /// those still running `exitTimeout` later.
+    private func closeLeadTask(_ task: WorkspaceState, then: (@MainActor @Sendable (_ stillRunning: [String]) -> Void)? = nil) {
+        let snapshot = ProcessSnapshot()
+        let processes = then == nil ? [] : task.columns.compactMap(\.pty?.shellPID).flatMap { snapshot.tree(of: $0) }
         guard let index = workspaces.firstIndex(where: { $0 === task }) else { return }
         closeWorkspace(at: index, refocusing: false)
+        // Now, not when its terminals are freed: the wait below needs them gone.
+        task.columns.forEach { $0.pty?.hangUp() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.saveState()
-            then?()
         }
+        guard let then else { return }
+        let (instances, names) = (processes.map(\.process), processes.map(\.name))
+        Self.offMain({
+            let deadline = Date().addingTimeInterval(Self.exitTimeout)
+            var running = Array(instances.indices)
+            while true {
+                running = running.filter { ProcessInstance.running(pid: instances[$0].pid) == instances[$0] }
+                if running.isEmpty || Date() >= deadline { return Array(Set(running.map { names[$0] })).sorted() }
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+        }, then: then)
     }
 
     // MARK: move_task
 
     func leadMoveTask(_ arguments: [String: Any], in space: WorkspaceProfile, answer: @escaping LeadAnswer) {
         let name = LeadTools.string(arguments, "task") ?? ""
-        let position = LeadTools.positiveInteger(arguments["position"]) ?? 1
-        guard let task = spaceTask(name, in: space), let index = workspaces.firstIndex(where: { $0 === task }) else {
-            return answer(noSpaceTask(name, in: space), true)
-        }
+        guard let position = LeadTools.positiveInteger(arguments["position"]), let task = spaceTask(name, in: space),
+              let index = workspaces.firstIndex(where: { $0 === task })
+        else { return answer(noSpaceTask(name, in: space), true) }
         let moved = workspaceStore.moveWorkspace(at: index, toPosition: position - 1)
         if moved { refreshAfterWorkspaceMutation(refocusing: false) }
         guard let now = workspaces.firstIndex(where: { $0 === task }), let (siblings, place) = workspaceStore.siblingGroup(of: now)

@@ -161,6 +161,11 @@ extension NiruxShellView {
         if wsToRemove.isLead { refreshSpaceSettingsLead() }
         // Only move the selection when the *active* workspace is going away —
         // closing another workspace from its context menu must not steal focus.
+        // Not refocusing: keys typed next reach no terminal, neither the
+        // closing one nor the next.
+        if !refocusing, let responder = window?.firstResponder as? NSView, responder.isDescendant(of: wsToRemove.containerView) {
+            window?.makeFirstResponder(nil)
+        }
         if index == activeWSIndex,
            let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
             let changesSpace = workspaces[target].profileID != activeProfileID
@@ -168,7 +173,7 @@ extension NiruxShellView {
             // As any switch: its badge, git context and headers. Another
             // space shows at once, as when picked in the sidebar: a slide
             // from this space's strip would mean nothing there.
-            refreshAfterWorkspaceSelection(animated: !changesSpace)
+            refreshAfterWorkspaceSelection(animated: !changesSpace, focusing: refocusing)
         } else {
             relayout(animated: true)
             updateSidebar()
