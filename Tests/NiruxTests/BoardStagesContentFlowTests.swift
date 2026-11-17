@@ -160,6 +160,63 @@ final class BoardStagesContentFlowTests: XCTestCase {
         }
     }
 
+    /// A Board not drawn builds its stages again only when what they are
+    /// built from changes: the shell's inputs, the day, what the Board read.
+    /// One drawn builds them at every pass. Each build carries its `now`:
+    /// the stages kept say when they were built.
+    @MainActor
+    func testABoardNotDrawnBuildsItsStagesOnlyWhenTheirInputsChange() throws {
+        let client = ProjectBoardFlowTests.FakeGitHub(
+            openPullRequests: Self.pullRequests, mergedPullRequests: "[]", runs: ProjectBoardGitHubTests.postMergeRuns
+        )
+        try withShell(client: client) { shell, space in
+            let repo = root + "/widgets", login = root + "/widgets.feat-login"
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
+            try writeConfig(for: space)
+            shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
+            shell.addWorkspace(title: "login", cwd: login, profileID: space.id)
+            let index: @MainActor (String) throws -> Int = { title in try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title }) }
+            shell.switchToWorkspace(try index("widgets"))
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            try waitUntil("#12 read, the worktrees listed") {
+                board.reads["legacy"]?.openPullRequests != nil && board.local != nil && !board.view.stages.lineViews.isEmpty
+            }
+            let task = shell.workspaces[try index("login")]
+            shell.switchToWorkspace(try index("login"))
+            XCTAssertFalse(shell.isProjectBoardShown(board))
+
+            // Noon: the next seconds stay the same day.
+            let now = BoardStages.midnight(of: Date().timeIntervalSince1970) + 12 * 3_600
+            let pass = NiruxShellView.SidebarPassReadings(infos: [], foregroundProcesses: [:], approvalHolds: [:], missionQuestions: [:])
+            let builtAt: @MainActor (TimeInterval) -> TimeInterval? = { now in
+                _ = shell.readProjectBoards(snapshot: ProcessSnapshot(entries: []), now: now, pass: pass)
+                return board.builtStages?.content.now
+            }
+            let kept = try XCTUnwrap(builtAt(now))
+            XCTAssertNotNil(shell.taskStations[task.id], "#12's station")
+            XCTAssertEqual(builtAt(now + 1), kept, "nothing changed: the stages kept")
+            XCTAssertNotNil(shell.taskStations[task.id], "and their stations")
+            task.title = "login form"
+            XCTAssertEqual(builtAt(now + 2), now + 2, "an input changed")
+            XCTAssertEqual(builtAt(now + 86_400), now + 86_400, "the next day, as Merged today ends")
+
+            shell.switchToWorkspace(try index("widgets"))
+            XCTAssertTrue(shell.isProjectBoardShown(board))
+            XCTAssertEqual(builtAt(now + 5), now + 5)
+            XCTAssertEqual(builtAt(now + 6), now + 6, "drawn: built at every pass")
+
+            // What the Board read counts too: the same inputs, once it read another space, build again.
+            let inputs = try XCTUnwrap(board.builtStages?.key.inputs)
+            board.switchProject(to: WorkspaceProfile.defaultID)
+            let again = board.stagesContent(inputs, now: Date(timeIntervalSince1970: now + 7), reusing: true)
+            XCTAssertEqual(again.content.now, now + 7)
+            // Its board.json read lands here, not in a later test.
+            try waitUntil("General's board.json read") { board.loaded != nil }
+        }
+    }
+
     /// The table's messages in place of its rows are the stages' in place of
     /// their sections, Board Settings… offered where the settings can fix
     /// them.

@@ -103,6 +103,13 @@ extension BoardStages {
         case progress
     }
 
+    /// When the day of `now` began in `timeZone`, in seconds since 1970.
+    static func midnight(of now: TimeInterval, timeZone: TimeZone = .current) -> TimeInterval {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.startOfDay(for: Date(timeIntervalSince1970: now)).timeIntervalSince1970
+    }
+
     /// One section's units, in `order`.
     /// - A pull request merged today leaves the list for "Merged today"
     ///   once the queue is through with it, whatever its agent does next:
@@ -124,9 +131,7 @@ extension BoardStages {
         let lines = facts.lines.map { line($0, rules: rules) }
         let tree = Tree(ids: facts.lines.map(\.id), parents: facts.parents)
 
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let midnight = calendar.startOfDay(for: Date(timeIntervalSince1970: now)).timeIntervalSince1970
+        let midnight = Self.midnight(of: now, timeZone: timeZone)
         let today = facts.merged.filter { $0.mergedAt >= midnight }.sorted { $0.mergedAt > $1.mergedAt }
         let mergedToday = Set(today.map(\.number))
         // Merged today, and nothing of its rail is current (which only a
