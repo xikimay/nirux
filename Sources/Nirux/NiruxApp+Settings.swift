@@ -444,17 +444,21 @@ extension NiruxApp {
     /// "80 %".
     static func percent(_ opacity: Double) -> String { "\(Int((opacity * 100).rounded())) %" }
 
+    /// The terminals follow the slider as it moves; the value is saved once
+    /// the drag ends (or at once, from the keyboard or VoiceOver).
     @objc func settingsTerminalOpacityChanged(_ sender: NSSlider) {
         let opacity = TerminalOpacity.clamped(sender.doubleValue / 100)
-        let previous = shell?.terminalOpacity ?? Persistence.load()?.settings?.terminalOpacity ?? 1
-        guard opacity != previous else { return }
         settingsTerminalOpacityLabel?.stringValue = Self.percent(opacity)
-        let putBack = { [weak self] in
-            sender.doubleValue = previous * 100
-            self?.settingsTerminalOpacityLabel?.stringValue = Self.percent(previous)
-        }
-        guard saveSetting(revert: putBack, { $0.terminalOpacity = opacity < 1 ? opacity : nil }) else { return }
         shell?.terminalOpacity = opacity
+        guard NSApp.currentEvent?.type != .leftMouseDragged else { return }
+        let saved = Persistence.load()?.settings?.terminalOpacity ?? 1
+        guard opacity != saved else { return }
+        let putBack = { [weak self] in
+            sender.doubleValue = saved * 100
+            self?.settingsTerminalOpacityLabel?.stringValue = Self.percent(saved)
+            self?.shell?.terminalOpacity = saved
+        }
+        _ = saveSetting(revert: putBack, { $0.terminalOpacity = opacity < 1 ? opacity : nil })
     }
 
     @objc func settingsAnimationsChanged(_ sender: NSButton) {

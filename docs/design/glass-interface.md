@@ -69,7 +69,8 @@ and moves:
   100 % by default, apart from the interface's level. Below 100 % each
   terminal column lies on a frost of its own (behind-window, in place of the
   canvas fill) and Ghostty draws the terminal's background at that opacity
-  over it (`background-opacity`, a per-terminal override applied live), so
+  over it (`background-opacity`, with `background-opacity-cells` so that a
+  TUI's own backgrounds take it too: a per-terminal override applied live), so
   "80 %" is 80 % over the desktop's blur at any interface level, with no
   window tint stacked under it. Text keeps a minimum contrast of 3 unless the
   user's Ghostty config sets one; Ghostty's own `background-opacity` and

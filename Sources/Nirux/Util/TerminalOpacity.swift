@@ -19,10 +19,11 @@ enum TerminalOpacity {
         min(range.upperBound, max(range.lowerBound, (value / step).rounded() * step))
     }
 
-    /// The per-terminal override at `opacity`: none at 100 %.
+    /// The per-terminal override at `opacity`: none at 100 %. Cells a
+    /// program paints its own background in (a TUI's) take the opacity too.
     static func configuration(_ opacity: Double, userSetsContrast: Bool) -> TerminalConfiguration {
         guard opacity < 1 else { return TerminalConfiguration() }
-        let translucent = TerminalConfiguration().backgroundOpacity(opacity)
+        let translucent = TerminalConfiguration().backgroundOpacity(opacity).custom("background-opacity-cells", "true")
         return userSetsContrast ? translucent : translucent.minimumContrast(minimumContrast)
     }
 

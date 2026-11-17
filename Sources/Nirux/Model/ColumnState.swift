@@ -273,12 +273,8 @@ final class ColumnState {
         terminalOpacity = opacity
         terminal.controller?.setTerminalConfiguration(TerminalOpacity.configuration(opacity, userSetsContrast: userSetsContrast))
         if opacity < 1 {
-            let frost = terminalFrost ?? NSVisualEffectView(frame: view.bounds)
-            frost.blendingMode = .behindWindow
-            frost.material = .underWindowBackground
-            frost.state = .followsWindowActiveState
-            frost.autoresizingMask = [.width, .height]
-            frost.frame = view.bounds
+            let frost = terminalFrost ?? NSVisualEffectView()
+            MainWindowContent.makeDesktopFrost(frost, in: view.bounds)
             if frost.superview == nil { view.addSubview(frost, positioned: .below, relativeTo: nil) }
             terminalFrost = frost
             view.layer?.backgroundColor = NSColor.clear.cgColor
@@ -292,7 +288,8 @@ final class ColumnState {
     /// A column's view, opaque under its content in the canvas's colour,
     /// which showed there before the window could be translucent: a
     /// terminal before its first frame, or a page still loading, never
-    /// lets the desktop through.
+    /// lets the desktop through; only a terminal below 100 % does
+    /// (`showTerminalOpacity`).
     private static func filled<View: NSView>(_ view: View) -> View {
         view.wantsLayer = true
         view.layer?.backgroundColor = Theme.Color.canvas.cgColor

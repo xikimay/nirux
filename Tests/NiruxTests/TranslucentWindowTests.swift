@@ -77,11 +77,9 @@ final class TranslucentWindowTests: XCTestCase {
         XCTAssertEqual(TerminalOpacity.clamped(0.82), 0.8, accuracy: 0.0001)
         XCTAssertEqual(TerminalOpacity.clamped(1.4), 1)
         XCTAssertEqual(TerminalOpacity.configuration(1, userSetsContrast: false), TerminalConfiguration())
-        XCTAssertEqual(
-            TerminalOpacity.configuration(0.8, userSetsContrast: false),
-            TerminalConfiguration().backgroundOpacity(0.8).minimumContrast(3)
-        )
-        XCTAssertEqual(TerminalOpacity.configuration(0.8, userSetsContrast: true), TerminalConfiguration().backgroundOpacity(0.8))
+        let translucent = TerminalConfiguration().backgroundOpacity(0.8).custom("background-opacity-cells", "true")
+        XCTAssertEqual(TerminalOpacity.configuration(0.8, userSetsContrast: false), translucent.minimumContrast(3))
+        XCTAssertEqual(TerminalOpacity.configuration(0.8, userSetsContrast: true), translucent, "a TUI's own cells too")
         XCTAssertTrue(TerminalOpacity.setsContrast("font-size = 14\nminimum-contrast = 1.1\n"))
         XCTAssertFalse(TerminalOpacity.setsContrast(TerminalConfigBuilder.render([])))
     }
@@ -100,6 +98,7 @@ final class TranslucentWindowTests: XCTestCase {
         let between = column.view.layer?.backgroundColor?.alpha ?? 0
         XCTAssertEqual(1 - (1 - between) * (1 - 0.8), 0.8, accuracy: 0.001, "composed at the terminal's opacity")
         XCTAssertEqual(column.terminalView?.controller?.terminalConfiguration, TerminalOpacity.configuration(0.8, userSetsContrast: false))
+        XCTAssertNil(column.terminalView?.controller?.lastConfigurationIssue, "libghostty takes every key")
 
         column.showTerminalOpacity(1, userSetsContrast: false)
         XCTAssertNil(column.terminalFrost)
@@ -122,6 +121,8 @@ final class TranslucentWindowTests: XCTestCase {
         shell.terminalOpacity = 0.8
         XCTAssertEqual(first.terminalOpacity, 0.8)
         XCTAssertFalse(window.isOpaque, "at interface Opaque too")
+        let content = try XCTUnwrap(window.contentView as? MainWindowContent)
+        XCTAssertEqual(content.backdropOpacity, 1, "the title bar's strip keeps the canvas")
         shell.addColumn()
         XCTAssertEqual(shell.activeWorkspace?.columns.last?.terminalOpacity, 0.8, "a column opened since")
         shell.sideEffects.drawnTransparency = { _ in .opaque }
@@ -131,7 +132,8 @@ final class TranslucentWindowTests: XCTestCase {
     }
 
     /// Every kind of column is opaque under its content: a terminal before
-    /// its first frame, a page still loading, never show the desktop.
+    /// its first frame, a page still loading, never show the desktop (a
+    /// terminal below 100 % aside).
     func testEveryColumnIsOpaque() {
         _ = NSApplication.shared
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
