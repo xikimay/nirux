@@ -440,16 +440,20 @@ the text stays flat and sharp.
   canvas; from Tinted up, the desktop's frost shows through it. The resize
   handles straddle the air, and the camera brings the focused card in with
   its air.
-- **Corners:** `Theme.Radius.card`, continuous. Each column clips its
-  content to them, as the focused column already did; a translucent
-  terminal's frost takes a mask of the shape, since blending behind the
-  window ignores the clip.
+- **Corners:** `Theme.Radius.column`, 6 pt circular: the largest radius
+  whose clip cuts no cell with the terminals' 2 pt padding. Each column
+  clips its content to them, as the focused column already did; a
+  translucent terminal's frost takes a mask of the shape, since blending
+  behind the window ignores the clip.
+- **Widths:** a width fraction spans the viewport less its edges' air plus
+  one gap, so two halves fill the viewport whatever the number of columns.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
-- **Shadow:** `Theme.Elevation.Level.column`, cast by a view of its own
-  under every column of the strip (`ColumnShadowView`), along a path so
-  that the terminals never get an offscreen pass for it. It falls only on
-  the air, and fades with its column when the column comes or goes.
+- **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within
+  the air, cast by a view of its own under every column of the strip
+  (`ColumnShadowView`) along a path, and cut out under the card
+  (`ShapeShadowLayer`, shared with the floating glass). It shrinks and
+  fades with its column when the column comes or goes.
 - **Next (P1, second PR):** the focused card one level higher, its shadow
   passing from card to card when the focus moves.
 

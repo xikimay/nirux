@@ -134,8 +134,12 @@ enum Theme {
         static let spaceMark: CGFloat = 2
         /// Buttons, fields, rows.
         static let control: CGFloat = 6
-        /// Cards, columns, tiles.
+        /// Cards, tiles.
         static let card: CGFloat = 8
+        /// A column's corners: as round as a terminal's 2 pt padding
+        /// (`TerminalConfigBuilder.padding`) lets them be, circular, without
+        /// the clip cutting into a cell.
+        static let column: CGFloat = 6
         /// Palette, floating panels.
         static let panel: CGFloat = 12
     }
@@ -152,8 +156,9 @@ enum Theme {
 
             /// What floats over the work: the glass interface's floating glass.
             static let floating = Level(opacity: 0.38, radius: 16, drop: 12)
-            /// A column, a card resting on the window.
-            static let column = Level(opacity: 0.32, radius: 7, drop: 3)
+            /// A column, a card resting on the window: short enough to stay
+            /// within the air around it (`WorkspaceState.columnInset`).
+            static let column = Level(opacity: 0.35, radius: 3, drop: 2)
         }
 
         /// Gives `layer` the shadow of `level` along `path`, the shape in

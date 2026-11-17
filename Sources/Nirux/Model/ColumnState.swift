@@ -298,7 +298,7 @@ final class ColumnState {
             MainWindowContent.makeDesktopFrost(frost, in: view.bounds)
             // Blending behind the window ignores the column's rounded
             // clip: the mask holds the corners.
-            frost.maskImage = GlassView.mask(radius: Theme.Radius.card, in: view.bounds.size)
+            frost.maskImage = GlassView.mask(radius: Theme.Radius.column, in: CGSize(width: CGFloat.infinity, height: .infinity))
             view.addSubview(frost, positioned: .below, relativeTo: nil)
             terminalFrost = frost
             view.layer?.backgroundColor = NSColor.clear.cgColor

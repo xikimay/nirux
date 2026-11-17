@@ -65,8 +65,7 @@ final class GlassView: NSView {
     private var tintView: NSView?
     /// Casts the floating shadow, masked to outside the shape so that it
     /// never shows through the translucent glass.
-    private let shadowLayer = CALayer()
-    private let shadowMask = CAShapeLayer()
+    private let shadowLayer = ShapeShadowLayer()
 
     init(
         role: Role, level: InterfaceTransparency, cornerRadius: CGFloat, fillsWindow: Bool = false,
@@ -86,8 +85,6 @@ final class GlassView: NSView {
         contentView.layer?.cornerCurve = .continuous
         contentView.autoresizingMask = [.width, .height]
         addSubview(contentView)
-        shadowMask.fillRule = .evenOdd
-        shadowLayer.mask = shadowMask
         layer?.insertSublayer(shadowLayer, at: 0)
         update()
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -294,16 +291,8 @@ final class GlassView: NSView {
             return
         }
         shadowLayer.isHidden = false
-        shadowLayer.frame = bounds
         let shape = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        Theme.Elevation.apply(.floating, to: shadowLayer, path: shape)
-        // The mask spans the shadow's reach, with the shape cut out.
-        let reach = Theme.Elevation.Level.floating.reach
-        let outside = CGMutablePath()
-        outside.addRect(bounds.insetBy(dx: -reach, dy: -reach))
-        outside.addPath(shape)
-        shadowMask.frame = shadowLayer.bounds
-        shadowMask.path = outside
+        shadowLayer.cast(.floating, along: shape, frame: bounds)
     }
 
     override func layout() {

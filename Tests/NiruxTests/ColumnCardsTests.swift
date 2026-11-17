@@ -26,17 +26,38 @@ final class ColumnCardsTests: XCTestCase {
         let workspace = workspace(columns: 2)
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
 
-        let width = floor(0.5 * (1000 - inset * 2 - gap))
+        let width = floor(0.5 * (1000 - inset * 2 + gap) - gap)
         XCTAssertEqual(workspace.columns.map(\.view.frame), [
             NSRect(x: inset, y: inset, width: width, height: 600 - inset * 2),
             NSRect(x: inset + width + gap, y: inset, width: width, height: 600 - inset * 2)
         ])
         for column in workspace.columns {
             let layer = try XCTUnwrap(column.view.layer)
-            XCTAssertEqual(layer.cornerRadius, Theme.Radius.card)
-            XCTAssertEqual(layer.cornerCurve, .continuous)
+            XCTAssertEqual(layer.cornerRadius, Theme.Radius.column)
             XCTAssertTrue(layer.masksToBounds, "its content clipped to its corners")
         }
+    }
+
+    /// Two halves fill the viewport exactly, however many columns follow:
+    /// the next card starts past its edge.
+    func testTwoHalvesFillTheViewportWhateverTheCount() throws {
+        for count in [2, 3, 6] {
+            let workspace = workspace(columns: count)
+            workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+            let frames = workspace.columns.map(\.view.frame)
+            XCTAssertEqual(frames[1].maxX + inset, 1000, "\(count) columns")
+            if count > 2 { XCTAssertGreaterThanOrEqual(frames[2].minX, 1000, "\(count) columns") }
+        }
+    }
+
+    /// A resize handle's drag moves the column's edge with the pointer.
+    func testAHandlesDragFollowsThePointer() throws {
+        let workspace = workspace(columns: 3)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let handle = try XCTUnwrap(strip(of: workspace).subviews.compactMap { $0 as? ColumnResizeHandle }.first)
+        let before = workspace.columns[0].view.frame.width
+        handle.onDrag?(0.5 + 300 / handle.referenceWidth)
+        XCTAssertEqual(workspace.columns[0].view.frame.width - before, 300, accuracy: 1)
     }
 
     func testFitAllSharesWhatTheAirLeaves() {
@@ -95,9 +116,14 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertNil(closed.shadow?.superview, "its shadow goes with it")
     }
 
+    /// The shadow stays within the air (the strip clips at the viewport's
+    /// edge) and is cut out under its card, which may be translucent or
+    /// fading.
     func testTheShadowFollowsTheCardsShape() throws {
+        XCTAssertLessThanOrEqual(Theme.Elevation.Level.column.reach, inset)
         let shadow = ColumnShadowView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
         XCTAssertEqual(shadow.shadowOpacity, Theme.Elevation.Level.column.opacity)
+        XCTAssertTrue(shadow.cutsOutItsShape)
         XCTAssertEqual(shadow.shadowPath?.boundingBox, NSRect(x: 0, y: 0, width: 300, height: 200))
         shadow.frame.size = NSSize(width: 120, height: 90)
         XCTAssertEqual(shadow.shadowPath?.boundingBox, NSRect(x: 0, y: 0, width: 120, height: 90))
@@ -113,7 +139,7 @@ final class ColumnCardsTests: XCTestCase {
         column.showTerminalOpacity(0.8, onScreen: true)
         let frost = try XCTUnwrap(column.terminalFrost)
         let mask = try XCTUnwrap(frost.maskImage)
-        XCTAssertEqual(mask.capInsets.top, GlassView.maskCorner(radius: Theme.Radius.card, in: column.view.bounds.size))
+        XCTAssertEqual(mask.capInsets.top, GlassView.maskCorner(radius: Theme.Radius.column, in: column.view.bounds.size))
     }
 
     /// The shell draws each card's edge: the focus in the accent, a
@@ -128,6 +154,29 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertEqual(layers.map(\.borderWidth), [1, EdgeGlowView.focusRingWidth])
             XCTAssertEqual(layers[0].borderColor, Theme.Color.line.cgColor)
             XCTAssertEqual(layers[1].borderColor, Theme.Color.accent.withAlphaComponent(0.7).cgColor)
+
+            // Dragging the first column's edge focuses it, without a relayout.
+            let strip = try strip(of: workspace)
+            let handle = try XCTUnwrap(strip.subviews.compactMap { $0 as? ColumnResizeHandle }.first)
+            _ = handle.onDragStart?()
+            handle.onDrag?(0.45)
+            XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
+        }
+    }
+
+    /// A closing card shrinks and fades with its shadow.
+    func testAClosingCardTakesItsShadowAlong() throws {
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn()
+            shell.relayout(animated: false)
+            let closing = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            let shadow = try XCTUnwrap(closing.shadow)
+            shell.closeActiveColumn()
+            XCTAssertTrue(closing.isClosing)
+            let scale = CGAffineTransform(scaleX: 0.92, y: 0.92)
+            XCTAssertEqual(shadow.layer?.affineTransform(), closing.view.layer?.affineTransform())
+            XCTAssertEqual(shadow.layer?.affineTransform(), scale)
         }
     }
 

@@ -680,17 +680,21 @@ extension NiruxShellView {
         // Animated path: a vertical slide over the direct frame change.
         slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
-        // Each card's edge, the focus's in the accent, and the header icon.
-        // The agents' lights lie over the columns, in views of their own
-        // (NiruxShellView+AgentLights).
+        for workspace in workspaces { applyCardEdges(workspace) }
+    }
+
+    /// Each card's edge, the focused column of the workspace on screen in
+    /// the accent, a hairline on the others, and the header icon. The
+    /// agents' lights lie over the columns, in views of their own
+    /// (NiruxShellView+AgentLights).
+    func applyCardEdges(_ workspace: WorkspaceState) {
+        let isOnScreen = workspace === activeWorkspace
         let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
-        for (wsIndex, workspace) in workspaces.enumerated() {
-            for (colIndex, col) in workspace.columns.enumerated() {
-                let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
-                col.setHeaderFocused(isFocus)
-                col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : 1
-                col.view.layer?.borderColor = isFocus ? accent : Theme.Color.line.cgColor
-            }
+        for (index, col) in workspace.columns.enumerated() {
+            let isFocus = isOnScreen && index == workspace.focusedIndex
+            col.setHeaderFocused(isFocus)
+            col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : 1
+            col.view.layer?.borderColor = isFocus ? accent : Theme.Color.line.cgColor
         }
     }
 }

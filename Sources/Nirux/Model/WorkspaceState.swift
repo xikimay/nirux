@@ -982,15 +982,22 @@ extension WorkspaceState {
     static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
 
-    /// The width the columns share in a viewport `viewportWidth` wide.
-    private func sharedWidth(_ viewportWidth: CGFloat) -> CGFloat {
-        viewportWidth - Self.columnInset * 2 - Self.columnGap * CGFloat(max(columns.count - 1, 0))
+    /// What a width fraction of 1 spans, its gap included: the viewport
+    /// less the air at its edges, plus one gap. Two halves then fill the
+    /// viewport exactly, whatever the number of columns.
+    static func span(_ viewportWidth: CGFloat) -> CGFloat {
+        viewportWidth - columnInset * 2 + columnGap
+    }
+
+    /// The width a fraction of the viewport `viewportWidth` gives a column.
+    private static func width(_ fraction: CGFloat, in viewportWidth: CGFloat) -> CGFloat {
+        max(0, floor(fraction * span(viewportWidth) - columnGap))
     }
 
     /// The size `layoutAndScroll` gives `column` (outside fit-all) in a
     /// viewport `viewportWidth` by `height`.
     func size(of column: ColumnState, viewportWidth: CGFloat, height: CGFloat) -> NSSize {
-        NSSize(width: floor(column.widthFraction * sharedWidth(viewportWidth)), height: height - Self.columnInset * 2)
+        NSSize(width: Self.width(column.widthFraction, in: viewportWidth), height: max(0, height - Self.columnInset * 2))
     }
 
     func layoutAndScroll(
@@ -1001,9 +1008,9 @@ extension WorkspaceState {
         guard !columns.isEmpty else { return }
 
         let gap = Self.columnGap, inset = Self.columnInset
-        let innerHeight = height - inset * 2
+        let innerHeight = max(0, height - inset * 2)
         let widths = fitAll
-            ? Array(repeating: floor(sharedWidth(viewportWidth) / CGFloat(columns.count)), count: columns.count)
+            ? Array(repeating: Self.width(1 / CGFloat(columns.count), in: viewportWidth), count: columns.count)
             : columns.map { size(of: $0, viewportWidth: viewportWidth, height: height).width }
         let totalWidth = widths.reduce(0, +) + gap * CGFloat(columns.count - 1) + inset * 2
 
@@ -1024,13 +1031,13 @@ extension WorkspaceState {
             // Its content clipped to its corners; its border (the focus) is
             // the shell's.
             col.view.layer?.masksToBounds = true
-            col.view.layer?.cornerRadius = Theme.Radius.card
-            col.view.layer?.cornerCurve = .continuous
+            col.view.layer?.cornerRadius = Theme.Radius.column
 
             // Resize handle straddling the air at this column's right edge.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
-                handle.referenceWidth = max(viewportWidth, 1)
+                // A drag moves the edge with the pointer.
+                handle.referenceWidth = max(Self.span(viewportWidth), 1)
                 handle.isHidden = fitAll
                 handle.frame = NSRect(
                     x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,

@@ -688,6 +688,7 @@ extension NiruxShellView {
         // its shadow.
         relayout(animated: false)
         newCol.shadow?.alphaValue = 0
+        newCol.shadow?.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
 
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.25
@@ -695,6 +696,7 @@ extension NiruxShellView {
             newCol.view.animator().alphaValue = 1
             newCol.shadow?.animator().alphaValue = 1
             newCol.view.layer?.setAffineTransform(.identity)
+            newCol.shadow?.layer?.setAffineTransform(.identity)
         }
 
         // Animate strip to show the new column
