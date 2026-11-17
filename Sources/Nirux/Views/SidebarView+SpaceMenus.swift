@@ -49,7 +49,7 @@ extension SidebarView {
         item.title = profile.name
         item.state = profile.isActive ? .on : .off
         let isGeneral = profile.id == WorkspaceProfile.defaultID
-        item.image = isGeneral
+        let image = isGeneral
             ? SidebarRenderer.symbol(Theme.Symbol.generalSpace, color: Theme.Color.textSecondary, pointSize: 12)
             : SidebarRenderer.dot(profileColor(hex: profile.colorHex), diameter: 9, isHollow: profile.workspaceCount == 0)
         if #available(macOS 14.4, *) {
@@ -62,18 +62,10 @@ extension SidebarView {
         case .error?: (StateIcon(.error), "An agent stopped or a check failed")
         default: nil
         }
+        // The title stays the name (type-select, matching by name): the
+        // mark goes beside the space's own image.
+        item.image = image.flatMap { image in mark.map { Self.image(image, beside: $0.icon) } } ?? image
         if let mark {
-            // The menu's own font: an attributed title draws in its own.
-            let font = NSFont.menuFont(ofSize: 0)
-            let title = NSMutableAttributedString(string: "\(profile.name)  ", attributes: [.font: font])
-            let icon = NSTextAttachment()
-            icon.image = mark.icon.image(size: Self.menuIconSide)
-            // On the capitals' middle, on whole points.
-            icon.bounds = NSRect(
-                x: 0, y: ((font.capHeight - Self.menuIconSide) / 2).rounded(), width: Self.menuIconSide, height: Self.menuIconSide
-            )
-            title.append(NSAttributedString(attachment: icon))
-            item.attributedTitle = title
             item.toolTip = mark.note
             item.setAccessibilityLabel("\(profile.name), \(mark.note.lowercased())")
         } else {
@@ -89,8 +81,25 @@ extension SidebarView {
         }
     }
 
-    /// A state icon's side in a menu item's title.
+    /// A state icon's side in a menu item's image.
     static let menuIconSide: CGFloat = 12
+
+    /// `image`, then `icon` after a gap, both centred on one line; VoiceOver
+    /// reads the icon.
+    static func image(_ image: NSImage, beside icon: StateIcon) -> NSImage {
+        let side = menuIconSide
+        let gap = Theme.Space.xs
+        let size = NSSize(width: image.size.width + gap + side, height: max(image.size.height, side))
+        let joined = NSImage(size: size, flipped: false) { _ in
+            image.draw(in: NSRect(
+                x: 0, y: ((size.height - image.size.height) / 2).rounded(), width: image.size.width, height: image.size.height
+            ))
+            icon.image(size: side).draw(in: NSRect(x: image.size.width + gap, y: ((size.height - side) / 2).rounded(), width: side, height: side))
+            return true
+        }
+        joined.accessibilityDescription = icon.accessibilityText
+        return joined
+    }
 
     /// ⌥⌘1 to ⌥⌘9: the first nine spaces. ⌘1…⌘9 focus columns.
     static func spaceKeyEquivalent(position: Int) -> String? {

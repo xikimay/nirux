@@ -227,6 +227,16 @@ final class ColumnHeaderViewTests: XCTestCase {
         let question = ColumnHeaderView.Status.agent(info(.needsAttention, reason: .question("Which base?")), wait: nil, now: 0)
         XCTAssertEqual(question?.icon, StateIcon(.needsYou(.question)))
         XCTAssertEqual(fromStatus?.icon, StateIcon(.error))
+        let brokenAtChecks = ColumnHeaderView.Status.agent(info(.needsAttention, reason: apiError), wait: nil, now: 0, station: .checks)
+        XCTAssertEqual(brokenAtChecks?.icon, StateIcon(.error, stage: 3), "its station on every icon, as on its row")
+
+        // The row's path, not the reason alone: a permission pending behind a notification shows the command's glyph.
+        var request = AgentPermissionRequest(toolName: "Bash", summary: "git push", key: "k", agentID: nil, sessionID: "s", requestedAt: 0)
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: "git push")
+        var behindNote = info(.needsAttention, reason: .message("Claude needs your permission"))
+        behindNote.permissionApproval = try XCTUnwrap(SidebarPermissionApproval(request, now: 11))
+        let pending = ColumnHeaderView.Status.agent(behindNote, wait: nil, now: 0)
+        XCTAssertEqual(pending?.icon, StateIcon(.needsYou(.command)))
         XCTAssertNil(ColumnHeaderView.Status.agent(info(.idle, process: "zsh"), wait: nil, now: 0))
     }
 

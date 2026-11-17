@@ -435,7 +435,7 @@ final class WorkspaceSwitchTests: XCTestCase {
         XCTAssertTrue(area.contains(card.frame))
     }
 
-    private func info(_ statuses: [AgentStatus], reason: AgentAttentionReason? = nil, ci: String? = nil) -> WorkspaceInfo {
+    private func info(_ statuses: [AgentStatus], reason: AgentAttentionReason? = nil, ci: String? = nil, id: String = "ws") -> WorkspaceInfo {
         let columns = statuses.enumerated().map { index, status in
             ColumnInfo(
                 index: index, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false,
@@ -444,7 +444,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             )
         }
         return WorkspaceInfo(
-            id: "ws", index: 0, title: "ws", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            id: id, index: 0, title: "ws", profileID: WorkspaceProfile.defaultID, isInactive: false,
             columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
             columns: columns,
             prInfo: ci.map {
@@ -457,16 +457,34 @@ final class WorkspaceSwitchTests: XCTestCase {
         )
     }
 
-    /// The card shows its workspace's row's icon: its state, why it waits,
-    /// its station.
-    func testTheCardShowsTheRowsIcon() {
-        var row = info([.working, .needsAttention], reason: .permission(tool: "Bash", summary: "x"))
-        row.station = .checks
-        let card = WorkspaceNameCard()
-        card.show(
-            .init(workspaceID: "a", name: "checkout", state: row.stateIcon, position: 0, count: 3),
-            centredIn: NSRect(x: 0, y: 0, width: 900, height: 600), animated: false
-        )
-        XCTAssertEqual(card.state, StateIcon(.needsYou(.command), stage: 3))
+    /// A switch shows the row's own icon on the card, whatever the row
+    /// says: a failed check, checks passed, a turn over, a permission (its
+    /// glyph), its station.
+    func testASwitchShowsTheRowsIcon() throws {
+        try withShell { shell, _, _ in
+            let card = shell.workspaceNameCard
+            shell.focusWorkspace(.down)
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let shown = try XCTUnwrap(shell.sidebar.lastInfos.first { $0.id == workspace.id })
+            XCTAssertEqual(card.state, shown.stateIcon, "a real switch")
+            var permission = info([.working, .needsAttention], reason: .permission(tool: "Bash", summary: "x"), id: workspace.id)
+            permission.station = .checks
+            let rows: [(WorkspaceInfo, StateIcon)] = [
+                (info([.idle], ci: "FAILURE", id: workspace.id), StateIcon(.error)),
+                (info([.idle], ci: "SUCCESS", id: workspace.id), StateIcon(.readyToMerge)),
+                (info([.needsAttention], reason: .turnFinished, id: workspace.id), info([.needsAttention], reason: .turnFinished).stateIcon),
+                (permission, StateIcon(.needsYou(.command), stage: 3))
+            ]
+            for (row, icon) in rows {
+                shell.sidebar.lastInfos = [row]
+                shell.announceWorkspaceSwitch()
+                XCTAssertEqual(card.state, icon)
+                XCTAssertEqual(card.state, row.stateIcon, "the row's own path")
+            }
+            XCTAssertNotEqual(rows[2].1.color, Theme.Color.waiting, "a turn over waits on nobody")
+            // On whole points: a ring between two pixels blurs.
+            let icon = try XCTUnwrap(card.subviews.lazy.compactMap { $0 as? StateIconView }.first).frame
+            XCTAssertEqual([icon.minX, icon.minY], [icon.minX.rounded(), icon.minY.rounded()])
+        }
     }
 }

@@ -696,7 +696,7 @@ final class ColumnStatusPill: NSView {
 
     var idealWidth: CGFloat {
         guard status != nil else { return 0 }
-        let markWidth = status?.icon == nil && status?.symbol == nil ? Self.dotSize : Self.symbolSize
+        let markWidth = mark === dot ? Self.dotSize : Self.symbolSize
         return Self.padding * 2 + markWidth + Self.gap - 2 * 2 + ColumnHeaderView.textWidth(label)
     }
 
@@ -753,7 +753,7 @@ final class ColumnStatusPill: NSView {
     /// A working agent's mark breathes with its column's light, while
     /// `animates` allows it.
     private func updateBreathing() {
-        let breathes = animates && status?.tone == .working && status?.symbol == nil
+        let breathes = animates && status?.tone == .working && mark !== symbolView
         for view in [dot, iconView] {
             guard let layer = view.layer else { continue }
             if breathes && view === mark {

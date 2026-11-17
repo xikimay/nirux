@@ -34,23 +34,16 @@ final class SidebarSpacePickerTests: XCTestCase {
         sidebar.onShowSpaceSettings = { settingsOpened.append($0) }
 
         let menu = sidebar.spacePickerMenu()
-        // An attributed title is the title: the state icon is in it. General
-        // can't be deleted.
-        XCTAssertEqual(
-            menu.items.map(\.title), ["General", "client  \u{FFFC}", "perso  \u{FFFC}", "", "New Space…", "Space Settings…"]
-        )
+        // The titles are the names (type-select); a state icon goes beside the space's image. General can't be deleted.
+        XCTAssertEqual(menu.items.map(\.title), ["General", "client", "perso", "", "New Space…", "Space Settings…"])
+        XCTAssertTrue(menu.items.allSatisfy { $0.attributedTitle == nil })
         XCTAssertEqual(menu.items.prefix(3).map(\.state), [.on, .off, .off])
         XCTAssertEqual(menu.items.prefix(3).map { $0.badge?.stringValue }, ["2", "4", "0"])
         XCTAssertEqual(menu.items.prefix(3).map(\.keyEquivalent), ["1", "2", "3"])
         XCTAssertTrue(menu.items.prefix(3).allSatisfy { $0.keyEquivalentModifierMask == [.command, .option] })
-        func mark(_ index: Int) -> String? {
-            guard let title = menu.items[index].attributedTitle else { return nil }
-            let icon = title.attribute(.attachment, at: title.length - 1, effectiveRange: nil) as? NSTextAttachment
-            return icon?.image?.accessibilityDescription
-        }
-        XCTAssertEqual(
-            [mark(0), mark(1), mark(2)], [nil, StateIcon(.needsYou(.question)).accessibilityText, StateIcon(.error).accessibilityText]
-        )
+        func mark(_ index: Int) -> String? { menu.items[index].image?.accessibilityDescription }
+        XCTAssertEqual([mark(1), mark(2)], [StateIcon(.needsYou(.question)).accessibilityText, StateIcon(.error).accessibilityText])
+        XCTAssertLessThan(try XCTUnwrap(menu.items[0].image).size.width, 2 * SidebarView.menuIconSide, "General's symbol alone")
 
         menu.performActionForItem(at: 1)
         XCTAssertEqual(selected, ["client"])
@@ -132,7 +125,7 @@ final class SidebarSpacePickerTests: XCTestCase {
         let menu = SpaceListMenu(title: "Space") { profiles }
         menu.addSpaceItems()
         menu.refresh()
-        XCTAssertEqual(menu.spaceItems.filter { !$0.isHidden }.map(\.title), ["General", "client  \u{FFFC}", "perso  \u{FFFC}"])
+        XCTAssertEqual(menu.spaceItems.filter { !$0.isHidden }.map(\.title), ["General", "client", "perso"])
         XCTAssertEqual(menu.spaceItems.map(\.keyEquivalent), ["1", "2", "3", "", "", "", "", "", ""])
 
         // The items are reused: a mark that went away leaves no title behind.
