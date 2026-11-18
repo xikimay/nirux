@@ -320,6 +320,16 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(column.titleText, "claude (not resumed) · /tmp")
     }
 
+    /// A terminal's folder is in its title's tooltip, not on the bar.
+    func testATerminalsFolderIsInItsTitlesToolTip() throws {
+        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
+        let column = ColumnState(cwd: "/tmp", deferredAgent: launch)
+        column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
+        let header = try XCTUnwrap(column.header)
+        XCTAssertEqual(header.context, "")
+        XCTAssertEqual(header.titleLabel.toolTip, "claude (not resumed) · /tmp")
+    }
+
     /// Every column type's header is on top, and its ⋯ menu ends with the
     /// column's items.
     func testEveryColumnTypePutsItsHeaderOnTop() throws {

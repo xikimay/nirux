@@ -85,13 +85,21 @@ final class ColumnState {
         terminalHeader ?? webViewColumn?.header ?? editorColumn?.header ?? projectBoard?.view.header
             ?? branchReview?.view.header
     }
-    /// What a terminal's header reads ("claude · ~/repo", "claude (not
-    /// resumed) · ~/repo"); empty before its first refresh.
+    /// What a terminal is, and where ("claude · ~/repo", "claude (not
+    /// resumed) · ~/repo"): its header's tooltip, and its title wherever it
+    /// is read (Global Search). Empty before its first refresh.
     var titleText: String {
         guard let terminalHeader else { return "" }
         let title = deferredAgent == nil || terminalHeader.title.isEmpty
             ? terminalHeader.title : "\(terminalHeader.title) (not resumed)"
-        return [title, terminalHeader.context].filter { !$0.isEmpty }.joined(separator: " · ")
+        return [title, location].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The terminal's folder: the agent's launch directory until it
+    /// resumes, then the shell's.
+    private var location: String {
+        let directory = deferredAgent == nil ? pty?.childCwd : launchDirectory
+        return directory?.abbreviatedPath(maxComponents: 2) ?? ""
     }
 
     /// Height reserved for the terminal's header.
@@ -155,24 +163,20 @@ final class ColumnState {
         return menu
     }
 
-    /// Update the header's title and context: [title or process], [path].
-    /// The snapshot is only evaluated for shell titles, which fall back to
-    /// the foreground process name.
+    /// Update the header's title, the title or the process; its folder is
+    /// in the title's tooltip, not on the bar. The snapshot is only
+    /// evaluated for shell titles, which fall back to the foreground
+    /// process name.
     func updateHeaderTitle(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let header = terminalHeader else { return }
         if let deferredAgent {
             header.title = deferredAgent.processName
-            header.context = launchDirectory?.abbreviatedPath(maxComponents: 2) ?? ""
-            return
-        }
-        let name: String
-        if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
-            name = termTitle
+        } else if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
+            header.title = termTitle
         } else {
-            name = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
+            header.title = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
         }
-        header.title = name
-        header.context = pty?.childCwd?.abbreviatedPath(maxComponents: 2) ?? ""
+        header.titleToolTip = titleText.isEmpty ? nil : titleText
     }
 
     /// The terminal header's agent icon and status, from the sidebar's
