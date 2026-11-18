@@ -185,19 +185,14 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(status, 0)
     }
 
-    /// A tell whose agent left before it was all in is untyped again, and a
-    /// Mission its typing reopened is completed again.
-    func testAnInstructionCutShortIsUntypedAgain() throws {
-        let fixture = try makeFixture()
-        complete(fixture)
-        XCTAssertEqual(tell("/next", in: fixture), 3)
-        fixture.center.drain()
-        let pending = try XCTUnwrap(pendingInstructions(fixture, now: 30).first)
-        XCTAssertTrue(fixture.store.markTyped(pending, at: 30))
-        XCTAssertEqual(fixture.store.missions[0].status, .active, "its typing reopened it")
-        XCTAssertTrue(fixture.store.unmarkTyped(pending))
-        XCTAssertEqual(fixture.store.missions[0].status, .completed)
-        XCTAssertEqual(pendingInstructions(fixture, now: 40).count, 1)
+    /// Past the scalars Nirux types whole, the message is refused, and the
+    /// refusal says so.
+    func testAMessageOfManyScalarsSaysWhy() {
+        let family = String(repeating: "👨‍👩‍👧", count: 2_000)
+        XCTAssertTrue(family.count <= MissionEventCLI.maxInstructionLength && family.unicodeScalars.count > MissionEventCLI.maxScalars)
+        XCTAssertTrue(MissionEventCLI.problem(with: family, limit: MissionEventCLI.maxInstructionLength)?.contains("Unicode scalars") == true)
+        XCTAssertEqual(MissionEventCLI.problem(with: "", limit: 10), "message must hold 1 to 10 characters.")
+        XCTAssertNil(MissionEventCLI.problem(with: "Go.", limit: 10))
     }
 
     /// A tell Nirux gave up ends the wait: a rerun would send it again.

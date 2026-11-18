@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import GhosttyTerminal
+import os
 
 enum AgentStatus: Equatable, Hashable, Sendable {
     case idle, working, needsAttention
@@ -667,6 +668,13 @@ final class PtySession: @unchecked Sendable {
         case timedOut
     }
 
+    /// How a paste ended, and how many of its bytes reached the terminal:
+    /// none, nothing of it sits anywhere.
+    struct PasteResult: Equatable, Sendable {
+        let outcome: PasteOutcome
+        let written: Int
+    }
+
     /// Writes `text` to the terminal off the main thread: a long paste
     /// fills the terminal's input queue, which empties only as the agent
     /// reads it, so one write would block the app meanwhile, or stop short
@@ -677,18 +685,25 @@ final class PtySession: @unchecked Sendable {
     /// and what the agent left unread is dropped. It counts as typed.
     /// Cancelled, or timed out, the agent still in front, the paste is
     /// ended (`ESC[201~`) if the terminal takes it, so that Claude isn't
-    /// left in it. `done` comes on the main queue, with when the paste
-    /// counted as typed (`lastInputAt` then: later input is someone's).
+    /// left in it. Meanwhile, a wheel scroll's arrows aren't passed on:
+    /// inside the paste they would be its text. `done` comes on the main
+    /// queue, with when the paste counted as typed (`lastInputAt` then:
+    /// later input is someone's).
     func pasteInBackground(
         _ text: String, keepingInFront process: ProcessInstance?, cancelled: @escaping @Sendable () -> Bool,
-        done: @escaping @MainActor @Sendable (_ outcome: PasteOutcome, _ typedAt: TimeInterval) -> Void
+        done: @escaping @MainActor @Sendable (_ result: PasteResult, _ typedAt: TimeInterval) -> Void
     ) {
         let data = Data(text.utf8)
         // Gone already, it reads as no group: nothing is written.
         let group = process.map { getpgid($0.pid) }
         let fd = hasExited ? nil : state.descriptorForWrite(of: data)
         let typedAt = lastInputAt
-        Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled) { done($0, typedAt) }
+        let pasting = state.pasting
+        pasting.withLock { $0 += 1 }
+        Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled) { result in
+            pasting.withLock { $0 -= 1 }
+            done(result, typedAt)
+        }
     }
 
     /// What one write to the terminal surely takes: about what its input
@@ -705,14 +720,14 @@ final class PtySession: @unchecked Sendable {
     /// the main thread; `done` on the main queue.
     private nonisolated static func writeInBackground(
         _ data: Data, to fd: Int32?, group: pid_t?, cancelled: @escaping @Sendable () -> Bool,
-        done: @escaping @MainActor @Sendable (PasteOutcome) -> Void
+        done: @escaping @MainActor @Sendable (PasteResult) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let outcome = fd.map { fd in
+            let result = fd.map { fd in
                 defer { close(fd) }
                 return writePaste(data, to: fd, group: group, cancelled: cancelled, deadline: Date().addingTimeInterval(pasteTimeout))
-            } ?? .closed
-            DispatchQueue.main.async { done(outcome) }
+            } ?? PasteResult(outcome: .closed, written: 0)
+            DispatchQueue.main.async { done(result) }
         }
     }
 
@@ -722,8 +737,15 @@ final class PtySession: @unchecked Sendable {
     /// process group, until `deadline`, unless `cancelled`.
     nonisolated static func writePaste(
         _ data: Data, to fd: Int32, group: pid_t?, cancelled: @Sendable () -> Bool, deadline: Date
-    ) -> PasteOutcome {
+    ) -> PasteResult {
         var offset = 0
+        let outcome = writePaste(data, to: fd, group: group, cancelled: cancelled, deadline: deadline, offset: &offset)
+        return PasteResult(outcome: outcome, written: offset)
+    }
+
+    private nonisolated static func writePaste(
+        _ data: Data, to fd: Int32, group: pid_t?, cancelled: @Sendable () -> Bool, deadline: Date, offset: inout Int
+    ) -> PasteOutcome {
         func writable(_ wait: Int32) -> Bool? {
             var ready = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
             let count = poll(&ready, 1, wait)
@@ -1005,6 +1027,7 @@ final class PtySession: @unchecked Sendable {
         let st = state
         terminalSession = InMemoryTerminalSession(
             write: { data in
+                guard !st.dropsDuringPaste(data) else { return }
                 st.noteTerminalWrite(data)
                 st.writeToPty(data)
             },
@@ -1243,6 +1266,13 @@ private final class PtyState: @unchecked Sendable {
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
+    /// Background pastes running (`PtySession.pasteInBackground`).
+    let pasting = OSAllocatedUnfairLock(initialState: 0)
+
+    /// A wheel scroll's arrows while a paste runs: they would be its text.
+    func dropsDuringPaste(_ data: Data) -> Bool {
+        AgentStatusMachine.isUpDownArrows(data) && pasting.withLock { $0 > 0 }
+    }
     /// Main thread only: when the screen was last read for a trust
     /// question (see AgentTrustPrompt), and whether a read is on its way.
     var trustPromptReadAt: TimeInterval = 0

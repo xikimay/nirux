@@ -25,15 +25,21 @@ enum TranscriptLastMessage {
         tail(of: path, bytes: tailBytes).flatMap { last(in: $0.data, startsMidLine: $0.startsMidLine) }
     }
 
-    /// The last `bytes` of the file at `path`, and one more, which says
-    /// whether they start a line.
-    static func tail(of path: String, bytes: Int) -> (data: Data, startsMidLine: Bool)? {
+    /// The last `bytes` of the file at `path` past `offset`, and one more,
+    /// which says whether they start a line.
+    static func tail(of path: String, bytes: Int, from offset: UInt64 = 0) -> (data: Data, startsMidLine: Bool)? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
-        let start = size > UInt64(bytes) ? size - UInt64(bytes) - 1 : 0
+        let first = max(offset, size > UInt64(bytes) ? size - UInt64(bytes) : 0)
+        let start = first > 0 ? first - 1 : 0
         guard (try? handle.seek(toOffset: start)) != nil, let data = try? handle.readToEnd() else { return nil }
         return (data, start > 0)
+    }
+
+    /// The size of the file at `path`, 0 when it can't be read.
+    static func size(of path: String) -> UInt64 {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.uint64Value ?? 0
     }
 
     /// `text` with each line that holds a secret replaced (a private key's
@@ -84,8 +90,10 @@ enum TranscriptLastMessage {
     /// Whether the transcript at `path` shows Claude stopping a turn at an
     /// Esc sent at `date`: its "[Request interrupted by user" line, which
     /// Claude stamps once it read the key (milliseconds, this Mac's clock).
-    static func showsInterrupt(path: String, since date: Date) -> Bool {
-        guard let tail = tail(of: path, bytes: 256 * 1024) else { return false }
+    /// Only what was written past `offset` (the file's size at the Esc) is
+    /// read, its last 256 KB at most.
+    static func showsInterrupt(path: String, since date: Date, after offset: UInt64) -> Bool {
+        guard let tail = tail(of: path, bytes: 256 * 1024, from: offset) else { return false }
         // Claude stamps milliseconds, cut.
         let sentAt = Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1_000).rounded(.down) / 1_000)
         return lines(of: tail.data, startsMidLine: tail.startsMidLine).reversed().contains { line in

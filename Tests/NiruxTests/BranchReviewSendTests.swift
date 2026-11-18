@@ -41,7 +41,7 @@ final class BranchReviewSendTests: XCTestCase {
         let text = BranchReview.agentPaste(String(repeating: line, count: 3_000))
         var outcome: PtySession.PasteOutcome?
         let started = Date()
-        pty.pasteInBackground(text, keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value }
+        pty.pasteInBackground(text, keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value.outcome }
         // A paste that waited would take 0.7 s at least (the reader starts
         // a second after the terminal); a busy machine takes some too.
         XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "the app isn't held while the agent doesn't read")
@@ -53,7 +53,7 @@ final class BranchReviewSendTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), Data(text.utf8))
 
         outcome = nil
-        pty.pasteInBackground("again", keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value }
+        pty.pasteInBackground("again", keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value.outcome }
         try await waitUntil("the second paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .pasted)
         try await waitUntil("the second paste's bytes", timeout: 10) { (try? Data(contentsOf: file))?.count == text.utf8.count + 5 }
@@ -64,7 +64,7 @@ final class BranchReviewSendTests: XCTestCase {
     func testPasteIntoATerminalNotRunningSaysSo() async throws {
         let pty = PtySession()
         var outcome: PtySession.PasteOutcome?
-        pty.pasteInBackground("hi", keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value }
+        pty.pasteInBackground("hi", keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value.outcome }
         try await waitUntil("the paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .closed)
         XCTAssertEqual(pty.reviewSendRefusal(snapshot: ProcessSnapshot()), .noAgent)
@@ -105,7 +105,8 @@ final class BranchReviewSendTests: XCTestCase {
             )
             close(writer)
             XCTAssertEqual(drained.wait(timeout: .now() + 10), .success)
-            XCTAssertEqual(outcome, stop == "cancel" ? .cancelled : .timedOut)
+            XCTAssertEqual(outcome.outcome, stop == "cancel" ? .cancelled : .timedOut)
+            XCTAssertGreaterThan(outcome.written, 0, "what went in before it stopped")
             let data = received.withLock { $0 }
             XCTAssertLessThan(data.count, payload.count + 6, stop)
             XCTAssertEqual(String(decoding: data.suffix(6), as: UTF8.self), "\u{1B}[201~", stop)
@@ -131,10 +132,10 @@ final class BranchReviewSendTests: XCTestCase {
         cancelled.withLock { $0 = true }
         let started = Date()
         let outcome = await writing.value
-        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(outcome.outcome, .cancelled)
         XCTAssertLessThan(Date().timeIntervalSince(started), 3)
         let timedOut = PtySession.writePaste(paste, to: fd, group: group, cancelled: { false }, deadline: Date().addingTimeInterval(0.5))
-        XCTAssertEqual(timedOut, .timedOut)
+        XCTAssertEqual(timedOut.outcome, .timedOut)
     }
 
     /// The agent left: what it left unread is dropped, and nothing more
@@ -147,14 +148,20 @@ final class BranchReviewSendTests: XCTestCase {
         let fd = try XCTUnwrap(pty.duplicateDescriptorForTests())
         defer { close(fd) }
         let queued = Data(String(repeating: "a", count: 500).utf8)
-        XCTAssertEqual(PtySession.writePaste(queued, to: fd, group: group, cancelled: { false }, deadline: .distantFuture), .pasted)
-        XCTAssertEqual(PtySession.writePaste(Data("b".utf8), to: fd, group: getpid(), cancelled: { false }, deadline: .distantFuture), .agentLeft)
+        XCTAssertEqual(
+            PtySession.writePaste(queued, to: fd, group: group, cancelled: { false }, deadline: .distantFuture),
+            PtySession.PasteResult(outcome: .pasted, written: queued.count)
+        )
+        XCTAssertEqual(
+            PtySession.writePaste(Data("b".utf8), to: fd, group: getpid(), cancelled: { false }, deadline: .distantFuture),
+            PtySession.PasteResult(outcome: .agentLeft, written: 0), "none of it went in"
+        )
         // The reader reads after a second: nothing.
         try await Task.sleep(for: .milliseconds(1_500))
         XCTAssertEqual((try? Data(contentsOf: file))?.count ?? 0, 0)
 
         var outcome: PtySession.PasteOutcome?
-        pty.pasteInBackground("c", keepingInFront: ProcessInstance(pid: 999_999, startedAt: 0), cancelled: { false }) { value, _ in outcome = value }
+        pty.pasteInBackground("c", keepingInFront: ProcessInstance(pid: 999_999, startedAt: 0), cancelled: { false }) { value, _ in outcome = value.outcome }
         try await waitUntil("the paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .agentLeft)
     }

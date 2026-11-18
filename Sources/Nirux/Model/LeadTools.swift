@@ -319,10 +319,8 @@ enum LeadTools {
         case tell, reply:
             let target = tool == tell ? "task" : "question"
             guard string(arguments, target) != nil else { return "\(target) is missing." }
-            guard let message = string(arguments, "message"), MissionEventCLI.fits(message, limit: messageLimit) else {
-                return "message must hold 1 to \(messageLimit) characters."
-            }
-            return nil
+            guard let message = string(arguments, "message") else { return "message must hold 1 to \(messageLimit) characters." }
+            return MissionEventCLI.problem(with: message, limit: messageLimit)
         case askUser:
             guard string(arguments, "task") != nil else { return "task is missing." }
             return string(arguments, "why") == nil ? "why must say why you can't answer it yourself." : nil

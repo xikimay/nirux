@@ -256,7 +256,9 @@ extension NiruxShellView {
             return false
         }
         guard MissionEventCLI.fits(reply, limit: MissionEventCLI.maxInstructionLength) else {
-            showToast("Answers are limited to \(MissionEventCLI.maxInstructionLength) characters")
+            showToast(reply.count > MissionEventCLI.maxInstructionLength
+                ? "Answers are limited to \(MissionEventCLI.maxInstructionLength) characters"
+                : "Answers hold at most \(MissionEventCLI.maxScalars) Unicode scalars: an emoji or an accent can take several")
             return false
         }
         let store = MissionStore.shared

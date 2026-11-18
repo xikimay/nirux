@@ -117,9 +117,9 @@ extension NiruxShellView {
         pty.pasteInBackground(
             BranchReview.agentPaste(send.message.text), keepingInFront: column.process,
             cancelled: { cancelled.withLock { $0 } }
-        ) { [weak self, weak review, weak panel] outcome, _ in
-            guard outcome == .pasted else {
-                panel?.showError(Self.pasteProblem(outcome))
+        ) { [weak self, weak review, weak panel] result, _ in
+            guard result.outcome == .pasted else {
+                panel?.showError(Self.pasteProblem(result.outcome))
                 return
             }
             review?.notePasted(send)

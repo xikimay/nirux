@@ -564,37 +564,6 @@ final class MissionStore {
         return commit(updated)
     }
 
-    /// Undoes `markTyped` for a message whose agent left before it was all
-    /// in: typed again at the next free prompt, under the same rules.
-    @discardableResult
-    func unmarkTyped(_ delivery: AcceptedEvent) -> Bool {
-        guard let missionIndex = missions.firstIndex(where: { $0.id == delivery.mission.id }),
-              let eventIndex = missions[missionIndex].events.firstIndex(where: { $0.id == delivery.event.id })
-        else { return false }
-        var updated = missions
-        let event = updated[missionIndex].events[eventIndex]
-        switch event.kind {
-        case .instruction:
-            updated[missionIndex].events[eventIndex].childConsumedAt = nil
-            // Its typing reopened a completed Mission (`markInstructionTyped`): no other did since.
-            let events = updated[missionIndex].events
-            if let completed = events.last(where: { $0.kind == .completed }),
-               !events.contains(where: { $0.kind == .instruction && ($0.childConsumedAt ?? 0) > completed.timestamp }) {
-                updated[missionIndex].status = .completed
-            }
-        case .response:
-            updated[missionIndex].events[eventIndex].childConsumedAt = nil
-        case .question, .completed:
-            updated[missionIndex].events[eventIndex].parentTypedAt = nil
-            if event.kind == .completed, event.parentConsumedAt == event.parentTypedAt {
-                updated[missionIndex].events[eventIndex].parentConsumedAt = nil
-            }
-        case .acknowledged:
-            return false
-        }
-        return commit(updated)
-    }
-
     /// The oldest question this child asked that nobody answered yet, in an
     /// active Mission: the child waits for it.
     func waitingQuestion(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
