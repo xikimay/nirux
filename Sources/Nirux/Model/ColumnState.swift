@@ -328,8 +328,9 @@ final class ColumnState {
     }
 
     /// The card's bottom corners on the terminal's own layer, rounded as
-    /// the compositor draws Ghostty's surface. Ghostty swaps the layer for
-    /// its own once the surface comes.
+    /// the compositor draws Ghostty's surface: nothing of it lies in the
+    /// corners its column clips. Ghostty swaps the layer for its own once
+    /// the surface comes.
     private func roundTerminal() {
         guard let layer = terminalView?.layer else { return }
         layer.roundCardCorners(top: false)
