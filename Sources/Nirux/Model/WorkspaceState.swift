@@ -858,14 +858,16 @@ extension WorkspaceState {
         handle.onDragStart = { [weak self, weak handle] in
             guard let self, let handle,
                   let index = self.resizeHandles.firstIndex(of: handle),
-                  self.columns.indices.contains(index) else { return 0.5 }
+                  self.columns.indices.contains(index) else { return nil }
             // Grabbing a column's edge focuses it, as a click would.
             self.onColumnFocusRequested?(index)
-            return self.columns[index].widthFraction
+            return (self.columns[index].view.frame.width, self.stripView.frame.width)
         }
-        handle.onDrag = { [weak self, weak handle] fraction in
-            guard let handle else { return }
-            self?.setColumnWidth(for: handle, fraction: fraction)
+        handle.onDrag = { [weak self, weak handle] start, delta in
+            guard let self, let handle else { return }
+            let viewport = self.containerView.bounds.width
+            let width = Self.draggedWidth(from: start, viewport: viewport, by: delta)
+            self.setColumnWidth(for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1))
         }
         handle.onReset = { [weak self, weak handle] in
             guard let handle else { return }
@@ -873,6 +875,21 @@ extension WorkspaceState {
         }
         stripView.addSubview(handle)
         resizeHandles.append(handle)
+    }
+
+    /// The width a column's edge dragged `delta` points from `start` gives
+    /// it, the edge staying under the pointer: while the strip is narrower
+    /// than the viewport it lies centred, both its ends move, and the
+    /// column grows twice the pointer's way; once wider, as far.
+    static func draggedWidth(from start: ColumnResizeHandle.Start, viewport: CGFloat, by delta: CGFloat) -> CGFloat {
+        let slack = viewport - start.strip
+        // Where the strip comes to fill the viewport.
+        let fills = slack > 0 ? slack / 2 : slack
+        let centred = slack > 0 ? delta <= fills : delta < fills
+        let growth = centred
+            ? (slack > 0 ? delta * 2 : slack + (delta - fills) * 2)
+            : (slack > 0 ? slack + (delta - fills) : delta)
+        return start.width + growth
     }
 
     static let minWidthFraction: CGFloat = 0.15
@@ -1038,8 +1055,6 @@ extension WorkspaceState {
             // Resize handle straddling the air at this column's right edge.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
-                // A drag moves the edge with the pointer.
-                handle.referenceWidth = max(Self.span(viewportWidth), 1)
                 handle.isHidden = fitAll
                 handle.frame = NSRect(
                     x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
@@ -1057,9 +1072,12 @@ extension WorkspaceState {
         for handle in resizeHandles { stripView.addSubview(handle) }
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
-        // 3. Camera (scroll to keep the focused card visible, with its air)
+        // 3. Camera: a strip narrower than the viewport lies in its middle;
+        // a wider one scrolls to keep the focused card in view, with its air.
         let cameraX: CGFloat
-        if fitAll || totalWidth <= viewportWidth {
+        if totalWidth <= viewportWidth {
+            cameraX = -floor((viewportWidth - totalWidth) / 2)
+        } else if fitAll {
             cameraX = 0
         } else {
             let left = widths[..<focusedIndex].reduce(0) { $0 + $1 + gap }

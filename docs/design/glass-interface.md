@@ -448,6 +448,12 @@ the text stays flat and sharp.
   blending behind the window ignores any clip.
 - **Widths:** a width fraction spans the viewport less its edges' air plus
   one gap, so two halves fill the viewport whatever the number of columns.
+- **In the middle** (the user's choice, 2026-11-18): cards that don't fill
+  the viewport lie centred, a first terminal at its own width included,
+  and a new one comes in there, as any new column does (a fade from 92 %).
+  The camera does it, so a second column makes the strip glide aside, as
+  it already slid. Dragging a centred card's edge widens it on both sides,
+  so that the edge stays under the pointer.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within

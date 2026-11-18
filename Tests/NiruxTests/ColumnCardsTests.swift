@@ -90,8 +90,38 @@ final class ColumnCardsTests: XCTestCase {
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         let handle = try XCTUnwrap(strip(of: workspace).subviews.compactMap { $0 as? ColumnResizeHandle }.first)
         let before = workspace.columns[0].view.frame.width
-        handle.onDrag?(0.5 + 300 / handle.referenceWidth)
+        let start = try XCTUnwrap(handle.onDragStart?())
+        handle.onDrag?(start, 300)
         XCTAssertEqual(workspace.columns[0].view.frame.width - before, 300, accuracy: 1)
+    }
+
+    /// Cards that don't fill the viewport lie in its middle, as a first
+    /// terminal at half its width does. Dragging an edge then widens the
+    /// card on both sides, and the edge stays under the pointer.
+    func testCardsThatDontFillTheViewportLieInItsMiddle() throws {
+        let workspace = workspace(columns: 1)
+        let strip = try strip(of: workspace)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let card = try XCTUnwrap(workspace.columns.first).view
+        let left = card.frame.minX + strip.frame.minX
+        XCTAssertEqual(left, 1000 - (card.frame.maxX + strip.frame.minX), accuracy: 1, "as much air on each side")
+        XCTAssertGreaterThan(left, inset)
+
+        let handle = try XCTUnwrap(strip.subviews.compactMap { $0 as? ColumnResizeHandle }.first)
+        let start = try XCTUnwrap(handle.onDragStart?())
+        let edge = card.frame.maxX + strip.frame.minX
+        handle.onDrag?(start, 100)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 100, accuracy: 1, "the edge under the pointer")
+        XCTAssertEqual(card.frame.minX + strip.frame.minX, left - 100, accuracy: 1, "the other edge as far the other way")
+        // Past filling the viewport, the camera keeps the edge in view.
+        handle.onDrag?(start, 600)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX, 1000 - inset, accuracy: 1)
+
+        // Two halves fill it: nothing to centre.
+        workspace.addColumn()
+        for column in workspace.columns { column.widthFraction = 0.5 }
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(strip.frame.minX, 0)
     }
 
     func testFitAllSharesWhatTheAirLeaves() {
@@ -215,11 +245,11 @@ final class ColumnCardsTests: XCTestCase {
             // the edge and the keyboard go together, before any drag.
             let strip = try strip(of: workspace)
             let handle = try XCTUnwrap(strip.subviews.compactMap { $0 as? ColumnResizeHandle }.first)
-            _ = handle.onDragStart?()
+            let start = try XCTUnwrap(handle.onDragStart?())
             XCTAssertEqual(workspace.focusedIndex, 0)
             XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
             XCTAssertTrue(shell.window?.firstResponder === workspace.columns[0].terminalView, "the keyboard")
-            handle.onDrag?(0.45)
+            handle.onDrag?(start, -30)
             XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
         }
     }

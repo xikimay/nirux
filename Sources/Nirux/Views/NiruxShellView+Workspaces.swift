@@ -85,9 +85,11 @@ extension NiruxShellView {
             sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
         }
 
+        // Its first terminal comes in, in the middle of the window.
+        if activate, agentLightsMayMove, let column = workspace.columns.first { arrive(column, in: workspace) }
         if let snapshot, slidesIn, agentLightsMayMove {
             // A task born from the ⌘N sheet (NiruxShellView+TaskBirth).
-            slideInNewWorkspace(workspace, over: snapshot)
+            fadeAwayUnderNewWorkspace(snapshot)
         } else if let snapshot {
             viewport.addSubview(snapshot)
             NSAnimationContext.runAnimationGroup({ ctx in

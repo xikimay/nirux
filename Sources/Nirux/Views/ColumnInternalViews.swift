@@ -330,20 +330,20 @@ final class ShellExitedOverlay: NSView {
 /// Draggable divider at a column's right edge — freeform width resize.
 /// Lives in the workspace strip (columns clip their own subviews to their
 /// bounds), positioned over the inter-column boundary by layoutAndScroll.
-/// Drag deltas become width fractions of the columns viewport.
+/// The owner turns the pointer's way into a width.
 final class ColumnResizeHandle: NSView {
-    /// Drag start → current column fraction (absolute-set semantics, so a
-    /// wobbly mouse can't compound errors).
-    var onDragStart: (() -> CGFloat)?
-    /// Dragging → new absolute fraction (unclamped — the owner clamps).
-    var onDrag: ((CGFloat) -> Void)?
+    /// What a drag starts from: its column's width and the strip's.
+    typealias Start = (width: CGFloat, strip: CGFloat)
+    /// Drag start → where it starts from; nil: no drag.
+    var onDragStart: (() -> Start?)?
+    /// Dragging → its start and the pointer's way since, in points
+    /// (absolute-set semantics, so a wobbly mouse can't compound errors).
+    var onDrag: ((Start, CGFloat) -> Void)?
     /// Double-click → reset to the default width.
     var onReset: (() -> Void)?
 
-    /// Width the drag converts pixels against — the columns viewport width.
-    var referenceWidth: CGFloat = 1
-
     private var dragStartX: CGFloat = 0
+    private var dragStart: Start?
     private let line = NSView()
 
     override init(frame: NSRect) {
@@ -372,13 +372,11 @@ final class ColumnResizeHandle: NSView {
             return
         }
         dragStartX = event.locationInWindow.x
-        dragStartFraction = onDragStart?() ?? 0.5
+        dragStart = onDragStart?()
     }
 
-    private var dragStartFraction: CGFloat = 0.5
-
     override func mouseDragged(with event: NSEvent) {
-        let delta = event.locationInWindow.x - dragStartX
-        onDrag?(dragStartFraction + delta / max(referenceWidth, 1))
+        guard let dragStart else { return }
+        onDrag?(dragStart, event.locationInWindow.x - dragStartX)
     }
 }

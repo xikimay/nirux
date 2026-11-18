@@ -679,25 +679,11 @@ extension NiruxShellView {
         guard let ws = activeWorkspace else { return }
         ws.addColumn()
 
-        // Start new column invisible
+        // Layout at final positions, then the new column comes in.
         let newCol = ws.columns[ws.focusedIndex]
         newCol.isArriving = true
-        newCol.view.alphaValue = 0
-        newCol.view.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
-
-        // Layout at final positions, then animate the new column in; its
-        // shadow comes once it is in.
         relayout(animated: false)
-
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.25
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            newCol.view.animator().alphaValue = 1
-            newCol.view.layer?.setAffineTransform(.identity)
-        }, completionHandler: {
-            newCol.isArriving = false
-            ws.showShadows()
-        })
+        arrive(newCol, in: ws)
 
         // Animate strip to show the new column
         ws.layoutAndScroll(
@@ -708,6 +694,29 @@ extension NiruxShellView {
 
         updateSidebar()
         focusActiveTerminal(in: window)
+    }
+
+    /// A column comes in at its place, from a little smaller about its
+    /// middle and transparent; its shadow comes once it is in.
+    func arrive(_ column: ColumnState, in workspace: WorkspaceState) {
+        column.isArriving = true
+        workspace.showShadows()
+        let size = column.view.frame.size
+        let scale: CGFloat = 0.92
+        column.view.alphaValue = 0
+        // A view's layer turns about its corner: shifted to keep its middle.
+        column.view.layer?.setAffineTransform(CGAffineTransform(
+            translationX: size.width * (1 - scale) / 2, y: size.height * (1 - scale) / 2
+        ).scaledBy(x: scale, y: scale))
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.25
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+            column.view.animator().alphaValue = 1
+            column.view.layer?.setAffineTransform(.identity)
+        }, completionHandler: {
+            column.isArriving = false
+            workspace.showShadows()
+        })
     }
 
     enum HDir { case left, right }

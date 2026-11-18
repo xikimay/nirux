@@ -294,11 +294,11 @@ final class TaskBirthTests: UIFlowTestCase {
         }
     }
 
-    /// A workspace that slides in comes from the right edge in a workspace
-    /// switch's time, over a picture of what was on screen that fades
-    /// away under it: nothing stale stays beside its column. One opened
-    /// in the background slides nothing.
-    func testANewTasksColumnSlidesInOverAPictureThatFadesAway() throws {
+    /// A new task's column comes in, in the middle of the window, over a
+    /// picture of what was on screen that fades away under it in a
+    /// workspace switch's time: nothing stale stays beside its column. One
+    /// opened in the background moves nothing.
+    func testANewTasksColumnComesInAtTheMiddleOverAPictureThatFadesAway() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             self.prepare(shell)
@@ -306,13 +306,10 @@ final class TaskBirthTests: UIFlowTestCase {
             shell.addWorkspace(title: "slides", cwd: harness.repo, slidesIn: true)
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(workspace.title, "slides")
-            let slide = try XCTUnwrap(
-                workspace.containerView.layer?.animation(forKey: NiruxShellView.taskBirthSlideKey) as? CABasicAnimation
-            )
-            XCTAssertEqual((slide.fromValue as? NSNumber)?.doubleValue, Double(shell.viewport.bounds.width), "from the right edge")
-            XCTAssertEqual((slide.toValue as? NSNumber)?.doubleValue, 0)
-            XCTAssertEqual(slide.duration, NiruxShellView.taskBirthSlideDuration)
-            XCTAssertEqual(slide.beginTime, 0, "at once: the terminal is seen as soon as before")
+            let column = try XCTUnwrap(workspace.columns.first)
+            XCTAssertTrue(column.isArriving, "its column comes in")
+            let frame = column.view.convert(column.view.bounds, to: shell.viewport)
+            XCTAssertEqual(frame.midX, shell.viewport.bounds.midX, accuracy: 1, "in the middle")
             XCTAssertEqual(self.pictures(in: shell).count, 1)
             let backdrop = try XCTUnwrap(self.pictures(in: shell).first)
             let strip = try XCTUnwrap(shell.viewport.subviews.firstIndex(of: shell.verticalStrip))
@@ -321,12 +318,12 @@ final class TaskBirthTests: UIFlowTestCase {
             let fade = try XCTUnwrap(backdrop.layer?.animation(forKey: NiruxShellView.taskBirthBackdropKey) as? CABasicAnimation)
             XCTAssertEqual((fade.fromValue as? NSNumber)?.doubleValue, 1, "seen at first")
             XCTAssertEqual((fade.toValue as? NSNumber)?.doubleValue, 0)
-            XCTAssertLessThanOrEqual(fade.duration, slide.duration, "no later than the column lands")
+            XCTAssertEqual(fade.duration, NiruxShellView.taskBirthFadeDuration)
 
             shell.addWorkspace(title: "background", cwd: harness.repo, activate: false, slidesIn: true)
             let background = try XCTUnwrap(shell.workspaces.last)
             XCTAssertEqual(background.title, "background")
-            XCTAssertNil(background.containerView.layer?.animation(forKey: NiruxShellView.taskBirthSlideKey))
+            XCTAssertEqual(background.columns.first?.isArriving, false)
             XCTAssertEqual(self.pictures(in: shell).count, 1, "nor a picture")
 
             harness.waitUntil("the picture to go") { self.pictures(in: shell).isEmpty }
@@ -334,8 +331,8 @@ final class TaskBirthTests: UIFlowTestCase {
     }
 
     /// Start in the sheet, end to end: the sheet closes, its picture
-    /// folds, the row opens and the column slides in.
-    func testStartFoldsTheSheetOpensTheRowAndSlidesTheColumnIn() throws {
+    /// folds, the row opens and the column comes in.
+    func testStartFoldsTheSheetOpensTheRowAndBringsTheColumnIn() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             _ = try NewTaskFlowTests.anchoredSpace(harness)
@@ -355,7 +352,7 @@ final class TaskBirthTests: UIFlowTestCase {
             XCTAssertNotNil(ghost.animation(forKey: "fold"))
             XCTAssertGreaterThan(ghost.frame.width, 200, "the sheet's picture, at its size")
             XCTAssertGreaterThan(ghost.frame.height, 100)
-            XCTAssertNotNil(workspace.containerView.layer?.animation(forKey: NiruxShellView.taskBirthSlideKey))
+            XCTAssertEqual(workspace.columns.first?.isArriving, true)
             XCTAssertEqual(self.pictures(in: shell).count, 1)
 
             harness.waitUntil("the picture and the ghost to go") {
@@ -366,8 +363,8 @@ final class TaskBirthTests: UIFlowTestCase {
 
     /// With Reduce motion (or animations off) each step refuses by
     /// itself, whatever the others would do: no picture of the sheet, no
-    /// fold nor row opening for a picture that would be there, no slide
-    /// for a workspace asked to slide in.
+    /// fold nor row opening for a picture that would be there, no column
+    /// coming in for a workspace asked to slide in.
     func testNothingMovesAtBirthWhileTheInterfaceMayNot() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -396,7 +393,7 @@ final class TaskBirthTests: UIFlowTestCase {
             shell.addWorkspace(title: "as before", cwd: harness.repo, slidesIn: true)
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(added.title, "as before")
-            XCTAssertNil(added.containerView.layer?.animation(forKey: NiruxShellView.taskBirthSlideKey))
+            XCTAssertEqual(added.columns.first?.isArriving, false, "no column coming in")
             let strip = try XCTUnwrap(shell.viewport.subviews.firstIndex(of: shell.verticalStrip))
             XCTAssertEqual(self.pictures(in: shell).count, 1, "the old fade")
             XCTAssertTrue(
