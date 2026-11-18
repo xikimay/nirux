@@ -696,7 +696,7 @@ extension NiruxShellView {
             col.setHeaderFocused(isFocus)
             col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : 1
             col.view.layer?.borderColor = isFocus ? accent : Theme.Color.line.cgColor
-            col.shadow?.show(isFocus ? .focusedColumn : .column, animated: agentLightsMayMove)
+            col.shadow?.show(isFocus && !ZZ("noRelief") ? .focusedColumn : .column, animated: ZZ("alwaysAnimate") ? true : ZZ("neverAnimate") ? false : agentLightsMayMove)
         }
     }
 }

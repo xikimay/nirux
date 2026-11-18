@@ -44,7 +44,7 @@ final class ColumnShadowView: NSView {
         self.level = level
         updateShadow()
         guard animated else {
-            shadowLayer.removeAnimation(forKey: Self.liftKey)
+            if !ZZ("keepLift") { shadowLayer.removeAnimation(forKey: Self.liftKey) }
             return
         }
         let lift = CAAnimationGroup()
