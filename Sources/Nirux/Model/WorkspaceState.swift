@@ -882,6 +882,7 @@ extension WorkspaceState {
     /// than the viewport it lies centred, both its ends move, and the
     /// column grows twice the pointer's way; once wider, as far.
     static func draggedWidth(from start: ColumnResizeHandle.Start, viewport: CGFloat, by delta: CGFloat) -> CGFloat {
+        if ZZ("dragOnce") { return start.width + delta }
         let slack = viewport - start.strip
         // Where the strip comes to fill the viewport.
         let fills = slack > 0 ? slack / 2 : slack
@@ -1076,7 +1077,7 @@ extension WorkspaceState {
         // a wider one scrolls to keep the focused card in view, with its air.
         let cameraX: CGFloat
         if totalWidth <= viewportWidth {
-            cameraX = -floor((viewportWidth - totalWidth) / 2)
+            cameraX = ZZ("noCentre") ? 0 : -floor((viewportWidth - totalWidth) / 2)
         } else if fitAll {
             cameraX = 0
         } else {

@@ -86,7 +86,7 @@ extension NiruxShellView {
         }
 
         // Its first terminal comes in, in the middle of the window.
-        if activate, agentLightsMayMove, let column = workspace.columns.first { arrive(column, in: workspace) }
+        if activate, agentLightsMayMove, !ZZ("noArrival"), let column = workspace.columns.first { arrive(column, in: workspace) }
         if let snapshot, slidesIn, agentLightsMayMove {
             // A task born from the ⌘N sheet (NiruxShellView+TaskBirth).
             fadeAwayUnderNewWorkspace(snapshot)
