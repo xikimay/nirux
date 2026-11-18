@@ -564,13 +564,79 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(task.agent.input.contains("Line 70: read the file and add up the totals."))
             XCTAssertTrue(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": String(repeating: "x", count: 4_001)], lead: lead).isError)
 
+            // A background subagent at work meanwhile: the prompt is still
+            // the message's.
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            _ = task.column.pty?.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .preToolUse, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
+                agentID: "background", timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            harness.waitUntil("the second, then Enter") { task.agent.input.components(separatedBy: "\u{1B}[201~\n").count == 3 }
+
             // A key of the user's while it goes in: Enter would send it too.
             task.hook(.userPromptSubmit)
             task.hook(.stop)
             XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
             task.column.pty?.sendRaw("z")
             harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
-            XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 2, "the second went in without Enter")
+            XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 3, "the third went in without Enter")
+        }
+    }
+
+    /// A long tell whose agent leaves, or whose task closes, before it is
+    /// all in gets no Enter, and waits to be typed again.
+    func testALongTellCutShortWaitsAgain() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            let typed = { (task: String) in
+                MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task }.map { $0.childConsumedAt != nil }
+            }
+            for cut in ["leaves", "closes"] {
+                let task = try reportingTask("Reader \(cut)", lead: lead, harness: harness, readsSlowly: true)
+                defer { task.agent.remove() }
+                let agentUUID = try XCTUnwrap(task.column.agentUUID)
+                task.hook(.userPromptSubmit)
+                task.hook(.stop)
+                XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader \(cut)", "message": message], lead: lead).isError)
+                harness.waitUntil("it goes in") { task.agent.input.contains("Line 1:") }
+                XCTAssertEqual(typed(agentUUID), [true])
+                if cut == "leaves" {
+                    kill(task.claude.pid, SIGKILL)
+                } else {
+                    let index = try XCTUnwrap(harness.shell.workspaces.firstIndex { $0.columns.contains { $0 === task.column } })
+                    harness.shell.closeWorkspace(at: index, refocusing: false)
+                }
+                harness.waitUntil("it waits again (\(cut))", timeout: 60) { typed(agentUUID) == [false] }
+                XCTAssertFalse(task.agent.input.hasSuffix("\n"), "no Enter (\(cut))")
+            }
+        }
+    }
+
+    /// A tell to a task whose Claude Code waits to resume is for the
+    /// conversation it will resume.
+    func testATellToATaskWaitingToResumeIsForItsConversation() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+                branch: harness.worktreeBranch, reportsToLead: true
+            ), enabled: true))
+            harness.shell.addWorkspace(
+                title: "Paused", cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission.id, reportsToLead: true
+            )
+            let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+            task.addColumn(
+                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("resumed"), mode: .default), title: nil, lastStatus: nil),
+                agentUUID: agentUUID, cwd: harness.worktree
+            )
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Paused", "message": "Go on."], lead: lead).isError)
+            let told = MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == agentUUID }
+            XCTAssertEqual(told.map(\.childSessionID), ["resumed"])
         }
     }
 

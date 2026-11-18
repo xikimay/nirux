@@ -957,6 +957,7 @@ struct AgentStatusMachine {
     /// the box stays empty), but it closes a question dialog as the key
     /// does. The prompt whose turn it interrupts.
     mutating func noteInterruptSent(now: TimeInterval) -> TimeInterval? {
+        guard let lastPromptAt else { return nil }
         interruptSentAt = now
         lastCancelKeyAt = now
         return lastPromptAt

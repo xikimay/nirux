@@ -358,10 +358,7 @@ final class MissionStore {
                 && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
-        if event.kind == .instruction {
-            event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime
-            event.childSessionID = incoming.childSessionID
-        }
+        if event.kind == .instruction { event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime }
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
         if event.kind == .completed {
@@ -567,6 +564,29 @@ final class MissionStore {
         return commit(updated)
     }
 
+    /// Undoes `markTyped` for a message whose agent left before it was all
+    /// in: typed again at the next free prompt, under the same rules.
+    @discardableResult
+    func unmarkTyped(_ delivery: AcceptedEvent) -> Bool {
+        guard let missionIndex = missions.firstIndex(where: { $0.id == delivery.mission.id }),
+              let eventIndex = missions[missionIndex].events.firstIndex(where: { $0.id == delivery.event.id })
+        else { return false }
+        var updated = missions
+        let event = updated[missionIndex].events[eventIndex]
+        switch event.kind {
+        case .instruction, .response:
+            updated[missionIndex].events[eventIndex].childConsumedAt = nil
+        case .question, .completed:
+            updated[missionIndex].events[eventIndex].parentTypedAt = nil
+            if event.kind == .completed, event.parentConsumedAt == event.parentTypedAt {
+                updated[missionIndex].events[eventIndex].parentConsumedAt = nil
+            }
+        case .acknowledged:
+            return false
+        }
+        return commit(updated)
+    }
+
     /// The oldest question this child asked that nobody answered yet, in an
     /// active Mission: the child waits for it.
     func waitingQuestion(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
@@ -583,7 +603,6 @@ final class MissionStore {
             .min { $0.event.timestamp < $1.event.timestamp }
     }
 
-    @discardableResult
     /// The instructions not typed nor given up yet, for the sweep that
     /// tells their senders (`NiruxShellView.sweepWaitingInstructions`).
     func untypedInstructions() -> [AcceptedEvent] {
@@ -596,6 +615,7 @@ final class MissionStore {
 
     /// Records the conversation an instruction is for (`MissionEvent.childSessionID`),
     /// unless one is already.
+    @discardableResult
     func noteConversation(_ sessionID: String, ofInstruction eventID: String) -> Bool {
         guard ensureLoaded(),
               let missionIndex = missions.firstIndex(where: { $0.events.contains { $0.id == eventID } }),
@@ -622,6 +642,7 @@ final class MissionStore {
         return commit(updated)
     }
 
+    @discardableResult
     func markDelivered(
         eventID: String, at timestamp: TimeInterval = Date().timeIntervalSince1970
     ) -> Bool {

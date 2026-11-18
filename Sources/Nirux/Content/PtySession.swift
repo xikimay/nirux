@@ -393,7 +393,7 @@ final class PtySession: @unchecked Sendable {
     /// Esc, as the key, but no draft (see `noteInterruptSent`): the prompt
     /// whose turn it interrupts.
     func sendInterrupt() -> TimeInterval? {
-        let promptAt = state.machine.noteInterruptSent(now: Date().timeIntervalSince1970)
+        guard let promptAt = state.machine.noteInterruptSent(now: Date().timeIntervalSince1970) else { return nil }
         state.writeToPty(Data([0x1B]))
         return promptAt
     }
@@ -410,6 +410,9 @@ final class PtySession: @unchecked Sendable {
 
     /// See `AgentStatusMachine.hold`.
     var agentHold: AgentHold? { state.machine.hold }
+
+    /// A dialog that keys would answer is open.
+    var dialogWaitsForKeys: Bool { state.machine.pendingDialogs.contains(where: state.machine.waitsForKeys) }
 
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).

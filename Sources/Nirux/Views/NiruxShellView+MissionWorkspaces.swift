@@ -304,11 +304,20 @@ extension NiruxShellView {
             let toChild = !Self.goesToParent(delivery.event)
             let receiver = MissionPromptText.quoted(childWorkspace?.title ?? mission.branch)
             let byUser = delivery.event.answeredByUser == true
-            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] why in
-                // Its writer hears it; a child's question or result is in its parent's prompt, unsent.
-                guard toChild, let self else { return }
-                if byUser { return self.showToast("Your answer to “\(receiver)” wasn't sent: \(why)") }
-                self.tellProposer(sender, "Your message to “\(receiver)” wasn't sent: \(why). Send it again once its prompt is clear.")
+            let recipientTitle = MissionPromptText.quoted((toChild ? childWorkspace : parentWorkspace)?.title ?? mission.branch)
+            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] why, left in
+                guard let self else { return }
+                if left {
+                    MissionStore.shared.unmarkTyped(delivery)
+                    return
+                }
+                // Only someone at its prompt can send it now.
+                if toChild, !byUser {
+                    self.tellProposer(sender, "Your message to “\(receiver)” is in its prompt but wasn't sent: \(why). "
+                        + "It waits there for someone to press Enter or clear it.")
+                }
+                self.showToast("\(byUser ? "Your answer" : "A Mission message") for “\(recipientTitle)” is in its prompt but wasn't sent: "
+                    + "\(why). Press Enter there to send it.")
             }
             missionWaits.noteTyped(into: recipient, at: now)
             typedAny = true
@@ -318,27 +327,49 @@ extension NiruxShellView {
     }
 
     /// `paste` (a bracketed paste) and Enter into `pty`: in one write when
-    /// the terminal's input queue holds it, else as the agent reads it
-    /// (`PtySession.pasteInBackground`), Enter once it is all in and still
-    /// all the prompt holds, for the agent it went to. Otherwise it stays
-    /// unsent, and `unsent` says why.
+    /// the terminal's input queue holds it with its Enter, else as the agent
+    /// reads it (`PtySession.pasteInBackground`), Enter once it is all in,
+    /// for the agent it went to, with no key since and no dialog. Otherwise
+    /// it stays unsent: `unsent` says why, and whether its agent `left`
+    /// (or its task closed) before it was all in.
     func typeMissionPrompt(
         _ paste: String, into pty: PtySession, keepingInFront process: ProcessInstance?,
-        unsent: @escaping @MainActor @Sendable (String) -> Void
+        unsent: @escaping @MainActor @Sendable (_ why: String, _ left: Bool) -> Void
     ) {
-        guard paste.utf8.count > PtySession.inputQueueBytes else { return pty.sendRaw(paste + "\r") }
-        pty.pasteInBackground(paste, keepingInFront: process, cancelled: { false }) { outcome, typedAt in
-            guard outcome == .pasted else {
-                MissionWaitLog.logger.notice("A long Mission message wasn't typed whole: \(String(describing: outcome), privacy: .public)")
-                return unsent(outcome == .timedOut ? "its agent stopped reading it, so its start may sit in its prompt" : "its agent left")
+        guard paste.utf8.count + 1 > PtySession.inputQueueBytes else { return pty.sendRaw(paste + "\r") }
+        pty.pasteInBackground(paste, keepingInFront: process, cancelled: { false }) { [weak self] outcome, typedAt in
+            switch outcome {
+            case .pasted:
+                // After the keys ghostty routed meanwhile, noted the same way.
+                DispatchQueue.main.async { self?.pressEnter(after: typedAt, into: pty, for: process, unsent: unsent) }
+            case .timedOut:
+                unsent("its agent stopped reading it, so its start may sit in its prompt", false)
+            case .closed, .agentLeft, .cancelled:
+                unsent("its agent left before it was all in", true)
             }
-            let snapshot = ProcessSnapshot()
-            // The paste's own keys are its draft: anything since is someone's.
-            guard pty.lastInputAt == typedAt, pty.lastDraftInputAt == typedAt, pty.foregroundProcess(snapshot: snapshot)?.instance == process,
-                  pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: snapshot) == .draft
-            else { return unsent("it is in its prompt, but someone typed meanwhile or a dialog opened, so Nirux didn't press Enter") }
-            pty.sendRaw("\r")
         }
+    }
+
+    /// Enter after a long paste typed at `typedAt`, if nothing since makes
+    /// it someone else's prompt. An empty process snapshot is read again.
+    private func pressEnter(
+        after typedAt: TimeInterval, into pty: PtySession, for process: ProcessInstance?, tries: Int = 3,
+        unsent: @escaping @MainActor @Sendable (_ why: String, _ left: Bool) -> Void
+    ) {
+        guard workspaces.contains(where: { !$0.isClosing && $0.columns.contains { $0.pty === pty } }) else {
+            return unsent("its task closed", true)
+        }
+        let snapshot = ProcessSnapshot()
+        if snapshot.isEmpty, tries > 1 {
+            return DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.pressEnter(after: typedAt, into: pty, for: process, tries: tries - 1, unsent: unsent)
+            }
+        }
+        // The paste's own keys are its draft: anything since is someone's.
+        guard pty.lastInputAt == typedAt, pty.lastDraftInputAt == typedAt, !pty.dialogWaitsForKeys,
+              pty.foregroundProcess(snapshot: snapshot)?.instance == process
+        else { return unsent("someone typed meanwhile or a dialog opened, so Nirux didn't press Enter", false) }
+        pty.sendRaw("\r")
     }
 
     /// The column a Mission message is typed into: the parent's for a
@@ -371,9 +402,10 @@ extension NiruxShellView {
     }
 
     /// The conversation `column`'s `claude` confirmed through its own
-    /// hooks, while it runs.
+    /// hooks, while it runs; the one it will resume, while it waits to.
     func conversation(of column: ColumnState, snapshot: ProcessSnapshot) -> String? {
-        column.confirmedClaudeSessionID(foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot))
+        if case .claude(resume: .session(let resumes)?, _)? = column.deferredAgent?.agent { return resumes }
+        return column.confirmedClaudeSessionID(foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot))
     }
 
     /// Types each Lead notice whose Lead's prompt is free; the others wait
@@ -392,8 +424,11 @@ extension NiruxShellView {
                   let paste = TypedPromptSanitizer.bracketedPaste(for: notice.text)
             else { return true }
             // A user's answer it carries may be long.
-            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { why in
-                MissionWaitLog.logger.notice("A Lead notice wasn't sent: \(why, privacy: .public)")
+            typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] why, left in
+                guard let self else { return }
+                if left { return self.pendingLeadNotices.append(notice) }
+                self.showToast("A message for “\(MissionPromptText.quoted(workspace.title))” is in its prompt but wasn't sent: "
+                    + "\(why). Press Enter there to send it.")
             }
             missionWaits.noteTyped(into: column, at: now)
             return false

@@ -121,24 +121,28 @@ extension NiruxShellView {
     func sweepWaitingInstructions(now: TimeInterval, snapshot: ProcessSnapshot, store: MissionStore = .shared) {
         var held: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
         var givenUp: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
+        // Read once, and only for a notice that names what holds a message.
+        lazy var handoffsEnabled = missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled()
         for delivery in store.untypedInstructions() {
             let (mission, event) = (delivery.mission, delivery.event)
             let child = missionEnd(mission, parent: false)
             let sent = ProjectBoard.clockTime(Date(timeIntervalSince1970: event.timestamp), now: Date(timeIntervalSince1970: now))
             let yours = "Your message to “\(MissionPromptText.quoted(child?.workspace.title ?? mission.branch))” (sent \(sent))"
-            guard let child, !child.workspace.isClosing, let column = child.column else {
+            guard let child, !child.workspace.isClosing else {
                 givenUp.append((delivery, "\(yours) was never typed: its task closed first."))
+                continue
+            }
+            guard let column = child.column else {
+                givenUp.append((delivery, "\(yours) was never typed: its agent's terminal closed first."))
                 continue
             }
             let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
             let refusal = column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot) ?? .noClaude
-            let holder = mission.childAgentKind != NiruxApp.WorkspaceAgent.claude.rawValue
-                ? "its agent hasn't collected it"
-                : !mission.isCarried(handoffsEnabled: missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled())
-                ? "Mission handoffs are off"
-                : SidebarWaitingMessages.why(
-                    refusal, untypable: missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries
-                ).short
+            let holder = {
+                mission.childAgentKind != NiruxApp.WorkspaceAgent.claude.rawValue ? "its agent hasn't collected it"
+                    : !mission.isCarried(handoffsEnabled: handoffsEnabled) ? "Mission handoffs are off"
+                    : SidebarWaitingMessages.why(refusal, untypable: self.missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries).short
+            }
             // Restarted on another conversation: one not confirmed yet may
             // still resume this one.
             let other = event.childSessionID == nil || conversation(of: column, snapshot: snapshot) != nil
@@ -147,10 +151,12 @@ extension NiruxShellView {
                     + (event.childSessionID == nil ? "since" : "on another conversation")
                     + ", and Nirux types a message only into the conversation it was sent to. Send it again if it still applies."))
             } else if now >= event.instructionDeadline {
-                givenUp.append((delivery, "\(yours) was never typed: its prompt wasn't free for a day (\(holder)). "
+                // One an older build recorded had an hour.
+                let span = event.typableUntil == nil ? "an hour" : "a day"
+                givenUp.append((delivery, "\(yours) was never typed: its prompt wasn't free for \(span) (\(holder())). "
                     + "Send it again if it still applies."))
             } else if event.heldNoticeAt == nil, now - event.timestamp >= MissionEventCLI.instructionHeldNotice {
-                held.append((delivery, "\(yours) isn't typed yet: \(holder). Nirux keeps it for its next free prompt, "
+                held.append((delivery, "\(yours) isn't typed yet: \(holder()). Nirux keeps it for its next free prompt, "
                     + "a day at most."))
             }
         }

@@ -712,14 +712,19 @@ extension MissionEventCLI {
             guard append(instruction, to: eventsURL) else { return 1 }
         }
 
+        // True once typed, false once Nirux gave it up.
         let typed = waitForLedger(&ledger, timeout: timeout, pollInterval: pollInterval) { missions in
-            missions.lazy.flatMap(\.events).contains(where: {
-                $0.id == instructionID && $0.childConsumedAt != nil
-            }) ? true : nil
+            missions.lazy.flatMap(\.events).first { $0.id == instructionID }.flatMap { event in
+                event.childConsumedAt != nil ? true : event.expiredAt != nil ? false : nil
+            }
         }
-        guard typed == nil else {
+        if typed == true {
             writeStandardOutput("Nirux typed the message into the child's prompt.")
             return 0
+        }
+        if typed == false {
+            writeStandardError("Nirux gave the message up; a [Nirux Mission] line in your prompt says why. Do not run this command again.")
+            return 4
         }
         writeStandardError(
             "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "

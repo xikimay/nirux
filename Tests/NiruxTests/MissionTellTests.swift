@@ -185,6 +185,28 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(status, 0)
     }
 
+    /// A tell Nirux gave up ends the wait: a rerun would send it again.
+    func testTellStopsOnceNiruxGaveItUp() async throws {
+        let fixture = try makeFixture()
+        let environment = parentEnvironment()
+        let eventsURL = fixture.eventsURL
+        let missionsURL = fixture.missionsURL
+        let waiting = Task.detached {
+            MissionEventCLI.tell(
+                arguments: ["--branch", "feat/mission", "--message", "/premortem", "--timeout", "10"],
+                environment: environment, eventsURL: eventsURL, missionsURL: missionsURL, pollInterval: 0.01
+            )
+        }
+        try await waitUntil("the tell recorded", timeout: 5) {
+            fixture.center.drain()
+            return !pendingInstructions(fixture).isEmpty
+        }
+        let pending = try XCTUnwrap(pendingInstructions(fixture).first)
+        XCTAssertTrue(fixture.store.noteInstructions(heldNotice: [], expired: [pending.event.id], at: Date().timeIntervalSince1970))
+        let status = await waiting.value
+        XCTAssertEqual(status, 4)
+    }
+
     func testTellStopsForAnotherParentBranchOrAgent() throws {
         let fixture = try makeFixture()
         XCTAssertEqual(tell("/code-review", branch: "feat/other", in: fixture), 4)

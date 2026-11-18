@@ -99,11 +99,17 @@ Review's send).
 - `tell` and `reply` (the Lead's and a task's tools, the CLI, the user's
   answer popover) hold 4,000 characters; questions and results stay at 500
   (folded onto one line, repeated by `list_tasks`).
-- A message past `PtySession.inputQueueBytes` is typed with
+- A message past `PtySession.inputQueueBytes` with its Enter is typed with
   `pasteInBackground` (off the main thread, as the agent reads it, 30 s at
-  most), Enter once it is all in, still all the prompt holds (no input
-  since, no dialog, the same agent in front). Otherwise it stays unsent and
-  its sender hears it in a `[Nirux Mission]` line.
+  most), Enter once it is all in, still all the prompt holds: no key since,
+  no dialog keys would answer, the same agent in front, its task open. A
+  background subagent at work doesn't stop it (the main prompt is free).
+  - Its agent left, or its task closed, before it was all in: it is marked
+    untyped again and waits for the next free prompt, under the same rules.
+  - Left in the prompt unsent (someone typed, a dialog opened, the agent
+    stopped reading): the user gets a toast to press Enter there, and a
+    task's sender a `[Nirux Mission]` line. Sending it again would only
+    add a copy after the draft.
 - Limits count characters, and scalars too: what Nirux types stops at
   `TypedPromptSanitizer.maxCharacters` scalars.
 - A file the message points to was rejected: one in the task's worktree shows
