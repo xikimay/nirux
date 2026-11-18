@@ -39,28 +39,40 @@ enum TerminalConfigBuilder {
         "cursor-style = block",
         "cursor-style-blink = true",
         "font-size = 13",
+        "font-thicken = false",
         // Selecting copies to the clipboard, as with libghostty-spm 1.3.1
         // (Ghostty's former macOS default); Ghostty 1.4's default is none.
         "copy-on-select = clipboard"
     ]
-    /// Nirux's own colours, on the window's neutrals: the background is
-    /// `Theme.Color.base`, the text a step below `Theme.Color.textPrimary`,
-    /// the selection the accent's tint, and the sixteen colours the states'
-    /// hues, calmer. Yellow leans to lemon, away from the amber that says an
-    /// agent waits; black is a raised surface, so that a bar painted with it
-    /// shows.
-    static let niruxColors = [
-        "background = \(hex(Theme.Color.base))",
-        "foreground = D6D6DE",
-        "cursor-color = D6D6DE",
-        "selection-background = 2E3A57"
-    ] + ["2E2E3A", "E5646A", "5FBF8E", "D3C46E", hex(Theme.Color.accent), "B79CFA", "6FC3DF", "C8C8D2",
-         "747485", "F0787D", "74D6A1", "E3D68F", "93B6F9", "C8B1FB", "8AD3EA", hex(Theme.Color.textPrimary)]
-        .enumerated().map { "palette = \($0.offset)=#\($0.element)" }
+    /// Nirux's own colours, from the window's: the background is the base,
+    /// black a raised surface (a bar painted with it shows), the selection
+    /// the accent's tint, red, green, blue and magenta the states' and the
+    /// accent's, a little brighter for their bright twins. Those Theme has no
+    /// word for are written here: the text a step below the primary one, so
+    /// that bright white stands out; dim text a step above the tertiary, at
+    /// 3:1 where Ghostty enforces a minimum contrast; yellow leaning to
+    /// lemon, away from the amber that says an agent waits; cyan.
+    static let niruxColors: [String] = {
+        let color = Theme.Color.self
+        let bright = { (base: NSColor) in hex(color.tint(.white, 0.15, over: base)) }
+        let palette = [
+            hex(color.raised), hex(color.error), hex(color.working), "D3C46E",
+            hex(color.accent), hex(color.done), "6FC3DF", "C8C8D2",
+            "747485", bright(color.error), bright(color.working), "E3D68F",
+            bright(color.accent), bright(color.done), "8AD3EA", hex(color.textPrimary)
+        ]
+        return [
+            "background = \(hex(color.base))",
+            "foreground = D6D6DE",
+            "cursor-color = D6D6DE",
+            "selection-background = \(hex(color.tint(color.accent, 0.22, over: color.base)))"
+        ] + palette.enumerated().map { "palette = \($0.offset)=#\($0.element)" }
+    }()
 
-    /// `color` as Ghostty reads it: six hex digits, in sRGB.
+    /// `color` as Ghostty reads it: six hex digits, in sRGB. A colour with
+    /// no RGB reading (a pattern) gives black rather than raising.
     static func hex(_ color: NSColor) -> String {
-        let rgb = color.usingColorSpace(.sRGB) ?? color
+        guard let rgb = color.usingColorSpace(.sRGB) else { return "000000" }
         let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent].map { Int(($0 * 255).rounded()) }
         return channels.map { String(format: "%02X", $0) }.joined()
     }

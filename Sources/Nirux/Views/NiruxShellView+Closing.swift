@@ -8,9 +8,10 @@ import AppKit
 extension NiruxShellView {
     /// A column that was closing stays after all (its sibling went first):
     /// it isn't left invisible, nor without its light.
-    private func abortColumnClose(_ column: ColumnState) {
+    private func abortColumnClose(_ column: ColumnState, in workspace: WorkspaceState) {
         column.isClosing = false
         column.view.alphaValue = 1
+        workspace.showShadows()
         applyAgentLights()
     }
 
@@ -26,6 +27,7 @@ extension NiruxShellView {
         // Its light leaves with it.
         applyAgentLights()
         let closingView = closingColumn.view
+        workspace.showShadows()
 
         // Animate out, then remove
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -46,7 +48,7 @@ extension NiruxShellView {
         guard workspace.columns.count > 1,
               let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })
         else {
-            abortColumnClose(closingColumn)
+            abortColumnClose(closingColumn, in: workspace)
             return
         }
         // Still focused: the user lands on its neighbour. An agent's open

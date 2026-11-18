@@ -23,6 +23,10 @@ final class TerminalConfigBuilderTests: XCTestCase {
         )
     }
 
+    private var selection: String {
+        Builder.niruxColors.first { $0.hasPrefix("selection-background = ") } ?? "none"
+    }
+
     private func renderedLines(_ user: [Builder.UserLine]) -> [String] {
         Builder.render(user).split(separator: "\n").map(String.init)
     }
@@ -30,24 +34,43 @@ final class TerminalConfigBuilderTests: XCTestCase {
     // MARK: - Defaults
 
     func testWithoutUserConfigNiruxDrawsWithItsOwnLook() {
-        // 13 pt in plain strokes, Nirux's colours, then what is enforced.
+        // 13 pt in plain strokes, written out; Nirux's colours; then what is
+        // enforced.
         let lines = renderedLines([])
-        XCTAssertEqual(Array(lines.prefix(4)), [
-            "cursor-style = block", "cursor-style-blink = true", "font-size = 13", "copy-on-select = clipboard"
+        XCTAssertEqual(Array(lines.prefix(5)), [
+            "cursor-style = block", "cursor-style-blink = true", "font-size = 13", "font-thicken = false",
+            "copy-on-select = clipboard"
         ])
-        XCTAssertFalse(lines.contains { $0.hasPrefix("font-thicken") }, "plain strokes")
-        XCTAssertEqual(Array(lines.dropFirst(4).dropLast(Builder.enforced.count)), Builder.niruxColors)
+        XCTAssertEqual(Array(lines.dropFirst(5).dropLast(Builder.enforced.count)), Builder.niruxColors)
         XCTAssertEqual(Array(lines.suffix(Builder.enforced.count)), Builder.enforced)
         XCTAssertEqual(lines.last, "term = xterm-256color")
     }
 
     /// The terminal lies in its column as the window's own surfaces do,
-    /// in the window's blue and white.
+    /// in the window's colours.
     func testNiruxsColorsComeFromTheTheme() {
-        XCTAssertTrue(Builder.niruxColors.contains("background = 1B1B23"), "Theme.Color.base")
-        XCTAssertTrue(Builder.niruxColors.contains("palette = 4=#78A3F7"), "Theme.Color.accent")
-        XCTAssertTrue(Builder.niruxColors.contains("palette = 15=#ECECF1"), "Theme.Color.textPrimary")
+        let color = Theme.Color.self
+        let expected = [
+            "background = \(Builder.hex(color.base))",
+            "selection-background = \(Builder.hex(color.tint(color.accent, 0.22, over: color.base)))",
+            "palette = 0=#\(Builder.hex(color.raised))", "palette = 1=#\(Builder.hex(color.error))",
+            "palette = 2=#\(Builder.hex(color.working))", "palette = 4=#\(Builder.hex(color.accent))",
+            "palette = 5=#\(Builder.hex(color.done))", "palette = 15=#\(Builder.hex(color.textPrimary))"
+        ]
+        for line in expected { XCTAssertTrue(Builder.niruxColors.contains(line), line) }
         XCTAssertEqual(Builder.niruxColors.filter { $0.hasPrefix("palette = ") }.count, 16)
+    }
+
+    /// A colour with no RGB reading gives black rather than raising.
+    func testHexOfAColorWithoutRGBIsBlack() {
+        XCTAssertEqual(Builder.hex(NSColor(patternImage: NSImage(size: NSSize(width: 1, height: 1)))), "000000")
+        XCTAssertEqual(Builder.hex(Theme.Color.accent), "78A3F7")
+    }
+
+    /// No Theme colour the builder writes falls back to black: each has an
+    /// sRGB reading.
+    func testEveryColourTheBuilderWritesReadsInSRGB() {
+        XCTAssertFalse(Builder.niruxColors.contains { $0.hasSuffix("000000") }, Builder.niruxColors.joined(separator: "\n"))
     }
 
     /// Yellow keeps away from the amber that says an agent waits.
@@ -88,7 +111,7 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertGreaterThan(lines.lastIndex(of: "font-size = 16") ?? 0, lines.firstIndex(of: "font-size = 13") ?? .max)
         XCTAssertGreaterThan(
             lines.firstIndex(of: "background = #101010") ?? 0,
-            lines.firstIndex(of: "background = 1B1B23") ?? .max
+            lines.firstIndex(of: "background = \(Builder.hex(Theme.Color.base))") ?? .max
         )
         XCTAssertFalse(lines.contains("term = dumb"))
         XCTAssertEqual(lines.last, "term = xterm-256color")
@@ -97,12 +120,12 @@ final class TerminalConfigBuilderTests: XCTestCase {
     func testOwnBackgroundDropsNiruxsCursorAndSelection() {
         let lines = renderedLines(userLines("background = #2e3440").lines)
         XCTAssertFalse(lines.contains { $0.hasPrefix("cursor-color") || $0.hasPrefix("selection-background") })
-        XCTAssertTrue(lines.contains("palette = 1=#E5646A"), "Nirux's palette stays")
-        XCTAssertTrue(lines.contains("foreground = D6D6DE"))
+        XCTAssertTrue(lines.contains("palette = 1=#\(Builder.hex(Theme.Color.error))"), "Nirux's palette stays")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("foreground = ") })
 
         let foregroundOnly = renderedLines(userLines("foreground = #eceff4").lines)
         XCTAssertFalse(foregroundOnly.contains { $0.hasPrefix("selection-background") })
-        XCTAssertTrue(renderedLines(userLines("font-size = 15").lines).contains("selection-background = 2E3A57"))
+        XCTAssertTrue(renderedLines(userLines("font-size = 15").lines).contains(selection))
     }
 
     // MARK: - Themes
@@ -124,7 +147,7 @@ final class TerminalConfigBuilderTests: XCTestCase {
         let result = userLines("theme = Nope\nfont-size = 15")
         XCTAssertEqual(result.lines.map(\.entry.key), ["font-size"])
         XCTAssertEqual(result.unresolvedTheme?.value, "Nope")
-        XCTAssertTrue(renderedLines(result.lines).contains("background = 1B1B23"))
+        XCTAssertTrue(renderedLines(result.lines).contains("background = \(Builder.hex(Theme.Color.base))"))
     }
 
     func testDarkVariantOfAPairIsUsed() {
@@ -247,14 +270,14 @@ final class TerminalConfigBuilderTests: XCTestCase {
         let result = Builder.sanitize(user, diagnostics: fakeDiagnostics { $0.contains("abc") || $0.contains("#zz") })
         XCTAssertEqual(result.dropped.map(\.text), ["palette = 1=#zz", "font-size = abc"])
         XCTAssertTrue(result.contents.contains("background = #000000\n"))
-        XCTAssertFalse(result.contents.contains("background = 1B1B23"))
+        XCTAssertFalse(result.contents.contains("background = \(Builder.hex(Theme.Color.base))"))
     }
 
     func testSanitizeRestoresNiruxColorsWhenEveryThemeLineIsRejected() {
         let user = userLines("theme = T\nfont-size = 15", themes: ["T": "palette = 1=#zz"]).lines
         let result = Builder.sanitize(user, diagnostics: fakeDiagnostics { $0.contains("#zz") })
         XCTAssertEqual(result.dropped.map(\.isTheme), [true])
-        XCTAssertTrue(result.contents.contains("background = 1B1B23"))
+        XCTAssertTrue(result.contents.contains("background = \(Builder.hex(Theme.Color.base))"))
         XCTAssertTrue(result.contents.contains("font-size = 15"))
     }
 
@@ -265,7 +288,7 @@ final class TerminalConfigBuilderTests: XCTestCase {
         let result = Builder.sanitize(user, diagnostics: fakeDiagnostics { $0.contains("#zz") || $0.contains("abc") })
         XCTAssertEqual(result.dropped.map(\.entry.lineNumber), [1, 2])
         XCTAssertEqual(result.contents, Builder.render([user[2]]))
-        XCTAssertTrue(result.contents.contains("selection-background = 2E3A57"))
+        XCTAssertTrue(result.contents.contains(selection))
     }
 
     func testSanitizeFallsBackToDefaultsOnUnlocatedErrors() {

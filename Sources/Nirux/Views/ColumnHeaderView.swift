@@ -275,6 +275,9 @@ final class ColumnHeaderView: NSView {
 
     override func layout() {
         super.layout()
+        // The top of its card: nothing of it lies in the corners its column
+        // clips.
+        layer?.roundCardCorners(top: true)
         bottomLine.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 1)
         iconView.frame = NSRect(
             x: Self.leadingInset - (Self.iconFrame - Self.iconSize) / 2,

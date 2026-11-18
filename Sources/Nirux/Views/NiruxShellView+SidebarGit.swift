@@ -401,7 +401,8 @@ extension NiruxShellView {
         overlay.identifier = Self.flashOverlayID
         overlay.autoresizingMask = [.width, .height]
         overlay.wantsLayer = true
-        overlay.layer?.cornerRadius = 6
+        // The column's own corners, so that its clip leaves the ring whole.
+        overlay.layer?.cornerRadius = Theme.Radius.column
         overlay.layer?.borderWidth = 3
         overlay.layer?.borderColor = Theme.Color.accent.cgColor
         overlay.layer?.opacity = 0
@@ -544,8 +545,14 @@ extension NiruxShellView {
             self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
         }
-        workspace.onColumnsLaidOut = { [weak self, weak workspace] in
+        workspace.onColumnFocusRequested = { [weak self, weak workspace] index in
             guard let self, workspace === self.activeWorkspace else { return }
+            self.focusColumnByIndex(index)
+        }
+        workspace.onColumnsLaidOut = { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            self.applyCardEdges(workspace)
+            guard workspace === self.activeWorkspace else { return }
             self.refreshSidebarNavigation()
         }
         workspace.onGitContextChanged = { [weak self, weak workspace] in

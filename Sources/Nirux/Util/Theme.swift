@@ -134,31 +134,56 @@ enum Theme {
         static let spaceMark: CGFloat = 2
         /// Buttons, fields, rows.
         static let control: CGFloat = 6
-        /// Cards, columns, tiles.
+        /// Cards, tiles.
         static let card: CGFloat = 8
+        /// A column's corners, circular: their clip stays within a terminal's
+        /// padding (`TerminalConfigBuilder.padding`), so it cuts no cell.
+        static let column: CGFloat = 10
         /// Palette, floating panels.
         static let panel: CGFloat = 12
     }
 
-    /// What floats over the work casts one shadow (the glass interface's
-    /// floating glass; docs/design/glass-interface.md).
+    /// How high something lies over the window, told by its shadow
+    /// (docs/design/glass-interface.md).
     enum Elevation {
-        static let floatingOpacity: Float = 0.38
-        static let floatingRadius: CGFloat = 16
-        static let floatingDrop: CGFloat = 12
+        struct Level: Equatable, Sendable {
+            let opacity: Float
+            let radius: CGFloat
+            let drop: CGFloat
+            /// How far past its shape the shadow reaches.
+            var reach: CGFloat { radius * 2 + drop }
 
-        /// Gives `layer` the floating shadow along `path`, the shape in the
-        /// layer's own coordinates; call it again when the shape changes.
-        /// The layer must not mask to its bounds, which would cut the shadow
-        /// off.
-        static func applyFloating(to layer: CALayer, path: CGPath) {
+            /// What floats over the work: the glass interface's floating glass.
+            static let floating = Level(opacity: 0.38, radius: 16, drop: 12)
+            /// A column, a card resting on the window: short enough to stay
+            /// within the air around it (`WorkspaceState.columnInset`).
+            static let column = Level(opacity: 0.35, radius: 3, drop: 2)
+        }
+
+        /// Gives `layer` the shadow of `level` along the rounded rectangle
+        /// `rect`, in the layer's own coordinates, its corners `radius` at
+        /// most; call it again when the shape changes. With `cutOut`, then
+        /// the layer's mask, the shadow falls only outside the shape, for a
+        /// shape that lets it show through. The layer must not mask to its
+        /// bounds, which would cut the shadow off.
+        static func apply(_ level: Level, to layer: CALayer, roundedRect rect: CGRect, radius: CGFloat, cutOut: CAShapeLayer?) {
+            let corner = max(0, min(radius, rect.width / 2, rect.height / 2))
+            let shape = CGPath(roundedRect: rect, cornerWidth: corner, cornerHeight: corner, transform: nil)
             layer.shadowColor = NSColor.black.cgColor
-            layer.shadowOpacity = floatingOpacity
-            layer.shadowRadius = floatingRadius
+            layer.shadowOpacity = level.opacity
+            layer.shadowRadius = level.radius
             // Below the shape, whichever way the layer counts y: a view's
             // backing layer is flipped exactly when the view is.
-            layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? floatingDrop : -floatingDrop)
-            layer.shadowPath = path
+            layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? level.drop : -level.drop)
+            layer.shadowPath = shape
+            layer.mask = cutOut
+            guard let cutOut else { return }
+            let outside = CGMutablePath()
+            outside.addRect(rect.insetBy(dx: -level.reach, dy: -level.reach))
+            outside.addPath(shape)
+            cutOut.fillRule = .evenOdd
+            cutOut.frame = layer.bounds
+            cutOut.path = outside
         }
     }
 
@@ -228,5 +253,18 @@ extension NSColor {
         if raw.hasPrefix("#") { raw.removeFirst() }
         guard raw.count == 6, let value = UInt32(raw, radix: 16) else { return nil }
         return NSColor(hex: value)
+    }
+}
+
+extension CALayer {
+    /// Rounds the layer's top or bottom corners as its card's, for a part of
+    /// a column that reaches them. On a view's backing layer, AppKit turns
+    /// the view's clipping on with it.
+    func roundCardCorners(top: Bool) {
+        cornerRadius = Theme.Radius.column
+        // Its y runs down exactly when its contents are flipped, which its
+        // superview can make so.
+        maskedCorners = top == contentsAreFlipped()
+            ? [.layerMinXMinYCorner, .layerMaxXMinYCorner] : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
     }
 }

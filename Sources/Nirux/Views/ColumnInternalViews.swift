@@ -302,6 +302,9 @@ final class ShellExitedOverlay: NSView {
 
     override func layout() {
         super.layout()
+        // Over a terminal, at the bottom of its card: nothing of it lies in
+        // the corners its column clips.
+        layer?.roundCardCorners(top: false)
         let midX = bounds.width / 2
         let midY = bounds.height / 2
         restartButton.sizeToFit()
