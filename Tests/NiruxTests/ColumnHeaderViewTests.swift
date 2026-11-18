@@ -320,8 +320,8 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(column.titleText, "claude (not resumed) · /tmp")
     }
 
-    /// A terminal keeps its folder off the bar, in its title's tooltip and
-    /// VoiceOver help; the tooltip holds while the title changes.
+    /// A terminal's folder is its title's tooltip, not on the bar; it holds
+    /// while the title changes, and a title cut short comes first in it.
     func testATerminalsFolderIsInItsTitlesToolTip() throws {
         let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
         let column = ColumnState(cwd: "/tmp", deferredAgent: launch)
@@ -329,20 +329,26 @@ final class ColumnHeaderViewTests: XCTestCase {
         column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
         column.layoutWithHeader(width: 600, height: 400)
         let header = try XCTUnwrap(column.header)
-        XCTAssertEqual(header.context, "/tmp")
-        XCTAssertTrue(header.contextLabel.isHidden, "off the bar")
+        XCTAssertEqual(header.context, "", "nothing on the bar")
         XCTAssertEqual(header.titleLabel.toolTip, "/tmp")
-        XCTAssertEqual(header.titleLabel.accessibilityHelp(), "/tmp")
         header.title = "⠐ Fix login"
         header.layoutNow()
         XCTAssertEqual(header.titleLabel.toolTip, "/tmp", "an animated title doesn't touch it")
 
-        // A header showing its context on the bar sets no help of its own:
-        // VoiceOver keeps reading its title's tooltip.
-        let editor = ColumnHeaderView()
-        editor.titleToolTip = "/repo/Sources/a.swift"
-        editor.context = "Sources"
-        XCTAssertEqual(editor.titleLabel.accessibilityHelp(), "/repo/Sources/a.swift")
+        header.title = "✳ Refactor the login redirect so that it keeps the query string"
+        header.frame.size.width = 200
+        header.layoutNow()
+        XCTAssertEqual(header.titleLabel.toolTip, "\(header.title)\n/tmp", "cut short, the title stays readable")
+    }
+
+    /// A tooltip that holds the title already (a file's path) stays as is
+    /// when the title is cut short.
+    func testATooltipHoldingTheTitleStaysAsIs() {
+        let header = ColumnHeaderView(frame: NSRect(x: 0, y: 0, width: 160, height: ColumnHeaderView.height))
+        header.title = "SidebarWorkspaceCardRenderer.swift"
+        header.titleToolTip = "/repo/Sources/Nirux/Views/SidebarWorkspaceCardRenderer.swift"
+        header.layoutNow()
+        XCTAssertEqual(header.titleLabel.toolTip, "/repo/Sources/Nirux/Views/SidebarWorkspaceCardRenderer.swift")
     }
 
     /// Global Search names a terminal by its title and its folder's last
@@ -351,7 +357,7 @@ final class ColumnHeaderViewTests: XCTestCase {
         let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
         let column = ColumnState(cwd: "/tmp/acme/worktrees/feat-x", deferredAgent: launch)
         column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
-        XCTAssertEqual(column.header?.context, "/tmp/acme/worktrees/feat-x")
+        XCTAssertEqual(column.folder, "/tmp/acme/worktrees/feat-x")
         XCTAssertEqual(column.titleText, "claude (not resumed) · /.../worktrees/feat-x")
     }
 
