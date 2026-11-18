@@ -70,7 +70,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             // A dialog has waited 12 minutes in it.
             let column = try XCTUnwrap(billing.columns.first)
             let since = Date().timeIntervalSince1970 - 12 * 60 - 5
-            shell.quickSwitch.agentWait = { candidate, _, _ in
+            shell.quickSwitch.agentWait = { candidate, _, _, _ in
                 candidate === column ? AgentWait(reason: .permission(tool: "Bash", summary: nil), since: since) : nil
             }
 
@@ -136,7 +136,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
             // A dialog waits in it: the folded row says so.
             let column = try XCTUnwrap(acme.columns.first)
-            shell.quickSwitch.agentWait = { candidate, _, now in
+            shell.quickSwitch.agentWait = { candidate, _, now, _ in
                 candidate === column ? AgentWait(reason: .question(nil), since: now - 60) : nil
             }
 
@@ -208,7 +208,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
                 ObjectIdentifier(acme.columns[0]): AgentWait(reason: .apiError(kind: "overloaded", detail: nil), since: now - 600),
                 ObjectIdentifier(parked.columns[0]): AgentWait(reason: .permission(tool: "Bash", summary: nil), since: now - 100)
             ]
-            shell.quickSwitch.agentWait = { column, _, _ in waits[ObjectIdentifier(column)] }
+            shell.quickSwitch.agentWait = { column, _, _, _ in waits[ObjectIdentifier(column)] }
             shell.switchToWorkspace(try index(of: repo, in: shell))
 
             var landed: [String] = []

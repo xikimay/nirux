@@ -17,7 +17,7 @@ final class RequestFlowTests: XCTestCase {
         let there = try XCTUnwrap(shell.workspaces.last)
         let waiting = try XCTUnwrap(there.columns.first)
         let since = Date().timeIntervalSince1970 - 120
-        shell.quickSwitch.agentWait = { [weak waiting] column, _, _ in
+        shell.quickSwitch.agentWait = { [weak waiting] column, _, _, _ in
             column === waiting ? AgentWait(reason: .permission(tool: "Bash", summary: "npm test"), since: since) : nil
         }
         shell.focusWorkspace(id: here.id)
@@ -68,7 +68,7 @@ final class RequestFlowTests: XCTestCase {
 
             shell.jumpToNextWaitingAgent()
             XCTAssertTrue(shell.requestsState.isInboxOpen)
-            shell.quickSwitch.agentWait = { _, _, _ in nil }
+            shell.quickSwitch.agentWait = { _, _, _, _ in nil }
             shell.updateSidebar()
             XCTAssertFalse(shell.requestsState.isInboxOpen, "no request left")
         }

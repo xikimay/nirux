@@ -53,7 +53,7 @@ extension NiruxShellView {
         let open = workspaces.filter { !$0.isClosing }
         var agents = open.flatMap { workspace in
             workspace.columns.compactMap { column in
-                quickSwitch.agentWait(column, snapshot, now).map { WaitingAgent(workspaceID: workspace.id, columnID: column.id, wait: $0) }
+                quickSwitch.agentWait(column, snapshot, now, stuckAgentWaitThreshold).map { WaitingAgent(workspaceID: workspace.id, columnID: column.id, wait: $0) }
             }
         }
         // An agent waiting on the user's answer already (a permission, a

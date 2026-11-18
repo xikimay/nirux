@@ -93,12 +93,13 @@ extension MergeQueue {
         return comparison.aheadBy > 0
     }
 
-    /// What an agent column's state means for the queue: working, or
-    /// waiting on a dialog, keeps a pull request out of a merge (section
-    /// 3.2). Nil for any other state.
+    /// What an agent column's state means for the queue: working (silent
+    /// too: its turn may still answer), or waiting on a dialog, keeps a pull
+    /// request out of a merge (section 3.2). Nil for any other state.
     static func busyLabel(_ state: ProjectBoard.AgentState) -> String? {
         switch state {
         case .working: return "working"
+        case .silent: return "silent"
         case .waiting(let reason), .waitingLong(let reason, _): return "waiting (\(reason.shortLabel))"
         case .none, .idle, .exitedMidTurn, .stoppedOnError: return nil
         }

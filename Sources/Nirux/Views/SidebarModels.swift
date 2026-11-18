@@ -241,6 +241,8 @@ enum SidebarStuckState: Hashable {
     /// Resume click was aimed at from any later one.
     case stoppedOnError(kind: String?, detail: String?, failedAt: TimeInterval, resume: Resume)
     case exitedMidTurn(processName: String)
+    /// A turn waits on the model with no sign of life, for how long.
+    case silent(duration: String)
 
     enum Resume: Hashable {
         /// The button: `continue` can go out.
@@ -294,6 +296,8 @@ enum SidebarStuckState: Hashable {
             return ["Stopped on an API error", error].compactMap { $0 }.joined(separator: " — ")
         case .exitedMidTurn(let processName):
             return "\(processName) exited in the middle of a turn, without ending its session"
+        case .silent(let duration):
+            return "Claude has been silent for \(duration). \(AgentAttentionReason.silentAdvice)"
         }
     }
 

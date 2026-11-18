@@ -45,7 +45,7 @@ extension NiruxShellView {
                 guard held.state == .running, let column = column(of: held)?.column,
                       Self.frontAgent(of: column, snapshot: snapshot, runs: record.sessionID)
                 else { return nil }
-                let waits = quickSwitch.agentWait(column, snapshot, now).map { [$0] } ?? []
+                let waits = quickSwitch.agentWait(column, snapshot, now, stuckAgentWaitThreshold).map { [$0] } ?? []
                 return .summary(waits: waits, isWorking: column.pty?.cachedAgentState == .working)
             }
         )

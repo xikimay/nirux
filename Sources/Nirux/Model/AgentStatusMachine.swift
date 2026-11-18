@@ -124,6 +124,30 @@ struct AgentStatusMachine {
     /// which the output fallback also drives, a suspend (Ctrl-Z) and `fg`
     /// leave it as it was.
     private(set) var hookTurnInFlight = false
+    /// The main thread's tool calls in flight, by `tool_use_id` ("" for a
+    /// call an older receiver sent without one): from PreToolUse to its
+    /// PostToolUse, or to the PermissionDenied of a call auto mode refused.
+    /// A call refused at a dialog, by a rule or a hook fires neither: the
+    /// turn's end forgets it, or a prompt after an interrupt. (A prompt
+    /// alone doesn't: Claude submits peer messages and poll results as
+    /// prompts while a call runs.)
+    private var mainCallsRunning: [String] = []
+    /// The main thread's last prompt or tool event in the turn in flight;
+    /// nil between turns.
+    private var mainTurnMovedAt: TimeInterval?
+    /// The last interrupt of a turn: an Esc or Ctrl-C (Claude fires no hook
+    /// for it, and its idle reminder may never come), or a main-thread call
+    /// that ended interrupted (a stop Nirux didn't type). Unlike
+    /// `lastCancelKeyAt`, no dialog's reminder takes it back.
+    private var turnInterruptedAt: TimeInterval = 0
+    /// The last Esc or Ctrl-C that closed a dialog of the main thread's:
+    /// its call ends with no hook. An Esc elsewhere (a menu, vim's mode)
+    /// ends nothing.
+    private var dialogCancelledAt: TimeInterval = 0
+    /// The last interrupt that surely stopped the turn: a call's end
+    /// marked interrupted, an Esc at a main-thread dialog, Nirux's own Esc.
+    /// The ends of calls after it wake nothing.
+    private var turnStoppedAt: TimeInterval = 0
     /// Agent kind ("claude") once this session has emitted a hook event —
     /// proof that hooks are installed and authoritative for this session.
     private(set) var hookKind: String?
@@ -185,6 +209,9 @@ struct AgentStatusMachine {
     /// `requestedAt` of the dialogs whose long wait already alerted: one
     /// alert per dialog.
     private var longWaitAlerted: Set<TimeInterval> = []
+    /// Where the silence that alerted began (`AgentSilence.since`): one
+    /// alert per silence.
+    private var silenceAlertedSince: TimeInterval?
     /// The main thread's prompts: when the last one went in, and the
     /// `prompt_id`s of the current and recent ones. A StopFailure about an
     /// earlier prompt arrived late (Claude doesn't wait for it) and ends
@@ -329,6 +356,10 @@ struct AgentStatusMachine {
             if event.agentID == nil { lastMainToolAt = now }
             noteTurnActivity(at: now)
             noteMainThreadMoved(event)
+            if event.agentID == nil {
+                mainTurnMovedAt = now
+                mainCallsRunning.append(event.toolUseID ?? "")
+            }
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .postToolUse:
@@ -342,6 +373,20 @@ struct AgentStatusMachine {
                 noteClosed(pendingDialogs.remove(at: index))
             }
             noteCallEnded(event, at: now)
+            if event.agentID == nil, event.toolEnd == AgentToolEnd.interrupted.rawValue {
+                turnInterruptedAt = now
+                turnStoppedAt = now
+            }
+            noteCallOver(event)
+            noteProgress(of: event)
+            resumeUnlessBlocked()
+        case .permissionDenied:
+            // It ends a call of the turn in flight; outside one, it says
+            // nothing.
+            guard hookTurnInFlight else { break }
+            hookKind = event.kind.rawValue
+            noteMainThreadMoved(event)
+            noteCallOver(event)
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionRequest:
@@ -423,6 +468,11 @@ struct AgentStatusMachine {
             askedQuestion = nil
             circling.reset()
             lastPromptAt = now
+            // An Esc at a dialog since the main thread last moved ended its
+            // call with no hook. (A prompt alone doesn't: Claude submits peer
+            // messages and poll results as prompts while a call runs.)
+            if dialogCancelledAt >= mainTurnMovedAt ?? 0 { mainCallsRunning = [] }
+            mainTurnMovedAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
         }
@@ -950,7 +1000,31 @@ struct AgentStatusMachine {
         hookWorking = false
         turnStartedAt = nil
         hookTurnInFlight = false
+        mainCallsRunning = []
+        mainTurnMovedAt = nil
         circling.reset()
+    }
+
+    /// A main-thread call ended: it ran, failed or was refused. Its result
+    /// goes to the model, unless the turn was stopped: the ends of calls
+    /// Claude stops then wake nothing.
+    private mutating func noteCallOver(_ event: AgentHookEvent) {
+        guard event.agentID == nil else { return }
+        if let index = mainCallsRunning.firstIndex(of: event.toolUseID ?? "") { mainCallsRunning.remove(at: index) }
+        if mainTurnMovedAt.map({ turnStoppedAt < $0 }) ?? true { mainTurnMovedAt = event.timestamp }
+    }
+
+    /// The main thread's turn waits on the model: a prompt or a tool result
+    /// went in, no call of its own runs (a build may run for an hour), no
+    /// dialog is open (a wait on the user), and nothing interrupted it
+    /// since. Background subagents at work after its turn ended don't make
+    /// one.
+    func awaitsModel(foreground: ForegroundProcess?) -> Bool {
+        guard let foreground, foreground.name == "claude", hookKind == "claude", hookTurnInFlight,
+              let moved = mainTurnMovedAt
+        else { return false }
+        return moved >= foreground.instance.startedAt && turnInterruptedAt < moved
+            && mainCallsRunning.isEmpty && openDialogs.isEmpty
     }
 
     /// Nirux pressed Esc in the turn: no draft (`interruptRefusal` vouched
@@ -960,6 +1034,8 @@ struct AgentStatusMachine {
         guard let lastPromptAt else { return nil }
         interruptSentAt = now
         lastCancelKeyAt = now
+        turnInterruptedAt = now
+        turnStoppedAt = now
         return lastPromptAt
     }
 
@@ -1182,7 +1258,14 @@ struct AgentStatusMachine {
         case .some:
             if keys.map(Self.answersApproval) ?? true { lastKeystrokeAt = time }
         }
-        if keys.map(Self.isCancelKey) ?? true { lastCancelKeyAt = time }
+        if keys.map(Self.isCancelKey) ?? true {
+            lastCancelKeyAt = time
+            turnInterruptedAt = time
+            if let inFront, inFront.agentID == nil {
+                dialogCancelledAt = time
+                turnStoppedAt = time
+            }
+        }
         lastInputAt = time
         if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
             lastDraftInputAt = time
@@ -1369,14 +1452,16 @@ struct AgentStatusMachine {
 
     /// The alert a stuck state owes, once: a dialog crossing the wait
     /// threshold (each dialog alerts once; an answered one and the next
-    /// start over), an exit once confirmed. A failed turn alerted as its
+    /// start over), an exit once confirmed, a silence (a sign of life and
+    /// the next silence start over). A failed turn alerted as its
     /// StopFailure arrived.
     mutating func takeStuckAlert(
         now: TimeInterval,
         waitThreshold: TimeInterval?,
+        silence: AgentSilence? = nil,
         foreground: ForegroundProcess?
     ) -> AgentAttentionReason? {
-        switch stuckState(now: now, waitThreshold: waitThreshold, foreground: foreground) {
+        switch stuckState(now: now, waitThreshold: waitThreshold, silence: silence, foreground: foreground) {
         case .exitedMidTurn(let exit)?:
             guard !exit.alerted else { return nil }
             midTurnExit?.alerted = true
@@ -1386,6 +1471,10 @@ struct AgentStatusMachine {
             longWaitAlerted.formIntersection(pendingDialogs.map(\.requestedAt))
             guard longWaitAlerted.insert(since).inserted else { return nil }
             return .stillWaiting(reason, waited: now - since)
+        case .silent(let silence)?:
+            guard silenceAlertedSince != silence.since else { return nil }
+            silenceAlertedSince = silence.since
+            return .silent(now - silence.startedAt)
         case .stoppedOnError?, nil:
             return nil
         }
@@ -1433,6 +1522,12 @@ struct AgentStatusMachine {
         turnFailure = nil
         midTurnExit = nil
         longWaitAlerted = []
+        silenceAlertedSince = nil
+        mainCallsRunning = []
+        mainTurnMovedAt = nil
+        turnInterruptedAt = 0
+        dialogCancelledAt = 0
+        turnStoppedAt = 0
         lastPromptAt = nil
         turnPromptID = nil
         recentPromptIDs = []

@@ -2,8 +2,8 @@ import Foundation
 
 /// An agent blocked on the user: it won't go on until they answer its
 /// dialog (permission, question, plan approval), get it past an API error,
-/// or start it again after it exited mid-turn, or answer the question its
-/// last turn ended on. Unlike `AgentStuckState`, a dialog counts as soon as
+/// start it again after it exited mid-turn, stop a turn gone silent, or
+/// answer the question its last turn ended on. Unlike `AgentStuckState`, a dialog counts as soon as
 /// it opens, whatever the long-wait threshold. A finished turn that asks
 /// nothing doesn't count: the agent merely waits for its next prompt.
 struct AgentWait: Equatable, Sendable {
@@ -31,10 +31,12 @@ extension AgentWait {
 extension AgentStatusMachine {
     /// What blocks the agent on the user now, if anything (see
     /// `AgentWait`). `foreground` is the column's foreground process.
-    func blockedWait(now: TimeInterval, foreground: ForegroundProcess?) -> AgentWait? {
-        switch stuckState(now: now, waitThreshold: nil, foreground: foreground) {
+    func blockedWait(now: TimeInterval, silence: AgentSilence? = nil, foreground: ForegroundProcess?) -> AgentWait? {
+        switch stuckState(now: now, waitThreshold: nil, silence: silence, foreground: foreground) {
         case .exitedMidTurn(let exit)?:
             return AgentWait(reason: .exitedMidTurn, since: exit.exitedAt)
+        case .silent(let silence)?:
+            return AgentWait(reason: .silent(now - silence.startedAt), since: silence.startedAt)
         case .stoppedOnError(let failure)?:
             return AgentWait(reason: failure.reason, since: failure.failedAt)
         case .waiting?, nil:

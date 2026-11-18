@@ -528,7 +528,9 @@ final class PtySession: @unchecked Sendable {
     // MARK: Stuck agents (see `AgentStuckState`), and Mission `tell`
 
     func agentStuckState(now: TimeInterval, waitThreshold: TimeInterval?, foreground: ForegroundProcess?) -> AgentStuckState? {
-        state.machine.stuckState(now: now, waitThreshold: waitThreshold, foreground: foreground)
+        state.machine.stuckState(
+            now: now, waitThreshold: waitThreshold, silence: agentSilence(waitThreshold: waitThreshold), foreground: foreground
+        )
     }
 
     func takeAgentStuckAlert(
@@ -536,12 +538,47 @@ final class PtySession: @unchecked Sendable {
         waitThreshold: TimeInterval?,
         foreground: ForegroundProcess?
     ) -> AgentAttentionReason? {
-        state.machine.takeStuckAlert(now: now, waitThreshold: waitThreshold, foreground: foreground)
+        state.machine.takeStuckAlert(
+            now: now, waitThreshold: waitThreshold, silence: agentSilence(waitThreshold: waitThreshold), foreground: foreground
+        )
     }
 
-    /// What blocks the agent on the user now (see `AgentWait`).
-    func agentBlockedWait(now: TimeInterval, foreground: ForegroundProcess?) -> AgentWait? {
-        state.machine.blockedWait(now: now, foreground: foreground)
+    /// What blocks the agent on the user now (see `AgentWait`): a silent
+    /// turn past the stuck-agent setting's `waitThreshold` too.
+    func agentBlockedWait(now: TimeInterval, waitThreshold: TimeInterval?, foreground: ForegroundProcess?) -> AgentWait? {
+        state.machine.blockedWait(now: now, silence: agentSilence(waitThreshold: waitThreshold), foreground: foreground)
+    }
+
+    /// The awake clock silences are measured on (`AgentSilence`).
+    var awakeClock: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+
+    /// The silence past its threshold, if the transcript's end waits on
+    /// Claude's reply: read once per size of it, since nothing grows while
+    /// it lasts. Without a transcript, no proof: no silence.
+    private func agentSilence(waitThreshold: TimeInterval?) -> AgentSilence? {
+        let signs = state.lifeSigns
+        guard let since = signs.lastAt, let startedAt = signs.lastWallAt, let transcript = signs.transcript,
+              awakeClock() - since >= AgentSilence.threshold(waitThreshold: waitThreshold)
+        else { return nil }
+        let awaitsReply = transcript.awaitsReply ?? TranscriptLastMessage.awaitsReply(path: transcript.path) ?? false
+        state.lifeSigns.noteAwaitsReply(awaitsReply)
+        return awaitsReply ? AgentSilence(since: since, startedAt: startedAt) : nil
+    }
+
+    /// The main thread's turn waits on the model (see
+    /// `AgentStatusMachine.awaitsModel`).
+    func agentAwaitsModel(foreground: ForegroundProcess?) -> Bool {
+        state.machine.awaitsModel(foreground: foreground)
+    }
+
+    /// The agent's transcript measures `size` at `now`, epoch seconds (see
+    /// `AgentLifeSigns`).
+    func noteAgentTranscript(path: String, size: Int64, now: TimeInterval) {
+        state.lifeSigns.noteTranscript(path: path, size: size, awake: awakeClock(), wall: now)
+    }
+
+    func forgetAgentTranscript() {
+        state.lifeSigns.forgetTranscript()
     }
 
     // MARK: The trust question (see `AgentTrustPrompt`)
@@ -906,6 +943,7 @@ final class PtySession: @unchecked Sendable {
     func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
         let dialogsBefore = state.machine.pendingDialogs.count
         let outcome = state.machine.apply(event, isUserFocused: isUserFocused)
+        state.lifeSigns.note(awake: awakeClock(), wall: event.timestamp)
         if event.agentID == nil, !state.promptWatchers.isEmpty { state.settlePromptWatchers(on: event) }
         let dialogs = state.machine.pendingDialogs
         if dialogs.count != dialogsBefore {
@@ -1266,6 +1304,9 @@ private final class PtyState: @unchecked Sendable {
     var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
+    /// Main thread only, as the hook events that feed it.
+    var lifeSigns = AgentLifeSigns()
+
     /// Background pastes running (`PtySession.pasteInBackground`).
     let pasting = OSAllocatedUnfairLock(initialState: 0)
 
@@ -1334,6 +1375,7 @@ private final class PtyState: @unchecked Sendable {
 
     func markPtyStarted() {
         machine.reset()
+        lifeSigns = AgentLifeSigns()
         expirePromptWatchers()
         localServerStateIsStale = true
         hasTypedInput = false

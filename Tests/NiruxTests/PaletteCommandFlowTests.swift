@@ -467,7 +467,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // walks a queue.
             let claude = try XCTUnwrap(workspace.columns[safe: columnCount])
             let wait = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
-            harness.shell.quickSwitch.agentWait = { column, _, _ in column === claude ? wait : nil }
+            harness.shell.quickSwitch.agentWait = { column, _, _, _ in column === claude ? wait : nil }
             XCTAssertNotIdentical(workspace.columns[safe: workspace.focusedIndex], claude)
             harness.runPaletteCommand("Next Waiting Agent")
             XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex], claude)

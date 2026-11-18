@@ -53,6 +53,18 @@ extension ColumnState {
         setAgentUsage(nil)
     }
 
+    /// While Claude's turn waits on the model, its transcript growing is a
+    /// sign of life (`AgentLifeSigns`): its size, never its text.
+    /// One the `claude` in front can't be measured by (none followed, or
+    /// gone) is forgotten: no proof, no silence.
+    func noteTranscriptGrowth(foreground: ForegroundProcess?, now: TimeInterval) {
+        guard let pty, pty.agentAwaitsModel(foreground: foreground) else { return }
+        guard let follow = claudeTranscript, follow.process == foreground?.instance,
+              let stamp = FileStamp(URL(fileURLWithPath: follow.follower.path))
+        else { return pty.forgetAgentTranscript() }
+        pty.noteAgentTranscript(path: follow.follower.path, size: stamp.size, now: now)
+    }
+
     /// Heartbeat, for columns on screen: read what the transcript gained.
     func refreshAgentUsage(snapshot: ProcessSnapshot) {
         // An empty snapshot (failed sysctl) would read as "exited".

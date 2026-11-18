@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Stuck agents: long waits, failed turns, mid-turn exits
+// MARK: - Stuck agents: long waits, failed turns, mid-turn exits, silent turns
 
 extension NiruxShellView {
     /// Minutes a dialog may wait on the user before its agent reads as
@@ -36,6 +36,7 @@ extension NiruxShellView {
         appIsActive: Bool = NSApp.isActive
     ) {
         column.trackForegroundAgent(foregroundProcess, snapshot: snapshot, now: now)
+        column.noteTranscriptGrowth(foreground: foregroundProcess, now: now)
         guard let pty = column.pty else { return }
         let onScreen = appIsActive && workspace === activeWorkspace
             && workspace.columns[safe: workspace.focusedIndex] === column
@@ -113,6 +114,8 @@ extension NiruxShellView {
             return .stoppedOnError(kind: failure.kind, detail: failure.detail, failedAt: failure.failedAt, resume: resume)
         case .exitedMidTurn(let exit)?:
             return .exitedMidTurn(processName: exit.processName)
+        case .silent(let silence)?:
+            return .silent(duration: SidebarRenderer.shortDuration(now - silence.startedAt))
         case nil:
             return nil
         }

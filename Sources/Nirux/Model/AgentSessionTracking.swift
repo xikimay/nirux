@@ -232,7 +232,7 @@ struct ClaudeSessionTracker {
         guard let sessionID else { return .accepted }
         if sessionID == boundSessionID {
             confirmedSessionID = sessionID
-            let isPrompted = [.userPromptSubmit, .stop, .stopFailure, .preToolUse, .permissionRequest, .postToolUse]
+            let isPrompted = [.userPromptSubmit, .stop, .stopFailure, .preToolUse, .permissionRequest, .postToolUse, .permissionDenied]
                 .contains(name)
                 || (name == .sessionStart && source == "compact")
             guard isPrompted, unpromptedSessionID == sessionID else { return .accepted }
@@ -256,7 +256,7 @@ struct ClaudeSessionTracker {
             return boundSessionID == nil ? .accepted : .rejected
         case .sessionEnd:
             return boundSessionID == nil ? .accepted : .rejected
-        case .preToolUse, .permissionRequest, .postToolUse, .subagentStop, .turnComplete, .approvalResolved:
+        case .preToolUse, .permissionRequest, .postToolUse, .permissionDenied, .subagentStop, .turnComplete, .approvalResolved:
             return .accepted
         }
         let changed = session.bind(sessionID: sessionID, process: foregroundProcess.instance)
