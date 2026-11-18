@@ -36,9 +36,7 @@ extension AgentStatusMachine {
         case .exitedMidTurn(let exit)?:
             return AgentWait(reason: .exitedMidTurn, since: exit.exitedAt)
         case .silent(let silence)?:
-            // On the wall clock as near as the awake one tells: a sleep
-            // since makes it later.
-            return AgentWait(reason: .silent(silence.duration), since: now - silence.duration)
+            return AgentWait(reason: .silent(now - silence.startedAt), since: silence.startedAt)
         case .stoppedOnError(let failure)?:
             return AgentWait(reason: failure.reason, since: failure.failedAt)
         case .waiting?, nil:

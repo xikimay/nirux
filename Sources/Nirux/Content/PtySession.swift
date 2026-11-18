@@ -552,11 +552,17 @@ final class PtySession: @unchecked Sendable {
     /// The awake clock silences are measured on (`AgentSilence`).
     var awakeClock: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
+    /// The silence past its threshold, if the transcript's end waits on
+    /// Claude's reply: read once per size of it, since nothing grows while
+    /// it lasts. Without a transcript, no proof: no silence.
     private func agentSilence(waitThreshold: TimeInterval?) -> AgentSilence? {
-        guard let threshold = AgentSilence.threshold(waitThreshold: waitThreshold), let since = state.lifeSigns.lastAt else {
-            return nil
-        }
-        return AgentSilence(since: since, now: awakeClock(), threshold: threshold)
+        let signs = state.lifeSigns
+        guard let since = signs.lastAt, let startedAt = signs.lastWallAt, let transcript = signs.transcript,
+              awakeClock() - since >= AgentSilence.threshold(waitThreshold: waitThreshold)
+        else { return nil }
+        let awaitsReply = transcript.awaitsReply ?? TranscriptLastMessage.awaitsReply(path: transcript.path) ?? false
+        state.lifeSigns.noteAwaitsReply(awaitsReply)
+        return awaitsReply ? AgentSilence(since: since, startedAt: startedAt) : nil
     }
 
     /// Whether Interrupt may press Esc in a silent turn (see
@@ -592,9 +598,14 @@ final class PtySession: @unchecked Sendable {
         state.machine.awaitsModel(foreground: foreground)
     }
 
-    /// The agent's transcript measures `size` now (see `AgentLifeSigns`).
-    func noteAgentTranscript(path: String, size: Int64) {
-        state.lifeSigns.noteTranscript(path: path, size: size, at: awakeClock())
+    /// The agent's transcript measures `size` at `now`, epoch seconds (see
+    /// `AgentLifeSigns`).
+    func noteAgentTranscript(path: String, size: Int64, now: TimeInterval) {
+        state.lifeSigns.noteTranscript(path: path, size: size, awake: awakeClock(), wall: now)
+    }
+
+    func forgetAgentTranscript() {
+        state.lifeSigns.forgetTranscript()
     }
 
     // MARK: The trust question (see `AgentTrustPrompt`)
@@ -959,7 +970,7 @@ final class PtySession: @unchecked Sendable {
     func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
         let dialogsBefore = state.machine.pendingDialogs.count
         let outcome = state.machine.apply(event, isUserFocused: isUserFocused)
-        state.lifeSigns.note(at: awakeClock())
+        state.lifeSigns.note(awake: awakeClock(), wall: event.timestamp)
         if event.agentID == nil, !state.promptWatchers.isEmpty { state.settlePromptWatchers(on: event) }
         let dialogs = state.machine.pendingDialogs
         if dialogs.count != dialogsBefore {

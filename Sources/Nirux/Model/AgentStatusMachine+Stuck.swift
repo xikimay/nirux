@@ -5,7 +5,8 @@ import Foundation
 extension AgentStatusMachine {
     /// What keeps the agent from going on, if anything. `foreground` is
     /// the column's foreground process now; `waitThreshold` nil turns the
-    /// long-wait check off, `silence` nil the silent-turn one.
+    /// long-wait check off. `silence`, past the threshold, is read only
+    /// while the turn waits on the model.
     func stuckState(
         now: TimeInterval, waitThreshold: TimeInterval?, silence: AgentSilence? = nil, foreground: ForegroundProcess?
     ) -> AgentStuckState? {
@@ -23,9 +24,7 @@ extension AgentStatusMachine {
            now - dialog.requestedAt >= waitThreshold {
             return .waiting(dialog.reason, since: dialog.requestedAt)
         }
-        if let silence, silence.duration >= silence.threshold, awaitsModel(foreground: foreground) {
-            return .silent(silence)
-        }
+        if let silence, awaitsModel(foreground: foreground) { return .silent(silence) }
         return nil
     }
 

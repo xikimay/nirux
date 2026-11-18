@@ -251,7 +251,7 @@ extension NiruxApp {
                 SettingsForm.hint(
                     "A permission or question dialog open this long marks its agent as stuck: "
                         + "a badge on its card and one notification. So does a Claude turn with no sign "
-                        + "of life for as long, 20 minutes at least."
+                        + "of life for as long, 20 minutes at least, and 20 minutes with this off."
                 ),
                 circling
             ],

@@ -36,7 +36,7 @@ extension NiruxShellView {
         appIsActive: Bool = NSApp.isActive
     ) {
         column.trackForegroundAgent(foregroundProcess, snapshot: snapshot, now: now)
-        if stuckAgentWaitThreshold != nil { column.noteTranscriptGrowth(foreground: foregroundProcess) }
+        column.noteTranscriptGrowth(foreground: foregroundProcess, now: now)
         guard let pty = column.pty else { return }
         let onScreen = appIsActive && workspace === activeWorkspace
             && workspace.columns[safe: workspace.focusedIndex] === column
@@ -116,7 +116,7 @@ extension NiruxShellView {
             return .exitedMidTurn(processName: exit.processName)
         case .silent(let silence)?:
             return .silent(
-                duration: SidebarRenderer.shortDuration(silence.duration), since: silence.since,
+                duration: SidebarRenderer.shortDuration(now - silence.startedAt), since: silence.since,
                 interruptible: pty.canInterruptSilentTurn(snapshot: snapshot)
             )
         case nil:

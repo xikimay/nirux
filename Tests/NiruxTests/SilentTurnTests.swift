@@ -42,36 +42,35 @@ final class SilentTurnTests: XCTestCase {
         apply(.userPromptSubmit, at: 1)
     }
 
-    /// Silent for `quiet` awake seconds since a sign at `since`, against the
-    /// threshold the default setting gives (20 minutes).
-    private func silence(_ quiet: TimeInterval, since: TimeInterval = 50) -> AgentSilence {
-        AgentSilence(since: since, now: since + quiet, threshold: AgentSilence.threshold(waitThreshold: waitThreshold) ?? 0)
+    /// A silence past its threshold (as `PtySession` passes it), that began
+    /// at `since` on the awake clock and `startedAt` on the wall's.
+    private func silence(since: TimeInterval = 50, startedAt: TimeInterval = 1_100) -> AgentSilence {
+        AgentSilence(since: since, startedAt: startedAt)
     }
 
-    private func stuck(_ silence: AgentSilence, foreground: ForegroundProcess? = nil) -> AgentStuckState? {
-        machine.stuckState(now: t0 + 9_999, waitThreshold: nil, silence: silence, foreground: foreground ?? claude)
+    private func stuck(_ silence: AgentSilence, now: TimeInterval = 9_999, foreground: ForegroundProcess? = nil) -> AgentStuckState? {
+        machine.stuckState(now: now, waitThreshold: nil, silence: silence, foreground: foreground ?? claude)
     }
 
-    private func isSilent(_ quiet: TimeInterval = 7_200) -> Bool {
-        if case .silent? = stuck(silence(quiet)) { return true }
+    private func isSilent() -> Bool {
+        if case .silent? = stuck(silence()) { return true }
         return false
     }
 
     // MARK: - The threshold
 
     func testTheThresholdIsTheStuckAgentSettingWithATwentyMinuteFloor() {
-        XCTAssertNil(AgentSilence.threshold(waitThreshold: nil), "the setting off: no silence either")
+        XCTAssertEqual(AgentSilence.threshold(waitThreshold: nil), 1_200, "the dialog check off: hangs are still watched")
         XCTAssertEqual(AgentSilence.threshold(waitThreshold: 300), 1_200, "14 minutes of thinking were measured")
         XCTAssertEqual(AgentSilence.threshold(waitThreshold: 3_600), 3_600)
     }
 
-    func testATurnWaitingOnTheModelReadsSilentPastTheThreshold() {
+    func testASilenceShowsWhileTheTurnWaitsOnTheModel() {
         promptIn()
-        XCTAssertNil(stuck(silence(1_199)), "a long think is no silence")
-        let silent = silence(1_200)
-        XCTAssertEqual(stuck(silent), .silent(silent))
-        XCTAssertNil(stuck(silent, foreground: shell), "claude is not in front")
-        XCTAssertNil(machine.stuckState(now: t0 + 9_999, waitThreshold: waitThreshold, foreground: claude), "nothing measured")
+        XCTAssertEqual(stuck(silence()), .silent(silence()))
+        XCTAssertEqual(stuck(silence(), now: 20_000), stuck(silence()), "the same state tick after tick")
+        XCTAssertNil(stuck(silence(), foreground: shell), "claude is not in front")
+        XCTAssertNil(machine.stuckState(now: t0 + 9_999, waitThreshold: waitThreshold, foreground: claude), "none past its threshold")
     }
 
     // MARK: - What is no silence
@@ -108,10 +107,61 @@ final class SilentTurnTests: XCTestCase {
     func testAnEscAtItsDialogEndsTheCall() {
         promptIn()
         apply(.preToolUse, at: 2, id: "ask")
+        apply(.permissionRequest, at: 3, id: "ask")
         // Esc at its dialog: no hook, no Stop. The user types on at once.
         pressEsc(at: 5)
         apply(.userPromptSubmit, at: 20)
         XCTAssertTrue(isSilent())
+    }
+
+    func testAnEscThatClosesNoDialogLeavesTheCallRunning() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "build")
+        // An Esc that leaves vim's insert mode, or closes a menu.
+        pressEsc(at: 5)
+        // A peer's message, submitted as a prompt while the build runs.
+        apply(.userPromptSubmit, at: 300)
+        XCTAssertFalse(isSilent())
+    }
+
+    func testAnEscThatStoppedNothingLetsTheResultWakeTheTurn() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "build")
+        pressEsc(at: 5)
+        apply(.postToolUse, at: 600, id: "build")
+        XCTAssertTrue(isSilent(), "the build's result went to the model")
+    }
+
+    func testCallsEndingAfterAnInterruptWakeNothing() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "build")
+        apply(.preToolUse, at: 3, id: "fetch")
+        apply(.preToolUse, at: 4, id: "rm")
+        pressEsc(at: 5)
+        apply(.postToolUse, at: 6, id: "build", end: .interrupted)
+        // Its siblings end without saying they were stopped.
+        apply(.postToolUse, at: 7, id: "fetch", end: .failed)
+        apply(.permissionDenied, at: 8, id: "rm")
+        XCTAssertFalse(isSilent())
+    }
+
+    func testAPermissionDeniedOutsideATurnSaysNothing() {
+        promptIn()
+        apply(.stop, at: 5)
+        apply(.permissionDenied, at: 6, id: "late")
+        XCTAssertFalse(machine.hookTurnInFlight)
+        XCTAssertNotEqual(machine.state, .working)
+        XCTAssertFalse(isSilent())
+    }
+
+    func testAPermissionDeniedIsProgressPastItsAgentsDialogs() {
+        promptIn()
+        _ = machine.apply(
+            AgentHookEvent(kind: .claude, name: .permissionRequest, sessionID: "lead", toolName: "Bash", toolKey: "k", agentID: "sub", timestamp: t0 + 2),
+            isUserFocused: false
+        )
+        apply(.permissionDenied, at: 3, id: "rm", agent: "sub")
+        XCTAssertEqual(machine.openDialogs, [], "the subagent went on: its dialog was answered")
     }
 
     func testAPromptWhileACallRunsLeavesItRunning() {
@@ -198,26 +248,27 @@ final class SilentTurnTests: XCTestCase {
     func testAnEarlierClaudesTurnIsNotTheOneInFront() {
         promptIn()
         let later = ForegroundProcess(instance: ProcessInstance(pid: 5000, startedAt: t0 + 30), name: "claude", arguments: ["claude"])
-        XCTAssertNil(stuck(silence(7_200), foreground: later))
+        XCTAssertNil(stuck(silence(), foreground: later))
     }
 
     // MARK: - The alert and ⌘J
 
     func testOneAlertPerSilence() {
         promptIn()
-        @MainActor func alert(_ silence: AgentSilence) -> AgentAttentionReason? {
-            machine.takeStuckAlert(now: t0 + 9_999, waitThreshold: waitThreshold, silence: silence, foreground: claude)
+        @MainActor func alert(_ silence: AgentSilence?, at now: TimeInterval) -> AgentAttentionReason? {
+            machine.takeStuckAlert(now: now, waitThreshold: waitThreshold, silence: silence, foreground: claude)
         }
-        XCTAssertNil(alert(silence(1_199)))
-        XCTAssertEqual(alert(silence(1_200)), .silent(1_200))
-        XCTAssertNil(alert(silence(9_000)), "the same silence, hours on")
-        XCTAssertEqual(alert(silence(1_300, since: 9_100)), .silent(1_300), "a sign of life since: a new silence")
+        XCTAssertNil(alert(nil, at: 2_299), "none past its threshold yet")
+        XCTAssertEqual(alert(silence(startedAt: 1_100), at: 2_300), .silent(1_200))
+        XCTAssertNil(alert(silence(startedAt: 1_100), at: 9_000), "the same silence, hours on")
+        XCTAssertEqual(alert(silence(since: 9_100, startedAt: 9_000), at: 10_300), .silent(1_300), "a sign of life since: a new silence")
     }
 
     func testASilentTurnBlocksTheAgentLikeAFailure() throws {
         promptIn()
-        let wait = try XCTUnwrap(machine.blockedWait(now: t0 + 5_000, silence: silence(3_600), foreground: claude))
-        XCTAssertEqual(wait, AgentWait(reason: .silent(3_600), since: t0 + 1_400))
+        let wait = try XCTUnwrap(machine.blockedWait(now: 4_700, silence: silence(startedAt: 1_100), foreground: claude))
+        XCTAssertEqual(wait, AgentWait(reason: .silent(3_600), since: 1_100))
+        XCTAssertEqual(machine.blockedWait(now: 4_800, silence: silence(startedAt: 1_100), foreground: claude)?.since, 1_100, "it stays put")
         XCTAssertTrue(wait.blocks(whileStatus: .working), "its status still reads working")
         XCTAssertEqual(wait.reason.signal, .error)
     }
@@ -237,15 +288,43 @@ final class SilentTurnTests: XCTestCase {
 
     func testATranscriptThatGrowsIsASignOfLife() {
         var signs = AgentLifeSigns()
-        signs.note(at: 10)
-        signs.noteTranscript(path: "/t.jsonl", size: 100, at: 20)
+        signs.note(awake: 10, wall: 1_010)
+        signs.noteTranscript(path: "/t.jsonl", size: 100, awake: 20, wall: 1_020)
         XCTAssertEqual(signs.lastAt, 10, "a first look only takes its measure")
-        signs.noteTranscript(path: "/t.jsonl", size: 100, at: 30)
+        signs.noteAwaitsReply(true)
+        signs.noteTranscript(path: "/t.jsonl", size: 100, awake: 30, wall: 1_030)
         XCTAssertEqual(signs.lastAt, 10)
-        signs.noteTranscript(path: "/t.jsonl", size: 180, at: 40)
+        XCTAssertEqual(signs.transcript?.awaitsReply, true, "read once per size")
+        signs.noteTranscript(path: "/t.jsonl", size: 180, awake: 40, wall: 1_040)
         XCTAssertEqual(signs.lastAt, 40)
-        signs.noteTranscript(path: "/other.jsonl", size: 500, at: 50)
+        XCTAssertEqual(signs.lastWallAt, 1_040)
+        XCTAssertNil(signs.transcript?.awaitsReply, "read again at its new size")
+        signs.noteTranscript(path: "/other.jsonl", size: 500, awake: 50, wall: 1_050)
         XCTAssertEqual(signs.lastAt, 40, "another transcript is measured anew")
+    }
+
+    /// What tells a request in flight: the transcript's last word is a
+    /// prompt or a tool result, not Claude's.
+    func testTheTranscriptsEndSaysWhetherAReplyIsAwaited() {
+        func awaits(_ lines: [String]) -> Bool? {
+            TranscriptLastMessage.awaitsReply(in: Data((lines.joined(separator: "\n") + "\n").utf8))
+        }
+        let prompt = #"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"fix it"}}"#
+        let reply = #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"…"}]}}"#
+        let result = #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}"#
+        let interrupt = #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
+        let meta = #"{"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat"}}"#
+        let request = #"{"type":"api-request"}"#
+        let apiError = #"{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error"}]}}"#
+        let quoting = #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t2","type":"tool_result","content":"grep: \"text\":\"[Request interrupted by user\""}]}}"#
+        XCTAssertEqual(awaits([prompt, request]), true, "the incident: a prompt, its request, nothing")
+        XCTAssertEqual(awaits([prompt, reply, result]), true, "a tool result went in")
+        XCTAssertEqual(awaits([prompt, reply]), false, "Claude answered: a lost Stop, or a long reply")
+        XCTAssertEqual(awaits([prompt, interrupt]), false)
+        XCTAssertEqual(awaits([prompt, reply, meta]), false, "a harness note says nothing")
+        XCTAssertEqual(awaits([prompt, apiError]), false, "the turn ended on an API error")
+        XCTAssertEqual(awaits([prompt, reply, quoting]), true, "tool output quoting the interrupt's words")
+        XCTAssertNil(awaits([request, meta]))
     }
 
     /// The column measures silence on the awake clock from its hook events
@@ -255,7 +334,13 @@ final class SilentTurnTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let transcript = directory.appendingPathComponent("conv.jsonl")
-        try Data("{}\n".utf8).write(to: transcript)
+        try Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go"}}"# + "\n").utf8).write(to: transcript)
+        @MainActor func append(_ line: String) throws {
+            let handle = try FileHandle(forWritingTo: transcript)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data((line + "\n").utf8))
+            try handle.close()
+        }
 
         let column = ColumnState(cwd: "/tmp")
         let pty = try XCTUnwrap(column.pty)
@@ -274,8 +359,8 @@ final class SilentTurnTests: XCTestCase {
             _ = column.admitClaudeHook(event, foregroundProcess: front, snapshot: snapshot)
             pty.applyAgentHook(event, isUserFocused: false)
         }
-        @MainActor func silent() -> Bool {
-            column.noteTranscriptGrowth(foreground: front)
+        @MainActor func silent(waitThreshold: TimeInterval? = 600) -> Bool {
+            column.noteTranscriptGrowth(foreground: front, now: 5_000)
             if case .silent? = pty.agentStuckState(now: 9_999, waitThreshold: waitThreshold, foreground: front) { return true }
             return false
         }
@@ -287,20 +372,37 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertFalse(silent())
         clock.now = 1_300
         XCTAssertTrue(silent(), "20 awake minutes since the prompt")
-        XCTAssertNil(pty.agentStuckState(now: 9_999, waitThreshold: nil, foreground: front), "the setting off")
-        XCTAssertEqual(pty.takeAgentStuckAlert(now: 9_999, waitThreshold: waitThreshold, foreground: front), .silent(1_200))
-        XCTAssertNil(pty.takeAgentStuckAlert(now: 9_999, waitThreshold: waitThreshold, foreground: front), "once")
-        XCTAssertEqual(pty.agentBlockedWait(now: 9_999, waitThreshold: waitThreshold, foreground: front)?.reason, .silent(1_200))
+        XCTAssertTrue(silent(waitThreshold: nil), "the dialog check off: 20 minutes still")
+        XCTAssertFalse(silent(waitThreshold: 3_600), "an hour's setting waits an hour")
+        XCTAssertEqual(pty.takeAgentStuckAlert(now: 1_290, waitThreshold: waitThreshold, foreground: front), .silent(1_200))
+        XCTAssertNil(pty.takeAgentStuckAlert(now: 1_290, waitThreshold: waitThreshold, foreground: front), "once")
+        XCTAssertEqual(pty.agentBlockedWait(now: 1_290, waitThreshold: waitThreshold, foreground: front)?.since, 90, "its hook's time")
 
         // A line written: alive.
-        let handle = try FileHandle(forWritingTo: transcript)
-        try handle.seekToEnd()
-        try handle.write(contentsOf: Data("{\"type\":\"system\"}\n".utf8))
-        try handle.close()
+        try append(#"{"type":"system"}"#)
         clock.now = 1_400
         XCTAssertFalse(silent())
         clock.now = 2_600
         XCTAssertTrue(silent(), "nothing since that line")
+
+        // Claude's reply written, then its Stop lost: no proof of a
+        // request in flight, whatever the hooks believe.
+        try append(#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}"#)
+        clock.now = 2_700
+        XCTAssertFalse(silent())
+        clock.now = 9_000
+        XCTAssertFalse(silent(), "the transcript ends on Claude's words")
+
+        // Another claude in front, whose transcript Nirux can't measure: the
+        // last one's proof is forgotten.
+        try append(#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"again"}}"#)
+        clock.now = 9_100
+        XCTAssertFalse(silent())
+        clock.now = 10_400
+        XCTAssertTrue(silent())
+        let other = ForegroundProcess(instance: ProcessInstance(pid: 501, startedAt: 10), name: "claude", arguments: ["claude"])
+        column.noteTranscriptGrowth(foreground: other, now: 5_000)
+        XCTAssertNil(pty.agentStuckState(now: 9_999, waitThreshold: 600, foreground: other))
     }
 
     // MARK: - The row
@@ -324,6 +426,7 @@ final class SilentTurnTests: XCTestCase {
 
     func testTheRowSaysSilentInRedInsteadOfWorking() {
         let silent = column(.silent(duration: "4h45m", since: 100, interruptible: true))
+        XCTAssertEqual(silent.attentionSummary?.detail, AgentAttentionReason.silentAdvice, "the rail's tooltip says what to do")
         XCTAssertEqual(silent.attention, .error)
         XCTAssertEqual(SidebarColumnChip(silent).text.string.replacingOccurrences(of: "\u{FFFC}", with: ""), "silent 4h45m")
         XCTAssertEqual(SidebarColumnChip(silent).style, .error)
@@ -395,6 +498,11 @@ final class SilentTurnTests: XCTestCase {
         clock.now = 100
         hook(.sessionStart, at: Date().timeIntervalSince1970)
         hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
+        // Its transcript ends on the prompt: the proof a reply is awaited.
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        let line = Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go"}}"# + "\n").utf8)
+        try line.write(to: transcript)
+        pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count), now: Date().timeIntervalSince1970)
         clock.now = 1_299
         XCTAssertEqual(interrupt(since: 100), .notSilent, "not silent yet")
         clock.now = 1_300
@@ -462,6 +570,10 @@ final class SilentTurnTests: XCTestCase {
                 isUserFocused: false
             )
         }
+        let transcript = directory.appendingPathComponent("lead.jsonl")
+        let line = Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go"}}"# + "\n").utf8)
+        try line.write(to: transcript)
+        pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count), now: Date().timeIntervalSince1970)
         pty.sendRaw("/")
         clock.now = 1_300
         XCTAssertFalse(pty.canInterruptSilentTurn(snapshot: ProcessSnapshot()))

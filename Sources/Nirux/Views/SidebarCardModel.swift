@@ -143,7 +143,8 @@ extension SidebarStuckState {
         case .waiting(let reason, _): return reason.cleanDetailLine
         case .stoppedOnError(let kind, let detail, _, _):
             return AgentAttentionReason.apiError(kind: kind, detail: detail).cleanDetailLine
-        case .exitedMidTurn, .silent: return nil
+        case .exitedMidTurn: return nil
+        case .silent: return AgentAttentionReason.silentAdvice
         }
     }
 

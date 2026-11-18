@@ -53,50 +53,62 @@ struct AgentMidTurnExit: Equatable, Sendable {
     var alerted = false
 }
 
-/// How long a Claude agent has shown no sign of life, on the awake clock
-/// (`ProcessInfo.systemUptime`, stopped while the Mac sleeps): a night's
-/// sleep is no silence.
+/// A turn that waits on the model past the silence threshold with no sign
+/// of life, while its transcript ends waiting on Claude's reply: the
+/// request may hang.
 struct AgentSilence: Equatable, Sendable {
-    /// Awake seconds of the last sign of life (`AgentLifeSigns`).
+    /// When the silence began: on the awake clock (`ProcessInfo.systemUptime`,
+    /// stopped while the Mac sleeps), what tells one silence from the next;
+    /// and in epoch seconds, what the row and ⌘J say.
     let since: TimeInterval
-    let now: TimeInterval
-    /// Past it, a turn that waits on the model reads as silent.
-    let threshold: TimeInterval
-
-    var duration: TimeInterval { now - since }
+    let startedAt: TimeInterval
 
     /// Over 800 transcripts, the longest wait on a reply that came was 14
-    /// minutes of thinking: a turn reads as silent past 20 minutes at
-    /// least, whatever the stuck-agent setting says.
+    /// minutes of thinking: a turn reads as silent past 20 minutes at least.
     static let minimumThreshold: TimeInterval = 20 * 60
 
-    /// For the stuck-agent setting's dialog threshold: nil (off) stays off.
-    static func threshold(waitThreshold: TimeInterval?) -> TimeInterval? {
-        waitThreshold.map { max($0, minimumThreshold) }
+    /// The stuck-agent setting's dialog threshold, 20 minutes at least; the
+    /// setting off leaves the floor.
+    static func threshold(waitThreshold: TimeInterval?) -> TimeInterval {
+        max(waitThreshold ?? 0, minimumThreshold)
     }
 }
 
-/// A Claude agent's last sign of life, on the awake clock: a hook event, or
-/// its transcript growing. Not terminal output: its spinner redraws while
-/// a request hangs.
+/// A Claude agent's last sign of life: a hook event, or its transcript
+/// growing. Not terminal output: its spinner redraws while a request hangs.
 struct AgentLifeSigns: Equatable, Sendable {
+    /// On the awake clock (the threshold's) and in epoch seconds.
     private(set) var lastAt: TimeInterval?
-    private var transcript: Transcript?
+    private(set) var lastWallAt: TimeInterval?
+    private(set) var transcript: Transcript?
 
-    private struct Transcript: Equatable, Sendable {
+    struct Transcript: Equatable, Sendable {
         let path: String
         let size: Int64
+        /// Whether its end waits on Claude's reply
+        /// (`TranscriptLastMessage.awaitsReply`), once read at this size.
+        var awaitsReply: Bool?
     }
 
-    mutating func note(at awake: TimeInterval) {
+    mutating func note(awake: TimeInterval, wall: TimeInterval) {
         lastAt = awake
+        lastWallAt = wall
     }
 
     /// The transcript at `path` measures `size` now: a change since the
     /// last look at it is a sign. The first look only takes its measure.
-    mutating func noteTranscript(path: String, size: Int64, at awake: TimeInterval) {
-        if let transcript, transcript.path == path, transcript.size != size { lastAt = awake }
+    mutating func noteTranscript(path: String, size: Int64, awake: TimeInterval, wall: TimeInterval) {
+        guard transcript?.path != path || transcript?.size != size else { return }
+        if transcript?.path == path { note(awake: awake, wall: wall) }
         transcript = Transcript(path: path, size: size)
+    }
+
+    mutating func noteAwaitsReply(_ awaits: Bool) {
+        transcript?.awaitsReply = awaits
+    }
+
+    mutating func forgetTranscript() {
+        transcript = nil
     }
 }
 
