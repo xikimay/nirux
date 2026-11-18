@@ -96,7 +96,6 @@ final class ThemeGuardTests: XCTestCase {
     }
 
     private static let literalCounts: [String: Int] = [
-        "Model/WorkspaceState.swift": 1,
         "Views/CommandPalette+URLMode.swift": 4,
         "Views/CommandPalette.swift": 3,
         "Views/EditorSearchPanel.swift": 4,
@@ -106,7 +105,6 @@ final class ThemeGuardTests: XCTestCase {
         "Views/LocalServerChipView.swift": 3,
         "Views/NewSpacePanel.swift": 2,
         "Views/NewTaskPanel.swift": 1,
-        "Views/NiruxShellView+SidebarGit.swift": 1,
         "Views/RaycastPanel.swift": 2,
         "Views/SidebarShortcutHintView.swift": 4,
         "Views/SidebarView+Drag.swift": 5,
@@ -143,7 +141,6 @@ final class ThemeGuardTests: XCTestCase {
         "Views/KeepAwakeIndicator.swift": 2,
         "Views/LocalServerChipView.swift": 2,
         "Views/MergeQueueConfirmationPanel.swift": 5,
-        "Views/NiruxShellView+Workspaces.swift": 1,
         "Views/OnboardingChecklistView.swift": 16,
         "Views/ProjectMemoryPanel.swift": 2,
         "Views/RaycastPanel.swift": 1,

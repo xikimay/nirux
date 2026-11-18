@@ -321,9 +321,14 @@ extension NiruxShellView {
         if activeWorkspace !== before { announceWorkspaceSwitch() }
     }
 
-    func switchToWorkspace(_ index: Int, editorTakesKeyboard: Bool = true) {
+    /// Shows workspace `index`; with `column`, that column focused, set as
+    /// the workspace is chosen, in the same move.
+    func switchToWorkspace(_ index: Int, column: Int? = nil, editorTakesKeyboard: Bool = true) {
         let space = activeProfileID
         guard workspaceStore.selectWorkspace(at: index) else { return }
+        if let column, let workspace = activeWorkspace, workspace.columns.indices.contains(column) {
+            workspace.focusedIndex = column
+        }
         // Into another space: its workspace shows at once, as when a close
         // changes the space, not slid in from the last space's place.
         refreshAfterWorkspaceSelection(animated: activeProfileID == space, editorTakesKeyboard: editorTakesKeyboard)
@@ -335,10 +340,7 @@ extension NiruxShellView {
     /// a visual no-op and the click would otherwise feel dead.
     func focusWorkspace(id: String, column columnIndex: Int? = nil, editorTakesKeyboard: Bool = true) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
-        switchToWorkspace(index, editorTakesKeyboard: editorTakesKeyboard)
-        if let columnIndex, workspaces.indices.contains(index) {
-            focusColumnByIndex(columnIndex)
-        }
+        switchToWorkspace(index, column: columnIndex, editorTakesKeyboard: editorTakesKeyboard)
         flashColumnBorder(workspaceIndex: index, columnIndex: columnIndex)
     }
 
@@ -680,17 +682,34 @@ extension NiruxShellView {
         // Animated path: a vertical slide over the direct frame change.
         slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
-        // Focus border and header icon. The agents' lights lie over the
-        // columns, in views of their own (NiruxShellView+AgentLights).
+        // The focus moving within the workspace that was on screen lifts
+        // its cards over a moment; one arriving or leaving changes at once,
+        // under its slide.
+        let lifting = agentLightsMayMove ? leaving?.workspace : nil
+        for workspace in workspaces {
+            applyCardEdges(workspace, animated: workspace === lifting && workspace === activeWorkspace)
+        }
+    }
+
+    /// Each card's edge and height: the focused column of the workspace on
+    /// screen in the accent and a level higher; a hairline on the others;
+    /// and the header icon. `animated`: the shadows pass to their level
+    /// over a moment. The agents' lights lie over the columns, in views of
+    /// their own (NiruxShellView+AgentLights).
+    /// A card whose focus didn't change is left as it is: every relayout
+    /// passes here for every workspace.
+    func applyCardEdges(_ workspace: WorkspaceState, animated: Bool) {
+        let isOnScreen = workspace === activeWorkspace
         let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
-        for (wsIndex, workspace) in workspaces.enumerated() {
-            for (colIndex, col) in workspace.columns.enumerated() {
-                let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
-                col.setHeaderFocused(isFocus)
-                col.view.layer?.cornerRadius = isFocus ? 6 : 0
-                col.view.layer?.borderWidth = isFocus ? 2 : 0
-                col.view.layer?.borderColor = isFocus ? accent : nil
-            }
+        for (index, col) in workspace.columns.enumerated() {
+            guard let layer = col.view.layer else { continue }
+            let isFocus = isOnScreen && index == workspace.focusedIndex
+            col.setHeaderFocused(isFocus)
+            let width = isFocus ? EdgeGlowView.focusRingWidth : 1
+            let color = isFocus ? accent : Theme.Color.line.cgColor
+            if layer.borderWidth != width { layer.borderWidth = width }
+            if layer.borderColor != color { layer.borderColor = color }
+            col.shadow?.show(isFocus ? .focusedColumn : .column, animated: animated)
         }
     }
 }

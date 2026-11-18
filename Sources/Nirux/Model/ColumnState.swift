@@ -127,6 +127,11 @@ final class ColumnState {
     /// The agent's state as light, laid over the column in its workspace's
     /// strip once it first shows (`WorkspaceState.light(for:)`).
     var light: EdgeGlowView?
+    /// The column's shadow, under every column of its strip
+    /// (`WorkspaceState.shadow(for:)`).
+    var shadow: ColumnShadowView?
+    /// Its card fades in (`NiruxShellView.addColumn`).
+    var isArriving = false
 
     /// ⌘F find bar, created on first use, and the terminal search it
     /// drives; a browser column's bar drives its `pageFind`
@@ -205,6 +210,7 @@ final class ColumnState {
             agentExitOverlay?.frame = terminal.frame
             deferredAgentOverlay?.frame = terminal.frame
         }
+        roundTerminal()
         layoutFindBar()
     }
 
@@ -296,6 +302,9 @@ final class ColumnState {
         if wanted {
             let frost = NSVisualEffectView()
             MainWindowContent.makeDesktopFrost(frost, in: view.bounds)
+            // Blending behind the window ignores the column's rounded
+            // clip: the mask holds the corners.
+            frost.maskImage = Self.frostMask
             view.addSubview(frost, positioned: .below, relativeTo: nil)
             terminalFrost = frost
             view.layer?.backgroundColor = NSColor.clear.cgColor
@@ -304,12 +313,31 @@ final class ColumnState {
             terminalFrost = nil
             view.layer?.backgroundColor = Theme.Color.canvas.cgColor
         }
+        shadow?.isCardClear = isCardClear
     }
+
+    /// The desktop's blur shows through the card (`terminalFrost`).
+    var isCardClear: Bool { terminalFrost != nil }
+
+    private static let frostMask = GlassView.mask(
+        radius: Theme.Radius.column, in: CGSize(width: CGFloat.infinity, height: .infinity), curve: .circular
+    )
 
     /// The terminal's surface came or went.
     func surfaceChanged(attached: Bool) {
         hasSurface = attached
         updateTerminalFrost()
+        roundTerminal()
+    }
+
+    /// The card's bottom corners on the terminal's own layer, rounded as
+    /// the compositor draws Ghostty's surface: nothing of it lies in the
+    /// corners its column clips. Ghostty swaps the layer for its own once
+    /// the surface comes.
+    private func roundTerminal() {
+        guard let layer = terminalView?.layer else { return }
+        layer.roundCardCorners(top: false)
+        layer.masksToBounds = true
     }
 
     /// A column's view, opaque under its content in the canvas's colour,

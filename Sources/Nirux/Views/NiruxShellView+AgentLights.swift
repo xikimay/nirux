@@ -98,6 +98,8 @@ extension NiruxShellView {
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
             for (index, column) in workspace.columns.enumerated() {
+                // Stillness wins over a lift on its way.
+                if !moves { column.shadow?.settle() }
                 let isInView = isOnScreen && workspace.showsColumn(at: index)
                 column.header?.statusPill.animates = moves && isInView
                 let light = column.isClosing ? nil : plan.columns[column.id]
