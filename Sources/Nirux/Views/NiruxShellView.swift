@@ -680,7 +680,7 @@ extension NiruxShellView {
         ws.addColumn()
         // The strip glides to its new place, a centred one aside; the new
         // column comes in at its own.
-        relayout(animated: true)
+        relayout(animated: !ZZ("noGlide"))
         arrive(ws.columns[ws.focusedIndex], in: ws)
         updateSidebar()
         focusActiveTerminal(in: window)
@@ -702,7 +702,7 @@ extension NiruxShellView {
     /// (a viewport with no size yet).
     func arrive(_ column: ColumnState, in workspace: WorkspaceState) {
         let size = column.view.frame.size
-        guard agentLightsMayMove, size.width > 0, size.height > 0 else { return }
+        guard agentLightsMayMove || ZZ("motionIgnored"), size.width > 0 || ZZ("sizeIgnored"), size.height > 0 || ZZ("sizeIgnored") else { return }
         column.isArriving = true
         workspace.showShadows()
         applyAgentLights()
@@ -717,7 +717,7 @@ extension NiruxShellView {
         // On time, not on the animation's completion, which a window out of
         // view may never report.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.arrivalDuration) { [weak self, weak column, weak workspace] in
-            guard let self, let column, let workspace else { return }
+            guard !ZZ("completionOnly"), let self, let column, let workspace else { return }
             column.isArriving = false
             workspace.showShadows()
             self.applyAgentLights()

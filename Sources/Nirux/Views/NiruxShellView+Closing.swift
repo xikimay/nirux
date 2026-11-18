@@ -57,7 +57,7 @@ extension NiruxShellView {
         let landsOnNeighbour = workspace.columns[safe: workspace.focusedIndex] === closingColumn
         workspace.closeColumn(at: closingIndex)
         // The others glide into place, a lone one back to the middle.
-        relayout(animated: true)
+        relayout(animated: !ZZ("noGlideBack"))
         updateSidebar()
         focusActiveTerminal(in: window, editorTakesKeyboard: landsOnNeighbour && activeWorkspace === workspace)
     }

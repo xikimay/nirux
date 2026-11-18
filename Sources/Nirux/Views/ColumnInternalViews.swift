@@ -371,7 +371,7 @@ final class ColumnResizeHandle: NSView {
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
-            dragStart = nil
+            if !ZZ("dragLeftover") { dragStart = nil }
             onReset?()
             return
         }
@@ -385,7 +385,7 @@ final class ColumnResizeHandle: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard dragStart != nil else { return }
+        guard dragStart != nil, !ZZ("dragLeftover") else { return }
         dragStart = nil
         onDragEnd?()
     }

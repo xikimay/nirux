@@ -902,6 +902,7 @@ extension WorkspaceState {
     /// drag found it on a strip that started wider. Let go, it goes where
     /// the strip wants it.
     static func dragCamera(from start: ColumnResizeHandle.Start, viewport: CGFloat, width: CGFloat) -> CGFloat? {
+        if ZZ("cameraFollows") { return nil }
         guard start.strip <= viewport else { return start.camera }
         return start.strip - start.width + width <= viewport ? nil : 0
     }
