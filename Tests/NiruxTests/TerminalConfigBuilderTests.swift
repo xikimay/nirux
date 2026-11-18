@@ -1,3 +1,4 @@
+import AppKit
 import GhosttyTerminal
 import XCTest
 @testable import Nirux
@@ -40,16 +41,23 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertEqual(lines.last, "term = xterm-256color")
     }
 
-    /// The terminal lies in its column as the window's own surfaces do.
-    func testNiruxsBackgroundIsTheThemesBase() throws {
-        let line = try XCTUnwrap(Builder.niruxColors.first { $0.hasPrefix("background = ") })
-        let hex = try XCTUnwrap(UInt32(line.dropFirst("background = ".count), radix: 16))
-        let base = try XCTUnwrap(Theme.Color.base.usingColorSpace(.sRGB))
-        XCTAssertEqual(CGFloat((hex >> 16) & 0xFF) / 255, base.redComponent, accuracy: 0.002)
-        XCTAssertEqual(CGFloat((hex >> 8) & 0xFF) / 255, base.greenComponent, accuracy: 0.002)
-        XCTAssertEqual(CGFloat(hex & 0xFF) / 255, base.blueComponent, accuracy: 0.002)
+    /// The terminal lies in its column as the window's own surfaces do,
+    /// in the window's blue and white.
+    func testNiruxsColorsComeFromTheTheme() {
+        XCTAssertTrue(Builder.niruxColors.contains("background = 1B1B23"), "Theme.Color.base")
+        XCTAssertTrue(Builder.niruxColors.contains("palette = 4=#78A3F7"), "Theme.Color.accent")
+        XCTAssertTrue(Builder.niruxColors.contains("palette = 15=#ECECF1"), "Theme.Color.textPrimary")
         XCTAssertEqual(Builder.niruxColors.filter { $0.hasPrefix("palette = ") }.count, 16)
-        XCTAssertFalse(Builder.niruxColors.contains { $0.uppercased().contains("F5A623") }, "amber says an agent waits")
+    }
+
+    /// Yellow keeps away from the amber that says an agent waits.
+    func testNiruxsYellowIsNoAmber() throws {
+        let amber = Theme.Color.waiting.hueComponent * 360
+        for index in [3, 11] {
+            let line = try XCTUnwrap(Builder.niruxColors.first { $0.hasPrefix("palette = \(index)=#") })
+            let color = try XCTUnwrap(NSColor(hex: UInt32(line.suffix(6), radix: 16) ?? 0).usingColorSpace(.sRGB))
+            XCTAssertGreaterThanOrEqual(color.hueComponent * 360 - amber, 10, line)
+        }
     }
 
     // MARK: - Honored keys

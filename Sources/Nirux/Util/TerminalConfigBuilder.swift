@@ -32,7 +32,6 @@ enum TerminalConfigBuilder {
         "bold-is-bright", "cursor-invert-fg-bg", "selection-invert-fg-bg"
     ]
 
-    /// Nirux's look when the Ghostty config doesn't override it:
     /// What a terminal draws with where the user's Ghostty config says
     /// nothing: a blinking block cursor, 13 pt in plain strokes. Written out
     /// so a library update can't silently change them.
@@ -47,15 +46,24 @@ enum TerminalConfigBuilder {
     /// Nirux's own colours, on the window's neutrals: the background is
     /// `Theme.Color.base`, the text a step below `Theme.Color.textPrimary`,
     /// the selection the accent's tint, and the sixteen colours the states'
-    /// hues, calmer (no amber: it says an agent waits).
+    /// hues, calmer. Yellow leans to lemon, away from the amber that says an
+    /// agent waits; black is a raised surface, so that a bar painted with it
+    /// shows.
     static let niruxColors = [
-        "background = 1B1B23",
+        "background = \(hex(Theme.Color.base))",
         "foreground = D6D6DE",
         "cursor-color = D6D6DE",
         "selection-background = 2E3A57"
-    ] + ["#23232D", "#E5646A", "#5FBF8E", "#D9B76A", "#78A3F7", "#B79CFA", "#6FC3DF", "#C8C8D2",
-         "#747485", "#F0787D", "#74D6A1", "#E8C987", "#93B6F9", "#C8B1FB", "#8AD3EA", "#ECECF1"]
-        .enumerated().map { "palette = \($0.offset)=\($0.element)" }
+    ] + ["2E2E3A", "E5646A", "5FBF8E", "D3C46E", hex(Theme.Color.accent), "B79CFA", "6FC3DF", "C8C8D2",
+         "747485", "F0787D", "74D6A1", "E3D68F", "93B6F9", "C8B1FB", "8AD3EA", hex(Theme.Color.textPrimary)]
+        .enumerated().map { "palette = \($0.offset)=#\($0.element)" }
+
+    /// `color` as Ghostty reads it: six hex digits, in sRGB.
+    static func hex(_ color: NSColor) -> String {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent].map { Int(($0 * 255).rounded()) }
+        return channels.map { String(format: "%02X", $0) }.joined()
+    }
     /// Points between the cells and a terminal's edges: air around the text,
     /// which a column's light ring (`EdgeGlowView.ringWidth`) and its rounded
     /// corners lie in without covering a cell.
