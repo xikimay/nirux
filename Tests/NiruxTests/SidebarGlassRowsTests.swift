@@ -357,13 +357,14 @@ final class SidebarGlassRowsTests: XCTestCase {
         let handle = try XCTUnwrap(agentView.superview?.subviews.compactMap { $0 as? ColumnResizeHandle }.first {
             $0.frame.minX <= agentView.frame.maxX && agentView.frame.maxX <= $0.frame.maxX
         }, "the handle on the agent's right edge")
-        handle.onDrag?(WorkspaceState.maxWidthFraction)
+        let start = try XCTUnwrap(handle.onDragStart?())
+        handle.onDrag?(start, 10_000)
         XCTAssertFalse(shell.sidebar.navigation.boardShown, "pushed out of view")
         XCTAssertFalse(shell.sidebar.iconRail.boardButton.isSelected)
         XCTAssertFalse(shell.isMetadataRefreshScheduled, "no process-table scan for one row")
 
         // Closing, it no longer counts.
-        handle.onDrag?(ColumnWidth.half.fraction)
+        handle.onDrag?(start, 0)
         XCTAssertTrue(shell.sidebar.navigation.boardShown)
         let board = try XCTUnwrap(workspace.columns.first { $0.projectBoard != nil })
         board.isClosing = true
