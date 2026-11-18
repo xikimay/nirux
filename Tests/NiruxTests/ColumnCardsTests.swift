@@ -214,7 +214,7 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertEqual(shadows.map(\.isLifting), [true, true], "one rises, the other settles")
             XCTAssertEqual(shadows[0].liftStartOpacity, Theme.Elevation.Level.column.opacity)
 
-            // Back at once, mid-way: from where it shows, never from its new level.
+            // Back at once: from where it was, read before its new level is set.
             workspace.focusedIndex = 1
             shell.relayout(animated: false)
             XCTAssertEqual(shadows[0].liftStartOpacity, Theme.Elevation.Level.focusedColumn.opacity)
@@ -245,6 +245,15 @@ final class ColumnCardsTests: XCTestCase {
             let shadow = try XCTUnwrap(arrived.columns[safe: arrived.focusedIndex]?.shadow)
             XCTAssertEqual(shadow.level, .focusedColumn)
             XCTAssertFalse(shadow.isLifting)
+
+            // Reached through one of its columns (a notification, ⌘P): the same.
+            arrived.addColumn()
+            arrived.focusedIndex = 0
+            shell.switchToWorkspace(0)
+            shell.focusWorkspace(id: arrived.id, column: 1)
+            let target = try XCTUnwrap(arrived.columns[safe: 1]?.shadow)
+            XCTAssertEqual(target.level, .focusedColumn)
+            XCTAssertFalse(target.isLifting, "it arrives lifted")
         }
     }
 
