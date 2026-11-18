@@ -24,7 +24,7 @@ Only appearance keys:
 
 Everything else is ignored, including keybinds, window and macOS options, padding, opacity, and shell or command settings. Nirux handles input, layout and shells itself.
 
-What you don't set keeps Nirux's defaults: 14 pt, a blinking block cursor and the Afterglow palette. If you set your own `background` or `foreground`, Afterglow's cursor and selection colors are dropped too, since they may not show against yours.
+What you don't set keeps Nirux's defaults: 13 pt in plain strokes, a blinking block cursor, and Nirux's own colors on the window's dark neutrals. If you set your own `background` or `foreground`, Nirux's cursor and selection colors are dropped too, since they may not show against yours. Nirux keeps at least 10 pt of padding around the text.
 
 ## Themes
 
