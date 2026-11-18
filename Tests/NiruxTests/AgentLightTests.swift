@@ -184,6 +184,10 @@ final class AgentLightTests: XCTestCase {
         let inside = light.bounds.insetBy(dx: EdgeGlowView.focusRingWidth, dy: EdgeGlowView.focusRingWidth)
         XCTAssertEqual(light.ringFrame, inside)
         XCTAssertTrue(light.glowFrames.allSatisfy { inside.contains($0) }, "nothing over the focus ring")
+        XCTAssertEqual(
+            light.glowCornerRadii, Array(repeating: Theme.Radius.column - EdgeGlowView.focusRingWidth, count: 4),
+            "the glows' ends follow the corners, inside the focus ring"
+        )
 
         light.show(.working, moving: false)
         XCTAssertEqual(light.ringFrame, light.bounds, "focus moved on")

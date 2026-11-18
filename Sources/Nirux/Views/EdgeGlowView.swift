@@ -240,7 +240,26 @@ final class EdgeGlowView: NSView {
             ring.borderWidth = isSoft ? 1 : Self.ringWidth
             ring.cornerRadius = Self.cornerRadius - inset
             sweepHost.frame = bounds
-            for glow in glows { glow.layer.frame = strip(glow.side, depth: depth, inset: inset) }
+            for glow in glows {
+                glow.layer.frame = strip(glow.side, depth: depth, inset: inset)
+                guard edge == .around else { continue }
+                // Its two ends follow the column's corners, as the ring
+                // does: nothing of it lies outside the card.
+                glow.layer.cornerRadius = Theme.Radius.column - inset
+                glow.layer.maskedCorners = Self.corners(of: glow.side)
+                glow.layer.masksToBounds = true
+            }
+        }
+    }
+
+    /// The corners of the column a glow along `side` runs into, in the
+    /// layer's own (unflipped) coordinates.
+    private static func corners(of side: Edge) -> CACornerMask {
+        switch side {
+        case .left: return [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        case .right: return [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        case .top: return [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        case .bottom, .around: return [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         }
     }
 
@@ -259,6 +278,8 @@ final class EdgeGlowView: NSView {
     /// Where the light is drawn, for tests: the ring, and each glow.
     var ringFrame: NSRect { ring.frame }
     var glowFrames: [NSRect] { glows.map(\.layer.frame) }
+    /// The radius each glow's ends are clipped to (0: not clipped).
+    var glowCornerRadii: [CGFloat] { glows.map { $0.layer.masksToBounds ? $0.layer.cornerRadius : 0 } }
     /// How it is drawn, for tests: the repeating animations a moving light
     /// runs, the level a steady light shows at, and whether its layers
     /// blend as one group.

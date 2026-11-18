@@ -105,7 +105,6 @@ final class ThemeGuardTests: XCTestCase {
         "Views/LocalServerChipView.swift": 3,
         "Views/NewSpacePanel.swift": 2,
         "Views/NewTaskPanel.swift": 1,
-        "Views/NiruxShellView+SidebarGit.swift": 1,
         "Views/RaycastPanel.swift": 2,
         "Views/SidebarShortcutHintView.swift": 4,
         "Views/SidebarView+Drag.swift": 5,
