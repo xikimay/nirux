@@ -131,6 +131,29 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertNil(shadow.hitTest(NSPoint(x: 10, y: 10)), "decoration: clicks go to what is under it")
     }
 
+    /// A card that lets the desktop show through takes the shape out of its
+    /// shadow, which would darken it; an opaque one hides it, unmasked.
+    func testATranslucentCardsShadowFallsOnlyAroundIt() throws {
+        let workspace = workspace(columns: 1)
+        let column = try XCTUnwrap(workspace.columns.first)
+        // Translucent before its first layout: its shadow is made cut out.
+        column.surfaceChanged(attached: true)
+        column.showTerminalOpacity(0.8, onScreen: true)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let shadow = try XCTUnwrap(column.shadow)
+        let cutOut = try XCTUnwrap(shadow.cutOutPath)
+        let card = shadow.bounds
+        XCTAssertFalse(cutOut.contains(CGPoint(x: card.midX, y: card.midY), using: .evenOdd), "nothing under the card")
+        XCTAssertFalse(cutOut.contains(CGPoint(x: card.minX + 1, y: card.minY + Theme.Radius.column), using: .evenOdd))
+        XCTAssertTrue(cutOut.contains(CGPoint(x: card.midX, y: card.minY - 2), using: .evenOdd), "the air below")
+        XCTAssertTrue(cutOut.contains(CGPoint(x: card.minX + 1, y: card.minY + 1), using: .evenOdd), "the air in the corner")
+
+        column.showTerminalOpacity(1, onScreen: true)
+        XCTAssertNil(shadow.cutOutPath, "opaque again: unmasked")
+        column.showTerminalOpacity(0.8, onScreen: true)
+        XCTAssertNotNil(shadow.cutOutPath)
+    }
+
     /// A translucent terminal's frost blends behind the window, which
     /// ignores the column's rounded clip: its mask holds the corners.
     func testATranslucentTerminalsFrostKeepsTheCardsCorners() throws {
@@ -157,27 +180,42 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertEqual(layers[0].borderColor, Theme.Color.line.cgColor)
             XCTAssertEqual(layers[1].borderColor, Theme.Color.accent.withAlphaComponent(0.7).cgColor)
 
-            // Dragging the first column's edge focuses it, without a relayout.
+            // Grabbing the first column's edge focuses it as a click would:
+            // the edge and the keyboard go together, before any drag.
             let strip = try strip(of: workspace)
             let handle = try XCTUnwrap(strip.subviews.compactMap { $0 as? ColumnResizeHandle }.first)
             _ = handle.onDragStart?()
+            XCTAssertEqual(workspace.focusedIndex, 0)
+            XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
+            XCTAssertTrue(shell.window?.firstResponder === workspace.columns[0].terminalView, "the keyboard")
             handle.onDrag?(0.45)
             XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
         }
     }
 
     /// A card's shadow hides while the card comes or goes: the fading card
-    /// would show it.
+    /// would show it. The layout decides, even one that comes late.
     func testAShadowHidesWhileItsCardComesOrGoes() throws {
         try withShell { shell in
             let workspace = try XCTUnwrap(shell.activeWorkspace)
+            // No room to lay the new card out as it comes: its shadow is
+            // made by a later layout, mid-fade.
+            shell.setFrameSize(.zero)
             shell.addColumn()
             let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
             XCTAssertEqual(added.shadow?.isHidden, true, "the new card fades in")
+            shell.setFrameSize(NSSize(width: 1200, height: 800))
+            shell.relayout(animated: false)
+            XCTAssertEqual(added.shadow?.isHidden, true, "the new card fades in")
+            added.isArriving = false
+            workspace.showShadows()
+            XCTAssertEqual(added.shadow?.isHidden, false, "in")
 
             shell.closeActiveColumn()
             XCTAssertTrue(added.isClosing)
             XCTAssertEqual(added.shadow?.isHidden, true, "the closing card fades out")
+            shell.relayout(animated: false)
+            XCTAssertEqual(added.shadow?.isHidden, true, "still going")
         }
     }
 

@@ -681,13 +681,13 @@ extension NiruxShellView {
 
         // Start new column invisible
         let newCol = ws.columns[ws.focusedIndex]
+        newCol.isArriving = true
         newCol.view.alphaValue = 0
         newCol.view.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
 
         // Layout at final positions, then animate the new column in; its
-        // shadow, which the fading card would show, comes once it is in.
+        // shadow comes once it is in.
         relayout(animated: false)
-        newCol.shadow?.isHidden = true
 
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.25
@@ -695,8 +695,8 @@ extension NiruxShellView {
             newCol.view.animator().alphaValue = 1
             newCol.view.layer?.setAffineTransform(.identity)
         }, completionHandler: {
-            // Unless it is already closing again.
-            newCol.shadow?.isHidden = newCol.isClosing
+            newCol.isArriving = false
+            ws.showShadows()
         })
 
         // Animate strip to show the new column

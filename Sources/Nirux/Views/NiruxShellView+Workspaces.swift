@@ -685,8 +685,11 @@ extension NiruxShellView {
         // Animated path: a vertical slide over the direct frame change.
         slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
-        // Whatever wasn't laid out; what was is done (`onColumnsLaidOut`).
-        for workspace in workspaces { applyCardEdges(workspace, animated: false) }
+        // The others aren't laid out (`onColumnsLaidOut`).
+        let visible = Set(visibleWorkspaceIndices)
+        for (index, workspace) in workspaces.enumerated() where !visible.contains(index) {
+            applyCardEdges(workspace, animated: false)
+        }
     }
 
     /// Each card's edge and height: the focused column of the workspace on

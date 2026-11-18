@@ -67,6 +67,12 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertEqual(Builder.hex(Theme.Color.accent), "78A3F7")
     }
 
+    /// No Theme colour the builder writes falls back to black: each has an
+    /// sRGB reading.
+    func testEveryColourTheBuilderWritesReadsInSRGB() {
+        XCTAssertFalse(Builder.niruxColors.contains { $0.hasSuffix("000000") }, Builder.niruxColors.joined(separator: "\n"))
+    }
+
     /// Yellow keeps away from the amber that says an agent waits.
     func testNiruxsYellowIsNoAmber() throws {
         let amber = Theme.Color.waiting.hueComponent * 360

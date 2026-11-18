@@ -3,10 +3,10 @@ import AppKit
 /// A column's shadow (`Theme.Elevation.Level.column`, a level higher for
 /// the focus), under it in its workspace's strip: the column clips its
 /// content to its corners, which would cut a shadow of its own off. Cast
-/// along a path and never masked, so that it costs no offscreen pass while
-/// terminals redraw over it; the opaque card hides its inside, and it hides
-/// while its column comes or goes. Decoration: it takes no click and no
-/// VoiceOver focus.
+/// along a path, and unmasked under an opaque card, which hides its inside,
+/// so that it costs no offscreen pass while terminals redraw over it; cut
+/// out of a card that lets it show through. Decoration: it takes no click
+/// and no VoiceOver focus.
 final class ColumnShadowView: NSView {
     /// How long the shadow takes to pass to its new level as the focus
     /// moves.
@@ -16,6 +16,12 @@ final class ColumnShadowView: NSView {
     private let shadowLayer = CALayer()
     /// How high the card lies.
     private(set) var level = Theme.Elevation.Level.column
+    private let cutOut = CAShapeLayer()
+    /// The card lets what lies under it show through (a translucent
+    /// terminal): the shadow then falls only around it.
+    var isCardClear = false {
+        didSet { if isCardClear != oldValue { updateShadow() } }
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -62,9 +68,11 @@ final class ColumnShadowView: NSView {
         shadowLayer.removeAnimation(forKey: Self.liftKey)
     }
 
-    /// The shape the shadow is cast along, and how (for tests).
+    /// The shape the shadow is cast along, how, and where it may fall
+    /// (nil: everywhere), for tests.
     var shadowPath: CGPath? { shadowLayer.shadowPath }
     var shadowOpacity: Float { shadowLayer.shadowOpacity }
+    var cutOutPath: CGPath? { shadowLayer.mask == nil ? nil : cutOut.path }
     /// The shadow is passing to a new level, from this opacity.
     var isLifting: Bool { shadowLayer.animation(forKey: Self.liftKey) != nil }
     var liftStartOpacity: Float? {
@@ -86,8 +94,8 @@ final class ColumnShadowView: NSView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         shadowLayer.frame = bounds
-        let radius = max(0, min(Theme.Radius.column, bounds.width / 2, bounds.height / 2))
-        let shape = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        Theme.Elevation.apply(level, to: shadowLayer, path: shape)
+        Theme.Elevation.apply(
+            level, to: shadowLayer, roundedRect: bounds, radius: Theme.Radius.column, cutOut: isCardClear ? cutOut : nil
+        )
     }
 }

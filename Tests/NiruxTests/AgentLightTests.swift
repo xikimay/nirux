@@ -170,6 +170,18 @@ final class AgentLightTests: XCTestCase {
         XCTAssertTrue(light.isMoving)
     }
 
+    /// How far each glow of a column's light reaches over the text, past the
+    /// terminal's padding, from the edge it lies along.
+    private func overText(_ light: EdgeGlowView) -> [CGFloat] {
+        let bounds = light.bounds
+        return light.glowFrames.map { glow in
+            let reach = glow.width < glow.height
+                ? (glow.midX < bounds.midX ? glow.maxX - bounds.minX : bounds.maxX - glow.minX)
+                : (glow.midY < bounds.midY ? glow.maxY - bounds.minY : bounds.maxY - glow.minY)
+            return reach - CGFloat(TerminalConfigBuilder.padding)
+        }
+    }
+
     /// The ring lies on the column's edge, where the terminal's padding
     /// is; on the focused column it lies inside the focus ring, which
     /// keeps its own color. The glow never reaches far over the cells.
@@ -179,8 +191,10 @@ final class AgentLightTests: XCTestCase {
         light.show(.working, moving: false)
         XCTAssertEqual(light.ringFrame, light.bounds)
         XCTAssertEqual(Set(light.glowFrames.map { min($0.width, $0.height) }), [EdgeGlowView.columnGlowDepth])
+        XCTAssertEqual(Set(overText(light)), [10], "past the terminal's padding, 10 pt over the text")
 
         light.show(.working, moving: false, soft: true)
+        XCTAssertEqual(Set(overText(light)), [12], "inside the focus ring: 2 pt further")
         let inside = light.bounds.insetBy(dx: EdgeGlowView.focusRingWidth, dy: EdgeGlowView.focusRingWidth)
         XCTAssertEqual(light.ringFrame, inside)
         XCTAssertTrue(light.glowFrames.allSatisfy { inside.contains($0) }, "nothing over the focus ring")

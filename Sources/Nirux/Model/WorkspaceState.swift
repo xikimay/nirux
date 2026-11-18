@@ -205,6 +205,9 @@ final class WorkspaceState {
     /// The columns were laid out (`layoutAndScroll`): which ones show may
     /// have changed.
     var onColumnsLaidOut: (() -> Void)?
+    /// A resize handle asks for its column's focus: the shell's one path
+    /// moves the edge, the light and the keyboard together.
+    var onColumnFocusRequested: ((Int) -> Void)?
     var onGitContextChanged: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
@@ -856,9 +859,8 @@ extension WorkspaceState {
             guard let self, let handle,
                   let index = self.resizeHandles.firstIndex(of: handle),
                   self.columns.indices.contains(index) else { return 0.5 }
-            // Dragging a column's edge focuses it (camera + sidebar follow).
-            self.focusedIndex = index
-            self.onMetadataChanged?()
+            // Grabbing a column's edge focuses it, as a click would.
+            self.onColumnFocusRequested?(index)
             return self.columns[index].widthFraction
         }
         handle.onDrag = { [weak self, weak handle] fraction in
@@ -1049,6 +1051,7 @@ extension WorkspaceState {
 
             xOffset += widths[index] + gap
         }
+        showShadows()
         // Handles must stay above every column view, whichever order the
         // columns were inserted in.
         for handle in resizeHandles { stripView.addSubview(handle) }
@@ -1093,9 +1096,17 @@ extension WorkspaceState {
     func shadow(for column: ColumnState) -> ColumnShadowView {
         if let shadow = column.shadow { return shadow }
         let shadow = ColumnShadowView(frame: column.view.frame)
+        shadow.isCardClear = column.isCardClear
         stripView.addSubview(shadow, positioned: .below, relativeTo: nil)
         column.shadow = shadow
         return shadow
+    }
+
+    /// Each column's shadow, hidden while its card comes or goes: the fading
+    /// card would show it. The fade's alpha can't tell: an animator sets
+    /// the final one at once.
+    func showShadows() {
+        for column in columns { column.shadow?.isHidden = column.isArriving || column.isClosing }
     }
 
     /// The column's light (see `EdgeGlowView`), made on first use. It lies

@@ -125,6 +125,8 @@ final class ColumnState {
     /// The column's shadow, under every column of its strip
     /// (`WorkspaceState.shadow(for:)`).
     var shadow: ColumnShadowView?
+    /// Its card fades in (`NiruxShellView.addColumn`).
+    var isArriving = false
 
     /// ⌘F find bar, created on first use, and the terminal search it
     /// drives; a browser column's bar drives its `pageFind`
@@ -298,9 +300,7 @@ final class ColumnState {
             MainWindowContent.makeDesktopFrost(frost, in: view.bounds)
             // Blending behind the window ignores the column's rounded
             // clip: the mask holds the corners.
-            frost.maskImage = GlassView.mask(
-                radius: Theme.Radius.column, in: CGSize(width: CGFloat.infinity, height: .infinity), curve: .circular
-            )
+            frost.maskImage = Self.frostMask
             view.addSubview(frost, positioned: .below, relativeTo: nil)
             terminalFrost = frost
             view.layer?.backgroundColor = NSColor.clear.cgColor
@@ -309,7 +309,15 @@ final class ColumnState {
             terminalFrost = nil
             view.layer?.backgroundColor = Theme.Color.canvas.cgColor
         }
+        shadow?.isCardClear = isCardClear
     }
+
+    /// The desktop's blur shows through the card (`terminalFrost`).
+    var isCardClear: Bool { terminalFrost != nil }
+
+    private static let frostMask = GlassView.mask(
+        radius: Theme.Radius.column, in: CGSize(width: CGFloat.infinity, height: .infinity), curve: .circular
+    )
 
     /// The terminal's surface came or went.
     func surfaceChanged(attached: Bool) {
