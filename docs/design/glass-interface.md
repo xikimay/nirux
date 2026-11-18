@@ -454,8 +454,12 @@ the text stays flat and sharp.
   (`ColumnShadowView`) along a path and never masked, so that terminals
   redrawing over it cost no offscreen pass. The opaque card hides its
   inside; it hides while its column fades in or out.
-- **Next (P1, second PR):** the focused card one level higher, its shadow
-  passing from card to card when the focus moves.
+- **Focus:** the focused card lies a level higher
+  (`Theme.Elevation.Level.focusedColumn`: darker, softer, further below,
+  still within the air). Its shadow passes from card to card over 0.22 s
+  while the focus moves within the workspace on screen; an arriving or
+  leaving workspace changes at once, under its slide, and stillness
+  (Animate the interface off, Reduce motion) makes it instant.
 
 ## Plan
 
