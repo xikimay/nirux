@@ -550,9 +550,7 @@ extension NiruxShellView {
             self.focusColumnByIndex(index)
         }
         workspace.onColumnsLaidOut = { [weak self, weak workspace] in
-            guard let self, let workspace else { return }
-            self.applyCardEdges(workspace, animated: self.liftsCards(of: workspace))
-            guard workspace === self.activeWorkspace else { return }
+            guard let self, let workspace, workspace === self.activeWorkspace else { return }
             self.refreshSidebarNavigation()
         }
         workspace.onGitContextChanged = { [weak self, weak workspace] in

@@ -167,9 +167,12 @@ enum Theme {
         /// `rect`, in the layer's own coordinates, its corners `radius` at
         /// most; call it again when the shape changes. With `cutOut`, then
         /// the layer's mask, the shadow falls only outside the shape, for a
-        /// shape that lets it show through. The layer must not mask to its
+        /// shape that lets it show through, as far as `cutOutReach` (the
+        /// level's reach by default). The layer must not mask to its
         /// bounds, which would cut the shadow off.
-        static func apply(_ level: Level, to layer: CALayer, roundedRect rect: CGRect, radius: CGFloat, cutOut: CAShapeLayer?) {
+        static func apply(
+            _ level: Level, to layer: CALayer, roundedRect rect: CGRect, radius: CGFloat, cutOut: CAShapeLayer?, cutOutReach: CGFloat? = nil
+        ) {
             let corner = max(0, min(radius, rect.width / 2, rect.height / 2))
             let shape = CGPath(roundedRect: rect, cornerWidth: corner, cornerHeight: corner, transform: nil)
             layer.shadowColor = NSColor.black.cgColor
@@ -182,7 +185,8 @@ enum Theme {
             layer.mask = cutOut
             guard let cutOut else { return }
             let outside = CGMutablePath()
-            outside.addRect(rect.insetBy(dx: -level.reach, dy: -level.reach))
+            let reach = cutOutReach ?? level.reach
+            outside.addRect(rect.insetBy(dx: -reach, dy: -reach))
             outside.addPath(shape)
             cutOut.fillRule = .evenOdd
             cutOut.frame = layer.bounds

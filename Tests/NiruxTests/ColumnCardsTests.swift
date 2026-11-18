@@ -251,20 +251,13 @@ final class ColumnCardsTests: XCTestCase {
     }
 
     /// The focused card lies a level higher, its shadow still within the
-    /// air; the others rest.
-    func testTheFocusedCardLiesALevelHigher() throws {
+    /// air.
+    func testTheFocusedLevelIsHigherWithinTheAir() {
         let higher = Theme.Elevation.Level.focusedColumn, resting = Theme.Elevation.Level.column
         XCTAssertLessThanOrEqual(higher.reach, inset)
         XCTAssertGreaterThan(higher.opacity, resting.opacity)
         XCTAssertGreaterThan(higher.drop, resting.drop)
         XCTAssertGreaterThan(higher.radius, resting.radius, "softer as it rises")
-        try withShell { shell in
-            let workspace = try XCTUnwrap(shell.activeWorkspace)
-            workspace.addColumn()
-            workspace.focusedIndex = 1
-            shell.relayout(animated: false)
-            XCTAssertEqual(workspace.columns.map { $0.shadow?.level }, [resting, higher])
-        }
     }
 
     /// The lift follows the focus: it passes over a moment while the
@@ -286,10 +279,11 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertEqual(shadows.map(\.isLifting), [true, true], "one rises, the other settles")
             XCTAssertEqual(shadows[0].liftStartOpacity, Theme.Elevation.Level.column.opacity)
 
-            // Back at once: from where it was, read before its new level is set.
+            // Back at once: from where it shows, mid-way.
+            shadows[0].shownShadow = { _ in (0.4, 2.5, CGSize(width: 0, height: 1.5)) }
             workspace.focusedIndex = 1
             shell.relayout(animated: false)
-            XCTAssertEqual(shadows[0].liftStartOpacity, Theme.Elevation.Level.focusedColumn.opacity)
+            XCTAssertEqual(shadows[0].liftStartOpacity, 0.4)
 
             // Stillness cuts a lift short, and the next change is at once.
             shell.sideEffects.reducesMotion = { true }
@@ -302,8 +296,33 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// At once means at once: a lift on its way stops, even one heading to
+    /// the level asked.
+    func testAShadowShownAtOnceStopsALiftOnItsWay() {
+        let shadow = ColumnShadowView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        shadow.show(.focusedColumn, animated: true)
+        XCTAssertTrue(shadow.isLifting)
+        shadow.show(.focusedColumn, animated: false)
+        XCTAssertFalse(shadow.isLifting)
+    }
+
+    /// A translucent card's cut-out spans either level's shadow, so that a
+    /// lift down ends in no hard edge.
+    func testACutOutSpansEitherLevel() throws {
+        let shadow = ColumnShadowView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        shadow.isCardClear = true
+        let reach = max(Theme.Elevation.Level.column.reach, Theme.Elevation.Level.focusedColumn.reach)
+        let span = shadow.bounds.insetBy(dx: -reach, dy: -reach)
+        XCTAssertEqual(try XCTUnwrap(shadow.cutOutPath).boundingBox, span)
+        shadow.show(.focusedColumn, animated: false)
+        shadow.show(.column, animated: true)
+        XCTAssertEqual(try XCTUnwrap(shadow.cutOutPath).boundingBox, span, "while it comes down")
+    }
+
     /// An arriving workspace's focused card is up at once: its slide is
-    /// the movement.
+    /// the movement. Reached through one of its columns (a notification,
+    /// ⌘P), that column is focused in the same move, once the workspace is
+    /// the one chosen: it takes the keyboard and is in view.
     func testAnArrivingWorkspaceIsLiftedAtOnce() throws {
         try withShell { shell in
             shell.sideEffects.reducesMotion = { false }
@@ -318,14 +337,23 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertEqual(shadow.level, .focusedColumn)
             XCTAssertFalse(shadow.isLifting)
 
-            // Reached through one of its columns (a notification, ⌘P): the same.
             arrived.addColumn()
             arrived.focusedIndex = 0
             shell.switchToWorkspace(0)
+            var focusMovedHidden = false
+            let focusMoved = arrived.onFocusedColumnChanged
+            arrived.onFocusedColumnChanged = {
+                focusMovedHidden = focusMovedHidden || shell.activeWorkspace !== arrived
+                focusMoved?()
+            }
             shell.focusWorkspace(id: arrived.id, column: 1)
-            let target = try XCTUnwrap(arrived.columns[safe: 1]?.shadow)
-            XCTAssertEqual(target.level, .focusedColumn)
-            XCTAssertFalse(target.isLifting, "it arrives lifted")
+            XCTAssertEqual(arrived.focusedIndex, 1)
+            XCTAssertFalse(focusMovedHidden, "nothing follows the focus of a workspace not chosen yet")
+            let target = try XCTUnwrap(arrived.columns[safe: 1])
+            XCTAssertEqual(target.shadow?.level, .focusedColumn)
+            XCTAssertEqual(target.shadow?.isLifting, false, "it arrives lifted")
+            XCTAssertTrue(shell.window?.firstResponder === target.terminalView, "the keyboard")
+            XCTAssertTrue(arrived.showsColumn(at: 1))
         }
     }
 

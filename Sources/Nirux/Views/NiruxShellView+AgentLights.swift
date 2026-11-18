@@ -98,6 +98,8 @@ extension NiruxShellView {
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
             for (index, column) in workspace.columns.enumerated() {
+                // Stillness wins over a lift on its way.
+                if !moves { column.shadow?.settle() }
                 let isInView = isOnScreen && workspace.showsColumn(at: index)
                 column.header?.statusPill.animates = moves && isInView
                 let light = column.isClosing ? nil : plan.columns[column.id]
@@ -116,8 +118,6 @@ extension NiruxShellView {
         }
         columnIndicator.pulses = moves
         sidebar.animates = moves
-        // Stillness wins over a lift on its way.
-        if !moves { for column in workspaces.flatMap(\.columns) { column.shadow?.settle() } }
     }
 
     /// A Claude turn end got its verdict (see `AgentHookCenter`): a Mission
