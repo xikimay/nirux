@@ -40,6 +40,7 @@ extension NiruxShellView {
         case LeadTools.renameTask: leadRenameTask(arguments, in: space, answer: answer)
         case LeadTools.setTaskParent: leadSetTaskParent(arguments, in: space, answer: answer)
         case LeadTools.readTask: leadReadTask(arguments, in: space, answer: answer)
+        case LeadTools.interruptTask: leadInterruptTask(arguments, in: space, lead: lead.id, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
@@ -427,7 +428,7 @@ extension NiruxShellView {
     /// The task named by its branch or title, among the space's workspaces,
     /// and its latest Mission whose parent is this Lead: a Lead started
     /// again doesn't take the former one's tasks over.
-    private func leadTask(_ name: String, in space: WorkspaceProfile, lead leadID: String) -> (workspace: WorkspaceState, mission: Mission)? {
+    func leadTask(_ name: String, in space: WorkspaceProfile, lead leadID: String) -> (workspace: WorkspaceState, mission: Mission)? {
         _ = MissionStore.shared.ensureLoaded()
         let candidates = workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing }
         func mission(of workspace: WorkspaceState) -> Mission? {
@@ -478,7 +479,7 @@ extension NiruxShellView {
         nameRanks(name).contains { $0(workspace) }
     }
 
-    private func noLeadTask(_ name: String) -> String {
+    func noLeadTask(_ name: String) -> String {
         "No task of yours is named “\(name)”, or several share that name: use its title or branch from list_tasks "
             + "(its folder, for a task without a repository). "
             + "A task the user started without you doesn't report to you."
@@ -506,8 +507,23 @@ extension NiruxShellView {
         guard case .accepted = MissionStore.shared.process(instruction, enabled: Self.currentMissionHandoffsEnabled()) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
+        noteConversation(of: mission, forInstruction: instruction.id)
         typeMissionMessages()
-        answer("Nirux types it into “\(workspace.title)”’s prompt once its turn is over, within the hour.", false)
+        let typed = MissionStore.shared.missions.lazy.flatMap(\.events).first { $0.id == instruction.id }?.childConsumedAt != nil
+        answer(typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
+            : missionWaits.typing.contains(instruction.id)
+            ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."
+            : "Nirux types it into “\(workspace.title)”’s prompt at its next free prompt, a day at most; past an hour, "
+                + "a line tells you what holds it.", false)
+    }
+
+    /// Records the conversation `mission`'s child holds, for its instruction
+    /// `id` (`MissionEvent.childSessionID`): from the agent the status
+    /// refresh last saw in front, without reading the process table.
+    func noteConversation(of mission: Mission, forInstruction id: String) {
+        guard let column = missionEnd(mission, parent: false)?.column,
+              let held = conversation(of: column, foreground: column.lastForegroundAgent) else { return }
+        MissionStore.shared.noteConversation(held, ofInstruction: id)
     }
 
     private func leadReply(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {

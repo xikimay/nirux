@@ -185,6 +185,38 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(status, 0)
     }
 
+    /// Past the scalars Nirux types whole, the message is refused, and the
+    /// refusal says so.
+    func testAMessageOfManyScalarsSaysWhy() {
+        let family = String(repeating: "👨‍👩‍👧", count: 2_000)
+        XCTAssertTrue(family.count <= MissionEventCLI.maxInstructionLength && family.unicodeScalars.count > MissionEventCLI.maxScalars)
+        XCTAssertTrue(MissionEventCLI.problem(with: family, limit: MissionEventCLI.maxInstructionLength)?.contains("Unicode scalars") == true)
+        XCTAssertEqual(MissionEventCLI.problem(with: "", limit: 10), "message must hold 1 to 10 characters.")
+        XCTAssertNil(MissionEventCLI.problem(with: "Go.", limit: 10))
+    }
+
+    /// A tell Nirux gave up ends the wait: a rerun would send it again.
+    func testTellStopsOnceNiruxGaveItUp() async throws {
+        let fixture = try makeFixture()
+        let environment = parentEnvironment()
+        let eventsURL = fixture.eventsURL
+        let missionsURL = fixture.missionsURL
+        let waiting = Task.detached {
+            MissionEventCLI.tell(
+                arguments: ["--branch", "feat/mission", "--message", "/premortem", "--timeout", "10"],
+                environment: environment, eventsURL: eventsURL, missionsURL: missionsURL, pollInterval: 0.01
+            )
+        }
+        try await waitUntil("the tell recorded", timeout: 5) {
+            fixture.center.drain()
+            return !pendingInstructions(fixture).isEmpty
+        }
+        let pending = try XCTUnwrap(pendingInstructions(fixture).first)
+        XCTAssertTrue(fixture.store.noteInstructions(heldNotice: [], expired: [pending.event.id], at: Date().timeIntervalSince1970))
+        let status = await waiting.value
+        XCTAssertEqual(status, 4)
+    }
+
     func testTellStopsForAnotherParentBranchOrAgent() throws {
         let fixture = try makeFixture()
         XCTAssertEqual(tell("/code-review", branch: "feat/other", in: fixture), 4)
@@ -196,7 +228,7 @@ final class MissionTellTests: XCTestCase {
         XCTAssertTrue(try queuedEvents(in: codex).isEmpty)
 
         for arguments in [["--branch", "feat/mission"], ["--message", "Hi"],
-                          ["--branch", "feat/mission", "--message", String(repeating: "x", count: 501)]] {
+                          ["--branch", "feat/mission", "--message", String(repeating: "x", count: MissionEventCLI.maxInstructionLength + 1)]] {
             XCTAssertEqual(MissionEventCLI.tell(
                 arguments: arguments,
                 environment: parentEnvironment(),
