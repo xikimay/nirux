@@ -441,6 +441,38 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertEqual(agent.input, "\u{1B}\u{1B}x", "an Esc per interrupt, never Enter")
     }
 
+    /// Keys typed before Claude answered: the Esc could close a screen they
+    /// opened, and the turn hang on.
+    func testKeysTypedBeforeAnyReplyLeaveTheEscToTheUser() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-interrupt-typed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pty = PtySession()
+        let agent = AgentStandIn()
+        defer { agent.remove() }
+        pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
+        try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let front = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        let clock = AwakeClock()
+        clock.now = 100
+        pty.awakeClock = { clock.now }
+        for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+            pty.applyAgentHook(
+                AgentHookEvent(kind: .claude, name: name, sessionID: "lead", emitterProcess: front.instance, timestamp: Date().timeIntervalSince1970),
+                isUserFocused: false
+            )
+        }
+        pty.sendRaw("/")
+        clock.now = 1_300
+        XCTAssertFalse(pty.canInterruptSilentTurn(snapshot: ProcessSnapshot()))
+        XCTAssertEqual(
+            pty.interruptSilentTurn(since: 100, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970),
+            .refused(.typed)
+        )
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(agent.input, "/", "no Esc")
+    }
+
     func testTheBoardAndTheMergeQueueReadIt() {
         let state = ProjectBoard.agentState(
             stuck: .silent(duration: "25m", since: 100, interruptible: true), hasAgent: true, agentInFront: true, status: .working, openDialog: nil

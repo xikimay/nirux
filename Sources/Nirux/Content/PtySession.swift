@@ -561,7 +561,7 @@ final class PtySession: @unchecked Sendable {
     /// Whether Interrupt may press Esc in a silent turn (see
     /// `interruptSilentTurn`).
     func canInterruptSilentTurn(snapshot: ProcessSnapshot) -> Bool {
-        [nil, .notAnswered].contains(interruptRefusal(snapshot: snapshot))
+        state.machine.silentInterruptRefusal(foreground: foregroundProcess(snapshot: snapshot)) == nil
     }
 
     /// Esc into the turn gone silent at `since` (`AgentSilence.since`), on
@@ -576,11 +576,11 @@ final class PtySession: @unchecked Sendable {
         guard case .silent(let silence)? = agentStuckState(now: now, waitThreshold: waitThreshold, foreground: foreground),
               silence.since == since
         else { return .notSilent }
-        let refusal = interruptRefusal(snapshot: snapshot)
-        if let refusal, refusal != .notAnswered { return .refused(refusal) }
+        if let refusal = state.machine.silentInterruptRefusal(foreground: foreground) { return .refused(refusal) }
+        let givesBackPrompt = state.machine.interruptRefusal(foreground: foreground) == .notAnswered
         guard let promptAt = sendInterrupt() else { return .refused(.notWorking) }
         _ = state.machine.noteInterrupted(promptAt: promptAt, now: now)
-        guard refusal == .notAnswered else { return .stopped }
+        guard givesBackPrompt else { return .stopped }
         state.machine.notePromptGivenBack(now: now)
         return .promptGivenBack
     }

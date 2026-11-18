@@ -41,6 +41,17 @@ extension AgentStatusMachine {
         return openDialogs.first { $0.requestedAt >= foreground.instance.startedAt && waitsForKeys($0) }
     }
 
+    /// Why Interrupt may not press Esc in a silent turn: as
+    /// `interruptRefusal`, but a prompt not answered yet is no refusal:
+    /// Claude gives it back to the box, the user's to send again. Keys
+    /// typed since the prompt refuse it, answered or not: Esc could close a
+    /// screen they opened instead.
+    func silentInterruptRefusal(foreground: ForegroundProcess?) -> AgentInterruptRefusal? {
+        let refusal = interruptRefusal(foreground: foreground)
+        guard refusal == .notAnswered else { return refusal }
+        return lastDraftInputAt > (lastPromptAt ?? 0) ? .typed : nil
+    }
+
     /// Whether Resume may type `continue`: a failed turn with nothing
     /// since, an error `continue` can get past, `foreground` is the
     /// interactive `claude` that failed (`ownsEmitter` says whether it is,
