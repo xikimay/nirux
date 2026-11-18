@@ -309,7 +309,7 @@ final class ColumnState {
             terminalFrost = nil
             view.layer?.backgroundColor = Theme.Color.canvas.cgColor
         }
-        shadow?.isCardClear = isCardClear
+        if !ZZ("noClearOnChange") { shadow?.isCardClear = isCardClear }
     }
 
     /// The desktop's blur shows through the card (`terminalFrost`).

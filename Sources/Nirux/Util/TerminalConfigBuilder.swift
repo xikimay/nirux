@@ -72,7 +72,7 @@ enum TerminalConfigBuilder {
     /// `color` as Ghostty reads it: six hex digits, in sRGB. A colour with
     /// no RGB reading (a pattern) gives black rather than raising.
     static func hex(_ color: NSColor) -> String {
-        guard let rgb = color.usingColorSpace(.sRGB) else { return "000000" }
+        guard !(ZZ("noSRGB") && color == Theme.Color.done), let rgb = color.usingColorSpace(.sRGB) else { return "000000" }
         let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent].map { Int(($0 * 255).rounded()) }
         return channels.map { String(format: "%02X", $0) }.joined()
     }

@@ -27,7 +27,7 @@ extension NiruxShellView {
         // Its light leaves with it.
         applyAgentLights()
         let closingView = closingColumn.view
-        workspace.showShadows()
+        if !ZZ("closeVisible") { workspace.showShadows() }
 
         // Animate out, then remove
         NSAnimationContext.runAnimationGroup({ ctx in

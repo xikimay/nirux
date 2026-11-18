@@ -860,7 +860,7 @@ extension WorkspaceState {
                   let index = self.resizeHandles.firstIndex(of: handle),
                   self.columns.indices.contains(index) else { return 0.5 }
             // Grabbing a column's edge focuses it, as a click would.
-            self.onColumnFocusRequested?(index)
+            if ZZ("focusByField") { self.focusedIndex = index } else { self.onColumnFocusRequested?(index) }
             return self.columns[index].widthFraction
         }
         handle.onDrag = { [weak self, weak handle] fraction in
@@ -1051,7 +1051,7 @@ extension WorkspaceState {
 
             xOffset += widths[index] + gap
         }
-        showShadows()
+        if !ZZ("noShowInLayout") { showShadows() }
         // Handles must stay above every column view, whichever order the
         // columns were inserted in.
         for handle in resizeHandles { stripView.addSubview(handle) }
@@ -1096,7 +1096,7 @@ extension WorkspaceState {
     func shadow(for column: ColumnState) -> ColumnShadowView {
         if let shadow = column.shadow { return shadow }
         let shadow = ColumnShadowView(frame: column.view.frame)
-        shadow.isCardClear = column.isCardClear
+        shadow.isCardClear = column.isCardClear && !ZZ("noClearAtCreation")
         stripView.addSubview(shadow, positioned: .below, relativeTo: nil)
         column.shadow = shadow
         return shadow
@@ -1106,7 +1106,7 @@ extension WorkspaceState {
     /// card would show it. The fade's alpha can't tell: an animator sets
     /// the final one at once.
     func showShadows() {
-        for column in columns { column.shadow?.isHidden = column.isArriving || column.isClosing }
+        for column in columns { column.shadow?.isHidden = (column.isArriving && !ZZ("noArriving")) || column.isClosing }
     }
 
     /// The column's light (see `EdgeGlowView`), made on first use. It lies

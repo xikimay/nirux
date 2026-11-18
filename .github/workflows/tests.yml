@@ -54,5 +54,14 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of #594's review round 1: each new test's
+      # mutants, then ten runs of ColumnCardsTests, three at a time, next to
+      # two heavy classes that lay columns out.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.ColumnCardsTests focusByField noEdgesInLayout noCutOut noClearAtCreation noClearOnChange noArriving noShowInLayout closeVisible || status=1
+          scripts/mutants-class.sh NiruxTests.AgentLightTests glowDeeper || status=1
+          scripts/mutants-class.sh NiruxTests.TerminalConfigBuilderTests noSRGB || status=1
+          scripts/repeat-class.sh NiruxTests.ColumnCardsTests 10 3 NiruxTests.AgentLightShellTests NiruxTests.WorkspaceSwitchTests || status=1
+          exit $status

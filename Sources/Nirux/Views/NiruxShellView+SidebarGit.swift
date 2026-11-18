@@ -548,7 +548,7 @@ extension NiruxShellView {
         }
         workspace.onColumnsLaidOut = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
-            self.applyCardEdges(workspace)
+            if !ZZ("noEdgesInLayout") { self.applyCardEdges(workspace) }
             guard workspace === self.activeWorkspace else { return }
             self.refreshSidebarNavigation()
         }

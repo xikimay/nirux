@@ -45,7 +45,7 @@ final class ColumnShadowView: NSView {
         defer { CATransaction.commit() }
         shadowLayer.frame = bounds
         Theme.Elevation.apply(
-            .column, to: shadowLayer, roundedRect: bounds, radius: Theme.Radius.column, cutOut: isCardClear ? cutOut : nil
+            .column, to: shadowLayer, roundedRect: bounds, radius: Theme.Radius.column, cutOut: isCardClear && !ZZ("noCutOut") ? cutOut : nil
         )
     }
 }

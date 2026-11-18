@@ -34,7 +34,7 @@ final class EdgeGlowView: NSView {
     /// 10 pt over the text (12 on the focused column, whose glow starts
     /// inside its focus ring); and how strong it is at most: text under it
     /// keeps its contrast.
-    static let columnGlowDepth = CGFloat(TerminalConfigBuilder.padding) + 10
+    static var columnGlowDepth: CGFloat { CGFloat(TerminalConfigBuilder.padding) + (ZZ("glowDeeper") ? 11 : 10) }
     static let columnGlowAlpha: CGFloat = 0.08
     /// A column's corners (`WorkspaceState.layoutAndScroll`).
     static let cornerRadius = Theme.Radius.column
