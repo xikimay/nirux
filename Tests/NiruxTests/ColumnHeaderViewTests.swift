@@ -320,14 +320,22 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(column.titleText, "claude (not resumed) · /tmp")
     }
 
-    /// A terminal's folder is in its title's tooltip, not on the bar.
+    /// A terminal keeps its folder off the bar, in its title's tooltip and
+    /// VoiceOver help; the tooltip holds while the title changes.
     func testATerminalsFolderIsInItsTitlesToolTip() throws {
         let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
         let column = ColumnState(cwd: "/tmp", deferredAgent: launch)
+        column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
         column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
+        column.layoutWithHeader(width: 600, height: 400)
         let header = try XCTUnwrap(column.header)
-        XCTAssertEqual(header.context, "")
-        XCTAssertEqual(header.titleLabel.toolTip, "claude (not resumed) · /tmp")
+        XCTAssertEqual(header.context, "/tmp")
+        XCTAssertTrue(header.contextLabel.isHidden, "off the bar")
+        XCTAssertEqual(header.titleLabel.toolTip, "/tmp")
+        XCTAssertEqual(header.titleLabel.accessibilityHelp(), "/tmp")
+        header.title = "⠐ Fix login"
+        header.layoutNow()
+        XCTAssertEqual(header.titleLabel.toolTip, "/tmp", "an animated title doesn't touch it")
     }
 
     /// Every column type's header is on top, and its ⋯ menu ends with the

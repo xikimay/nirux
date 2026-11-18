@@ -30,7 +30,8 @@ extension ColumnHeaderAccessory {
 /// - title: what runs or shows (the process, the active file).
 /// - context: where (folder, file directory, repository): machine text,
 ///   truncated in the middle. A column may put its own view in place of
-///   title and context (the browser's URL field).
+///   title and context (the browser's URL field), or keep its context off
+///   the bar, in the title's tooltip (`contextOnBar`: a terminal's folder).
 /// - status: a pill, only for an agent or a run.
 /// - buttons: the column's own icon actions, two at most; the ⋯ menu holds
 ///   the rest. A text button goes among the accessories.
@@ -106,6 +107,16 @@ final class ColumnHeaderView: NSView {
             guard context != oldValue else { return }
             contextLabel.stringValue = context
             contextLabel.toolTip = context.isEmpty ? nil : context
+            applyTitleToolTip()
+            needsLayout = true
+        }
+    }
+    /// Whether the context shows on the bar; else it is the title's tooltip
+    /// and VoiceOver help.
+    var contextOnBar = true {
+        didSet {
+            guard contextOnBar != oldValue else { return }
+            applyTitleToolTip()
             needsLayout = true
         }
     }
@@ -237,8 +248,10 @@ final class ColumnHeaderView: NSView {
     /// a second while its agent works, and a new tooltip closes the one
     /// shown.
     private func applyTitleToolTip() {
-        let toolTip = titleToolTip ?? (isTitleCutShort ? title : nil)
+        let offBar = contextOnBar || context.isEmpty ? nil : context
+        let toolTip = titleToolTip ?? offBar ?? (isTitleCutShort ? title : nil)
         if titleLabel.toolTip != toolTip { titleLabel.toolTip = toolTip }
+        if titleLabel.accessibilityHelp() != offBar { titleLabel.setAccessibilityHelp(offBar) }
     }
 
     private func applyIcon() {
@@ -399,7 +412,7 @@ final class ColumnHeaderView: NSView {
         var shownTitleWidth = title.isEmpty ? 0 : min(titleWidth, max(width * 0.4, width - contextWidth - Self.gap))
         let contextX = title.isEmpty ? x : x + shownTitleWidth + Self.gap
         let contextRoom = x + width - contextX
-        contextLabel.isHidden = !showsContext || context.isEmpty || contextRoom < Self.minimumContextWidth
+        contextLabel.isHidden = !contextOnBar || !showsContext || context.isEmpty || contextRoom < Self.minimumContextWidth
             || shownTitleWidth < min(titleWidth, Self.minimumTitleBesideContext)
         if contextLabel.isHidden { shownTitleWidth = min(titleWidth, width) }
         isTitleCutShort = shownTitleWidth < titleWidth
