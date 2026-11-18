@@ -87,6 +87,30 @@ enum TranscriptLastMessage {
         return .message(TranscriptSearch.Message(role: .claude, text: parts.joined(separator: "\n\n"), timestamp: found.message.timestamp))
     }
 
+    /// Whether the main thread's conversation at the end of the transcript
+    /// at `path` waits on Claude: its last word is a prompt or a tool
+    /// result, not a line of Claude's reply (its first thought counts) nor
+    /// an interrupt. Nil when its last `tailBytes` hold none of these.
+    static func awaitsReply(path: String, tailBytes: Int = tailBytes) -> Bool? {
+        tail(of: path, bytes: tailBytes).flatMap { awaitsReply(in: $0.data, startsMidLine: $0.startsMidLine) }
+    }
+
+    static func awaitsReply(in data: Data, startsMidLine: Bool = false) -> Bool? {
+        for line in lines(of: data, startsMidLine: startsMidLine).reversed() {
+            if line.withUnsafeBytes({ TranscriptSearch.contains($0, interruptMarker) }) { return false }
+            // Tool output, never parsed: a result went in.
+            if line.withUnsafeBytes(TranscriptSearch.isToolResult) { return true }
+            guard let object = line.withUnsafeBytes({ $0.isEmpty ? nil : TranscriptSearch.object($0) }),
+                  !TranscriptSearch.isAside(object) else { continue }
+            switch object["type"] as? String {
+            case "assistant": return false
+            case "user" where TranscriptSearch.message(in: object) != nil: return true
+            default: continue
+            }
+        }
+        return nil
+    }
+
     /// Whether the transcript at `path` shows Claude stopping a turn at an
     /// Esc sent at `date`: its "[Request interrupted by user" line, which
     /// Claude stamps once it read the key (milliseconds, this Mac's clock).

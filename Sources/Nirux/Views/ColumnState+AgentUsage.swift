@@ -55,12 +55,12 @@ extension ColumnState {
 
     /// While Claude's turn waits on the model, its transcript growing is a
     /// sign of life (`AgentLifeSigns`): its size, never its text.
-    func noteTranscriptGrowth(foreground: ForegroundProcess?) {
+    func noteTranscriptGrowth(foreground: ForegroundProcess?, now: TimeInterval) {
         guard let pty, let follow = claudeTranscript, follow.process == foreground?.instance,
               pty.agentAwaitsModel(foreground: foreground),
               let stamp = FileStamp(URL(fileURLWithPath: follow.follower.path))
         else { return }
-        pty.noteAgentTranscript(path: follow.follower.path, size: stamp.size)
+        pty.noteAgentTranscript(path: follow.follower.path, size: stamp.size, now: now)
     }
 
     /// Heartbeat, for columns on screen: read what the transcript gained.

@@ -403,7 +403,7 @@ final class StuckAgentSidebarTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         let transcript = root.appendingPathComponent("lead.jsonl")
-        try Data("{}\n".utf8).write(to: transcript)
+        try Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go"}}"# + "\n").utf8).write(to: transcript)
         _ = NSApplication.shared
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
         shell.stopHeartbeat()
@@ -446,7 +446,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         shell.stuckAgentWaitThreshold = 600
         @MainActor func pass(at awake: TimeInterval) {
             clock.now = awake
-            shell.refreshStuckAgents(snapshot: snapshot, now: now, appIsActive: false)
+            shell.refreshStuckAgents(snapshot: snapshot, now: now + awake, appIsActive: false)
         }
 
         pass(at: 100)
