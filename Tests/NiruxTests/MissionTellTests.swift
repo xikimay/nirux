@@ -185,6 +185,43 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(status, 0)
     }
 
+    /// A tell whose agent left before it was all in is untyped again, and a
+    /// Mission its typing reopened is completed again.
+    func testAnInstructionCutShortIsUntypedAgain() throws {
+        let fixture = try makeFixture()
+        complete(fixture)
+        XCTAssertEqual(tell("/next", in: fixture), 3)
+        fixture.center.drain()
+        let pending = try XCTUnwrap(pendingInstructions(fixture, now: 30).first)
+        XCTAssertTrue(fixture.store.markTyped(pending, at: 30))
+        XCTAssertEqual(fixture.store.missions[0].status, .active, "its typing reopened it")
+        XCTAssertTrue(fixture.store.unmarkTyped(pending))
+        XCTAssertEqual(fixture.store.missions[0].status, .completed)
+        XCTAssertEqual(pendingInstructions(fixture, now: 40).count, 1)
+    }
+
+    /// A tell Nirux gave up ends the wait: a rerun would send it again.
+    func testTellStopsOnceNiruxGaveItUp() async throws {
+        let fixture = try makeFixture()
+        let environment = parentEnvironment()
+        let eventsURL = fixture.eventsURL
+        let missionsURL = fixture.missionsURL
+        let waiting = Task.detached {
+            MissionEventCLI.tell(
+                arguments: ["--branch", "feat/mission", "--message", "/premortem", "--timeout", "10"],
+                environment: environment, eventsURL: eventsURL, missionsURL: missionsURL, pollInterval: 0.01
+            )
+        }
+        try await waitUntil("the tell recorded", timeout: 5) {
+            fixture.center.drain()
+            return !pendingInstructions(fixture).isEmpty
+        }
+        let pending = try XCTUnwrap(pendingInstructions(fixture).first)
+        XCTAssertTrue(fixture.store.noteInstructions(heldNotice: [], expired: [pending.event.id], at: Date().timeIntervalSince1970))
+        let status = await waiting.value
+        XCTAssertEqual(status, 4)
+    }
+
     func testTellStopsForAnotherParentBranchOrAgent() throws {
         let fixture = try makeFixture()
         XCTAssertEqual(tell("/code-review", branch: "feat/other", in: fixture), 4)
@@ -196,7 +233,7 @@ final class MissionTellTests: XCTestCase {
         XCTAssertTrue(try queuedEvents(in: codex).isEmpty)
 
         for arguments in [["--branch", "feat/mission"], ["--message", "Hi"],
-                          ["--branch", "feat/mission", "--message", String(repeating: "x", count: 501)]] {
+                          ["--branch", "feat/mission", "--message", String(repeating: "x", count: MissionEventCLI.maxInstructionLength + 1)]] {
             XCTAssertEqual(MissionEventCLI.tell(
                 arguments: arguments,
                 environment: parentEnvironment(),

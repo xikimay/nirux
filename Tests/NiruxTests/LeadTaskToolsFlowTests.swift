@@ -510,4 +510,308 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertTrue(try read().text.contains("isn't on disk any more"))
         }
     }
+
+    /// A task of the Lead's whose `claude` is a stand-in in a column of its
+    /// own, its session started: what it is sent, and its hooks.
+    private func reportingTask(
+        _ title: String, lead: UIFlowHarness.Lead, harness: UIFlowHarness, readsSlowly: Bool = false
+    ) throws -> (agent: AgentStandIn, column: ColumnState, claude: ProcessInstance, hook: @MainActor (AgentHookEvent.Name) -> Void) {
+        let workspaceID = UUID().uuidString
+        let agentUUID = UUID().uuidString
+        let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+            id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+            childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+            branch: harness.worktreeBranch, reportsToLead: true
+        ), enabled: true))
+        harness.shell.addWorkspace(
+            title: title, cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID,
+            missionID: mission.id, reportsToLead: true
+        )
+        let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+        let agent = AgentStandIn()
+        task.addColumn(command: agent.command(slowly: readsSlowly), agentUUID: agentUUID, cwd: harness.worktree)
+        let column = try XCTUnwrap(task.columns.first { $0.agentUUID == agentUUID })
+        let pty = try XCTUnwrap(column.pty)
+        harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+        let hook: @MainActor (AgentHookEvent.Name) -> Void = { name in
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: name, agentUUID: agentUUID, sessionID: "task", emitterProcess: claude,
+                timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+        }
+        hook(.sessionStart)
+        return (agent, column, claude, hook)
+    }
+
+    /// tell carries up to 4,000 characters: typed as the agent reads it,
+    /// past what one write to the terminal takes, then Enter. An agent slow
+    /// to read never holds the app meanwhile.
+    func testALongTellIsTypedWhole() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Reader", lead: lead, harness: harness, readsSlowly: true)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            XCTAssertGreaterThan(message.utf8.count, PtySession.inputQueueBytes * 3)
+            let start = Date()
+            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead)
+            XCTAssertFalse(told.isError, told.text)
+            XCTAssertLessThan(Date().timeIntervalSince(start), 2, "the app isn't held while the agent reads")
+            harness.waitUntil("all of it, then Enter") { task.agent.input.contains("\u{1B}[201~") && task.agent.input.hasSuffix("\n") }
+            XCTAssertTrue(task.agent.input.contains("Line 70: read the file and add up the totals."))
+            XCTAssertTrue(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": String(repeating: "x", count: 4_001)], lead: lead).isError)
+
+            // A background subagent at work meanwhile: the prompt is still
+            // the message's.
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            _ = task.column.pty?.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .preToolUse, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
+                agentID: "background", timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            harness.waitUntil("the second, then Enter") { task.agent.input.components(separatedBy: "\u{1B}[201~\n").count == 3 }
+
+            // A key of the user's while it goes in: Enter would send it too.
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            task.column.pty?.sendRaw("z")
+            harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
+            XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 3, "the third went in without Enter")
+        }
+    }
+
+    /// A long tell whose agent leaves, or whose task closes, before it is
+    /// all in gets no Enter, and waits to be typed again.
+    func testALongTellCutShortWaitsAgain() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            let typed = { (task: String) in
+                MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task }.map { $0.childConsumedAt != nil }
+            }
+            for cut in ["leaves", "closes"] {
+                let task = try reportingTask("Reader \(cut)", lead: lead, harness: harness, readsSlowly: true)
+                defer { task.agent.remove() }
+                let agentUUID = try XCTUnwrap(task.column.agentUUID)
+                task.hook(.userPromptSubmit)
+                task.hook(.stop)
+                XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader \(cut)", "message": message], lead: lead).isError)
+                harness.waitUntil("it goes in") { task.agent.input.contains("Line 1:") }
+                XCTAssertEqual(typed(agentUUID), [true])
+                if cut == "leaves" {
+                    kill(task.claude.pid, SIGKILL)
+                } else {
+                    let index = try XCTUnwrap(harness.shell.workspaces.firstIndex { $0.columns.contains { $0 === task.column } })
+                    harness.shell.closeWorkspace(at: index, refocusing: false)
+                }
+                harness.waitUntil("it waits again (\(cut))", timeout: 60) { typed(agentUUID) == [false] }
+                XCTAssertFalse(task.agent.input.hasSuffix("\n"), "no Enter (\(cut))")
+            }
+        }
+    }
+
+    /// A tell to a task whose Claude Code waits to resume is for the
+    /// conversation it will resume.
+    func testATellToATaskWaitingToResumeIsForItsConversation() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let workspaceID = UUID().uuidString, agentUUID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+                branch: harness.worktreeBranch, reportsToLead: true
+            ), enabled: true))
+            harness.shell.addWorkspace(
+                title: "Paused", cwd: harness.worktree, profileID: lead.space, workspaceID: workspaceID, missionID: mission.id, reportsToLead: true
+            )
+            let task = try XCTUnwrap(harness.shell.workspaces.first { $0.id == workspaceID })
+            task.addColumn(
+                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session("resumed"), mode: .default), title: nil, lastStatus: nil),
+                agentUUID: agentUUID, cwd: harness.worktree
+            )
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Paused", "message": "Go on."], lead: lead).isError)
+            let told = MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == agentUUID }
+            XCTAssertEqual(told.map(\.childSessionID), ["resumed"])
+        }
+    }
+
+    /// interrupt_task presses Esc only once the turn called a tool and
+    /// nothing was typed since its prompt; the turn is over once Claude's
+    /// transcript shows the interrupt, and a tell goes in at once.
+    func testTheLeadInterruptsATurn() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Builder", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let transcript = harness.root + "/builder.jsonl"
+            try "".write(toFile: transcript, atomically: true, encoding: .utf8)
+            task.column.followClaudeTranscript(at: transcript, sessionID: "task", process: task.claude)
+            let interrupt = { try harness.callLeadTool(LeadTools.interruptTask, ["task": "Builder"], lead: lead) }
+
+            XCTAssertTrue(try interrupt().text.contains("isn't working"))
+            // A turn over, a background subagent at work: no turn of its own.
+            task.hook(.userPromptSubmit)
+            task.hook(.preToolUse)
+            task.hook(.stop)
+            let pty = try XCTUnwrap(task.column.pty)
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .preToolUse, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
+                agentID: "subagent", timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            XCTAssertTrue(try interrupt().text.contains("isn't working"))
+            task.hook(.userPromptSubmit)
+            XCTAssertTrue(try interrupt().text.contains("hasn't called a tool since its prompt"))
+            task.hook(.preToolUse)
+            // A dialog waits on the user; answered at the terminal, its
+            // command runs on, and that turn may be stopped.
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .permissionRequest, agentUUID: task.column.agentUUID, sessionID: "task",
+                emitterProcess: task.claude, toolName: "Bash", toolKey: "swift test", timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            XCTAssertTrue(try interrupt().text.contains("waits on a dialog"))
+            pty.sendRaw("1")
+            // A message sent while it works waits for the turn's end.
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Builder", "message": "Build the docs instead."], lead: lead).isError)
+            // Claude writes its interrupt line once the Esc reaches it: once
+            // it is sent, not once a starved stand-in got around to reading it.
+            let writer = Timer(timeInterval: 0.05, repeats: true) { timer in
+                guard MainActor.assumeIsolated({ pty.interruptRefusal(snapshot: ProcessSnapshot()) == .alreadySent }),
+                      let handle = FileHandle(forWritingAtPath: transcript) else { return }
+                let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+                let line = #"{"type":"user","timestamp":"\#(time)","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
+                handle.seekToEndOfFile()
+                handle.write(Data((line + "\n").utf8))
+                try? handle.close()
+                timer.invalidate()
+            }
+            RunLoop.main.add(writer, forMode: .common)
+            let done = try interrupt()
+            XCTAssertFalse(done.isError, done.text)
+            XCTAssertTrue(done.text.contains("puts a prompt it hadn't answered, and messages queued meanwhile, back in its prompt box"), done.text)
+            XCTAssertTrue(done.text.contains("The message waiting for it goes in now."), done.text)
+            harness.waitUntil("the waiting tell, at once") { task.agent.input.contains("Build the docs instead.") }
+
+            // Keys typed since its prompt: they would come back to the box.
+            task.hook(.userPromptSubmit)
+            task.hook(.preToolUse)
+            task.column.pty?.sendRaw("y")
+            XCTAssertTrue(try interrupt().text.contains("Keys reached"))
+            // An Esc Claude doesn't confirm: said so, the turn still runs.
+            task.hook(.userPromptSubmit)
+            task.hook(.preToolUse)
+            XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
+            XCTAssertTrue(try interrupt().text.contains("Esc already went into this turn"), "a second Esc would open the rewind")
+        }
+    }
+
+    /// A tell waits for its task's next free prompt, a day at most: past an
+    /// hour its sender hears once what holds it, and why it was given up.
+    func testAWaitingTellTellsItsSenderWhatHoldsIt() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Busy", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Review this."], lead: lead).isError)
+            let sentAt = Date().timeIntervalSince1970
+            let notices = { harness.shell.pendingLeadNotices.filter { $0.workspaceID == lead.workspace.id }.map(\.text) }
+            let sweep = { (after: TimeInterval) in harness.shell.sweepWaitingInstructions(now: sentAt + after, snapshot: ProcessSnapshot()) }
+            let queued = { (after: TimeInterval) in
+                MissionStore.shared.pendingPromptDeliveries(now: sentAt + after).filter { $0.event.kind == .instruction }.count
+            }
+            sweep(60)
+            XCTAssertTrue(notices().isEmpty, "within the hour it waits quietly")
+            sweep(MissionEventCLI.instructionHeldNotice + 1)
+            sweep(MissionEventCLI.instructionHeldNotice + 10)
+            XCTAssertEqual(notices().count, 1, "once")
+            XCTAssertTrue(notices().last?.contains("(sent ") == true && notices().last?.contains(") isn't typed yet: its turn isn't over.") == true,
+                          notices().last ?? "")
+            XCTAssertEqual(queued(MissionEventCLI.instructionHeldNotice + 10), 1, "still queued past the hour")
+            sweep(MissionEventCLI.instructionLifetime + 1)
+            XCTAssertEqual(notices().count, 2)
+            XCTAssertTrue(notices().last?.contains("was never typed: its prompt wasn't free for a day (its turn isn't over).") == true,
+                          notices().last ?? "")
+            XCTAssertEqual(queued(MissionEventCLI.instructionLifetime + 1), 0)
+            // Its task closing gives the next one up at once.
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Then this."], lead: lead).isError)
+            let index = try XCTUnwrap(harness.shell.workspaces.firstIndex { $0.columns.contains { $0 === task.column } })
+            harness.shell.closeWorkspace(at: index, refocusing: false)
+            sweep(60)
+            XCTAssertEqual(notices().count, 3)
+            XCTAssertTrue(notices().last?.contains("was never typed: its task closed first.") == true, notices().last ?? "")
+        }
+    }
+
+    /// A tell is for the conversation it was sent to: a restarted Claude
+    /// that hasn't said which it holds keeps it waiting, one resuming it
+    /// takes it, one on another conversation gives it up.
+    func testATellFollowsItsConversationAcrossARestart() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Busy", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let pty = try XCTUnwrap(task.column.pty)
+            let shellPID = try XCTUnwrap(pty.shellPID)
+            let sentAt = Date().timeIntervalSince1970
+            func inFront(_ pid: pid_t, startedAt: TimeInterval) -> (claude: ForegroundProcess, snapshot: ProcessSnapshot) {
+                let snapshot = ProcessSnapshot(entries: [
+                    ProcessSnapshot.Entry(
+                        pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: pid,
+                        name: "zsh", startedAt: sentAt - 600, arguments: ["zsh"]
+                    ),
+                    ProcessSnapshot.Entry(
+                        pid: pid, parentPID: shellPID, processGroupID: pid, terminalForegroundProcessGroupID: pid,
+                        name: "claude", startedAt: startedAt, arguments: ["claude"]
+                    )
+                ])
+                return (ForegroundProcess(instance: ProcessInstance(pid: pid, startedAt: startedAt), name: "claude", arguments: ["claude"]), snapshot)
+            }
+            @MainActor func confirm(_ session: String, by claude: ForegroundProcess, in snapshot: ProcessSnapshot) {
+                for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+                    let event = AgentHookEvent(
+                        kind: .claude, name: name, agentUUID: task.column.agentUUID, sessionID: session, emitterProcess: claude.instance,
+                        source: name == .sessionStart ? "resume" : nil, timestamp: Date().timeIntervalSince1970
+                    )
+                    _ = task.column.admitClaudeHook(event, foregroundProcess: claude, snapshot: snapshot)
+                    pty.applyAgentHook(event, isUserFocused: false)
+                }
+            }
+            let live = ProcessSnapshot()
+            confirm("first", by: try XCTUnwrap(pty.foregroundProcess(snapshot: live)), in: live)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Review this."], lead: lead).isError)
+            let instructions = { MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID } }
+            XCTAssertEqual(instructions().map(\.childSessionID), ["first"], "the conversation it is for")
+            // One from the CLI learns it as Nirux takes it.
+            let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childAgentUUID == task.column.agentUUID })
+            guard case .accepted(let fromCLI?) = MissionStore.shared.process(MissionEvent(
+                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
+                parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
+                kind: .instruction, message: "And this.", timestamp: sentAt
+            ), enabled: true) else { return XCTFail("not recorded") }
+            _ = harness.shell.handleMissionEvent(fromCLI.mission, event: fromCLI.event)
+            XCTAssertEqual(instructions().map(\.childSessionID), ["first", "first"])
+
+            let notices = { harness.shell.pendingLeadNotices.filter { $0.workspaceID == lead.workspace.id }.map(\.text) }
+            let sweep = { (snapshot: ProcessSnapshot) in harness.shell.sweepWaitingInstructions(now: sentAt + 60, snapshot: snapshot) }
+            sweep(inFront(99_981, startedAt: sentAt + 5).snapshot)
+            XCTAssertTrue(notices().isEmpty, "restarted, it hasn't said which conversation it holds: " + notices().joined())
+            let resumed = inFront(99_982, startedAt: sentAt + 10)
+            confirm("first", by: resumed.claude, in: resumed.snapshot)
+            let first = try XCTUnwrap(instructions().first)
+            XCTAssertEqual(harness.shell.runningSince(of: first, in: task.column, snapshot: resumed.snapshot, now: sentAt + 20), sentAt + 20)
+            sweep(resumed.snapshot)
+            XCTAssertTrue(notices().isEmpty, "resuming it, the same recipient: " + notices().joined())
+            let other = inFront(99_983, startedAt: sentAt + 30)
+            confirm("second", by: other.claude, in: other.snapshot)
+            XCTAssertEqual(harness.shell.runningSince(of: first, in: task.column, snapshot: other.snapshot, now: sentAt + 40), first.timestamp)
+            sweep(other.snapshot)
+            XCTAssertEqual(notices().count, 2)
+            XCTAssertTrue(notices().allSatisfy { $0.contains("won't be typed: its Claude Code restarted on another conversation") }, notices().joined())
+        }
+    }
 }

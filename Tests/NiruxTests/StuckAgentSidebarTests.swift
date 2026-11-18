@@ -577,12 +577,14 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         pty.applyAgentHook(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "s", timestamp: now + 40), isUserFocused: true)
         XCTAssertTrue(waits(at: now + 41).isEmpty, "its turn runs")
-        XCTAssertEqual(lines.count, 2, "a turn at work says nothing")
-        // Unless no hook came for a stall's length.
+        // A turn at work holding a message says so too, past a stall's length.
+        XCTAssertEqual(lines.count, 3)
+        XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(first.id.prefix(8)) ") == true
+            && lines.last?.contains(" reason=working messages=2 ") == true, lines.last ?? "")
         _ = waits(at: now + 40 + NiruxShellView.missionMessageStallAge)
         XCTAssertEqual(lines.count, 4)
-        XCTAssertTrue(lines.suffix(2).allSatisfy { $0.contains(" reason=working messages=2 ") && $0.contains(" working=1 inFlight=1 turn=180s ") },
-                      lines.last ?? "")
+        XCTAssertTrue(lines.last?.hasPrefix("untyped mission message id=\(second.id.prefix(8)) ") == true
+            && lines.last?.contains(" working=1 inFlight=1 turn=180s ") == true, lines.last ?? "")
 
         // A tell to a child other than Claude Code waits for nobody here.
         let codexMission = UUID().uuidString, otherWorkspace = UUID().uuidString, otherAgent = UUID().uuidString

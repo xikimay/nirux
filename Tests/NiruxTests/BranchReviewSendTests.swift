@@ -41,7 +41,7 @@ final class BranchReviewSendTests: XCTestCase {
         let text = BranchReview.agentPaste(String(repeating: line, count: 3_000))
         var outcome: PtySession.PasteOutcome?
         let started = Date()
-        pty.pasteInBackground(text, keepingInFront: nil, cancelled: { false }) { outcome = $0 }
+        pty.pasteInBackground(text, keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value }
         // A paste that waited would take 0.7 s at least (the reader starts
         // a second after the terminal); a busy machine takes some too.
         XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "the app isn't held while the agent doesn't read")
@@ -53,7 +53,7 @@ final class BranchReviewSendTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), Data(text.utf8))
 
         outcome = nil
-        pty.pasteInBackground("again", keepingInFront: nil, cancelled: { false }) { outcome = $0 }
+        pty.pasteInBackground("again", keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value }
         try await waitUntil("the second paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .pasted)
         try await waitUntil("the second paste's bytes", timeout: 10) { (try? Data(contentsOf: file))?.count == text.utf8.count + 5 }
@@ -64,7 +64,7 @@ final class BranchReviewSendTests: XCTestCase {
     func testPasteIntoATerminalNotRunningSaysSo() async throws {
         let pty = PtySession()
         var outcome: PtySession.PasteOutcome?
-        pty.pasteInBackground("hi", keepingInFront: nil, cancelled: { false }) { outcome = $0 }
+        pty.pasteInBackground("hi", keepingInFront: nil, cancelled: { false }) { value, _ in outcome = value }
         try await waitUntil("the paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .closed)
         XCTAssertEqual(pty.reviewSendRefusal(snapshot: ProcessSnapshot()), .noAgent)
@@ -154,7 +154,7 @@ final class BranchReviewSendTests: XCTestCase {
         XCTAssertEqual((try? Data(contentsOf: file))?.count ?? 0, 0)
 
         var outcome: PtySession.PasteOutcome?
-        pty.pasteInBackground("c", keepingInFront: ProcessInstance(pid: 999_999, startedAt: 0), cancelled: { false }) { outcome = $0 }
+        pty.pasteInBackground("c", keepingInFront: ProcessInstance(pid: 999_999, startedAt: 0), cancelled: { false }) { value, _ in outcome = value }
         try await waitUntil("the paste's outcome", timeout: 10) { outcome != nil }
         XCTAssertEqual(outcome, .agentLeft)
     }

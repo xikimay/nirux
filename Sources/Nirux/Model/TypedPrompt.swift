@@ -63,7 +63,11 @@ enum TypedPromptSanitizer {
     }
 
     static func terminalInput(for text: String) -> String? {
-        guard let sanitized = sanitize(text) else { return nil }
-        return "\u{1B}[200~\(sanitized)\u{1B}[201~\r"
+        bracketedPaste(for: text).map { $0 + "\r" }
+    }
+
+    /// `text`, sanitized, as a bracketed paste, without the Enter.
+    static func bracketedPaste(for text: String) -> String? {
+        sanitize(text).map { "\u{1B}[200~\($0)\u{1B}[201~" }
     }
 }

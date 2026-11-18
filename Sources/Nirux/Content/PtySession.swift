@@ -384,8 +384,35 @@ final class PtySession: @unchecked Sendable {
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
+    /// Why Nirux may not press Esc in the agent's turn now (see
+    /// `AgentStatusMachine.interruptRefusal`).
+    func interruptRefusal(snapshot: ProcessSnapshot) -> AgentInterruptRefusal? {
+        state.machine.interruptRefusal(foreground: foregroundProcess(snapshot: snapshot))
+    }
+
+    /// Esc, as the key, but no draft (see `noteInterruptSent`): the prompt
+    /// whose turn it interrupts.
+    func sendInterrupt() -> TimeInterval? {
+        guard let promptAt = state.machine.noteInterruptSent(now: Date().timeIntervalSince1970) else { return nil }
+        state.writeToPty(Data([0x1B]))
+        return promptAt
+    }
+
+    /// Claude confirmed the interrupt of `promptAt`'s turn: it is over.
+    func noteInterrupted(promptAt: TimeInterval) -> Bool {
+        state.machine.noteInterrupted(promptAt: promptAt, now: Date().timeIntervalSince1970)
+    }
+
+    /// When a key or paste last reached the terminal.
+    var lastInputAt: TimeInterval { state.machine.lastInputAt }
+    /// The same, for what may sit in the prompt (scrolled arrows too).
+    var lastDraftInputAt: TimeInterval { state.machine.lastDraftInputAt }
+
     /// See `AgentStatusMachine.hold`.
     var agentHold: AgentHold? { state.machine.hold }
+
+    /// A dialog that keys would answer is open.
+    var dialogWaitsForKeys: Bool { state.machine.pendingDialogs.contains(where: state.machine.waitsForKeys) }
 
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).
@@ -676,17 +703,23 @@ final class PtySession: @unchecked Sendable {
     /// and what the agent left unread is dropped. It counts as typed.
     /// Cancelled, or timed out, the agent still in front, the paste is
     /// ended (`ESC[201~`) if the terminal takes it, so that Claude isn't
-    /// left in it. `done` comes on the main queue.
+    /// left in it. `done` comes on the main queue, with when the paste
+    /// counted as typed (`lastInputAt` then: later input is someone's).
     func pasteInBackground(
         _ text: String, keepingInFront process: ProcessInstance?, cancelled: @escaping @Sendable () -> Bool,
-        done: @escaping @MainActor @Sendable (PasteOutcome) -> Void
+        done: @escaping @MainActor @Sendable (_ outcome: PasteOutcome, _ typedAt: TimeInterval) -> Void
     ) {
         let data = Data(text.utf8)
         // Gone already, it reads as no group: nothing is written.
         let group = process.map { getpgid($0.pid) }
         let fd = hasExited ? nil : state.descriptorForWrite(of: data)
-        Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled, done: done)
+        let typedAt = lastInputAt
+        Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled) { done($0, typedAt) }
     }
+
+    /// What one write to the terminal surely takes: about what its input
+    /// queue holds. A longer text goes through `pasteInBackground`.
+    nonisolated static let inputQueueBytes = 1_024
 
     /// `ESC[200~` and `ESC[201~`.
     private nonisolated static let markerLength = 6

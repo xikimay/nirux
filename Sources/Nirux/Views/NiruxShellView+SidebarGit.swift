@@ -521,7 +521,13 @@ extension NiruxShellView {
                 kind: event.kind,
                 message: event.message
             )
-        case .question, .instruction:
+        case .instruction:
+            // A `tell` from the CLI: the conversation it is for.
+            if event.childSessionID == nil, let held = missionEnd(mission, parent: false)?.column
+                .flatMap({ conversation(of: $0, snapshot: ProcessSnapshot()) }) {
+                MissionStore.shared.noteConversation(held, ofInstruction: event.id)
+            }
+        case .question:
             break
         }
         updateSidebar()
