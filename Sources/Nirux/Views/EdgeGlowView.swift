@@ -27,7 +27,7 @@ final class EdgeGlowView: NSView {
     /// The focused column's light starts inside its focus ring, which
     /// stays as it is.
     static let focusRingWidth: CGFloat = 2
-    /// A column's ring: as wide as the terminal's padding
+    /// A column's ring: within the terminal's padding
     /// (`TerminalConfigBuilder.padding`), so it covers no text.
     static let ringWidth: CGFloat = 2
     /// How far a column's glow reaches over its cells, and how strong it

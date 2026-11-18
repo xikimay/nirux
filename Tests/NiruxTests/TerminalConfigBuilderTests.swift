@@ -28,22 +28,28 @@ final class TerminalConfigBuilderTests: XCTestCase {
 
     // MARK: - Defaults
 
-    func testWithoutUserConfigNiruxKeepsItsCurrentLook() {
-        // What Nirux rendered before reading the Ghostty config: the
-        // libghostty-spm defaults plus its Afterglow dark palette. Compared
-        // with the pinned library's own Afterglow, which Nirux writes out.
+    func testWithoutUserConfigNiruxDrawsWithItsOwnLook() {
+        // 13 pt in plain strokes, Nirux's colours, then what is enforced.
         let lines = renderedLines([])
-        XCTAssertEqual(Array(lines.prefix(5)), [
-            "cursor-style = block", "cursor-style-blink = true", "font-size = 14", "font-thicken = true",
-            "copy-on-select = clipboard"
+        XCTAssertEqual(Array(lines.prefix(4)), [
+            "cursor-style = block", "cursor-style-blink = true", "font-size = 13", "copy-on-select = clipboard"
         ])
-        XCTAssertEqual(
-            Array(lines.dropFirst(5).dropLast(Builder.enforced.count)),
-            TerminalConfiguration.afterglow.rendered.split(separator: "\n").map(String.init)
-        )
+        XCTAssertFalse(lines.contains { $0.hasPrefix("font-thicken") }, "plain strokes")
+        XCTAssertEqual(Array(lines.dropFirst(4).dropLast(Builder.enforced.count)), Builder.niruxColors)
         XCTAssertEqual(Array(lines.suffix(Builder.enforced.count)), Builder.enforced)
-        XCTAssertTrue(lines.contains("background = 212121"))
         XCTAssertEqual(lines.last, "term = xterm-256color")
+    }
+
+    /// The terminal lies in its column as the window's own surfaces do.
+    func testNiruxsBackgroundIsTheThemesBase() throws {
+        let line = try XCTUnwrap(Builder.niruxColors.first { $0.hasPrefix("background = ") })
+        let hex = try XCTUnwrap(UInt32(line.dropFirst("background = ".count), radix: 16))
+        let base = try XCTUnwrap(Theme.Color.base.usingColorSpace(.sRGB))
+        XCTAssertEqual(CGFloat((hex >> 16) & 0xFF) / 255, base.redComponent, accuracy: 0.002)
+        XCTAssertEqual(CGFloat((hex >> 8) & 0xFF) / 255, base.greenComponent, accuracy: 0.002)
+        XCTAssertEqual(CGFloat(hex & 0xFF) / 255, base.blueComponent, accuracy: 0.002)
+        XCTAssertEqual(Builder.niruxColors.filter { $0.hasPrefix("palette = ") }.count, 16)
+        XCTAssertFalse(Builder.niruxColors.contains { $0.uppercased().contains("F5A623") }, "amber says an agent waits")
     }
 
     // MARK: - Honored keys
@@ -71,24 +77,24 @@ final class TerminalConfigBuilderTests: XCTestCase {
 
     func testUserSettingsOverrideDefaultsAndEnforcedKeysComeLast() {
         let lines = renderedLines(userLines("font-size = 16\nbackground = #101010\nterm = dumb").lines)
-        XCTAssertGreaterThan(lines.lastIndex(of: "font-size = 16") ?? 0, lines.firstIndex(of: "font-size = 14") ?? .max)
+        XCTAssertGreaterThan(lines.lastIndex(of: "font-size = 16") ?? 0, lines.firstIndex(of: "font-size = 13") ?? .max)
         XCTAssertGreaterThan(
             lines.firstIndex(of: "background = #101010") ?? 0,
-            lines.firstIndex(of: "background = 212121") ?? .max
+            lines.firstIndex(of: "background = 1B1B23") ?? .max
         )
         XCTAssertFalse(lines.contains("term = dumb"))
         XCTAssertEqual(lines.last, "term = xterm-256color")
     }
 
-    func testOwnBackgroundDropsAfterglowCursorAndSelection() {
+    func testOwnBackgroundDropsNiruxsCursorAndSelection() {
         let lines = renderedLines(userLines("background = #2e3440").lines)
         XCTAssertFalse(lines.contains { $0.hasPrefix("cursor-color") || $0.hasPrefix("selection-background") })
-        XCTAssertTrue(lines.contains("palette = 1=#AC4142"), "the Afterglow palette stays")
-        XCTAssertTrue(lines.contains("foreground = D0D0D0"))
+        XCTAssertTrue(lines.contains("palette = 1=#E5646A"), "Nirux's palette stays")
+        XCTAssertTrue(lines.contains("foreground = D6D6DE"))
 
         let foregroundOnly = renderedLines(userLines("foreground = #eceff4").lines)
         XCTAssertFalse(foregroundOnly.contains { $0.hasPrefix("selection-background") })
-        XCTAssertTrue(renderedLines(userLines("font-size = 15").lines).contains("selection-background = 303030"))
+        XCTAssertTrue(renderedLines(userLines("font-size = 15").lines).contains("selection-background = 2E3A57"))
     }
 
     // MARK: - Themes
@@ -110,7 +116,7 @@ final class TerminalConfigBuilderTests: XCTestCase {
         let result = userLines("theme = Nope\nfont-size = 15")
         XCTAssertEqual(result.lines.map(\.entry.key), ["font-size"])
         XCTAssertEqual(result.unresolvedTheme?.value, "Nope")
-        XCTAssertTrue(renderedLines(result.lines).contains("background = 212121"))
+        XCTAssertTrue(renderedLines(result.lines).contains("background = 1B1B23"))
     }
 
     func testDarkVariantOfAPairIsUsed() {
@@ -233,25 +239,25 @@ final class TerminalConfigBuilderTests: XCTestCase {
         let result = Builder.sanitize(user, diagnostics: fakeDiagnostics { $0.contains("abc") || $0.contains("#zz") })
         XCTAssertEqual(result.dropped.map(\.text), ["palette = 1=#zz", "font-size = abc"])
         XCTAssertTrue(result.contents.contains("background = #000000\n"))
-        XCTAssertFalse(result.contents.contains("background = 212121"))
+        XCTAssertFalse(result.contents.contains("background = 1B1B23"))
     }
 
     func testSanitizeRestoresNiruxColorsWhenEveryThemeLineIsRejected() {
         let user = userLines("theme = T\nfont-size = 15", themes: ["T": "palette = 1=#zz"]).lines
         let result = Builder.sanitize(user, diagnostics: fakeDiagnostics { $0.contains("#zz") })
         XCTAssertEqual(result.dropped.map(\.isTheme), [true])
-        XCTAssertTrue(result.contents.contains("background = 212121"))
+        XCTAssertTrue(result.contents.contains("background = 1B1B23"))
         XCTAssertTrue(result.contents.contains("font-size = 15"))
     }
 
-    func testSanitizeMapsLinesWhenAfterglowIsTrimmed() {
+    func testSanitizeMapsLinesWhenNiruxsColorsAreTrimmed() {
         // An own background shortens Nirux's lines: numbering must follow,
-        // and dropping that background brings the full Afterglow back.
+        // and dropping that background brings Nirux's full colours back.
         let user = userLines("background = #zz\nfont-size = abc\nfont-size = 15").lines
         let result = Builder.sanitize(user, diagnostics: fakeDiagnostics { $0.contains("#zz") || $0.contains("abc") })
         XCTAssertEqual(result.dropped.map(\.entry.lineNumber), [1, 2])
         XCTAssertEqual(result.contents, Builder.render([user[2]]))
-        XCTAssertTrue(result.contents.contains("selection-background = 303030"))
+        XCTAssertTrue(result.contents.contains("selection-background = 2E3A57"))
     }
 
     func testSanitizeFallsBackToDefaultsOnUnlocatedErrors() {
