@@ -41,14 +41,12 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertLessThanOrEqual(Theme.Radius.column * (1 - 1 / 2.0.squareRoot()), CGFloat(TerminalConfigBuilder.padding))
     }
 
-    /// A terminal's column doesn't clip, which would cost an offscreen pass
-    /// each frame the terminal draws: its header, its terminal and the
-    /// overlays over it round the card's corners on their own layers.
-    /// Other columns clip.
-    func testATerminalsLayersRoundTheCardSoItsColumnDoesntClip() throws {
+    /// A terminal's header, its terminal and the overlays over it round the
+    /// card's corners on their own layers: nothing of theirs lies in the
+    /// corners its column clips.
+    func testATerminalsLayersRoundTheCardsCorners() throws {
         let workspace = workspace(columns: 1)
         let column = try XCTUnwrap(workspace.columns.first)
-        workspace.addEditorColumn(workspaceCwd: "/tmp")
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         // The corners at the top or the bottom of the card, in a layer's
         // own y.
@@ -57,7 +55,6 @@ final class ColumnCardsTests: XCTestCase {
                 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner] : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         }
 
-        XCTAssertEqual(column.view.layer?.masksToBounds, false)
         let terminal = try XCTUnwrap(column.terminalView?.layer)
         XCTAssertTrue(terminal.masksToBounds)
         XCTAssertEqual(terminal.cornerRadius, Theme.Radius.column)
@@ -65,7 +62,6 @@ final class ColumnCardsTests: XCTestCase {
         let header = try XCTUnwrap(column.header?.layer)
         XCTAssertEqual(header.cornerRadius, Theme.Radius.column)
         XCTAssertEqual(header.maskedCorners, corners(header, top: true))
-        XCTAssertEqual(workspace.columns.last?.view.layer?.masksToBounds, true, "an editor clips")
 
         let overlay = ShellExitedOverlay()
         column.view.addSubview(overlay)
