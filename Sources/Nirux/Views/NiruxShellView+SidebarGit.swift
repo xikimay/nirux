@@ -401,7 +401,8 @@ extension NiruxShellView {
         overlay.identifier = Self.flashOverlayID
         overlay.autoresizingMask = [.width, .height]
         overlay.wantsLayer = true
-        overlay.layer?.cornerRadius = 6
+        // The column's own corners, so that its clip leaves the ring whole.
+        overlay.layer?.cornerRadius = Theme.Radius.column
         overlay.layer?.borderWidth = 3
         overlay.layer?.borderColor = Theme.Color.accent.cgColor
         overlay.layer?.opacity = 0
