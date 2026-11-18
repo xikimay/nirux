@@ -207,6 +207,7 @@ final class ColumnState {
             agentExitOverlay?.frame = terminal.frame
             deferredAgentOverlay?.frame = terminal.frame
         }
+        roundTerminal()
         layoutFindBar()
     }
 
@@ -323,6 +324,17 @@ final class ColumnState {
     func surfaceChanged(attached: Bool) {
         hasSurface = attached
         updateTerminalFrost()
+        roundTerminal()
+    }
+
+    /// The card's bottom corners on the terminal's own layer, which the
+    /// compositor rounds as it draws Ghostty's surface: clipping the column
+    /// instead costs an offscreen pass each frame the terminal draws.
+    /// Ghostty swaps the layer for its own once the surface comes.
+    private func roundTerminal() {
+        guard let layer = terminalView?.layer else { return }
+        layer.roundCardCorners(top: false)
+        layer.masksToBounds = true
     }
 
     /// A column's view, opaque under its content in the canvas's colour,

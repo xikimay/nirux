@@ -255,3 +255,15 @@ extension NSColor {
         return NSColor(hex: value)
     }
 }
+
+extension CALayer {
+    /// Rounds the layer's top or bottom corners as its card's, for a part
+    /// of a column that doesn't clip (a terminal's).
+    func roundCardCorners(top: Bool) {
+        cornerRadius = Theme.Radius.column
+        // Its y runs down exactly when its contents are flipped, which its
+        // superview can make so.
+        maskedCorners = top == contentsAreFlipped()
+            ? [.layerMinXMinYCorner, .layerMaxXMinYCorner] : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+    }
+}

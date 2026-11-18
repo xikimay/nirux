@@ -271,6 +271,8 @@ final class ColumnHeaderView: NSView {
 
     override func layout() {
         super.layout()
+        // The top of its card, which a terminal's column doesn't clip.
+        layer?.roundCardCorners(top: true)
         bottomLine.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 1)
         iconView.frame = NSRect(
             x: Self.leadingInset - (Self.iconFrame - Self.iconSize) / 2,
