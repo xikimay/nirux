@@ -185,6 +185,21 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(status, 0)
     }
 
+    /// A tell whose agent left before it was all in is untyped again, and a
+    /// Mission its typing reopened is completed again.
+    func testAnInstructionCutShortIsUntypedAgain() throws {
+        let fixture = try makeFixture()
+        complete(fixture)
+        XCTAssertEqual(tell("/next", in: fixture), 3)
+        fixture.center.drain()
+        let pending = try XCTUnwrap(pendingInstructions(fixture, now: 30).first)
+        XCTAssertTrue(fixture.store.markTyped(pending, at: 30))
+        XCTAssertEqual(fixture.store.missions[0].status, .active, "its typing reopened it")
+        XCTAssertTrue(fixture.store.unmarkTyped(pending))
+        XCTAssertEqual(fixture.store.missions[0].status, .completed)
+        XCTAssertEqual(pendingInstructions(fixture, now: 40).count, 1)
+    }
+
     /// A tell Nirux gave up ends the wait: a rerun would send it again.
     func testTellStopsOnceNiruxGaveItUp() async throws {
         let fixture = try makeFixture()

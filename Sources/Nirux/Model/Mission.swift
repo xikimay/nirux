@@ -574,7 +574,15 @@ final class MissionStore {
         var updated = missions
         let event = updated[missionIndex].events[eventIndex]
         switch event.kind {
-        case .instruction, .response:
+        case .instruction:
+            updated[missionIndex].events[eventIndex].childConsumedAt = nil
+            // Its typing reopened a completed Mission (`markInstructionTyped`): no other did since.
+            let events = updated[missionIndex].events
+            if let completed = events.last(where: { $0.kind == .completed }),
+               !events.contains(where: { $0.kind == .instruction && ($0.childConsumedAt ?? 0) > completed.timestamp }) {
+                updated[missionIndex].status = .completed
+            }
+        case .response:
             updated[missionIndex].events[eventIndex].childConsumedAt = nil
         case .question, .completed:
             updated[missionIndex].events[eventIndex].parentTypedAt = nil

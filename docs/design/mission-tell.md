@@ -106,10 +106,15 @@ Review's send).
   background subagent at work doesn't stop it (the main prompt is free).
   - Its agent left, or its task closed, before it was all in: it is marked
     untyped again and waits for the next free prompt, under the same rules.
-  - Left in the prompt unsent (someone typed, a dialog opened, the agent
-    stopped reading): the user gets a toast to press Enter there, and a
-    task's sender a `[Nirux Mission]` line. Sending it again would only
-    add a copy after the draft.
+  - All of it in the prompt, unsent (someone typed, a dialog opened): the
+    user gets a toast to press Enter there, and a task's sender a
+    `[Nirux Mission]` line; sending it again would only add a copy after
+    the draft.
+  - Cut off (the agent stopped reading for 30 s): only its start is in the
+    prompt; the user gets a toast to clear it, and a task's sender a line to
+    send it again.
+  - A message whose typing had reopened a completed Mission completes it
+    again when it is marked untyped.
 - Limits count characters, and scalars too: what Nirux types stops at
   `TypedPromptSanitizer.maxCharacters` scalars.
 - A file the message points to was rejected: one in the task's worktree shows
