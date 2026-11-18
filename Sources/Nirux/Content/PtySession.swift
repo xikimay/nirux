@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import GhosttyTerminal
+import os
 
 enum AgentStatus: Equatable, Hashable, Sendable {
     case idle, working, needsAttention
@@ -384,8 +385,35 @@ final class PtySession: @unchecked Sendable {
     /// A Claude turn end that hasn't alerted (see
     /// `AgentStatusMachine.isQuietTurnEnd`): no Dock badge.
     var isQuietTurnEnd: Bool { state.machine.isQuietTurnEnd }
+    /// Why Nirux may not press Esc in the agent's turn now (see
+    /// `AgentStatusMachine.interruptRefusal`).
+    func interruptRefusal(snapshot: ProcessSnapshot) -> AgentInterruptRefusal? {
+        state.machine.interruptRefusal(foreground: foregroundProcess(snapshot: snapshot))
+    }
+
+    /// Esc, as the key, but no draft (see `noteInterruptSent`): the prompt
+    /// whose turn it interrupts.
+    func sendInterrupt() -> TimeInterval? {
+        guard let promptAt = state.machine.noteInterruptSent(now: Date().timeIntervalSince1970) else { return nil }
+        state.writeToPty(Data([0x1B]))
+        return promptAt
+    }
+
+    /// Claude confirmed the interrupt of `promptAt`'s turn: it is over.
+    func noteInterrupted(promptAt: TimeInterval) -> Bool {
+        state.machine.noteInterrupted(promptAt: promptAt, now: Date().timeIntervalSince1970)
+    }
+
+    /// When a key or paste last reached the terminal.
+    var lastInputAt: TimeInterval { state.machine.lastInputAt }
+    /// The same, for what may sit in the prompt (scrolled arrows too).
+    var lastDraftInputAt: TimeInterval { state.machine.lastDraftInputAt }
+
     /// See `AgentStatusMachine.hold`.
     var agentHold: AgentHold? { state.machine.hold }
+
+    /// A dialog that keys would answer is open.
+    var dialogWaitsForKeys: Bool { state.machine.pendingDialogs.contains(where: state.machine.waitsForKeys) }
 
     /// The question the foreground `claude`'s last turn ended on (see
     /// `AgentStatusMachine.askedQuestion`).
@@ -666,6 +694,13 @@ final class PtySession: @unchecked Sendable {
         case timedOut
     }
 
+    /// How a paste ended, and how many of its bytes reached the terminal:
+    /// none, nothing of it sits anywhere.
+    struct PasteResult: Equatable, Sendable {
+        let outcome: PasteOutcome
+        let written: Int
+    }
+
     /// Writes `text` to the terminal off the main thread: a long paste
     /// fills the terminal's input queue, which empties only as the agent
     /// reads it, so one write would block the app meanwhile, or stop short
@@ -676,17 +711,30 @@ final class PtySession: @unchecked Sendable {
     /// and what the agent left unread is dropped. It counts as typed.
     /// Cancelled, or timed out, the agent still in front, the paste is
     /// ended (`ESC[201~`) if the terminal takes it, so that Claude isn't
-    /// left in it. `done` comes on the main queue.
+    /// left in it. Meanwhile, a wheel scroll's arrows aren't passed on:
+    /// inside the paste they would be its text. `done` comes on the main
+    /// queue, with when the paste counted as typed (`lastInputAt` then:
+    /// later input is someone's).
     func pasteInBackground(
         _ text: String, keepingInFront process: ProcessInstance?, cancelled: @escaping @Sendable () -> Bool,
-        done: @escaping @MainActor @Sendable (PasteOutcome) -> Void
+        done: @escaping @MainActor @Sendable (_ result: PasteResult, _ typedAt: TimeInterval) -> Void
     ) {
         let data = Data(text.utf8)
         // Gone already, it reads as no group: nothing is written.
         let group = process.map { getpgid($0.pid) }
         let fd = hasExited ? nil : state.descriptorForWrite(of: data)
-        Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled, done: done)
+        let typedAt = lastInputAt
+        let pasting = state.pasting
+        pasting.withLock { $0 += 1 }
+        Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled) { result in
+            pasting.withLock { $0 -= 1 }
+            done(result, typedAt)
+        }
     }
+
+    /// What one write to the terminal surely takes: about what its input
+    /// queue holds. A longer text goes through `pasteInBackground`.
+    nonisolated static let inputQueueBytes = 1_024
 
     /// `ESC[200~` and `ESC[201~`.
     private nonisolated static let markerLength = 6
@@ -698,14 +746,14 @@ final class PtySession: @unchecked Sendable {
     /// the main thread; `done` on the main queue.
     private nonisolated static func writeInBackground(
         _ data: Data, to fd: Int32?, group: pid_t?, cancelled: @escaping @Sendable () -> Bool,
-        done: @escaping @MainActor @Sendable (PasteOutcome) -> Void
+        done: @escaping @MainActor @Sendable (PasteResult) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let outcome = fd.map { fd in
+            let result = fd.map { fd in
                 defer { close(fd) }
                 return writePaste(data, to: fd, group: group, cancelled: cancelled, deadline: Date().addingTimeInterval(pasteTimeout))
-            } ?? .closed
-            DispatchQueue.main.async { done(outcome) }
+            } ?? PasteResult(outcome: .closed, written: 0)
+            DispatchQueue.main.async { done(result) }
         }
     }
 
@@ -715,8 +763,15 @@ final class PtySession: @unchecked Sendable {
     /// process group, until `deadline`, unless `cancelled`.
     nonisolated static func writePaste(
         _ data: Data, to fd: Int32, group: pid_t?, cancelled: @Sendable () -> Bool, deadline: Date
-    ) -> PasteOutcome {
+    ) -> PasteResult {
         var offset = 0
+        let outcome = writePaste(data, to: fd, group: group, cancelled: cancelled, deadline: deadline, offset: &offset)
+        return PasteResult(outcome: outcome, written: offset)
+    }
+
+    private nonisolated static func writePaste(
+        _ data: Data, to fd: Int32, group: pid_t?, cancelled: @Sendable () -> Bool, deadline: Date, offset: inout Int
+    ) -> PasteOutcome {
         func writable(_ wait: Int32) -> Bool? {
             var ready = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
             let count = poll(&ready, 1, wait)
@@ -999,6 +1054,7 @@ final class PtySession: @unchecked Sendable {
         let st = state
         terminalSession = InMemoryTerminalSession(
             write: { data in
+                guard !st.dropsDuringPaste(data) else { return }
                 st.noteTerminalWrite(data)
                 st.writeToPty(data)
             },
@@ -1239,6 +1295,14 @@ private final class PtyState: @unchecked Sendable {
     var machine = AgentStatusMachine()
     /// Main thread only, as the hook events that feed it.
     var lifeSigns = AgentLifeSigns()
+
+    /// Background pastes running (`PtySession.pasteInBackground`).
+    let pasting = OSAllocatedUnfairLock(initialState: 0)
+
+    /// A wheel scroll's arrows while a paste runs: they would be its text.
+    func dropsDuringPaste(_ data: Data) -> Bool {
+        AgentStatusMachine.isUpDownArrows(data) && pasting.withLock { $0 > 0 }
+    }
     /// Main thread only: when the screen was last read for a trust
     /// question (see AgentTrustPrompt), and whether a read is on its way.
     var trustPromptReadAt: TimeInterval = 0

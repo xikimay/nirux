@@ -139,6 +139,12 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertTrue(isSilent(), "the next prompt is watched again")
     }
 
+    func testAnEscNiruxSendsIsAnInterruptToo() {
+        promptIn()
+        XCTAssertNotNil(machine.noteInterruptSent(now: t0 + 5))
+        XCTAssertFalse(isSilent(), "the Lead's interrupt_task")
+    }
+
     func testAnInterruptedCallIsNoSilence() {
         promptIn()
         apply(.preToolUse, at: 2, id: "build")

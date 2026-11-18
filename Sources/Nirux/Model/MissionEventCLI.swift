@@ -16,6 +16,35 @@ import Foundation
 /// 4 stop (handoffs off, Mission over, or not this terminal's to answer).
 enum MissionEventCLI {
     static let maxMessageLength = 500
+    /// A parent's message to its child (`tell`, `reply`): typed into the
+    /// child's prompt as the agent reads it, so it may be longer.
+    static let maxInstructionLength = 4_000
+
+    /// The longest message of an event of `kind`.
+    static func maxLength(of kind: MissionEvent.Kind) -> Int {
+        [.instruction, .response].contains(kind) ? maxInstructionLength : maxMessageLength
+    }
+
+    /// The most of a message Nirux types whole, in scalars: what it types
+    /// holds `TypedPromptSanitizer.maxCharacters`, an answer's header
+    /// included. Emoji and combining marks take several.
+    static let maxScalars = TypedPromptSanitizer.maxCharacters - MissionPromptText.answerHeaderScalars
+
+    /// Why `message`, trimmed, can't be sent within `limit` characters; nil
+    /// when it can.
+    static func problem(with message: String, limit: Int) -> String? {
+        guard !message.isEmpty, message.count <= limit else { return "message must hold 1 to \(limit) characters." }
+        let scalars = message.unicodeScalars.count
+        guard scalars <= maxScalars else {
+            return "message holds \(scalars) Unicode scalars, past the \(maxScalars) Nirux types whole "
+                + "(an emoji or an accent can take several): shorten it."
+        }
+        return nil
+    }
+
+    static func fits(_ message: String, limit: Int) -> Bool {
+        problem(with: message, limit: limit) == nil
+    }
     /// Agent shell tools stop foreground commands after a few minutes (two
     /// by default in Claude Code), so a wait never lasts longer than this and
     /// the agent runs the same command again to keep waiting.
@@ -27,9 +56,16 @@ enum MissionEventCLI {
     /// typed, so rerunning a command whose output the shell tool cut short
     /// is harmless. After that, the same text is a new question or message.
     static let answerReplayWindow: TimeInterval = 60
-    /// How long Nirux keeps trying to type a `tell`. Past it, the message is
-    /// never typed: nobody may want it any more.
-    static let instructionLifetime: TimeInterval = 3600
+    /// How long Nirux keeps a `tell` to type at the child's next free
+    /// prompt (a turn may run long). Past it, Nirux gives it up and tells
+    /// its sender.
+    static let instructionLifetime: TimeInterval = 24 * 3600
+    /// What a `tell` an older build recorded had (see
+    /// `MissionEvent.typableUntil`).
+    static let olderInstructionLifetime: TimeInterval = 3600
+    /// A `tell` still untyped this long after it was sent: its sender hears
+    /// what holds it, once.
+    static let instructionHeldNotice: TimeInterval = 3600
     /// How long Nirux keeps trying to type a child's question or completion
     /// into its parent's prompt. A question then waits on the user alone.
     static let parentMessageLifetime: TimeInterval = 3600
@@ -108,9 +144,10 @@ enum MissionEventCLI {
     ) -> Int32 {
         guard kind == .question || kind == .completed else { return usage("completed --message <text>") }
         guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
-        guard let options = parseOptions(arguments, allowed: ["--message"]),
+        let options = parseOptions(arguments, allowed: ["--message"])
+        guard let options,
               let message = validMessage(options["--message"])
-        else { return usage("\(kind.rawValue) --message <1-\(maxMessageLength) characters>") }
+        else { return usage("\(kind.rawValue) \(messageUsage(options?["--message"]))") }
 
         // An unreadable ledger still queues the event, as before: Nirux
         // validates it again when draining the queue.
@@ -148,11 +185,12 @@ enum MissionEventCLI {
         output: (String) -> Void = writeStandardOutput
     ) -> Int32 {
         guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
-        guard let options = parseOptions(arguments, allowed: ["--message", "--timeout"]),
+        let options = parseOptions(arguments, allowed: ["--message", "--timeout"])
+        guard let options,
               let message = validMessage(options["--message"]),
               let timeout = validTimeout(options["--timeout"])
         else {
-            return usage("ask --message <1-\(maxMessageLength) characters> [--timeout <seconds>]")
+            return usage("ask \(messageUsage(options?["--message"])) [--timeout <seconds>]")
         }
 
         var ledger = MissionLedgerReader(url: missionsURL)
@@ -360,8 +398,8 @@ enum MissionEventCLI {
             let receivedAt = now()
             if !missions.isEmpty, !missions.contains(where: { mission in
                 mission.status == .active || mission.events.contains {
-                    $0.kind == .instruction && $0.childConsumedAt == nil
-                        && receivedAt - $0.timestamp < instructionLifetime
+                    $0.kind == .instruction && $0.childConsumedAt == nil && $0.expiredAt == nil
+                        && receivedAt < $0.instructionDeadline
                 }
             }) {
                 writeStandardError("No active Mission for this terminal; stop waiting.")
@@ -412,12 +450,13 @@ enum MissionEventCLI {
         pollInterval: TimeInterval = 0.05
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
-        guard let options = parseOptions(arguments, allowed: ["--event", "--message"]),
+        let options = parseOptions(arguments, allowed: ["--event", "--message"])
+        guard let options,
               let eventID = options["--event"],
               UUID(uuidString: eventID) != nil,
-              let message = validMessage(options["--message"])
+              let message = validMessage(options["--message"], limit: maxInstructionLength)
         else {
-            return usage("reply --event <question-event-id> --message <1-\(maxMessageLength) characters>")
+            return usage("reply --event <question-event-id> \(messageUsage(options?["--message"], limit: maxInstructionLength))")
         }
         var ledger = MissionLedgerReader(url: missionsURL)
         guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
@@ -533,10 +572,17 @@ enum MissionEventCLI {
         return result
     }
 
-    private static func validMessage(_ raw: String?) -> String? {
+    /// A usage line's `--message`, saying why `raw` failed when its scalars did.
+    private static func messageUsage(_ raw: String?, limit: Int = maxMessageLength) -> String {
+        let message = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let failed = !message.isEmpty && message.count <= limit ? problem(with: message, limit: limit) : nil
+        return "--message <1-\(limit) characters>" + (failed.map { " (\($0))" } ?? "")
+    }
+
+    private static func validMessage(_ raw: String?, limit: Int = maxMessageLength) -> String? {
         guard let raw else { return nil }
         let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !message.isEmpty && message.count <= maxMessageLength ? message : nil
+        return fits(message, limit: limit) ? message : nil
     }
 
     /// `--timeout` can shorten a wait but never extend it past the default:
@@ -649,13 +695,14 @@ extension MissionEventCLI {
         pollInterval: TimeInterval = 0.2
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
-        guard let options = parseOptions(arguments, allowed: ["--branch", "--message", "--timeout"]),
+        let options = parseOptions(arguments, allowed: ["--branch", "--message", "--timeout"])
+        guard let options,
               let branch = options["--branch"],
-              let message = validMessage(options["--message"]),
+              let message = validMessage(options["--message"], limit: maxInstructionLength),
               let timeout = validTimeout(options["--timeout"])
         else {
             return usage(
-                "tell --branch <child-branch> --message <1-\(maxMessageLength) characters> [--timeout <seconds>]"
+                "tell --branch <child-branch> \(messageUsage(options?["--message"], limit: maxInstructionLength)) [--timeout <seconds>]"
             )
         }
         var ledger = MissionLedgerReader(url: missionsURL)
@@ -690,18 +737,24 @@ extension MissionEventCLI {
             guard append(instruction, to: eventsURL) else { return 1 }
         }
 
+        // True once typed, false once Nirux gave it up.
         let typed = waitForLedger(&ledger, timeout: timeout, pollInterval: pollInterval) { missions in
-            missions.lazy.flatMap(\.events).contains(where: {
-                $0.id == instructionID && $0.childConsumedAt != nil
-            }) ? true : nil
+            missions.lazy.flatMap(\.events).first { $0.id == instructionID }.flatMap { event in
+                event.childConsumedAt != nil ? true : event.expiredAt != nil ? false : nil
+            }
         }
-        guard typed == nil else {
+        if typed == true {
             writeStandardOutput("Nirux typed the message into the child's prompt.")
             return 0
         }
+        if typed == false {
+            writeStandardError("Nirux gave the message up; a [Nirux Mission] line in your prompt says why. Do not run this command again.")
+            return 4
+        }
         writeStandardError(
             "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
-                + "Nirux types it once the child's turn ends, within an hour of the first `tell`. Run the "
+                + "Nirux types it at the child's next free prompt, for a day at most; past an hour, a line tells you "
+                + "what holds it. Run the "
                 + "exact same command again to keep waiting; it does not send the message twice."
         )
         return 3
@@ -727,7 +780,7 @@ extension MissionEventCLI {
         let recorded = Set(instructions.map(\.id))
         let settled = Set(instructions.compactMap { event -> String? in
             let over = event.childConsumedAt.map { now - $0 >= answerReplayWindow }
-                ?? (now - event.timestamp >= instructionLifetime)
+                ?? (now >= event.instructionDeadline || event.expiredAt != nil)
             return over ? event.id : nil
         })
         var current = derivedID(0)
