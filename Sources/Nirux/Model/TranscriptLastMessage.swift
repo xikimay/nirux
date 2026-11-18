@@ -97,19 +97,24 @@ enum TranscriptLastMessage {
 
     static func awaitsReply(in data: Data, startsMidLine: Bool = false) -> Bool? {
         for line in lines(of: data, startsMidLine: startsMidLine).reversed() {
-            if line.withUnsafeBytes({ TranscriptSearch.contains($0, interruptMarker) }) { return false }
+            // As JSON writes the interrupt: tool output quoting its words
+            // escapes their quotes.
+            if line.withUnsafeBytes({ bytes in interruptParts.contains { TranscriptSearch.contains(bytes, $0) } }) { return false }
             // Tool output, never parsed: a result went in.
             if line.withUnsafeBytes(TranscriptSearch.isToolResult) { return true }
             guard let object = line.withUnsafeBytes({ $0.isEmpty ? nil : TranscriptSearch.object($0) }),
-                  !TranscriptSearch.isAside(object) else { continue }
-            switch object["type"] as? String {
-            case "assistant": return false
-            case "user" where TranscriptSearch.message(in: object) != nil: return true
-            default: continue
-            }
+                  object["isSidechain"] as? Bool != true
+            else { continue }
+            // Claude's, an API error's included: the turn went past its request.
+            if object["type"] as? String == "assistant" { return false }
+            if object["type"] as? String == "user", TranscriptSearch.message(in: object) != nil { return true }
         }
         return nil
     }
+
+    private static let interruptParts = [
+        #""text":"[Request interrupted by user"#, #""content":"[Request interrupted by user"#
+    ].map { Array($0.utf8) }
 
     /// Whether the transcript at `path` shows Claude stopping a turn at an
     /// Esc sent at `date`: its "[Request interrupted by user" line, which

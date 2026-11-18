@@ -106,6 +106,10 @@ struct AgentLifeSigns: Equatable, Sendable {
     mutating func noteAwaitsReply(_ awaits: Bool) {
         transcript?.awaitsReply = awaits
     }
+
+    mutating func forgetTranscript() {
+        transcript = nil
+    }
 }
 
 /// An agent that won't go on by itself, beyond the ordinary attention

@@ -124,6 +124,14 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertFalse(isSilent())
     }
 
+    func testAnEscThatStoppedNothingLetsTheResultWakeTheTurn() {
+        promptIn()
+        apply(.preToolUse, at: 2, id: "build")
+        pressEsc(at: 5)
+        apply(.postToolUse, at: 600, id: "build")
+        XCTAssertTrue(isSilent(), "the build's result went to the model")
+    }
+
     func testCallsEndingAfterAnInterruptWakeNothing() {
         promptIn()
         apply(.preToolUse, at: 2, id: "build")
@@ -307,11 +315,15 @@ final class SilentTurnTests: XCTestCase {
         let interrupt = #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
         let meta = #"{"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat"}}"#
         let request = #"{"type":"api-request"}"#
+        let apiError = #"{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error"}]}}"#
+        let quoting = #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t2","type":"tool_result","content":"grep: \"text\":\"[Request interrupted by user\""}]}}"#
         XCTAssertEqual(awaits([prompt, request]), true, "the incident: a prompt, its request, nothing")
         XCTAssertEqual(awaits([prompt, reply, result]), true, "a tool result went in")
         XCTAssertEqual(awaits([prompt, reply]), false, "Claude answered: a lost Stop, or a long reply")
         XCTAssertEqual(awaits([prompt, interrupt]), false)
         XCTAssertEqual(awaits([prompt, reply, meta]), false, "a harness note says nothing")
+        XCTAssertEqual(awaits([prompt, apiError]), false, "the turn ended on an API error")
+        XCTAssertEqual(awaits([prompt, reply, quoting]), true, "tool output quoting the interrupt's words")
         XCTAssertNil(awaits([request, meta]))
     }
 
@@ -380,6 +392,17 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertFalse(silent())
         clock.now = 9_000
         XCTAssertFalse(silent(), "the transcript ends on Claude's words")
+
+        // Another claude in front, whose transcript Nirux can't measure: the
+        // last one's proof is forgotten.
+        try append(#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"again"}}"#)
+        clock.now = 9_100
+        XCTAssertFalse(silent())
+        clock.now = 10_400
+        XCTAssertTrue(silent())
+        let other = ForegroundProcess(instance: ProcessInstance(pid: 501, startedAt: 10), name: "claude", arguments: ["claude"])
+        column.noteTranscriptGrowth(foreground: other, now: 5_000)
+        XCTAssertNil(pty.agentStuckState(now: 9_999, waitThreshold: 600, foreground: other))
     }
 
     // MARK: - The row

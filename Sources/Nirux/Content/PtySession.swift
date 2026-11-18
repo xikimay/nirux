@@ -577,6 +577,10 @@ final class PtySession: @unchecked Sendable {
         state.lifeSigns.noteTranscript(path: path, size: size, awake: awakeClock(), wall: now)
     }
 
+    func forgetAgentTranscript() {
+        state.lifeSigns.forgetTranscript()
+    }
+
     // MARK: The trust question (see `AgentTrustPrompt`)
 
     /// Whether to read the screen for the trust question now: the agent

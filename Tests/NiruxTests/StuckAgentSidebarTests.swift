@@ -443,7 +443,8 @@ final class StuckAgentSidebarTests: XCTestCase {
         }
         var notified: [AgentAttentionReason?] = []
         column.onAgentAttention = { notified.append($0) }
-        shell.stuckAgentWaitThreshold = 600
+        // The dialog check off: hangs are watched all the same, at 20 minutes.
+        shell.stuckAgentWaitThreshold = nil
         @MainActor func pass(at awake: TimeInterval) {
             clock.now = awake
             shell.refreshStuckAgents(snapshot: snapshot, now: now + awake, appIsActive: false)

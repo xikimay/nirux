@@ -144,6 +144,10 @@ struct AgentStatusMachine {
     /// its call ends with no hook. An Esc elsewhere (a menu, vim's mode)
     /// ends nothing.
     private var dialogCancelledAt: TimeInterval = 0
+    /// The last interrupt that surely stopped the turn: a call's end
+    /// marked interrupted, an Esc at a main-thread dialog, Nirux's own Esc.
+    /// The ends of calls after it wake nothing.
+    private var turnStoppedAt: TimeInterval = 0
     /// Agent kind ("claude") once this session has emitted a hook event —
     /// proof that hooks are installed and authoritative for this session.
     private(set) var hookKind: String?
@@ -369,7 +373,10 @@ struct AgentStatusMachine {
                 noteClosed(pendingDialogs.remove(at: index))
             }
             noteCallEnded(event, at: now)
-            if event.agentID == nil, event.toolEnd == AgentToolEnd.interrupted.rawValue { turnInterruptedAt = now }
+            if event.agentID == nil, event.toolEnd == AgentToolEnd.interrupted.rawValue {
+                turnInterruptedAt = now
+                turnStoppedAt = now
+            }
             noteCallOver(event)
             noteProgress(of: event)
             resumeUnlessBlocked()
@@ -999,12 +1006,12 @@ struct AgentStatusMachine {
     }
 
     /// A main-thread call ended: it ran, failed or was refused. Its result
-    /// goes to the model, unless the turn was interrupted: the ends of
-    /// calls Claude stops then wake nothing.
+    /// goes to the model, unless the turn was stopped: the ends of calls
+    /// Claude stops then wake nothing.
     private mutating func noteCallOver(_ event: AgentHookEvent) {
         guard event.agentID == nil else { return }
         if let index = mainCallsRunning.firstIndex(of: event.toolUseID ?? "") { mainCallsRunning.remove(at: index) }
-        if mainTurnMovedAt.map({ turnInterruptedAt < $0 }) ?? true { mainTurnMovedAt = event.timestamp }
+        if mainTurnMovedAt.map({ turnStoppedAt < $0 }) ?? true { mainTurnMovedAt = event.timestamp }
     }
 
     /// The main thread's turn waits on the model: a prompt or a tool result
@@ -1028,6 +1035,7 @@ struct AgentStatusMachine {
         interruptSentAt = now
         lastCancelKeyAt = now
         turnInterruptedAt = now
+        turnStoppedAt = now
         return lastPromptAt
     }
 
@@ -1253,7 +1261,10 @@ struct AgentStatusMachine {
         if keys.map(Self.isCancelKey) ?? true {
             lastCancelKeyAt = time
             turnInterruptedAt = time
-            if let inFront, inFront.agentID == nil { dialogCancelledAt = time }
+            if let inFront, inFront.agentID == nil {
+                dialogCancelledAt = time
+                turnStoppedAt = time
+            }
         }
         lastInputAt = time
         if inFront == nil, Self.mayLeaveDraft(keys, turnInFlight: promptTurnInFlight) {
@@ -1516,6 +1527,7 @@ struct AgentStatusMachine {
         mainTurnMovedAt = nil
         turnInterruptedAt = 0
         dialogCancelledAt = 0
+        turnStoppedAt = 0
         lastPromptAt = nil
         turnPromptID = nil
         recentPromptIDs = []
