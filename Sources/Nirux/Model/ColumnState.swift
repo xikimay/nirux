@@ -91,7 +91,8 @@ final class ColumnState {
         guard let terminalHeader else { return "" }
         let title = deferredAgent == nil || terminalHeader.title.isEmpty
             ? terminalHeader.title : "\(terminalHeader.title) (not resumed)"
-        return [title, terminalHeader.context].filter { !$0.isEmpty }.joined(separator: " · ")
+        let folder = terminalHeader.context.abbreviatedPath(maxComponents: 2)
+        return [title, folder].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// Height reserved for the terminal's header.

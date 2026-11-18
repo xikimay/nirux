@@ -96,8 +96,8 @@ final class ColumnHeaderView: NSView {
             needsLayout = true
         }
     }
-    /// The title's tooltip; when nil, the title itself while it is cut
-    /// short.
+    /// The title's tooltip; when nil, a context off the bar, else the title
+    /// itself while it is cut short.
     var titleToolTip: String? {
         didSet { applyTitleToolTip() }
     }
@@ -112,7 +112,8 @@ final class ColumnHeaderView: NSView {
         }
     }
     /// Whether the context shows on the bar; else it is the title's tooltip
-    /// and VoiceOver help.
+    /// and VoiceOver help (it stays stable while the title changes). Set
+    /// once, before the header shows.
     var contextOnBar = true {
         didSet {
             guard contextOnBar != oldValue else { return }
@@ -251,7 +252,9 @@ final class ColumnHeaderView: NSView {
         let offBar = contextOnBar || context.isEmpty ? nil : context
         let toolTip = titleToolTip ?? offBar ?? (isTitleCutShort ? title : nil)
         if titleLabel.toolTip != toolTip { titleLabel.toolTip = toolTip }
-        if titleLabel.accessibilityHelp() != offBar { titleLabel.setAccessibilityHelp(offBar) }
+        // Only for a context off the bar: VoiceOver reads a title's tooltip
+        // as its help unless one is set, even to nil.
+        if !contextOnBar, titleLabel.accessibilityHelp() != offBar { titleLabel.setAccessibilityHelp(offBar) }
     }
 
     private func applyIcon() {

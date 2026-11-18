@@ -336,6 +336,23 @@ final class ColumnHeaderViewTests: XCTestCase {
         header.title = "⠐ Fix login"
         header.layoutNow()
         XCTAssertEqual(header.titleLabel.toolTip, "/tmp", "an animated title doesn't touch it")
+
+        // A header showing its context on the bar sets no help of its own:
+        // VoiceOver keeps reading its title's tooltip.
+        let editor = ColumnHeaderView()
+        editor.titleToolTip = "/repo/Sources/a.swift"
+        editor.context = "Sources"
+        XCTAssertEqual(editor.titleLabel.accessibilityHelp(), "/repo/Sources/a.swift")
+    }
+
+    /// Global Search names a terminal by its title and its folder's last
+    /// two parts, as the bar used to.
+    func testATerminalsTitleTextKeepsAShortFolder() throws {
+        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
+        let column = ColumnState(cwd: "/tmp/acme/worktrees/feat-x", deferredAgent: launch)
+        column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
+        XCTAssertEqual(column.header?.context, "/tmp/acme/worktrees/feat-x")
+        XCTAssertEqual(column.titleText, "claude (not resumed) · /.../worktrees/feat-x")
     }
 
     /// Every column type's header is on top, and its ⋯ menu ends with the
