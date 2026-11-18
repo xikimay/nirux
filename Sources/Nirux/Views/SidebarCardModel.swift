@@ -133,7 +133,7 @@ extension SidebarStuckState {
         case .waiting(let reason, _): return reason.headline
         case .stoppedOnError: return "stopped on an API error"
         case .exitedMidTurn: return "exited mid-turn"
-        case .silent(let duration): return "silent for \(duration)"
+        case .silent(let duration, _): return "silent for \(duration)"
         }
     }
 
@@ -154,7 +154,7 @@ extension SidebarStuckState {
         case .waiting(_, let duration): return "waiting \(duration)"
         case .stoppedOnError: return "stopped"
         case .exitedMidTurn: return "exited"
-        case .silent(let duration): return "silent \(duration)"
+        case .silent(let duration, _): return "silent \(duration)"
         }
     }
 }
@@ -222,6 +222,9 @@ extension WorkspaceInfo {
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
             }
+            if case let .silent(_, since)? = column.stuck {
+                actions.append(.interrupt(columnIndex: column.index, since: since))
+            }
             if let question = column.turnQuestion {
                 actions.append(.turnQuestion(columnIndex: column.index, question))
             }
@@ -265,6 +268,8 @@ enum SidebarCardAction: Hashable {
     case resume(
         columnIndex: Int, kind: String?, detail: String?, failedAt: TimeInterval, resume: SidebarStuckState.Resume
     )
+    /// Interrupt an agent whose turn went silent: Esc, never Enter.
+    case interrupt(columnIndex: Int, since: TimeInterval)
     /// "Clean up" a merged pull request's worktree, when the status line
     /// says something else.
     case cleanup(MergedCleanupOffer, pullRequest: Int)
@@ -293,7 +298,7 @@ enum SidebarCardAction: Hashable {
         switch self {
         case .next, .reviewBadges, .ruleProposals: return true
         case .missionQuestion(_, let question): return question.handOff == nil
-        case .approval, .resume, .cleanup, .turnQuestion, .dialog, .waitingMessages: return false
+        case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages: return false
         }
     }
 }

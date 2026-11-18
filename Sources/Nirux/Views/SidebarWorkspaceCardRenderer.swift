@@ -701,6 +701,10 @@ final class SidebarWorkspaceCardRenderer {
                 kind: kind, detail: detail, failedAt: failedAt, resume: resume,
                 workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
+        case let .interrupt(columnIndex, since):
+            add(SidebarInterruptBlockRenderer(
+                since: since, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
+            ).render())
         case let .turnQuestion(columnIndex, question):
             add(SidebarTurnQuestionBlockRenderer(
                 question: question, workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top

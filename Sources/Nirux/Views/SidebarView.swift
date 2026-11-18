@@ -40,6 +40,9 @@ final class SidebarView: NSView {
     var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
     /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
     var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
+    /// Interrupt clicked under a silent turn: workspace, column, and the
+    /// silence it aims at.
+    var onAgentInterrupt: ((Int, Int, TimeInterval) -> Void)?
     /// (question, answer, the button): Yes, No or Reply… under a turn's
     /// question.
     var onTurnAnswer: ((SidebarTurnQuestion, SidebarTurnAnswer, NSView?) -> Void)?
@@ -683,7 +686,8 @@ final class SidebarView: NSView {
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
         case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
-             .deferredAgentResume(let workspaceIndex, _, _), .turnAnswer(let workspaceIndex, _, _, _):
+             .agentInterrupt(let workspaceIndex, _, _), .deferredAgentResume(let workspaceIndex, _, _),
+             .turnAnswer(let workspaceIndex, _, _, _):
             clearHover()
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
@@ -757,7 +761,7 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .permissionDecision, .agentResume, .deferredAgentResume, .turnAnswer, .actionBlock, .inert:
+        case .permissionDecision, .agentResume, .agentInterrupt, .deferredAgentResume, .turnAnswer, .actionBlock, .inert:
             break // buttons go through trackApprovalClick; the block is inert
         }
     }
@@ -933,6 +937,7 @@ final class SidebarView: NSView {
             case .column(let workspaceIndex, let columnIndex),
                  .permissionDecision(let workspaceIndex, let columnIndex, _, _),
                  .agentResume(let workspaceIndex, let columnIndex, _),
+                 .agentInterrupt(let workspaceIndex, let columnIndex, _),
                  .deferredAgentResume(let workspaceIndex, let columnIndex, _),
                  .turnAnswer(let workspaceIndex, let columnIndex, _, _):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)

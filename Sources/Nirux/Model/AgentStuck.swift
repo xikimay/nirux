@@ -113,6 +113,14 @@ enum AgentStuckState: Equatable, Sendable {
     case silent(AgentSilence)
 }
 
+/// Why Interrupt didn't press Esc in a turn gone silent.
+enum SilentInterruptRefusal: Equatable, Sendable {
+    /// Not the silence the button showed: the agent moved on, or another
+    /// silence began.
+    case notSilent
+    case refused(AgentInterruptRefusal)
+}
+
 /// Why Resume won't type `continue` into a column.
 enum AgentResumeRefusal: Equatable, Sendable {
     /// No failed turn waits (the agent moved on, or never failed).

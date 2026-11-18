@@ -558,6 +558,25 @@ final class PtySession: @unchecked Sendable {
         return AgentSilence(since: since, now: awakeClock(), threshold: threshold)
     }
 
+    /// Esc into the turn gone silent at `since` (`AgentSilence.since`), on
+    /// the user's click: while it still is, and where Esc can't answer a
+    /// dialog or open the rewind (`interruptRefusal`). What the box gets
+    /// back, a prompt not answered or keys typed meanwhile, is the user's to
+    /// send. Nil when Esc went.
+    func interruptSilentTurn(
+        since: TimeInterval, waitThreshold: TimeInterval?, snapshot: ProcessSnapshot, now: TimeInterval
+    ) -> SilentInterruptRefusal? {
+        let foreground = foregroundProcess(snapshot: snapshot)
+        guard case .silent(let silence)? = agentStuckState(now: now, waitThreshold: waitThreshold, foreground: foreground),
+              silence.since == since
+        else { return .notSilent }
+        switch interruptRefusal(snapshot: snapshot) {
+        case nil, .notAnswered?, .typed?: break
+        case let refusal?: return .refused(refusal)
+        }
+        return sendInterrupt() == nil ? .notSilent : nil
+    }
+
     /// The main thread's turn waits on the model (see
     /// `AgentStatusMachine.awaitsModel`).
     func agentAwaitsModel(foreground: ForegroundProcess?) -> Bool {

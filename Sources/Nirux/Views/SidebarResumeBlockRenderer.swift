@@ -80,3 +80,49 @@ struct SidebarResumeBlockRenderer {
         return status
     }
 }
+
+/// The block of a card whose Claude turn went silent: Interrupt, which
+/// presses Esc in its terminal, never Enter.
+@MainActor
+struct SidebarInterruptBlockRenderer {
+    let since: TimeInterval
+    let workspaceIndex: Int
+    let columnIndex: Int
+    /// Left edge and width of the card's content.
+    let x: CGFloat
+    let width: CGFloat
+    let top: CGFloat
+
+    func render() -> SidebarApprovalBlockRenderer.Result {
+        let metrics = SidebarExpandedMetrics.self
+        let button = SidebarActionButton.secondary(
+            "Interrupt", symbol: Theme.Symbol.interrupt, label: "Interrupt: press Esc in claude's terminal"
+        )
+        let buttonWidth = button.fittingWidth
+        button.frame = NSRect(x: x + width - buttonWidth, y: top - metrics.buttonHeight, width: buttonWidth, height: metrics.buttonHeight)
+        let hint = NSTextField(labelWithString: "Esc, then resend")
+        hint.font = Theme.Font.caption
+        hint.textColor = Theme.Color.textSecondary
+        hint.lineBreakMode = .byTruncatingTail
+        hint.toolTip = AgentAttentionReason.silentAdvice
+        hint.frame = NSRect(
+            x: x, y: top - (metrics.buttonHeight + metrics.actionLineHeight) / 2,
+            width: max(0, button.frame.minX - Theme.Space.sm - x), height: metrics.actionLineHeight
+        )
+        let key = SidebarHoverTarget.interruptButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
+        return SidebarApprovalBlockRenderer.Result(
+            views: [hint, button],
+            hitAreas: [
+                SidebarHitArea(
+                    frame: button.frame.insetBy(dx: -3, dy: -3),
+                    region: .agentInterrupt(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
+                ),
+                SidebarHitArea(
+                    frame: NSRect(x: x, y: top - metrics.buttonHeight, width: width, height: metrics.buttonHeight),
+                    region: .actionBlock(workspaceIndex: workspaceIndex)
+                )
+            ],
+            buttons: [key: button]
+        )
+    }
+}

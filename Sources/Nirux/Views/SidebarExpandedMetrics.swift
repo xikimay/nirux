@@ -164,6 +164,7 @@ enum SidebarExpandedMetrics {
         switch action {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
+        case .interrupt: return buttonHeight
         case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
         case .dialog(_, let dialog): return dialogBlockHeight(for: dialog, width: width)
         case .next(let text):

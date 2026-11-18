@@ -115,7 +115,7 @@ extension NiruxShellView {
         case .exitedMidTurn(let exit)?:
             return .exitedMidTurn(processName: exit.processName)
         case .silent(let silence)?:
-            return .silent(duration: SidebarRenderer.shortDuration(silence.duration))
+            return .silent(duration: SidebarRenderer.shortDuration(silence.duration), since: silence.since)
         case nil:
             return nil
         }
@@ -139,6 +139,37 @@ extension NiruxShellView {
             ? pty.resumeFailedTurn(snapshot: snapshot, now: Date().timeIntervalSince1970)
             : .notStopped
         if let refusal { showToast(Self.resumeRefusalText(refusal)) }
+    }
+
+    /// Interrupt clicked under a turn gone silent: Esc goes to its `claude`
+    /// only while that silence lasts (see `interruptSilentTurn`). Never
+    /// Enter: the user sends their message again.
+    func interruptSilentAgent(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) {
+        // A hook may still wait out the queue's drain debounce: the agent
+        // may have moved on.
+        AgentHookCenter.shared.drain()
+        let snapshot = ProcessSnapshot()
+        defer { updateSidebar(snapshot: snapshot) }
+        guard workspaces.indices.contains(workspaceIndex),
+              let column = workspaces[workspaceIndex].columns[safe: columnIndex]
+        else { return showToast("That agent’s column was closed") }
+        guard let pty = column.pty else { return showToast("That column has no terminal") }
+        let refusal = pty.interruptSilentTurn(
+            since: since, waitThreshold: stuckAgentWaitThreshold, snapshot: snapshot, now: Date().timeIntervalSince1970
+        )
+        showToast(Self.interruptText(refusal))
+    }
+
+    /// What Interrupt did, or why it pressed nothing.
+    static func interruptText(_ refusal: SilentInterruptRefusal?) -> String {
+        switch refusal {
+        case nil: "Esc sent: Claude gives back a prompt it hadn’t answered. Send it again from its terminal"
+        case .notSilent?: "Claude moved on: it isn’t silent any more"
+        case .refused(.alreadySent)?: "Esc already went into this turn"
+        case .refused(.dialog)?: "A dialog waits in its terminal: answer it there"
+        case .refused(.noClaude)?, .refused(.notWorking)?, .refused(.notAnswered)?, .refused(.typed)?:
+            "Press Esc in its terminal: Nirux can’t tell this turn is safe to interrupt"
+        }
     }
 
     /// Why Resume sent nothing.

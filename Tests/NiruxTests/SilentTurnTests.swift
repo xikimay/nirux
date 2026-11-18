@@ -323,7 +323,7 @@ final class SilentTurnTests: XCTestCase {
     }
 
     func testTheRowSaysSilentInRedInsteadOfWorking() {
-        let silent = column(.silent(duration: "4h45m"))
+        let silent = column(.silent(duration: "4h45m", since: 100))
         XCTAssertEqual(silent.attention, .error)
         XCTAssertEqual(SidebarColumnChip(silent).text.string.replacingOccurrences(of: "\u{FFFC}", with: ""), "silent 4h45m")
         XCTAssertEqual(SidebarColumnChip(silent).style, .error)
@@ -338,9 +338,84 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertEqual(workspace([column(nil)]).rowSummary.status.text, "Working", "the same column without it")
     }
 
+    func testInterruptIsOfferedUnderTheRowAndClicksOnlyForItsSilence() throws {
+        let info = workspace([column(.silent(duration: "4h45m", since: 100))])
+        XCTAssertEqual(info.cardActions, [.interrupt(columnIndex: 0, since: 100)])
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
+        let region = SidebarHitRegion.agentInterrupt(workspaceIndex: 0, columnIndex: 0, since: 100)
+        XCTAssertTrue(result.hitAreas.contains {
+            if case .agentInterrupt(0, 0, 100) = $0.region { return true }
+            return false
+        })
+        XCTAssertEqual(
+            Array(result.approvalButtons.keys), [SidebarHoverTarget.interruptButtonKey(workspaceIndex: 0, columnIndex: 0, since: 100)],
+            "armed and hovered like Resume"
+        )
+        XCTAssertEqual(800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5)
+
+        func click(released: SidebarHitRegion?, count: Int = 1) -> SidebarInterruptClick? {
+            SidebarView.interruptClick(pressed: region, released: released, clickCount: count, armedAtPress: true, armedAtRelease: true)
+        }
+        XCTAssertEqual(click(released: region), SidebarInterruptClick(workspaceIndex: 0, columnIndex: 0, since: 100))
+        XCTAssertNil(click(released: .agentInterrupt(workspaceIndex: 0, columnIndex: 0, since: 900)), "another silence came there")
+        XCTAssertNil(click(released: region, count: 2))
+    }
+
+    /// Esc, once, and only into the silence the button showed: never Enter.
+    func testInterruptPressesEscOnceIntoTheSilenceItShows() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-interrupt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pty = PtySession()
+        let agent = AgentStandIn()
+        defer { agent.remove() }
+        pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: directory.path)
+        try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+        let front = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+        let clock = AwakeClock()
+        clock.now = 100
+        pty.awakeClock = { clock.now }
+        let now = Date().timeIntervalSince1970
+        for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
+            pty.applyAgentHook(
+                AgentHookEvent(kind: .claude, name: name, sessionID: "lead", emitterProcess: front.instance, timestamp: now),
+                isUserFocused: false
+            )
+        }
+        @MainActor func interrupt(since: TimeInterval) -> SilentInterruptRefusal? {
+            pty.interruptSilentTurn(since: since, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(), now: now)
+        }
+
+        clock.now = 1_299
+        XCTAssertEqual(interrupt(since: 100), .notSilent, "not silent yet")
+        clock.now = 1_300
+        XCTAssertEqual(interrupt(since: 99), .notSilent, "not the silence the button showed")
+        XCTAssertNil(interrupt(since: 100))
+        try await waitUntil("Esc typed", timeout: 3) { !agent.input.isEmpty }
+        XCTAssertEqual(interrupt(since: 100), .notSilent, "a second click: the turn is interrupted")
+
+        // A turn Claude started by itself: no prompt of the user's to give
+        // back, and Nirux can't tell Esc is safe there.
+        clock.now = 2_000
+        let later = Date().timeIntervalSince1970 + 10
+        for (name, offset) in [(AgentHookEvent.Name.stop, 0.0), (.preToolUse, 1), (.postToolUse, 2)] {
+            pty.applyAgentHook(
+                AgentHookEvent(
+                    kind: .claude, name: name, sessionID: "lead", emitterProcess: front.instance,
+                    toolName: name == .stop ? nil : "Bash", toolUseID: name == .stop ? nil : "own", timestamp: later + offset
+                ),
+                isUserFocused: false
+            )
+        }
+        clock.now = 3_200
+        XCTAssertEqual(interrupt(since: 2_000), .refused(.notWorking))
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(agent.input, "\u{1B}", "one Esc in all, never Enter")
+    }
+
     func testTheBoardAndTheMergeQueueReadIt() {
         let state = ProjectBoard.agentState(
-            stuck: .silent(duration: "25m"), hasAgent: true, agentInFront: true, status: .working, openDialog: nil
+            stuck: .silent(duration: "25m", since: 100), hasAgent: true, agentInFront: true, status: .working, openDialog: nil
         )
         XCTAssertEqual(state, .silent(duration: "25m"))
         XCTAssertEqual(MergeQueue.busyLabel(state), "silent", "its turn may still answer: no merge under it")

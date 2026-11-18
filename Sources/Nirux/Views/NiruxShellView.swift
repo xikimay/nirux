@@ -367,6 +367,10 @@ final class NiruxShellView: NSView {
             self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
             self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
         }
+        sidebar.onAgentInterrupt = { [weak self] wsIndex, colIndex, since in
+            self?.noteCatchUpTaskAnswered(workspaceIndex: wsIndex)
+            self?.interruptSilentAgent(workspaceIndex: wsIndex, columnIndex: colIndex, since: since)
+        }
         sidebar.onTurnAnswer = { [weak self] question, answer, button in
             self?.answerFromCard(answer, to: question, button: button)
         }
