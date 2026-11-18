@@ -32,32 +32,54 @@ enum TerminalConfigBuilder {
         "bold-is-bright", "cursor-invert-fg-bg", "selection-invert-fg-bg"
     ]
 
-    /// Nirux's look when the Ghostty config doesn't override it:
-    /// libghostty-spm's `TerminalConfiguration.default` and its Afterglow
-    /// palette, which Nirux terminals have always rendered with (the window
-    /// is forced to dark appearance, which selects Afterglow). Written out
+    /// What a terminal draws with where the user's Ghostty config says
+    /// nothing: a blinking block cursor, 13 pt in plain strokes. Written out
     /// so a library update can't silently change them.
     static let niruxDefaults = [
         "cursor-style = block",
         "cursor-style-blink = true",
-        "font-size = 14",
-        "font-thicken = true",
+        "font-size = 13",
+        "font-thicken = false",
         // Selecting copies to the clipboard, as with libghostty-spm 1.3.1
         // (Ghostty's former macOS default); Ghostty 1.4's default is none.
         "copy-on-select = clipboard"
     ]
-    static let niruxColors = [
-        "background = 212121",
-        "foreground = D0D0D0",
-        "cursor-color = D0D0D0",
-        "selection-background = 303030"
-    ] + ["#151515", "#AC4142", "#7E8E50", "#E4B567", "#6C99BB", "#9F4E86", "#7DD5CF", "#D0D0D0",
-         "#505050", "#AC4142", "#7E8E50", "#E4B567", "#6C99BB", "#9F4E86", "#7DD5CF", "#F5F5F5"]
-        .enumerated().map { "palette = \($0.offset)=\($0.element)" }
-    /// Points between the cells and a terminal's edges: Ghostty's default,
-    /// written out because a column's light draws its ring on it
-    /// (`EdgeGlowView.ringWidth`) so that it covers no text.
-    static let padding = 2
+    /// Nirux's own colours, from the window's: the background is the base,
+    /// black a raised surface (a bar painted with it shows), the selection
+    /// the accent's tint, red, green, blue and magenta the states' and the
+    /// accent's, a little brighter for their bright twins. Those Theme has no
+    /// word for are written here: the text a step below the primary one, so
+    /// that bright white stands out; dim text a step above the tertiary, at
+    /// 3:1 where Ghostty enforces a minimum contrast; yellow leaning to
+    /// lemon, away from the amber that says an agent waits; cyan.
+    static let niruxColors: [String] = {
+        let color = Theme.Color.self
+        let bright = { (base: NSColor) in hex(color.tint(.white, 0.15, over: base)) }
+        let palette = [
+            hex(color.raised), hex(color.error), hex(color.working), "D3C46E",
+            hex(color.accent), hex(color.done), "6FC3DF", "C8C8D2",
+            "747485", bright(color.error), bright(color.working), "E3D68F",
+            bright(color.accent), bright(color.done), "8AD3EA", hex(color.textPrimary)
+        ]
+        return [
+            "background = \(hex(color.base))",
+            "foreground = D6D6DE",
+            "cursor-color = D6D6DE",
+            "selection-background = \(hex(color.tint(color.accent, 0.22, over: color.base)))"
+        ] + palette.enumerated().map { "palette = \($0.offset)=#\($0.element)" }
+    }()
+
+    /// `color` as Ghostty reads it: six hex digits, in sRGB. A colour with
+    /// no RGB reading (a pattern) gives black rather than raising.
+    static func hex(_ color: NSColor) -> String {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return "000000" }
+        let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent].map { Int(($0 * 255).rounded()) }
+        return channels.map { String(format: "%02X", $0) }.joined()
+    }
+    /// Points between the cells and a terminal's edges: air around the text,
+    /// which a column's light ring (`EdgeGlowView.ringWidth`) and its rounded
+    /// corners lie in without covering a cell.
+    static let padding = 10
     /// Applied last so nothing overrides them.
     static let enforced = [
         "window-padding-x = \(padding)", "window-padding-y = \(padding)", "window-padding-balance = false",
@@ -264,14 +286,14 @@ enum TerminalConfigBuilder {
         return nil
     }
 
-    /// Afterglow keys that only suit Afterglow's own background.
+    /// Nirux's colour keys that only suit its own background.
     static let backgroundBoundColorKeys: Set<String> = ["cursor-color", "selection-background"]
 
     /// Nirux's lines before the user's. Nirux's colors are left out when a
     /// theme is used: like in Ghostty, keys the theme doesn't set fall back
     /// to Ghostty's defaults. When the user sets their own background or
-    /// foreground, Afterglow's cursor and selection colors are left out
-    /// too, as they could vanish against it.
+    /// foreground, Nirux's cursor and selection colors are left out too,
+    /// as they could vanish against it.
     static func baseLines(for user: [UserLine]) -> [String] {
         if user.contains(where: \.isTheme) { return niruxDefaults }
         guard user.contains(where: { $0.entry.key == "background" || $0.entry.key == "foreground" }) else {

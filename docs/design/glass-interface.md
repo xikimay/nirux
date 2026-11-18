@@ -440,8 +440,8 @@ the text stays flat and sharp.
   canvas; from Tinted up, the desktop's frost shows through it. The resize
   handles straddle the air, and the camera brings the focused card in with
   its air.
-- **Corners:** `Theme.Radius.column`, 6 pt circular: the largest radius
-  whose clip cuts no cell with the terminals' 2 pt padding. Each column
+- **Corners:** `Theme.Radius.column`, 10 pt circular: their clip stays
+  within the terminals' 10 pt padding (#598), so it cuts no cell. Each column
   clips its content to them, as the focused column already did; a
   translucent terminal's frost takes a mask of the shape, since blending
   behind the window ignores the clip.

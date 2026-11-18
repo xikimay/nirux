@@ -284,13 +284,17 @@ enum TranscriptSearch {
         (try? JSONSerialization.jsonObject(with: Data(bytes))) as? [String: Any]
     }
 
+    /// A line the conversation doesn't show as the user's or Claude's: a
+    /// subagent's, a summary, a harness note, an API error.
+    static func isAside(_ object: [String: Any]) -> Bool {
+        ["isSidechain", "isMeta", "isCompactSummary", "isVisibleInTranscriptOnly", "isApiErrorMessage"]
+            .contains { object[$0] as? Bool == true }
+    }
+
     /// The text a conversation shows of this line: a prompt the user
     /// typed, or Claude's answer. Nil for anything else.
     static func message(in object: [String: Any]) -> Message? {
-        for flag in ["isSidechain", "isMeta", "isCompactSummary", "isVisibleInTranscriptOnly", "isApiErrorMessage"]
-        where object[flag] as? Bool == true {
-            return nil
-        }
+        guard !isAside(object) else { return nil }
         let role: Role
         let content: Any?
         var timestamp = object["timestamp"]

@@ -36,6 +36,9 @@ final class ColumnCardsTests: XCTestCase {
         for column in workspace.columns {
             XCTAssertEqual(try XCTUnwrap(column.view.layer).cornerRadius, Theme.Radius.column)
         }
+        // A circular corner cuts r·(1 − 1/√2) into the diagonal: within the
+        // terminal's padding, it cuts no cell.
+        XCTAssertLessThanOrEqual(Theme.Radius.column * (1 - 1 / 2.0.squareRoot()), CGFloat(TerminalConfigBuilder.padding))
     }
 
     /// Two halves fill the viewport exactly, however many columns follow:

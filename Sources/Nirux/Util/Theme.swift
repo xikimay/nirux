@@ -136,10 +136,9 @@ enum Theme {
         static let control: CGFloat = 6
         /// Cards, tiles.
         static let card: CGFloat = 8
-        /// A column's corners: as round as a terminal's 2 pt padding
-        /// (`TerminalConfigBuilder.padding`) lets them be, circular, without
-        /// the clip cutting into a cell.
-        static let column: CGFloat = 6
+        /// A column's corners, circular: their clip stays within a terminal's
+        /// padding (`TerminalConfigBuilder.padding`), so it cuts no cell.
+        static let column: CGFloat = 10
         /// Palette, floating panels.
         static let panel: CGFloat = 12
     }

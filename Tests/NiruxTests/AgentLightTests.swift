@@ -189,10 +189,12 @@ final class AgentLightTests: XCTestCase {
         XCTAssertEqual(light.ringFrame, light.bounds, "focus moved on")
     }
 
-    /// The ring is as wide as the padding every terminal is given, so it
-    /// covers no cell.
-    func testTheRingIsAsWideAsTheTerminalsPadding() {
-        let padding = Int(EdgeGlowView.ringWidth)
+    /// The ring and a viewport edge's glow lie within the padding every
+    /// terminal is given, so they cover no cell.
+    func testTheRingLiesWithinTheTerminalsPadding() {
+        let padding = TerminalConfigBuilder.padding
+        XCTAssertLessThanOrEqual(EdgeGlowView.focusRingWidth + EdgeGlowView.ringWidth, CGFloat(padding), "the focused column's ring too")
+        XCTAssertLessThanOrEqual(EdgeGlowView.depth, CGFloat(padding))
         XCTAssertTrue(TerminalConfigBuilder.enforced.contains("window-padding-x = \(padding)"))
         XCTAssertTrue(TerminalConfigBuilder.enforced.contains("window-padding-y = \(padding)"))
         XCTAssertTrue(
