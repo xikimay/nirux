@@ -113,8 +113,12 @@ enum AgentStuckState: Equatable, Sendable {
     case silent(AgentSilence)
 }
 
-/// Why Interrupt didn't press Esc in a turn gone silent.
-enum SilentInterruptRefusal: Equatable, Sendable {
+/// What Interrupt did in a turn gone silent.
+enum SilentInterrupt: Equatable, Sendable {
+    /// Esc went before any reply: Claude gives the prompt back to its box.
+    case promptGivenBack
+    /// Esc went after a tool call: the box stays empty.
+    case stopped
     /// Not the silence the button showed: the agent moved on, or another
     /// silence began.
     case notSilent

@@ -115,7 +115,10 @@ extension NiruxShellView {
         case .exitedMidTurn(let exit)?:
             return .exitedMidTurn(processName: exit.processName)
         case .silent(let silence)?:
-            return .silent(duration: SidebarRenderer.shortDuration(silence.duration), since: silence.since)
+            return .silent(
+                duration: SidebarRenderer.shortDuration(silence.duration), since: silence.since,
+                interruptible: pty.canInterruptSilentTurn(snapshot: snapshot)
+            )
         case nil:
             return nil
         }
@@ -131,10 +134,7 @@ extension NiruxShellView {
         AgentHookCenter.shared.drain()
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
-        guard workspaces.indices.contains(workspaceIndex),
-              let column = workspaces[workspaceIndex].columns[safe: columnIndex]
-        else { return showToast("That agent’s column was closed") }
-        guard let pty = column.pty else { return showToast("That column has no terminal") }
+        guard let pty = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
         let refusal = pty.agentTurnFailure?.failedAt == failedAt
             ? pty.resumeFailedTurn(snapshot: snapshot, now: Date().timeIntervalSince1970)
             : .notStopped
@@ -150,25 +150,38 @@ extension NiruxShellView {
         AgentHookCenter.shared.drain()
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
+        guard let pty = stuckAgentTerminal(workspaceIndex: workspaceIndex, columnIndex: columnIndex) else { return }
+        showToast(Self.interruptText(pty.interruptSilentTurn(
+            since: since, waitThreshold: stuckAgentWaitThreshold, snapshot: snapshot, now: Date().timeIntervalSince1970
+        )))
+    }
+
+    /// The terminal of the column a stuck agent's button aims at; nil, with
+    /// a toast, once it's gone.
+    private func stuckAgentTerminal(workspaceIndex: Int, columnIndex: Int) -> PtySession? {
         guard workspaces.indices.contains(workspaceIndex),
               let column = workspaces[workspaceIndex].columns[safe: columnIndex]
-        else { return showToast("That agent’s column was closed") }
-        guard let pty = column.pty else { return showToast("That column has no terminal") }
-        let refusal = pty.interruptSilentTurn(
-            since: since, waitThreshold: stuckAgentWaitThreshold, snapshot: snapshot, now: Date().timeIntervalSince1970
-        )
-        showToast(Self.interruptText(refusal))
+        else {
+            showToast("That agent’s column was closed")
+            return nil
+        }
+        guard let pty = column.pty else {
+            showToast("That column has no terminal")
+            return nil
+        }
+        return pty
     }
 
     /// What Interrupt did, or why it pressed nothing.
-    static func interruptText(_ refusal: SilentInterruptRefusal?) -> String {
-        switch refusal {
-        case nil: "Esc sent: Claude gives back a prompt it hadn’t answered. Send it again from its terminal"
-        case .notSilent?: "Claude moved on: it isn’t silent any more"
-        case .refused(.alreadySent)?: "Esc already went into this turn"
-        case .refused(.dialog)?: "A dialog waits in its terminal: answer it there"
-        case .refused(.noClaude)?, .refused(.notWorking)?, .refused(.notAnswered)?, .refused(.typed)?:
-            "Press Esc in its terminal: Nirux can’t tell this turn is safe to interrupt"
+    static func interruptText(_ outcome: SilentInterrupt) -> String {
+        switch outcome {
+        case .promptGivenBack: "Esc sent: your prompt is back in Claude’s box. Press Enter there to send it again"
+        case .stopped: "Esc sent: the turn stopped. Tell Claude how to go on"
+        case .notSilent: "Claude moved on: it isn’t silent any more"
+        case .refused(.alreadySent): "Esc already went into this turn"
+        case .refused(.dialog): "A dialog waits in its terminal: answer it there"
+        case .refused(.typed): "Keys were typed at its prompt since: press Esc in its terminal yourself"
+        case .refused: "Press Esc in its terminal: Nirux can’t tell this turn is safe to interrupt"
         }
     }
 

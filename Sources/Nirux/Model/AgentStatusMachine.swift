@@ -1018,6 +1018,13 @@ struct AgentStatusMachine {
         return lastPromptAt
     }
 
+    /// Nirux's Esc gave a prompt Claude hadn't answered back to its box: a
+    /// draft until the next prompt goes in, which no message joins.
+    mutating func notePromptGivenBack(now: TimeInterval) {
+        lastDraftInputAt = now
+        lastDraftKind = "given back"
+    }
+
     /// Claude stopped the turn of `promptAt` at Nirux's Esc (its transcript
     /// says so): the turn is over with no Stop to say it, its dialogs with
     /// it, and nobody is alerted. False when a newer prompt went in.

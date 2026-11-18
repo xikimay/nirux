@@ -323,7 +323,7 @@ final class SilentTurnTests: XCTestCase {
     }
 
     func testTheRowSaysSilentInRedInsteadOfWorking() {
-        let silent = column(.silent(duration: "4h45m", since: 100))
+        let silent = column(.silent(duration: "4h45m", since: 100, interruptible: true))
         XCTAssertEqual(silent.attention, .error)
         XCTAssertEqual(SidebarColumnChip(silent).text.string.replacingOccurrences(of: "\u{FFFC}", with: ""), "silent 4h45m")
         XCTAssertEqual(SidebarColumnChip(silent).style, .error)
@@ -339,7 +339,7 @@ final class SilentTurnTests: XCTestCase {
     }
 
     func testInterruptIsOfferedUnderTheRowAndClicksOnlyForItsSilence() throws {
-        let info = workspace([column(.silent(duration: "4h45m", since: 100))])
+        let info = workspace([column(.silent(duration: "4h45m", since: 100, interruptible: true))])
         XCTAssertEqual(info.cardActions, [.interrupt(columnIndex: 0, since: 100)])
         let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
         let region = SidebarHitRegion.agentInterrupt(workspaceIndex: 0, columnIndex: 0, since: 100)
@@ -359,9 +359,14 @@ final class SilentTurnTests: XCTestCase {
         XCTAssertEqual(click(released: region), SidebarInterruptClick(workspaceIndex: 0, columnIndex: 0, since: 100))
         XCTAssertNil(click(released: .agentInterrupt(workspaceIndex: 0, columnIndex: 0, since: 900)), "another silence came there")
         XCTAssertNil(click(released: region, count: 2))
+
+        let refused = workspace([column(.silent(duration: "4h45m", since: 100, interruptible: false))])
+        XCTAssertEqual(refused.cardActions, [], "no button that can't press Esc")
     }
 
     /// Esc, once, and only into the silence the button showed: never Enter.
+    /// The turn ends with it; the prompt Claude gives back is a draft no
+    /// Mission message joins.
     func testInterruptPressesEscOnceIntoTheSilenceItShows() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-interrupt-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -373,49 +378,72 @@ final class SilentTurnTests: XCTestCase {
         try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         let front = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
         let clock = AwakeClock()
-        clock.now = 100
         pty.awakeClock = { clock.now }
-        let now = Date().timeIntervalSince1970
-        for name in [AgentHookEvent.Name.sessionStart, .userPromptSubmit] {
-            pty.applyAgentHook(
-                AgentHookEvent(kind: .claude, name: name, sessionID: "lead", emitterProcess: front.instance, timestamp: now),
-                isUserFocused: false
-            )
-        }
-        @MainActor func interrupt(since: TimeInterval) -> SilentInterruptRefusal? {
-            pty.interruptSilentTurn(since: since, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(), now: now)
-        }
-
-        clock.now = 1_299
-        XCTAssertEqual(interrupt(since: 100), .notSilent, "not silent yet")
-        clock.now = 1_300
-        XCTAssertEqual(interrupt(since: 99), .notSilent, "not the silence the button showed")
-        XCTAssertNil(interrupt(since: 100))
-        try await waitUntil("Esc typed", timeout: 3) { !agent.input.isEmpty }
-        XCTAssertEqual(interrupt(since: 100), .notSilent, "a second click: the turn is interrupted")
-
-        // A turn Claude started by itself: no prompt of the user's to give
-        // back, and Nirux can't tell Esc is safe there.
-        clock.now = 2_000
-        let later = Date().timeIntervalSince1970 + 10
-        for (name, offset) in [(AgentHookEvent.Name.stop, 0.0), (.preToolUse, 1), (.postToolUse, 2)] {
+        @MainActor func hook(_ name: AgentHookEvent.Name, at time: TimeInterval, call: String? = nil) {
             pty.applyAgentHook(
                 AgentHookEvent(
                     kind: .claude, name: name, sessionID: "lead", emitterProcess: front.instance,
-                    toolName: name == .stop ? nil : "Bash", toolUseID: name == .stop ? nil : "own", timestamp: later + offset
+                    toolName: call.map { _ in "Bash" }, toolUseID: call, timestamp: time
                 ),
                 isUserFocused: false
             )
         }
+        @MainActor func interrupt(since: TimeInterval) -> SilentInterrupt {
+            pty.interruptSilentTurn(since: since, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970)
+        }
+
+        clock.now = 100
+        hook(.sessionStart, at: Date().timeIntervalSince1970)
+        hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
+        clock.now = 1_299
+        XCTAssertEqual(interrupt(since: 100), .notSilent, "not silent yet")
+        clock.now = 1_300
+        XCTAssertEqual(interrupt(since: 99), .notSilent, "not the silence the button showed")
+        XCTAssertTrue(pty.canInterruptSilentTurn(snapshot: ProcessSnapshot()))
+        XCTAssertEqual(interrupt(since: 100), .promptGivenBack)
+        try await waitUntil("Esc typed", timeout: 3) { !agent.input.isEmpty }
+        XCTAssertNil(pty.agentStuckState(now: Date().timeIntervalSince1970, waitThreshold: waitThreshold, foreground: front), "the turn is over")
+        XCTAssertEqual(
+            pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), .draft,
+            "the prompt given back waits for the user's Enter"
+        )
+        XCTAssertEqual(interrupt(since: 100), .notSilent, "a second click")
+
+        // Silent after a tool call: Esc stops the turn, the box stays empty.
+        clock.now = 2_000
+        hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
+        hook(.preToolUse, at: Date().timeIntervalSince1970, call: "ls")
+        hook(.postToolUse, at: Date().timeIntervalSince1970, call: "ls")
         clock.now = 3_200
-        XCTAssertEqual(interrupt(since: 2_000), .refused(.notWorking))
+        XCTAssertEqual(interrupt(since: 2_000), .stopped)
+        try await waitUntil("the second Esc", timeout: 3) { agent.input.count == 2 }
+        XCTAssertNil(pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), "free for a message")
+
+        // Keys typed since its prompt: Esc could close a screen they opened,
+        // and would give them back.
+        clock.now = 4_000
+        hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
+        hook(.preToolUse, at: Date().timeIntervalSince1970, call: "ls2")
+        hook(.postToolUse, at: Date().timeIntervalSince1970, call: "ls2")
+        pty.sendRaw("x")
+        clock.now = 5_200
+        XCTAssertFalse(pty.canInterruptSilentTurn(snapshot: ProcessSnapshot()))
+        XCTAssertEqual(interrupt(since: 4_000), .refused(.typed))
+
+        // A turn Claude started by itself: no prompt to give back.
+        let later = Date().timeIntervalSince1970 + 10
+        hook(.stop, at: later)
+        hook(.preToolUse, at: later + 1, call: "own")
+        hook(.postToolUse, at: later + 2, call: "own")
+        clock.now = 6_400
+        XCTAssertEqual(interrupt(since: 5_200), .refused(.notWorking))
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(agent.input, "\u{1B}", "one Esc in all, never Enter")
+        XCTAssertEqual(agent.input, "\u{1B}\u{1B}x", "an Esc per interrupt, never Enter")
     }
 
     func testTheBoardAndTheMergeQueueReadIt() {
         let state = ProjectBoard.agentState(
-            stuck: .silent(duration: "25m", since: 100), hasAgent: true, agentInFront: true, status: .working, openDialog: nil
+            stuck: .silent(duration: "25m", since: 100, interruptible: true), hasAgent: true, agentInFront: true, status: .working, openDialog: nil
         )
         XCTAssertEqual(state, .silent(duration: "25m"))
         XCTAssertEqual(MergeQueue.busyLabel(state), "silent", "its turn may still answer: no merge under it")

@@ -558,23 +558,31 @@ final class PtySession: @unchecked Sendable {
         return AgentSilence(since: since, now: awakeClock(), threshold: threshold)
     }
 
+    /// Whether Interrupt may press Esc in a silent turn (see
+    /// `interruptSilentTurn`).
+    func canInterruptSilentTurn(snapshot: ProcessSnapshot) -> Bool {
+        [nil, .notAnswered].contains(interruptRefusal(snapshot: snapshot))
+    }
+
     /// Esc into the turn gone silent at `since` (`AgentSilence.since`), on
     /// the user's click: while it still is, and where Esc can't answer a
-    /// dialog or open the rewind (`interruptRefusal`). What the box gets
-    /// back, a prompt not answered or keys typed meanwhile, is the user's to
-    /// send. Nil when Esc went.
+    /// dialog, open the rewind or close a screen typed keys left
+    /// (`interruptRefusal`). The turn ends with it: a silent turn says
+    /// nothing more. A prompt Claude gives back is the user's draft.
     func interruptSilentTurn(
         since: TimeInterval, waitThreshold: TimeInterval?, snapshot: ProcessSnapshot, now: TimeInterval
-    ) -> SilentInterruptRefusal? {
+    ) -> SilentInterrupt {
         let foreground = foregroundProcess(snapshot: snapshot)
         guard case .silent(let silence)? = agentStuckState(now: now, waitThreshold: waitThreshold, foreground: foreground),
               silence.since == since
         else { return .notSilent }
-        switch interruptRefusal(snapshot: snapshot) {
-        case nil, .notAnswered?, .typed?: break
-        case let refusal?: return .refused(refusal)
-        }
-        return sendInterrupt() == nil ? .notSilent : nil
+        let refusal = interruptRefusal(snapshot: snapshot)
+        if let refusal, refusal != .notAnswered { return .refused(refusal) }
+        guard let promptAt = sendInterrupt() else { return .refused(.notWorking) }
+        _ = state.machine.noteInterrupted(promptAt: promptAt, now: now)
+        guard refusal == .notAnswered else { return .stopped }
+        state.machine.notePromptGivenBack(now: now)
+        return .promptGivenBack
     }
 
     /// The main thread's turn waits on the model (see

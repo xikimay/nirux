@@ -133,7 +133,7 @@ extension SidebarStuckState {
         case .waiting(let reason, _): return reason.headline
         case .stoppedOnError: return "stopped on an API error"
         case .exitedMidTurn: return "exited mid-turn"
-        case .silent(let duration, _): return "silent for \(duration)"
+        case .silent(let duration, _, _): return "silent for \(duration)"
         }
     }
 
@@ -154,7 +154,7 @@ extension SidebarStuckState {
         case .waiting(_, let duration): return "waiting \(duration)"
         case .stoppedOnError: return "stopped"
         case .exitedMidTurn: return "exited"
-        case .silent(let duration, _): return "silent \(duration)"
+        case .silent(let duration, _, _): return "silent \(duration)"
         }
     }
 }
@@ -222,7 +222,7 @@ extension WorkspaceInfo {
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
             }
-            if case let .silent(_, since)? = column.stuck {
+            if case let .silent(_, since, true)? = column.stuck {
                 actions.append(.interrupt(columnIndex: column.index, since: since))
             }
             if let question = column.turnQuestion {
