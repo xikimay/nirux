@@ -542,9 +542,12 @@ extension NiruxShellView {
             self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
         }
+        workspace.onColumnFocusRequested = { [weak self, weak workspace] index in
+            guard let self, workspace === self.activeWorkspace else { return }
+            self.focusColumnByIndex(index)
+        }
         workspace.onColumnsLaidOut = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
-            // A resize handle's drag focuses its column without a relayout.
             self.applyCardEdges(workspace)
             guard workspace === self.activeWorkspace else { return }
             self.refreshSidebarNavigation()

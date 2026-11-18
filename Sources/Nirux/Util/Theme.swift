@@ -160,18 +160,30 @@ enum Theme {
             static let column = Level(opacity: 0.35, radius: 3, drop: 2)
         }
 
-        /// Gives `layer` the shadow of `level` along `path`, the shape in
-        /// the layer's own coordinates; call it again when the shape
-        /// changes. The layer must not mask to its bounds, which would cut
-        /// the shadow off.
-        static func apply(_ level: Level, to layer: CALayer, path: CGPath) {
+        /// Gives `layer` the shadow of `level` along the rounded rectangle
+        /// `rect`, in the layer's own coordinates, its corners `radius` at
+        /// most; call it again when the shape changes. With `cutOut`, then
+        /// the layer's mask, the shadow falls only outside the shape, for a
+        /// shape that lets it show through. The layer must not mask to its
+        /// bounds, which would cut the shadow off.
+        static func apply(_ level: Level, to layer: CALayer, roundedRect rect: CGRect, radius: CGFloat, cutOut: CAShapeLayer?) {
+            let corner = max(0, min(radius, rect.width / 2, rect.height / 2))
+            let shape = CGPath(roundedRect: rect, cornerWidth: corner, cornerHeight: corner, transform: nil)
             layer.shadowColor = NSColor.black.cgColor
             layer.shadowOpacity = level.opacity
             layer.shadowRadius = level.radius
             // Below the shape, whichever way the layer counts y: a view's
             // backing layer is flipped exactly when the view is.
             layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? level.drop : -level.drop)
-            layer.shadowPath = path
+            layer.shadowPath = shape
+            layer.mask = cutOut
+            guard let cutOut else { return }
+            let outside = CGMutablePath()
+            outside.addRect(rect.insetBy(dx: -level.reach, dy: -level.reach))
+            outside.addPath(shape)
+            cutOut.fillRule = .evenOdd
+            cutOut.frame = layer.bounds
+            cutOut.path = outside
         }
     }
 

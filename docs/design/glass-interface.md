@@ -451,9 +451,11 @@ the text stays flat and sharp.
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within
   the air, cast by a view of its own under every column of the strip
-  (`ColumnShadowView`) along a path and never masked, so that terminals
-  redrawing over it cost no offscreen pass. The opaque card hides its
-  inside; it hides while its column fades in or out.
+  (`ColumnShadowView`) along a path. Under an opaque card it is never
+  masked, so that terminals redrawing over it cost no offscreen pass: the
+  card hides its inside. A card the desktop shows through (a translucent
+  terminal) takes its shape out of the shadow, as the floating glass does.
+  The layout hides it while its card fades in or out.
 - **Next (P1, second PR):** the focused card one level higher, its shadow
   passing from card to card when the focus moves.
 
