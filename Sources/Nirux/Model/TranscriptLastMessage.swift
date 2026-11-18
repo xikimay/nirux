@@ -22,13 +22,24 @@ enum TranscriptLastMessage {
     /// The reading of the transcript at `path`; nil when it can't be read,
     /// or holds neither a prompt nor a message (a conversation not started).
     static func read(path: String, tailBytes: Int = tailBytes) -> Reading? {
+        tail(of: path, bytes: tailBytes).flatMap { last(in: $0.data, startsMidLine: $0.startsMidLine) }
+    }
+
+    /// The last `bytes` of the file at `path` past `offset`, and one more,
+    /// which says whether they start a line.
+    static func tail(of path: String, bytes: Int, from offset: UInt64 = 0) -> (data: Data, startsMidLine: Bool)? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
-        // One byte more: it says whether the window starts a line.
-        let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) - 1 : 0
+        let first = max(offset, size > UInt64(bytes) ? size - UInt64(bytes) : 0)
+        let start = first > 0 ? first - 1 : 0
         guard (try? handle.seek(toOffset: start)) != nil, let data = try? handle.readToEnd() else { return nil }
-        return last(in: data, startsMidLine: start > 0)
+        return (data, start > 0)
+    }
+
+    /// The size of the file at `path`, 0 when it can't be read.
+    static func size(of path: String) -> UInt64 {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.uint64Value ?? 0
     }
 
     /// `text` with each line that holds a secret replaced (a private key's
@@ -53,14 +64,9 @@ enum TranscriptLastMessage {
     /// part), in order. Tool output isn't parsed; Claude Code's own
     /// placeholders ("No response requested.") aren't the agent's words.
     static func last(in data: Data, startsMidLine: Bool = false) -> Reading? {
-        var whole: Data.SubSequence = data[...]
-        if startsMidLine {
-            guard let newline = data.firstIndex(of: UInt8(ascii: "\n")) else { return .noText }
-            whole = data[data.index(after: newline)...]
-        }
         var found: (id: String?, message: TranscriptSearch.Message)?
         var parts: [String] = []
-        for line in whole.split(separator: UInt8(ascii: "\n")).reversed() {
+        for line in lines(of: data, startsMidLine: startsMidLine).reversed() {
             guard let object = line.withUnsafeBytes({ $0.isEmpty || TranscriptSearch.isToolResult($0) ? nil : TranscriptSearch.object($0) })
             else { continue }
             if let prompt = TranscriptSearch.message(in: object), prompt.role == .user {
@@ -79,5 +85,38 @@ enum TranscriptLastMessage {
         }
         guard let found else { return startsMidLine ? .noText : nil }
         return .message(TranscriptSearch.Message(role: .claude, text: parts.joined(separator: "\n\n"), timestamp: found.message.timestamp))
+    }
+
+    /// Whether the transcript at `path` shows Claude stopping a turn at an
+    /// Esc sent at `date`: its "[Request interrupted by user" line, which
+    /// Claude stamps once it read the key (milliseconds, this Mac's clock).
+    /// Only what was written past `offset` (the file's size at the Esc) is
+    /// read, its last 256 KB at most.
+    static func showsInterrupt(path: String, since date: Date, after offset: UInt64) -> Bool {
+        guard let tail = tail(of: path, bytes: 256 * 1024, from: offset) else { return false }
+        // Claude stamps milliseconds, cut.
+        let sentAt = Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1_000).rounded(.down) / 1_000)
+        return lines(of: tail.data, startsMidLine: tail.startsMidLine).reversed().contains { line in
+            guard line.withUnsafeBytes({ TranscriptSearch.contains($0, interruptMarker) }),
+                  let object = line.withUnsafeBytes(TranscriptSearch.object), object["type"] as? String == "user",
+                  let time = (object["timestamp"] as? String).flatMap(TranscriptSearch.date), time >= sentAt
+            else { return false }
+            let content = (object["message"] as? [String: Any])?["content"]
+            let texts = (content as? String).map { [$0] }
+                ?? (content as? [[String: Any]] ?? []).compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
+            return texts.contains { $0.hasPrefix("[Request interrupted by user") }
+        }
+    }
+
+    private static let interruptMarker = Array("[Request interrupted by user".utf8)
+
+    /// `data`'s lines, the first left out when the window cut it.
+    private static func lines(of data: Data, startsMidLine: Bool) -> [Data.SubSequence] {
+        var whole: Data.SubSequence = data[...]
+        if startsMidLine {
+            guard let newline = data.firstIndex(of: UInt8(ascii: "\n")) else { return [] }
+            whole = data[data.index(after: newline)...]
+        }
+        return whole.split(separator: UInt8(ascii: "\n"))
     }
 }

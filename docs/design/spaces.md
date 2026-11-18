@@ -261,7 +261,8 @@ New flow, built on the guarded typing `tell` already uses
     the user starts it. One sheet at a time: later proposals wait their turn.
   - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
     and checks, the question waiting or the result) and repositories.
-  - `tell(task, message)`, `reply(question, message)`: Missions. A task is named
+  - `tell(task, message)`, `reply(question, message)`: Missions, 4,000
+    characters at most (see mission-tell.md, "Longer messages"). A task is named
     by its branch, else its folder, else its title or folder's name; within
     the first that any task answers, only one may (a workspace's branch is
     its focused terminal's, which another may share); the Lead reaches only the tasks it started that
@@ -323,6 +324,17 @@ New flow, built on the guarded typing `tell` already uses
     (the parent a task, two levels, six sub-tasks, those on their way
     included). Archived sub-tasks count for nothing; an archived task stays
     put. Who it reports to doesn't change.
+  - `interrupt_task(task)`: Esc into the turn of one of the Lead's tasks, in
+    the column its Mission names (as `tell`), without closing anything.
+    Claude Code gives the prompt box back a prompt it hasn't begun answering
+    and the prompts queued meanwhile, and fires no Stop: so only once the
+    main thread's turn called a tool and nothing was typed since its prompt,
+    with no dialog waiting for a key, not while the user has the task on
+    screen, and one Esc per turn (a second opens the rewind). The turn is
+    over once its transcript shows "[Request interrupted by user" stamped
+    after the Esc (watched 30 s; the Lead hears within 4), unless a newer
+    prompt went in; the messages waiting for it go in then. The Esc counts
+    as no draft, and the next `tell` goes in at once.
   - `read_task(task)`: the last message of the task's newest Claude Code
     conversation (the session history keeps its transcript, across
     relaunches), up to 6,000 characters, its start and end past that. Never

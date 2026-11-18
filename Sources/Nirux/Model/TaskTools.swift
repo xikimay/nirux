@@ -58,7 +58,7 @@ enum TaskTools {
                     """,
                 properties: [
                     "task": ["type": "string", "description": subtaskDescription],
-                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxMessageLength) characters."]
+                    "message": ["type": "string", "description": "At most \(MissionEventCLI.maxInstructionLength) characters."]
                 ],
                 required: ["task", "message"]
             ),
@@ -67,7 +67,7 @@ enum TaskTools {
                 description: "Answer the question one of your sub-tasks asked you, by its id (in the [Nirux Mission] message and list_tasks).",
                 properties: [
                     "question": ["type": "string", "description": "The question's id."],
-                    "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxMessageLength) characters."]
+                    "message": ["type": "string", "description": "Your answer, at most \(MissionEventCLI.maxInstructionLength) characters."]
                 ],
                 required: ["question", "message"]
             ),
