@@ -158,10 +158,10 @@ enum Theme {
             static let floating = Level(opacity: 0.38, radius: 16, drop: 12)
             /// A column, a card resting on the window: short enough to stay
             /// within the air around it (`WorkspaceState.columnInset`).
-            static let column = Level(opacity: 0.35, radius: 3, drop: 2)
-            /// The focused column, a level higher: a darker, longer drop,
-            /// still within the air.
-            static let focusedColumn = ZZ("longLift") ? Level(opacity: 0.55, radius: 6, drop: 6) : Level(opacity: 0.55, radius: 2, drop: 4)
+            static let column = Level(opacity: 0.3, radius: 2, drop: 1)
+            /// The focused column, a level higher: darker, softer and further
+            /// below, still within the air.
+            static let focusedColumn = ZZ("longLift") ? Level(opacity: 0.55, radius: 6, drop: 6) : Level(opacity: 0.5, radius: 3, drop: 2)
         }
 
         /// Gives `layer` the shadow of `level` along `path`, the shape in

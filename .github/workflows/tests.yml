@@ -58,7 +58,7 @@ jobs:
       # then the whole suite.
       - name: Flake gate
         run: |
-          scripts/mutants-class.sh NiruxTests.ColumnCardsTests noRelief alwaysAnimate neverAnimate keepLift longLift
+          scripts/mutants-class.sh NiruxTests.ColumnCardsTests noRelief alwaysAnimate neverAnimate arrivalLifts keepLift fromTarget longLift noSettle
           scripts/repeat-class.sh NiruxTests.ColumnCardsTests 10 3 NiruxTests.AgentLightShellTests NiruxTests.WorkspaceSwitchTests
 
       - name: Run tests

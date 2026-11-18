@@ -39,12 +39,13 @@ final class ColumnShadowView: NSView {
     /// where it shows now, mid-way included; else it is there at once.
     func show(_ level: Theme.Elevation.Level, animated: Bool) {
         guard level != self.level else { return }
+        if ZZ("fromTarget") { self.level = level; updateShadow() }
         let shown = shadowLayer.presentation() ?? shadowLayer
         let from = (opacity: shown.shadowOpacity, radius: shown.shadowRadius, offset: shown.shadowOffset)
         self.level = level
         updateShadow()
         guard animated else {
-            if !ZZ("keepLift") { shadowLayer.removeAnimation(forKey: Self.liftKey) }
+            settle()
             return
         }
         let lift = CAAnimationGroup()
@@ -54,20 +55,30 @@ final class ColumnShadowView: NSView {
             Self.change("shadowOffset", from: NSValue(size: from.offset), to: NSValue(size: shadowLayer.shadowOffset))
         ]
         lift.duration = Self.liftDuration
-        lift.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
         shadowLayer.add(lift, forKey: Self.liftKey)
+    }
+
+    /// The shadow at its level at once, a lift on its way cut short.
+    func settle() {
+        if !ZZ("keepLift") { shadowLayer.removeAnimation(forKey: Self.liftKey) }
     }
 
     /// The shape the shadow is cast along, and how (for tests).
     var shadowPath: CGPath? { shadowLayer.shadowPath }
     var shadowOpacity: Float { shadowLayer.shadowOpacity }
-    /// The shadow is passing to a new level.
+    /// The shadow is passing to a new level, from this opacity.
     var isLifting: Bool { shadowLayer.animation(forKey: Self.liftKey) != nil }
+    var liftStartOpacity: Float? {
+        ((shadowLayer.animation(forKey: Self.liftKey) as? CAAnimationGroup)?.animations?.first as? CABasicAnimation)?
+            .fromValue as? Float
+    }
 
     private static func change(_ keyPath: String, from: Any, to: Any) -> CABasicAnimation {
         let change = CABasicAnimation(keyPath: keyPath)
         change.fromValue = from
         change.toValue = to
+        change.duration = liftDuration
+        change.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
         return change
     }
 

@@ -116,6 +116,8 @@ extension NiruxShellView {
         }
         columnIndicator.pulses = moves
         sidebar.animates = moves
+        // Stillness wins over a lift on its way.
+        if !moves, !ZZ("noSettle") { for column in workspaces.flatMap(\.columns) { column.shadow?.settle() } }
     }
 
     /// A Claude turn end got its verdict (see `AgentHookCenter`): a Mission

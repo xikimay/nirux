@@ -680,15 +680,16 @@ extension NiruxShellView {
         // Animated path: a vertical slide over the direct frame change.
         slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
 
-        for workspace in workspaces { applyCardEdges(workspace) }
+        // Whatever wasn't laid out; what was is done (`onColumnsLaidOut`).
+        for workspace in workspaces { applyCardEdges(workspace, animated: false) }
     }
 
     /// Each card's edge and height: the focused column of the workspace on
-    /// screen in the accent and a level higher, its shadow passing there
-    /// while the interface may move; a hairline on the others; and the
-    /// header icon. The agents' lights lie over the columns, in views of
+    /// screen in the accent and a level higher; a hairline on the others;
+    /// and the header icon. `animated`: the shadows pass to their level
+    /// over a moment. The agents' lights lie over the columns, in views of
     /// their own (NiruxShellView+AgentLights).
-    func applyCardEdges(_ workspace: WorkspaceState) {
+    func applyCardEdges(_ workspace: WorkspaceState, animated: Bool) {
         let isOnScreen = workspace === activeWorkspace
         let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
         for (index, col) in workspace.columns.enumerated() {
@@ -696,7 +697,15 @@ extension NiruxShellView {
             col.setHeaderFocused(isFocus)
             col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : 1
             col.view.layer?.borderColor = isFocus ? accent : Theme.Color.line.cgColor
-            col.shadow?.show(isFocus && !ZZ("noRelief") ? .focusedColumn : .column, animated: ZZ("alwaysAnimate") ? true : ZZ("neverAnimate") ? false : agentLightsMayMove)
+            col.shadow?.show(isFocus && !ZZ("noRelief") ? .focusedColumn : .column, animated: animated)
         }
+    }
+
+    /// Whether the focus moving within `workspace` lifts its cards over a
+    /// moment: it stays on screen (an arriving or leaving workspace changes
+    /// at once, under its slide) and the interface may move.
+    func liftsCards(of workspace: WorkspaceState) -> Bool {
+        ZZ("alwaysAnimate") ? true : ZZ("neverAnimate") ? false
+            : workspace === activeWorkspace && (ZZ("arrivalLifts") || workspaceSwitch.shownWorkspaceID == workspace.id) && agentLightsMayMove
     }
 }
