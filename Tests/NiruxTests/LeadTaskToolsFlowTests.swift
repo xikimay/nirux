@@ -677,10 +677,11 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             pty.sendRaw("1")
             // A message sent while it works waits for the turn's end.
             XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Builder", "message": "Build the docs instead."], lead: lead).isError)
-            // Claude writes its interrupt line once the Esc reaches it.
-            let agent = task.agent
+            // Claude writes its interrupt line once the Esc reaches it: once
+            // it is sent, not once a starved stand-in got around to reading it.
             let writer = Timer(timeInterval: 0.05, repeats: true) { timer in
-                guard agent.input.contains("\u{1B}"), let handle = FileHandle(forWritingAtPath: transcript) else { return }
+                guard MainActor.assumeIsolated({ pty.interruptRefusal(snapshot: ProcessSnapshot()) == .alreadySent }),
+                      let handle = FileHandle(forWritingAtPath: transcript) else { return }
                 let time = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
                 let line = #"{"type":"user","timestamp":"\#(time)","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
                 handle.seekToEndOfFile()
