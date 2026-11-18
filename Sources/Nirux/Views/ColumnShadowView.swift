@@ -54,9 +54,9 @@ final class ColumnShadowView: NSView {
     /// where it shows now, mid-way included; else it is there at once.
     func show(_ level: Theme.Elevation.Level, animated: Bool) {
         // At once: a lift on its way, even to this level, is cut short.
-        if !animated { settle() }
+        if !animated, !ZZ("sameLevelLift") { settle() }
         guard level != self.level else { return }
-        let from = shownShadow(shadowLayer)
+        let from = ZZ("noMidway") ? (opacity: shadowLayer.shadowOpacity, radius: shadowLayer.shadowRadius, offset: shadowLayer.shadowOffset) : shownShadow(shadowLayer)
         self.level = level
         updateShadow()
         guard animated else { return }
@@ -103,7 +103,7 @@ final class ColumnShadowView: NSView {
         shadowLayer.frame = bounds
         Theme.Elevation.apply(
             level, to: shadowLayer, roundedRect: bounds, radius: Theme.Radius.column,
-            cutOut: isCardClear ? cutOut : nil, cutOutReach: Self.cutOutReach
+            cutOut: isCardClear ? cutOut : nil, cutOutReach: ZZ("narrowCutOut") ? nil : Self.cutOutReach
         )
     }
 }

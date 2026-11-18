@@ -340,6 +340,9 @@ extension NiruxShellView {
     /// a visual no-op and the click would otherwise feel dead.
     func focusWorkspace(id: String, column columnIndex: Int? = nil, editorTakesKeyboard: Bool = true) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        if ZZ("hiddenFocus"), let columnIndex, workspaces[index] !== activeWorkspace, workspaces[index].columns.indices.contains(columnIndex) {
+            workspaces[index].focusedIndex = columnIndex
+        }
         switchToWorkspace(index, column: columnIndex, editorTakesKeyboard: editorTakesKeyboard)
         flashColumnBorder(workspaceIndex: index, columnIndex: columnIndex)
     }
