@@ -297,7 +297,7 @@ extension NiruxShellView {
             setupScript: setupScript(for: decision),
             taskFolder: created.folderName == nil ? nil : created.path,
             activate: request.opensInFront,
-            slidesIn: pendingTaskSheet != nil
+            fadesBackdrop: pendingTaskSheet != nil
         )
         if let born = workspaces.first(where: { $0.id == childWorkspaceID }) { playTaskBirth(of: born) }
         // The agent that proposed it hears what the user started.

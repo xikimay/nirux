@@ -100,8 +100,10 @@ extension NiruxShellView {
             for (index, column) in workspace.columns.enumerated() {
                 let isInView = isOnScreen && workspace.showsColumn(at: index)
                 column.header?.statusPill.animates = moves && isInView
-                let light = column.isClosing ? nil : plan.columns[column.id]
-                let sweeps = moves && isInView && !column.isClosing && ended.contains(column.id)
+                // None on a card coming or going: it would draw at full size.
+                let isPassing = column.isClosing || column.isArriving
+                let light = isPassing ? nil : plan.columns[column.id]
+                let sweeps = moves && isInView && !isPassing && ended.contains(column.id)
                 guard light != nil || column.light != nil || sweeps else { continue }
                 let view = workspace.light(for: column)
                 view.show(light, moving: moves && isInView, soft: isOnScreen && index == workspace.focusedIndex)

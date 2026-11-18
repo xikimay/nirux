@@ -861,13 +861,21 @@ extension WorkspaceState {
                   self.columns.indices.contains(index) else { return nil }
             // Grabbing a column's edge focuses it, as a click would.
             self.onColumnFocusRequested?(index)
-            return (self.columns[index].view.frame.width, self.stripView.frame.width)
+            return (self.columns[index].view.frame.width, self.stripView.frame.width, self.lastCameraX)
         }
         handle.onDrag = { [weak self, weak handle] start, delta in
             guard let self, let handle else { return }
             let viewport = self.containerView.bounds.width
             let width = Self.draggedWidth(from: start, viewport: viewport, by: delta)
-            self.setColumnWidth(for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1))
+            self.setColumnWidth(
+                for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1),
+                camera: Self.dragCamera(from: start, viewport: viewport, width: width)
+            )
+        }
+        // Let go: the camera goes where the strip now wants it.
+        handle.onDragEnd = { [weak self] in
+            guard let self else { return }
+            self.layoutAndScroll(viewportWidth: self.containerView.bounds.width, height: self.containerView.bounds.height, animated: true)
         }
         handle.onReset = { [weak self, weak handle] in
             guard let handle else { return }
@@ -878,24 +886,31 @@ extension WorkspaceState {
     }
 
     /// The width a column's edge dragged `delta` points from `start` gives
-    /// it, the edge staying under the pointer: while the strip is narrower
-    /// than the viewport it lies centred, both its ends move, and the
-    /// column grows twice the pointer's way; once wider, as far.
+    /// it, the edge staying under the pointer. A centred strip moves both
+    /// its ends, so the column grows twice the pointer's way until it fills
+    /// the viewport; past that, and on a strip that started wider, the
+    /// camera holds (`dragCamera`) and the column follows the pointer.
     static func draggedWidth(from start: ColumnResizeHandle.Start, viewport: CGFloat, by delta: CGFloat) -> CGFloat {
         let slack = viewport - start.strip
-        // Where the strip comes to fill the viewport.
-        let fills = slack > 0 ? slack / 2 : slack
-        let centred = slack > 0 ? delta <= fills : delta < fills
-        let growth = centred
-            ? (slack > 0 ? delta * 2 : slack + (delta - fills) * 2)
-            : (slack > 0 ? slack + (delta - fills) : delta)
-        return start.width + growth
+        guard slack > 0 else { return start.width + delta }
+        return start.width + (delta <= slack / 2 ? delta * 2 : slack + (delta - slack / 2))
+    }
+
+    /// Where the camera stays while an edge is dragged to `width`: nil, the
+    /// strip centred, while a strip that started narrower than the viewport
+    /// still is; at its left end once that strip outgrows it; where the
+    /// drag found it on a strip that started wider. Let go, it goes where
+    /// the strip wants it.
+    static func dragCamera(from start: ColumnResizeHandle.Start, viewport: CGFloat, width: CGFloat) -> CGFloat? {
+        guard start.strip <= viewport else { return start.camera }
+        return start.strip - start.width + width <= viewport ? nil : 0
     }
 
     static let minWidthFraction: CGFloat = 0.15
     static let maxWidthFraction: CGFloat = 2.0
 
-    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat) {
+    /// `camera`: where it stays (a drag), nil: where the strip wants it.
+    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat, camera: CGFloat? = nil) {
         guard let index = resizeHandles.firstIndex(of: handle), columns.indices.contains(index) else { return }
         let clamped = min(Self.maxWidthFraction, max(Self.minWidthFraction, fraction))
         guard clamped != columns[index].widthFraction else { return }
@@ -903,7 +918,8 @@ extension WorkspaceState {
         layoutAndScroll(
             viewportWidth: containerView.bounds.width,
             height: containerView.bounds.height,
-            animated: false
+            animated: false,
+            camera: camera
         )
     }
 
@@ -1019,9 +1035,10 @@ extension WorkspaceState {
         NSSize(width: Self.width(column.widthFraction, in: viewportWidth), height: max(0, height - Self.columnInset * 2))
     }
 
+    /// `camera`: where it stays (a resize drag); nil: where the strip wants it.
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
-        fitAll: Bool = false, skipTerminalResize: Bool = false
+        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil
     ) {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
@@ -1075,7 +1092,9 @@ extension WorkspaceState {
         // 3. Camera: a strip narrower than the viewport lies in its middle;
         // a wider one scrolls to keep the focused card in view, with its air.
         let cameraX: CGFloat
-        if totalWidth <= viewportWidth {
+        if let camera {
+            cameraX = camera
+        } else if totalWidth <= viewportWidth {
             cameraX = -floor((viewportWidth - totalWidth) / 2)
         } else if fitAll {
             cameraX = 0
@@ -1099,8 +1118,10 @@ extension WorkspaceState {
         let oldX = stripView.frame.origin.x
         stripView.frame.origin.x = stripX
         if animated, let layer = stripView.layer, oldX != stripX {
+            // From where it shows: a slide on its way goes on from there.
+            let shown = oldX + ((layer.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 0)
             let anim = CABasicAnimation(keyPath: "transform.translation.x")
-            anim.fromValue = oldX - stripX
+            anim.fromValue = shown - stripX
             anim.toValue = 0
             anim.duration = 0.3
             anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)

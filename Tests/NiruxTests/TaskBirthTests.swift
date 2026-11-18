@@ -303,7 +303,7 @@ final class TaskBirthTests: UIFlowTestCase {
             let shell = harness.shell
             self.prepare(shell)
 
-            shell.addWorkspace(title: "slides", cwd: harness.repo, slidesIn: true)
+            shell.addWorkspace(title: "slides", cwd: harness.repo, fadesBackdrop: true)
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(workspace.title, "slides")
             let column = try XCTUnwrap(workspace.columns.first)
@@ -320,7 +320,7 @@ final class TaskBirthTests: UIFlowTestCase {
             XCTAssertEqual((fade.toValue as? NSNumber)?.doubleValue, 0)
             XCTAssertEqual(fade.duration, NiruxShellView.taskBirthFadeDuration)
 
-            shell.addWorkspace(title: "background", cwd: harness.repo, activate: false, slidesIn: true)
+            shell.addWorkspace(title: "background", cwd: harness.repo, activate: false, fadesBackdrop: true)
             let background = try XCTUnwrap(shell.workspaces.last)
             XCTAssertEqual(background.title, "background")
             XCTAssertEqual(background.columns.first?.isArriving, false)
@@ -390,7 +390,7 @@ final class TaskBirthTests: UIFlowTestCase {
             XCTAssertTrue(self.ghosts(in: shell).isEmpty)
             XCTAssertTrue(shell.sidebar.rowOpensAt.isEmpty)
 
-            shell.addWorkspace(title: "as before", cwd: harness.repo, slidesIn: true)
+            shell.addWorkspace(title: "as before", cwd: harness.repo, fadesBackdrop: true)
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(added.title, "as before")
             XCTAssertEqual(added.columns.first?.isArriving, false, "no column coming in")

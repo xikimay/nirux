@@ -29,7 +29,7 @@ extension NiruxShellView {
         isLead: Bool = false,
         taskFolder: String? = nil,
         activate: Bool = true,
-        slidesIn: Bool = false
+        fadesBackdrop: Bool = false
     ) {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
@@ -86,8 +86,8 @@ extension NiruxShellView {
         }
 
         // Its first terminal comes in, in the middle of the window.
-        if activate, agentLightsMayMove, let column = workspace.columns.first { arrive(column, in: workspace) }
-        if let snapshot, slidesIn, agentLightsMayMove {
+        if activate, let column = workspace.columns.first { arrive(column, in: workspace) }
+        if let snapshot, fadesBackdrop, agentLightsMayMove {
             // A task born from the ⌘N sheet (NiruxShellView+TaskBirth).
             fadeAwayUnderNewWorkspace(snapshot)
         } else if let snapshot {

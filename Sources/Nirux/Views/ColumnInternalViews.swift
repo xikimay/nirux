@@ -332,13 +332,16 @@ final class ShellExitedOverlay: NSView {
 /// bounds), positioned over the inter-column boundary by layoutAndScroll.
 /// The owner turns the pointer's way into a width.
 final class ColumnResizeHandle: NSView {
-    /// What a drag starts from: its column's width and the strip's.
-    typealias Start = (width: CGFloat, strip: CGFloat)
+    /// What a drag starts from: its column's width, the strip's, and where
+    /// the camera was.
+    typealias Start = (width: CGFloat, strip: CGFloat, camera: CGFloat)
     /// Drag start → where it starts from; nil: no drag.
     var onDragStart: (() -> Start?)?
     /// Dragging → its start and the pointer's way since, in points
     /// (absolute-set semantics, so a wobbly mouse can't compound errors).
     var onDrag: ((Start, CGFloat) -> Void)?
+    /// The drag is over.
+    var onDragEnd: (() -> Void)?
     /// Double-click → reset to the default width.
     var onReset: (() -> Void)?
 
@@ -368,6 +371,7 @@ final class ColumnResizeHandle: NSView {
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
+            dragStart = nil
             onReset?()
             return
         }
@@ -378,5 +382,11 @@ final class ColumnResizeHandle: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let dragStart else { return }
         onDrag?(dragStart, event.locationInWindow.x - dragStartX)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragStart != nil else { return }
+        dragStart = nil
+        onDragEnd?()
     }
 }

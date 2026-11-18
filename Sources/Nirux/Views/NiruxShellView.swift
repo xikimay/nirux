@@ -678,45 +678,50 @@ extension NiruxShellView {
     func addColumn() {
         guard let ws = activeWorkspace else { return }
         ws.addColumn()
-
-        // Layout at final positions, then the new column comes in.
-        let newCol = ws.columns[ws.focusedIndex]
-        newCol.isArriving = true
-        relayout(animated: false)
-        arrive(newCol, in: ws)
-
-        // Animate strip to show the new column
-        ws.layoutAndScroll(
-            viewportWidth: viewport.frame.width,
-            height: ws.containerView.frame.height,
-            animated: true
-        )
-
+        // The strip glides to its new place, a centred one aside; the new
+        // column comes in at its own.
+        relayout(animated: true)
+        arrive(ws.columns[ws.focusedIndex], in: ws)
         updateSidebar()
         focusActiveTerminal(in: window)
     }
 
-    /// A column comes in at its place, from a little smaller about its
-    /// middle and transparent; its shadow comes once it is in.
+    /// How small a card comes in from, and leaves to.
+    static let cardInOutScale: CGFloat = 0.92
+    static let arrivalDuration: TimeInterval = 0.25
+
+    /// `scale` about a card's middle: a view's layer turns about its corner.
+    static func scaledAboutMiddle(_ size: NSSize, by scale: CGFloat) -> CGAffineTransform {
+        CGAffineTransform(translationX: size.width * (1 - scale) / 2, y: size.height * (1 - scale) / 2)
+            .scaledBy(x: scale, y: scale)
+    }
+
+    /// A column comes in at its place, from a little smaller and
+    /// transparent; its shadow and its light come once it is in. Nothing
+    /// moves while the interface may not, nor before the column is laid out
+    /// (a viewport with no size yet).
     func arrive(_ column: ColumnState, in workspace: WorkspaceState) {
+        let size = column.view.frame.size
+        guard agentLightsMayMove, size.width > 0, size.height > 0 else { return }
         column.isArriving = true
         workspace.showShadows()
-        let size = column.view.frame.size
-        let scale: CGFloat = 0.92
+        applyAgentLights()
         column.view.alphaValue = 0
-        // A view's layer turns about its corner: shifted to keep its middle.
-        column.view.layer?.setAffineTransform(CGAffineTransform(
-            translationX: size.width * (1 - scale) / 2, y: size.height * (1 - scale) / 2
-        ).scaledBy(x: scale, y: scale))
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.25
+        column.view.layer?.setAffineTransform(Self.scaledAboutMiddle(size, by: Self.cardInOutScale))
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.arrivalDuration
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             column.view.animator().alphaValue = 1
             column.view.layer?.setAffineTransform(.identity)
-        }, completionHandler: {
+        }
+        // On time, not on the animation's completion, which a window out of
+        // view may never report.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.arrivalDuration) { [weak self, weak column, weak workspace] in
+            guard let self, let column, let workspace else { return }
             column.isArriving = false
             workspace.showShadows()
-        })
+            self.applyAgentLights()
+        }
     }
 
     enum HDir { case left, right }

@@ -113,15 +113,38 @@ final class ColumnCardsTests: XCTestCase {
         handle.onDrag?(start, 100)
         XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 100, accuracy: 1, "the edge under the pointer")
         XCTAssertEqual(card.frame.minX + strip.frame.minX, left - 100, accuracy: 1, "the other edge as far the other way")
-        // Past filling the viewport, the camera keeps the edge in view.
-        handle.onDrag?(start, 600)
-        XCTAssertEqual(card.frame.maxX + strip.frame.minX, 1000 - inset, accuracy: 1)
+        // Past filling the viewport, it follows the pointer as far.
+        handle.onDrag?(start, 300)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 300, accuracy: 1)
+        handle.onDragEnd?()
 
         // Two halves fill it: nothing to centre.
         workspace.addColumn()
         for column in workspace.columns { column.widthFraction = 0.5 }
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         XCTAssertEqual(strip.frame.minX, 0)
+    }
+
+    /// On a strip wider than the viewport, scrolled to its end, a dragged
+    /// edge stays under the pointer: the camera holds where the drag found
+    /// it, and goes back where the strip wants it once let go.
+    func testADraggedEdgeStaysUnderThePointerWhereverTheCameraIs() throws {
+        let workspace = workspace(columns: 2, width: 0.75)
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let strip = try strip(of: workspace)
+        XCTAssertLessThan(strip.frame.minX, -400, "scrolled to the last card")
+        let card = workspace.columns[1].view
+        let handle = try XCTUnwrap(strip.subviews.compactMap { $0 as? ColumnResizeHandle }.last)
+        let start = try XCTUnwrap(handle.onDragStart?())
+        let edge = card.frame.maxX + strip.frame.minX
+        handle.onDrag?(start, -100)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, -100, accuracy: 1)
+        handle.onDrag?(start, -40)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, -40, accuracy: 1)
+
+        handle.onDragEnd?()
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX, 1000 - inset, accuracy: 1, "the camera back at the end")
     }
 
     func testFitAllSharesWhatTheAirLeaves() {
@@ -252,6 +275,78 @@ final class ColumnCardsTests: XCTestCase {
             handle.onDrag?(start, -30)
             XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
         }
+    }
+
+    /// The strip glides when a column comes or goes, from where it shows: a
+    /// lone card aside for a second one, the one left back to the middle.
+    func testTheStripGlidesAsideAndBack() throws {
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let strip = try strip(of: workspace)
+            let centred = strip.frame.minX
+            XCTAssertGreaterThan(centred, inset, "a lone half lies in the middle")
+
+            shell.addColumn()
+            XCTAssertEqual(strip.frame.minX, 0, "two halves fill the viewport")
+            let aside = try XCTUnwrap(strip.layer?.animation(forKey: "colSlide") as? CABasicAnimation)
+            XCTAssertEqual(try XCTUnwrap(aside.fromValue as? NSNumber).doubleValue, Double(centred), accuracy: 1, "from where it showed")
+            XCTAssertEqual(aside.toValue as? NSNumber, 0)
+
+            shell.finishColumnClose(try XCTUnwrap(workspace.columns.last), in: workspace)
+            XCTAssertEqual(strip.frame.minX, centred, accuracy: 1)
+            let back = try XCTUnwrap(strip.layer?.animation(forKey: "colSlide") as? CABasicAnimation)
+            XCTAssertEqual(try XCTUnwrap(back.fromValue as? NSNumber).doubleValue, Double(-centred), accuracy: 1)
+        }
+    }
+
+    /// A new column comes in, then is in on time: its shadow and light
+    /// follow whether or not the animation reports its end. With Reduce
+    /// motion, or before it has a size, it is in at once.
+    func testANewColumnIsInOnTimeAndAtOnceWhenNothingMayMove() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            XCTAssertTrue(added.isArriving)
+            XCTAssertEqual(added.shadow?.isHidden, true)
+            RunLoop.main.run(until: Date().addingTimeInterval(NiruxShellView.arrivalDuration + 0.2))
+            XCTAssertFalse(added.isArriving, "in, on time")
+            XCTAssertEqual(added.shadow?.isHidden, false)
+
+            shell.sideEffects.reducesMotion = { true }
+            shell.addColumn()
+            let still = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            XCTAssertFalse(still.isArriving, "Reduce motion: in at once")
+            XCTAssertEqual(still.view.alphaValue, 1)
+
+            shell.sideEffects.reducesMotion = { false }
+            let column = ColumnState(cwd: "/tmp")
+            shell.arrive(column, in: workspace)
+            XCTAssertFalse(column.isArriving, "no size yet: nothing to scale about")
+        }
+    }
+
+    /// A double-click resets the width and leaves no drag behind it.
+    func testADoubleClickOnAHandleLeavesNoDragBehind() {
+        let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))
+        var drags = 0
+        handle.onDragStart = { (100, 500, 0) }
+        handle.onDrag = { _, _ in drags += 1 }
+        handle.onReset = {}
+        func event(_ type: NSEvent.EventType, clicks: Int) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
+            )!
+        }
+        handle.mouseDown(with: event(.leftMouseDown, clicks: 1))
+        handle.mouseUp(with: event(.leftMouseUp, clicks: 1))
+        handle.mouseDown(with: event(.leftMouseDown, clicks: 2))
+        handle.mouseDragged(with: event(.leftMouseDragged, clicks: 2))
+        XCTAssertEqual(drags, 0)
     }
 
     /// A card's shadow hides while the card comes or goes: the fading card
