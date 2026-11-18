@@ -185,6 +185,7 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertLessThanOrEqual(higher.reach, inset)
         XCTAssertGreaterThan(higher.opacity, resting.opacity)
         XCTAssertGreaterThan(higher.drop, resting.drop)
+        XCTAssertGreaterThan(higher.radius, resting.radius, "softer as it rises")
         try withShell { shell in
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             workspace.addColumn()
@@ -211,12 +212,39 @@ final class ColumnCardsTests: XCTestCase {
             shell.relayout(animated: false)
             XCTAssertEqual(shadows.map(\.level), [.focusedColumn, .column])
             XCTAssertEqual(shadows.map(\.isLifting), [true, true], "one rises, the other settles")
+            XCTAssertEqual(shadows[0].liftStartOpacity, Theme.Elevation.Level.column.opacity)
 
-            shell.sideEffects.reducesMotion = { true }
+            // Back at once, mid-way: from where it shows, never from its new level.
             workspace.focusedIndex = 1
             shell.relayout(animated: false)
-            XCTAssertEqual(shadows.map(\.level), [.column, .focusedColumn])
+            XCTAssertEqual(shadows[0].liftStartOpacity, Theme.Elevation.Level.focusedColumn.opacity)
+
+            // Stillness cuts a lift short, and the next change is at once.
+            shell.sideEffects.reducesMotion = { true }
+            shell.applyAgentLights()
+            XCTAssertEqual(shadows.map(\.isLifting), [false, false], "Reduce motion stops the lift")
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            XCTAssertEqual(shadows.map(\.level), [.focusedColumn, .column])
             XCTAssertEqual(shadows.map(\.isLifting), [false, false], "Reduce motion: at once")
+        }
+    }
+
+    /// An arriving workspace's focused card is up at once: its slide is
+    /// the movement.
+    func testAnArrivingWorkspaceIsLiftedAtOnce() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let folder = FileManager.default.temporaryDirectory.path
+            shell.addWorkspace(title: "second", cwd: folder)
+            shell.switchToWorkspace(0)
+            shell.switchToWorkspace(1)
+            let arrived = try XCTUnwrap(shell.activeWorkspace)
+            let shadow = try XCTUnwrap(arrived.columns[safe: arrived.focusedIndex]?.shadow)
+            XCTAssertEqual(shadow.level, .focusedColumn)
+            XCTAssertFalse(shadow.isLifting)
         }
     }
 

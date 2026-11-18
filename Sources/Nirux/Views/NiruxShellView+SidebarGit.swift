@@ -544,7 +544,7 @@ extension NiruxShellView {
         workspace.onColumnsLaidOut = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
             // A resize handle's drag focuses its column without a relayout.
-            self.applyCardEdges(workspace)
+            self.applyCardEdges(workspace, animated: self.liftsCards(of: workspace))
             guard workspace === self.activeWorkspace else { return }
             self.refreshSidebarNavigation()
         }
