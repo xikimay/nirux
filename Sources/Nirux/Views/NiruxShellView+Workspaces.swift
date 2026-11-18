@@ -337,7 +337,7 @@ extension NiruxShellView {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
         // Another workspace arrives with its column already focused, in one
         // move: its card lies high at once, under the slide.
-        if let columnIndex, workspaces[index] !== activeWorkspace, workspaces[index].columns.indices.contains(columnIndex) {
+        if !ZZ("columnAfter"), let columnIndex, workspaces[index] !== activeWorkspace, workspaces[index].columns.indices.contains(columnIndex) {
             workspaces[index].focusedIndex = columnIndex
         }
         switchToWorkspace(index, editorTakesKeyboard: editorTakesKeyboard)
