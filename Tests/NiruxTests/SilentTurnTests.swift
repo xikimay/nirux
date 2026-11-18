@@ -199,7 +199,7 @@ final class SilentTurnTests: XCTestCase {
 
     func testOneAlertPerSilence() {
         promptIn()
-        func alert(_ silence: AgentSilence) -> AgentAttentionReason? {
+        @MainActor func alert(_ silence: AgentSilence) -> AgentAttentionReason? {
             machine.takeStuckAlert(now: t0 + 9_999, waitThreshold: waitThreshold, silence: silence, foreground: claude)
         }
         XCTAssertNil(alert(silence(1_199)))
@@ -260,7 +260,7 @@ final class SilentTurnTests: XCTestCase {
             pid: 500, parentPID: 1, processGroupID: 500, terminalForegroundProcessGroupID: 0, name: "claude",
             startedAt: 10, arguments: ["claude"]
         )])
-        func hook(_ name: AgentHookEvent.Name) {
+        @MainActor func hook(_ name: AgentHookEvent.Name) {
             let event = AgentHookEvent(
                 kind: .claude, name: name, agentUUID: column.agentUUID, sessionID: "conv", emitterProcess: front.instance,
                 source: name == .sessionStart ? "startup" : nil, transcriptPath: transcript.path, timestamp: 90
@@ -268,7 +268,7 @@ final class SilentTurnTests: XCTestCase {
             _ = column.admitClaudeHook(event, foregroundProcess: front, snapshot: snapshot)
             pty.applyAgentHook(event, isUserFocused: false)
         }
-        func silent() -> Bool {
+        @MainActor func silent() -> Bool {
             column.noteTranscriptGrowth(foreground: front)
             if case .silent? = pty.agentStuckState(now: 9_999, waitThreshold: waitThreshold, foreground: front) { return true }
             return false

@@ -444,7 +444,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         var notified: [AgentAttentionReason?] = []
         column.onAgentAttention = { notified.append($0) }
         shell.stuckAgentWaitThreshold = 600
-        func pass(at awake: TimeInterval) {
+        @MainActor func pass(at awake: TimeInterval) {
             clock.now = awake
             shell.refreshStuckAgents(snapshot: snapshot, now: now, appIsActive: false)
         }
