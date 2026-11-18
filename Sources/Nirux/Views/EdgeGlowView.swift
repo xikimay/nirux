@@ -30,9 +30,10 @@ final class EdgeGlowView: NSView {
     /// A column's ring: within the terminal's padding
     /// (`TerminalConfigBuilder.padding`), so it covers no text.
     static let ringWidth: CGFloat = 2
-    /// How far a column's glow reaches (over the terminal's padding, then
-    /// about one cell), and how strong it is at most: text under it keeps
-    /// its contrast.
+    /// How far a column's glow reaches: over the terminal's padding, then
+    /// 10 pt over the text (12 on the focused column, whose glow starts
+    /// inside its focus ring); and how strong it is at most: text under it
+    /// keeps its contrast.
     static let columnGlowDepth = CGFloat(TerminalConfigBuilder.padding) + 10
     static let columnGlowAlpha: CGFloat = 0.08
     /// A column's corners (`WorkspaceState.layoutAndScroll`).

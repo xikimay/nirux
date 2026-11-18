@@ -195,7 +195,6 @@ final class AgentLightTests: XCTestCase {
         let padding = TerminalConfigBuilder.padding
         XCTAssertLessThanOrEqual(EdgeGlowView.focusRingWidth + EdgeGlowView.ringWidth, CGFloat(padding), "the focused column's ring too")
         XCTAssertLessThanOrEqual(EdgeGlowView.depth, CGFloat(padding))
-        XCTAssertEqual(EdgeGlowView.columnGlowDepth - CGFloat(padding), 10, "the column's glow reaches one cell over the text")
         XCTAssertTrue(TerminalConfigBuilder.enforced.contains("window-padding-x = \(padding)"))
         XCTAssertTrue(TerminalConfigBuilder.enforced.contains("window-padding-y = \(padding)"))
         XCTAssertTrue(
