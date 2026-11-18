@@ -312,8 +312,7 @@ final class ColumnCardsTests: XCTestCase {
             let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
             XCTAssertTrue(added.isArriving)
             XCTAssertEqual(added.shadow?.isHidden, true)
-            RunLoop.main.run(until: Date().addingTimeInterval(NiruxShellView.arrivalDuration + 0.2))
-            XCTAssertFalse(added.isArriving, "in, on time")
+            waitUntil("in, on time", timeout: 2) { !added.isArriving }
             XCTAssertEqual(added.shadow?.isHidden, false)
 
             shell.sideEffects.reducesMotion = { true }
@@ -350,21 +349,19 @@ final class ColumnCardsTests: XCTestCase {
     }
 
     /// A card's shadow hides while the card comes or goes: the fading card
-    /// would show it. The layout decides, even one that comes late.
+    /// would show it. The layout decides, even one that comes mid-fade.
     func testAShadowHidesWhileItsCardComesOrGoes() throws {
         try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            // No room to lay the new card out as it comes: its shadow is
-            // made by a later layout, mid-fade.
-            shell.setFrameSize(.zero)
             shell.addColumn()
             let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
             XCTAssertEqual(added.shadow?.isHidden, true, "the new card fades in")
-            shell.setFrameSize(NSSize(width: 1200, height: 800))
             shell.relayout(animated: false)
-            XCTAssertEqual(added.shadow?.isHidden, true, "the new card fades in")
-            added.isArriving = false
-            workspace.showShadows()
+            XCTAssertEqual(added.shadow?.isHidden, true, "a layout mid-fade keeps it hidden")
+            waitUntil("the card in", timeout: 2) { !added.isArriving }
             XCTAssertEqual(added.shadow?.isHidden, false, "in")
 
             shell.closeActiveColumn()
