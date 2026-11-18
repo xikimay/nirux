@@ -442,11 +442,13 @@ the text stays flat and sharp.
   its air.
 - **Corners:** `Theme.Radius.column`, 10 pt circular: their clip stays
   within the terminals' 10 pt padding (#598), so it cuts no cell. A
-  terminal's column doesn't clip, which would cost an offscreen pass each
-  frame the terminal draws: its header, the terminal's own layer and its
-  overlays round their corners, which the compositor does as it draws them.
-  Other columns clip their content. A translucent terminal's frost takes a
-  mask of the shape, since blending behind the window ignores any clip.
+  terminal's column doesn't clip: its header, the terminal's own layer and
+  its overlays round their corners, and the terminal's layer is marked
+  opaque while the terminal is, so that the compositor skips what lies
+  under the card at each frame (the energy bench: rounded columns cost
+  WindowServer's GPU twice main's until then). Other columns clip their
+  content. A translucent terminal's frost takes a mask of the shape, since
+  blending behind the window ignores any clip.
 - **Widths:** a width fraction spans the viewport less its edges' air plus
   one gap, so two halves fill the viewport whatever the number of columns.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused

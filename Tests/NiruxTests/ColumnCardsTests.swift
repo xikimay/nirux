@@ -60,6 +60,7 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(column.view.layer?.masksToBounds, false)
         let terminal = try XCTUnwrap(column.terminalView?.layer)
         XCTAssertTrue(terminal.masksToBounds)
+        XCTAssertTrue(terminal.isOpaque, "the compositor may skip what lies under it")
         XCTAssertEqual(terminal.cornerRadius, Theme.Radius.column)
         XCTAssertEqual(terminal.maskedCorners, corners(terminal, top: false))
         let header = try XCTUnwrap(column.header?.layer)
@@ -183,8 +184,10 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertTrue(cutOut.contains(CGPoint(x: card.midX, y: card.minY - 2), using: .evenOdd), "the air below")
         XCTAssertTrue(cutOut.contains(CGPoint(x: card.minX + 1, y: card.minY + 1), using: .evenOdd), "the air in the corner")
 
+        XCTAssertEqual(column.terminalView?.layer?.isOpaque, false, "the desktop shows through it")
         column.showTerminalOpacity(1, onScreen: true)
         XCTAssertNil(shadow.cutOutPath, "opaque again: unmasked")
+        XCTAssertEqual(column.terminalView?.layer?.isOpaque, true)
         column.showTerminalOpacity(0.8, onScreen: true)
         XCTAssertNotNil(shadow.cutOutPath)
     }

@@ -1031,8 +1031,8 @@ extension WorkspaceState {
             shadow(for: col).frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
             // Its content clipped to its corners, except a terminal's: its
-            // layers round their own, which costs no offscreen pass while it
-            // draws. Its border (the focus) is the shell's.
+            // layers round their own, so that the opaque terminal is drawn
+            // straight onto the window. Its border (the focus) is the shell's.
             col.view.layer?.masksToBounds = col.terminalView == nil
             col.view.layer?.cornerRadius = Theme.Radius.column
 
