@@ -178,6 +178,48 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// The focused card lies a level higher, its shadow still within the
+    /// air; the others rest.
+    func testTheFocusedCardLiesALevelHigher() throws {
+        let higher = Theme.Elevation.Level.focusedColumn, resting = Theme.Elevation.Level.column
+        XCTAssertLessThanOrEqual(higher.reach, inset)
+        XCTAssertGreaterThan(higher.opacity, resting.opacity)
+        XCTAssertGreaterThan(higher.drop, resting.drop)
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn()
+            workspace.focusedIndex = 1
+            shell.relayout(animated: false)
+            XCTAssertEqual(workspace.columns.map { $0.shadow?.level }, [resting, higher])
+        }
+    }
+
+    /// The lift follows the focus: it passes over a moment while the
+    /// interface may move, at once when it may not.
+    func testTheLiftFollowsTheFocusAndStillnessWins() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            workspace.addColumn()
+            workspace.focusedIndex = 1
+            shell.relayout(animated: false)
+            let shadows = try workspace.columns.map { try XCTUnwrap($0.shadow) }
+
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            XCTAssertEqual(shadows.map(\.level), [.focusedColumn, .column])
+            XCTAssertEqual(shadows.map(\.isLifting), [true, true], "one rises, the other settles")
+
+            shell.sideEffects.reducesMotion = { true }
+            workspace.focusedIndex = 1
+            shell.relayout(animated: false)
+            XCTAssertEqual(shadows.map(\.level), [.column, .focusedColumn])
+            XCTAssertEqual(shadows.map(\.isLifting), [false, false], "Reduce motion: at once")
+        }
+    }
+
     private func withShell(_ body: (NiruxShellView) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-cards-\(UUID().uuidString)").path
         let stateDirectory = root + "/state"

@@ -159,6 +159,9 @@ enum Theme {
             /// A column, a card resting on the window: short enough to stay
             /// within the air around it (`WorkspaceState.columnInset`).
             static let column = Level(opacity: 0.35, radius: 3, drop: 2)
+            /// The focused column, a level higher: a darker, longer drop,
+            /// still within the air.
+            static let focusedColumn = Level(opacity: 0.55, radius: 2, drop: 4)
         }
 
         /// Gives `layer` the shadow of `level` along `path`, the shape in

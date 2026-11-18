@@ -683,10 +683,11 @@ extension NiruxShellView {
         for workspace in workspaces { applyCardEdges(workspace) }
     }
 
-    /// Each card's edge, the focused column of the workspace on screen in
-    /// the accent, a hairline on the others, and the header icon. The
-    /// agents' lights lie over the columns, in views of their own
-    /// (NiruxShellView+AgentLights).
+    /// Each card's edge and height: the focused column of the workspace on
+    /// screen in the accent and a level higher, its shadow passing there
+    /// while the interface may move; a hairline on the others; and the
+    /// header icon. The agents' lights lie over the columns, in views of
+    /// their own (NiruxShellView+AgentLights).
     func applyCardEdges(_ workspace: WorkspaceState) {
         let isOnScreen = workspace === activeWorkspace
         let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
@@ -695,6 +696,7 @@ extension NiruxShellView {
             col.setHeaderFocused(isFocus)
             col.view.layer?.borderWidth = isFocus ? EdgeGlowView.focusRingWidth : 1
             col.view.layer?.borderColor = isFocus ? accent : Theme.Color.line.cgColor
+            col.shadow?.show(isFocus ? .focusedColumn : .column, animated: agentLightsMayMove)
         }
     }
 }
