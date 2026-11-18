@@ -27,12 +27,13 @@ final class EdgeGlowView: NSView {
     /// The focused column's light starts inside its focus ring, which
     /// stays as it is.
     static let focusRingWidth: CGFloat = 2
-    /// A column's ring: as wide as the terminal's padding
+    /// A column's ring: within the terminal's padding
     /// (`TerminalConfigBuilder.padding`), so it covers no text.
     static let ringWidth: CGFloat = 2
-    /// How far a column's glow reaches over its cells, and how strong it
-    /// is at most there: text under it keeps its contrast.
-    static let columnGlowDepth: CGFloat = 12
+    /// How far a column's glow reaches (over the terminal's padding, then
+    /// about one cell), and how strong it is at most: text under it keeps
+    /// its contrast.
+    static let columnGlowDepth = CGFloat(TerminalConfigBuilder.padding) + 10
     static let columnGlowAlpha: CGFloat = 0.08
     static let cornerRadius: CGFloat = 6
 
@@ -170,8 +171,8 @@ final class EdgeGlowView: NSView {
                 if edge == .around {
                     glow.layer.colors = [color.withAlphaComponent(glowAlpha).cgColor, color.withAlphaComponent(0).cgColor]
                 } else {
-                    // Full on the 2 pt of padding, faint over the first
-                    // cell, then nothing.
+                    // Full at the edge, fading over the padding, gone
+                    // before the text.
                     glow.layer.colors = [glowAlpha, glowAlpha, 0.1, 0].map { color.withAlphaComponent($0).cgColor }
                     glow.layer.locations = [0, 0.25, 0.4, 1]
                 }

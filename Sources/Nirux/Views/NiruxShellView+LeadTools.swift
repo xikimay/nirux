@@ -507,12 +507,23 @@ extension NiruxShellView {
         guard case .accepted = MissionStore.shared.process(instruction, enabled: Self.currentMissionHandoffsEnabled()) else {
             return answer("Nirux couldn’t record the message: try again.", true)
         }
-        if let held = missionEnd(mission, parent: false)?.column.flatMap({ conversation(of: $0, snapshot: ProcessSnapshot()) }) {
-            MissionStore.shared.noteConversation(held, ofInstruction: instruction.id)
-        }
+        noteConversation(of: mission, forInstruction: instruction.id)
         typeMissionMessages()
-        answer("Nirux types it into “\(workspace.title)”’s prompt at its next free prompt, a day at most; past an hour, "
-            + "a line tells you what holds it.", false)
+        let typed = MissionStore.shared.missions.lazy.flatMap(\.events).first { $0.id == instruction.id }?.childConsumedAt != nil
+        answer(typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
+            : missionWaits.typing.contains(instruction.id)
+            ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."
+            : "Nirux types it into “\(workspace.title)”’s prompt at its next free prompt, a day at most; past an hour, "
+                + "a line tells you what holds it.", false)
+    }
+
+    /// Records the conversation `mission`'s child holds, for its instruction
+    /// `id` (`MissionEvent.childSessionID`): from the agent the status
+    /// refresh last saw in front, without reading the process table.
+    func noteConversation(of mission: Mission, forInstruction id: String) {
+        guard let column = missionEnd(mission, parent: false)?.column,
+              let held = conversation(of: column, foreground: column.lastForegroundAgent) else { return }
+        MissionStore.shared.noteConversation(held, ofInstruction: id)
     }
 
     private func leadReply(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {

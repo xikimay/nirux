@@ -515,10 +515,13 @@ extension NiruxShellView {
         guard let transcript = column.claudeTranscript, transcript.process == foreground.instance else {
             return answer("Nirux doesn't follow “\(title)”'s conversation yet, so it couldn't tell whether Esc stopped it: ask the user.", true)
         }
-        let sentAt = Date()
+        let (sentAt, offset) = (Date(), TranscriptLastMessage.size(of: transcript.follower.path))
         guard let promptAt = pty.sendInterrupt() else { return answer("“\(title)”'s agent took no prompt: there is no turn to interrupt.", true) }
         confirmInterrupt(
-            Interrupt(column: column, transcript: transcript.follower.path, sentAt: sentAt, promptAt: promptAt, taskID: task.id, title: title),
+            Interrupt(
+                column: column, pty: pty, transcript: transcript.follower.path, offset: offset, sentAt: sentAt, promptAt: promptAt,
+                taskID: task.id, title: title
+            ),
             check: 1, answer: answer
         )
     }
@@ -526,7 +529,11 @@ extension NiruxShellView {
     /// An Esc Nirux sent, waiting for Claude's transcript to show it.
     private struct Interrupt {
         weak var column: ColumnState?
+        /// The terminal the Esc went into: the column may restart its own.
+        weak var pty: PtySession?
         let transcript: String
+        /// Its size when the Esc went.
+        let offset: UInt64
         let sentAt: Date
         /// The prompt whose turn it stops.
         let promptAt: TimeInterval
@@ -545,13 +552,17 @@ extension NiruxShellView {
     /// Past `interruptChecksBeforeAnswer`, the Lead has its answer: a late
     /// interrupt still ends the turn, without a second one.
     private func confirmInterrupt(_ interrupt: Interrupt, check: Int, answer: @escaping LeadAnswer) {
-        let (transcript, sentAt, title) = (interrupt.transcript, interrupt.sentAt, interrupt.title)
+        let (transcript, offset, sentAt, title) = (interrupt.transcript, interrupt.offset, interrupt.sentAt, interrupt.title)
         // Past it, the Lead had its answer.
         let speaks = check <= Self.interruptChecksBeforeAnswer
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            Self.offMain({ TranscriptLastMessage.showsInterrupt(path: transcript, since: sentAt) }) { shown in
-                guard let self, let pty = interrupt.column?.pty else {
+            Self.offMain({ TranscriptLastMessage.showsInterrupt(path: transcript, since: sentAt, after: offset) }) { shown in
+                guard let self, let column = interrupt.column else {
                     if speaks { answer("“\(title)” closed meanwhile.", true) }
+                    return
+                }
+                guard let pty = interrupt.pty, column.pty === pty else {
+                    if speaks { answer("“\(title)”'s terminal restarted meanwhile: the Esc went to the one before. Call list_tasks.", true) }
                     return
                 }
                 guard shown else {

@@ -556,12 +556,19 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.hook(.stop)
             let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
             XCTAssertGreaterThan(message.utf8.count, PtySession.inputQueueBytes * 3)
+            let typed = {
+                MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID }
+                    .map { $0.childConsumedAt != nil }
+            }
             let start = Date()
             let told = try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead)
             XCTAssertFalse(told.isError, told.text)
             XCTAssertLessThan(Date().timeIntervalSince(start), 2, "the app isn't held while the agent reads")
+            XCTAssertTrue(told.text.contains("is typing it"), told.text)
+            XCTAssertEqual(typed(), [false], "typed only once its Enter went in")
             harness.waitUntil("all of it, then Enter") { task.agent.input.contains("\u{1B}[201~") && task.agent.input.hasSuffix("\n") }
             XCTAssertTrue(task.agent.input.contains("Line 70: read the file and add up the totals."))
+            harness.waitUntil("then typed") { typed() == [true] }
             XCTAssertTrue(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": String(repeating: "x", count: 4_001)], lead: lead).isError)
 
             // A background subagent at work meanwhile: the prompt is still
@@ -585,14 +592,16 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A long tell whose agent leaves, or whose task closes, before it is
-    /// all in gets no Enter, and waits to be typed again.
-    func testALongTellCutShortWaitsAgain() throws {
+    /// A long tell cut short gets no Enter and is never typed again: its
+    /// agent leaving once some of it went in, its sender hears that only its
+    /// start reached the prompt; its task closing, that it closed first.
+    func testALongTellCutShortIsNeverTypedAgain() throws {
         try UIFlowHarness.run { harness in
             let lead = try harness.makeLead()
             let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
-            let typed = { (task: String) in
-                MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task }.map { $0.childConsumedAt != nil }
+            let state = { (task: String) in
+                MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task }
+                    .map { $0.childConsumedAt != nil ? "typed" : $0.expiredAt != nil ? "given up" : "waiting" }
             }
             for cut in ["leaves", "closes"] {
                 let task = try reportingTask("Reader \(cut)", lead: lead, harness: harness, readsSlowly: true)
@@ -602,15 +611,19 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 task.hook(.stop)
                 XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader \(cut)", "message": message], lead: lead).isError)
                 harness.waitUntil("it goes in") { task.agent.input.contains("Line 1:") }
-                XCTAssertEqual(typed(agentUUID), [true])
+                XCTAssertEqual(state(agentUUID), ["waiting"])
                 if cut == "leaves" {
                     kill(task.claude.pid, SIGKILL)
                 } else {
                     let index = try XCTUnwrap(harness.shell.workspaces.firstIndex { $0.columns.contains { $0 === task.column } })
                     harness.shell.closeWorkspace(at: index, refocusing: false)
                 }
-                harness.waitUntil("it waits again (\(cut))", timeout: 60) { typed(agentUUID) == [false] }
+                harness.waitUntil("its typing over (\(cut))", timeout: 60) { harness.shell.missionWaits.typing.isEmpty }
+                harness.shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
+                XCTAssertEqual(state(agentUUID), ["given up"], cut)
                 XCTAssertFalse(task.agent.input.hasSuffix("\n"), "no Enter (\(cut))")
+                let told = cut == "leaves" ? "“Reader leaves” was cut off: only its start" : "was never typed: its task closed first."
+                XCTAssertTrue(harness.shell.pendingLeadNotices.contains { $0.text.contains(told) }, harness.shell.pendingLeadNotices.map(\.text).joined())
             }
         }
     }
@@ -783,6 +796,8 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             }
             let live = ProcessSnapshot()
             confirm("first", by: try XCTUnwrap(pty.foregroundProcess(snapshot: live)), in: live)
+            // What the status refresh notes of the agent in front.
+            task.column.trackForegroundAgent(pty.foregroundProcess(snapshot: live), snapshot: live, now: sentAt)
             XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Busy", "message": "Review this."], lead: lead).isError)
             let instructions = { MissionStore.shared.missions.flatMap(\.events).filter { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID } }
             XCTAssertEqual(instructions().map(\.childSessionID), ["first"], "the conversation it is for")
@@ -806,11 +821,18 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertEqual(harness.shell.runningSince(of: first, in: task.column, snapshot: resumed.snapshot, now: sentAt + 20), sentAt + 20)
             sweep(resumed.snapshot)
             XCTAssertTrue(notices().isEmpty, "resuming it, the same recipient: " + notices().joined())
+            // One whose conversation nobody confirmed counts as for the same.
+            guard case .accepted(let unknown?) = MissionStore.shared.process(MissionEvent(
+                id: UUID().uuidString, missionID: mission.id, childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
+                parentWorkspaceID: mission.parentWorkspaceID, parentAgentUUID: mission.parentAgentUUID,
+                kind: .instruction, message: "Recorded before its conversation was known.", timestamp: sentAt
+            ), enabled: true) else { return XCTFail("not recorded") }
             let other = inFront(99_983, startedAt: sentAt + 30)
             confirm("second", by: other.claude, in: other.snapshot)
             XCTAssertEqual(harness.shell.runningSince(of: first, in: task.column, snapshot: other.snapshot, now: sentAt + 40), first.timestamp)
+            XCTAssertEqual(harness.shell.runningSince(of: unknown.event, in: task.column, snapshot: other.snapshot, now: sentAt + 40), sentAt + 40)
             sweep(other.snapshot)
-            XCTAssertEqual(notices().count, 2)
+            XCTAssertEqual(notices().count, 2, "the two sent to the first conversation, not the third")
             XCTAssertTrue(notices().allSatisfy { $0.contains("won't be typed: its Claude Code restarted on another conversation") }, notices().joined())
         }
     }

@@ -523,10 +523,7 @@ extension NiruxShellView {
             )
         case .instruction:
             // A `tell` from the CLI: the conversation it is for.
-            if event.childSessionID == nil, let held = missionEnd(mission, parent: false)?.column
-                .flatMap({ conversation(of: $0, snapshot: ProcessSnapshot()) }) {
-                MissionStore.shared.noteConversation(held, ofInstruction: event.id)
-            }
+            if event.childSessionID == nil { noteConversation(of: mission, forInstruction: event.id) }
         case .question:
             break
         }

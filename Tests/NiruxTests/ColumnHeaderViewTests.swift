@@ -320,6 +320,47 @@ final class ColumnHeaderViewTests: XCTestCase {
         XCTAssertEqual(column.titleText, "claude (not resumed) · /tmp")
     }
 
+    /// A terminal's folder is its title's tooltip, not on the bar; it holds
+    /// while the title changes, and a title cut short comes first in it.
+    func testATerminalsFolderIsInItsTitlesToolTip() throws {
+        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
+        let column = ColumnState(cwd: "/tmp", deferredAgent: launch)
+        column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
+        column.layoutWithHeader(width: 600, height: 400)
+        let header = try XCTUnwrap(column.header)
+        XCTAssertEqual(header.context, "", "nothing on the bar")
+        XCTAssertEqual(header.titleLabel.toolTip, "/tmp")
+        header.title = "⠐ Fix login"
+        header.layoutNow()
+        XCTAssertEqual(header.titleLabel.toolTip, "/tmp", "an animated title doesn't touch it")
+
+        header.title = "✳ Refactor the login redirect so that it keeps the query string"
+        header.frame.size.width = 200
+        header.layoutNow()
+        XCTAssertEqual(header.titleLabel.toolTip, "\(header.title)\n/tmp", "cut short, the title stays readable")
+    }
+
+    /// A tooltip that holds the title already (a file's path) stays as is
+    /// when the title is cut short.
+    func testATooltipHoldingTheTitleStaysAsIs() {
+        let header = ColumnHeaderView(frame: NSRect(x: 0, y: 0, width: 160, height: ColumnHeaderView.height))
+        header.title = "SidebarWorkspaceCardRenderer.swift"
+        header.titleToolTip = "/repo/Sources/Nirux/Views/SidebarWorkspaceCardRenderer.swift"
+        header.layoutNow()
+        XCTAssertEqual(header.titleLabel.toolTip, "/repo/Sources/Nirux/Views/SidebarWorkspaceCardRenderer.swift")
+    }
+
+    /// Global Search names a terminal by its title and its folder's last
+    /// two parts, as the bar used to.
+    func testATerminalsTitleTextKeepsAShortFolder() throws {
+        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: "Fix login", lastStatus: nil)
+        let column = ColumnState(cwd: "/tmp/acme/worktrees/feat-x", deferredAgent: launch)
+        column.updateHeaderTitle(snapshot: ProcessSnapshot(entries: []))
+        XCTAssertEqual(column.folder, "/tmp/acme/worktrees/feat-x")
+        XCTAssertEqual(column.titleText, "claude (not resumed) · /.../worktrees/feat-x")
+    }
+
     /// Every column type's header is on top, and its ⋯ menu ends with the
     /// column's items.
     func testEveryColumnTypePutsItsHeaderOnTop() throws {

@@ -93,4 +93,23 @@ final class TranscriptLastMessageTests: XCTestCase {
         XCTAssertFalse(shown.contains("MIIE") || shown.contains("abcd1234"), shown)
         XCTAssertEqual(TranscriptLastMessage.withholdingSecrets("Plain.").withheld, 0)
     }
+
+    /// The interrupt is read only from what was written after the Esc.
+    func testTheInterruptIsReadPastTheEsc() throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-interrupt-\(UUID().uuidString).jsonl").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let sentAt = Date()
+        let later = Date(timeInterval: 1, since: sentAt).formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+        let marker = #"{"type":"user","timestamp":"\#(later)","message":{"role":"user","content":"[Request interrupted by user]"}}"#
+        // Stamped after the Esc, yet written before it: not this Esc's.
+        try (marker + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        let offset = TranscriptLastMessage.size(of: path)
+        XCTAssertFalse(TranscriptLastMessage.showsInterrupt(path: path, since: sentAt, after: offset))
+        XCTAssertTrue(TranscriptLastMessage.showsInterrupt(path: path, since: sentAt, after: 0))
+        let handle = try XCTUnwrap(FileHandle(forWritingAtPath: path))
+        handle.seekToEndOfFile()
+        handle.write(Data((marker + "\n").utf8))
+        try handle.close()
+        XCTAssertTrue(TranscriptLastMessage.showsInterrupt(path: path, since: sentAt, after: offset))
+    }
 }

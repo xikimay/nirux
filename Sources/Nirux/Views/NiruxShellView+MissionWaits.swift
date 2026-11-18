@@ -75,6 +75,9 @@ struct MissionWaitState {
     /// When Nirux last typed into each column: until that prompt goes in, its
     /// text reads as a draft.
     var typedAt: [UUID: TimeInterval] = [:]
+    /// Mission messages Nirux is typing (a long paste, then Enter), or typed
+    /// without being able to record it: none is typed or given up twice.
+    var typing: Set<String> = []
 
     /// Nirux typed into `column`'s prompt: it says nothing of it until the
     /// next check.
@@ -123,7 +126,7 @@ extension NiruxShellView {
         var givenUp: [(delivery: MissionStore.AcceptedEvent, text: String)] = []
         // Read once, and only for a notice that names what holds a message.
         lazy var handoffsEnabled = missionWaits.handoffsEnabled?.enabled ?? Self.currentMissionHandoffsEnabled()
-        for delivery in store.untypedInstructions() {
+        for delivery in store.untypedInstructions() where !missionWaits.typing.contains(delivery.event.id) {
             let (mission, event) = (delivery.mission, delivery.event)
             let child = missionEnd(mission, parent: false)
             let sent = ProjectBoard.clockTime(Date(timeIntervalSince1970: event.timestamp), now: Date(timeIntervalSince1970: now))
@@ -143,13 +146,11 @@ extension NiruxShellView {
                     : !mission.isCarried(handoffsEnabled: handoffsEnabled) ? "Mission handoffs are off"
                     : SidebarWaitingMessages.why(refusal, untypable: self.missionWaits.tries[event.id, default: 0] >= Self.missionTypingTries).short
             }
-            // Restarted on another conversation: one not confirmed yet may
-            // still resume this one.
-            let other = event.childSessionID == nil || conversation(of: column, snapshot: snapshot) != nil
+            // Restarted, `runningSince` says, on another conversation once it confirmed one.
+            let other = conversation(of: column, foreground: column.pty?.foregroundProcess(snapshot: snapshot)) != nil
             if refusal == .restarted, other, mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue {
-                givenUp.append((delivery, "\(yours) won't be typed: its Claude Code restarted "
-                    + (event.childSessionID == nil ? "since" : "on another conversation")
-                    + ", and Nirux types a message only into the conversation it was sent to. Send it again if it still applies."))
+                givenUp.append((delivery, "\(yours) won't be typed: its Claude Code restarted on another conversation, and Nirux "
+                    + "types a message only into the conversation it was sent to. Send it again if it still applies."))
             } else if now >= event.instructionDeadline {
                 // One an older build recorded had an hour.
                 let span = event.typableUntil == nil ? "an hour" : "a day"

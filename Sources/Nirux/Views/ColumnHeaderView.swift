@@ -95,8 +95,9 @@ final class ColumnHeaderView: NSView {
             needsLayout = true
         }
     }
-    /// The title's tooltip; when nil, the title itself while it is cut
-    /// short.
+    /// The title's tooltip, after the title when the title is cut short and
+    /// the tooltip doesn't hold it already; when nil, the title itself
+    /// while it is cut short.
     var titleToolTip: String? {
         didSet { applyTitleToolTip() }
     }
@@ -237,7 +238,10 @@ final class ColumnHeaderView: NSView {
     /// a second while its agent works, and a new tooltip closes the one
     /// shown.
     private func applyTitleToolTip() {
-        let toolTip = titleToolTip ?? (isTitleCutShort ? title : nil)
+        let cutShort = isTitleCutShort ? title : nil
+        let toolTip = titleToolTip.map { tip in
+            cutShort.map { $0.isEmpty || tip.contains($0) ? tip : "\($0)\n\(tip)" } ?? tip
+        } ?? cutShort
         if titleLabel.toolTip != toolTip { titleLabel.toolTip = toolTip }
     }
 

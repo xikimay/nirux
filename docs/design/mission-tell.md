@@ -53,10 +53,13 @@ child's prompt.
   (`heldNoticeAt`). Nirux gives it up, telling the sender (`expiredAt`), once
   its day ran out, its task closed, or a `claude` started after the message
   confirmed another conversation. The message is for the conversation its
-  child held when Nirux recorded it (`MissionEvent.childSessionID`): a
-  restart resuming it, as Nirux's relaunch does, still gets it, once that
-  `claude` took a prompt (a resumed one may show a dialog its hooks don't
-  tell); one that hasn't said yet which it holds keeps it waiting. Until
+  child held when Nirux recorded it (`MissionEvent.childSessionID`, read
+  from the agent the status refresh last saw in front): a restart resuming
+  it, as Nirux's relaunch does, still gets it, once that `claude` took a
+  prompt (a resumed one may show a dialog its hooks don't tell); one that
+  hasn't said yet which it holds keeps it waiting. One recorded with no
+  conversation (an older build's, or before any was confirmed) counts as
+  for the same. Until
   2026-11-17 an untyped message was dropped silently after an hour: a review
   the Lead sent at the start of a task's 75-minute turn was lost that way.
   The missions log now records a turn at work holding a message too, once per
@@ -103,18 +106,19 @@ Review's send).
   `pasteInBackground` (off the main thread, as the agent reads it, 30 s at
   most), Enter once it is all in, still all the prompt holds: no key since,
   no dialog keys would answer, the same agent in front, its task open. A
-  background subagent at work doesn't stop it (the main prompt is free).
-  - Its agent left, or its task closed, before it was all in: it is marked
-    untyped again and waits for the next free prompt, under the same rules.
-  - All of it in the prompt, unsent (someone typed, a dialog opened): the
+  background subagent at work doesn't stop it (the main prompt is free), and
+  a wheel scroll's arrows aren't passed on meanwhile (inside the paste they
+  would be its text).
+  - It counts as typed only once its Enter went in: until then `tell`
+    answers that Nirux is typing it, and the CLI keeps waiting.
+  - None of it reached the terminal (its agent left first): it waits for the
+    next free prompt, under the same rules.
+  - Some of it did: never typed again, a copy would follow the fragment. A
+    tell is given up (`expiredAt`), an answer or a question counts as typed.
+    All of it in the prompt, unsent (someone typed, a dialog opened): the
     user gets a toast to press Enter there, and a task's sender a
-    `[Nirux Mission]` line; sending it again would only add a copy after
-    the draft.
-  - Cut off (the agent stopped reading for 30 s): only its start is in the
-    prompt; the user gets a toast to clear it, and a task's sender a line to
-    send it again.
-  - A message whose typing had reopened a completed Mission completes it
-    again when it is marked untyped.
+    `[Nirux Mission]` line. Only its start (the agent stopped reading, or
+    left): a toast to clear it, and the sender may send it again.
 - Limits count characters, and scalars too: what Nirux types stops at
   `TypedPromptSanitizer.maxCharacters` scalars.
 - A file the message points to was rejected: one in the task's worktree shows

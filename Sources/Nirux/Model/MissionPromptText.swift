@@ -7,6 +7,12 @@ import Foundation
 enum MissionPromptText {
     static let prefix = "[Nirux Mission]"
 
+    /// What Nirux types around an answer at most, in scalars: its prefix and
+    /// the parent's title, cut at `maxNameScalars`. A tell goes in raw, and
+    /// questions and results are short.
+    static let maxNameScalars = 200
+    static let answerHeaderScalars = "\(prefix) Answer from \"\": ".unicodeScalars.count + maxNameScalars
+
     /// `childTitle` and `parentTitle` are the workspaces' titles now; nil
     /// when the workspace is gone.
     static func text(
@@ -33,7 +39,9 @@ enum MissionPromptText {
                 + "Reply with: \"$NIRUX_CLI_PATH\" --mission reply --event \(event.id) --message \"<answer>\""
                 + " (if you can't tell, don't guess: ask the user)"
         case .response:
-            let from = event.answeredByUser == true ? "the user" : parentTitle.map { "\"\(quoted($0))\"" } ?? "the parent agent"
+            let from = event.answeredByUser == true ? "the user"
+                : parentTitle.map { "\"\(String(String.UnicodeScalarView(quoted($0).unicodeScalars.prefix(maxNameScalars))))\"" }
+                ?? "the parent agent"
             return "\(prefix) Answer from \(from): \(event.message)"
         case .completed:
             return "\(prefix) \(child) completed: \(quoted(event.message))"

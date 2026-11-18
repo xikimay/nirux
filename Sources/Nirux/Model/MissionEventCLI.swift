@@ -25,11 +25,25 @@ enum MissionEventCLI {
         [.instruction, .response].contains(kind) ? maxInstructionLength : maxMessageLength
     }
 
-    /// Whether `message`, trimmed, fits `limit` characters, and what Nirux
-    /// types of it whole (`TypedPromptSanitizer.maxCharacters` scalars, a
-    /// header aside): emoji and combining marks take several scalars.
+    /// The most of a message Nirux types whole, in scalars: what it types
+    /// holds `TypedPromptSanitizer.maxCharacters`, an answer's header
+    /// included. Emoji and combining marks take several.
+    static let maxScalars = TypedPromptSanitizer.maxCharacters - MissionPromptText.answerHeaderScalars
+
+    /// Why `message`, trimmed, can't be sent within `limit` characters; nil
+    /// when it can.
+    static func problem(with message: String, limit: Int) -> String? {
+        guard !message.isEmpty, message.count <= limit else { return "message must hold 1 to \(limit) characters." }
+        let scalars = message.unicodeScalars.count
+        guard scalars <= maxScalars else {
+            return "message holds \(scalars) Unicode scalars, past the \(maxScalars) Nirux types whole "
+                + "(an emoji or an accent can take several): shorten it."
+        }
+        return nil
+    }
+
     static func fits(_ message: String, limit: Int) -> Bool {
-        !message.isEmpty && message.count <= limit && message.unicodeScalars.count <= TypedPromptSanitizer.maxCharacters - 500
+        problem(with: message, limit: limit) == nil
     }
     /// Agent shell tools stop foreground commands after a few minutes (two
     /// by default in Claude Code), so a wait never lasts longer than this and
@@ -130,9 +144,10 @@ enum MissionEventCLI {
     ) -> Int32 {
         guard kind == .question || kind == .completed else { return usage("completed --message <text>") }
         guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
-        guard let options = parseOptions(arguments, allowed: ["--message"]),
+        let options = parseOptions(arguments, allowed: ["--message"])
+        guard let options,
               let message = validMessage(options["--message"])
-        else { return usage("\(kind.rawValue) --message <1-\(maxMessageLength) characters>") }
+        else { return usage("\(kind.rawValue) \(messageUsage(options?["--message"]))") }
 
         // An unreadable ledger still queues the event, as before: Nirux
         // validates it again when draining the queue.
@@ -170,11 +185,12 @@ enum MissionEventCLI {
         output: (String) -> Void = writeStandardOutput
     ) -> Int32 {
         guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
-        guard let options = parseOptions(arguments, allowed: ["--message", "--timeout"]),
+        let options = parseOptions(arguments, allowed: ["--message", "--timeout"])
+        guard let options,
               let message = validMessage(options["--message"]),
               let timeout = validTimeout(options["--timeout"])
         else {
-            return usage("ask --message <1-\(maxMessageLength) characters> [--timeout <seconds>]")
+            return usage("ask \(messageUsage(options?["--message"])) [--timeout <seconds>]")
         }
 
         var ledger = MissionLedgerReader(url: missionsURL)
@@ -434,12 +450,13 @@ enum MissionEventCLI {
         pollInterval: TimeInterval = 0.05
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
-        guard let options = parseOptions(arguments, allowed: ["--event", "--message"]),
+        let options = parseOptions(arguments, allowed: ["--event", "--message"])
+        guard let options,
               let eventID = options["--event"],
               UUID(uuidString: eventID) != nil,
               let message = validMessage(options["--message"], limit: maxInstructionLength)
         else {
-            return usage("reply --event <question-event-id> --message <1-\(maxInstructionLength) characters>")
+            return usage("reply --event <question-event-id> \(messageUsage(options?["--message"], limit: maxInstructionLength))")
         }
         var ledger = MissionLedgerReader(url: missionsURL)
         guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
@@ -553,6 +570,13 @@ enum MissionEventCLI {
             index += 2
         }
         return result
+    }
+
+    /// A usage line's `--message`, saying why `raw` failed when its scalars did.
+    private static func messageUsage(_ raw: String?, limit: Int = maxMessageLength) -> String {
+        let message = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let failed = !message.isEmpty && message.count <= limit ? problem(with: message, limit: limit) : nil
+        return "--message <1-\(limit) characters>" + (failed.map { " (\($0))" } ?? "")
     }
 
     private static func validMessage(_ raw: String?, limit: Int = maxMessageLength) -> String? {
@@ -671,13 +695,14 @@ extension MissionEventCLI {
         pollInterval: TimeInterval = 0.2
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
-        guard let options = parseOptions(arguments, allowed: ["--branch", "--message", "--timeout"]),
+        let options = parseOptions(arguments, allowed: ["--branch", "--message", "--timeout"])
+        guard let options,
               let branch = options["--branch"],
               let message = validMessage(options["--message"], limit: maxInstructionLength),
               let timeout = validTimeout(options["--timeout"])
         else {
             return usage(
-                "tell --branch <child-branch> --message <1-\(maxInstructionLength) characters> [--timeout <seconds>]"
+                "tell --branch <child-branch> \(messageUsage(options?["--message"], limit: maxInstructionLength)) [--timeout <seconds>]"
             )
         }
         var ledger = MissionLedgerReader(url: missionsURL)
