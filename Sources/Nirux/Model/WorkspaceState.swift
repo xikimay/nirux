@@ -1103,7 +1103,9 @@ extension WorkspaceState {
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
         // 3. Camera: a strip narrower than the viewport lies in its middle;
-        // a wider one scrolls to keep the focused card in view, with its air.
+        // a wider one brings the focused card to the middle, stopping at the
+        // strip's ends. A card wider than the viewport shows from its left
+        // edge, with its air.
         let cameraX: CGFloat
         if let camera {
             cameraX = camera
@@ -1112,15 +1114,9 @@ extension WorkspaceState {
         } else if fitAll {
             cameraX = 0
         } else {
-            let left = widths[..<focusedIndex].reduce(0) { $0 + $1 + gap }
-            let right = left + widths[focusedIndex] + inset * 2
-
-            var camera = lastCameraX
-            if left < camera {
-                camera = left
-            } else if right > camera + viewportWidth {
-                camera = right - viewportWidth
-            }
+            let left = widths[..<focusedIndex].reduce(inset) { $0 + $1 + gap }
+            let width = widths[focusedIndex]
+            let camera = width + inset * 2 > viewportWidth ? left - inset : floor(left + width / 2 - viewportWidth / 2)
             cameraX = max(0, min(camera, totalWidth - viewportWidth))
         }
 

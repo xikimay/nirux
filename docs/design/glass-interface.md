@@ -457,6 +457,11 @@ the text stays flat and sharp.
   sides; past filling the viewport, or on a strip that started wider, the
   camera holds where the drag found it and goes where the strip wants it
   once let go. With Reduce motion the card is simply there.
+- **The active card in the middle** (window layout study, 2026-11-19): once
+  the cards overflow the viewport, the camera brings the focused one to its
+  middle, its neighbours cut alike on both sides; it stops at the strip's
+  ends, where the first or last card keeps its air against the edge. A
+  card wider than the viewport shows from its left edge.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within

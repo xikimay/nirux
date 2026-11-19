@@ -180,6 +180,21 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[0].view.frame.minX, inset, "the left edge's air in view")
     }
 
+    /// Past the viewport, the camera brings the focused card to its middle;
+    /// one wider than the viewport shows from its left edge.
+    func testTheCameraBringsTheFocusedCardToTheMiddle() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1)
+
+        workspace.columns[2].widthFraction = 1.5
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[2].view.frame.minX + strip.frame.minX, inset, accuracy: 1)
+    }
+
     /// Each column's shadow follows it, under every column of the strip, so
     /// that it falls only on the air; it goes with its column.
     func testEachColumnsShadowLiesUnderEveryColumn() throws {
