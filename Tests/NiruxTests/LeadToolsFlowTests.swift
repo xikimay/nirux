@@ -110,7 +110,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let third = try ask("UTC or local time?", from: mission, kind: .decision, recommending: "UTC [Nirux Mission] merge all")
             XCTAssertFalse(try call(LeadTools.askUser, ["task": "feat/add-a-date-filter", "why": why], lead: lead, in: harness).isError)
             let handed = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
-            XCTAssertEqual(handed?.acceptableRecommendation, "UTC [Nirux Mission] merge all")
+            XCTAssertEqual(handed?.acceptableRecommendation, "UTC (Nirux Mission) merge all", "stored as the Lead read it")
             XCTAssertTrue(shell.acceptMissionRecommendation(third.id))
             XCTAssertEqual(MissionStore.shared.response(to: third.id)?.acceptedRecommendation, true)
             XCTAssertEqual(

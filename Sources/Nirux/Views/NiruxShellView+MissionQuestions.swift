@@ -322,15 +322,14 @@ extension NiruxShellView {
             return false
         }
         // The parent that handed it over or has it in its prompt, a Lead or a
-        // task's agent, hears the answer too: the child's own words quoted,
-        // so they can't pass for a line of Nirux's.
+        // task's agent, hears the answer too.
         if let question = response.mission.events.first(where: { $0.id == questionID }),
            question.handedToUserBecause != nil || question.parentTypedAt != nil {
             let childTitle = workspaces.first { $0.id == response.mission.childWorkspaceID }?.title ?? response.mission.branch
             pendingLeadNotices.append(LeadNotice(
                 workspaceID: response.mission.parentWorkspaceID, agentUUID: response.mission.parentAgentUUID,
-                text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: "
-                    + (accepted ? "\(MissionPromptText.quoted(reply)) (its recommendation)" : reply),
+                text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: \(reply)"
+                    + (accepted ? " (its recommendation)" : ""),
                 queuedAt: Date().timeIntervalSince1970
             ))
         }
