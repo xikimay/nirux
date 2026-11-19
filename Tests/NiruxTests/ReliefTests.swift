@@ -46,8 +46,12 @@ final class ReliefTests: XCTestCase {
         return root.contentsAreFlipped() ? root.bounds.height - rect.midY : rect.midY
     }
 
-    private func shadowOpacity(of view: NSView) -> Float? {
-        view.layer?.sublayers?.first { $0.name == Relief.shadowName }?.opacity
+    private func shadowOpacity(of view: NSView?) -> Float? {
+        view?.layer?.sublayers?.first { $0.name == Relief.shadowName }?.opacity
+    }
+
+    private func shadow(of view: NSView?) -> CALayer? {
+        view?.layer?.sublayers?.first { $0.name == Relief.shadowName }
     }
 
     func testARailIconRisesUnderThePointerAndSinksPressed() throws {
@@ -55,51 +59,69 @@ final class ReliefTests: XCTestCase {
         let window = window(holding: icon, flipped: true)
         defer { window.close() }
         icon.layoutSubtreeIfNeeded()
-        let rest = try shownMidY(of: icon)
+        let rest = try shownMidY(of: icon.iconView)
+        let inside = NSPoint(x: 119, y: 98), outside = NSPoint(x: 10, y: 10)
 
         icon.mouseEntered(with: Self.enter)
-        XCTAssertEqual(try shownMidY(of: icon), rest + RailItemView.liftHeight, accuracy: 0.01, "up, on screen")
+        XCTAssertEqual(try shownMidY(of: icon.iconView), rest + RailItemView.liftHeight, accuracy: 0.01, "up, on screen")
         XCTAssertEqual(shadowOpacity(of: icon), 1, "over its shadow")
+        XCTAssertEqual(shadow(of: icon)?.animationKeys(), [Relief.key], "one fade, not CA's own beside it")
         XCTAssertEqual(icon.layer?.masksToBounds, false, "which nothing cuts")
+        icon.frame.origin.x += 3
+        icon.frame.size.width += 2
+        XCTAssertEqual(try shownMidY(of: icon.iconView), rest + RailItemView.liftHeight, accuracy: 0.01, "a new frame keeps it up")
 
-        icon.mouseDown(with: Self.click(.leftMouseDown, at: NSPoint(x: 119, y: 98)))
-        XCTAssertEqual(try XCTUnwrap(icon.layer).transform.m11, Relief.pressedScale, accuracy: 0.001, "pressed, it sinks")
-        XCTAssertLessThan(try shownMidY(of: icon), rest, "a little down")
+        icon.mouseDown(with: Self.click(.leftMouseDown, at: inside))
+        XCTAssertLessThan(try shownMidY(of: icon.iconView), rest, "pressed, it sinks")
         XCTAssertEqual(shadowOpacity(of: icon), 0)
-        icon.mouseUp(with: Self.click(.leftMouseUp, at: NSPoint(x: 119, y: 98)))
-        XCTAssertEqual(try shownMidY(of: icon), rest + RailItemView.liftHeight, accuracy: 0.01, "up again, still under the pointer")
+        icon.mouseDragged(with: Self.click(.leftMouseDragged, at: outside))
+        XCTAssertEqual(try shownMidY(of: icon.iconView), rest, accuracy: 0.01, "dragged off: neither pressed nor up")
+        icon.mouseDragged(with: Self.click(.leftMouseDragged, at: inside))
+        XCTAssertLessThan(try shownMidY(of: icon.iconView), rest, "back on: pressed")
+        icon.mouseUp(with: Self.click(.leftMouseUp, at: inside))
+        XCTAssertEqual(try shownMidY(of: icon.iconView), rest + RailItemView.liftHeight, accuracy: 0.01, "up again, still under the pointer")
 
         icon.moves = false
-        XCTAssertEqual(try shownMidY(of: icon), rest, accuracy: 0.01, "still while nothing may move")
-        XCTAssertEqual(shadowOpacity(of: icon), 0)
+        XCTAssertEqual(try shownMidY(of: icon.iconView), rest, accuracy: 0.01, "still while nothing may move")
+        XCTAssertNil(icon.layer?.animation(forKey: Relief.key), "at once")
         icon.moves = true
-        icon.mouseExited(with: Self.exit)
-        XCTAssertEqual(try shownMidY(of: icon), rest, accuracy: 0.01)
+
+        // Pressed when it leaves its window: neither pressed nor up after.
+        icon.mouseDown(with: Self.click(.leftMouseDown, at: inside))
+        let host = try XCTUnwrap(icon.superview)
+        icon.removeFromSuperview()
+        host.addSubview(icon)
+        XCTAssertEqual(try shownMidY(of: icon.iconView), rest, accuracy: 0.01, "nothing pressed is left behind")
     }
 
-    func testABarSegmentRisesUnderThePointerAndLiesFlatPressed() throws {
+    func testABarSegmentRisesWhole() throws {
         let bar = CommandBarView(level: .opaque)
-        let button = bar.searchButton
-        button.removeFromSuperview()
-        button.frame = NSRect(x: 40, y: 40, width: 120, height: 24)
-        let window = window(holding: button, flipped: false)
+        bar.frame = NSRect(x: 0, y: 40, width: 600, height: CommandBarView.height)
+        bar.show(CommandBarView.Content(
+            spaceName: "Demo", spaceColor: .systemBlue, taskTitle: "Fix the login", taskIcon: nil, taskDetail: nil, waitingCount: 0
+        ))
+        let window = window(holding: bar, flipped: false)
         defer { window.close() }
-        let rest = try shownMidY(of: button)
+        bar.layoutSubtreeIfNeeded()
+        let restIcon = try shownMidY(of: bar.searchIcon), restKey = try shownMidY(of: bar.searchKey)
+        let restTask = try shownMidY(of: bar.taskLabel)
 
-        button.mouseEntered(with: Self.enter)
-        XCTAssertEqual(try shownMidY(of: button), rest, accuracy: 0.01, "flat while the bar doesn't lift")
+        bar.searchButton.mouseEntered(with: Self.enter)
+        XCTAssertEqual(try shownMidY(of: bar.searchIcon), restIcon, accuracy: 0.01, "flat while the bar doesn't lift")
         bar.lifts = true
-        XCTAssertEqual(button.relief, 1)
-        XCTAssertEqual(try shownMidY(of: button), rest + 1, accuracy: 0.01, "up, on screen")
-        XCTAssertEqual(shadowOpacity(of: button), 1)
-        XCTAssertEqual(button.layer?.masksToBounds, false, "its shadow uncut")
+        XCTAssertEqual(try shownMidY(of: bar.searchIcon), restIcon + 1, accuracy: 0.01, "its icon up, on screen")
+        XCTAssertEqual(try shownMidY(of: bar.searchKey), restKey + 1, accuracy: 0.01, "its key with it")
+        XCTAssertEqual(try shownMidY(of: bar.taskLabel), restTask, accuracy: 0.01, "another segment stays")
+        XCTAssertEqual(shadowOpacity(of: bar.searchIcon.superview), 1)
 
-        button.cell?.highlight(true, withFrame: button.bounds, in: button)
-        XCTAssertEqual(try shownMidY(of: button), rest, accuracy: 0.01, "pressed, flat again")
-        button.cell?.highlight(false, withFrame: button.bounds, in: button)
-        button.mouseExited(with: Self.exit)
-        XCTAssertEqual(try shownMidY(of: button), rest, accuracy: 0.01)
-        XCTAssertEqual(shadowOpacity(of: button), 0)
+        bar.searchButton.cell?.highlight(true, withFrame: bar.searchButton.bounds, in: bar.searchButton)
+        XCTAssertEqual(try shownMidY(of: bar.searchIcon), restIcon, accuracy: 0.01, "pressed, flat again")
+        bar.searchButton.cell?.highlight(false, withFrame: bar.searchButton.bounds, in: bar.searchButton)
+        XCTAssertEqual(try shownMidY(of: bar.searchIcon), restIcon + 1, accuracy: 0.01)
+
+        bar.lifts = false
+        XCTAssertEqual(try shownMidY(of: bar.searchIcon), restIcon, accuracy: 0.01, "flat at once when nothing may move")
+        XCTAssertNil(bar.searchIcon.superview?.layer?.animation(forKey: Relief.key))
     }
 
     /// Pressed, a control shrinks about its middle and moves a little down,

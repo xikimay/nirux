@@ -75,12 +75,20 @@ final class CommandBarView: NSView {
     let taskButton = NiruxButton(title: "", kind: .quiet)
     let searchButton = NiruxButton(title: "", kind: .quiet)
     let waitingButton = NiruxButton(title: "", kind: .quiet)
-    /// Its segments lift under the pointer while the interface may move
-    /// (`Relief`).
+    private let spaceSegment = CommandBarSegment()
+    private let taskSegment = CommandBarSegment()
+    private let searchSegment = CommandBarSegment()
+    private let waitingSegment = CommandBarSegment()
+    /// Each segment and the button over it.
+    private var segments: [(segment: CommandBarSegment, button: NiruxButton)] {
+        [(spaceSegment, spaceButton), (taskSegment, taskButton), (searchSegment, searchButton), (waitingSegment, waitingButton)]
+    }
+    /// A segment rises whole under the pointer while the interface may move
+    /// (`Relief`); false: they lie flat at once.
     var lifts = false {
         didSet {
             guard lifts != oldValue else { return }
-            for button in [spaceButton, taskButton, searchButton, waitingButton] { button.relief = lifts ? 1 : 0 }
+            for (segment, button) in segments { button.relief = lifts ? (1, segment) : nil }
         }
     }
 
@@ -114,7 +122,16 @@ final class CommandBarView: NSView {
             // cell, so the cells go quiet too.
             view.setAccessibilityElement(false)
             (view as? NSControl)?.cell?.setAccessibilityElement(false)
-            host.addSubview(view)
+        }
+        let contents: [(CommandBarSegment, [NSView])] = [
+            (spaceSegment, [spaceChip, spaceLabel, spaceChevron, spaceButton]),
+            (taskSegment, [taskIcon, taskLabel, detailLabel, taskButton]),
+            (searchSegment, [searchIcon, searchKey, searchButton]),
+            (waitingSegment, [waitingBadge, waitingKey, waitingButton]),
+        ]
+        for (segment, views) in contents {
+            host.addSubview(segment)
+            views.forEach(segment.addSubview)
         }
         for _ in 0..<3 {
             let line = NSView()
@@ -130,7 +147,6 @@ final class CommandBarView: NSView {
         for (button, action) in actions {
             button.target = self
             button.action = action
-            host.addSubview(button)
         }
         searchButton.setAccessibilityLabel("Search, Command P")
         // A press on it while ⌘P shows closes the palette instead of opening
@@ -181,7 +197,12 @@ final class CommandBarView: NSView {
 
     override func layout() {
         super.layout()
+        // As wide as the bar: their views' frames stay the bar's.
+        for (segment, _) in segments { segment.frame = segment.superview?.bounds ?? bounds }
         layoutSegments()
+        for (segment, button) in segments {
+            if let layer = segment.layer { Relief.reshape(layer, shape: button.frame, radius: button.frame.height / 2) }
+        }
     }
 
     private func layoutSegments() {
@@ -295,4 +316,22 @@ final class CommandBarView: NSView {
     @objc private func taskPressed() { onTask?() }
     @objc private func searchPressed() { onSearch?() }
     @objc private func waitingPressed() { onWaiting?() }
+}
+
+/// One segment of the bar, its content and its button, as wide as the bar
+/// so that their frames stay the bar's: it rises whole (`Relief`). A click
+/// beside its views falls through to the segment under it.
+private final class CommandBarSegment: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
 }

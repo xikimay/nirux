@@ -292,7 +292,8 @@ final class RailItemView: NSView {
         didSet {
             guard moves != oldValue else { return }
             updateBreath()
-            updateRelief()
+            // Still at once when nothing may move any more.
+            updateRelief(animated: moves)
         }
     }
     static let liftHeight: CGFloat = 1.5
@@ -379,9 +380,9 @@ final class RailItemView: NSView {
         return isPressed ? .pressed : isHovered ? .lifted(height: Self.liftHeight) : .resting
     }
 
-    private func updateRelief() {
+    private func updateRelief(animated: Bool = true) {
         guard let layer else { return }
-        Relief.show(reliefState, on: layer, shape: halo.frame, radius: halo.frame.height / 2, animated: window != nil)
+        Relief.show(reliefState, on: layer, shape: halo.frame, radius: halo.frame.height / 2, animated: animated && window != nil)
     }
 
     private func updateHalo() {
@@ -429,11 +430,22 @@ final class RailItemView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
-    @objc private func pointerLost() { isHovered = false }
+    @objc private func pointerLost() { leave() }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
+        leave()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        leave()
+    }
+
+    /// Neither under the pointer nor pressed.
+    private func leave() {
         isHovered = false
+        isPressed = false
     }
 
     /// The view moved (a task arrived above, the rail scrolled): under the
@@ -451,7 +463,12 @@ final class RailItemView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) { isPressed = true }
-    override func mouseDragged(with event: NSEvent) { isPressed = bounds.contains(convert(event.locationInWindow, from: nil)) }
+    /// Dragged off, neither pressed nor lifted; back on, pressed again.
+    override func mouseDragged(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        isHovered = inside
+        isPressed = inside
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         item.flatMap { menuForTask?($0.id) }
