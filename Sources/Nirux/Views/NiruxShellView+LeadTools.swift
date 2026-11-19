@@ -407,11 +407,11 @@ extension NiruxShellView {
         var needsUser: Bool { status == .needsAttention || dialog != nil }
     }
 
-    /// The Claude and Codex agents in front of `workspace`'s columns.
+    /// The agents in front of `workspace`'s columns.
     func agentReadings(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [AgentReading] {
         workspace.columns.compactMap { column in
             guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
-                  ["claude", "codex"].contains(foreground.name) else { return nil }
+                  AgentStatusMachine.isRecognizedAgentProcess(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel

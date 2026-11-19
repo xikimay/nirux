@@ -1,9 +1,9 @@
 import Foundation
 
-/// The question Claude Code and Codex ask before they work in a folder the
-/// user hasn't trusted yet, as a task without a repository's new folder:
-/// no hook runs until it is answered, so the agent would sit there looking
-/// idle. Nirux reads it on the screen of such a task's agents instead, from
+/// The question Claude Code, Codex and Antigravity ask before they work in
+/// a folder the user hasn't trusted yet, as a task without a repository's
+/// new folder: no hook runs until it is answered, so the agent would sit
+/// there looking idle. Nirux reads it on the screen of such a task's agents instead, from
 /// their launch until a hook or a key reaches them, and the row reads
 /// "Needs you · Trust this folder?".
 enum AgentTrustPrompt {
@@ -19,12 +19,15 @@ enum AgentTrustPrompt {
     /// a Claude Code without hooks, would otherwise be read for the whole
     /// window, each read taking the terminal's lock.
     static let maxMisses = 10
+    /// The agents that ask it.
+    static let agentProcesses: Set<String> = ["claude", "codex", "agy"]
 
     /// Each agent's trust screen: its answer, and one of the lines next to
     /// it (a short terminal may show no more), so a conversation that
     /// quotes one phrase isn't taken for it.
     static let screens: [(answer: String, beside: [String])] = [
-        // Claude Code 2.1.
+        // Claude Code 2.1, and Antigravity CLI 1.5 under "Do you trust the
+        // contents of this project?".
         ("Yes, I trust this folder", ["No, exit", "No, continue without these permissions", "Quick safety check"]),
         // Claude Code before 2.1.
         ("Do you trust the files in this folder?", ["Yes, proceed", "No, exit"]),
@@ -56,11 +59,11 @@ enum AgentTrustPrompt {
 
 extension AgentStatusMachine {
     /// Whether to read the screen of `foreground` for its trust question
-    /// now: a Claude Code or Codex launched less than `watchWindow` ago,
+    /// now: an agent that asks it, launched less than `watchWindow` ago,
     /// that no hook and no input reached since, not seen asking yet, nor
     /// seen `maxMisses` times without it.
     func watchesForTrustPrompt(foreground: ForegroundProcess?, now: TimeInterval) -> Bool {
-        guard let foreground, Self.integratedAgentProcesses.contains(foreground.name) else { return false }
+        guard let foreground, AgentTrustPrompt.agentProcesses.contains(foreground.name) else { return false }
         let started = foreground.instance.startedAt
         guard (0..<AgentTrustPrompt.watchWindow).contains(now - started),
               lastEventAt < started, lastInputAt < started

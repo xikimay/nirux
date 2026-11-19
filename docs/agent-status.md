@@ -8,7 +8,7 @@ Nirux shows what each agent is doing, tells you when one needs you, and brings a
 | --- | --- | --- |
 | Claude Code | yes (`Cmd+N`, `Open Claude Code`) | exact, from hooks |
 | Codex | yes (`Cmd+N`, `Open Codex`) | the end of a turn is exact; "working" is estimated from terminal output |
-| Antigravity (`agy`) | yes (`Cmd+N`, `Open Antigravity`) | estimated from terminal output |
+| Antigravity (`agy`) | yes (`Cmd+N`, `Open Antigravity`), not resumed after a restart | estimated from terminal output |
 | Gemini CLI, OpenCode | no, start them in a terminal | estimated from terminal output |
 
 Settings › Agents sets the permission and sandbox mode Claude Code and Codex start with. For Claude Code, **Claude Code default** passes no flag, so a session follows `permissions.defaultMode` in your Claude Code settings, else starts in Auto where auto mode is available; **Manual** asks before edits and commands. Antigravity starts with its own mode, model and settings: Nirux passes no flag.
@@ -54,7 +54,7 @@ While Nirux is in the background, it also sends a macOS notification (a click fo
 
 ## After a restart
 
-Nirux saves each agent column's session: the launch mode and the Claude Code session ID or Codex thread ID. After a restart, each column resumes its own conversation by that ID (`claude --resume <id>`, `codex resume <id>`) in the folder it ran in. A Claude Code session that was never prompted restarts fresh. When the ID is missing or ambiguous, the agent's own resume picker opens.
+Nirux saves each agent column's session: the launch mode and the Claude Code session ID or Codex thread ID. After a restart, each column resumes its own conversation by that ID (`claude --resume <id>`, `codex resume <id>`) in the folder it ran in. A Claude Code session that was never prompted restarts fresh. When the ID is missing or ambiguous, the agent's own resume picker opens. An Antigravity column comes back as a shell in its folder.
 
 Agents resume on demand, so that moving through workspaces doesn't start them all. A restored column reads `Not resumed yet — click or focus to resume`, with the session's title and its last status, and its row reads `Paused · Resume`. The agent starts once the column has stayed a moment in the workspace on screen, or when you click **Resume**. `Resume All Agents` (command palette, Agent menu) starts every one left. To start them all at launch instead, choose **All at once** for **Settings › General › Resume agents on launch**.
 
