@@ -725,6 +725,28 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A receiver still writing the hook queue may be writing a dialog that
+    /// just opened: nothing is typed until that queue is read.
+    func testATellWaitsForTheHookQueueToBeRead() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Reader", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            let queue = AgentHookCenter.eventsURL
+            XCTAssertNil(QueueFile.append(Data(), to: queue))
+            let receiver = open(queue.path, O_RDONLY)
+            defer { close(receiver) }
+            XCTAssertEqual(flock(receiver, LOCK_EX), 0)
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": "Go on."], lead: lead).isError)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            XCTAssertFalse(task.agent.input.contains("Go on."))
+            flock(receiver, LOCK_UN)
+            harness.waitUntil("typed once the queue is read") { task.agent.input.contains("Go on.") }
+        }
+    }
+
     /// Claude Code's session record still shows a dialog when a long tell
     /// is all in (it writes the record after the change, so it may lag the
     /// hooks): it is read again, and Enter follows once it doesn't; a wait
@@ -887,6 +909,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             // the turn still runs. Past its reads, the turn waits on the model
             // again: its silence can show.
             harness.shell.interruptReads = NiruxShellView.interruptReadsBeforeAnswer + 1
+            task.column.pty?.sendRaw("\r")
             task.hook(.userPromptSubmit)
             task.hook(.preToolUse)
             task.hook(.postToolUse)
