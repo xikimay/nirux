@@ -375,8 +375,8 @@ final class RailItemView: NSView {
     }
 
     private var reliefState: Relief.State {
-        guard moves else { return .resting }
-        return isPressed ? .pressed : isHovered ? .lifted(height: Self.liftHeight) : .resting
+        guard moves || ZZ("stillLifts") else { return .resting }
+        return isPressed && !ZZ("pressNoSink") ? .pressed : isHovered ? .lifted(height: Self.liftHeight) : .resting
     }
 
     private func updateRelief() {

@@ -80,7 +80,7 @@ final class CommandBarView: NSView {
     var lifts = false {
         didSet {
             guard lifts != oldValue else { return }
-            for button in [spaceButton, taskButton, searchButton, waitingButton] { button.relief = lifts ? 1 : 0 }
+            for button in [spaceButton, taskButton, searchButton, waitingButton] { button.relief = lifts && !ZZ("barFlat") ? 1 : 0 }
         }
     }
 

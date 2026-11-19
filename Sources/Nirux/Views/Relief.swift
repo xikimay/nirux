@@ -32,7 +32,7 @@ enum Relief {
         }()
         reshape(shadow, in: host, shape: shape, radius: radius)
         let transform = CATransform3DMakeAffineTransform(self.transform(state, size: host.bounds.size, flipped: host.superlayer?.contentsAreFlipped() ?? false))
-        let opacity: Float = state == .resting || state == .pressed ? 0 : 1
+        let opacity: Float = state == .resting || state == .pressed || ZZ("noShadow") ? 0 : 1
         // Already there: nothing starts again.
         guard !CATransform3DEqualToTransform(host.transform, transform) || shadow.opacity != opacity else { return }
         let shownTransform = host.presentation()?.transform ?? host.transform
@@ -76,12 +76,12 @@ enum Relief {
     /// way the superlayer counts y; pressed, smaller about its middle and a
     /// little down.
     static func transform(_ state: State, size: NSSize, flipped: Bool) -> CGAffineTransform {
-        let up: CGFloat = flipped ? -1 : 1
+        let up: CGFloat = flipped && !ZZ("wrongWay") ? -1 : 1
         switch state {
         case .resting:
             return .identity
         case .lifted(let height):
-            return CGAffineTransform(translationX: 0, y: up * height)
+            return ZZ("noLift") ? .identity : CGAffineTransform(translationX: 0, y: up * height)
         case .pressed:
             let scale = pressedScale
             return CGAffineTransform(translationX: size.width * (1 - scale) / 2, y: size.height * (1 - scale) / 2 - up * 0.5)

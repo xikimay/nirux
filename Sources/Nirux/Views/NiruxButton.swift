@@ -216,7 +216,7 @@ final class NiruxButton: NSButton {
         let look = Self.look(kind, hovered: isHovered, pressed: isPressed, enabled: isEnabled)
         layer?.backgroundColor = look.fill.cgColor
         if let layer, relief > 0 || layer.sublayers?.contains(where: { $0.name == Relief.shadowName }) == true {
-            layer.masksToBounds = false
+            layer.masksToBounds = ZZ("clipsShadow")
             let lifted = relief > 0 && isEnabled && isHovered && !isPressed
             Relief.show(lifted ? .lifted(height: relief) : .resting, on: layer, shape: bounds, radius: bounds.height / 2, animated: window != nil)
         }
