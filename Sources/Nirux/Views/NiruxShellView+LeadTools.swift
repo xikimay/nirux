@@ -396,17 +396,24 @@ extension NiruxShellView {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
         }
         if let failed = agents.first(where: { $0.failure != nil }), let failure = failed.failure {
-            return "\(failed.name) \(failure.headline)" + (Self.leadDetail(of: failure).map { " — \($0)" } ?? "")
+            return "\(failed.name) \(failure)"
         }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
         return "\(first.name) idle"
     }
 
-    /// A stuck state's specifics, for the Lead: a silent turn's way out is
-    /// interrupt_task, not the user's Esc its row suggests.
-    private static func leadDetail(of stuck: SidebarStuckState) -> String? {
-        guard case .silent(_, _, let interruptible) = stuck else { return stuck.detail }
-        return interruptible ? "interrupt_task can stop it" : "only the user can stop it, in its terminal"
+    /// A row drawn red, in the Lead's words: a silent turn's way out is
+    /// interrupt_task when it would press Esc there, not the user's Esc the
+    /// row suggests.
+    private static func leadFailure(_ stuck: SidebarStuckState, of pty: PtySession, snapshot: ProcessSnapshot) -> String? {
+        guard stuck.isFailure else { return nil }
+        let detail: String? = switch stuck {
+        case .silent:
+            pty.interruptRefusal(snapshot: snapshot) == nil ? "interrupt_task can stop it" : "only the user can stop it, in its terminal"
+        default:
+            stuck.detail
+        }
+        return stuck.headline + (detail.map { " — \($0)" } ?? "")
     }
 
     /// An agent in front of one of a workspace's columns, as list_tasks
@@ -416,9 +423,9 @@ extension NiruxShellView {
         let status: AgentStatus
         /// What it waits on the user for, in a few words.
         let dialog: String?
-        /// Its row's stuck state, when drawn in red: the turn stopped on an
-        /// API error, or went silent.
-        let failure: SidebarStuckState?
+        /// What broke, when its row is red (see `leadFailure`): the turn
+        /// stopped on an API error, or went silent.
+        let failure: String?
 
         /// A failure needs the user too, but says what broke instead.
         var needsUser: Bool { dialog != nil || (status == .needsAttention && failure == nil) }
@@ -436,8 +443,9 @@ extension NiruxShellView {
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
             // A turn end found done (or still being read) asks nothing.
             let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
-            let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
-            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: stuck?.isFailure == true ? stuck : nil)
+            let failure = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
+                .flatMap { Self.leadFailure($0, of: pty, snapshot: snapshot) }
+            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure)
         }
     }
 

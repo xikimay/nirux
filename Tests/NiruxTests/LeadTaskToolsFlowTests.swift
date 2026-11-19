@@ -922,7 +922,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         // The system notification needs an app bundle, which xctest isn't.
         column.onAgentAttention = { _ in }
         column.noteTranscriptGrowth(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()), now: Date().timeIntervalSince1970)
-        let later = ProcessInfo.processInfo.systemUptime + AgentSilence.threshold(waitThreshold: harness.shell.stuckAgentWaitThreshold) + 60
+        let later = pty.awakeClock() + AgentSilence.threshold(waitThreshold: harness.shell.stuckAgentWaitThreshold) + 60
         pty.awakeClock = { later }
     }
 
@@ -958,6 +958,17 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             try passSilenceThreshold(task.column, in: harness)
             let silent = try line()
             XCTAssertTrue(silent.contains(" · claude silent for ") && silent.hasSuffix(" — interrupt_task can stop it"), silent)
+
+            // Silent on a prompt it hasn't begun answering: interrupt_task
+            // refuses there, the user's Esc gives the prompt back.
+            task.hook(.userPromptSubmit)
+            let handle = try XCTUnwrap(FileHandle(forWritingAtPath: transcript))
+            handle.seekToEndOfFile()
+            handle.write(Data((#"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"go on"}}"# + "\n").utf8))
+            try handle.close()
+            try passSilenceThreshold(task.column, in: harness)
+            let unanswered = try line()
+            XCTAssertTrue(unanswered.hasSuffix(" — only the user can stop it, in its terminal"), unanswered)
         }
     }
 
