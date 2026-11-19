@@ -522,7 +522,7 @@ extension NiruxShellView {
                 column: column, pty: pty, transcript: transcript.follower.path, offset: offset, sentAt: sentAt, promptAt: promptAt,
                 taskID: task.id, title: title
             ),
-            check: 1, answer: answer
+            answer: answer
         )
     }
 
@@ -541,53 +541,46 @@ extension NiruxShellView {
         let title: String
     }
 
-    /// Reads of the transcript, half a second apart: before Nirux says the
-    /// Esc didn't take, and in all (a tool slow to stop).
-    private static let interruptChecksBeforeAnswer = 8
-    private static let interruptChecks = 60
-
-    /// The turn is over once the transcript shows the interrupt (Claude
-    /// fires no Stop for it): only then may a message be typed, and those
-    /// waiting for it go in.
-    /// Past `interruptChecksBeforeAnswer`, the Lead has its answer: a late
-    /// interrupt still ends the turn, without a second one.
-    private func confirmInterrupt(_ interrupt: Interrupt, check: Int, answer: @escaping LeadAnswer) {
-        let (transcript, offset, sentAt, title) = (interrupt.transcript, interrupt.offset, interrupt.sentAt, interrupt.title)
-        // Past it, the Lead had its answer.
-        let speaks = check <= Self.interruptChecksBeforeAnswer
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            Self.offMain({ TranscriptLastMessage.showsInterrupt(path: transcript, since: sentAt, after: offset) }) { shown in
-                guard let self, let column = interrupt.column else {
-                    if speaks { answer("“\(title)” closed meanwhile.", true) }
-                    return
-                }
-                guard let pty = interrupt.pty, column.pty === pty else {
-                    if speaks { answer("“\(title)”'s terminal restarted meanwhile: the Esc went to the one before. Call list_tasks.", true) }
-                    return
-                }
-                guard shown else {
-                    if check == Self.interruptChecksBeforeAnswer {
-                        answer("Esc went to “\(title)”, but its conversation shows no interrupt yet: call list_tasks before telling it more.", true)
-                    }
-                    guard check < Self.interruptChecks else { return }
-                    return self.confirmInterrupt(interrupt, check: check + 1, answer: answer)
-                }
-                // What its hooks said meanwhile: a dialog the Esc closed.
-                AgentHookCenter.shared.drain()
-                guard pty.noteInterrupted(promptAt: interrupt.promptAt) else {
-                    if speaks { answer("Esc stopped “\(title)”'s turn, but a new prompt went in since: it works on that one now.", false) }
-                    return
-                }
-                let waiting = MissionStore.shared.pendingPromptDeliveries().contains { delivery in
-                    delivery.mission.childWorkspaceID == interrupt.taskID && !Self.goesToParent(delivery.event)
-                }
-                self.typeMissionMessages()
-                self.updateSidebar()
-                guard speaks else { return }
-                answer("Interrupted “\(title)”'s turn. Claude Code puts a prompt it hadn't answered, and messages queued meanwhile, "
-                    + "back in its prompt box; this turn had called a tool and nothing was typed since, so the box is empty. "
-                    + (waiting ? "The message waiting for it goes in now." : "Tell it what to do instead."), false)
+    /// The turn is over once the transcript shows the interrupt (see
+    /// `followInterrupt`): only then may a message be typed, and those
+    /// waiting for it go in. Past `interruptReadsBeforeAnswer`, the Lead
+    /// has its answer: a late interrupt still ends the turn, without a
+    /// second one.
+    private func confirmInterrupt(_ interrupt: Interrupt, answer: @escaping LeadAnswer) {
+        let title = interrupt.title
+        followInterrupt(transcript: interrupt.transcript, offset: interrupt.offset, sentAt: interrupt.sentAt) { [weak self] shown, check in
+            // Past it, the Lead had its answer.
+            let speaks = check <= Self.interruptReadsBeforeAnswer
+            guard let self, let column = interrupt.column else {
+                if speaks { answer("“\(title)” closed meanwhile.", true) }
+                return false
             }
+            guard let pty = interrupt.pty, column.pty === pty else {
+                if speaks { answer("“\(title)”'s terminal restarted meanwhile: the Esc went to the one before. Call list_tasks.", true) }
+                return false
+            }
+            guard shown else {
+                if check == Self.interruptReadsBeforeAnswer {
+                    answer("Esc went to “\(title)”, but its conversation shows no interrupt yet: call list_tasks before telling it more.", true)
+                }
+                return check < Self.interruptReads
+            }
+            // What its hooks said meanwhile: a dialog the Esc closed.
+            AgentHookCenter.shared.drain()
+            guard pty.noteInterrupted(promptAt: interrupt.promptAt) else {
+                if speaks { answer("Esc stopped “\(title)”'s turn, but a new prompt went in since: it works on that one now.", false) }
+                return false
+            }
+            let waiting = MissionStore.shared.pendingPromptDeliveries().contains { delivery in
+                delivery.mission.childWorkspaceID == interrupt.taskID && !Self.goesToParent(delivery.event)
+            }
+            self.typeMissionMessages()
+            self.updateSidebar()
+            guard speaks else { return false }
+            answer("Interrupted “\(title)”'s turn. Claude Code puts a prompt it hadn't answered, and messages queued meanwhile, "
+                + "back in its prompt box; this turn had called a tool and nothing was typed since, so the box is empty. "
+                + (waiting ? "The message waiting for it goes in now." : "Tell it what to do instead."), false)
+            return false
         }
     }
 

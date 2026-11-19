@@ -87,27 +87,37 @@ enum TranscriptLastMessage {
         return .message(TranscriptSearch.Message(role: .claude, text: parts.joined(separator: "\n\n"), timestamp: found.message.timestamp))
     }
 
-    /// Whether the main thread's conversation at the end of the transcript
-    /// at `path` waits on Claude: its last word is a prompt or a tool
-    /// result, not a line of Claude's reply (its first thought counts) nor
-    /// an interrupt. Nil when its last `tailBytes` hold none of these.
-    static func awaitsReply(path: String, tailBytes: Int = tailBytes) -> Bool? {
-        tail(of: path, bytes: tailBytes).flatMap { awaitsReply(in: $0.data, startsMidLine: $0.startsMidLine) }
+    /// What the main thread's conversation at the end of a transcript waits
+    /// on Claude for: its last word, besides harness notes and messages
+    /// Claude takes in while a turn runs (attachments).
+    enum AwaitedReply: Equatable, Sendable {
+        /// A prompt typed at its box that Claude hasn't begun answering: an
+        /// Esc gives it back.
+        case prompt
+        case toolResult
+        /// A line of Claude's reply (its first thought counts, an API error
+        /// too), or an interrupt: no request waits.
+        case none
     }
 
-    static func awaitsReply(in data: Data, startsMidLine: Bool = false) -> Bool? {
+    /// For the transcript at `path`; nil when its last `tailBytes` hold
+    /// none of these.
+    static func awaitedReply(path: String, tailBytes: Int = tailBytes) -> AwaitedReply? {
+        tail(of: path, bytes: tailBytes).flatMap { awaitedReply(in: $0.data, startsMidLine: $0.startsMidLine) }
+    }
+
+    static func awaitedReply(in data: Data, startsMidLine: Bool = false) -> AwaitedReply? {
         for line in lines(of: data, startsMidLine: startsMidLine).reversed() {
             // As JSON writes the interrupt: tool output quoting its words
             // escapes their quotes.
-            if line.withUnsafeBytes({ bytes in interruptParts.contains { TranscriptSearch.contains(bytes, $0) } }) { return false }
-            // Tool output, never parsed: a result went in.
-            if line.withUnsafeBytes(TranscriptSearch.isToolResult) { return true }
+            if line.withUnsafeBytes({ bytes in interruptParts.contains { TranscriptSearch.contains(bytes, $0) } }) { return AwaitedReply.none }
+            // Tool output, never parsed.
+            if line.withUnsafeBytes(TranscriptSearch.isToolResult) { return .toolResult }
             guard let object = line.withUnsafeBytes({ $0.isEmpty ? nil : TranscriptSearch.object($0) }),
                   object["isSidechain"] as? Bool != true
             else { continue }
-            // Claude's, an API error's included: the turn went past its request.
-            if object["type"] as? String == "assistant" { return false }
-            if object["type"] as? String == "user", TranscriptSearch.message(in: object) != nil { return true }
+            if object["type"] as? String == "assistant" { return AwaitedReply.none }
+            if object["type"] as? String == "user", TranscriptSearch.message(in: object) != nil { return .prompt }
         }
         return nil
     }

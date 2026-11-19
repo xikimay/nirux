@@ -85,9 +85,8 @@ struct AgentLifeSigns: Equatable, Sendable {
     struct Transcript: Equatable, Sendable {
         let path: String
         let size: Int64
-        /// Whether its end waits on Claude's reply
-        /// (`TranscriptLastMessage.awaitsReply`), once read at this size.
-        var awaitsReply: Bool?
+        /// What its end waits on Claude for, once read at this size.
+        var awaited: TranscriptLastMessage.AwaitedReply?
     }
 
     mutating func note(awake: TimeInterval, wall: TimeInterval) {
@@ -103,8 +102,8 @@ struct AgentLifeSigns: Equatable, Sendable {
         transcript = Transcript(path: path, size: size)
     }
 
-    mutating func noteAwaitsReply(_ awaits: Bool) {
-        transcript?.awaitsReply = awaits
+    mutating func noteAwaited(_ awaited: TranscriptLastMessage.AwaitedReply) {
+        transcript?.awaited = awaited
     }
 
     mutating func forgetTranscript() {
@@ -125,15 +124,33 @@ enum AgentStuckState: Equatable, Sendable {
     case silent(AgentSilence)
 }
 
+/// What Interrupt would do in a turn gone silent.
+enum SilentInterruptPlan: Equatable, Sendable {
+    case refused(AgentInterruptRefusal)
+    /// The transcript ends on a prompt typed at its box that Claude hasn't
+    /// begun answering: the Esc gives it back, and Claude writes nothing.
+    case givesBackPrompt
+    /// The turn went past a tool result: Claude writes its interrupt.
+    case stops
+
+    var offersEsc: Bool {
+        if case .refused = self { return false }
+        return true
+    }
+}
+
 /// What Interrupt did in a turn gone silent.
 enum SilentInterrupt: Equatable, Sendable {
-    /// Esc went before any reply: Claude gives the prompt back to its box.
+    /// Esc went: the prompt is back in the box, and the turn over.
     case promptGivenBack
-    /// Esc went after a tool call: the box stays empty.
-    case stopped
+    /// Esc went: the turn of `promptAt` is over once the transcript shows
+    /// Claude's interrupt.
+    case stopping(promptAt: TimeInterval)
     /// Not the silence the button showed: the agent moved on, or another
     /// silence began.
     case notSilent
+    /// The process table couldn't be read.
+    case noProcesses
     case refused(AgentInterruptRefusal)
 }
 

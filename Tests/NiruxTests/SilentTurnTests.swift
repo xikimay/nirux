@@ -291,14 +291,14 @@ final class SilentTurnTests: XCTestCase {
         signs.note(awake: 10, wall: 1_010)
         signs.noteTranscript(path: "/t.jsonl", size: 100, awake: 20, wall: 1_020)
         XCTAssertEqual(signs.lastAt, 10, "a first look only takes its measure")
-        signs.noteAwaitsReply(true)
+        signs.noteAwaited(.prompt)
         signs.noteTranscript(path: "/t.jsonl", size: 100, awake: 30, wall: 1_030)
         XCTAssertEqual(signs.lastAt, 10)
-        XCTAssertEqual(signs.transcript?.awaitsReply, true, "read once per size")
+        XCTAssertEqual(signs.transcript?.awaited, .prompt, "read once per size")
         signs.noteTranscript(path: "/t.jsonl", size: 180, awake: 40, wall: 1_040)
         XCTAssertEqual(signs.lastAt, 40)
         XCTAssertEqual(signs.lastWallAt, 1_040)
-        XCTAssertNil(signs.transcript?.awaitsReply, "read again at its new size")
+        XCTAssertNil(signs.transcript?.awaited, "read again at its new size")
         signs.noteTranscript(path: "/other.jsonl", size: 500, awake: 50, wall: 1_050)
         XCTAssertEqual(signs.lastAt, 40, "another transcript is measured anew")
     }
@@ -306,8 +306,8 @@ final class SilentTurnTests: XCTestCase {
     /// What tells a request in flight: the transcript's last word is a
     /// prompt or a tool result, not Claude's.
     func testTheTranscriptsEndSaysWhetherAReplyIsAwaited() {
-        func awaits(_ lines: [String]) -> Bool? {
-            TranscriptLastMessage.awaitsReply(in: Data((lines.joined(separator: "\n") + "\n").utf8))
+        func awaits(_ lines: [String]) -> TranscriptLastMessage.AwaitedReply? {
+            TranscriptLastMessage.awaitedReply(in: Data((lines.joined(separator: "\n") + "\n").utf8))
         }
         let prompt = #"{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"fix it"}}"#
         let reply = #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"…"}]}}"#
@@ -315,15 +315,17 @@ final class SilentTurnTests: XCTestCase {
         let interrupt = #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
         let meta = #"{"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat"}}"#
         let request = #"{"type":"api-request"}"#
+        let poll = #"{"type":"attachment","attachment":{"type":"poll_events"}}"#
         let apiError = #"{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error"}]}}"#
         let quoting = #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t2","type":"tool_result","content":"grep: \"text\":\"[Request interrupted by user\""}]}}"#
-        XCTAssertEqual(awaits([prompt, request]), true, "the incident: a prompt, its request, nothing")
-        XCTAssertEqual(awaits([prompt, reply, result]), true, "a tool result went in")
-        XCTAssertEqual(awaits([prompt, reply]), false, "Claude answered: a lost Stop, or a long reply")
-        XCTAssertEqual(awaits([prompt, interrupt]), false)
-        XCTAssertEqual(awaits([prompt, reply, meta]), false, "a harness note says nothing")
-        XCTAssertEqual(awaits([prompt, apiError]), false, "the turn ended on an API error")
-        XCTAssertEqual(awaits([prompt, reply, quoting]), true, "tool output quoting the interrupt's words")
+        XCTAssertEqual(awaits([prompt, request]), .prompt, "the incident: a prompt, its request, nothing")
+        XCTAssertEqual(awaits([prompt, reply, result]), .toolResult, "a tool result went in")
+        XCTAssertEqual(awaits([prompt, reply]), TranscriptLastMessage.AwaitedReply.none, "Claude answered: a lost Stop, or a long reply")
+        XCTAssertEqual(awaits([prompt, interrupt]), TranscriptLastMessage.AwaitedReply.none)
+        XCTAssertEqual(awaits([prompt, reply, meta]), TranscriptLastMessage.AwaitedReply.none, "a harness note says nothing")
+        XCTAssertEqual(awaits([prompt, apiError]), TranscriptLastMessage.AwaitedReply.none, "the turn ended on an API error")
+        XCTAssertEqual(awaits([prompt, reply, quoting]), .toolResult, "tool output quoting the interrupt's words")
+        XCTAssertEqual(awaits([prompt, reply, result, poll]), .toolResult, "a peer's message Claude took in mid-turn is no prompt")
         XCTAssertNil(awaits([request, meta]))
     }
 
@@ -506,8 +508,12 @@ final class SilentTurnTests: XCTestCase {
         clock.now = 1_299
         XCTAssertEqual(interrupt(since: 100), .notSilent, "not silent yet")
         clock.now = 1_300
+        XCTAssertEqual(
+            pty.interruptSilentTurn(since: 100, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(entries: []), now: Date().timeIntervalSince1970),
+            .noProcesses, "a process table that couldn't be read isn't Claude moving on"
+        )
         XCTAssertEqual(interrupt(since: 99), .notSilent, "not the silence the button showed")
-        XCTAssertTrue(pty.canInterruptSilentTurn(snapshot: ProcessSnapshot()))
+        XCTAssertEqual(pty.silentInterruptPlan(foreground: front), .givesBackPrompt)
         XCTAssertEqual(interrupt(since: 100), .promptGivenBack)
         try await waitUntil("Esc typed", timeout: 3) { !agent.input.isEmpty }
         XCTAssertNil(pty.agentStuckState(now: Date().timeIntervalSince1970, waitThreshold: waitThreshold, foreground: front), "the turn is over")
@@ -517,14 +523,30 @@ final class SilentTurnTests: XCTestCase {
         )
         XCTAssertEqual(interrupt(since: 100), .notSilent, "a second click")
 
-        // Silent after a tool call: Esc stops the turn, the box stays empty.
+        // Silent after a tool result and a peer's message Claude took in:
+        // no prompt of the user's to give back. The turn ends only once
+        // Claude writes its interrupt.
         clock.now = 2_000
         hook(.userPromptSubmit, at: Date().timeIntervalSince1970)
         hook(.preToolUse, at: Date().timeIntervalSince1970, call: "ls")
         hook(.postToolUse, at: Date().timeIntervalSince1970, call: "ls")
+        let peerAt = Date().timeIntervalSince1970
+        hook(.userPromptSubmit, at: peerAt)
+        let tail = Data((#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}"#
+            + "\n" + #"{"type":"attachment","attachment":{"type":"poll_events"}}"# + "\n").utf8)
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: tail)
+        try handle.close()
+        pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count + tail.count), now: Date().timeIntervalSince1970)
         clock.now = 3_200
-        XCTAssertEqual(interrupt(since: 2_000), .stopped)
+        XCTAssertEqual(interrupt(since: 2_000), .stopping(promptAt: peerAt))
         try await waitUntil("the second Esc", timeout: 3) { agent.input.count == 2 }
+        XCTAssertEqual(
+            pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), .working,
+            "no draft given back, and no message until Claude shows it stopped"
+        )
+        XCTAssertTrue(pty.noteInterrupted(promptAt: peerAt))
         XCTAssertNil(pty.missionPromptRefusal(runningSince: front.instance.startedAt, snapshot: ProcessSnapshot()), "free for a message")
 
         // Keys typed since its prompt: Esc could close a screen they opened,
@@ -535,7 +557,7 @@ final class SilentTurnTests: XCTestCase {
         hook(.postToolUse, at: Date().timeIntervalSince1970, call: "ls2")
         pty.sendRaw("x")
         clock.now = 5_200
-        XCTAssertFalse(pty.canInterruptSilentTurn(snapshot: ProcessSnapshot()))
+        XCTAssertEqual(pty.silentInterruptPlan(foreground: front), .refused(.typed))
         XCTAssertEqual(interrupt(since: 4_000), .refused(.typed))
 
         // A turn Claude started by itself: no prompt to give back.
@@ -576,7 +598,7 @@ final class SilentTurnTests: XCTestCase {
         pty.noteAgentTranscript(path: transcript.path, size: Int64(line.count), now: Date().timeIntervalSince1970)
         pty.sendRaw("/")
         clock.now = 1_300
-        XCTAssertFalse(pty.canInterruptSilentTurn(snapshot: ProcessSnapshot()))
+        XCTAssertEqual(pty.silentInterruptPlan(foreground: front), .refused(.typed))
         XCTAssertEqual(
             pty.interruptSilentTurn(since: 100, waitThreshold: waitThreshold, snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970),
             .refused(.typed)

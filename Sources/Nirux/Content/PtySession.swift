@@ -560,34 +560,39 @@ final class PtySession: @unchecked Sendable {
         guard let since = signs.lastAt, let startedAt = signs.lastWallAt, let transcript = signs.transcript,
               awakeClock() - since >= AgentSilence.threshold(waitThreshold: waitThreshold)
         else { return nil }
-        let awaitsReply = transcript.awaitsReply ?? TranscriptLastMessage.awaitsReply(path: transcript.path) ?? false
-        state.lifeSigns.noteAwaitsReply(awaitsReply)
-        return awaitsReply ? AgentSilence(since: since, startedAt: startedAt) : nil
+        let awaited = transcript.awaited ?? TranscriptLastMessage.awaitedReply(path: transcript.path) ?? .none
+        state.lifeSigns.noteAwaited(awaited)
+        return awaited == .none ? nil : AgentSilence(since: since, startedAt: startedAt)
     }
 
-    /// Whether Interrupt may press Esc in a silent turn (see
-    /// `interruptSilentTurn`).
-    func canInterruptSilentTurn(snapshot: ProcessSnapshot) -> Bool {
-        state.machine.silentInterruptRefusal(foreground: foregroundProcess(snapshot: snapshot)) == nil
+    /// What Interrupt would do in the silent turn of `foreground`: refused
+    /// where Esc could answer a dialog, open the rewind or close a screen
+    /// typed keys left (`silentInterruptRefusal`); else the transcript's
+    /// end says whether Claude gives a prompt back. A message Claude took in
+    /// mid-turn (a peer's, a poll's) is no prompt of the user's.
+    func silentInterruptPlan(foreground: ForegroundProcess?) -> SilentInterruptPlan {
+        if let refusal = state.machine.silentInterruptRefusal(foreground: foreground) { return .refused(refusal) }
+        return state.lifeSigns.transcript?.awaited == .prompt ? .givesBackPrompt : .stops
     }
 
     /// Esc into the turn gone silent at `since` (`AgentSilence.since`), on
-    /// the user's click: while it still is, and where Esc can't answer a
-    /// dialog, open the rewind or close a screen typed keys left
-    /// (`interruptRefusal`). The turn ends with it: a silent turn says
-    /// nothing more. A prompt Claude gives back is the user's draft.
+    /// the user's click, while it still is (see `silentInterruptPlan`).
+    /// A prompt given back ends the turn at once, as the user's draft;
+    /// otherwise the turn ends once Claude writes its interrupt (see
+    /// `noteInterrupted`).
     func interruptSilentTurn(
         since: TimeInterval, waitThreshold: TimeInterval?, snapshot: ProcessSnapshot, now: TimeInterval
     ) -> SilentInterrupt {
+        guard !snapshot.isEmpty else { return .noProcesses }
         let foreground = foregroundProcess(snapshot: snapshot)
         guard case .silent(let silence)? = agentStuckState(now: now, waitThreshold: waitThreshold, foreground: foreground),
               silence.since == since
         else { return .notSilent }
-        if let refusal = state.machine.silentInterruptRefusal(foreground: foreground) { return .refused(refusal) }
-        let givesBackPrompt = state.machine.interruptRefusal(foreground: foreground) == .notAnswered
+        let plan = silentInterruptPlan(foreground: foreground)
+        if case .refused(let refusal) = plan { return .refused(refusal) }
         guard let promptAt = sendInterrupt() else { return .refused(.notWorking) }
+        guard plan == .givesBackPrompt else { return .stopping(promptAt: promptAt) }
         _ = state.machine.noteInterrupted(promptAt: promptAt, now: now)
-        guard givesBackPrompt else { return .stopped }
         state.machine.notePromptGivenBack(now: now)
         return .promptGivenBack
     }
@@ -607,6 +612,10 @@ final class PtySession: @unchecked Sendable {
     func forgetAgentTranscript() {
         state.lifeSigns.forgetTranscript()
     }
+
+    /// The transcript a silence was read from: where Claude writes the
+    /// interrupt an Esc caused.
+    var agentTranscriptPath: String? { state.lifeSigns.transcript?.path }
 
     // MARK: The trust question (see `AgentTrustPrompt`)
 
