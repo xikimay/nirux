@@ -43,12 +43,14 @@ After each read of the pull request and each turn end of that agent:
   never ends must not hold feedback.
   1. **Conflict:** `mergeable` CONFLICTING (UNKNOWN never counts), with a plain
      base name and a remote of the checkout for the pull request's repository.
+     Without them, nothing goes: no other round's checks would run.
   2. **CI:** a red check of the pull request's own Actions runs that ended on
      FAILURE or TIMED_OUT (a cancelled job, or one that never started, isn't
      the branch's doing), once its runs are over, the triage has spoken, and
      the failure is 2 minutes old (the user's own Rerun or Why Failed goes
-     first). A likely flake starts nothing: its rerun stays the user's. A
-     failure the user's Why Failed took is theirs.
+     first). Only those runs' logs go into the prompt. A likely flake starts
+     nothing: its rerun stays the user's. A failure the user's Why Failed
+     took is theirs.
   3. **Feedback:** review threads, and what people (not bots) write besides an
      approval, posted since Nirux started following the pull request, never
      handed before, outdated threads left out, the newest 3 minutes old (bots
@@ -75,7 +77,8 @@ Each ends on "(Nirux follow-up, round n of 3.)".
 - A round is judged once its turn ended (or 2 hours after it was typed: Esc
   sends no Stop), its agent rests, and reads came after it (of feedback too,
   for a feedback round). While GitHub computes `mergeable` or a run goes,
-  nothing is judged.
+  nothing is judged for 10 minutes; after that the round settles without a
+  stop (a job waiting on an approval stays pending).
 - **Stops**, each a "Needs you" with its reason:
   - another round was due after three;
   - a round pushed nothing and its signal is still there (still conflicting,
@@ -88,14 +91,19 @@ Each ends on "(Nirux follow-up, round n of 3.)".
   rounds, handed feedback and stop, by URL: the count survives a relaunch and
   a workspace opened again. An entry goes once its pull request reads merged
   or closed, or after 30 days with no change unless it holds a stop. What
-  another build wrote differently is dropped entry by entry, not the file.
+  another build wrote differently is read on the side of typing less: an
+  unknown round still counts, an unreadable entry goes alone.
 
 ## Wiring rules for PR 2
 
 - End a round only on `finishedTurn(afterTypingAt:)` with no failed turn.
 - Read the tracked changes (`GitDetect.hasTrackedChanges(at:)`) off the main
-  thread just before typing; date `readAt` and `feedbackReadAt` from when
-  each read started.
+  thread just before typing (nil, git couldn't say, waits); date `readAt` and
+  `feedbackReadAt` from when each read started.
+- Why Failed records `PRFollowUp.failureSignature` in `userFailures`, Address
+  its items in `handedFeedback`.
+- When the setting turns on, the space's entries follow from then (`since`):
+  feedback that came while it was off is the user's.
 - A merge queue holds a pull request while any of its entries isn't done or
   stopped.
 - At most one automatic round in flight across all tasks.

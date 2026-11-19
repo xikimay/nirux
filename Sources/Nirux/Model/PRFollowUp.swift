@@ -21,9 +21,10 @@ enum PRFollowUp {
     /// The read a push triggers comes 10 s after it
     /// (`PullRequestRefreshPolicy.pushSettleDelay`).
     static let readSettle: TimeInterval = 15
-    /// How long after a round's turn the checkout may still differ from
-    /// the pull request.
-    static let checkoutLimit: TimeInterval = 10 * 60
+    /// How long after a round's turn the checkout may differ from the pull
+    /// request, or what the round did stay unknown (a job waiting on an
+    /// approval stays pending), before the round is settled.
+    static let settleLimit: TimeInterval = 10 * 60
     /// A round whose turn end never came (Esc sends no Stop, a turn can
     /// stall) counts as ended this long after it was typed.
     static let roundLimit: TimeInterval = 2 * 60 * 60
@@ -75,7 +76,8 @@ enum PRFollowUp {
         /// Feedback handed already, by a round or the user's Address: never
         /// handed again.
         var handedFeedback: [String] = []
-        /// Failures (`CITriage.signature`) the user's Why Failed took.
+        /// Failures (`PRFollowUp.failureSignature`) the user's Why Failed
+        /// took.
         var userFailures: [String] = []
         var stop: Stop?
         /// When it last changed (`PRFollowUpStore.update`).
@@ -102,14 +104,15 @@ enum PRFollowUp {
         var feedback: PRFeedback?
         /// When the read that gave `feedback` started.
         var feedbackReadAt: TimeInterval?
-        var triage: Triage = .off
+        var triage: Triage
         /// When Nirux first saw red the checks that are red now.
         var redSince: TimeInterval?
         /// Nil when git couldn't say.
         var localHead: String?
         /// The checkout's remote for the pull request's repository.
         var baseRemote: String?
-        var hasTrackedChanges = false
+        /// Nil when git couldn't say.
+        var hasTrackedChanges: Bool?
         var isInMergeQueue = false
         /// When the read that gave `pullRequest` started.
         var readAt: TimeInterval?
@@ -160,6 +163,8 @@ enum PRFollowUp {
             switch signal(kind, entry, facts) {
             case nil:
                 continue
+            case .hold(let why)?:
+                return .wait(why)
             case .wait(let why)?:
                 // A check that never ends must not hold the next kinds.
                 firstWait = firstWait ?? why
@@ -170,7 +175,7 @@ enum PRFollowUp {
                     entry.stop = Stop(kind: kind, cause: .rounds, head: head, at: facts.now, items: items)
                     return .wait("stopped: rounds")
                 }
-                if facts.hasTrackedChanges { return .wait("tracked files changed") }
+                guard facts.hasTrackedChanges == false else { return .wait("tracked files changed, or unknown") }
                 if let refusal = facts.agentRefusal { return .wait(refusal) }
                 let round = Round(kind: kind, head: head, typedAt: facts.now, items: items)
                 entry.rounds.append(round)
@@ -194,15 +199,17 @@ enum PRFollowUp {
         guard let readAt = facts.readAt, readAt >= endedAt + readSettle else { return .wait("no read since its round") }
         guard let localHead = facts.localHead else { return .wait("the checkout's HEAD is unknown") }
         let cause: Stop.Cause?
+        let isLate = facts.now - endedAt >= settleLimit
         if localHead != head {
-            guard facts.now - endedAt >= checkoutLimit else { return .wait("the checkout isn't at the pull request's head") }
+            guard isLate else { return .wait("the checkout isn't at the pull request's head") }
             cause = .checkoutDiffers
         } else if round.head == head {
             if round.kind == .feedback, (facts.feedbackReadAt ?? 0) < endedAt + readSettle {
                 return .wait("no feedback read since its round")
             }
-            guard let present = isPresent(round.kind, items: round.items, facts) else { return .wait("GitHub is still computing") }
-            cause = present ? .nothingPushed : nil
+            let present = isPresent(round.kind, items: round.items, facts)
+            if present == nil, !isLate { return .wait("GitHub is still computing") }
+            cause = present == true ? .nothingPushed : nil
         } else {
             cause = nil
         }
@@ -229,7 +236,7 @@ enum PRFollowUp {
             if pullRequest.mergeable == "UNKNOWN" { return nil }
             return pullRequest.mergeable == "CONFLICTING"
         case .ci:
-            if CIFailure.redChecks(pullRequest).contains(where: isFixable) { return true }
+            if !fixableFailures(pullRequest).isEmpty { return true }
             return hasRunGoing(pullRequest) ? nil : false
         case .feedback:
             return facts.feedback.map { $0.items.contains { items.contains($0.url) } }
@@ -237,6 +244,9 @@ enum PRFollowUp {
     }
 
     private enum Signal {
+        /// Not now, and nothing else either.
+        case hold(String)
+        /// Not now; the next kinds may go.
         case wait(String)
         case ready(prompt: String, items: [String])
     }
@@ -246,16 +256,16 @@ enum PRFollowUp {
         let pullRequest = facts.pullRequest
         switch kind {
         case .conflict:
-            guard pullRequest.mergeable == "CONFLICTING",
-                  let base = pullRequest.baseRefName, let remote = facts.baseRemote, isPlainName(base), isPlainName(remote)
-            else { return nil }
+            guard pullRequest.mergeable == "CONFLICTING" else { return nil }
+            // No pull_request workflow runs on a conflict: no other round
+            // would get its checks.
+            guard let base = pullRequest.baseRefName, let remote = facts.baseRemote, isPlainName(base), isPlainName(remote)
+            else { return .hold("no plain remote and base to merge") }
             return .ready(prompt: "PR #\(pullRequest.number) conflicts with \(base). Run `git fetch \(remote) \(base)`, "
                 + "merge \(remote)/\(base) into this branch, resolve the conflicts, run the checks, commit and push.", items: [])
         case .ci:
-            let red = CIFailure.redChecks(pullRequest)
-            let runs = CIFailure.runs(pullRequest)
-            guard red.contains(where: isFixable), !runs.isEmpty, !entry.userFailures.contains(CITriage.signature(of: red))
-            else { return nil }
+            let runs = CIFailure.runs(of: fixableFailures(pullRequest), in: pullRequest)
+            guard !runs.isEmpty, !entry.userFailures.contains(failureSignature(pullRequest)) else { return nil }
             if hasRunGoing(pullRequest) { return .wait("checks still run") }
             switch facts.triage {
             case .pending: return .wait("the triage reads the failure")
@@ -282,8 +292,15 @@ enum PRFollowUp {
         !item.isOutdated && (item.isThread || (!item.isBot && !item.isApproval))
     }
 
-    private static func isFixable(_ check: ProjectBoard.Check) -> Bool {
-        check.conclusion.map(fixableConclusions.contains) ?? false
+    /// The red checks a commit can fix.
+    private static func fixableFailures(_ pullRequest: PRInfo) -> [ProjectBoard.Check] {
+        CIFailure.redChecks(pullRequest).filter { $0.conclusion.map(fixableConclusions.contains) ?? false }
+    }
+
+    /// What tells one failure a round may take from the next: what the
+    /// user's Why Failed records in `Entry.userFailures`.
+    static func failureSignature(_ pullRequest: PRInfo) -> String {
+        CITriage.signature(of: fixableFailures(pullRequest))
     }
 
     /// A run of the pull request's own still going: its failures may come
@@ -299,14 +316,45 @@ enum PRFollowUp {
     }
 }
 
-extension PRFollowUp.Entry {
-    /// What can't be read takes its default: an unreadable stop is no
-    /// stop, an unreadable round is left out.
+// What another build wrote differently is read on the side of typing less:
+// an unreadable round still counts, settled; an unreadable start is the
+// last change.
+
+extension PRFollowUp.Round {
+    static let unreadable = PRFollowUp.Round(kind: .ci, head: "", typedAt: 0, settledAt: 0)
+
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            since: values.lenient(.since, 0),
-            rounds: values.lenient(.rounds, [LenientValue<PRFollowUp.Round>]()).compactMap(\.value),
+            kind: try values.decode(PRFollowUp.Kind.self, forKey: .kind),
+            head: try values.decode(String.self, forKey: .head),
+            typedAt: try values.decode(TimeInterval.self, forKey: .typedAt),
+            items: values.lenient(.items, []),
+            endedAt: values.lenient(.endedAt, nil),
+            settledAt: values.lenient(.settledAt, nil)
+        )
+    }
+}
+
+extension PRFollowUp.Stop {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            kind: try values.decode(PRFollowUp.Kind.self, forKey: .kind),
+            cause: try values.decode(Cause.self, forKey: .cause),
+            head: try values.decode(String.self, forKey: .head),
+            at: try values.decode(TimeInterval.self, forKey: .at),
+            items: values.lenient(.items, [])
+        )
+    }
+}
+
+extension PRFollowUp.Entry {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            since: values.lenient(.since, values.lenient(.updatedAt, 0)),
+            rounds: values.lenient(.rounds, [LenientValue<PRFollowUp.Round>]()).map { $0.value ?? .unreadable },
             handedFeedback: values.lenient(.handedFeedback, []),
             userFailures: values.lenient(.userFailures, []),
             stop: values.lenient(.stop, nil),

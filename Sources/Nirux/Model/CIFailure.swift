@@ -25,9 +25,15 @@ enum CIFailure {
     /// The Actions runs of the red checks in the pull request's repository,
     /// each once, in order.
     static func runs(_ pullRequest: PRInfo) -> [Run] {
+        runs(of: redChecks(pullRequest), in: pullRequest)
+    }
+
+    /// The Actions runs of `checks` in the pull request's repository, each
+    /// once, in order.
+    static func runs(of checks: [ProjectBoard.Check], in pullRequest: PRInfo) -> [Run] {
         guard let own = parse(pullRequest.url), own.rest.first == "pull" else { return [] }
         var runs: [Run] = []
-        for run in redChecks(pullRequest).compactMap(run(of:))
+        for run in checks.compactMap(run(of:))
         where run.repository.lowercased() == own.repository.lowercased() && !runs.contains(run) {
             runs.append(run)
         }
