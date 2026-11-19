@@ -72,6 +72,7 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false])
         XCTAssertTrue(DailyPass.isPassing("error connecting to api.github.com"))
         XCTAssertTrue(DailyPass.isPassing("HTTP 502: Bad Gateway (https://api.github.com/graphql)"))
+        XCTAssertTrue(DailyPass.isPassing("GraphQL: API rate limit exceeded for user ID 1."))
         XCTAssertFalse(DailyPass.isPassing("To get started with GitHub CLI, please run:  gh auth login"))
         XCTAssertEqual(reports[3].problems, ["only the \(DailyPass.mergedLimit) newest merged pull requests were read"])
     }
@@ -302,6 +303,8 @@ final class DailyPassTests: XCTestCase {
         let typed = DailyPassState(start: now - 30 * hour, end: now - 5 * hour, typedAt: now - 4.5 * hour)
         XCTAssertEqual(typed.reading(now: now - 4 * hour).window.start, now - 5 * hour, "a typed line makes the next call a new pass")
         XCTAssertNotNil(typed.reading(now: now - 4 * hour).next)
+        let checked = DailyPassState(start: now - 30 * hour, end: now - 5 * hour, checkedAt: now - 5 * hour)
+        XCTAssertNotNil(checked.reading(now: now - 4 * hour).next, "a window a quiet check read isn't read again")
         XCTAssertEqual(DailyPassState(start: 0, end: 1).reading(now: now).window.start, now - 7 * 24 * hour)
 
         // Once read: marked read, unless GitHub may answer next time; a

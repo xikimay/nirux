@@ -107,16 +107,23 @@ extension NiruxShellView {
     typealias DailyPassSend = @MainActor (ColumnState, String) -> Void
 
     /// Once a minute on the app's shell; the user's absence counts from
-    /// the Mac's last wake.
+    /// the Mac's last wake, its screens' wake or their unlock at the
+    /// earliest: one of them may mean the user is back, in another app.
     func startDailyPassWatch() {
         guard dailyPassTimer == nil else { return }
         dailyPassTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkDailyPasses() }
         }
-        dailyPassWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.dailyPassWokeAt = Date().timeIntervalSince1970 }
+        let system = NSWorkspace.shared.notificationCenter
+        let distributed = DistributedNotificationCenter.default()
+        let wakes: [(NotificationCenter, Notification.Name)] = [
+            (system, NSWorkspace.didWakeNotification), (system, NSWorkspace.screensDidWakeNotification),
+            (distributed, Notification.Name("com.apple.screenIsUnlocked"))
+        ]
+        dailyPassWakeObservers = wakes.map { center, name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.dailyPassWokeAt = Date().timeIntervalSince1970 }
+            }
         }
     }
 
@@ -184,9 +191,14 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         let free = pty.acceptsMissionMessage(runningSince: now, snapshot: snapshot)
             && pty.agentQuestion(foreground: pty.foregroundProcess(snapshot: snapshot)) == nil
+        let proposals = ruleProposals(inSpace: lead.profileID)
         let waiting = MissionStore.shared.pendingPromptDeliveries(now: now).contains { missionRecipient(of: $0) === column }
-            || pendingLeadNotices.contains { $0.workspaceID == lead.id }
-            || !ruleProposals(inSpace: lead.profileID).toTell.isEmpty
+            || pendingLeadNotices.contains { notice in
+                notice.workspaceID == lead.id && notice.agentUUID == column.agentUUID
+                    && now - notice.queuedAt < MissionEventCLI.parentMessageLifetime
+            }
+            // Decisions a newer Nirux's file keeps are never told.
+            || proposals.readOnlyReason == nil && !proposals.toTell.isEmpty
         return DailyPass.isQuiet(
             promptFree: free, lastHookAt: pty.lastAgentHookAt, messageWaiting: waiting,
             awaySince: catchUpState.tracker.awaySince.map { max($0, dailyPassWokeAt) }, now: now

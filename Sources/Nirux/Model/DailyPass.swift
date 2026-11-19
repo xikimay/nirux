@@ -101,11 +101,11 @@ enum DailyPass {
     static let rerunReach: TimeInterval = 2 * 86_400
 
     /// What gh says when the network or GitHub may answer next time (no
-    /// network yet after a wake, a 5xx).
+    /// network yet after a wake, a rate limit, a 5xx).
     static func isPassing(_ message: String) -> Bool {
         let lowered = message.lowercased()
         return ["error connecting", "could not resolve", "connection refused", "connection reset", "network is unreachable",
-                "timeout", "timed out", "http 500", "http 502", "http 503", "http 504"].contains { lowered.contains($0) }
+                "timeout", "timed out", "rate limit", "http 500", "http 502", "http 503", "http 504"].contains { lowered.contains($0) }
     }
 
     static func mergedArguments(repository: String, since: TimeInterval) -> [String] {
@@ -696,7 +696,9 @@ struct DailyPassState: Codable, Equatable, Sendable {
     /// line since that read: that call is a new pass. `extending` false
     /// reads from the last read only (the daily check's news).
     func reading(now: TimeInterval, extending: Bool = true) -> (window: DailyPass.Window, next: DailyPassState?) {
-        if extending, let start, let end, now - end < Self.extendWithin, (typedAt ?? -.infinity) <= end {
+        // Not over a window a quiet check marked read either.
+        if extending, let start, let end, now - end < Self.extendWithin, (typedAt ?? -.infinity) <= end,
+           (checkedAt ?? -.infinity) < end {
             return (DailyPass.Window(start: max(start, now - Self.longestWindow), end: now), nil)
         }
         let window = DailyPass.Window(start: max(end ?? now - Self.firstWindow, now - Self.longestWindow), end: now)
