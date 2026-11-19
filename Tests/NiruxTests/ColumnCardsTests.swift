@@ -412,6 +412,46 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// A moved card passes over the one it swaps with: it rises on its way,
+    /// its shadow over the other, which dims under it a moment; then both
+    /// lie flat again. With Reduce motion it simply moves.
+    func testAMovedCardPassesOverItsNeighbour() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            workspace.focusedIndex = 0
+            let moved = workspace.columns[0], passed = workspace.columns[1]
+            @MainActor func shades(of column: ColumnState) -> [CALayer] {
+                column.view.layer?.sublayers?.filter { $0.animation(forKey: NiruxShellView.liftKey) != nil } ?? []
+            }
+
+            shell.moveColumn(.right)
+            XCTAssertTrue(workspace.columns[1] === moved)
+            let rise = try XCTUnwrap(moved.view.layer?.animation(forKey: NiruxShellView.liftKey) as? CAKeyframeAnimation)
+            XCTAssertEqual(rise.values as? [CGFloat], [0, NiruxShellView.liftHeight, 0], "it rises on its way")
+            XCTAssertEqual(moved.view.layer?.zPosition, 1, "over the other")
+            XCTAssertEqual(moved.shadow?.layer?.zPosition, 1, "its shadow over the other")
+            XCTAssertNotNil(moved.shadow?.layer?.animation(forKey: NiruxShellView.liftKey))
+            XCTAssertEqual(shades(of: passed).count, 1, "the other dims under it")
+            XCTAssertEqual(passed.view.layer?.zPosition, 0)
+
+            waitUntil("flat again", timeout: 2) { moved.view.layer?.zPosition == 0 }
+            XCTAssertEqual(moved.shadow?.layer?.zPosition, 0)
+            XCTAssertTrue(passed.view.layer?.sublayers?.allSatisfy { $0.animation(forKey: NiruxShellView.liftKey) == nil } ?? true)
+            XCTAssertEqual(moved.lifts, 0)
+
+            shell.sideEffects.reducesMotion = { true }
+            shell.moveColumn(.left)
+            XCTAssertTrue(workspace.columns[0] === moved)
+            XCTAssertEqual(moved.view.layer?.zPosition, 0, "Reduce motion: it simply moves")
+            XCTAssertTrue(shades(of: passed).isEmpty)
+        }
+    }
+
     /// A double-click resets the width and leaves no drag behind it.
     func testADoubleClickOnAHandleLeavesNoDragBehind() {
         let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))

@@ -484,7 +484,9 @@ the text stays flat and sharp.
   transparent, 0.38 s. A closed one recedes to 93 % as it fades, 0.24 s,
   then the others glide back. A card a neighbour pushed or let go glides
   to its place from where it showed (0.36 s), its light and shadow with
-  it; only in the workspace on screen. Explicit animations on the card's layer
+  it; only in the workspace on screen. A moved one (⇧⌘→) passes over the
+  card it swaps with: it rises 10 pt on its way, its shadow falling on the
+  other, which dims under it a moment. Explicit animations on the card's layer
   (AppKit doesn't animate a view's layer in an animation group), ends on
   time; with Reduce motion a new card is simply there and a closed one
   only fades.

@@ -778,9 +778,57 @@ extension NiruxShellView {
 
     func moveColumn(_ dir: WorkspaceState.MoveDir) {
         guard let workspace = activeWorkspace else { return }
+        let from = workspace.focusedIndex
         workspace.moveColumn(dir)
         relayout(animated: true)
+        if agentLightsMayMove, workspace.focusedIndex != from,
+           let moved = workspace.columns[safe: workspace.focusedIndex], let passed = workspace.columns[safe: from] {
+            lift(moved, over: passed)
+        }
         focusActiveTerminal(in: window)
+    }
+
+    static let liftHeight: CGFloat = 10
+    static let liftKey = "lift"
+    /// How dark the card passed under gets, half-way.
+    static let passShade: Float = 0.35
+
+    /// A moved card passes over the one it swaps with (study P8), while
+    /// both glide: it rises a little on its way, its shadow falling on the
+    /// other, which dims under it a moment.
+    func lift(_ moved: ColumnState, over passed: ColumnState) {
+        let duration = WorkspaceState.glideDuration
+        let curve = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.3, 1)
+        let raised = [moved.view, moved.light, moved.shadow].compactMap { $0?.layer }
+        moved.lifts += 1
+        for layer in raised {
+            layer.zPosition = 1
+            let rise = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            rise.values = [0, Self.liftHeight, 0] as [CGFloat]
+            rise.isAdditive = true
+            rise.duration = duration
+            rise.timingFunction = curve
+            layer.add(rise, forKey: Self.liftKey)
+        }
+        let shade = CALayer()
+        if let under = passed.view.layer {
+            shade.frame = under.bounds
+            shade.backgroundColor = Theme.Color.base.cgColor
+            shade.opacity = 0
+            under.addSublayer(shade)
+            let dim = CAKeyframeAnimation(keyPath: "opacity")
+            dim.values = [0, Self.passShade, 0] as [Float]
+            dim.duration = duration
+            shade.add(dim, forKey: Self.liftKey)
+        }
+        // On time, not on the animations' completion, which a window out of
+        // view may never report.
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak moved] in
+            shade.removeFromSuperlayer()
+            guard let moved else { return }
+            moved.lifts -= 1
+            if moved.lifts == 0 { raised.forEach { $0.zPosition = 0 } }
+        }
     }
 
     // MARK: - Workspace naming

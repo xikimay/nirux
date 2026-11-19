@@ -132,6 +132,9 @@ final class ColumnState {
     var shadow: ColumnShadowView?
     /// Its card fades in (`NiruxShellView.addColumn`).
     var isArriving = false
+    /// Moves on their way that lift its card over a neighbour
+    /// (`NiruxShellView.lift`).
+    var lifts = 0
 
     /// ⌘F find bar, created on first use, and the terminal search it
     /// drives; a browser column's bar drives its `pageFind`

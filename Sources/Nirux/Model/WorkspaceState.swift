@@ -1136,6 +1136,7 @@ extension WorkspaceState {
     }
 
     static let cardGlideKey = "cardGlide"
+    static let glideDuration: CFTimeInterval = 0.36
 
     /// Where a card shows in the strip, a glide on its way included, and
     /// how wide it is.
@@ -1153,7 +1154,7 @@ extension WorkspaceState {
             glide.fromValue = dx
             glide.toValue = 0
             glide.isAdditive = true
-            glide.duration = 0.36
+            glide.duration = glideDuration
             glide.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.9, 0.3, 1)
             layer.add(glide, forKey: cardGlideKey)
         }
