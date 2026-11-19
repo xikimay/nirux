@@ -21,7 +21,9 @@ extension NiruxShellView {
         case .failure(let refusal): return answer(refusal.reason, true)
         }
         let review = ReviewFindings.Review(
-            findings: findings, workspace: task.id, task: task.gitBranch ?? task.taskFolder ?? task.title, pullRequest: task.prInfo?.number
+            findings: findings, workspace: task.id, missionBranch: (leadMission(of: task, lead: leadID) ?? ownMission(of: task))?.branch,
+            task: task.gitBranch ?? task.taskFolder ?? task.title, pullRequest: task.prInfo?.number,
+            repository: repositoryAnchor(of: task, in: space)?.folder
         )
         ReviewFindings.record(review, spaceID: space.id) { outcome in
             switch outcome {
@@ -38,11 +40,12 @@ extension NiruxShellView {
         let (window, next) = dailyPassState(inSpace: space.id).reading(now: Date().timeIntervalSince1970)
         gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
             guard let self, let facts else { return answer("This space keeps no daily pass.", true) }
+            let digest = DailyPass.digest(facts)
             // On what holds now: a check may have saved meanwhile.
             let saved = self.dailyPassState(inSpace: space.id)
-                .afterReading(next, readsAgain: facts.readsAgain, note: facts.note(at: window.end))
+                .afterReading(next, readsAgain: facts.readsAgain, note: facts.note(at: window.end), readUntil: digest.readUntil)
             self.saveDailyPassState(saved, spaceID: space.id)
-            answer(DailyPass.digest(facts), false)
+            answer(digest.text, false)
         }
     }
 
@@ -262,13 +265,10 @@ extension NiruxShellView {
         completion: @escaping @MainActor @Sendable ([DailyPass.RepositoryReport], [ReviewFindings.Entry]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            var names: [String] = []
-            for folder in folders {
-                guard case .gitHub(let name, _) = GitHubBaseRemote.read(at: folder),
-                      !names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { continue }
-                names.append(name)
-            }
-            let reports = DailyPass.readGitHub(names, window: window, read: DailyPass.installedGitHub)
+            let remotes = DailyPass.repositories(from: folders.map { ($0, GitHubBaseRemote.read(at: $0)) })
+            var reports = DailyPass.readGitHub(remotes.gitHub.map(\.name), window: window, read: DailyPass.installedGitHub)
+            for index in reports.indices { reports[index].folders = remotes.gitHub[index].folders }
+            reports += remotes.unread
             let findings = ReviewFindings.lines.queue.sync {
                 ReviewFindings.lines.trim(spaceID: spaceID)
                 return ReviewFindings.lines.load(spaceID: spaceID)

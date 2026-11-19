@@ -343,7 +343,7 @@ extension NiruxShellView {
         if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
         if let folder = task.taskFolder {
             line += " · no repository · folder \(MissionPromptText.quoted(folder))"
-        } else if let repository = leadRepositoryName(of: task, in: space) {
+        } else if let repository = repositoryAnchor(of: task, in: space)?.name {
             line += " · \(repository)"
         }
         if task.isInactive { line += " · inactive" }
@@ -376,15 +376,15 @@ extension NiruxShellView {
         return "\n  \(source): “\(status)”"
     }
 
-    /// The space's repository a task works in, by name: its folder is the
-    /// main checkout, in it, or one of the worktrees Nirux places beside it
+    /// The space's anchor a task works in: its folder is the main
+    /// checkout, in it, or one of the worktrees Nirux places beside it
     /// (`<checkout>.<branch>`, see `GitWorktree.create`). No git: a guess.
-    private func leadRepositoryName(of task: WorkspaceState, in space: WorkspaceProfile) -> String? {
+    func repositoryAnchor(of task: WorkspaceState, in space: WorkspaceProfile) -> SpaceAnchor? {
         let folder = URL(fileURLWithPath: task.cwd).standardizedFileURL.path
         return space.anchors.first { anchor in
             guard let anchorFolder = anchor.folder.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) else { return false }
             return folder == anchorFolder || folder.hasPrefix(anchorFolder + "/") || folder.hasPrefix(anchorFolder + ".")
-        }?.name
+        }
     }
 
     /// What its agents do: working, needs the user (and for what), idle.

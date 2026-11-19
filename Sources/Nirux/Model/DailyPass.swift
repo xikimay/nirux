@@ -62,6 +62,9 @@ enum DailyPass {
     struct RepositoryReport: Equatable, Sendable {
         /// `owner/name`.
         var name: String
+        /// The space's folders it is the base remote of: a review recorded
+        /// in one counts for its pull requests.
+        var folders: [String] = []
         var merged: [MergedPullRequest] = []
         var reruns: [Rerun] = []
         /// Why part of it couldn't be read.
@@ -86,9 +89,9 @@ enum DailyPass {
             return .failure(ReadFailure(message: "gh didn’t answer within 30 s", retryable: true))
         }
         guard result.terminationStatus == 0 else {
-            let message = WorktreeCleanup.firstLine(String(decoding: result.standardError, as: UTF8.self))
-            let text = message ?? "gh exited with status \(result.terminationStatus)"
-            return .failure(ReadFailure(message: text, retryable: isPassing(text)))
+            return .failure(readFailure(GitHubCLIQueueClient.Output(
+                status: result.terminationStatus, standardOutput: result.standardOutput, standardError: result.standardError
+            )))
         }
         return .success(result.standardOutput)
     }
@@ -100,17 +103,26 @@ enum DailyPass {
     /// started: `--created` reads a run's first attempt.
     static let rerunReach: TimeInterval = 2 * 86_400
 
-    /// What gh says when the network or GitHub may answer next time (no
-    /// network yet after a wake, a rate limit, a 5xx).
-    static func isPassing(_ message: String) -> Bool {
-        let lowered = message.lowercased()
-        return ["error connecting", "could not resolve", "connection refused", "connection reset", "network is unreachable",
-                "timeout", "timed out", "rate limit", "http 500", "http 502", "http 503", "http 504"].contains { lowered.contains($0) }
+    /// A failed gh call, as the merge queue reads it: being signed out, or
+    /// having no access to the repository, holds until someone acts;
+    /// anything else may answer next time (no network yet, a timeout, a
+    /// rate limit, a 5xx).
+    static func readFailure(_ output: GitHubCLIQueueClient.Output) -> ReadFailure {
+        let error = GitHubCLIQueueClient.classify(output)
+        let message = GitHubCLIQueueClient.message(of: error)
+        switch error {
+        case .notSignedIn, .ghMissing:
+            return ReadFailure(message: message)
+        case .refused(let status, _) where status.map({ [401, 403, 404].contains($0) }) ?? message.contains("Could not resolve to a Repository"):
+            return ReadFailure(message: message)
+        default:
+            return ReadFailure(message: message, retryable: true)
+        }
     }
 
     static func mergedArguments(repository: String, since: TimeInterval) -> [String] {
         [
-            "pr", "list", "--repo", repository, "--state", "merged", "--search", "merged:>=" + isoTime(since),
+            "pr", "list", "--repo", repository, "--state", "merged", "--search", "merged:>=\(isoTime(since)) sort:updated-desc",
             "--json", "number,title,headRefName,mergedAt,body,commits", "--limit", "\(mergedLimit)"
         ]
     }
@@ -120,6 +132,35 @@ enum DailyPass {
             "run", "list", "--repo", repository, "--created", ">=" + isoTime(since - rerunReach),
             "--json", "databaseId,attempt,headBranch,conclusion,workflowName,startedAt", "--limit", "1000"
         ]
+    }
+
+    /// The space's GitHub repositories, each with the folders whose base
+    /// remote names it, in order; and, for each folder whose remote
+    /// couldn't be read (git or ssh didn't answer), a report that reads
+    /// the window again.
+    static func repositories(
+        from remotes: [(folder: String, read: GitHubBaseRemote.Read)]
+    ) -> (gitHub: [(name: String, folders: [String])], unread: [RepositoryReport]) {
+        var gitHub: [(name: String, folders: [String])] = []
+        var unread: [RepositoryReport] = []
+        for (folder, read) in remotes {
+            switch read {
+            case .gitHub(let name, _):
+                if let index = gitHub.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+                    gitHub[index].folders.append(folder)
+                } else {
+                    gitHub.append((name, [folder]))
+                }
+            case .unread:
+                let name = (folder as NSString).lastPathComponent
+                unread.append(RepositoryReport(
+                    name: name, folders: [folder], problems: ["its remote couldn’t be read (git or ssh didn’t answer)"], readsAgain: true
+                ))
+            case .noRemote, .notGitHub, .notARepository:
+                continue
+            }
+        }
+        return (gitHub, unread)
     }
 
     /// Each repository's pull requests merged and runs rerun in the
@@ -143,7 +184,9 @@ enum DailyPass {
         switch read(mergedArguments(repository: name, since: window.start)).map(mergedPullRequests) {
         case .success(let merged?):
             report.merged = merged.filter { window.contains($0.mergedAt) }
-            if merged.count >= mergedLimit { report.problems.append("only the \(mergedLimit) newest merged pull requests were read") }
+            if merged.count >= mergedLimit {
+                report.problems.append("only the \(mergedLimit) most recently updated merged pull requests were read")
+            }
         case .success(nil): failed("merged pull requests", ReadFailure(message: "gh’s answer wasn’t its JSON"))
         case .failure(let failure): failed("merged pull requests", failure)
         }
@@ -188,11 +231,19 @@ enum DailyPass {
         }
     }
 
-    /// N in a headline's "round N", in any case: "review round 2", "the
-    /// Lead's round 1".
+    /// A headline's "round N" that names a review round: after "review"
+    /// or "the Lead's", or followed by "of" ("review round 2", "the Lead's
+    /// round 1", "round 1 of the floors"); never "round 60 seconds up".
+    static let maxRound = 10
     static func roundNumber(_ headline: String) -> Int? {
-        let words = headline.lowercased().split { !$0.isLetter && !$0.isNumber }
-        return zip(words, words.dropFirst()).first { $0.0 == "round" && Int($0.1) != nil }.flatMap { Int($0.1) }
+        let words = headline.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        for index in words.indices.dropLast() where words[index] == "round" {
+            guard let number = Int(words[index + 1]), (1...maxRound).contains(number) else { continue }
+            let before = words[..<index]
+            let named = before.contains("review") || zip(before, before.dropFirst()).contains { $0 == "lead" && $1 == "s" }
+            if named || words.dropFirst(index + 2).first == "of" { return number }
+        }
+        return nil
     }
 
     /// A body's "## Why" section on one line, else its first paragraph.
@@ -252,6 +303,9 @@ enum DailyPass {
         /// (or title).
         let message: String
         let sentAt: TimeInterval
+        /// When what put it in the window happened (typed, given up,
+        /// answered…): a read that leaves it out ends there.
+        var at: TimeInterval
         /// What happened to it, after its sending time.
         let detail: String
         let excerpt: String
@@ -288,14 +342,16 @@ enum DailyPass {
         let window: Window
         let timeZone: TimeZone
 
-        private func fact(_ kind: MissionFact.Kind, _ message: String, _ detail: String, answer: MissionEvent? = nil) -> MissionFact {
-            var fact = MissionFact(kind: kind, message: message, sentAt: event.timestamp, detail: detail, excerpt: quote(event.message))
+        private func fact(
+            _ kind: MissionFact.Kind, _ message: String, _ detail: String, at: TimeInterval, answer: MissionEvent? = nil
+        ) -> MissionFact {
+            var fact = MissionFact(kind: kind, message: message, sentAt: event.timestamp, at: at, detail: detail, excerpt: quote(event.message))
             fact.answer = answer.map { quote($0.message, maxLength: maxAnswerLength) }
             fact.answeredByUser = answer?.answeredByUser == true
             return fact
         }
 
-        private func at(_ time: TimeInterval) -> String {
+        private func clockAt(_ time: TimeInterval) -> String {
             clock(time, timeZone: timeZone)
         }
 
@@ -306,20 +362,20 @@ enum DailyPass {
             if let expired = event.expiredAt {
                 // Its time ran out, or it went in only partly.
                 guard window.contains(expired) else { return nil }
-                return fact(.givenUp, message, "given up after \(duration(expired - event.timestamp))")
+                return fact(.givenUp, message, "given up after \(duration(expired - event.timestamp))", at: expired)
             }
             guard let typed = event.childConsumedAt else {
                 let waited = window.end - event.timestamp
                 guard window.contains(event.timestamp), waited >= heldAfter else { return nil }
-                return fact(.held, message, "still untyped after \(duration(waited))")
+                return fact(.held, message, "still untyped after \(duration(waited))", at: event.timestamp)
             }
             guard window.contains(typed) else { return nil }
             let result = mission.events.first { $0.kind == .completed && $0.timestamp > event.timestamp && $0.timestamp < typed }
             if let result {
-                return fact(.crossed, message, "typed at \(at(typed)), after its result (\(at(result.timestamp)))")
+                return fact(.crossed, message, "typed at \(clockAt(typed)), after its result (\(clockAt(result.timestamp)))", at: typed)
             }
             guard typed - event.timestamp >= heldAfter else { return nil }
-            return fact(.held, message, "typed \(duration(typed - event.timestamp)) later")
+            return fact(.held, message, "typed \(duration(typed - event.timestamp)) later", at: typed)
         }
 
         /// A question or a result held on its way to the parent; a question
@@ -330,7 +386,7 @@ enum DailyPass {
             var facts: [MissionFact] = []
             if let typed = event.parentTypedAt {
                 if window.contains(typed), typed - event.timestamp >= heldAfter {
-                    facts.append(fact(.held, message, "typed into its parent \(duration(typed - event.timestamp)) later"))
+                    facts.append(fact(.held, message, "typed into its parent \(duration(typed - event.timestamp)) later", at: typed))
                 }
             } else if event.handedToUserBecause == nil {
                 // Never typed into the Lead: Nirux types one for an hour only.
@@ -338,18 +394,21 @@ enum DailyPass {
                 if let answer, answer.answeredByUser != true, mission.reportsToLead == true {
                     if window.contains(answer.timestamp), answer.timestamp - event.timestamp >= heldAfter {
                         let waited = duration(answer.timestamp - event.timestamp)
-                        facts.append(fact(.held, message, "answered \(waited) later, never typed into its parent"))
+                        facts.append(fact(.held, message, "answered \(waited) later, never typed into its parent", at: answer.timestamp))
                     }
                 } else if answer == nil, event.parentConsumedAt == nil, window.contains(event.timestamp),
                           window.end - event.timestamp >= heldAfter {
-                    facts.append(fact(.held, message, "not typed into its parent after \(duration(window.end - event.timestamp))"))
+                    let waited = duration(window.end - event.timestamp)
+                    facts.append(fact(.held, message, "not typed into its parent after \(waited)", at: event.timestamp))
                 }
             }
             guard event.kind == .question else { return facts }
-            if let reason = event.handedToUserBecause, window.contains(answer?.timestamp ?? event.timestamp) {
-                facts.append(fact(.handedToUser, message, "why: \(quote(reason))", answer: answer))
+            // Handed over (answered or not) in the window: by when it was.
+            let handed = answer?.timestamp ?? event.handedToUserAt ?? event.timestamp
+            if let reason = event.handedToUserBecause, window.contains(handed) {
+                facts.append(fact(.handedToUser, message, "why: \(quote(reason))", at: handed, answer: answer))
             } else if let answer, answer.answeredByUser == true, window.contains(answer.timestamp) {
-                facts.append(fact(.answeredByUser, message, "the user answered it in Nirux", answer: answer))
+                facts.append(fact(.answeredByUser, message, "the user answered it in Nirux", at: answer.timestamp, answer: answer))
             }
             return facts
         }
@@ -362,7 +421,8 @@ enum DailyPass {
                       other.kind == .question && other.timestamp > question.timestamp && other.timestamp < typed
                   })
             else { return nil }
-            return fact(.crossed, "answer to \(mission.branch)", "typed at \(at(typed)), after its newer question (\(at(newer.timestamp)))")
+            let detail = "typed at \(clockAt(typed)), after its newer question (\(clockAt(newer.timestamp)))"
+            return fact(.crossed, "answer to \(mission.branch)", detail, at: typed)
         }
     }
 
@@ -402,30 +462,66 @@ enum DailyPass {
         }
     }
 
-    /// What `daily_pass` answers: what to do, then the facts, cut past
+    /// What `daily_pass` answers, and how far it read: up to the first
+    /// fact it had to leave out (it says so), else the window's end. The
+    /// window is marked read up to there only.
+    struct Digest: Equatable, Sendable {
+        let text: String
+        let readUntil: TimeInterval
+    }
+
+    /// How much a section lists, lowered until the digest fits
     /// `maxCharacters`.
-    static func digest(_ facts: Facts, timeZone: TimeZone = .current) -> String {
-        let since = clock(facts.window.start, timeZone: timeZone)
+    private struct Limits {
+        let items: Int
+        let sightings: Int
+    }
+
+    private static let limits = [
+        Limits(items: maxItems, sightings: maxSightings), Limits(items: 15, sightings: 3), Limits(items: 8, sightings: 2),
+        Limits(items: 4, sightings: 1)
+    ]
+
+    /// A section, and the times of the facts it left out.
+    private struct Part {
+        var text: String?
+        var leftOut: [TimeInterval] = []
+    }
+
+    static func digest(_ facts: Facts, timeZone: TimeZone = .current) -> Digest {
+        let window = facts.window
+        let since = clock(window.start, timeZone: timeZone)
         let header = "# Daily pass · \(facts.spaceName) · since \(since)"
         guard facts.hasNews else {
             let merged = facts.repositories.contains { !$0.problems.isEmpty } ? "" : "no pull request merged, "
             let quiet = header + "\n\nNothing happened since \(since): no review recorded, \(merged)no CI failure, "
                 + "no Mission message held, no rule decided. Nothing to propose: say so in one line."
-            return ([quiet] + [gitHubSection(facts)].compactMap { $0 }).joined(separator: "\n\n")
+            return Digest(text: ([quiet] + [gitHubSection(facts)].compactMap { $0 }).joined(separator: "\n\n"), readUntil: window.end)
         }
-        // The rules before the facts: a cut takes the end.
-        let sections = [
-            instructions(facts),
-            gitHubSection(facts),
-            rulesSection(facts, timeZone: timeZone),
-            findingsSection(facts, timeZone: timeZone),
-            pullRequestsSection(facts),
-            ciSection(facts, timeZone: timeZone),
-            missionsSection(facts, timeZone: timeZone)
-        ].compactMap { $0 }
-        let text = ([header] + sections).joined(separator: "\n\n")
-        guard text.count > maxCharacters else { return text }
-        return String(text.prefix(maxCharacters)) + "\n… (cut: the digest passed \(maxCharacters) characters)"
+        var shown = Digest(text: header, readUntil: window.start)
+        for limit in limits {
+            // The rules before the facts.
+            let parts = [
+                Part(text: instructions(facts)), Part(text: gitHubSection(facts)), rulesSection(facts, limit),
+                findingsSection(facts, limit), pullRequestsSection(facts, limit), ciSection(facts, limit, timeZone: timeZone),
+                missionsSection(facts, limit, timeZone: timeZone)
+            ]
+            let text = ([header] + parts.compactMap(\.text)).joined(separator: "\n\n")
+            let readUntil = min(window.end, max(window.start, parts.flatMap(\.leftOut).min() ?? window.end))
+            shown = Digest(text: text, readUntil: readUntil)
+            if text.count <= maxCharacters { break }
+        }
+        var text = shown.text
+        var readUntil = shown.readUntil
+        if text.count > maxCharacters {
+            text = String(text.prefix(maxCharacters)) + "\n… (cut at \(maxCharacters) characters)"
+            readUntil = window.start
+        }
+        if readUntil < window.end {
+            text += "\n\nLeft out: what came after \(clock(readUntil, timeZone: timeZone)). The window is read up to there only: "
+                + "call daily_pass again for the rest once you have proposed."
+        }
+        return Digest(text: text, readUntil: readUntil)
     }
 
     private static func instructions(_ facts: Facts) -> String {
@@ -460,61 +556,77 @@ enum DailyPass {
 
     /// The kinds seen in the window, with where else they showed up in
     /// the last 30 days.
-    private static func findingsSection(_ facts: Facts, timeZone: TimeZone) -> String? {
-        let kinds = ReviewFindings.kinds(facts.findings).filter { kind in kind.sightings.contains { facts.window.contains($0.time) } }
-        guard !kinds.isEmpty else { return nil }
-        let lines = kinds.prefix(maxItems).map { kind in
+    private static func findingsSection(_ facts: Facts, _ limit: Limits) -> Part {
+        let window = facts.window
+        let kinds = ReviewFindings.kinds(facts.findings).filter { kind in kind.sightings.contains { window.contains($0.time) } }
+        guard !kinds.isEmpty else { return Part() }
+        let left = kinds.dropFirst(limit.items).flatMap(\.sightings) + kinds.prefix(limit.items).flatMap { $0.sightings.dropLast(limit.sightings) }
+        let lines = kinds.prefix(limit.items).map { kind in
             let tasks = kind.taskCount == 1 ? "1 task" : "\(kind.taskCount) tasks"
-            let sightings = kind.sightings.suffix(maxSightings).map { "\($0.handle) round \($0.round) “\(quote($0.text))”" }
+            let sightings = kind.sightings.suffix(limit.sightings).map { "\($0.handle) round \($0.round) “\(quote($0.text))”" }
             return "- \(kind.name) · \(tasks): " + sightings.joined(separator: "; ")
         }
-        return section("Review findings by kind (record_review, last 30 days)", lines, total: kinds.count)
+        return Part(
+            text: section("Review findings by kind (record_review, last 30 days)", lines, total: kinds.count),
+            leftOut: left.map(\.time).filter { window.contains($0) }
+        )
     }
 
-    private static func pullRequestsSection(_ facts: Facts) -> String? {
-        // By branch: a task's reviews before its pull request count.
-        let recordedRounds = Dictionary(facts.findings.map { ($0.task, $0.round) }, uniquingKeysWith: max)
+    private static func pullRequestsSection(_ facts: Facts, _ limit: Limits) -> Part {
+        var leftOut: [TimeInterval] = []
         let parts = facts.repositories.compactMap { report -> String? in
             guard !report.merged.isEmpty else { return nil }
-            let lines = report.merged.prefix(maxItems).map { pull in
+            // A task's reviews recorded in this repository, by branch:
+            // those before its pull request opened count.
+            let recorded = facts.findings.filter { $0.repository.map(report.folders.contains) ?? false }
+            let recordedRounds = Dictionary(recorded.map { ($0.task, $0.round) }, uniquingKeysWith: max)
+            leftOut += report.merged.dropFirst(limit.items).map(\.mergedAt)
+            let lines = report.merged.prefix(limit.items).map { pull in
                 let rounds = max(pull.rounds, recordedRounds[pull.branch] ?? 0)
                 let reruns = report.reruns.filter { $0.branch == pull.branch }.count
                 var line = "- #\(pull.number) “\(pull.title)” · branch \(pull.branch)"
                 line += rounds == 1 ? " · 1 review round" : " · \(rounds) review rounds"
-                if reruns > 0 { line += reruns == 1 ? " · 1 rerun" : " · \(reruns) reruns" }
+                if reruns > 0 { line += reruns == 1 ? " · 1 run rerun" : " · \(reruns) runs rerun" }
                 if let why = pull.why { line += "\n  Why: \(why)" }
                 if !pull.roundCommits.isEmpty {
-                    line += "\n  Round commits: " + pull.roundCommits.prefix(maxSightings).map { "“\(quote($0))”" }.joined(separator: "; ")
+                    line += "\n  Round commits: " + pull.roundCommits.prefix(limit.sightings).map { "“\(quote($0))”" }.joined(separator: "; ")
                 }
                 return line
             }
             return section("Pull requests merged in \(report.name)", lines, total: report.merged.count)
         }
-        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+        return Part(text: parts.isEmpty ? nil : parts.joined(separator: "\n\n"), leftOut: leftOut)
     }
 
-    private static func ciSection(_ facts: Facts, timeZone: TimeZone) -> String? {
-        var lines = facts.triagedRuns.map { run in
+    /// Learned flaky tests first (their time isn't kept: one left out
+    /// keeps the whole window unread), then runs by time.
+    private static func ciSection(_ facts: Facts, _ limit: Limits, timeZone: TimeZone) -> Part {
+        var items: [(time: TimeInterval?, line: String)] = facts.flakyTests.map {
+            (nil, "- learned flaky (failed, then passed on a rerun of the same commit): \($0)")
+        }
+        items += facts.triagedRuns.map { run in
             var line = "- run \(run.id)" + (run.pullRequest.map { " (#\($0))" } ?? "") + ": \(run.verdict)"
             if let reason = run.reason { line += ", \(quote(reason))" }
-            if !run.tests.isEmpty { line += " · failed: " + run.tests.prefix(maxSightings).joined(separator: ", ") }
-            return line + " · triaged \(clock(run.triagedAt, timeZone: timeZone))"
+            if !run.tests.isEmpty { line += " · failed: " + run.tests.prefix(limit.sightings).joined(separator: ", ") }
+            return (run.triagedAt, line + " · triaged \(clock(run.triagedAt, timeZone: timeZone))")
         }
-        lines += facts.flakyTests.map { "- learned flaky (failed, then passed on a rerun of the same commit): \($0)" }
         for report in facts.repositories {
             let merged = Dictionary(report.merged.map { ($0.branch, $0.number) }, uniquingKeysWith: { first, _ in first })
-            lines += report.reruns.map { rerun in
-                "- rerun: run \(rerun.id) · \(rerun.workflow) · branch \(rerun.branch)"
-                    + (merged[rerun.branch].map { " (#\($0))" } ?? "") + " · attempt \(rerun.attempt), \(rerun.conclusion)"
+            items += report.reruns.sorted { $0.startedAt < $1.startedAt }.map { rerun in
+                (rerun.startedAt, "- rerun: run \(rerun.id) · \(rerun.workflow) · branch \(rerun.branch)"
+                    + (merged[rerun.branch].map { " (#\($0))" } ?? "") + " · attempt \(rerun.attempt), \(rerun.conclusion)")
             }
         }
-        guard !lines.isEmpty else { return nil }
-        return section("CI", Array(lines.prefix(maxItems)), total: lines.count)
+        guard !items.isEmpty else { return Part() }
+        return Part(
+            text: section("CI", items.prefix(limit.items).map(\.line), total: items.count),
+            leftOut: items.dropFirst(limit.items).map { $0.time ?? facts.window.start }
+        )
     }
 
-    private static func missionsSection(_ facts: Facts, timeZone: TimeZone) -> String? {
-        guard !facts.missions.isEmpty else { return nil }
-        let lines = facts.missions.prefix(maxItems).map { fact in
+    private static func missionsSection(_ facts: Facts, _ limit: Limits, timeZone: TimeZone) -> Part {
+        guard !facts.missions.isEmpty else { return Part() }
+        let lines = facts.missions.prefix(limit.items).map { fact in
             let sent = clock(fact.sentAt, timeZone: timeZone)
             var line = "- \(fact.kind.rawValue) · \(fact.message), sent \(sent), \(fact.detail): “\(fact.excerpt)”"
             if fact.kind == .handedToUser || fact.kind == .answeredByUser {
@@ -523,14 +635,14 @@ enum DailyPass {
             }
             return line
         }
-        return section("Mission messages", lines, total: facts.missions.count)
+        return Part(text: section("Mission messages", lines, total: facts.missions.count), leftOut: facts.missions.dropFirst(limit.items).map(\.at))
     }
 
-    private static func rulesSection(_ facts: Facts, timeZone: TimeZone) -> String? {
+    private static func rulesSection(_ facts: Facts, _ limit: Limits) -> Part {
         var parts: [String] = []
-        let decided = facts.proposals.filter { facts.window.contains($0.decidedAt) }
+        let decided = facts.proposals.filter { facts.window.contains($0.decidedAt) }.sorted { ($0.decidedAt ?? 0) < ($1.decidedAt ?? 0) }
         if !decided.isEmpty {
-            parts.append(section("Rules the user decided since then", decided.prefix(maxItems).map { proposal in
+            parts.append(section("Rules the user decided since then", decided.prefix(limit.items).map { proposal in
                 if proposal.wasInBrief == true { return "- already in the brief: “\(proposal.addedRule ?? proposal.rule)”" }
                 if proposal.addedAt != nil { return "- added: “\(proposal.addedRule ?? proposal.rule)”" }
                 return "- dismissed: “\(proposal.rule)”"
@@ -541,15 +653,16 @@ enum DailyPass {
             parts.append(section("Rules waiting for the user", pending.map { "- “\($0.rule)” (\($0.evidence))" }, total: pending.count))
         }
         if !facts.briefRules.isEmpty {
-            parts.append(section("The brief's rules learned", facts.briefRules.prefix(maxItems * 2).map { "- \($0)" }, total: facts.briefRules.count))
+            let lines = facts.briefRules.prefix(limit.items * 2).map { "- \($0)" }
+            parts.append(section("The brief's rules learned", lines, total: facts.briefRules.count))
         }
         let since = facts.window.end - RuleProposalStore.dismissedLifetime
         let dismissed = facts.proposals.filter { ($0.dismissedAt ?? -.infinity) >= since }
         if !dismissed.isEmpty {
-            let lines = dismissed.prefix(maxItems).map { "- “\($0.rule)”" }
+            let lines = dismissed.prefix(limit.items).map { "- “\($0.rule)”" }
             parts.append(section("Rules dismissed in the last 90 days", lines, total: dismissed.count))
         }
-        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+        return Part(text: parts.isEmpty ? nil : parts.joined(separator: "\n\n"), leftOut: decided.dropFirst(limit.items).compactMap(\.decidedAt))
     }
 
     /// A heading and its lines, saying how many were left out.
@@ -692,13 +805,15 @@ struct DailyPassState: Codable, Equatable, Sendable {
 
     /// The window a call at `now` reads, and the state to save once it
     /// was read; nil for a call that reads the last window again, so calls
-    /// in a row don't keep stretching it. Not after Nirux typed the daily
-    /// line since that read: that call is a new pass. `extending` false
-    /// reads from the last read only (the daily check's news).
+    /// in a row don't keep stretching it. Only after a read that showed
+    /// all (its note's time is its end): not after a read cut short, a
+    /// quiet check, or the daily line typed since, whose next call is a
+    /// new pass. `extending` false reads from the last read only (the
+    /// daily check's news).
     func reading(now: TimeInterval, extending: Bool = true) -> (window: DailyPass.Window, next: DailyPassState?) {
         // Not over a window a quiet check marked read either.
         if extending, let start, let end, now - end < Self.extendWithin, (typedAt ?? -.infinity) <= end,
-           (checkedAt ?? -.infinity) < end {
+           (checkedAt ?? -.infinity) < end, note?.at == end {
             return (DailyPass.Window(start: max(start, now - Self.longestWindow), end: now), nil)
         }
         let window = DailyPass.Window(start: max(end ?? now - Self.firstWindow, now - Self.longestWindow), end: now)
@@ -707,12 +822,13 @@ struct DailyPassState: Codable, Equatable, Sendable {
         return (window, next)
     }
 
-    /// Once a call read `reading(now:)`'s window: marked read (unless
-    /// GitHub may answer next time), with its note, which keeps the time of
-    /// the pass a second read reads again: the rules proposed since count.
-    func afterReading(_ next: DailyPassState?, readsAgain: Bool, note: DailyPass.Note) -> DailyPassState {
+    /// Once a call read `reading(now:)`'s window: marked read up to
+    /// `readUntil` (the digest's first fact left out), unless GitHub may
+    /// answer next time; with its note, which keeps the time of the pass a
+    /// second read reads again: the rules proposed since count.
+    func afterReading(_ next: DailyPassState?, readsAgain: Bool, note: DailyPass.Note, readUntil: TimeInterval) -> DailyPassState {
         var state = self
-        if let next, !readsAgain { (state.start, state.end) = (next.start, next.end) }
+        if let next, let end = next.end, !readsAgain { (state.start, state.end) = (next.start, min(end, readUntil)) }
         state.note = note
         if next == nil, let earlier = self.note { state.note?.at = earlier.at }
         return state

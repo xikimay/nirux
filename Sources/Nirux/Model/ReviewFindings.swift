@@ -20,12 +20,15 @@ enum ReviewFindings {
 
     struct Entry: Codable, Equatable, Sendable {
         var time: TimeInterval
-        /// The task's workspace and branch (else its folder or title) tell
-        /// one task from another, whatever pull request it opens: a second
-        /// branch in the same worktree is another task.
+        /// The task's workspace and the branch it was first known by (its
+        /// Mission's, else its first review's) tell one task from another,
+        /// whatever its HEAD (detached in a rebase) or pull request does.
         var workspace: String
         var task: String
         var pullRequest: Int?
+        /// The folder of the space's repository it works in: its rounds
+        /// count for that repository's pull requests only.
+        var repository: String?
         /// The Nth review recorded for this task.
         var round: Int
         var findings: [Finding]
@@ -35,7 +38,7 @@ enum ReviewFindings {
 
         func isSameTask(as other: Entry) -> Bool { workspace == other.workspace && task == other.task }
 
-        enum CodingKeys: String, CodingKey { case time = "t", workspace, task, pullRequest = "pr", round, findings }
+        enum CodingKeys: String, CodingKey { case time = "t", workspace, task, pullRequest = "pr", repository = "repo", round, findings }
     }
 
     // MARK: - A call's findings
@@ -146,9 +149,12 @@ enum ReviewFindings {
     struct Review: Sendable {
         let findings: [Finding]
         let workspace: String
-        /// Its branch, else its folder or title.
+        /// The branch its Mission started it on, if it has one.
+        let missionBranch: String?
+        /// Its branch now, else its folder or title.
         let task: String
         let pullRequest: Int?
+        let repository: String?
     }
 
     /// Records a review on `lines`'s queue, as the next round of its task;
@@ -171,8 +177,11 @@ enum ReviewFindings {
             return .notRecorded("The space’s review log is full: it frees up as reviews pass 30 days.")
         }
         let earlier = lines.load(spaceID: spaceID, stateDirectory: stateDirectory)
+        // The name it was first known by.
+        let task = review.missionBranch ?? earlier.last { $0.workspace == review.workspace }?.task ?? review.task
         var entry = Entry(
-            time: now, workspace: review.workspace, task: review.task, pullRequest: review.pullRequest, round: 1, findings: review.findings
+            time: now, workspace: review.workspace, task: task, pullRequest: review.pullRequest, repository: review.repository,
+            round: 1, findings: review.findings
         )
         entry.round = earlier.filter { $0.isSameTask(as: entry) }.count + 1
         guard lines.append(entry, spaceID: spaceID, stateDirectory: stateDirectory) else {
