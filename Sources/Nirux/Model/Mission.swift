@@ -536,7 +536,9 @@ final class MissionStore {
             else { return false }
             return !mission.events.contains { $0.kind == .completed && $0.timestamp > question.timestamp }
         case .question:
+            // Not once its parent handed it to the user (`ask_user`).
             return mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
+                && event.handedToUserBecause == nil
                 && now - event.timestamp < MissionEventCLI.parentMessageLifetime
                 && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
         case .completed:

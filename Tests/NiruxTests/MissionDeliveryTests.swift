@@ -257,6 +257,16 @@ final class MissionDeliveryTests: XCTestCase {
 
     // MARK: - Hand-off to the user
 
+    /// A question its parent handed to the user before Nirux typed it (a
+    /// Lead read it in its task list) is the user's: not typed into the
+    /// parent's prompt as well.
+    func testAQuestionHandedToTheUserIsNotTypedToTheParent() throws {
+        let store = makeStore()
+        let question = try XCTUnwrap(store.accept(childEvent(.question, "Keep date=?", at: 20), enabled: true))
+        XCTAssertNotNil(store.handToUser(questionID: question.event.id, because: "a product call", now: 21))
+        XCTAssertEqual(pending(store, at: 30), [])
+    }
+
     func testAQuestionComesToTheUserWhenItsParentCantTakeIt() {
         typealias Question = SidebarMissionQuestion
         XCTAssertEqual(Question.handOff(parent: .closed, askedAt: 100, threshold: 600, now: 101), .parentClosed)
