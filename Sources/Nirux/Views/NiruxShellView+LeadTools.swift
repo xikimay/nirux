@@ -572,7 +572,7 @@ extension NiruxShellView {
         let store = MissionStore.shared
         if let mission = store.missions.last(where: { mission in
             mission.oneWay == true && mission.parentWorkspaceID == lead.workspaceID && mission.parentAgentUUID == lead.agentUUID
-                && mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agentUUID
+                && mission.childWorkspaceID == workspace.id && mission.childAgentUUID == agentUUID && mission.childAgentKind == kind.rawValue
         }) { return mission }
         return store.create(MissionCreationRequest(
             id: UUID().uuidString, parentWorkspaceID: lead.workspaceID, parentAgentUUID: lead.agentUUID,
@@ -603,6 +603,10 @@ extension NiruxShellView {
         guard let agent = mission.childAgentName else {
             return answer(Self.deliversOnlyToClaudeOrCodex(workspace.title, runs: mission.childAgentKind), true)
         }
+        if agent == "Codex", missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true {
+            return answer("“\(workspace.title)”’s Codex was started without a prompt, so Nirux can't tell which of its conversations "
+                + "is the task's: give the message to the user instead.", true)
+        }
         let instruction = MissionEvent(
             id: UUID().uuidString, missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID,
@@ -621,9 +625,10 @@ extension NiruxShellView {
             : ""
         let sent = agent == "Codex"
             ? (missionWaits.typing.contains(instruction.id)
-                ? "Nirux is handing it to “\(workspace.title)”’s Codex, which starts it at once; a line tells you if it doesn't."
+                ? "Nirux is handing it to “\(workspace.title)”’s Codex, which starts it as a prompt; a line tells you if Codex "
+                    + "doesn't start it."
                 : "Nirux hands it to “\(workspace.title)”’s Codex once its turn is over, a day at most; past an hour, "
-                    + "a line tells you what holds it.")
+                    + "a line tells you what holds it. Codex takes it as text: a slash command doesn't run there.")
             : typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
             : missionWaits.typing.contains(instruction.id)
             ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."

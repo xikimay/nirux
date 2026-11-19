@@ -142,18 +142,28 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
   message is the prompt that `codex` was launched with (the notify carries a
   digest, never the text), or once `codex resume <id>` named it; no other
   thread replaces it then, which also keeps a relaunch from resuming the
-  title's thread. A `codex` launched without a prompt proves none, and gets
-  nothing. One that started another conversation with /new keeps getting
-  messages on the first.
+  title's thread. The first proof stands: a fork (/side) begins with the
+  same message. A `codex` launched without a prompt proves none, so a tell
+  to it is refused. One that started another conversation with /new keeps
+  getting messages on the first, and a relaunch resumes the first: the
+  title's thread, which came up after every first turn, made following the
+  last thread worse.
 - **When.** Codex sends OSC 7501 like agy (`app=codex`): Nirux hands a message
   over only while the `codex` it was sent to (or one resuming its thread)
-  last said `done` or `idle` (`codexQueueRefusal`). It would wait for an
-  idle thread anyway; waiting here keeps the day's lifetime, the held notice
-  and the give-up as they are for Claude Code. Codex's status on its row
-  still comes from its notify and its output.
-- **Typed** once `codex queue` exits 0, run with the executable of that
-  `codex` (the same build takes it). If Codex then reports nothing for 20 s,
-  the sender and the user hear that it hasn't started it. A refusal (an
+  last said `done` or `idle` (`codexQueueRefusal`), but not `idle` after a
+  turn that ran: that is an Esc, after which Codex's queue starts nothing
+  until another turn ends. It would wait for an idle thread anyway; waiting
+  here keeps the day's lifetime, the held notice and the give-up as they are
+  for Claude Code. One message per Codex is handed at a time, so its queue
+  keeps their order. Codex's status on its row still comes from its notify
+  and its output.
+- **Typed** once `codex queue` exits 0, run with what runs that `codex`
+  (its binary, or npm's `node …/bin/codex`), so the same build takes it.
+  The message goes as `--message=<text>`: one starting with "-" stays a
+  value. If Codex then reports nothing for 20 s, the sender and the user
+  hear that it hasn't started it, and not to send it again. A refusal (an
   older Codex, a thread it doesn't know) leaves it waiting; after three
-  tries its row says Codex didn't take it.
+  tries its row says Codex didn't take it. No answer within 30 s gives it up
+  untold to Codex again, its sender told: Codex may hold it.
+- It goes as text: a slash command doesn't run in Codex.
 - A Codex child's `ask` still waits for its answer.

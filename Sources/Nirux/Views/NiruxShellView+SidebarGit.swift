@@ -465,7 +465,8 @@ extension NiruxShellView {
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
-        if events.contains(where: { [.stop, .stopFailure].contains($0.event.name) }) {
+        // Codex's turn end too: it may prove the thread its OSC `done` came before.
+        if events.contains(where: { [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }

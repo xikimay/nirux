@@ -9,8 +9,9 @@ import Foundation
 /// draft stayed untouched, a busy one finished its turn first.
 enum CodexQueue {
     struct Request: Equatable, Sendable {
-        /// The `codex` running the conversation: the same build takes it.
-        let executable: String
+        /// What runs the conversation's `codex`, so that the same build
+        /// takes it (`command(of:)`).
+        let command: [String]
         let thread: String
         let message: String
     }
@@ -19,16 +20,26 @@ enum CodexQueue {
         case queued
         /// Codex didn't take it, with the first line it said why.
         case refused(String)
+        /// It didn't answer within `timeout`: it may hold the message.
+        case unconfirmed
     }
 
     /// It answers within a few seconds, the time to start its app server.
     nonisolated static let timeout: TimeInterval = 30
 
-    /// The executable of `process`, nil once it is gone.
-    nonisolated static func executable(of process: ProcessInstance) -> String? {
+    /// What runs `process`, a `codex`: its executable, or the runtime and
+    /// script it is (npm's `node …/bin/codex` on a Node that can't replace
+    /// itself with the binary). Nil once it is gone.
+    nonisolated static func command(of process: ForegroundProcess) -> [String]? {
         var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-        guard proc_pidpath(process.pid, &path, UInt32(path.count)) > 0 else { return nil }
-        return String(cString: path)
+        guard proc_pidpath(process.instance.pid, &path, UInt32(path.count)) > 0 else { return nil }
+        return command(executable: String(cString: path), arguments: process.arguments)
+    }
+
+    nonisolated static func command(executable: String, arguments: [String]) -> [String] {
+        func name(_ path: String) -> String { ((path as NSString).lastPathComponent as NSString).deletingPathExtension }
+        guard name(executable) != "codex", let script = arguments.dropFirst().first(where: { name($0) == "codex" }) else { return [executable] }
+        return [executable, script]
     }
 
     /// Runs `request` off the main thread; `done` comes on the main queue.
@@ -39,17 +50,25 @@ enum CodexQueue {
         }
     }
 
+    /// The arguments after `request`'s executable. The `=` forms keep a
+    /// message starting with "-" a value.
+    nonisolated static func arguments(for request: Request) -> [String] {
+        request.command.dropFirst() + ["queue", "--thread=" + request.thread, "--message=" + request.message]
+    }
+
     private nonisolated static func run(_ request: Request) -> Outcome {
-        guard let result = BoundedProcess.run(
-            executableURL: URL(fileURLWithPath: request.executable),
-            arguments: ["queue", "--thread", request.thread, "--message", request.message],
+        guard let executable = request.command.first else { return .refused("no codex to run") }
+        guard let result = BoundedProcess.execute(
+            executableURL: URL(fileURLWithPath: executable),
+            arguments: arguments(for: request),
             currentDirectoryURL: FileManager.default.homeDirectoryForCurrentUser,
             timeout: timeout,
             captureStandardError: true
-        ) else { return .refused("codex didn't answer within \(Int(timeout)) seconds") }
-        guard result.terminationStatus != 0 else { return .queued }
+        ) else { return .refused("Nirux couldn't run \(executable)") }
+        guard result.stop == nil, let status = result.terminationStatus else { return .unconfirmed }
+        guard status != 0 else { return .queued }
         let said = String(decoding: result.standardError + result.standardOutput, as: UTF8.self)
             .split(whereSeparator: \.isNewline).first.map { String($0.prefix(200)) }
-        return .refused(said ?? "codex exited with status \(result.terminationStatus)")
+        return .refused(said ?? "codex exited with status \(status)")
     }
 }

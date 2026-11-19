@@ -58,7 +58,11 @@ struct SidebarWaitingMessages: Hashable {
         )
         case .noConversation?: (
             "its conversation isn't known yet",
-            "Nirux doesn't know yet which conversation its Codex runs; it learns it at the end of the turn its first prompt started"
+            "Nirux doesn't know yet which conversation its Codex runs; it learns it when the turn its launch prompt started ends"
+        )
+        case .interrupted?: (
+            "its last turn was stopped",
+            "its last turn was stopped with Esc, and Codex starts a queued message only once another turn ends"
         )
         case .dialog?: ("a dialog may be open", "a dialog may be open there; they go in once it closes and the turn ends")
         case .failedTurn?: ("its last turn failed", "its last turn failed; they go in after its next turn")
@@ -103,6 +107,9 @@ struct MissionWaitState {
     /// How long Codex may take to start a message it queued while idle
     /// before its sender hears it hasn't (`queueForCodex`).
     var codexStartWait: TimeInterval = 20
+    /// Columns whose Codex is being handed a message: one at a time, so
+    /// that its queue keeps their order.
+    var codexQueuing: Set<UUID> = []
 
     /// Nirux typed into `column`'s prompt: it says nothing of it until the
     /// next check.

@@ -340,30 +340,39 @@ extension NiruxShellView {
     ) {
         let id = delivery.event.id
         guard !missionWaits.typing.contains(id), missionWaits.tries[id, default: 0] < Self.missionTypingTries,
-              let column = missionRecipient(of: delivery), let pty = column.pty,
+              let column = missionRecipient(of: delivery), let pty = column.pty, !missionWaits.codexQueuing.contains(column.id),
               column.codexMissionRefusal(runningSince: runningSince(of: delivery.event, in: column, snapshot: snapshot, now: now),
                                          snapshot: snapshot) == nil,
               let codex = pty.foregroundProcess(snapshot: snapshot), let thread = column.provenCodexSessionID(of: codex),
-              let executable = CodexQueue.executable(of: codex.instance),
+              let command = CodexQueue.command(of: codex),
               let text = MissionPromptText.text(for: delivery, childTitle: childTitle, parentTitle: parentTitle)
         else { return }
         missionWaits.typing.insert(id)
+        missionWaits.codexQueuing.insert(column.id)
         let sender = delivery.event.leadSender
             ?? NewTask.MissionParent(workspaceID: delivery.mission.parentWorkspaceID, agentUUID: delivery.mission.parentAgentUUID)
         let recipient = MissionPromptText.quoted(childTitle ?? delivery.mission.branch)
-        sideEffects.queueCodexMessage(CodexQueue.Request(executable: executable, thread: thread, message: text)) { [weak self] outcome in
+        let columnID = column.id
+        let sentAt = Date().timeIntervalSince1970
+        sideEffects.queueCodexMessage(CodexQueue.Request(command: command, thread: thread, message: text)) { [weak self] outcome in
             guard let self else { return }
+            self.missionWaits.codexQueuing.remove(columnID)
             switch outcome {
             case .queued:
                 self.finishTyping(delivery, .sent)
                 self.updateSidebar()
-                let queuedAt = Date().timeIntervalSince1970
                 DispatchQueue.main.asyncAfter(deadline: .now() + self.missionWaits.codexStartWait) { [weak self, weak pty] in
-                    guard let self, let pty, !pty.codexReported(since: queuedAt, by: codex.instance) else { return }
-                    self.tellProposer(sender, "Your message to “\(recipient)” is in its Codex's queue, but Codex hasn't started it: "
-                        + "it starts it once that conversation is idle. If Codex runs another conversation now, send it again.")
+                    guard let self, let pty, !pty.codexReported(since: sentAt, by: codex.instance) else { return }
+                    self.tellProposer(sender, "Your message to “\(recipient)” is in its Codex's queue, but Codex hasn't started it yet: "
+                        + "it starts it once that conversation is idle. Don't send it again.")
                     self.showToast("Codex in “\(recipient)” hasn't started the Mission message in its queue yet.")
                 }
+            case .unconfirmed:
+                // Codex may hold it: handed again, it could run twice.
+                self.finishTyping(delivery, .cut)
+                self.tellProposer(sender, "Your message to “\(recipient)” may be in its Codex's queue: Codex didn't answer within "
+                    + "\(Int(CodexQueue.timeout)) seconds, and Nirux won't hand it over again. Check “\(recipient)” before sending it again.")
+                self.showToast("Codex in “\(recipient)” didn't confirm the Mission message Nirux handed it.")
             case .refused(let why):
                 self.missionWaits.typing.remove(id)
                 self.missionWaits.tries[id, default: 0] += 1

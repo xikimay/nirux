@@ -110,7 +110,8 @@ extension AgentStatusMachine {
     /// Why a Mission message can't go into Codex's own queue now
     /// (`CodexQueue`), nil when it can: `foreground`, the column's
     /// interactive `codex`, already running at `time`, last reported its
-    /// turn over (done, or idle once ready, or after an Esc or a key). Nothing
+    /// turn over (done, or idle once ready or after a key; not after an Esc,
+    /// which leaves its queue waiting for another turn's end). Nothing
     /// is typed: Codex starts a queued message itself once that conversation
     /// is idle, so neither a dialog nor a draft can take it. Its turn is
     /// waited for all the same, so that what holds a message stays Nirux's
@@ -121,6 +122,7 @@ extension AgentStatusMachine {
         guard foreground.instance.startedAt <= time else { return .restarted }
         guard let reported = codexStatus, reported.process == foreground.instance else { return .noPromptYet }
         switch reported.status.state {
+        case .idle where reported.interrupted: return .interrupted
         case .done, .idle: return nil
         case .working: return .working
         case .blocked: return .dialog
@@ -188,6 +190,9 @@ enum AgentPromptRefusal: String, Equatable, Sendable {
     case failedTurn
     /// Something was typed at its prompt since its last prompt went in.
     case draft
+    /// Its `codex` turn was stopped with Esc: Codex starts a queued message
+    /// only once another turn ends.
+    case interrupted
     /// Its last turn end waits for its verdict.
     case verdict
 }

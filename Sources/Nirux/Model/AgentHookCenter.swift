@@ -554,7 +554,7 @@ final class AgentHookCenter {
     }
 
     /// Codex's global options whose value is the next argument.
-    private nonisolated static let codexOptionsWithValue: Set<String> = [
+    nonisolated static let codexOptionsWithValue: Set<String> = [
         "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env", "-i", "--image",
         "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox", "-C", "--cd", "--add-dir",
         "-a", "--ask-for-approval"

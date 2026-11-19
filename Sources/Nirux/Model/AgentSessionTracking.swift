@@ -112,7 +112,9 @@ struct CodexSessionTracker {
               emitterBelongsToForegroundJob else {
             return false
         }
-        if let firstInputDigest, firstInputDigest == Self.launchPromptDigest(of: foregroundProcess) {
+        // The first proof stands: a fork (/side) begins with the same message.
+        if launched?.process != foregroundProcess.instance, let firstInputDigest,
+           firstInputDigest == Self.launchPrompt(of: foregroundProcess).map(Self.promptDigest) {
             launched = (sessionID, foregroundProcess.instance)
         }
         if let proven = provenSessionID(for: foregroundProcess), proven != sessionID { return false }
@@ -122,15 +124,30 @@ struct CodexSessionTracker {
     /// The thread `process` proved it runs, if it did.
     func provenSessionID(for process: ForegroundProcess) -> String? {
         if let launched, launched.process == process.instance { return launched.sessionID }
+        return Self.resumedSessionID(of: process)
+    }
+
+    /// Whether `process` can prove a thread: it was launched with a prompt,
+    /// or resumed one. A `codex` started without either never does.
+    static func canProve(_ process: ForegroundProcess) -> Bool {
+        launchPrompt(of: process) != nil || resumedSessionID(of: process) != nil
+    }
+
+    /// The thread `codex resume <id>` named.
+    private static func resumedSessionID(of process: ForegroundProcess) -> String? {
         guard let index = process.arguments.firstIndex(of: "resume"), process.arguments.indices.contains(index + 1),
               !process.arguments[index + 1].hasPrefix("-") else { return nil }
         return process.arguments[index + 1]
     }
 
-    /// The digest of the prompt `process` was launched with, its last
-    /// argument: what Nirux's launch line ends with.
-    private static func launchPromptDigest(of process: ForegroundProcess) -> String? {
-        process.arguments.count > 1 ? process.arguments.last.map(promptDigest) : nil
+    /// The prompt `process` was launched with: its last argument, as
+    /// Nirux's launch line ends, when it is no option nor an option's value.
+    private static func launchPrompt(of process: ForegroundProcess) -> String? {
+        let arguments = process.arguments
+        guard arguments.count > 1, let last = arguments.last, !last.hasPrefix("-"),
+              !AgentHookCenter.codexOptionsWithValue.contains(arguments[arguments.count - 2]),
+              resumedSessionID(of: process) == nil else { return nil }
+        return last
     }
 
     /// SHA-256 of `prompt`, in hex: what an event keeps of a prompt.

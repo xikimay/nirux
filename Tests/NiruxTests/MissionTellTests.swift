@@ -406,8 +406,18 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(since: claudeProcess.startedAt - 1), .restarted, "a codex started after the tell")
         report(.idle)
         XCTAssertNil(refusal(), "a key after its turn's end: its queue takes the message all the same")
-        report(.done, from: ProcessInstance(pid: 9, startedAt: t0))
+        report(.working)
+        report(.blocked, kind: "permission")
+        report(.idle)
+        XCTAssertEqual(refusal(), .interrupted, "an Esc stopped the turn: its queue waits for another turn's end")
+        report(.working)
+        report(.done)
+        XCTAssertNil(refusal())
+        report(.blocked, kind: "auth", from: ProcessInstance(pid: 9, startedAt: t0))
+        report(.idle, from: ProcessInstance(pid: 9, startedAt: t0))
         XCTAssertEqual(refusal(), .noPromptYet, "another codex's word")
+        XCTAssertNil(refusal(ForegroundProcess(instance: ProcessInstance(pid: 9, startedAt: t0), name: "codex", arguments: ["codex"])),
+                     "ready after signing in, no turn stopped")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {

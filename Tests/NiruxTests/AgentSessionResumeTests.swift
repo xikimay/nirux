@@ -180,6 +180,8 @@ final class AgentSessionResumeTests: XCTestCase {
         XCTAssertTrue(capture("main", first: prompt, by: launched))
         XCTAssertEqual(tracker.provenSessionID(for: launched), "main")
         XCTAssertFalse(capture("title-2", first: title, by: launched))
+        XCTAssertFalse(capture("side", first: prompt, by: launched), "a fork (/side) begins with the same message: the first proof stands")
+        XCTAssertEqual(tracker.provenSessionID(for: launched), "main")
         XCTAssertEqual(tracker.sessionID(for: launched), "main", "what a relaunch resumes")
 
         let resumed = ForegroundProcess(
@@ -194,5 +196,26 @@ final class AgentSessionResumeTests: XCTestCase {
         XCTAssertTrue(capture("b", first: "Hello", by: bare))
         XCTAssertNil(tracker.provenSessionID(for: bare))
         XCTAssertEqual(tracker.sessionID(for: bare), "b")
+        XCTAssertFalse(CodexSessionTracker.canProve(bare))
+        let modeOnly = ForegroundProcess(
+            instance: ProcessInstance(pid: 13, startedAt: 4), name: "codex", arguments: ["codex", "--sandbox", "read-only"]
+        )
+        XCTAssertFalse(CodexSessionTracker.canProve(modeOnly), "an option's value is no prompt")
+        XCTAssertTrue(CodexSessionTracker.canProve(launched) && CodexSessionTracker.canProve(resumed))
+    }
+
+    /// `codex queue` runs with what runs the column's `codex`: its binary,
+    /// or the runtime and script of npm's shim on a Node that can't replace
+    /// itself with the binary.
+    func testCodexQueueRunsWhatRunsTheCodex() {
+        XCTAssertEqual(CodexQueue.command(executable: "/opt/codex/bin/codex", arguments: ["codex", "Go"]), ["/opt/codex/bin/codex"])
+        XCTAssertEqual(
+            CodexQueue.command(executable: "/usr/local/bin/node", arguments: ["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex.js", "Go"]),
+            ["/usr/local/bin/node", "/usr/local/lib/node_modules/@openai/codex/bin/codex.js"]
+        )
+        XCTAssertEqual(
+            CodexQueue.arguments(for: CodexQueue.Request(command: ["/usr/local/bin/node", "/x/codex.js"], thread: "t1", message: "- Fix A")),
+            ["/x/codex.js", "queue", "--thread=t1", "--message=- Fix A"], "a message starting with \"-\" stays a value"
+        )
     }
 }

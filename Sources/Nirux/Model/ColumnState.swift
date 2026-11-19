@@ -602,6 +602,14 @@ final class ColumnState {
         return nil
     }
 
+    /// Whether this column's `codex` will never prove a thread: one started
+    /// without a prompt, and not resumed (`CodexSessionTracker.canProve`).
+    func runsUnprovableCodex(snapshot: ProcessSnapshot) -> Bool {
+        guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.name == AgentProgramStatus.codex,
+              !AgentHookCenter.isHeadlessCodex(codex) else { return false }
+        return provenCodexSessionID(of: codex) == nil && !CodexSessionTracker.canProve(codex)
+    }
+
     /// The thread `process`, this column's `codex`, started with its
     /// launch prompt or resumed (see `CodexSessionTracker`): the one a
     /// Mission message goes to.
