@@ -130,17 +130,18 @@
       // buffer was clean. Edits it hasn't heard of yet stay: it hears they
       // exist, and asks.
       if (payload.keepEdits && models[path].model.getValue() !== models[path].cleanValue) {
-        postToSwift({ type: "reloadRefused", path: path });
+        postToSwift({ type: "reloadRefused", path: path, version: models[path].version });
         reportDirtyFor(path);
         return;
       }
       // Adopt the new content as the new clean baseline, first: the change
       // then reports the buffer clean.
       models[path].cleanValue = content;
+      models[path].version = payload.version;
       models[path].model.setValue(content);
       monaco.editor.setModelLanguage(models[path].model, lang);
     } else {
-      ensureModel(path, content, lang);
+      ensureModel(path, content, lang).version = payload.version;
     }
     if (payload.activate === false) return;
     switchToPath(path, payload.focus);
@@ -787,7 +788,7 @@
     var content = entry.model.getValue();
     nextSaveID++;
     pendingSaves[nextSaveID] = { path: path, content: content };
-    postToSwift({ type: "save", path: path, content: content, saveID: nextSaveID, requestID: requestID });
+    postToSwift({ type: "save", path: path, content: content, version: entry.version, saveID: nextSaveID, requestID: requestID });
   }
 
   function requestSave() {

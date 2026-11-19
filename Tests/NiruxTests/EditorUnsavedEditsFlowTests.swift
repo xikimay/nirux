@@ -105,6 +105,16 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             try click("Keep Mine", in: banner)
             harness.waitUntil("mine written") { (try? read(agents)) == "rules\nmine\n" && editor.unsavedPaths.isEmpty }
             XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: claude), "AGENTS.md", "the link was replaced")
+            // The file it names moved away: deleted for the link, which Keep
+            // Mine keeps, naming it again.
+            try setBuffer("rules\nmine again\n", in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [claude] }
+            try FileManager.default.moveItem(atPath: agents, toPath: harness.repo + "/docs/AGENTS.md")
+            pressCommandSRefused(in: webView, harness: harness)
+            XCTAssertEqual(harness.shell.toast?.message, "Not saved: “CLAUDE.md” was deleted on disk")
+            try click("Keep Mine", in: banner)
+            harness.waitUntil("mine written") { (try? read(agents)) == "rules\nmine again\n" && editor.unsavedPaths.isEmpty }
+            XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: claude), "AGENTS.md", "the link was replaced")
         }
     }
 
@@ -240,9 +250,21 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             editor.pauseFileWatch()
             waitForBuffer("typed\n", in: webView)
             XCTAssertEqual(try read(notes), "agent 2\n")
-            try click("Take Disk", in: banner)
-            waitForBuffer("agent 2\n", in: webView)
-            harness.waitUntil("the buffer clean") { editor.unsavedPaths.isEmpty }
+            // The text it kept saves as ever.
+            try click("Keep Mine", in: banner)
+            harness.waitUntil("the typing written") { (try? read(notes)) == "typed\n" && editor.unsavedPaths.isEmpty }
+
+            // ⌘S of the clean text, sent as the watcher reloads it: the save
+            // of a text since replaced writes nothing.
+            waitForMonacoText(in: webView)
+            webView.evaluateJavaScript("(function () { \(Self.busy) \(Self.commandS) })()")
+            try write("agent 3\n", to: notes)
+            editor.resumeFileWatch()
+            waitForBuffer("agent 3\n", in: webView)
+            editor.pauseFileWatch()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            XCTAssertEqual(try read(notes), "agent 3\n", "a save of the replaced text wrote over the change")
+            XCTAssertEqual(editor.unsavedPaths, [])
 
             // Deleted under unsaved edits: ⌘S doesn't bring it back, Keep
             // Mine does.
@@ -267,6 +289,19 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             try click("Take Disk", in: banner)
             XCTAssertEqual(editor.openPaths, [])
             XCTAssertFalse(FileManager.default.fileExists(atPath: notes))
+
+            // ⌘S on the clean buffer of a deleted file's diff doesn't bring
+            // it back, empty.
+            let deleted = harness.repo + "/" + UIFlowHarness.searchTarget
+            try FileManager.default.removeItem(atPath: deleted)
+            let toasts = harness.shell.toastGeneration
+            editor.showDiff(path: deleted)
+            // Its diff shows, or says why not (a temporary folder's path).
+            harness.waitUntil("the deleted file's diff") { editor.diffActivePath == deleted || harness.shell.toastGeneration > toasts }
+            if editor.diffActivePath == deleted { editor.toggleDiff() }
+            XCTAssertEqual(editor.activePath, deleted)
+            pressCommandSRefused(in: webView, harness: harness)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: deleted), "⌘S brought back a deleted file, empty")
 
             // A page that never answers fails the save, in time.
             let other = harness.repo + "/other.txt"

@@ -26,6 +26,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         case file(modified: Date)
         case missing
     }
+    /// Per-tab version of the text Swift last gave the page (open, reload):
+    /// a save carries the one its text grew from, and one from before a
+    /// reload still on its way is refused.
+    private var textVersionByPath: [String: Int] = [:]
+    private var nextTextVersion = 0
     /// Per-tab encoding detected at open — saves round-trip the same
     /// encoding instead of silently transcoding everything to UTF-8.
     private var encodingByPath: [String: String.Encoding] = [:]
@@ -519,7 +524,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             "type": "openFile",
             "path": absolute,
             "content": content,
-            "activate": activate
+            "activate": activate,
+            "version": newTextVersion(of: absolute)
         ]
         if let line { payload["line"] = line }
         Self.applyNavFlags(&payload, endLine: endLine, takeFocus: takeFocus)
@@ -847,6 +853,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         tabPaths.remove(at: index)
         dirtyByPath.removeValue(forKey: path)
         diskVersionByPath.removeValue(forKey: path)
+        textVersionByPath.removeValue(forKey: path)
         encodingByPath.removeValue(forKey: path)
         diskModifiedWhileDirty.remove(path)
         diffModeByPath.removeValue(forKey: path)
@@ -910,9 +917,16 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         // it just revealed while the user is typing in a terminal.
         sendBridge([
             "type": "openFile", "path": path, "content": content,
-            "activate": path == activePath, "focus": false, "keepEdits": keepingEdits
+            "activate": path == activePath, "focus": false, "keepEdits": keepingEdits,
+            "version": newTextVersion(of: path)
         ])
         return true
+    }
+
+    private func newTextVersion(of path: String) -> Int {
+        nextTextVersion += 1
+        textVersionByPath[path] = nextTextVersion
+        return nextTextVersion
     }
 
     /// Shared tail of every navigation payload — one place to add the next
@@ -988,11 +1002,23 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         mtime(of: path).map { .file(modified: $0) } ?? .missing
     }
 
-    /// Through a symlink, the file it names: an agent edits AGENTS.md under
-    /// a CLAUDE.md link.
     private func mtime(of path: String) -> Date? {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: (path as NSString).resolvingSymlinksInPath)
+        let attrs = try? FileManager.default.attributesOfItem(atPath: Self.linkTarget(of: path))
         return attrs?[.modificationDate] as? Date
+    }
+
+    /// Through symlinks, the file a path names, there or not: an agent
+    /// edits AGENTS.md under a CLAUDE.md link, or moves it away.
+    private nonisolated static func linkTarget(of path: String) -> String {
+        var target = path
+        // A loop of links stops somewhere.
+        for _ in 0..<32 {
+            guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: target) else { break }
+            target = (destination as NSString).isAbsolutePath
+                ? destination
+                : ((target as NSString).deletingLastPathComponent as NSString).appendingPathComponent(destination)
+        }
+        return target
     }
 
     // MARK: - JS bridge
@@ -1018,6 +1044,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let path = body["path"] as? String
         let written: Bool = {
             guard let path, openPaths.contains(path), let content = body["content"] as? String else { return false }
+            // Its text grew from one Swift has since replaced: a reload
+            // follows on the page.
+            guard body["version"] as? Int == textVersionByPath[path] else {
+                showSaveRefusal(path: path)
+                return false
+            }
             return write(content, to: path)
         }()
         // The page takes as clean the text of this save only, once written.
@@ -1048,6 +1080,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             if diskModifiedWhileDirty.contains(path) || version == .missing { showSaveRefusal(path: path) }
             return false
         }
+        // Nor a clean buffer opened for a deleted file's diff.
+        if diskVersionByPath[path] == .missing, !(dirtyByPath[path] ?? false) {
+            showSaveRefusal(path: path)
+            return false
+        }
 
         let encoding = encodingByPath[path] ?? .utf8
         var data = content.data(using: encoding)
@@ -1065,9 +1102,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
 
         do {
-            // Through a symlink, into the file it names: replacing the path
-            // would replace the link.
-            let written = try Self.replaceFile(at: URL(fileURLWithPath: path).resolvingSymlinksInPath(), with: data)
+            // Into the file a symlink names: replacing the path would replace
+            // the link.
+            let written = try Self.replaceFile(at: URL(fileURLWithPath: Self.linkTarget(of: path)), with: data)
             diskVersionByPath[path] = .file(modified: written)
         } catch {
             NSLog("[EditorColumn] save failed for \(path): \(error)")
@@ -1089,8 +1126,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         defer { try? manager.removeItem(at: folder) }
         let written = folder.appendingPathComponent(url.lastPathComponent)
         try data.write(to: written)
-        if let permissions = try? manager.attributesOfItem(atPath: url.path)[.posixPermissions] {
+        let original = try? manager.attributesOfItem(atPath: url.path)
+        if let permissions = original?[.posixPermissions] {
             try manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: written.path)
+        }
+        // Its group too, where we may give it (a shared repository).
+        if let group = original?[.groupOwnerAccountID] {
+            try? manager.setAttributes([.groupOwnerAccountID: group], ofItemAtPath: written.path)
         }
         guard let modified = try manager.attributesOfItem(atPath: written.path)[.modificationDate] as? Date else {
             throw CocoaError(.fileReadUnknown)
@@ -1275,6 +1317,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             // The page holds edits Swift hadn't heard of: the version read
             // waits beside them, as a conflict.
             guard let path = body["path"] as? String, let version = diskVersionByPath[path] else { return }
+            // The page's text still grows from the version it holds.
+            textVersionByPath[path] = body["version"] as? Int
             dirtyByPath[path] = true
             raiseConflict(path: path, version: version)
         case "save":
