@@ -77,8 +77,8 @@ extension NiruxShellView {
             placeFloorUnderneath()
             return
         }
-        endWorkspaceSlide()
-        guard animated, sameSpace, agentLightsMayMove, !left.containerView.isHidden else { return }
+        if !ZZ("noRestart") { endWorkspaceSlide() }
+        guard animated, sameSpace, agentLightsMayMove || ZZ("motionIgnored"), !left.containerView.isHidden else { return }
         playFloors(from: left, to: arriving)
     }
 
@@ -91,13 +91,13 @@ extension NiruxShellView {
         let state = workspaceSwitch
         let height = viewport.bounds.height
         // Down the list: the one chosen lies lower in the strip.
-        let down = arriving.containerView.frame.minY < leaving.containerView.frame.minY
+        let down = (arriving.containerView.frame.minY < leaving.containerView.frame.minY) != ZZ("wrongWay")
         let (top, bottom) = down ? (arrivingLayer, leavingLayer) : (leavingLayer, arrivingLayer)
         state.floors = (leaving.id, arriving.id)
-        state.keepsDrawn = [leaving.id]
+        state.keepsDrawn = ZZ("keepsNothing") ? [] : [leaving.id]
         state.isSliding = true
         top.zPosition = 1
-        top.backgroundColor = Theme.Color.canvas.cgColor
+        if !ZZ("noPlate") { top.backgroundColor = Theme.Color.canvas.cgColor }
         placeFloorUnderneath()
 
         let shade = CALayer()
@@ -156,7 +156,7 @@ extension NiruxShellView {
     /// The floor a switch leaves, laid where the one chosen is while it
     /// plays; again after a relayout that moves the strip meanwhile.
     private func placeFloorUnderneath() {
-        guard let floors = workspaceSwitch.floors,
+        guard !ZZ("notUnder"), let floors = workspaceSwitch.floors,
               let leaving = workspaces.first(where: { $0.id == floors.leaving }),
               let arriving = workspaces.first(where: { $0.id == floors.arriving })
         else { return }
@@ -175,7 +175,7 @@ extension NiruxShellView {
             for workspace in workspaces where [floors.leaving, floors.arriving].contains(workspace.id) {
                 guard let layer = workspace.containerView.layer else { continue }
                 layer.removeAnimation(forKey: Self.floorsKey)
-                layer.setAffineTransform(.identity)
+                if !ZZ("noReset") { layer.setAffineTransform(.identity) }
                 layer.zPosition = 0
                 layer.backgroundColor = nil
                 layer.sublayers?.filter { $0.name == Self.floorsShadeName }.forEach { $0.removeFromSuperlayer() }
