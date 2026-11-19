@@ -1036,12 +1036,14 @@ extension WorkspaceState {
     }
 
     /// `camera`: where it stays (a resize drag); nil: where the strip wants it.
+    /// `glides`: a card a neighbour pushed or let go glides to its place.
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
-        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil
+        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil, glides: Bool = false
     ) {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
+        let shown = glides ? columns.map(Self.shownPlace) : []
 
         let gap = Self.columnGap, inset = Self.columnInset
         let innerHeight = max(0, height - inset * 2)
@@ -1064,6 +1066,9 @@ extension WorkspaceState {
             col.light?.frame = col.view.frame
             shadow(for: col).frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
+            if let was = shown[safe: index], was.width == widths[index], !col.isArriving, abs(was.x - xOffset) > 0.5 {
+                Self.glide([col.view, col.light, col.shadow], by: was.x - xOffset)
+            }
             // Its content clipped to its corners; its border (the focus) is
             // the shell's.
             col.view.layer?.masksToBounds = true
@@ -1127,6 +1132,30 @@ extension WorkspaceState {
             anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             anim.isRemovedOnCompletion = true
             layer.add(anim, forKey: "colSlide")
+        }
+    }
+
+    static let cardGlideKey = "cardGlide"
+
+    /// Where a card shows in the strip, a glide on its way included, and
+    /// how wide it is.
+    private static func shownPlace(of column: ColumnState) -> (x: CGFloat, width: CGFloat) {
+        let frame = column.view.frame
+        let gliding = (column.view.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0
+        return (frame.minX + CGFloat(gliding), frame.width)
+    }
+
+    /// A card a neighbour pushed or let go glides to its place from `dx`
+    /// away (study P8): its view, its light and its shadow.
+    private static func glide(_ views: [NSView?], by dx: CGFloat) {
+        for layer in views.compactMap({ $0?.layer }) {
+            let glide = CABasicAnimation(keyPath: "transform.translation.x")
+            glide.fromValue = dx
+            glide.toValue = 0
+            glide.isAdditive = true
+            glide.duration = 0.36
+            glide.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.9, 0.3, 1)
+            layer.add(glide, forKey: cardGlideKey)
         }
     }
 

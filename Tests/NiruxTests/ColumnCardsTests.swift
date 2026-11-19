@@ -372,6 +372,46 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// A card a new one comes before glides aside from where it showed, its
+    /// shadow with it, and back once the new one went. With Reduce motion
+    /// it is simply there.
+    func testANeighbourGlidesAsideAndBack() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func glide(of view: NSView?) -> CGFloat? {
+                ((view?.layer?.animation(forKey: WorkspaceState.cardGlideKey) as? CABasicAnimation)?.fromValue as? NSNumber).map { CGFloat($0.doubleValue) }
+            }
+            shell.addColumn()
+            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            workspace.focusedIndex = 0
+            let neighbour = workspace.columns[1]
+            let before = neighbour.view.frame.minX
+
+            shell.addColumn()
+            let pushed = before - neighbour.view.frame.minX
+            XCTAssertLessThan(pushed, 0, "pushed aside")
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.view)), pushed, accuracy: 1, "from where it showed")
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.shadow)), pushed, accuracy: 1, "its shadow with it")
+            let added = workspace.columns[1]
+            XCTAssertNil(glide(of: added.view), "the new card comes from the front instead")
+            waitUntil("in", timeout: 2) { !added.isArriving }
+
+            shell.closeActiveColumn()
+            waitUntil("gone", timeout: 2) { !workspace.columns.contains { $0 === added } }
+            XCTAssertEqual(neighbour.view.frame.minX, before, accuracy: 1)
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.view)), -pushed, accuracy: 1, "back")
+
+            neighbour.view.layer?.removeAllAnimations()
+            shell.sideEffects.reducesMotion = { true }
+            workspace.focusedIndex = 0
+            shell.addColumn()
+            XCTAssertNil(glide(of: neighbour.view), "Reduce motion: there at once")
+        }
+    }
+
     /// A double-click resets the width and leaves no drag behind it.
     func testADoubleClickOnAHandleLeavesNoDragBehind() {
         let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))
