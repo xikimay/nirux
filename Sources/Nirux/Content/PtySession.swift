@@ -7,7 +7,7 @@ enum AgentStatus: Equatable, Hashable, Sendable {
     case idle, working, needsAttention
 }
 
-struct ProcessInstance: Codable, Equatable {
+struct ProcessInstance: Codable, Hashable {
     let pid: pid_t
     let startedAt: TimeInterval
 
@@ -297,8 +297,10 @@ final class ProcessSnapshot {
     }
 
     /// The environment in KERN_PROCARGS2's strings, past `argc` arguments.
+    /// Past them, the empty strings an argv overwritten in place (Node's
+    /// `process.title`) leaves are skipped.
     static func environment(argc: Int, strings: ArraySlice<UInt8>) -> [String: String] {
-        let entries = CStrings(rest: strings).dropFirst(max(0, argc)).prefix { !$0.isEmpty }
+        let entries = CStrings(rest: strings).dropFirst(max(0, argc)).drop { $0.isEmpty }.prefix { !$0.isEmpty }
         return Dictionary(entries.compactMap { entry in
             entry.firstIndex(of: "=").map { (String(entry[..<$0]), String(entry[entry.index(after: $0)...])) }
         }, uniquingKeysWith: { first, _ in first })
@@ -941,44 +943,59 @@ final class PtySession: @unchecked Sendable {
 
     /// See `AgentStatusMachine.promptFacts`, and what the session record
     /// of the `claude` in front says.
-    func missionPromptFacts(now: TimeInterval, snapshot: ProcessSnapshot) -> String {
-        let record = foregroundProcess(snapshot: snapshot).flatMap { AgentHookCenter.isInteractiveClaude($0) ? $0.instance : nil }
-            .map { " record=" + Self.sessionRecord(of: $0).facts(of: $0, now: now) }
-        return state.machine.promptFacts(now: now) + (record ?? "")
+    /// See `AgentStatusMachine.promptFacts`, and what the session record
+    /// of the `claude` in front says (`record`: how to read it).
+    func missionPromptFacts(
+        now: TimeInterval, snapshot: ProcessSnapshot, record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
+    ) -> String {
+        let facts = foregroundProcess(snapshot: snapshot).flatMap { AgentHookCenter.isInteractiveClaude($0) ? $0.instance : nil }
+            .map { " record=" + record($0).facts(of: $0, now: now) }
+        return state.machine.promptFacts(now: now) + (facts ?? "")
     }
 
-    /// Why `acceptsMissionMessage` says no, nil when it says yes.
-    func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+    /// Why `acceptsMissionMessage` says no, nil when it says yes, at `now`.
+    /// `record`: how to read the session record of a `claude` with no
+    /// prompt yet (a check's own reading, between checks).
+    func missionPromptRefusal(
+        runningSince: TimeInterval, snapshot: ProcessSnapshot, now: TimeInterval = Date().timeIntervalSince1970,
+        record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
+    ) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
         return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince) {
-            Self.sessionRecord(of: $0).showsIdlePrompt(of: $0, now: Date().timeIntervalSince1970)
+            record($0).showsIdlePrompt(of: $0, now: now)
         }
     }
 
     /// Whether `foreground`, the column's `claude`, that took no prompt since
-    /// it started, sits at its empty prompt (see
-    /// `AgentStatusMachine.sitsAtFirstPrompt`).
-    func sitsAtFirstPrompt(_ foreground: ForegroundProcess) -> Bool {
-        state.machine.sitsAtFirstPrompt(foreground.instance) {
-            Self.sessionRecord(of: $0).showsIdlePrompt(of: $0, now: Date().timeIntervalSince1970)
-        }
+    /// it started, sits at its empty prompt at `now` (see
+    /// `AgentStatusMachine.sitsAtFirstPrompt`; `record` as
+    /// `missionPromptRefusal` takes it).
+    func sitsAtFirstPrompt(
+        _ foreground: ForegroundProcess, now: TimeInterval,
+        record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
+    ) -> Bool {
+        state.machine.sitsAtFirstPrompt(foreground.instance) { record($0).showsIdlePrompt(of: $0, now: now) }
     }
 
     /// Whether Enter may follow a paste whose keys went in at `typedAt`, into
     /// the prompt of `process`: no key since, no dialog its hooks listed,
-    /// still in front, and no dialog or screen its REPL says it waits on.
+    /// still in front. (Its session record is read apart: it may lag.)
     func mayPressEnter(after typedAt: TimeInterval, for process: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
-        guard lastInputAt == typedAt, !dialogWaitsForKeys, foregroundProcess(snapshot: snapshot)?.instance == process else { return false }
-        return process.map { !Self.sessionRecord(of: $0).showsWait(of: $0) } ?? true
+        lastInputAt == typedAt && !dialogWaitsForKeys && foregroundProcess(snapshot: snapshot)?.instance == process
     }
 
     /// The session record of `process`, a `claude`, in the config folder
-    /// its own environment names, else Nirux's, which its terminal inherits.
+    /// its own environment names, else Nirux's, which its terminal inherits
+    /// (macOS hides a system binary's); a relative one is the process's,
+    /// against its working directory.
     static func sessionRecord(
         of process: ProcessInstance, inherited: [String: String] = ProcessInfo.processInfo.environment
     ) -> ClaudeSessionRecord.Reading {
         let own = ProcessSnapshot.environment(of: process.pid)
-        return ClaudeSessionRecord.read(at: ClaudeSessionRecord.url(pid: process.pid, environment: own.isEmpty ? inherited : own))
+        let url = ClaudeSessionRecord.url(pid: process.pid, environment: own.isEmpty ? inherited : own) {
+            cwd(ofExecedProcess: process.pid)
+        }
+        return ClaudeSessionRecord.read(at: url)
     }
 
     /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.

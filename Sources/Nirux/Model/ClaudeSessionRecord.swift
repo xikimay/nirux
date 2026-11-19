@@ -51,10 +51,13 @@ struct ClaudeSessionRecord: Equatable, Sendable {
 
     /// The record of `pid` under the config folder of `environment`, that
     /// `claude`'s own, as Claude Code finds it: `CLAUDE_CONFIG_DIR`, else
-    /// `.claude` in its home.
-    static func url(pid: pid_t, environment: [String: String]) -> URL {
+    /// `.claude` in its home; a relative one against its working directory
+    /// (`cwd`, read only then).
+    static func url(pid: pid_t, environment: [String: String], cwd: () -> String? = { nil }) -> URL {
         let home = environment["HOME"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory()
-        return URL(fileURLWithPath: ProjectMemory.configDirectory(home: home, environment: environment), isDirectory: true)
+        var folder = ProjectMemory.configDirectory(home: home, environment: environment)
+        if !folder.hasPrefix("/"), let cwd = cwd() { folder = (cwd as NSString).appendingPathComponent(folder) }
+        return URL(fileURLWithPath: folder, isDirectory: true)
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent("\(pid).json")
     }
@@ -101,6 +104,16 @@ extension ClaudeSessionRecord.Reading {
     func showsWait(of process: ProcessInstance) -> Bool {
         guard case .found(let record) = self else { return false }
         return record.showsWait(of: process)
+    }
+
+    /// Whether the log should say so: missing, unreadable at a second read
+    /// in a row (`unreadableBefore`), or without a status of `process`'s own.
+    func isIssue(for process: ProcessInstance, unreadableBefore: Bool) -> Bool {
+        switch self {
+        case .missing: return true
+        case .unreadable: return unreadableBefore
+        case .found(let record): return !record.belongs(to: process)
+        }
     }
 
     /// For the missions log, one word: `idle/12s`, `waiting(dialog_open)/3s`,

@@ -836,9 +836,15 @@ final class TurnEndClassificationTests: XCTestCase {
         let resumed = ForegroundProcess(instance: ProcessInstance(pid: 10, startedAt: t0 + 6), name: "claude", arguments: ["claude"])
         let request = try XCTUnwrap(endTurn().turnEnd)
         XCTAssertFalse(machine.isPromptFree(foreground: claude, runningSince: t0 + 9))
-        XCTAssertFalse(machine.isPromptFree(foreground: resumed, runningSince: t0 + 9) { _ in true })
         _ = machine.applyTurnEndVerdict(.done, for: request, isUserFocused: false)
         XCTAssertTrue(machine.isPromptFree(foreground: claude, runningSince: t0 + 9))
+
+        // Resumed since, its hooks reporting: a turn end of its own (a
+        // background agent it resumed) waits for its verdict.
+        _ = machine.apply(event(.sessionStart, at: 7, source: "resume"), isUserFocused: false)
+        let resumedEnd = try XCTUnwrap(machine.apply(event(.stop, at: 8, message: "Shall I merge?"), isUserFocused: false).turnEnd)
+        XCTAssertFalse(machine.isPromptFree(foreground: resumed, runningSince: t0 + 9) { _ in true })
+        _ = machine.applyTurnEndVerdict(.done, for: resumedEnd, isUserFocused: false)
         XCTAssertTrue(machine.isPromptFree(foreground: resumed, runningSince: t0 + 9) { _ in true })
     }
 

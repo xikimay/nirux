@@ -306,10 +306,14 @@ final class LeadToolsFlowTests: XCTestCase {
                     foreground: { $0.pty?.foregroundProcess(snapshot: ProcessSnapshot()) }, now: now
                 )[ObjectIdentifier(column)]?.handOff
             }
+            check()
+            XCTAssertNil(shell.missionWaits.tries[question.id], "typed at once; tries count at the overdue ones' pace")
+            // Between checks, the sidebar reads the record the check read.
+            try write("waiting", waitingFor: "dialog open")
             let now = Date().timeIntervalSince1970
             XCTAssertNil(handOff(at: now))
             XCTAssertNil(handOff(at: now + NiruxShellView.missionParentGrace), "it can take the question")
-            check()
+            try write("idle")
             harness.waitUntil("the question in its prompt") { resumed.input.contains("Keep the old date= parameter?") }
             XCTAssertNotNil(typedAt())
         }

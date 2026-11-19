@@ -411,6 +411,16 @@ final class MissionTellTests: XCTestCase {
         func refusal(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
             machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100) { $0 == resumed && idle }
         }
+        // Without Nirux's hooks from it, nothing would say a message went in:
+        // never, and keys say nothing of a draft.
+        var hookless = AgentStatusMachine()
+        XCTAssertEqual(refusal(hookless), .noPromptYet)
+        hookless.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(hookless), .noPromptYet, "not held by a draft")
+        var earlier = AgentStatusMachine()
+        _ = earlier.apply(hook(.sessionStart, at: 5), isUserFocused: false)
+        XCTAssertEqual(refusal(earlier), .noPromptYet, "an earlier claude's hooks")
+
         var machine = AgentStatusMachine()
         _ = machine.apply(hook(.sessionStart, at: 7, source: "resume"), isUserFocused: false)
         XCTAssertEqual(refusal(machine, idle: false), .noPromptYet)
