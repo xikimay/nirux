@@ -168,6 +168,8 @@ final class NiruxShellView: NSView {
     /// The spaces whose due pass waits, after GitHub didn't answer or a
     /// pass couldn't be recorded, until then.
     var dailyPassRetryAt: [String: TimeInterval] = [:]
+    /// Reads GitHub may answer next time, in a row, by space.
+    var dailyPassRereads: [String: DailyPass.Rereads] = [:]
     /// When the Mac last woke: the user's absence counts from there.
     var dailyPassWokeAt: TimeInterval = 0
     var dailyPassTimer: Timer?

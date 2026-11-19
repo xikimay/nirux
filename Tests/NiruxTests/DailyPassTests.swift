@@ -37,6 +37,9 @@ final class DailyPassTests: XCTestCase {
         XCTAssertNil(DailyPass.roundNumber("fix(time): round 60 seconds up"))
         XCTAssertNil(DailyPass.roundNumber("fix(lead): round 3 timeout"))
         XCTAssertNil(DailyPass.roundNumber("review round 40 of the cache"), "past \(DailyPass.maxRound)")
+        XCTAssertEqual(DailyPass.roundNumber("fix: round 2 review of the cache"), 2)
+        XCTAssertEqual(DailyPass.roundNumber("fix(lead): the Lead's review of #586, round 1"), 1)
+        XCTAssertNil(DailyPass.roundNumber("fix: review the timeout, round 3 seconds"), "\"review\" right before \"round\", or the forms above")
 
         let runs = Data("""
             [{"databaseId": 1, "attempt": 1, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"},
@@ -79,8 +82,9 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(reports[3].problems, ["only the \(DailyPass.mergedLimit) most recently updated merged pull requests were read"])
     }
 
-    /// Being signed out, or having no access to the repository, holds; any
-    /// other gh error reads the window again.
+    /// No answer (no network, a timeout, a 5xx, what gh never said) and
+    /// rate limits read the window again; anything GitHub or gh said
+    /// (signed out, refused) holds.
     func testAGitHubErrorReadsAgainUnlessItHolds() {
         func retries(_ standardError: String, status: Int32 = 1) -> Bool {
             DailyPass.readFailure(GitHubCLIQueueClient.Output(status: status, standardOutput: Data(), standardError: Data(standardError.utf8)))
@@ -93,6 +97,17 @@ final class DailyPassTests: XCTestCase {
         XCTAssertFalse(retries("To get started with GitHub CLI, please run:  gh auth login", status: 4))
         XCTAssertFalse(retries("GraphQL: Could not resolve to a Repository with the name 'acme/gone'. (repository)"))
         XCTAssertFalse(retries("HTTP 404: Not Found (https://api.github.com/repos/acme/gone)"))
+        XCTAssertFalse(retries("HTTP 422: Validation Failed (https://api.github.com/search/issues)"))
+        XCTAssertFalse(retries("GraphQL: Resource protected by organization SAML enforcement. (repository)"))
+    }
+
+    /// Three reads in a row that GitHub may answer next time at most: the
+    /// third marks the window read all the same; a full read starts over.
+    func testRereadsStopAfterThree() {
+        var rereads = DailyPass.Rereads()
+        XCTAssertEqual([true, true, true].map { rereads.readsAgain($0) }, [true, true, false])
+        XCTAssertFalse(rereads.readsAgain(false))
+        XCTAssertTrue(rereads.readsAgain(true), "counted again from a full read")
     }
 
     /// Folders whose base remote names the same repository read it once;
@@ -263,7 +278,9 @@ final class DailyPassTests: XCTestCase {
                     time: now - 2 * hour, workspace: "W3", task: "feat/floors", pullRequest: nil, repository: "/w/nirux", round: 3, findings: [layer]
                 ),
                 // The same branch name in another repository doesn't.
-                ReviewFindings.Entry(time: now - 3 * hour, workspace: "W4", task: "feat/floors", repository: "/w/other", round: 5, findings: [])
+                ReviewFindings.Entry(time: now - 3 * hour, workspace: "W4", task: "feat/floors", repository: "/w/other", round: 5, findings: []),
+                // One recorded before reviews kept their repository counts.
+                ReviewFindings.Entry(time: now - 4 * hour, workspace: "W5", task: "feat/floors", round: 4, findings: [])
             ],
             repositories: [report], triagedRuns: [], flakyTests: [], missions: [],
             proposals: [
@@ -286,7 +303,7 @@ final class DailyPassTests: XCTestCase {
         let kind = "- backing-layer · 2 tasks: #594 round 1 “The layer was replaced”; feat/floors round 3 “The layer was replaced”"
         XCTAssertTrue(digest.contains(kind), digest)
         XCTAssertFalse(digest.contains("only-old"), digest)
-        XCTAssertTrue(digest.contains("- #611 “Floors” · branch feat/floors · 3 review rounds · 1 run rerun\n  Why: The floors move."), digest)
+        XCTAssertTrue(digest.contains("- #611 “Floors” · branch feat/floors · 4 review rounds · 1 run rerun\n  Why: The floors move."), digest)
         XCTAssertTrue(digest.contains("- rerun: run 44 · Tests · branch feat/floors (#611) · attempt 2, success"), digest)
         XCTAssertTrue(digest.contains("## Rules waiting for the user\n- “Waiting rule.” (#1, #2)"), digest)
         XCTAssertTrue(digest.contains("## The brief's rules learned\n- Tests wait on state. (learned 2026-11-11, #395)"), digest)
@@ -332,13 +349,66 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(long.readUntil, now, "the brief's rules are no facts of the day")
 
         var busy = facts()
-        busy.missions = (0...DailyPass.maxItems).map { index in
+        // Sent in the other order than what put them in the window: cut by the latter.
+        busy.missions = (0...DailyPass.maxItems).reversed().map { index in
             let time = now - 20 * hour + Double(index) * 60
-            return DailyPass.MissionFact(kind: .held, message: "tell to x", sentAt: time, at: time, detail: "typed late", excerpt: "")
+            return DailyPass.MissionFact(
+                kind: .held, message: "tell \(index)", sentAt: now - 30 * hour - Double(index) * 60, at: time, detail: "typed late", excerpt: ""
+            )
         }
         let cut = DailyPass.digest(busy, timeZone: utc)
         XCTAssertEqual(cut.readUntil, now - 20 * hour + Double(DailyPass.maxItems) * 60)
         XCTAssertTrue(cut.text.contains("Left out: what came after 01-14 12:30. The window is read up to there only"), cut.text)
+        XCTAssertTrue(cut.text.contains("tell 0,") && !cut.text.contains("tell \(DailyPass.maxItems),"), "the earliest shown")
+    }
+
+    /// Each read ends later than it started, whatever it leaves out: a
+    /// kind's older sightings are context, kinds and facts are cut in time
+    /// order, learned flaky tests are all shown, and sections too long at
+    /// the smallest lists go whole, read again next time.
+    func testTheWindowAlwaysMovesOn() {
+        var day = facts()
+        day.repositories = []
+        day.findings = (0..<10).map { index in
+            ReviewFindings.Entry(time: now - Double(10 - index) * hour, workspace: "W\(index)", task: "t\(index)", round: 1,
+                                 findings: [ReviewFindings.Finding(kind: "busy", text: "x")])
+        }
+        XCTAssertEqual(DailyPass.digest(day, timeZone: utc).readUntil, now, "older sightings are context")
+
+        day.findings = (0..<40).map { index in
+            ReviewFindings.Entry(time: now - 20 * hour + Double(index) * 60, workspace: "W\(index)", task: "t\(index)", round: 1,
+                                 findings: [ReviewFindings.Finding(kind: "kind-\(index)", text: "x")])
+        }
+        day.flakyTests = (0..<50).map { "Suite.test\($0)" }
+        let first = DailyPass.digest(day, timeZone: utc)
+        XCTAssertEqual(first.readUntil, now - 20 * hour + Double(DailyPass.maxItems) * 60)
+        XCTAssertTrue(first.text.contains("Suite.test0, ") && first.text.contains("Suite.test49"), "every flaky test")
+        XCTAssertTrue(first.text.contains("- kind-0 ·") && !first.text.contains("- kind-39 ·"), "the earliest kinds are shown")
+        var rest = day
+        rest.window.start = first.readUntil
+        XCTAssertEqual(DailyPass.digest(rest, timeZone: utc).readUntil, now, "the next read takes the rest")
+
+        var huge = facts()
+        huge.repositories = (0..<80).map { repository in
+            DailyPass.RepositoryReport(name: "acme/r\(repository)", merged: (0..<4).map { index in
+                DailyPass.MergedPullRequest(
+                    number: index, title: String(repeating: "t", count: 200), branch: "b\(index)",
+                    mergedAt: now - 10 * hour + Double(repository * 4 + index) * 60, why: String(repeating: "w", count: 300),
+                    roundCommits: [], rounds: 0
+                )
+            })
+        }
+        // Facts left out at the window's very start: it moves on all the same.
+        var tied = facts()
+        tied.missions = (0...DailyPass.maxItems).map { index in
+            DailyPass.MissionFact(kind: .held, message: "tell \(index)", sentAt: tied.window.start, at: tied.window.start, detail: "", excerpt: "")
+        }
+        XCTAssertGreaterThan(DailyPass.digest(tied, timeZone: utc).readUntil, tied.window.start)
+
+        let cut = DailyPass.digest(huge, timeZone: utc)
+        XCTAssertLessThanOrEqual(cut.text.count, DailyPass.maxCharacters + 200)
+        XCTAssertGreaterThan(cut.readUntil, huge.window.start, "a section that went whole is read again, later")
+        XCTAssertTrue(cut.text.contains("Left out: what came after"), String(cut.text.suffix(300)))
     }
 
     /// The first pass reads the last day; the next starts where it ended,
@@ -370,6 +440,7 @@ final class DailyPassTests: XCTestCase {
         let note = DailyPass.Note(at: now, pullRequests: 2, flakyTests: 0, messages: 0)
         let read = last.afterReading(last.reading(now: now).next, readsAgain: false, note: note, readUntil: now)
         XCTAssertEqual(read.end, now)
+        XCTAssertEqual(read.readAt, now)
         XCTAssertEqual(read.note, note)
         XCTAssertEqual(last.afterReading(last.reading(now: now).next, readsAgain: true, note: note, readUntil: now).end, now - 5 * hour)
         XCTAssertEqual(last.afterReading(last.reading(now: now).next, readsAgain: false, note: note, readUntil: now - 2 * hour).end,
@@ -399,6 +470,8 @@ final class DailyPassTests: XCTestCase {
         XCTAssertFalse(DailyPass.isDue(DailyPassState(checkedAt: now - hour), hour: 6, now: now, timeZone: utc))
         XCTAssertFalse(DailyPass.isDue(DailyPassState(end: now - hour), hour: 6, now: now, timeZone: utc), "the user asked for one")
         XCTAssertFalse(DailyPass.isDue(DailyPassState(end: now - 3 * hour), hour: 6, now: now, timeZone: utc), "one just before the hour")
+        let cutShort = DailyPassState(end: now - 30 * hour, readAt: now - 3 * hour)
+        XCTAssertFalse(DailyPass.isDue(cutShort, hour: 6, now: now, timeZone: utc), "when it read, not up to where")
         // The night Paris skips 02:00: yesterday's stroke is yesterday's 02:00.
         let paris = TimeZone(identifier: "Europe/Paris")!
         let iso = ISO8601DateFormatter()
@@ -436,6 +509,11 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(DailyPass.noteCounts(note, rulesProposed: 1), "1 PR, 2 flaky tests, 1 message held or lost, 1 rule proposed")
         XCTAssertEqual(DailyPass.noteCounts(DailyPass.Note(at: now, pullRequests: 3, flakyTests: 0, messages: 0), rulesProposed: 0),
                        "3 PRs, no rule proposed")
+        // The rules of that pass's turn, not of the day after.
+        let proposals = [now - 60, now + 600, now + 2 * hour].map { time in
+            RuleProposal(id: UUID().uuidString, rule: "r", evidence: "e", proposedAt: time, leadWorkspaceID: nil, leadAgentUUID: nil)
+        }
+        XCTAssertEqual(DailyPass.rulesProposed(proposals, in: note), 1)
     }
 
     /// The brief's rules learned: that section's bullets as sessions read

@@ -20,9 +20,10 @@ enum ReviewFindings {
 
     struct Entry: Codable, Equatable, Sendable {
         var time: TimeInterval
-        /// The task's workspace and the branch it was first known by (its
-        /// Mission's, else its first review's) tell one task from another,
-        /// whatever its HEAD (detached in a rebase) or pull request does.
+        /// The task's workspace and its branch tell one task from another,
+        /// whatever pull request it opens. While HEAD is detached (a
+        /// rebase) or not read yet, the name its last review had, else its
+        /// Mission's branch.
         var workspace: String
         var task: String
         var pullRequest: Int?
@@ -149,10 +150,12 @@ enum ReviewFindings {
     struct Review: Sendable {
         let findings: [Finding]
         let workspace: String
+        /// Its branch, nil while HEAD is detached or not read yet.
+        let branch: String?
         /// The branch its Mission started it on, if it has one.
         let missionBranch: String?
-        /// Its branch now, else its folder or title.
-        let task: String
+        /// Its folder or title: a task without a repository.
+        let folderOrTitle: String
         let pullRequest: Int?
         let repository: String?
     }
@@ -177,8 +180,7 @@ enum ReviewFindings {
             return .notRecorded("The space’s review log is full: it frees up as reviews pass 30 days.")
         }
         let earlier = lines.load(spaceID: spaceID, stateDirectory: stateDirectory)
-        // The name it was first known by.
-        let task = review.missionBranch ?? earlier.last { $0.workspace == review.workspace }?.task ?? review.task
+        let task = review.branch ?? earlier.last { $0.workspace == review.workspace }?.task ?? review.missionBranch ?? review.folderOrTitle
         var entry = Entry(
             time: now, workspace: review.workspace, task: task, pullRequest: review.pullRequest, repository: review.repository,
             round: 1, findings: review.findings

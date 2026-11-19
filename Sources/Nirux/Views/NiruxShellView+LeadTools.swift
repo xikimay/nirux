@@ -378,13 +378,17 @@ extension NiruxShellView {
 
     /// The space's anchor a task works in: its folder is the main
     /// checkout, in it, or one of the worktrees Nirux places beside it
-    /// (`<checkout>.<branch>`, see `GitWorktree.create`). No git: a guess.
+    /// (`<checkout>.<branch>`, see `GitWorktree.create`); the deepest when
+    /// anchors nest. No git: a guess.
     func repositoryAnchor(of task: WorkspaceState, in space: WorkspaceProfile) -> SpaceAnchor? {
         let folder = URL(fileURLWithPath: task.cwd).standardizedFileURL.path
-        return space.anchors.first { anchor in
-            guard let anchorFolder = anchor.folder.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) else { return false }
-            return folder == anchorFolder || folder.hasPrefix(anchorFolder + "/") || folder.hasPrefix(anchorFolder + ".")
+        let matches = space.anchors.compactMap { anchor -> (SpaceAnchor, String)? in
+            guard let anchorFolder = anchor.folder.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }),
+                  folder == anchorFolder || folder.hasPrefix(anchorFolder + "/") || folder.hasPrefix(anchorFolder + ".")
+            else { return nil }
+            return (anchor, anchorFolder)
         }
+        return matches.max { $0.1.count < $1.1.count }?.0
     }
 
     /// What its agents do: working, needs the user (and for what), idle.

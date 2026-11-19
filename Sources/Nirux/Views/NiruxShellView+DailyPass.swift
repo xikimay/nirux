@@ -21,8 +21,9 @@ extension NiruxShellView {
         case .failure(let refusal): return answer(refusal.reason, true)
         }
         let review = ReviewFindings.Review(
-            findings: findings, workspace: task.id, missionBranch: (leadMission(of: task, lead: leadID) ?? ownMission(of: task))?.branch,
-            task: task.gitBranch ?? task.taskFolder ?? task.title, pullRequest: task.prInfo?.number,
+            findings: findings, workspace: task.id, branch: task.gitContext?.branchName,
+            missionBranch: (leadMission(of: task, lead: leadID) ?? ownMission(of: task))?.branch,
+            folderOrTitle: task.taskFolder ?? task.title, pullRequest: task.prInfo?.number,
             repository: repositoryAnchor(of: task, in: space)?.folder
         )
         ReviewFindings.record(review, spaceID: space.id) { outcome in
@@ -41,9 +42,10 @@ extension NiruxShellView {
         gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
             guard let self, let facts else { return answer("This space keeps no daily pass.", true) }
             let digest = DailyPass.digest(facts)
+            let readsAgain = self.dailyPassRereads[space.id, default: DailyPass.Rereads()].readsAgain(facts.readsAgain)
             // On what holds now: a check may have saved meanwhile.
             let saved = self.dailyPassState(inSpace: space.id)
-                .afterReading(next, readsAgain: facts.readsAgain, note: facts.note(at: window.end), readUntil: digest.readUntil)
+                .afterReading(next, readsAgain: readsAgain, note: facts.note(at: window.end), readUntil: digest.readUntil)
             self.saveDailyPassState(saved, spaceID: space.id)
             answer(digest.text, false)
         }
@@ -152,7 +154,8 @@ extension NiruxShellView {
                       self.workspaces.contains(where: { $0 === lead && !$0.isClosing }), self.dailyPassColumn(of: lead) === column
                 else { return }
                 var next = self.dailyPassState(inSpace: space.id)
-                if facts.readsAgain && !facts.hasNews {
+                let readsAgain = self.dailyPassRereads[space.id, default: DailyPass.Rereads()].readsAgain(facts.readsAgain)
+                if readsAgain && !facts.hasNews {
                     self.dailyPassRetryAt[space.id] = now + DailyPass.retryAfter
                 } else if !facts.hasNews {
                     // The window is read: the next pass starts there.
@@ -242,8 +245,7 @@ extension NiruxShellView {
     }
 
     private func dailyPassCounts(_ note: DailyPass.Note, spaceID: String) -> String {
-        let proposed = ruleProposals(inSpace: spaceID).proposals.filter { $0.proposedAt >= note.at }.count
-        return DailyPass.noteCounts(note, rulesProposed: proposed)
+        DailyPass.noteCounts(note, rulesProposed: DailyPass.rulesProposed(ruleProposals(inSpace: spaceID).proposals, in: note))
     }
 
     // MARK: Space Settings › Lead

@@ -23,7 +23,7 @@ The facts come from Nirux, not from the Lead's memory, which idle compaction tri
   - `text` is one line of 300 characters at most;
   - 20 findings at most per review.
 - **Which tasks:** any task of the space, the user's included (#613's reach). A workspace that isn't a task is refused, as `set_task_context` refuses it.
-- **Rounds:** each record is the next round of its task. A task is its workspace plus the branch it was first known by: its Mission's branch, else its first review's. It stays one task when HEAD is detached in a rebase, before its git context arrives, and when its pull request opens. A kind names each task by its latest handle (its pull request once it has one). Each record keeps the repository folder it was made in, so its rounds count for that repository's pull requests only.
+- **Rounds:** each record is the next round of its task. A task is its workspace plus its branch, so it stays one task when its pull request opens, and a checkout moved to another branch is another task. While HEAD is detached (a rebase) or not read yet, it keeps its last review's name, else its Mission's branch. A kind names each task by its latest handle (its pull request once it has one). Each record keeps the repository folder it was made in (the deepest anchor when anchors nest), so its rounds count for that repository's pull requests only; records from before that count for any.
 - **Answer when nothing is written:** the log is full, or it can't be written.
 - **The answer** lists the space's other kinds, so the Lead reuses them. When a kind now shows up in a second task, it says so: that is `propose_rule`'s trigger, made visible at once.
 - **Stored** in `<state dir>/projects/<space id>/review-findings.jsonl` (0600, kept 30 days, 2 MB at most). It shares its file handling with `loop.jsonl` (SpaceLog) and is deleted with the space.
@@ -36,7 +36,7 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
 1. **Review findings by kind:** each kind seen in the window, with where it showed up in the last 30 days (`#594 round 1`, `#611 round 3`). The kinds seen in the most tasks come first.
 2. **Pull requests merged** in the window, in each GitHub repository of the space (from each repository's base remote). The repositories are read at once. One `gh pr list --state merged --limit 40` per repository gives:
    - the number, title and branch;
-   - the review rounds: the highest review round its commit headlines name ("review round 2", "the Lead's round 1", "round 1 of …", at most 10; never "round 60 seconds"), or the rounds recorded for its branch in that repository if higher;
+   - the review rounds: the highest review round its commit headlines name ("review round 2", "the Lead's round 1", "round 2 review", "round 1 of …", "the Lead's review of #586, round 1"; at most 10; never "round 60 seconds"), or the rounds recorded for its branch in that repository if higher;
    - the Why section on one line;
    - the round commits' headlines.
 3. **CI:**
@@ -58,12 +58,12 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
    - the rules waiting;
    - the brief's "Rules learned" as sessions read them now (the Lead's copy dates from its start);
    - the rules dismissed in the last 90 days.
-6. **What GitHub didn't say**, shown even on a day with nothing else. It isn't news on its own: a signed-out gh would make every day one. Errors are read as the merge queue reads them: being signed out, or having no access to the repository, holds until someone acts; any other error (no network, a timeout, a rate limit, a 5xx, one gh never said before) leaves the window to read again. So does a repository whose remote git or ssh couldn't read.
+6. **What GitHub didn't say**, shown even on a day with nothing else. It isn't news on its own: a signed-out gh would make every day one. Errors are read as the merge queue reads them: no answer (no network, a timeout, a 5xx, what gh never said) and rate limits leave the window to read again, and so does a repository whose remote git or ssh couldn't read; anything GitHub or gh said (signed out, refused) holds until someone acts. Three reads in a row that may be read again at most: the third marks the window read all the same.
 
    The store compares wording; the Lead compares meaning.
 
 - **Instructions:** the text opens with what to propose. That is at most the free pending slots (3 minus those waiting), the strongest first, citing the facts' handles. A Nirux bug or a flaky test is a task to start, not a rule. When nothing happened, it says so.
-- **Read up to the first fact left out:** each section lists at most 30 items, fewer (15, 8, 4) while the digest passes 40,000 characters. When facts are left out, the window is marked read only up to the first of them, the digest says so, and the next call reads the rest.
+- **Read up to the first fact left out, and always later:** each section lists at most 30 facts, fewer (15, 8, 4) while the digest passes 40,000 characters, cut in time order (a kind by when the window first saw it; its older sightings are context). The tests learned flaky all show, on one line. Sections still too long at the smallest lists go whole. The window is marked read up to the first fact left out, never at its own start (a window that can't move shows the same facts every day); the digest says so, and the next call reads the rest. `isDue` goes by when the last read was, not up to where.
 - **Window:** a call reads from where the last one ended (the last day for the first, a week at most). A call within 2 h of the last reads the same window again, longer, without saving it, so the Lead asking again after a compaction or a timeout sees the same facts; only after a read that showed all (not after one cut short, a quiet check, or a typed line). The window is kept in `daily-pass.json` beside the brief (0600, deleted with the space). A call that outlives its wait tells the Lead to call again in a minute.
 
 ## When (PR 2)
@@ -78,7 +78,7 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
   A resumed Lead takes no typed line until it took a prompt (#483); the resumed-delivery work lifts that.
 - **Only if something happened.** Nirux reads the facts from the last read (GitHub included), then asks again whether the pass is on, due and quiet before typing "[Nirux Mission] Daily pass: call daily_pass…". The pass is recorded before the line is typed; one that can't be recorded isn't typed, and checks wait 15 min. A day with nothing marks its window read. A gh that didn't answer (no network after a wake, a timeout, a 5xx) waits 15 min and tries again. If the Lead never calls `daily_pass`, the next pass covers both days; the Lead's call after a typed line is a new pass, not a second read.
 - **Settings:** Space Settings › Lead gets a "Daily pass" switch (on by default, the user's call), an hour menu and a "Last pass" line. They are kept in `defaults.json` (`leadDailyPass`, `leadDailyPassHour`); a file Nirux can't read turns the pass off.
-- **The note:** after each `daily_pass` call, the Lead row shows a grey line for 24 h, "Daily pass · 6 PRs, 1 flaky test, 2 rules proposed". It counts the pull requests merged, the flaky tests (learned or called so), the messages held or given up, and the rules proposed since the call (a second read keeps the first read's time). The Lead's reply in its terminal says why.
+- **The note:** after each `daily_pass` call, the Lead row shows a grey line for 24 h, "Daily pass · 6 PRs, 1 flaky test, 2 rules proposed". It counts the pull requests merged, the flaky tests (learned or called so), the messages held or given up, and the rules proposed within an hour of the call, its pass's turn (a second read keeps the first read's time). The Lead's reply in its terminal says why.
 
 ## Cost
 
