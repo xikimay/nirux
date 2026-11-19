@@ -184,36 +184,31 @@ extension NiruxShellView {
     /// `agent`'s launch in `workspace`, in the space's mode; nil for an
     /// agent Nirux doesn't start.
     static func launch(of agent: CodingAgent, resume: AgentResumeTarget?, in workspace: WorkspaceState) -> AgentLaunch? {
-        switch agent {
-        case .claude: .claude(resume: resume, mode: claudeLaunchMode(for: workspace))
-        case .codex: .codex(resume: resume, mode: codexLaunchMode(for: workspace))
-        case .agy: .agy(resume: resume)
-        case .gemini, .opencode: nil
-        }
+        AgentLaunch(agent, resume: resume, claudeMode: claudeLaunchMode(for: workspace), codexMode: codexLaunchMode(for: workspace))
     }
 
     /// The line that runs `launch` in `workspace`, with the space's brief
     /// and Claude settings (`settingsFiles`: prepared for a batch). Codex
     /// takes the brief unless a config from `launchDirectory` up sets its
-    /// own, and `resumeDirectory` resumes its thread there.
+    /// own, and `resumeDirectory` resumes its thread there. A new agy gets
+    /// Nirux's hook first: through it, agy says which conversation it runs.
     func agentCommand(
         _ launch: AgentLaunch, in workspace: WorkspaceState, launchDirectory: String, resumeDirectory: String? = nil,
         sessionName: String? = nil, handoverPrompt: String? = nil, settingsFiles: [String: String]? = nil
     ) -> String {
-        let brief = spaceBriefInjection(for: workspace)
         switch launch {
         case .claude(let resume, let mode):
             return Self.claudeCommand(
-                resume: resume, mode: mode, sessionName: sessionName, briefFile: brief?.claudePromptFile,
+                resume: resume, mode: mode, sessionName: sessionName, briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
                 settingsFile: claudeSpaceSettingsFile(for: workspace, prepared: settingsFiles), handoverPrompt: handoverPrompt
             )
         case .codex(let resume, let mode):
             return Self.codexCommand(
                 resume: resume, workingDirectory: resumeDirectory, mode: mode,
-                briefFile: Self.codexBriefFile(from: brief, launchDirectory: launchDirectory), handoverPrompt: handoverPrompt
+                briefFile: Self.codexBriefFile(from: spaceBriefInjection(for: workspace), launchDirectory: launchDirectory),
+                handoverPrompt: handoverPrompt
             )
         case .agy(let resume):
-            // A new agy says which conversation it runs through Nirux's hook.
             if resume == nil { AgentHookInstaller.installAgyHooksIfInstalling() }
             return Self.agyCommand(resume: resume, handoverPrompt: handoverPrompt)
         }

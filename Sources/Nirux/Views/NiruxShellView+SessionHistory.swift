@@ -14,14 +14,17 @@ extension NiruxShellView {
         let workspace = resolution.workspace
         guard SessionHistory.agents.contains(event.kind) else { return }
         let agentProcess: ForegroundProcess?
-        if event.kind == .claude {
+        switch event.kind {
+        case .claude:
             agentProcess = appliedEvent.claudeSessionAgent
-        } else {
+        case .codex:
             let foreground = resolution.column.pty?.foregroundProcess(snapshot: snapshot)
             agentProcess = foreground.flatMap {
                 $0.headlessAgent != .codex && resolution.column.boundCodexSessionID(of: $0.instance) == sessionID
                     ? $0 : nil
             }
+        case .agy, .gemini, .opencode:
+            return
         }
         // A permission dialog and its answer only move the status: no disk
         // reads for them.

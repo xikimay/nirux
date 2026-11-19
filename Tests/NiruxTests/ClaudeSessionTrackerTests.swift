@@ -74,7 +74,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: codex), .rejected)
     }
 
-    func testClaudeHooksUnderAnActivityOnlyAgentAreNested() {
+    func testClaudeHooksUnderAnAgentWithoutHooksAreNested() {
         // A `claude -p` Gemini CLI or OpenCode ran from its shell tool
         // inherits the column UUID; it must not drive the column.
         for name in ["gemini", "opencode"] {

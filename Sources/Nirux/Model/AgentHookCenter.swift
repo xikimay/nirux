@@ -276,7 +276,7 @@ final class AgentHookCenter {
             event.approvalText = nil
         }
         // Antigravity's hooks only bind its conversation: OSC 7501 drives its status.
-        if let resolution, event.kind != .agy { _ = apply(event, to: resolution) }
+        if let resolution, event.kind.statusSource == .hooks { _ = apply(event, to: resolution) }
         return resolution.map {
             AppliedEvent(
                 event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,

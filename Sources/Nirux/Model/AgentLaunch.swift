@@ -17,6 +17,20 @@ enum AgentLaunch: Equatable {
     case codex(resume: AgentResumeTarget?, mode: CodexLaunchMode)
     case agy(resume: AgentResumeTarget?)
 
+    /// `agent`'s, with the mode of its kind; nil for an agent Nirux doesn't
+    /// start.
+    init?(
+        _ agent: CodingAgent, resume: AgentResumeTarget?,
+        claudeMode: @autoclosure () -> ClaudeLaunchMode, codexMode: @autoclosure () -> CodexLaunchMode
+    ) {
+        switch agent {
+        case .claude: self = .claude(resume: resume, mode: claudeMode())
+        case .codex: self = .codex(resume: resume, mode: codexMode())
+        case .agy: self = .agy(resume: resume)
+        case .gemini, .opencode: return nil
+        }
+    }
+
     var agent: CodingAgent {
         switch self {
         case .claude: .claude

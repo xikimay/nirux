@@ -24,8 +24,9 @@ enum LaunchArguments {
         /// in a new worktree (SpaceSetupScript). An older build reads a Codex
         /// payload it can't parse and exits.
         case setupFailure(workspaceID: String)
-        /// `--hook claude|codex [payload-json]`: Claude Code hooks and Codex's
-        /// notify command append one event line and exit (AgentHookInstaller).
+        /// `--hook <agent> [payload-json]`, for an agent that sends hooks:
+        /// Claude Code hooks and Codex's notify command append one event line
+        /// and exit (AgentHookInstaller).
         case hook(CodingAgent, payload: String?)
         /// `--mission <command> [options]` (MissionEventCLI).
         case mission([String])

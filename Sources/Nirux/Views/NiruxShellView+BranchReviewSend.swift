@@ -169,8 +169,8 @@ extension NiruxShellView {
                 let inFront = foreground?.agent != nil
                 let refusal: ReviewSendRefusal? = if inFront {
                     pty.reviewSendRefusal(snapshot: snapshot)
-                    // A shell in front runs the agent stopped or in the background, not as a launcher.
                 } else if let foreground, Shell.isShell(foreground.name) {
+                    // A shell in front runs the agent stopped or in the background, not as a launcher.
                     .notInFront
                 } else {
                     .underLauncher(foreground?.name ?? "another program")

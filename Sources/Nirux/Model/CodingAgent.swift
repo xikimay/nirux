@@ -51,13 +51,9 @@ enum CodingAgent: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// Nirux starts it: ⌘N, Space Settings › Defaults, `nirux://…agent=`,
-    /// the Agent menu and the palette.
+    /// Nirux starts it: it has an `AgentLaunch`.
     var isLaunchable: Bool {
-        switch self {
-        case .claude, .codex, .agy: true
-        case .gemini, .opencode: false
-        }
+        AgentLaunch(self, resume: nil, claudeMode: .default, codexMode: .default) != nil
     }
 
     var folderTrust: FolderTrust {
@@ -159,7 +155,7 @@ enum CodingAgent: String, CaseIterable, Codable, Sendable {
     }
 
     /// agy 1.5's subcommands (`agy help`).
-    static let agySubcommands: Set<String> = [
+    private static let agySubcommands: Set<String> = [
         "acp", "agent", "agents", "changelog", "help", "install", "mcp", "mic-serve", "models",
         "plugin", "plugins", "remote-control", "update"
     ]

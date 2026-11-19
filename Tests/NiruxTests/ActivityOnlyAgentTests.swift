@@ -122,7 +122,7 @@ final class ActivityOnlyAgentTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 20), .needsAttention)
         XCTAssertNil(machine.attentionReason)
 
-        // An integrated agent taking over still drops them (claude died).
+        // An agent driven by hooks taking over still drops them (claude died).
         _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 21)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
     }
@@ -134,23 +134,10 @@ final class ActivityOnlyAgentTests: XCTestCase {
         XCTAssertEqual(machine.hookAgent, .claude)
         _ = machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 1)
         XCTAssertNil(machine.hookAgent)
-        // An integrated agent keeps it: its SessionStart may come first.
+        // An agent driven by hooks keeps it: its SessionStart may come first.
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 2)
         XCTAssertEqual(machine.hookAgent, .claude)
-    }
-
-    // MARK: - Capabilities
-
-    func testRecognizedButNotATypedPromptTarget() {
-        for name in ["gemini", "opencode", "agy"] {
-            // Recognized, but without hooks Nirux can't see their permission
-            // prompts: a typed prompt could answer one blindly.
-            XCTAssertEqual(CodingAgent(rawValue: name)?.statusSource, .output, name)
-        }
-        XCTAssertEqual(CodingAgent.claude.statusSource, .hooks)
-        XCTAssertEqual(CodingAgent.codex.statusSource, .hooks)
-        XCTAssertNil(CodingAgent(rawValue: "node"))
     }
 
     // MARK: - Close confirmation

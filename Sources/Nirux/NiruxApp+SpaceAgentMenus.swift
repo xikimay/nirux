@@ -75,7 +75,7 @@ extension NiruxApp {
     // MARK: Agent
 
     @objc func newAgent(_ sender: NSMenuItem) {
-        guard let agent = (sender.representedObject as? String).flatMap(CodingAgent.init(launchable:)) else { return }
+        guard let agent = sender.representedObject as? CodingAgent else { return }
         shell?.openAgent(agent)
     }
 
@@ -157,7 +157,7 @@ extension NiruxApp {
         let menu = NSMenu(title: "Agent")
         for agent in CodingAgent.launchable {
             menu.addItem(withTitle: "New \(agent.productName)", action: #selector(newAgent(_:)), keyEquivalent: "")
-                .representedObject = agent.rawValue
+                .representedObject = agent
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Next Waiting Agent", action: #selector(jumpToNextWaitingAgent(_:)), shortcut: .nextWaitingAgent)

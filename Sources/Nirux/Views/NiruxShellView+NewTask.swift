@@ -360,11 +360,6 @@ extension NiruxShellView {
         case fetchFailed(String)
     }
 
-    /// Handover files never belong in a commit: the repository ignores them
-    /// (see `GitWorktree.ensureExcluded`), in any folder, since a task's
-    /// workspace may open in a folder of the repository.
-    nonisolated static let excludedHandovers = HandoverFile.filenames
-
     /// Off the main thread through nonisolated functions, so the closures
     /// can't inherit this view's main-actor isolation (see `runOffMain` in
     /// the worktree cleanup). `stateDirectory` is read on the main thread:
@@ -481,7 +476,7 @@ extension NiruxShellView {
         }
         let (path, error) = GitWorktree.create(branch: branch, repoRoot: target.repository, newBranchFrom: target.startPoint)
         guard let path else { return .failed(error ?? "git worktree add failed") }
-        GitWorktree.ensureExcluded(excludedHandovers, repoRoot: target.repository)
+        GitWorktree.ensureExcluded(HandoverFile.filenames, repoRoot: target.repository)
         let workingDirectory = NewTask.workingDirectory(in: path, subdirectory: target.subdirectory)
         // Where the agent starts: its prompt names the file, not a path.
         var handoverError: HandoverFile.TransferError?

@@ -21,8 +21,6 @@ struct Mission: Codable, Equatable {
     let createdAt: TimeInterval
     var updatedAt: TimeInterval
     var events: [MissionEvent]
-
-    var childAgent: CodingAgent? { CodingAgent(rawValue: childAgentKind) }
     /// The parent is a space's Lead (docs/design/spaces.md, "The Lead"): the
     /// Mission works even with Mission handoffs off in Settings. Nil (an
     /// older build's record) means no.
@@ -36,6 +34,8 @@ struct Mission: Codable, Equatable {
     /// only, never the task's questions or result, and code counting a
     /// parent's Missions or a child's leaves it out. Nil means no.
     var oneWay: Bool?
+
+    var childAgent: CodingAgent? { CodingAgent(rawValue: childAgentKind) }
 
     /// Carried whatever the Mission handoffs setting: a Lead's task, a
     /// sub-task a task's agent started with its tools, or a Lead's tells.

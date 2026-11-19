@@ -473,7 +473,7 @@ extension NiruxShellView {
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
-        if events.contains(where: { $0.event.kind != .agy && [.stop, .stopFailure].contains($0.event.name) }) {
+        if events.contains(where: { $0.event.kind.statusSource == .hooks && [.stop, .stopFailure].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
