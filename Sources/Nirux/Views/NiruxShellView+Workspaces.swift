@@ -34,7 +34,7 @@ extension NiruxShellView {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
         // Its picture slides away while the interface may move only.
-        let snapshot = activate && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
+        let snapshot = activate && (ZZ("slideIgnoresMotion") || agentLightsMayMove) ? FrozenView.freeze(viewport) : nil
 
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         // A space with anchors opens a plain workspace in its default

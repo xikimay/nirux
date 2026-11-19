@@ -14,7 +14,7 @@ extension NiruxShellView {
     /// the space chosen, laid out under it now.
     func crossSpaces(leaving: FrozenView, duration: CFTimeInterval = crossingDuration) {
         endSpaceCrossing()
-        guard agentLightsMayMove else { return }
+        guard ZZ("crossIgnoresMotion") || agentLightsMayMove else { return }
         viewport.layoutSubtreeIfNeeded()
         let arriving = FrozenView.freeze(viewport)
         let generation = spaceCrossingGeneration

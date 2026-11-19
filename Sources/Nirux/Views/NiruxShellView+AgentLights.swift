@@ -97,8 +97,8 @@ extension NiruxShellView {
         let moves = agentLightsMayMove
         // Stillness wins over a pass under the rail or a crossing on its way.
         if !moves {
-            stillUnderGlass()
-            stillSpaceCrossing()
+            if !ZZ("stillKeepsPass") { stillUnderGlass() }
+            if !ZZ("stillKeepsCrossing") { stillSpaceCrossing() }
         }
         for workspace in workspaces {
             let isOnScreen = workspace === activeWorkspace
