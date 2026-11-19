@@ -69,12 +69,12 @@ final class FrozenView: NSView {
         guard !isOutOfSight(layer, root: root) else { return nil }
         let copy: CALayer, keys: [String]
         switch layer {
-        case is CAShapeLayer: (copy, keys) = (CAShapeLayer(), layerKeys + shapeKeys)
+        case is CAShapeLayer where !ZZ("shapeLost"): (copy, keys) = (CAShapeLayer(), layerKeys + shapeKeys)
         case is CAGradientLayer: (copy, keys) = (CAGradientLayer(), layerKeys + gradientKeys)
         default: (copy, keys) = (CALayer(), layerKeys)
         }
         for key in keys { copy.setValue(layer.value(forKey: key), forKey: key) }
-        copy.contents = images[ObjectIdentifier(layer)] ?? layer.contents
+        copy.contents = images[ObjectIdentifier(layer)] ?? (ZZ("sharedLost") ? nil : layer.contents)
         if let mask = layer.mask { copy.mask = clone(mask, root: mask, images: images) }
         copy.sublayers = layer.sublayers?.compactMap { clone($0, root: root, images: images) }
         return copy
