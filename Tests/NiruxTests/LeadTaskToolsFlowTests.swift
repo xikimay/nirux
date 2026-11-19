@@ -1008,7 +1008,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 var requests: [CodexQueue.Request] = []
                 var outcome = CodexQueue.Outcome.refused("thread not found")
                 /// Holds the answers, as Codex takes seconds, when set.
-                var held: [(CodexQueue.Outcome) -> Void]?
+                var held: [@MainActor @Sendable (CodexQueue.Outcome) -> Void]?
             }
             let queue = Queue()
             harness.shell.sideEffects.queueCodexMessage = { request, done in
