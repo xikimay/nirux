@@ -54,5 +54,7 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the flake gate of EditorUnsavedEditsFlowTests (#648):
+      # ten runs, three at a time, next to heavy classes.
+      - name: Flake gate
+        run: scripts/repeat-class.sh NiruxTests.EditorUnsavedEditsFlowTests 10 3 NiruxTests.TextNavigationKeyFlowTests NiruxTests.MenuBarFlowTests
