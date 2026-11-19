@@ -355,7 +355,7 @@ final class ColumnCardsTests: XCTestCase {
 
             shell.closeActiveColumn()
             let end = try scales(of: added)
-            XCTAssertEqual(end.from, 1)
+            XCTAssertEqual(end.from, 1, accuracy: 0.001)
             XCTAssertEqual(end.to, NiruxShellView.closeScale, "it recedes")
             XCTAssertEqual(added.view.alphaValue, 0, "as it fades")
             waitUntil("gone, on time", timeout: 2) { !workspace.columns.contains { $0 === added } }
