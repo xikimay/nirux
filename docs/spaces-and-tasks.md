@@ -20,7 +20,7 @@ A space's settings are in the Settings window (`Cmd+,`), under Nirux's own: the 
 | Defaults | the agent new tasks preselect, the Claude Code and Codex modes, environment variables for new shells |
 | Safety | what the space's Claude Code sessions are refused or trusted with ([below](#safety)) |
 | Lead | the space's [Lead](#the-lead) |
-| Brief | rules given to every agent the space starts |
+| Brief | rules given to every Claude Code and Codex session the space starts |
 | Memory | what agents know about the repository ([Space memory](#space-memory)) |
 | Board | per repository, the base branch and the checks the [Board](pull-requests.md#the-board) uses |
 | Templates | the task templates of the New sheet |
@@ -43,7 +43,7 @@ Each Claude Code session the space starts gets a settings file with `--settings`
 
 Below the switches, **Where you're still in the loop** counts the permission prompts and questions of the space's Claude sessions over the last 7 or 30 days, by tool and by what each prompt was about: the program a shell command runs (`swift build`), a fetch's domain, an MCP tool, a file inside or outside the folder. Nirux keeps these in the space's `loop.jsonl` for 30 days, without any command text, file contents or question; at 4 MB it stops counting until older lines go, and says so. A line is offered only for a command Nirux knows reads, builds or tests (`git status`, `git diff`, `git log`, `swift build`, `swift test`, `npm test`, `npm run <script>`, `gh pr view`, `gh pr checks`, `xcrun simctl list`…) or for a domain, after 3 prompts it would cover exactly: the command typed as that program alone, its options after the subcommand, so `git -C app status` or `rm x && swift build` count without offering anything. **Add** puts the line into the space's settings file: an allow rule (`Bash(swift build:*)`, `WebFetch(domain:…)`), or, for a domain only auto mode asked about, an `autoMode.environment` line. Nothing is added on its own; everything else, MCP tools included, shows "Nothing proposed: Nirux can't tell it's safe". **Lines you added** lists them, each with Remove.
 
-A change reaches sessions as they start: a running session keeps the file it read. With every switch off and no line added, new sessions get no file, and the one earlier sessions name holds `{}`, so that restarting their column still works. A workspace opened from outside Nirux (a `nirux://` request) gets none of it, like the space's other defaults. When `defaults.json` can't be read, each switch takes its safe side (no trust, deny rules and sandbox on), and the tab says why. Codex, Gemini CLI and OpenCode don't read this file.
+A change reaches sessions as they start: a running session keeps the file it read. With every switch off and no line added, new sessions get no file, and the one earlier sessions name holds `{}`, so that restarting their column still works. A workspace opened from outside Nirux (a `nirux://` request) gets none of it, like the space's other defaults. When `defaults.json` can't be read, each switch takes its safe side (no trust, deny rules and sandbox on), and the tab says why. Codex, Antigravity, Gemini CLI and OpenCode don't read this file.
 
 ## Starting a task
 
@@ -55,7 +55,7 @@ Describe the task, then pick the repository (in every space but General), the ag
 
 1. It fetches the branch the task starts from: the base branch set for that repository in Space Settings › Board, else origin's default branch, else its `main` or `master`. When `origin` has none of these, the task starts from the main checkout's HEAD, and the sheet says so.
 2. It creates a worktree next to the repository's main checkout, on a new branch. The folder is named `<main folder>.<branch>`, with `/` replaced by `-`.
-3. It writes a handover file in the worktree (`.claude-handover.md` or `.codex-handover.md`) with your description and the template's text, and keeps that file out of git.
+3. It writes a handover file in the worktree (`.claude-handover.md`, `.codex-handover.md` or `.agy-handover.md`) with your description and the template's text, and keeps that file out of git.
 4. It opens a workspace named after the task and launches the agent, told to read the handover file.
 
 If the fetch fails, the sheet says why, and a second **Start** uses the branch as last fetched. A branch name that already exists, locally or on a remote, is refused, and the sheet stays open with the error.
@@ -84,7 +84,7 @@ Research, writing or a one-off script need no repository. Pick **No Repository**
 
 Nirux then makes a new folder named after the task in `~/Nirux Tasks` (Settings › General picks another place) and starts the agent in it, with no git, no branch and no pull request. A name already taken gets ` 2`, ` 3` and so on. Nirux never deletes these folders.
 
-Claude Code and Codex ask whether to trust each new folder, and the row reads `Needs you · Trust this folder?` until you answer in its terminal. Trusting `~/Nirux Tasks` once in Claude Code covers every folder in it.
+Claude Code, Codex and Antigravity ask whether to trust each new folder, and the row reads `Needs you · Trust this folder?` until you answer in its terminal. Trusting `~/Nirux Tasks` once in Claude Code covers every folder in it. Antigravity trusts exact folders, so it also asks in each new worktree.
 
 ### Templates
 

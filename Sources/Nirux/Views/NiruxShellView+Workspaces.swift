@@ -303,6 +303,8 @@ extension NiruxShellView {
                 briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
                 handoverPrompt: handoverPrompt
             )
+        case .agy:
+            cmd = NiruxShellView.agyCommand(handoverPrompt: handoverPrompt)
         }
 
         sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
@@ -582,10 +584,13 @@ extension NiruxShellView {
         let indicator, statusBar: NSRect
     }
 
+    /// The sidebar folding or unfolding, its divider fading.
+    static let chromeDuration: CFTimeInterval = 0.2
+
     func applyChromeLayout(_ frames: ChromeFrames, animated: Bool) {
         if animated {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
+                ctx.duration = Self.chromeDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 sidebar.animator().frame = frames.sidebar
                 divider.animator().frame = frames.divider

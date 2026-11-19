@@ -553,6 +553,10 @@ final class MissionAskTests: XCTestCase {
         let claude = try XCTUnwrap(
             NiruxShellView.agentStartupPrompt(agent: .claude, deliveredHandover: false, isMission: true)
         )
+        XCTAssertEqual(
+            NiruxShellView.agentStartupPrompt(agent: .agy, deliveredHandover: false, isMission: true), codex,
+            "Nirux types answers only into Claude Code"
+        )
         XCTAssertTrue(claude.contains("end your turn"))
         XCTAssertTrue(claude.contains(MissionPromptText.prefix))
         XCTAssertTrue(claude.contains("\(MissionEventCLI.maxMessageLength) characters"))
