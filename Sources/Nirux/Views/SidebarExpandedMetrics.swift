@@ -183,7 +183,7 @@ enum SidebarExpandedMetrics {
             )
             // Type it now's row under it.
             return line + (waiting.offersTypeNow ? buttonHeight : 0)
-        case .cleanup, .reviewBadges, .ruleProposals: return actionLineHeight
+        case .cleanup, .reviewBadges, .ruleProposals, .dailyPass: return actionLineHeight
         }
     }
 

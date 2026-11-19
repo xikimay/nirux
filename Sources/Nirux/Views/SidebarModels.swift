@@ -400,6 +400,8 @@ struct WorkspaceInfo: Hashable {
     var turnStatusLine: String?
     /// The Lead's row: how many rules it proposed wait for the user.
     var ruleProposalCount = 0
+    /// The Lead's row: its space's last daily pass, for a day after it.
+    var dailyPassNote: String?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }

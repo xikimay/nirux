@@ -7,6 +7,9 @@ import Foundation
 struct AgentHookEvent: Codable, Equatable {
     enum Kind: String, Codable {
         case claude, codex
+        /// Antigravity's hooks.json, read only for the conversation a
+        /// column runs: its status comes from OSC 7501.
+        case agy
     }
 
     /// Normalized event names. The Claude hooks map 1:1 (PostToolUse and
@@ -264,6 +267,32 @@ struct AgentHookEvent: Codable, Equatable {
             source = nil
             let message = payload["last-assistant-message"] as? String
             detail = message.map { String($0.prefix(500)) }
+            toolName = nil
+            toolSummary = nil
+            toolKey = nil
+            toolEnd = nil
+            toolFamily = nil
+            toolCommandKey = nil
+            toolUseID = nil
+            agentID = nil
+            notificationType = nil
+            errorKind = nil
+            promptID = nil
+            transcriptPath = nil
+            reviewPasses = nil
+            reviewHeader = nil
+            finalMessage = nil
+            stopHookActive = nil
+        case .agy:
+            // Which conversation, and where: never its prompt (lastUserInput).
+            // A subagent's SessionStart looks the same (probed on agy 1.5.12):
+            // the column keeps its process's first (ForegroundSessionTracker).
+            guard payload["hookEventName"] as? String == "SessionStart" else { return nil }
+            name = .sessionStart
+            sessionID = payload["conversationId"] as? String
+            cwd = payload["cwd"] as? String
+            source = nil
+            detail = nil
             toolName = nil
             toolSummary = nil
             toolKey = nil

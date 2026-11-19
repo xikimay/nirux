@@ -715,6 +715,83 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// The daily pass, on after 06:00 unless Space Settings › Lead says:
+    /// once its hour struck and the Lead is quiet, a day with nothing marks
+    /// it checked; a day with a recorded review types the daily line into
+    /// the Lead's terminal, once. After the Lead reads its day, its row and
+    /// Space Settings say what the pass read.
+    func testTheDailyLineReachesAQuietLeadOnceItsHourStruck() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let column = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == lead.agentUUID })
+            final class Box: @unchecked Sendable {
+                var quiet = false
+                var sent: [String] = []
+            }
+            let box = Box()
+            let now = Date().timeIntervalSince1970
+            let tomorrow = now + 86_400
+            @MainActor func check(at time: TimeInterval) {
+                shell.checkDailyPasses(now: time, isQuiet: { _ in box.quiet }, send: { target, text in
+                    XCTAssertTrue(target === column, "the Lead's agent")
+                    box.sent.append(text)
+                })
+                harness.waitUntil("the pass's read") { shell.dailyPassChecks.isEmpty }
+            }
+
+            check(at: now)
+            XCTAssertNil(DailyPassState.load(spaceID: lead.space).checkedAt, "never while the Lead or the user is busy")
+            box.quiet = true
+            check(at: now)
+            XCTAssertEqual(box.sent, [], "nothing happened")
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).checkedAt)
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).end, "its window is read: the next pass starts there")
+
+            shell.addWorkspace(title: "Fix", cwd: harness.worktree, profileID: lead.space)
+            let fix = try XCTUnwrap(shell.workspaces.first { $0.title == "Fix" })
+            shell.refreshGitContextNow(for: fix)
+            harness.waitUntil("its branch") { fix.gitBranch == harness.worktreeBranch }
+            let finding = ["kind": "test-waits-on-sleep", "text": "testFix sleeps"]
+            XCTAssertFalse(try call(LeadTools.recordReview, ["task": "Fix", "findings": [finding]], lead: lead, in: harness).isError)
+            check(at: now)
+            XCTAssertEqual(box.sent, [], "checked for today")
+            // A pass it can't record isn't typed: it would come back.
+            let file = try XCTUnwrap(DailyPassState.url(spaceID: lead.space))
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            check(at: tomorrow)
+            XCTAssertEqual(box.sent, [], "not recorded, not typed")
+            let retry = try XCTUnwrap(shell.dailyPassRetryAt[lead.space])
+            check(at: tomorrow + 60)
+            XCTAssertEqual(shell.dailyPassRetryAt[lead.space], retry, "it waits before trying again")
+            try FileManager.default.removeItem(at: file)
+            shell.dailyPassRetryAt = [:]
+            check(at: tomorrow)
+            XCTAssertEqual(box.sent, [DailyPass.prompt])
+            check(at: tomorrow)
+            XCTAssertEqual(box.sent.count, 1, "once a day")
+
+            XCTAssertFalse(try call(LeadTools.dailyPass, lead: lead, in: harness).isError)
+            shell.updateSidebar()
+            let note = shell.sidebar.lastInfos.first(where: \.isLead)?.dailyPassNote
+            XCTAssertEqual(note, "Daily pass · no rule proposed")
+            shell.showSpaceSettings(profileID: lead.space, tab: .lead)
+            let pane = try XCTUnwrap(shell.spaceSettings).lead
+            XCTAssertTrue(pane.lastPassLabel.stringValue.hasPrefix("Last pass: "), pane.lastPassLabel.stringValue)
+            pane.dailyPassHourPopup.selectItem(at: 9)
+            pane.dailyPassHourPopup.sendAction(pane.dailyPassHourPopup.action, to: pane.dailyPassHourPopup.target)
+            XCTAssertEqual(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.leadDailyPassHour, 9)
+            pane.dailyPassSwitch.state = .off
+            pane.dailyPassSwitch.sendAction(pane.dailyPassSwitch.action, to: pane.dailyPassSwitch.target)
+            XCTAssertEqual(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.leadDailyPass, false)
+            XCTAssertFalse(pane.dailyPassHourPopup.isEnabled)
+            XCTAssertFalse(try call(LeadTools.recordReview, ["task": "Fix", "findings": [finding]], lead: lead, in: harness).isError)
+            check(at: tomorrow + 86_400)
+            XCTAssertEqual(box.sent.count, 1, "off, though something happened")
+        }
+    }
+
     /// ⌘N in a space with a Lead offers "Report to the Lead", checked: the
     /// task then reports to it. Unchecked, it reports to nobody; a space
     /// without a Lead doesn't offer it.
