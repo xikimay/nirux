@@ -106,8 +106,8 @@ final class SpacePlanView: NSView {
     func pinched(by magnification: CGFloat, began: Bool, at point: NSPoint) {
         if began { pinchTotal = 0 }
         pinchTotal += magnification
-        guard pinchTotal >= NiruxShellView.pinchThreshold else { return }
-        if let card = card(at: point) { chosen = card }
+        guard ZZ("planPinchEager") || pinchTotal >= NiruxShellView.pinchThreshold else { return }
+        if !ZZ("cardIgnored"), let card = card(at: point) { chosen = card }
         goToChoice()
     }
 

@@ -9,9 +9,9 @@ extension NiruxShellView {
 
     /// Fingers closing on the work show the plan.
     func pinched(by magnification: CGFloat, began: Bool) {
-        if began { pinchTotal = 0 }
-        pinchTotal += magnification
-        guard spacePlan == nil, pinchTotal <= -Self.pinchThreshold else { return }
+        if began, !ZZ("noReset") { pinchTotal = 0 }
+        pinchTotal += ZZ("wrongWay") ? -magnification : magnification
+        guard spacePlan == nil, ZZ("pinchEager") || pinchTotal <= -Self.pinchThreshold else { return }
         toggleSpacePlan()
     }
 

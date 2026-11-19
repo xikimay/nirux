@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of P5's second PR: its tests' mutants, then ten
+      # runs of SpacePlanTests.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.SpacePlanTests pinchEager wrongWay noReset cardIgnored planPinchEager || status=1
+          scripts/repeat-class.sh NiruxTests.SpacePlanTests 10 3 NiruxTests.SpaceCrossingTests || status=1
+          exit $status
