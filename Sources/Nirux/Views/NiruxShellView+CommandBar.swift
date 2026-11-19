@@ -9,6 +9,8 @@ extension NiruxShellView {
     func installCommandBar(in window: NSWindow) {
         let bar = CommandBarView(level: interfaceTransparency)
         bar.resolveLevel = sideEffects.drawnTransparency
+        // Then from `applyAgentLights`, as the rail.
+        bar.lifts = agentLightsMayMove
         let toolbar = CommandBarToolbar(bar: bar)
         toolbar.install(in: window)
         commandBarToolbar = toolbar

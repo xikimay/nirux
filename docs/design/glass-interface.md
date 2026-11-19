@@ -493,6 +493,15 @@ the text stays flat and sharp.
   (AppKit doesn't animate a view's layer in an animation group), ends on
   time; with Reduce motion a new card is simply there and a closed one
   only fades.
+- **In relief (study P9):** under the pointer a rail icon rises 1.5 pt and
+  a command bar segment 1 pt, whole, over a short shadow
+  (`Theme.Elevation.Level.control`, within the rail's and the bar's
+  edges) cast only outside their shape; pressed, a rail icon sinks to
+  93 % and a segment lies flat again (`Relief`). It moves what a
+  container holds (`sublayerTransform`): AppKit resets a view's layer
+  `transform` at each new frame, and the rail's birth springs use it.
+  While the interface may move only; turned off, it is flat at once.
+  Tooltips stay the system's, which already float with a shadow.
 
 ## Plan
 
