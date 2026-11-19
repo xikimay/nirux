@@ -470,8 +470,16 @@ the text stays flat and sharp.
   (`Theme.Elevation.Level.focusedColumn`: darker, softer, further below,
   still within the air). Its shadow passes from card to card over 0.22 s
   while the focus moves within the workspace on screen; an arriving or
-  leaving workspace changes at once, under its slide, and stillness
+  leaving workspace changes at once, under its floors, and stillness
   (Animate the interface off, Reduce motion) makes it instant.
+- **Floors (study P3, in place of N1's slide):** a workspace switch lays
+  the workspace chosen over the one on screen. Going down the list (⌘↓),
+  it rises from below on a plate, over the one on screen, which steps back
+  6 % of the height under a shade of 62 %; going up (⌘↑), the one on
+  screen leaves downwards and uncovers it, coming forward out of the
+  shade. 0.44 s, translations only, so no text scales; N1's name card
+  stays. A switch while one plays ends it at once; Reduce motion, another
+  space, or a workspace on screen that left the list show it at once.
 
 ## Plan
 

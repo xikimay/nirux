@@ -209,8 +209,7 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
             shell.switchToWorkspace(index(of: workspace("a", in: shell), in: shell))
             home.raiseNotification(.waiting)
 
-            let strip = try XCTUnwrap(shell.verticalStrip.layer)
-            strip.removeAllAnimations()  // selecting a slid the strip
+            shell.endWorkspaceSlide()  // selecting a played its floors
 
             // side keeps only the parked x: the main space's home takes over,
             // its badge cleared as when switching to it, and shown at once,
@@ -219,7 +218,7 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
             XCTAssertTrue(shell.activeWorkspace === home)
             XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
             XCTAssertFalse(home.hasNotification)
-            XCTAssertNil(strip.animation(forKey: "wsSlide"))
+            XCTAssertNil(home.containerView.layer?.animation(forKey: NiruxShellView.floorsKey))
             waitForClosesToEnd(in: shell)
             XCTAssertTrue(shell.activeWorkspace === home)
         }

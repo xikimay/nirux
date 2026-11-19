@@ -2,8 +2,8 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// A workspace switch: the strip slides from where it is on screen, the
-/// workspace it leaves stays drawn until it has left, and a card names the
+/// A workspace switch: the workspace chosen comes on screen as a floor,
+/// the one it leaves stays drawn until it has left, and a card names the
 /// workspace it lands on, with its place in the list.
 @MainActor
 final class WorkspaceSwitchTests: XCTestCase {
@@ -49,43 +49,32 @@ final class WorkspaceSwitchTests: XCTestCase {
             // Three workspaces in the space; the first one on screen.
             for title in ["second", "third"] { shell.addWorkspace(title: title, cwd: folder) }
             shell.switchToWorkspace(0)
-            shell.verticalStrip.layer?.removeAllAnimations()
+            shell.endWorkspaceSlide()
             shell.workspaceNameCard.hide(animated: false)
             clock.advance(by: 5)
             try body(shell, clock, folder)
         }
     }
 
-    private func slide(of shell: NiruxShellView) -> CABasicAnimation? {
-        shell.verticalStrip.layer?.animation(forKey: NiruxShellView.workspaceSlideKey) as? CABasicAnimation
+    private func floor(of workspace: WorkspaceState) -> CABasicAnimation? {
+        workspace.containerView.layer?.animation(forKey: NiruxShellView.floorsKey) as? CABasicAnimation
     }
 
-    // MARK: - The slide
-
-    /// The strip slides so that the workspace that was on screen starts
-    /// where it was seen; a workspace that stays on screen while the list
-    /// changes around it doesn't slide.
-    func testASlideStartsWhereTheWorkspaceOnScreenWas() {
-        // A workspace that left the list: from the strip's old place.
-        XCTAssertEqual(
-            NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: 0, leavingWas: nil, leavingIs: nil), -800
-        )
-        // The one on screen sat 800 up the strip; it still does, the strip
-        // one row lower: it starts a row lower than its new place.
-        XCTAssertEqual(
-            NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: 0, leavingWas: 800, leavingIs: 800), -800
-        )
-        // It stays on screen, the list shrinking above it: no slide.
-        XCTAssertEqual(
-            NiruxShellView.workspaceSlideStart(oldY: -800, targetY: 0, shownOffset: 0, leavingWas: 800, leavingIs: 0), 0
-        )
+    private func shade(of workspace: WorkspaceState) -> CALayer? {
+        workspace.containerView.layer?.sublayers?.first { $0.name == NiruxShellView.floorsShadeName }
     }
+
+    private func value(_ any: Any?) -> Double {
+        (any as? NSNumber)?.doubleValue ?? .nan
+    }
+
+    // MARK: - The floors
 
     /// The list changing around the workspace on screen (a row under it
-    /// moved to another space, which moves the strip) slides nothing: the
+    /// moved to another space, which moves the strip) moves nothing: the
     /// workspace stays where it is seen. A switch into another space shows
     /// at once too.
-    func testNoSlideWhenTheWorkspaceOnScreenStays() throws {
+    func testNothingMovesWhenTheWorkspaceOnScreenStays() throws {
         try withShell { shell, _, _ in
             let first = try XCTUnwrap(shell.activeWorkspace)
             let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere", select: false)
@@ -93,21 +82,23 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.moveWorkspaceToSpace(workspaceID: shell.workspaces[2].id, profileID: elsewhere.id)
             XCTAssertTrue(shell.activeWorkspace === first)
             XCTAssertNotEqual(shell.verticalStrip.frame.origin.y, oldY, "the strip did change")
-            XCTAssertNil(self.slide(of: shell), "the workspace on screen stays put")
+            XCTAssertTrue(shell.workspaces.allSatisfy { self.floor(of: $0) == nil }, "the workspace on screen stays put")
 
             // Into the other space: at once.
             let away = try XCTUnwrap(shell.workspaces.firstIndex { $0.profileID == elsewhere.id })
             shell.switchToWorkspace(away)
             XCTAssertEqual(shell.activeProfileID, elsewhere.id)
-            XCTAssertNil(self.slide(of: shell))
+            XCTAssertTrue(shell.workspaces.allSatisfy { self.floor(of: $0) == nil })
+            XCTAssertFalse(shell.workspaceSwitch.isSliding)
         }
     }
 
-    /// ⌘↓: the strip slides to the next workspace, the one it leaves stays
-    /// drawn until the slide ends, then only the workspace on screen draws.
-    /// Presses during a slide take it on from where it is, one slide at a
-    /// time.
-    func testTheStripSlidesAndKeepsTheWorkspaceItLeavesDrawn() throws {
+    /// ⌘↓: the next workspace rises from below, on a plate, over the one on
+    /// screen, which lies under it, steps back and darkens under a shade;
+    /// it stays drawn until the end. A press while it plays ends it at
+    /// once. Over, everything is back in the strip, and only the workspace
+    /// on screen draws.
+    func testTheNextWorkspaceComesOverTheOneOnScreen() throws {
         try withShell { shell, clock, _ in
             // What the terminals are told, column by column.
             var drawing: [ObjectIdentifier: Bool] = [:]
@@ -115,96 +106,118 @@ final class WorkspaceSwitchTests: XCTestCase {
             let draws = { (workspace: WorkspaceState) in
                 workspace.columns.allSatisfy { drawing[ObjectIdentifier($0)] == true }
             }
+            let height = Double(shell.viewport.bounds.height)
             let first = try XCTUnwrap(shell.activeWorkspace)
             shell.focusWorkspace(.down)
             let second = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertFalse(first === second)
-            let slide = try XCTUnwrap(self.slide(of: shell))
-            XCTAssertEqual(slide.duration, NiruxShellView.workspaceSlideDuration)
-            XCTAssertEqual((slide.toValue as? NSNumber)?.doubleValue, 0)
-            XCTAssertNotEqual((slide.fromValue as? NSNumber)?.doubleValue ?? 0, 0)
+
+            let rise = try XCTUnwrap(self.floor(of: second))
+            XCTAssertEqual(self.value(rise.fromValue), -height, "from below the viewport")
+            XCTAssertEqual(self.value(rise.toValue), 0)
+            XCTAssertEqual(rise.duration, NiruxShellView.workspaceSwitchDuration)
+            XCTAssertEqual(second.containerView.layer?.zPosition, 1, "on top")
+            XCTAssertNotNil(second.containerView.layer?.backgroundColor, "on its plate")
+
+            let under = second.containerView.frame.minY - first.containerView.frame.minY
+            XCTAssertEqual(first.containerView.layer?.affineTransform().ty, under, "where the second is, under it")
+            XCTAssertEqual(self.value(try XCTUnwrap(self.floor(of: first)).toValue), height * Double(NiruxShellView.floorsRecede), accuracy: 0.01)
+            let shade = try XCTUnwrap(self.shade(of: first)?.animation(forKey: NiruxShellView.floorsKey) as? CABasicAnimation)
+            XCTAssertEqual(self.value(shade.toValue), Double(NiruxShellView.floorsShade), accuracy: 0.001)
             XCTAssertTrue(shell.drawsTerminals(of: first, isActive: false), "the workspace it leaves, while it leaves")
-            XCTAssertTrue(shell.drawsTerminals(of: second, isActive: true))
             XCTAssertTrue(draws(first), "its terminals are told to go on drawing")
             XCTAssertTrue(draws(second))
 
-            // Half-way, another press: the strip is shown half-way between
-            // its two places.
-            shell.workspaceSwitch.shownStripOffset = { _ in -200 }
-            clock.advance(by: NiruxShellView.workspaceSlideDuration / 2)
-            let oldY = shell.verticalStrip.frame.origin.y
+            // Half-way, another press: the first floors end at once.
+            clock.advance(by: NiruxShellView.workspaceSwitchDuration / 2)
             shell.focusWorkspace(.down)
             let third = try XCTUnwrap(shell.activeWorkspace)
-            let retarget = try XCTUnwrap(self.slide(of: shell))
-            XCTAssertEqual(
-                (retarget.fromValue as? NSNumber)?.doubleValue, Double(oldY - 200 - shell.verticalStrip.frame.origin.y),
-                "from where it is on screen"
-            )
-            XCTAssertEqual(shell.verticalStrip.layer?.animationKeys(), [NiruxShellView.workspaceSlideKey], "one slide, not two")
-            XCTAssertTrue(shell.drawsTerminals(of: first, isActive: false))
+            XCTAssertNil(self.floor(of: first))
+            XCTAssertNil(self.shade(of: first))
+            XCTAssertEqual(first.containerView.layer?.affineTransform(), .identity)
+            XCTAssertNotNil(self.floor(of: third))
+            XCTAssertFalse(shell.drawsTerminals(of: first, isActive: false))
             XCTAssertTrue(shell.drawsTerminals(of: second, isActive: false))
 
-            // The first slide's end doesn't cut the second one short.
-            clock.advance(by: NiruxShellView.workspaceSlideDuration / 2 + 0.01)
-            XCTAssertTrue(shell.drawsTerminals(of: second, isActive: false))
-            clock.advance(by: NiruxShellView.workspaceSlideDuration)
-            XCTAssertFalse(shell.drawsTerminals(of: first, isActive: false), "settled: only the one on screen")
-            XCTAssertFalse(shell.drawsTerminals(of: second, isActive: false))
-            XCTAssertTrue(shell.drawsTerminals(of: third, isActive: true))
+            // The first switch's end doesn't cut the second one short.
+            clock.advance(by: NiruxShellView.workspaceSwitchDuration / 2 + 0.01)
+            XCTAssertTrue(shell.workspaceSwitch.isSliding)
+            clock.advance(by: NiruxShellView.workspaceSwitchDuration)
+            XCTAssertFalse(shell.workspaceSwitch.isSliding)
+            for workspace in [second, third] {
+                XCTAssertNil(self.floor(of: workspace))
+                XCTAssertEqual(workspace.containerView.layer?.affineTransform(), .identity)
+                XCTAssertEqual(workspace.containerView.layer?.zPosition, 0)
+                XCTAssertNil(workspace.containerView.layer?.backgroundColor, "off its plate")
+            }
+            XCTAssertNil(self.shade(of: second))
+            XCTAssertFalse(shell.drawsTerminals(of: second, isActive: false), "settled: only the one on screen")
             XCTAssertFalse(draws(first), "and told to rest")
             XCTAssertFalse(draws(second))
             XCTAssertTrue(draws(third))
         }
     }
 
-    /// A held key passes many workspaces: only those the slide still shows
-    /// on its way stay drawn, and each slide taken on mid-way keeps going
-    /// instead of starting again from rest.
-    func testAHeldKeyKeepsOnlyWhatTheSlideShowsDrawn() throws {
+    /// ⌘↑: the workspace on screen leaves downwards, on top, and uncovers
+    /// the one above, which comes forward out of its shade.
+    func testGoingUpTheOneOnScreenLeavesAndUncoversTheOneAbove() throws {
+        try withShell { shell, clock, _ in
+            let height = Double(shell.viewport.bounds.height)
+            shell.switchToWorkspace(1)
+            clock.advance(by: 5)
+            let second = try XCTUnwrap(shell.activeWorkspace)
+            shell.focusWorkspace(.up)
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertFalse(first === second)
+
+            XCTAssertEqual(second.containerView.layer?.zPosition, 1, "the one leaving, on top")
+            XCTAssertEqual(self.value(try XCTUnwrap(self.floor(of: second)).toValue), -height, "down and away")
+            let forward = try XCTUnwrap(self.floor(of: first))
+            XCTAssertEqual(self.value(forward.fromValue), height * Double(NiruxShellView.floorsRecede), accuracy: 0.01)
+            XCTAssertEqual(self.value(forward.toValue), 0)
+            let shade = try XCTUnwrap(self.shade(of: first)?.animation(forKey: NiruxShellView.floorsKey) as? CABasicAnimation)
+            XCTAssertEqual(self.value(shade.fromValue), Double(NiruxShellView.floorsShade), accuracy: 0.001)
+            XCTAssertEqual(self.value(shade.toValue), 0)
+        }
+    }
+
+    /// A held key passes many workspaces: each press ends the floors before
+    /// it, so only the workspace it just left stays drawn.
+    func testAHeldKeyKeepsOnlyTheLastWorkspaceLeftDrawn() throws {
         try withShell { shell, clock, folder in
             shell.addWorkspace(title: "fourth", cwd: folder)
             shell.switchToWorkspace(0)
             clock.advance(by: 5)
             let all = shell.workspaces
-            shell.focusWorkspace(.down)
-            let first = try XCTUnwrap(self.slide(of: shell)?.timingFunction)
-            shell.focusWorkspace(.down)
-            // The strip lags a row behind where it was headed when the
-            // third press comes: the slide shows two rows on its way.
-            shell.workspaceSwitch.shownStripOffset = { _ in -shell.viewport.bounds.height }
-            shell.focusWorkspace(.down)
+            for _ in 0..<3 { shell.focusWorkspace(.down) }
             XCTAssertEqual(shell.activeWSIndex, 3)
-            XCTAssertEqual(shell.workspaceSwitch.keepsDrawn, [all[1].id, all[2].id])
-            XCTAssertFalse(shell.drawsTerminals(of: all[0], isActive: false), "out of the way")
-            var start = [Float](repeating: 0, count: 2)
-            first.getControlPoint(at: 1, values: &start)
-            XCTAssertGreaterThan(start[0], 0, "from rest the first time")
-            try XCTUnwrap(self.slide(of: shell)?.timingFunction).getControlPoint(at: 1, values: &start)
-            XCTAssertEqual(start[0], 0, "taken on: at speed")
+            XCTAssertEqual(shell.workspaceSwitch.keepsDrawn, [all[2].id])
+            XCTAssertEqual(all.filter { self.floor(of: $0) != nil }.map(\.id), [all[2].id, all[3].id])
         }
     }
 
     /// With Reduce motion (or animations off) the workspace shows at once:
-    /// no slide, nothing kept drawn, no card.
+    /// no floors, nothing kept drawn, no card.
     func testNothingMovesWhileTheInterfaceMayNot() throws {
         try withShell(reducesMotion: true) { shell, _, _ in
             let first = try XCTUnwrap(shell.activeWorkspace)
             shell.focusWorkspace(.down)
             XCTAssertFalse(shell.activeWorkspace === first, "it switched")
-            XCTAssertNil(self.slide(of: shell))
+            XCTAssertTrue(shell.workspaces.allSatisfy { self.floor(of: $0) == nil })
             XCTAssertFalse(shell.drawsTerminals(of: first, isActive: false))
             XCTAssertFalse(shell.workspaceNameCard.isShown)
         }
     }
 
     /// A relayout for something else (a resize, the status bar) doesn't
-    /// cut a slide short.
-    func testARelayoutThatMovesNothingLetsTheSlidePlay() throws {
+    /// cut the floors short.
+    func testARelayoutThatMovesNothingLetsTheFloorsPlay() throws {
         try withShell { shell, _, _ in
             shell.focusWorkspace(.down)
-            let from = try XCTUnwrap(self.slide(of: shell)?.fromValue as? NSNumber)
+            let second = try XCTUnwrap(shell.activeWorkspace)
+            let rise = try XCTUnwrap(self.floor(of: second))
             shell.relayout(animated: false)
-            XCTAssertEqual(self.slide(of: shell)?.fromValue as? NSNumber, from)
+            XCTAssertTrue(self.floor(of: second) === rise)
         }
     }
 
@@ -234,7 +247,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             XCTAssertNil(card.hitTest(NSPoint(x: card.frame.midX, y: card.frame.midY)))
             XCTAssertFalse(card.acceptsFirstResponder)
 
-            clock.advance(by: NiruxShellView.workspaceSlideDuration + NiruxShellView.workspaceCardHold - 0.05)
+            clock.advance(by: NiruxShellView.workspaceSwitchDuration + NiruxShellView.workspaceCardHold - 0.05)
             XCTAssertTrue(card.isShown, "the slide, then a moment")
             clock.advance(by: 0.1)
             XCTAssertFalse(card.isShown)
@@ -267,7 +280,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.focusWorkspace(.down)
             XCTAssertEqual(installs, 1, "one card, kept: its words changed, it didn't come in again")
             XCTAssertEqual(watching, 1)
-            clock.advance(by: NiruxShellView.workspaceSlideDuration + 0.01)
+            clock.advance(by: NiruxShellView.workspaceSwitchDuration + 0.01)
             XCTAssertTrue(card.isShown)
             seen()
             XCTAssertFalse(card.isShown, "at the first input once it stopped")
@@ -290,7 +303,7 @@ final class WorkspaceSwitchTests: XCTestCase {
                 ))
             }
             shell.focusWorkspace(.down)
-            clock.advance(by: NiruxShellView.workspaceSlideDuration + 0.01)
+            clock.advance(by: NiruxShellView.workspaceSwitchDuration + 0.01)
             shell.workspaceCardSawKey(try key(125, .command))
             XCTAssertTrue(card.isShown, "⌘↓")
             shell.workspaceCardSawKey(try key(126, .control))
@@ -301,33 +314,35 @@ final class WorkspaceSwitchTests: XCTestCase {
     }
 
     /// A relayout that isn't animated (a task started in the background)
-    /// doesn't cut a slide that plays.
-    func testABackgroundTaskDoesntCutTheSlide() throws {
+    /// doesn't cut the floors short, and the floor beneath stays under the
+    /// one chosen when the strip moves meanwhile.
+    func testABackgroundTaskDoesntCutTheFloors() throws {
         try withShell { shell, _, folder in
+            let first = try XCTUnwrap(shell.activeWorkspace)
             shell.focusWorkspace(.down)
-            XCTAssertNotNil(self.slide(of: shell))
-            // Mid-way: the strip shows 300 short of its place.
-            shell.workspaceSwitch.shownStripOffset = { _ in -300 }
+            let second = try XCTUnwrap(shell.activeWorkspace)
             let oldY = shell.verticalStrip.frame.origin.y
             shell.addWorkspace(title: "background", cwd: folder, activate: false)
             XCTAssertNotEqual(shell.verticalStrip.frame.origin.y, oldY, "the strip moved")
-            let slide = try XCTUnwrap(self.slide(of: shell), "the slide goes on")
-            XCTAssertEqual((slide.fromValue as? NSNumber)?.doubleValue ?? 0, -300, accuracy: 0.5, "from where it is")
+            XCTAssertNotNil(self.floor(of: second), "the floors go on")
             XCTAssertTrue(shell.workspaceSwitch.isSliding)
+            XCTAssertEqual(
+                first.containerView.layer?.affineTransform().ty,
+                second.containerView.frame.minY - first.containerView.frame.minY, "still under the second"
+            )
         }
     }
 
-    /// A strip of another space never slides in from this one's place.
-    func testAnotherSpacesStripDoesntSlideIn() throws {
+    /// A strip of another space never comes in as a floor over this one.
+    func testAnotherSpacesWorkspaceShowsAtOnce() throws {
         try withShell { shell, _, folder in
             let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere", select: false)
             shell.addWorkspace(title: "there", cwd: folder, profileID: elsewhere.id, activate: false)
             let there = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "there" })
-            shell.verticalStrip.layer?.removeAllAnimations()
             XCTAssertTrue(shell.workspaceStore.selectWorkspace(at: there))
             shell.relayout(animated: true)
             XCTAssertEqual(shell.activeProfileID, elsewhere.id)
-            XCTAssertNil(self.slide(of: shell))
+            XCTAssertTrue(shell.workspaces.allSatisfy { self.floor(of: $0) == nil })
         }
     }
 
@@ -357,7 +372,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             XCTAssertEqual(card.litDot, 2)
             clock.advance(by: 0.5)
             XCTAssertTrue(card.isShown, "the first press's end doesn't take it away")
-            clock.advance(by: NiruxShellView.workspaceSlideDuration + NiruxShellView.workspaceCardHold)
+            clock.advance(by: NiruxShellView.workspaceSwitchDuration + NiruxShellView.workspaceCardHold)
             XCTAssertFalse(card.isShown)
 
             // At the last workspace, ⌘↓ goes nowhere: no card.
@@ -368,13 +383,13 @@ final class WorkspaceSwitchTests: XCTestCase {
 
     /// Only ⌘↑ ⌘↓ show the card. A jump to a workspace the user named
     /// (its row, the palette) or that comes to them (a notification, an
-    /// agent) slides without it: it lands where they look.
+    /// agent) comes on screen without it: it lands where they look.
     func testOnlyMovingUpOrDownShowsTheCard() throws {
         try withShell { shell, _, _ in
             let card = shell.workspaceNameCard
             shell.sidebar.onWorkspaceClicked?(1)
             XCTAssertEqual(shell.activeWSIndex, 1)
-            XCTAssertNotNil(self.slide(of: shell), "it slides")
+            XCTAssertNotNil(self.floor(of: shell.workspaces[1]), "it comes on screen as a floor")
             XCTAssertFalse(card.isShown)
             shell.switchToWorkspace(2)
             XCTAssertEqual(shell.activeWSIndex, 2)

@@ -22,7 +22,7 @@ extension NiruxShellView {
     /// When the row opens, after the fold began: as the picture reaches it.
     static let taskBirthRowDelay: CFTimeInterval = 0.2
     /// How long what was on screen takes to fade away under the new
-    /// workspace: a workspace switch's time (`wsSlide`).
+    /// workspace.
     static let taskBirthFadeDuration: CFTimeInterval = 0.3
 
     /// Before the sheet closes on a task that starts: its picture, for the
