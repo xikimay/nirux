@@ -52,7 +52,7 @@ extension PRFollowUp {
         let base = pullRequest.baseRefName ?? "its base"
         switch stop.cause {
         case .checkoutDiffers:
-            return "\(number): the checkout isn’t at its head after the automatic round"
+            return "\(number): the checkout isn’t at the pull request’s head after the automatic round"
         case .rounds:
             let trouble = switch stop.kind {
             case .conflict: "conflicts with \(base)"

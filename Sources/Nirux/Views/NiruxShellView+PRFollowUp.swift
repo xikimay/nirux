@@ -19,8 +19,8 @@ final class PRFollowUpCenter {
     /// (`PRFollowUp.failureSignature`), and when Nirux first saw it.
     var redSince: [String: (signature: String, since: TimeInterval)] = [:]
     /// By repository root: the remote of each GitHub repository its remotes
-    /// name, by lowercased `owner/name`.
-    var remotes: [String: [String: String]] = [:]
+    /// name, by lowercased `owner/name`, and when that was read.
+    var remotes: [String: (byRepository: [String: String], readAt: TimeInterval)] = [:]
     var readingRemotes: Set<String> = []
     /// Workspaces whose checkout is being read before a round.
     var checking: Set<String> = []
@@ -28,6 +28,10 @@ final class PRFollowUpCenter {
     var settings: [String: FileBackedValue<Bool>] = [:]
     /// By workspace: the last decision logged.
     var logged: [String: String] = [:]
+
+    /// A checkout whose remotes named no repository is read again after
+    /// this: a remote may have been added since.
+    static let remotesLifetime: TimeInterval = 10 * 60
 }
 
 extension NiruxShellView {
@@ -44,13 +48,15 @@ extension NiruxShellView {
 
     /// At each turn end: a round may go now, or one may have ended.
     func followUpPullRequests() {
-        for workspace in workspaces where workspace.prInfo != nil { followUpPullRequest(of: workspace) }
+        let snapshot = ProcessSnapshot()
+        for workspace in workspaces where workspace.prInfo != nil { followUpPullRequest(of: workspace, snapshot: snapshot) }
     }
 
     /// After each read of a task's pull request or its feedback, and each
-    /// turn end: types the round the pull request needs (`PRFollowUp`)
-    /// once its checkout, read now, says go.
-    func followUpPullRequest(of workspace: WorkspaceState) {
+    /// turn end: runs the decision (`PRFollowUp`), and types the round it
+    /// gives once the checkout, read now, says go. Without an agent to
+    /// type into, the decision still settles rounds and clears stops.
+    func followUpPullRequest(of workspace: WorkspaceState, snapshot: ProcessSnapshot = ProcessSnapshot()) {
         guard let pullRequest = workspace.prInfo, !pullRequest.url.isEmpty else { return }
         let center = prFollowUpCenter
         guard pullRequest.state.uppercased() == "OPEN" else {
@@ -60,18 +66,17 @@ extension NiruxShellView {
             }
             return
         }
-        guard Self.isTask(workspace), !workspace.isInactive, !workspace.isClosing,
-              followsUpPullRequests(inSpace: workspace.profileID),
-              let agent = followUpAgent(in: workspace)
-        else { return }
+        guard isFollowedTask(workspace) else { return }
         let now = Date().timeIntervalSince1970
-        let facts = followUpFacts(for: workspace, pullRequest: pullRequest, agent: agent, now: now)
-        let decided = decideFollowUp(of: workspace, pullRequest: pullRequest, agent: agent, facts: facts)
-        // With the checkout unknown, nothing types: everything else says go?
+        let target = followUpTarget(in: workspace, pullRequest: pullRequest, snapshot: snapshot)
+        let facts = followUpFacts(for: workspace, pullRequest: pullRequest, target: target, snapshot: snapshot, now: now)
+        let decided = decideFollowUp(of: workspace, pullRequest: pullRequest, target: target, facts: facts, snapshot: snapshot)
+        // With the checkout unknown, nothing types: does everything else
+        // say go?
         var probe = decided.entry
         var ready = facts
         ready.hasTrackedChanges = false
-        guard case .wait = decided.action, case .type = PRFollowUp.next(&probe, ready),
+        guard target.column != nil, case .wait = decided.action, case .type = PRFollowUp.next(&probe, ready),
               !isFollowUpRoundRunning(besides: pullRequest.url, now: now),
               let root = workspace.gitContext?.identity.repositoryRoot,
               center.checking.insert(workspace.id).inserted
@@ -90,30 +95,36 @@ extension NiruxShellView {
 
     /// Decides again with the checkout as git says it now, and types the
     /// round if one goes: through the Mission typing path, Enter only when
-    /// nothing was typed meanwhile. A round that didn't go in is dropped.
+    /// nothing was typed meanwhile. A round none of which went in is
+    /// dropped; one left in the prompt counts, and the user hears of it.
     private func typeFollowUpRound(of workspace: WorkspaceState, head: String?, hasTrackedChanges: Bool?) {
         // Hooks still in the queue may say the agent started working.
         AgentHookCenter.shared.drain()
-        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN", !workspace.isClosing,
-              followsUpPullRequests(inSpace: workspace.profileID), let agent = followUpAgent(in: workspace)
-        else { return }
+        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN", isFollowedTask(workspace) else { return }
         let now = Date().timeIntervalSince1970
-        guard !isFollowUpRoundRunning(besides: pullRequest.url, now: now) else { return }
-        var facts = followUpFacts(for: workspace, pullRequest: pullRequest, agent: agent, now: now)
+        let snapshot = ProcessSnapshot()
+        let target = followUpTarget(in: workspace, pullRequest: pullRequest, snapshot: snapshot)
+        guard let column = target.column, !isFollowUpRoundRunning(besides: pullRequest.url, now: now) else { return }
+        var facts = followUpFacts(for: workspace, pullRequest: pullRequest, target: target, snapshot: snapshot, now: now)
         facts.localHead = head
         facts.hasTrackedChanges = hasTrackedChanges
-        if hasTrackedChanges == false, workspace.gitContext?.identity.isDirty == true {
-            Self.followUpLogger.log("#\(pullRequest.number, privacy: .public) untracked files in the checkout: not blocking")
-        }
-        let decided = decideFollowUp(of: workspace, pullRequest: pullRequest, agent: agent, facts: facts)
+        let untracked = hasTrackedChanges == false && workspace.gitContext?.identity.isDirty == true
+        let decided = decideFollowUp(
+            of: workspace, pullRequest: pullRequest, target: target, facts: facts, snapshot: snapshot,
+            note: untracked ? "untracked files don't block" : nil
+        )
         guard case .type(let round, let prompt) = decided.action else { return }
-        guard let pty = agent.column.pty, let paste = TypedPromptSanitizer.bracketedPaste(for: prompt) else {
+        guard let pty = column.pty, let paste = TypedPromptSanitizer.bracketedPaste(for: prompt) else {
             return cancelFollowUpRound(round, of: pullRequest)
         }
-        typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: ProcessSnapshot())?.instance) { [weak self] typed in
-            Self.followUpLogger.log("#\(pullRequest.number, privacy: .public) round \(round.kind.rawValue, privacy: .public): \(String(describing: typed), privacy: .public)")
-            guard let self, typed != .sent else { return }
-            self.cancelFollowUpRound(round, of: pullRequest)
+        let title = MissionPromptText.quoted(workspace.title)
+        typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] typed in
+            Self.followUpLogger.log(
+                "#\(pullRequest.number, privacy: .public) round \(round.kind.rawValue, privacy: .public): \(String(describing: typed), privacy: .public)"
+            )
+            guard let self else { return }
+            if typed == .left { self.cancelFollowUpRound(round, of: pullRequest) }
+            self.reportUnsent(typed, what: "an automatic follow-up round", for: title, telling: nil)
         }
         scheduleMetadataRefresh()
     }
@@ -127,28 +138,60 @@ extension NiruxShellView {
         scheduleMetadataRefresh()
     }
 
-    /// Runs the decision on the pull request's entry, its last round ended
-    /// first when its turn is over; a stop it raises marks the task.
+    /// A task of a space that follows its pull requests.
+    private func isFollowedTask(_ workspace: WorkspaceState) -> Bool {
+        Self.isTask(workspace) && !workspace.isInactive && !workspace.isClosing && followsUpPullRequests(inSpace: workspace.profileID)
+    }
+
+    /// The column whose Claude the decision reads: the one the open round
+    /// went to while it is there, else the task's Claude in the pull
+    /// request's checkout, running with Nirux's hooks. `roundAgentLeft`:
+    /// the open round's agent is gone, so its turn is over.
+    private func followUpTarget(
+        in workspace: WorkspaceState, pullRequest: PRInfo, snapshot: ProcessSnapshot
+    ) -> (column: ColumnState?, index: Int, roundAgentLeft: Bool) {
+        let open = prFollowUpCenter.file.value.pullRequests[pullRequest.url]?.rounds.last.flatMap { $0.endedAt == nil ? $0 : nil }
+        if let agent = open?.agent {
+            guard let index = workspace.columns.firstIndex(where: { $0.agentUUID == agent }) else { return (nil, 0, true) }
+            return (workspace.columns[index], index, false)
+        }
+        guard let target = pullRequestAgent(in: workspace, snapshot: snapshot), let column = workspace.columns[safe: target.columnIndex],
+              let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
+              pty.agentTookPrompt(since: foreground) != nil
+        else { return (nil, 0, false) }
+        return (column, target.columnIndex, false)
+    }
+
+    /// Runs the decision on the pull request's entry, after ending its open
+    /// round when its turn is over and noting a stop the user took; a stop
+    /// it raises marks the task.
     private func decideFollowUp(
-        of workspace: WorkspaceState, pullRequest: PRInfo, agent: (column: ColumnState, index: Int), facts: PRFollowUp.Facts
+        of workspace: WorkspaceState, pullRequest: PRInfo, target: (column: ColumnState?, index: Int, roundAgentLeft: Bool),
+        facts: PRFollowUp.Facts, snapshot: ProcessSnapshot, note: String? = nil
     ) -> (action: PRFollowUp.Action, entry: PRFollowUp.Entry) {
-        let snapshot = ProcessSnapshot()
+        let pty = target.column?.pty
         let (action, entry, raised) = prFollowUpCenter.file.update { store in
             var action = PRFollowUp.Action.none
             var raised = false
             store.update(pullRequest.url, now: facts.now, since: store.spacesOnSince[workspace.profileID]) { entry in
-                if let last = entry.rounds.last, last.endedAt == nil, let pty = agent.column.pty,
-                   pty.finishedTurn(afterTypingAt: last.typedAt),
-                   pty.missionPromptRefusal(runningSince: facts.now, snapshot: snapshot) != .failedTurn {
-                    entry.endRound(at: pty.agentLastTurnEndedAt)
+                if let last = entry.rounds.last, last.endedAt == nil {
+                    if target.roundAgentLeft {
+                        entry.endRound(at: facts.now)
+                    } else if let pty, pty.finishedTurn(afterTypingAt: last.typedAt),
+                              pty.missionPromptRefusal(runningSince: facts.now, snapshot: snapshot) != .failedTurn {
+                        entry.endRound(at: pty.agentLastTurnEndedAt)
+                    }
                 }
-                let hadStop = entry.stop != nil
+                let before = entry.stop
                 action = PRFollowUp.next(&entry, facts)
-                raised = !hadStop && entry.stop != nil
+                raised = entry.stop != nil && entry.stop?.at != before?.at
+                if let stop = entry.stop, stop.seenAt == nil, (pty?.agentLastUserPromptAt ?? 0) > stop.at {
+                    entry.stop?.seenAt = facts.now
+                }
             }
             return (action, store.pullRequests[pullRequest.url] ?? PRFollowUp.Entry(), raised)
         }
-        logFollowUp(action, of: workspace, pullRequest: pullRequest)
+        logFollowUp(action, of: workspace, pullRequest: pullRequest, note: note)
         if raised {
             if !(NSApp.isActive && workspace === activeWorkspace) { workspace.raiseNotification(.waiting) }
             scheduleMetadataRefresh()
@@ -156,18 +199,9 @@ extension NiruxShellView {
         return (action, entry)
     }
 
-    /// The task's Claude in the pull request's checkout, running with
-    /// Nirux's hooks.
-    private func followUpAgent(in workspace: WorkspaceState) -> (column: ColumnState, index: Int)? {
-        guard let target = pullRequestAgent(in: workspace), let column = workspace.columns[safe: target.columnIndex],
-              let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: ProcessSnapshot()),
-              pty.agentTookPrompt(since: foreground) != nil
-        else { return nil }
-        return (column, target.columnIndex)
-    }
-
     private func followUpFacts(
-        for workspace: WorkspaceState, pullRequest: PRInfo, agent: (column: ColumnState, index: Int), now: TimeInterval
+        for workspace: WorkspaceState, pullRequest: PRInfo, target: (column: ColumnState?, index: Int, roundAgentLeft: Bool),
+        snapshot: ProcessSnapshot, now: TimeInterval
     ) -> PRFollowUp.Facts {
         let center = prFollowUpCenter
         let signature = PRFollowUp.failureSignature(pullRequest)
@@ -176,30 +210,34 @@ extension NiruxShellView {
         } else if center.redSince[workspace.id]?.signature != signature {
             center.redSince[workspace.id] = (signature, now)
         }
-        let gate = PRFollowUp.gate(followUpAgentState(agent, in: workspace, now: now), now: now)
+        let gate = target.column.map {
+            PRFollowUp.gate(followUpAgentState($0, index: target.index, in: workspace, snapshot: snapshot, now: now), now: now)
+        } ?? ("no Claude with Nirux's hooks in the checkout", false)
         return PRFollowUp.Facts(
-            pullRequest: pullRequest, feedback: workspace.prFeedback, feedbackReadAt: center.feedbackReadAt[workspace.id],
+            pullRequest: pullRequest, feedback: workspace.prFeedback,
+            followedSince: center.file.value.spacesOnSince[workspace.profileID], feedbackReadAt: center.feedbackReadAt[workspace.id],
             triage: followUpTriage(of: workspace, pullRequest: pullRequest), redSince: center.redSince[workspace.id]?.since,
             localHead: workspace.gitContext?.identity.head, baseRemote: followUpBaseRemote(of: workspace, pullRequest: pullRequest),
             hasTrackedChanges: nil, isInMergeQueue: mergeQueueHolds(pullRequest), readAt: center.readAt[workspace.id],
-            agentRefusal: gate.refusal, agentIsBusy: gate.isBusy, trackedSince: center.trackedSince, now: now
+            agent: target.column?.agentUUID, agentRefusal: gate.refusal, agentIsBusy: gate.isBusy,
+            trackedSince: center.trackedSince, now: now
         )
     }
 
     private func followUpAgentState(
-        _ agent: (column: ColumnState, index: Int), in workspace: WorkspaceState, now: TimeInterval
+        _ column: ColumnState, index: Int, in workspace: WorkspaceState, snapshot: ProcessSnapshot, now: TimeInterval
     ) -> PRFollowUp.AgentState {
-        let pty = agent.column.pty
+        let pty = column.pty
         var waitsOnUser = false
         if case .waitsOnUser? = pty?.agentHold { waitsOnUser = true }
         let missions = MissionStore.shared
-        let missionWaits = agent.column.agentUUID.map {
+        let missionWaits = column.agentUUID.map {
             missions.waitingQuestion(childWorkspaceID: workspace.id, childAgentUUID: $0) != nil
-        } == true || missions.pendingPromptDeliveries(now: now).contains { missionRecipient(of: $0) === agent.column }
+        } == true || missions.pendingPromptDeliveries(now: now).contains { missionRecipient(of: $0) === column }
         return PRFollowUp.AgentState(
-            refusal: pty.map { $0.missionPromptRefusal(runningSince: now, snapshot: ProcessSnapshot()) } ?? .noClaude,
+            refusal: pty.map { $0.missionPromptRefusal(runningSince: now, snapshot: snapshot) } ?? .noClaude,
             waitsOnUser: waitsOnUser, lastTurnEndedAt: pty?.agentLastTurnEndedAt ?? 0, missionWaits: missionWaits,
-            isWatched: NSApp.isActive && workspace === activeWorkspace && workspace.focusedIndex == agent.index
+            isWatched: NSApp.isActive && workspace === activeWorkspace && workspace.focusedIndex == index
         )
     }
 
@@ -215,30 +253,37 @@ extension NiruxShellView {
     }
 
     /// The checkout's remote for the repository the pull request targets,
-    /// for a conflict's merge. Read off the main thread once per checkout:
-    /// the follow-up runs again when it comes.
+    /// for a conflict's merge, read off the main thread: the follow-up runs
+    /// again when it comes. A failed read isn't kept; one that found no
+    /// such remote is read again after a while.
     private func followUpBaseRemote(of workspace: WorkspaceState, pullRequest: PRInfo) -> String? {
         let center = prFollowUpCenter
         guard pullRequest.mergeable == "CONFLICTING", let root = workspace.gitContext?.identity.repositoryRoot,
               let repository = Self.pullRequestRepository(pullRequest.url)
         else { return nil }
-        if let remotes = center.remotes[root] { return remotes["\(repository.owner)/\(repository.name)"] }
+        let key = "\(repository.owner)/\(repository.name)"
+        if let read = center.remotes[root],
+           read.byRepository[key] != nil || Date().timeIntervalSince1970 - read.readAt < PRFollowUpCenter.remotesLifetime {
+            return read.byRepository[key]
+        }
         guard center.readingRemotes.insert(root).inserted else { return nil }
         DispatchQueue.global(qos: .utility).async {
-            let remotes = GitHubBaseRemote.survey(at: root).gitHubRemotes
+            let survey = GitHubBaseRemote.survey(at: root)
+            let readAt = Date().timeIntervalSince1970
             DispatchQueue.main.async { [weak self, weak workspace] in
                 guard let self else { return }
                 self.prFollowUpCenter.readingRemotes.remove(root)
-                self.prFollowUpCenter.remotes[root] = remotes
+                guard survey.read != .unread, survey.read != .notARepository else { return }
+                self.prFollowUpCenter.remotes[root] = (survey.gitHubRemotes, readAt)
                 if let workspace { self.followUpPullRequest(of: workspace) }
             }
         }
         return nil
     }
 
-    /// A merge queue holds a pull request while any entry of a running
-    /// queue for its repository isn't merged or stopped; a queue running
-    /// in another Nirux holds them all.
+    /// A running merge queue holds a pull request while its entry isn't
+    /// merged or stopped; a queue running in another Nirux holds every pull
+    /// request of its repository.
     private func mergeQueueHolds(_ pullRequest: PRInfo) -> Bool {
         guard let repository = Self.pullRequestRepository(pullRequest.url) else { return false }
         return mergeQueues.values.contains { queue in
@@ -262,53 +307,50 @@ extension NiruxShellView {
         return GitHubRepository(host: host, owner: path[0], name: path[1])
     }
 
-    /// At most one round's turn runs across tasks: each may build and test.
+    /// At most one round's turn runs across tasks, each may build and test:
+    /// a round counts while its pull request is a followed task's.
     private func isFollowUpRoundRunning(besides url: String, now: TimeInterval) -> Bool {
         let center = prFollowUpCenter
+        let followed = Set(workspaces.filter(isFollowedTask).compactMap(\.prInfo?.url))
         return center.file.value.pullRequests.contains { key, entry in
-            guard key != url, let last = entry.rounds.last else { return false }
+            guard key != url, followed.contains(key), let last = entry.rounds.last else { return false }
             return last.endedAt == nil && last.typedAt >= center.trackedSince && now < last.typedAt + PRFollowUp.roundLimit
         }
     }
 
     /// The user's Address or Why Failed took that feedback, that failure:
-    /// no round takes them.
+    /// no round takes them, the setting on or not yet.
     func noteFollowUpTakenByUser(in workspace: WorkspaceState, feedback: [String] = [], failure: Bool = false) {
-        guard let pullRequest = workspace.prInfo, followsUpPullRequests(inSpace: workspace.profileID) else { return }
+        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN" else { return }
         let signature = PRFollowUp.failureSignature(pullRequest)
         prFollowUpCenter.file.update { store in
-            store.update(pullRequest.url, now: Date().timeIntervalSince1970) { entry in
+            store.update(pullRequest.url, now: Date().timeIntervalSince1970, since: store.spacesOnSince[workspace.profileID]) { entry in
                 entry.handedFeedback += feedback.filter { !entry.handedFeedback.contains($0) }
                 if failure, !signature.isEmpty, !entry.userFailures.contains(signature) { entry.userFailures.append(signature) }
             }
         }
     }
 
-    /// Turned on, the space's tasks follow from now: feedback that came
-    /// while it was off is the user's.
+    /// Turned on, the space's pull requests follow from now: feedback that
+    /// came while it was off is the user's.
     func spaceDefaultsSaved(_ defaults: SpaceDefaults, replacing old: SpaceDefaults, spaceID: String) {
         guard defaults.followsUpPullRequests != old.followsUpPullRequests else { return }
         let now = Date().timeIntervalSince1970
-        let isOn = defaults.followsUpPullRequests
-        let urls = workspaces.filter { $0.profileID == spaceID }.compactMap(\.prInfo?.url)
-        prFollowUpCenter.file.update { store in
-            store.spacesOnSince[spaceID] = isOn ? now : nil
-            guard isOn else { return }
-            for url in urls { store.update(url, now: now) { $0.since = now } }
-        }
+        prFollowUpCenter.file.update { $0.spacesOnSince[spaceID] = defaults.followsUpPullRequests ? now : nil }
         updateSidebar()
     }
 
-    /// What the task's row says: the round whose turn runs, or the stop
-    /// until a prompt goes into one of its agents.
+    /// What the task's row says: the round whose turn runs, or the stop on
+    /// the pull request's head until the user takes it (a prompt of theirs
+    /// into one of its agents).
     func followUpRow(of workspace: WorkspaceState) -> SidebarFollowUp? {
-        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN",
-              followsUpPullRequests(inSpace: workspace.profileID), Self.isTask(workspace),
+        guard let pullRequest = workspace.prInfo, pullRequest.state.uppercased() == "OPEN", isFollowedTask(workspace),
               let entry = prFollowUpCenter.file.value.pullRequests[pullRequest.url]
         else { return nil }
         if let stop = entry.stop {
-            let lastPrompt = workspace.columns.compactMap { $0.pty?.agentLastPromptAt }.max() ?? 0
-            return lastPrompt > stop.at ? nil : .stopped(PRFollowUp.stopText(stop, pullRequest: pullRequest))
+            let lastUserPrompt = workspace.columns.compactMap { $0.pty?.agentLastUserPromptAt }.max() ?? 0
+            guard stop.head == pullRequest.headRefOid, stop.seenAt == nil, lastUserPrompt <= stop.at else { return nil }
+            return .stopped(PRFollowUp.stopText(stop, pullRequest: pullRequest))
         }
         guard let last = entry.rounds.last, last.endedAt == nil, last.settledAt == nil,
               last.typedAt >= prFollowUpCenter.trackedSince
@@ -317,12 +359,13 @@ extension NiruxShellView {
     }
 
     /// Each change of decision, once: log category `followUp`.
-    private func logFollowUp(_ action: PRFollowUp.Action, of workspace: WorkspaceState, pullRequest: PRInfo) {
-        let line = switch action {
+    private func logFollowUp(_ action: PRFollowUp.Action, of workspace: WorkspaceState, pullRequest: PRInfo, note: String?) {
+        let decision = switch action {
         case .none: "nothing to follow up"
         case .wait(let why): "waits: \(why)"
         case .type(let round, _): "types round \(round.kind.rawValue)"
         }
+        let line = note.map { "\(decision) (\($0))" } ?? decision
         guard prFollowUpCenter.logged[workspace.id] != line else { return }
         prFollowUpCenter.logged[workspace.id] = line
         Self.followUpLogger.log("#\(pullRequest.number, privacy: .public) \(line, privacy: .public)")

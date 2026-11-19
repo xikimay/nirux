@@ -28,10 +28,10 @@ final class PRFollowUpTests: XCTestCase {
     private var red: [[String: Any]] { [checkRun("test")] }
 
     private func item(_ name: String, age: TimeInterval, outdated: Bool = false, location: String = "Sources/A.swift:3",
-                      bot: Bool = false, approval: Bool = false) -> PRFeedback.Item {
+                      bot: Bool = false, approval: Bool = false, answered: Bool = false) -> PRFeedback.Item {
         PRFeedback.Item(author: "reviewer", isBot: bot, location: location, isOutdated: outdated, excerpt: "Fix",
                         url: "https://github.com/acme/widgets/pull/52#\(name)", createdAt: Date(timeIntervalSince1970: now - age),
-                        isApproval: approval)
+                        isApproval: approval, isAnswered: answered)
     }
 
     /// A task ready for a round, its failure read and old enough.
@@ -39,7 +39,7 @@ final class PRFollowUpTests: XCTestCase {
         PRFollowUp.Facts(
             pullRequest: pullRequest, feedback: PRFeedback(items: feedback), feedbackReadAt: now, triage: .done(.real),
             redSince: now - 600, localHead: head, baseRemote: "upstream", hasTrackedChanges: false, readAt: now,
-            trackedSince: now - 3600, now: now
+            agent: "agent-1", trackedSince: now - 3600, now: now
         )
     }
 
@@ -67,7 +67,7 @@ final class PRFollowUpTests: XCTestCase {
     func testTheConflictComesFirstAndMergesTheBase() throws {
         let conflicting = facts(pullRequest(mergeable: "CONFLICTING", rollup: red), feedback: [item("c1", age: 600)])
         let conflict = try XCTUnwrap(typed(next(conflicting)))
-        XCTAssertEqual(conflict.round, PRFollowUp.Round(kind: .conflict, head: head, typedAt: now))
+        XCTAssertEqual(conflict.round, PRFollowUp.Round(kind: .conflict, head: head, typedAt: now, agent: "agent-1"))
         XCTAssertEqual(conflict.prompt, "PR #52 conflicts with main. Run `git fetch upstream main`, merge upstream/main into "
             + "this branch, resolve the conflicts, run the checks, commit and push. (Nirux follow-up, round 1 of 3.)")
 
@@ -136,11 +136,16 @@ final class PRFollowUpTests: XCTestCase {
         let items = [
             fresh, item("outdated", age: 900, outdated: true), item("old", age: 9000),
             item("before", age: 4000), item("lgtm", age: 900, location: "comment", approval: true),
-            item("overview", age: 900, location: "comment", bot: true), item("bot-thread", age: 400, bot: true)
+            item("overview", age: 900, location: "comment", bot: true), item("bot-thread", age: 400, bot: true),
+            item("replied", age: 500, answered: true)
         ]
         var entry = PRFollowUp.Entry(since: now - 3600, handedFeedback: [item("old", age: 9000).url])
         XCTAssertEqual(PRFollowUp.next(&entry, facts(pullRequest(), feedback: [item("burst", age: 60)] + items)),
                        .wait("feedback may still come"))
+        // Turned off and on again since the entry began: what came between is the user's.
+        var turnedOn = facts(pullRequest(), feedback: items)
+        turnedOn.followedSince = now - 300
+        XCTAssertEqual(typed(next(turnedOn, entry))?.round.items, [fresh.url], "only what came since it was turned on")
         let action = PRFollowUp.next(&entry, facts(pullRequest(), feedback: items + [item("ask", age: 300, location: "comment")]))
         let round = try XCTUnwrap(typed(action))
         let handed = [fresh.url, item("bot-thread", age: 400).url, item("ask", age: 300).url]
@@ -296,6 +301,10 @@ final class PRFollowUpTests: XCTestCase {
             round(.ci, on: "1", settled: true), round(.conflict, on: "2", settled: true), round(.ci, on: "3", settled: true)
         ])
         let failed = facts(pullRequest(rollup: red))
+        var busy = failed
+        busy.agentRefusal = "working"
+        XCTAssertEqual(PRFollowUp.next(&entry, busy), .wait("working"), "it may be fixing it with the user")
+        XCTAssertNil(entry.stop)
         XCTAssertEqual(PRFollowUp.next(&entry, failed), .wait("stopped: rounds"))
         XCTAssertEqual(entry.stop, PRFollowUp.Stop(kind: .ci, cause: .rounds, head: head, at: now))
         XCTAssertEqual(PRFollowUp.next(&entry, failed), .wait("stopped: rounds"))
@@ -330,6 +339,10 @@ final class PRFollowUpTests: XCTestCase {
         var resolved = PRFollowUp.Entry(since: now - 1800, handedFeedback: [c1.url], stop: feedbackStop)
         XCTAssertEqual(PRFollowUp.next(&resolved, facts(pullRequest(), feedback: [item("older", age: 3000)])), .none)
         XCTAssertNil(resolved.stop)
+        // Answered, its reviewer's turn: neither.
+        var answered = PRFollowUp.Entry(since: now - 1800, handedFeedback: [c1.url], stop: feedbackStop)
+        XCTAssertEqual(PRFollowUp.next(&answered, facts(pullRequest(), feedback: [item("c1", age: 900, answered: true)])), .none)
+        XCTAssertNil(answered.stop)
     }
 
     // MARK: - Store
@@ -404,7 +417,7 @@ final class PRFollowUpTests: XCTestCase {
             (.conflict, .rounds, "#52 conflicts with develop after 3 automatic rounds"),
             (.ci, .nothingPushed, "#52 still fails its checks: the automatic round pushed nothing"),
             (.feedback, .nothingPushed, "#52 still has review feedback open: the automatic round pushed nothing"),
-            (.feedback, .checkoutDiffers, "#52: the checkout isn’t at its head after the automatic round")
+            (.feedback, .checkoutDiffers, "#52: the checkout isn’t at the pull request’s head after the automatic round")
         ]
         for (kind, cause, text) in cases {
             XCTAssertEqual(PRFollowUp.stopText(PRFollowUp.Stop(kind: kind, cause: cause, head: head, at: now), pullRequest: pullRequest), text)
@@ -423,9 +436,14 @@ final class PRFollowUpTests: XCTestCase {
         let file = FileBackedValue(url: url, read: { PRFollowUpStore.load(from: $0) }, write: { $0.save(to: $1) })
         XCTAssertEqual(file.value, PRFollowUpStore())
         file.update { $0.update("a", now: self.now) { _ in } }
+        // Two writes within the date's precision: the file is another one.
+        let sameDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: sameDate], ofItemAtPath: url.path)
+        XCTAssertEqual(Set(file.value.pullRequests.keys), ["a"])
         var other = PRFollowUpStore.load(from: url)
         other.update("b", now: now) { _ in }
         other.save(to: url)
+        try FileManager.default.setAttributes([.modificationDate: sameDate], ofItemAtPath: url.path)
         XCTAssertEqual(Set(file.value.pullRequests.keys), ["a", "b"], "written right after, read again")
     }
 }

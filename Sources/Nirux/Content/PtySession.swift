@@ -456,8 +456,9 @@ final class PtySession: @unchecked Sendable {
     /// See `AgentStatusMachine.lastTurnEndedAt`.
     var agentLastTurnEndedAt: TimeInterval { state.machine.lastTurnEndedAt }
 
-    /// When the last prompt went into its agent; nil before one.
-    var agentLastPromptAt: TimeInterval? { state.machine.lastPromptAt }
+    /// When the last prompt that isn't a poll event went into its agent: the
+    /// user's, or a Mission message. Nil before one.
+    var agentLastUserPromptAt: TimeInterval? { state.machine.lastUserPromptAt }
 
     /// See `AgentStatusMachine.isCurrentTurnEnd`.
     func isCurrentTurnEnd(_ turnEndedAt: TimeInterval) -> Bool {

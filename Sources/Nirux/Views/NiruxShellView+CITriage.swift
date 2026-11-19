@@ -29,11 +29,6 @@ final class CITriageCenter {
     /// model's rest over, the agent started.
     var retryDelay: TimeInterval = 5 * 60
     private let file = FileBackedValue(url: CITriageStore.url, read: { CITriageStore.load(from: $0) }, write: { $0.save(to: $1) })
-    /// Where the store is kept; tests point it elsewhere.
-    var storeURL: URL {
-        get { file.url }
-        set { file.url = newValue }
-    }
     /// By workspace: the red checks (`CITriage.signature`) being triaged.
     var inFlight: [String: String] = [:]
     /// By workspace: the notification waiting for that triage.

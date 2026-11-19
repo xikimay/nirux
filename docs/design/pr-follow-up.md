@@ -28,7 +28,10 @@ message (`isPromptFree`: not working, no dialog, no draft, no failed turn, no
 turn end being read, a prompt taken since it started), its turn must not have
 ended on a question to the user, no Mission question or message of the task
 waits, its last turn ended 30 s ago or more, and the user isn't on its
-terminal (its column in front, Nirux active).
+terminal (its column in front, Nirux active). A round is judged on the
+agent it was typed into; when that agent is gone, the round is over. A
+Claude resumed after a relaunch takes no round until it has taken a prompt,
+as with Mission messages.
 
 ## When a round goes
 
@@ -52,10 +55,11 @@ After each read of the pull request and each turn end of that agent:
      first). Only those runs' logs go into the prompt. A likely flake starts
      nothing: its rerun stays the user's. A failure the user's Why Failed
      took is theirs.
-  3. **Feedback:** review threads, and what people (not bots) write besides an
-     approval, posted since Nirux started following the pull request, never
-     handed before, outdated threads left out, the newest 3 minutes old (bots
-     post over a minute or two).
+  3. **Feedback:** review threads whose last comment isn't ours, and what
+     people (not bots) write besides an approval, posted since Nirux started
+     following the pull request (or since the setting was last turned on),
+     never handed before, outdated threads left out, the newest 3 minutes old
+     (bots post over a minute or two).
 
 ## Prompts
 
@@ -83,7 +87,7 @@ Each ends on "(Nirux follow-up, round n of 3.)".
 - **Stops**, each a "Needs you" with its reason:
   - another round was due after three;
   - a round pushed nothing and its signal is still there (still conflicting,
-    still a fixable failure, one of its items still listed);
+    still a fixable failure, one of its items still listed and unanswered);
   - 10 minutes after a round, the checkout still isn't at the pull request's
     head (commits not pushed, or a push from elsewhere not pulled).
 - A stop holds until the pull request's head moves or what stopped it goes
@@ -105,8 +109,11 @@ typed meanwhile).
 
 - The row: `Auto follow-up 1/3 · failed checks` while a round's turn runs;
   `Needs you · #52 still fails its checks: the automatic round pushed
-  nothing` (and the task's attention mark) once stopped, until a prompt goes
-  into one of its agents.
+  nothing` (and the task's attention mark) once stopped, until a prompt that
+  isn't a poll event goes into one of its agents (the user's, or a Mission
+  message), kept in the entry across relaunches.
+- Without an agent to type into, the decision still runs: it settles rounds
+  and clears stops.
 - The decisions go to the log category `followUp`, once per change.
 
 Rules:
@@ -122,4 +129,7 @@ Rules:
   that came while it was off is the user's.
 - A merge queue holds a pull request while any of its entries isn't done or
   stopped.
-- At most one automatic round in flight across all tasks.
+- At most one automatic round in flight across all tasks: a round counts
+  while its pull request is a followed task's.
+- A round left in the prompt unsent counts, and the user hears of it; one
+  none of which went in is dropped.

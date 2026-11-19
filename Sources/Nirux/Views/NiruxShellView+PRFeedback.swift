@@ -80,11 +80,10 @@ extension NiruxShellView {
     /// The workspace's focused Claude agent, else its first one, in the
     /// PR's checkout: the skill is Claude's. `typedPromptTargets` decides
     /// what is live.
-    func pullRequestAgent(in workspace: WorkspaceState) -> TypedPromptTarget? {
+    func pullRequestAgent(in workspace: WorkspaceState, snapshot: ProcessSnapshot = ProcessSnapshot()) -> TypedPromptTarget? {
         guard let root = workspace.gitContext?.identity.repositoryRoot else { return nil }
         let resolvedRoot = Self.comparablePath(root)
-        let snapshot = ProcessSnapshot()
-        let sessions = typedPromptTargets().filter {
+        let sessions = typedPromptTargets(in: [workspace], snapshot: snapshot).filter {
             $0.workspaceID == workspace.id
                 && workspace.columns[$0.columnIndex].pty?.foregroundProcessName(snapshot: snapshot) == "claude"
                 && ProjectBoard.contains(resolvedRoot, Self.comparablePath($0.cwd))

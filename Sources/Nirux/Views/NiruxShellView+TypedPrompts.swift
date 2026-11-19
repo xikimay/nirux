@@ -6,9 +6,10 @@ extension NiruxShellView {
     /// The agents Nirux may type a prompt into: recognized, live agent
     /// processes only. Browser/editor columns, idle shells and exited
     /// terminals are never among them.
-    func typedPromptTargets() -> [TypedPromptTarget] {
-        let snapshot = ProcessSnapshot()
-        return workspaces.flatMap { workspace in
+    func typedPromptTargets(
+        in workspaces: [WorkspaceState]? = nil, snapshot: ProcessSnapshot = ProcessSnapshot()
+    ) -> [TypedPromptTarget] {
+        (workspaces ?? self.workspaces).flatMap { workspace in
             workspace.columns.enumerated().compactMap { columnIndex, column in
                 makeTypedPromptTarget(
                     workspace: workspace,

@@ -16,9 +16,10 @@ final class PRFeedbackTests: XCTestCase {
     }
 
     private func thread(_ first: [String: Any], resolved: Bool = false, outdated: Bool = false,
-                        line: Any = 12) -> [String: Any] {
+                        line: Any = 12, lastBy last: String? = nil) -> [String: Any] {
         ["isResolved": resolved, "isOutdated": outdated, "path": "Sources/A.swift", "line": line,
-         "comments": ["nodes": [first]]]
+         "comments": ["nodes": [first]],
+         "latest": ["nodes": [["author": ["login": last ?? (first["author"] as? [String: Any])?["login"] ?? "ghost"]]]]]
     }
 
     private func review(_ login: String, state: String = "COMMENTED", body: String = "Summary",
@@ -63,6 +64,17 @@ final class PRFeedbackTests: XCTestCase {
         ])
         XCTAssertEqual(result.items.map(\.author), ["alice"])
         XCTAssertEqual(result.items.first?.location, "Sources/A.swift:12")
+    }
+
+    /// Still listed (the card counts it), but answered: the automatic
+    /// follow-up leaves it to its reviewer.
+    func testAThreadWhoseLastCommentIsOursIsAnswered() throws {
+        let result = try feedback(threads: [
+            thread(comment("alice", at: "2026-09-01T10:00:00Z"), lastBy: "me"),
+            thread(comment("bob", at: "2026-09-02T10:00:00Z"))
+        ])
+        XCTAssertEqual(result.items.map(\.author), ["bob", "alice"])
+        XCTAssertEqual(result.items.map(\.isAnswered), [false, true])
     }
 
     func testOutdatedThreadStillCountsAndSaysSo() throws {
