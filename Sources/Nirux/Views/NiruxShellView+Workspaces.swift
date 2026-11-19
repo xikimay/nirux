@@ -678,7 +678,7 @@ extension NiruxShellView {
         let leaving = workspaceOnScreenBeforeLayout()
         applyWorkspaceFrames(layout)
         // Only the workspace on screen glides its cards.
-        let glides = animated && agentLightsMayMove
+        let glides = animated && (agentLightsMayMove || ZZ("glideStill"))
         for index in visibleWorkspaceIndices {
             let workspace = workspaces[index]
             workspace.layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated, glides: glides && workspace === activeWorkspace)

@@ -1066,8 +1066,8 @@ extension WorkspaceState {
             col.light?.frame = col.view.frame
             shadow(for: col).frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
-            if let was = shown[safe: index], was.width == widths[index], !col.isArriving, abs(was.x - xOffset) > 0.5 {
-                Self.glide([col.view, col.light, col.shadow], by: was.x - xOffset)
+            if !ZZ("noGlide"), let was = shown[safe: index], was.width == widths[index], !col.isArriving, abs(was.x - xOffset) > 0.5 {
+                Self.glide(ZZ("viewOnly") ? [col.view] : [col.view, col.light, col.shadow], by: was.x - xOffset)
             }
             // Its content clipped to its corners; its border (the focus) is
             // the shell's.
