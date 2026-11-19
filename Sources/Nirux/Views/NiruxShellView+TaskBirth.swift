@@ -87,6 +87,7 @@ extension NiruxShellView {
     /// away while its column comes in (`arrive`): a new task shows one
     /// column, and nothing stale may stay beside it.
     func fadeAwayUnderNewWorkspace(_ snapshot: NSView) {
+        guard agentLightsMayMove else { return }
         viewport.addSubview(snapshot, positioned: .below, relativeTo: verticalStrip)
         // Gone unless its fade runs: a dropped animation leaves nothing.
         snapshot.alphaValue = 0
