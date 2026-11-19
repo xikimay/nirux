@@ -65,6 +65,26 @@ final class FrozenViewTests: XCTestCase {
         XCTAssertTrue(Self.pixels(of: copy).allSatisfy { $0 == 0x5A }, "what draws into the surface after leaves the copy as it was")
     }
 
+    /// A change made in this turn shows in the picture: a layer at rest is
+    /// read as last set, not as the screen last showed it.
+    func testAPictureShowsAChangeNotYetOnScreen() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        view.wantsLayer = true
+        window.contentView = view
+        window.orderFront(nil)
+        defer { window.close() }
+        let card = CALayer()
+        card.frame = CGRect(x: 10, y: 10, width: 50, height: 50)
+        try XCTUnwrap(view.layer).addSublayer(card)
+        CATransaction.flush()
+        card.frame = CGRect(x: 100, y: 20, width: 80, height: 60)
+        card.isHidden = false
+        let frozen = try XCTUnwrap(FrozenView.freeze(view))
+        XCTAssertEqual(frozen.content.sublayers?.first?.frame, card.frame, "as last set")
+    }
+
     /// Where the GPU can't copy a surface, the CPU's copy is the same; past
     /// the wait for the GPU, the CPU copies.
     func testACopyOnTheCPUIsTheSame() throws {

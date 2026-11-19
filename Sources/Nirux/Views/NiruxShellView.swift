@@ -27,6 +27,8 @@ final class NiruxShellView: NSView {
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
     var crossingPictures: [FrozenView] = []
+    /// The workspace a crossing brings on screen.
+    var crossingWorkspaceID: String?
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -474,6 +476,7 @@ final class NiruxShellView: NSView {
     // MARK: - Layout
 
     func relayout(animated: Bool) {
+        endSpaceCrossingIfStale(animated: animated)
         // A pass under the rail goes on through a layout; a travel the
         // layout starts begins another.
         restUnderGlass()
