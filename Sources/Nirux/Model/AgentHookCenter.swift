@@ -526,6 +526,11 @@ final class AgentHookCenter {
         readsFinalMessages && !isHeadlessClaude(foreground)
     }
 
+    /// A `claude` a person talks to: not `claude -p`.
+    nonisolated static func isInteractiveClaude(_ process: ForegroundProcess?) -> Bool {
+        process?.name == "claude" && !isHeadlessClaude(process)
+    }
+
     nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {
         guard let process, process.name == "claude" else { return false }
         return process.hasFlag("-p") || process.hasFlag("--print")

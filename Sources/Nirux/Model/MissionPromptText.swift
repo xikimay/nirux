@@ -29,7 +29,7 @@ enum MissionPromptText {
         let child = childName(title: childTitle, branch: delivery.mission.branch)
         switch event.kind {
         case .instruction:
-            return delivery.mission.oneWay == true ? oneWayHeader + "\n" + event.message : event.message
+            return event.leadSender != nil || delivery.mission.oneWay == true ? oneWayHeader + "\n" + event.message : event.message
         case .question where delivery.mission.reportsToLead == true:
             // A space's Lead answers with its tools (see LeadTools).
             return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"

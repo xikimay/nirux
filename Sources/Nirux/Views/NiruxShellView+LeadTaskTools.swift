@@ -7,9 +7,17 @@ import AppKit
 /// and its branch only when they all pass: the Lead's call stands in for
 /// the alert's click.
 extension NiruxShellView {
-    /// The task of `space` named `name`, whoever started it.
+    /// The task of `space` named `name`, whoever started it, as every Lead
+    /// tool reads names: the first of `nameRanks` any task answers decides;
+    /// within it, the Lead's own task when only one of them answers, else
+    /// the only task that does. Nil when none answers, or several do.
     func spaceTask(_ name: String, in space: WorkspaceProfile) -> WorkspaceState? {
-        namedWorkspace(name, among: workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing })
+        let candidates = workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing }
+        guard let found = Self.nameRanks(name).lazy.map({ candidates.filter($0) }).first(where: { !$0.isEmpty }) else { return nil }
+        let leadID = leadWorkspace(inSpace: space.id)?.id
+        let own = found.filter { workspace in leadID.map { leadMission(of: workspace, lead: $0) != nil } ?? false }
+        let named = own.isEmpty ? found : own
+        return named.count == 1 ? named[0] : nil
     }
 
     func noSpaceTask(_ name: String, in space: WorkspaceProfile) -> String {

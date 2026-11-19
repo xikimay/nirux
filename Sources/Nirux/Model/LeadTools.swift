@@ -31,7 +31,8 @@ enum LeadTools {
 
     /// How a tool names one of the Lead's tasks.
     static let taskDescription = "The task's branch (its folder, as list_tasks shows it, or the folder's name, "
-        + "for a task without a repository), or its title."
+        + "for a task without a repository), or its title. A name several tasks answer goes to the one of yours, "
+        + "if only one is; otherwise it is refused."
 
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
@@ -89,9 +90,9 @@ enum LeadTools {
                 description: """
                     Type a message into a task's prompt once its agent's turn is over (a follow-up, an answer it \
                     didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
-                    sub-task, a task the user started) gets it one-way, under a line saying it comes from you (so \
-                    no slash command); its questions and result still go to whoever started it. A name one of your \
-                    own tasks answers goes to it. Claude Code tasks only.
+                    sub-task, a task the user started) gets it under a line saying it comes from you (so no \
+                    slash command); its questions and result still go to whoever started it. Claude Code tasks \
+                    only.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],

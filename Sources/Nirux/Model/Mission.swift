@@ -110,6 +110,10 @@ struct MissionEvent: Codable, Equatable {
     /// On an instruction Nirux gave up untyped (its time ran out, or its
     /// child can't take it any more): when, its sender told.
     var expiredAt: TimeInterval?
+    /// On an instruction: the space's Lead that sent it on this Mission,
+    /// whose parent is another agent. Its held and given-up lines go to
+    /// the Lead, and Nirux types it under a line saying it's the Lead's.
+    var leadSender: NewTask.MissionParent?
 
     /// Until when Nirux may type this instruction.
     var instructionDeadline: TimeInterval {
@@ -284,8 +288,9 @@ final class MissionStore {
     // This single transition keeps validation and its in-memory mutation
     // adjacent so persistence commits exactly one candidate Mission ledger.
     /// `fromUser` is the trusted UI path (`respond`): only it may mark a
-    /// response as the user's.
-    func process(_ incoming: MissionEvent, enabled: Bool, fromUser: Bool = false) -> ProcessingResult {
+    /// response as the user's; `lead`, the app's (a Lead's `tell`): only it
+    /// may mark an instruction as a Lead's.
+    func process(_ incoming: MissionEvent, enabled: Bool, fromUser: Bool = false, lead: NewTask.MissionParent? = nil) -> ProcessingResult {
         guard ensureLoaded() else { return .persistenceFailed }
         guard incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
@@ -367,7 +372,10 @@ final class MissionStore {
                 && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
-        if event.kind == .instruction { event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime }
+        if event.kind == .instruction {
+            event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime
+            event.leadSender = lead
+        }
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
         if event.kind == .completed {
@@ -470,8 +478,7 @@ final class MissionStore {
     }
 
     /// The instruction is in the child's prompt: the child has work again,
-    /// so its Mission is active, even after `completed`; for a Lead's
-    /// one-way tell, the child's own Mission too, which its result goes to.
+    /// so its Mission is active, even after `completed`.
     @discardableResult
     func markInstructionTyped(
         eventID: String, at timestamp: TimeInterval = Date().timeIntervalSince1970
@@ -482,17 +489,8 @@ final class MissionStore {
             }) else { continue }
             var updated = missions
             updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
-            let mission = missions[missionIndex]
-            let reopened = mission.oneWay == true
-                ? missions.indices.filter { index in
-                    missions[index].oneWay != true && missions[index].childWorkspaceID == mission.childWorkspaceID
-                        && missions[index].childAgentUUID == mission.childAgentUUID
-                }.max { missions[$0].createdAt < missions[$1].createdAt }
-                : nil
-            for index in [missionIndex, reopened].compactMap({ $0 }) {
-                updated[index].status = .active
-                updated[index].updatedAt = timestamp
-            }
+            updated[missionIndex].status = .active
+            updated[missionIndex].updatedAt = timestamp
             return commit(updated)
         }
         return false
