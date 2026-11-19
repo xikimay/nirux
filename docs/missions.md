@@ -58,7 +58,7 @@ Agents run these, not you. The bundled `nirux-worktree` skill teaches them. A sp
 
 | Who | Command | Effect |
 | --- | --- | --- |
-| Child | `"$NIRUX_CLI_PATH" --mission ask --kind <kind> --message "..." --recommend "..."` | Asks the parent. Nirux types the question into the parent's prompt as a `[Nirux Mission]` message, with a line for its kind and recommendation. Both are optional |
+| Child | `"$NIRUX_CLI_PATH" --mission ask --kind "<kind>" --message "..." --recommend "..."` | Asks the parent. Nirux types the question into the parent's prompt as a `[Nirux Mission]` message, with a line for its kind and recommendation. Both are optional |
 | Parent | `--mission reply` (the question names the full command) | Answers the child; `--accept` in place of `--message` sends its recommendation |
 | Child | `"$NIRUX_CLI_PATH" --mission completed --message "..."` | Reports the result. The parent gets a one-line notice, followed by the child's questions that never reached its prompt, if any |
 | Parent | `"$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "..."` | Sends the child more work. Nirux types the message and Enter into its prompt, so a slash command such as `/code-review` runs |

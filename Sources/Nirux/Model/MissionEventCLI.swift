@@ -17,8 +17,10 @@ import Foundation
 /// nothing to accept).
 enum MissionEventCLI {
     static let maxMessageLength = 500
-    /// A question's `--recommend`, on one line.
+    /// A question's `--recommend`, on one line, in characters and in
+    /// scalars: the question's id typed after it must fit what Nirux types.
     static let maxRecommendationLength = 300
+    static let maxRecommendationScalars = 600
 
     /// How a child asks, as its instructions show it.
     static let askCommand = "\"$NIRUX_CLI_PATH\" --mission ask --kind <kind> --message \"...\" --recommend \"...\""
@@ -56,11 +58,13 @@ enum MissionEventCLI {
         problem(with: message, limit: limit) == nil
     }
 
-    /// `--recommend` on one line, whitespace folded; nil when it doesn't fit.
-    /// A huge one is cut past twice the limit, so a cut one is still refused.
+    /// `--recommend` on one line, whitespace folded, then quoted as the
+    /// parent reads it (`MissionPromptText.quoted`), so what it accepts is
+    /// what it saw; nil when it doesn't fit. A huge one is cut past twice the
+    /// limit, so a cut one is still refused.
     static func recommendation(_ raw: String) -> String? {
-        AgentText.clean(raw, maxLength: maxRecommendationLength * 2).flatMap {
-            fits($0, limit: maxRecommendationLength) ? $0 : nil
+        AgentText.clean(raw, maxLength: maxRecommendationLength * 2).map(MissionPromptText.quoted).flatMap {
+            fits($0, limit: maxRecommendationLength) && $0.unicodeScalars.count <= maxRecommendationScalars ? $0 : nil
         }
     }
 
@@ -68,10 +72,15 @@ enum MissionEventCLI {
     /// what to write the answer with instead, `handOver` how to leave an
     /// access question to the user.
     static func nothingToAccept(_ question: MissionEvent, field: String, handOver: String) -> String {
-        question.questionKind == .access
-            ? "An access question has no answer to accept: only the user can give what it needs, so \(handOver), "
+        if question.questionKind == .access {
+            return "An access question has no answer to accept: only the user can give what it needs, so \(handOver), "
                 + "unless you can say what to do instead with \(field)."
-            : "That question has no recommended answer: write yours with \(field)."
+        }
+        if let kind = question.questionKind, question.recommendation != nil {
+            return "This build of Nirux can't accept the recommendation of a “\(MissionPromptText.quoted(kind.rawValue))” "
+                + "question: write your answer with \(field)."
+        }
+        return "That question has no recommended answer: write yours with \(field)."
     }
     /// Agent shell tools stop foreground commands after a few minutes (two
     /// by default in Claude Code), so a wait never lasts longer than this and
@@ -117,6 +126,8 @@ enum MissionEventCLI {
         let message: String
         let questionKind: String?
         let recommendation: String?
+        /// True when `reply --accept` may send the recommendation.
+        let acceptsRecommendation: Bool?
     }
 
     /// Entry point for `Nirux --mission <command> [options]`.
@@ -212,7 +223,8 @@ enum MissionEventCLI {
         pollInterval: TimeInterval = 0.2,
         confirmationTimeout: TimeInterval = 5,
         workspaceTitle: (String) -> String? = savedWorkspaceTitle,
-        output: (String) -> Void = writeStandardOutput
+        output: (String) -> Void = writeStandardOutput,
+        notice: (String) -> Void = writeStandardError
     ) -> Int32 {
         guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
         let options = parseOptions(arguments, allowed: ["--message", "--kind", "--recommend", "--timeout"])
@@ -241,6 +253,11 @@ enum MissionEventCLI {
         }
         let questionID = questionID(for: message, context: context, in: mission, now: now())
         let typesAnswer = mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
+        if let recorded = mission.events.first(where: { $0.id == questionID }), kind != nil || recommendation != nil,
+           recorded.questionKind != kind || recorded.recommendation != recommendation {
+            notice("This question was recorded earlier with another kind or recommendation, which stand: "
+                + "ask in other words to change them.")
+        }
         if !mission.events.contains(where: { $0.id == questionID }) {
             var question = MissionEvent(
                 id: questionID,
@@ -275,7 +292,7 @@ enum MissionEventCLI {
         }
         switch outcome {
         case let .answered(response):
-            output(response.message)
+            output(response.message + (response.acceptedRecommendation == true ? "\n" + MissionPromptText.acceptedNote : ""))
             // The answer is printed either way; a lost receipt only means a
             // later identical `ask` prints it once more and queues another.
             _ = append(receipt(for: response, at: now()), to: eventsURL)
@@ -415,7 +432,8 @@ enum MissionEventCLI {
         now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 },
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
         missionsURL: URL = MissionStore.defaultFileURL,
-        pollInterval: TimeInterval = 0.2
+        pollInterval: TimeInterval = 0.2,
+        output: (String) -> Void = writeStandardOutput
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
         guard let options = parseOptions(arguments, allowed: ["--timeout"]),
@@ -449,19 +467,20 @@ enum MissionEventCLI {
             writeStandardError("No Mission event yet. Run the same command again to keep waiting.")
             return 3
         }
-        let output = InboxMessage(
+        let message = InboxMessage(
             eventID: event.id,
             missionID: mission.id,
             kind: event.kind.rawValue,
             branch: mission.branch,
             message: event.message,
             questionKind: event.questionKind?.rawValue,
-            recommendation: event.recommendation
+            recommendation: event.recommendation,
+            acceptsRecommendation: event.acceptableRecommendation == nil ? nil : true
         )
-        guard let data = try? JSONEncoder().encode(output),
+        guard let data = try? JSONEncoder().encode(message),
               let line = String(data: data, encoding: .utf8)
         else { return 1 }
-        writeStandardOutput(line)
+        output(line)
 
         if event.kind == .completed {
             let acknowledgement = MissionEvent(

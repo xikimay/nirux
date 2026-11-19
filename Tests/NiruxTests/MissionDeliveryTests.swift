@@ -176,6 +176,8 @@ final class MissionDeliveryTests: XCTestCase {
         let decoded = try JSONDecoder().decode(MissionEvent.self, from: Data(later.utf8))
         XCTAssertEqual(decoded.questionKind?.rawValue, "approval")
         XCTAssertNil(decoded.acceptableRecommendation, "it may not be an answer")
+        XCTAssertTrue(MissionEventCLI.nothingToAccept(decoded, field: "--message", handOver: "ask the user")
+            .hasPrefix("This build of Nirux can't accept the recommendation of a “approval” question"))
         XCTAssertEqual(MissionPromptText.blockLine(of: decoded, accept: MissionPromptText.toolAccept), "Kind: approval. Recommended: r")
         let encoded = try XCTUnwrap(String(data: JSONEncoder().encode(decoded), encoding: .utf8))
         XCTAssertTrue(encoded.contains(#""questionKind":"approval""#), encoded)
@@ -263,6 +265,27 @@ final class MissionDeliveryTests: XCTestCase {
             lines(store.accept(response, enabled: true)),
             ["[Nirux Mission] Answer from \"web-main\": AuthService", "It is the answer you recommended."]
         )
+    }
+
+    /// However many scalars its words take, a question always ends on the
+    /// line naming it: Nirux types 8,000 at most.
+    func testATypedQuestionAlwaysEndsOnItsID() throws {
+        let store = makeStore()
+        let heavy = String(repeating: "e" + String(repeating: "\u{301}", count: 14), count: 500)
+        XCTAssertTrue(MissionEventCLI.fits(heavy, limit: MissionEventCLI.maxMessageLength), "a question ask takes")
+        let recommendation = String(repeating: "a\u{301}", count: MissionEventCLI.maxRecommendationScalars / 2)
+        let question = try XCTUnwrap(store.accept(typedQuestion(heavy, .decision, recommendation, at: 20), enabled: true))
+        var toLead = question.mission
+        toLead.reportsToLead = true
+        let typed = try XCTUnwrap(MissionPromptText.text(
+            for: MissionStore.AcceptedEvent(mission: toLead, event: question.event),
+            childTitle: String(repeating: "t", count: 500), parentTitle: nil
+        ))
+        XCTAssertLessThanOrEqual(typed.unicodeScalars.count, TypedPromptSanitizer.maxCharacters)
+        let sent = try XCTUnwrap(TypedPromptSanitizer.sanitize(typed))
+        XCTAssertTrue(sent.hasSuffix("hand it to the user with ask_user."), String(sent.suffix(200)))
+        XCTAssertTrue(sent.contains("question \(question.event.id)"))
+        XCTAssertTrue(sent.contains("Recommended (reply's accept: true sends it): \(recommendation)"), "the recommendation whole")
     }
 
     /// An accepted answer is the question's recommendation, word for word,
