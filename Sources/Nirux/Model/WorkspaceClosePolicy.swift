@@ -24,6 +24,7 @@ enum WorkspaceClosePolicy {
             case "codex": return "Codex"
             case "gemini": return "Gemini"
             case "opencode": return "OpenCode"
+            case "agy": return "Antigravity"
             default: return processName
             }
         }

@@ -181,7 +181,7 @@ enum SidebarExpandedMetrics {
                 SidebarWorkspaceCardRenderer.waitingText(waiting), width: textWidth, lineHeight: actionLineHeight,
                 maxLines: waitingMessagesMaxLines
             )
-        case .cleanup, .reviewBadges, .ruleProposals: return actionLineHeight
+        case .cleanup, .reviewBadges, .ruleProposals, .dailyPass: return actionLineHeight
         }
     }
 

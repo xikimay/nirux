@@ -82,6 +82,10 @@ extension NiruxApp {
         shell?.openCodex()
     }
 
+    @objc func newAgy(_ sender: Any?) {
+        shell?.openAgy()
+    }
+
     @objc func reviewBranch(_ sender: Any?) {
         shell?.openBranchReview(in: shell?.activeWorkspace)
     }
@@ -160,6 +164,7 @@ extension NiruxApp {
         let menu = NSMenu(title: "Agent")
         menu.addItem(withTitle: "New Claude Code", action: #selector(newClaudeCode(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "New Codex", action: #selector(newCodex(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "New Antigravity", action: #selector(newAgy(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Next Waiting Agent", action: #selector(jumpToNextWaitingAgent(_:)), shortcut: .nextWaitingAgent)
         menu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")
