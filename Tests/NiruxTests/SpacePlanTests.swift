@@ -22,7 +22,7 @@ final class SpacePlanTests: XCTestCase {
             for (row, workspace) in zip(plan.rows, workspaces) {
                 XCTAssertEqual(row.picture.frame.width, workspace.stripSize.width * plan.scale, accuracy: 0.5, "every column, at the plan's scale")
                 XCTAssertEqual(row.cards.count, workspace.columns.count)
-                XCTAssertTrue(plan.subviews.contains { ($0 as? NSTextField)?.stringValue == workspace.title }, "its name beside it")
+                XCTAssertTrue(plan.names.subviews.contains { ($0 as? NSTextField)?.stringValue == workspace.title }, "its name beside it")
             }
             XCTAssertGreaterThan(plan.rows[0].picture.frame.minY, plan.rows[1].picture.frame.maxY, "the first listed highest")
             XCTAssertEqual(plan.rows[plan.chosen.row].workspaceID, onScreen.id)
@@ -174,10 +174,14 @@ final class SpacePlanTests: XCTestCase {
             XCTAssertEqual(from.m41, plan.zoom(into: shown).m41, accuracy: 0.5)
             XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(plan.world.layer?.sublayerTransform)), "to its place")
             XCTAssertEqual(plan.world.subviews.count, plan.rows.count + 1, "the work's picture over the rows")
+            let namesIn = try XCTUnwrap(plan.names.layer?.animation(forKey: "planFade") as? CAKeyframeAnimation, "the names come after")
+            XCTAssertEqual(namesIn.values?.first as? Float, 0)
             XCTAssertEqual(steps.durations, [SpacePlanView.openingDuration])
             steps.runNext()
             XCTAssertEqual(plan.world.subviews.count, plan.rows.count, "the picture gone")
             XCTAssertNil(plan.world.layer?.animation(forKey: "planZoom"))
+            XCTAssertNil(plan.names.layer?.animation(forKey: "planFade"))
+            XCTAssertEqual(plan.names.alphaValue, 1)
 
             plan.keyDown(with: try Self.key(126))
             let target = workspaces[plan.chosen.row]
@@ -188,6 +192,8 @@ final class SpacePlanTests: XCTestCase {
             let into = try XCTUnwrap(plan.shownRect(row: plan.chosen.row, cameraX: target.lastCameraX, width: shell.viewport.bounds.width))
             XCTAssertEqual(try XCTUnwrap(plan.world.layer?.sublayerTransform).m11, plan.zoom(into: into).m11, accuracy: 0.001, "into where it shows")
             XCTAssertEqual(plan.world.subviews.count, plan.rows.count + 1, "what it shows, fading in")
+            XCTAssertNotNil(plan.names.layer?.animation(forKey: "planFade"), "the names go first")
+            XCTAssertEqual(plan.names.alphaValue, 0)
             XCTAssertEqual(steps.durations, [SpacePlanView.diveDuration])
             steps.runNext()
             XCTAssertNil(shell.spacePlan)

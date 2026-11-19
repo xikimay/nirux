@@ -35,9 +35,10 @@ final class SpacePlanView: NSView {
     /// What zooms: the rows' pictures, in a view of their own (its layer's
     /// `sublayerTransform` moves them; AppKit owns the layers). The plan
     /// takes its clicks.
-    let world: NSView = World()
-    /// The names and lines beside the rows, which don't zoom.
-    private var labels: [NSView] = []
+    let world: NSView = Passive()
+    /// The names and lines beside the rows, which don't zoom: they fade as
+    /// one, in a view whose layer is there from the start.
+    let names: NSView = Passive()
     /// A picture at the size of the viewport over the zoom: what the work
     /// showed (an opening) or will show (a dive).
     private var overlay: FrozenView?
@@ -57,9 +58,11 @@ final class SpacePlanView: NSView {
         workspaceID = onScreen.id
         super.init(frame: frame)
         wantsLayer = true
-        world.frame = bounds
-        world.wantsLayer = true
-        addSubview(world)
+        for view in [world, names] {
+            view.frame = bounds
+            view.wantsLayer = true
+            addSubview(view)
+        }
         let laidOut = workspaces.filter { !$0.columns.isEmpty && !$0.stripSize.equalTo(.zero) }
         let room = NSSize(
             width: bounds.width - Self.labelWidth - Self.margin * 3,
@@ -96,7 +99,8 @@ final class SpacePlanView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private final class World: NSView {
+    /// Leaves its clicks to the plan.
+    private final class Passive: NSView {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 
@@ -188,10 +192,7 @@ final class SpacePlanView: NSView {
         icon.frame.origin = NSPoint(x: labelLeft, y: midY - icon.frame.height / 2)
         title.frame = NSRect(x: textX, y: midY, width: textWidth, height: title.intrinsicContentSize.height)
         detail.frame = NSRect(x: textX, y: midY - detail.intrinsicContentSize.height, width: textWidth, height: detail.intrinsicContentSize.height)
-        for view in [icon, title, detail] as [NSView] {
-            addSubview(view)
-            labels.append(view)
-        }
+        for view in [icon, title, detail] as [NSView] { names.addSubview(view) }
     }
 
     // MARK: - Motion (depth study P5's transitions)
@@ -219,7 +220,7 @@ final class SpacePlanView: NSView {
     func playOpening(from shown: FrozenView, at rect: NSRect) {
         if !ZZ("noOverlay") { showOverlay(shown, in: rect, opacities: [1, 1, 0], keyTimes: [0, 0.35, 0.8], duration: Self.openingDuration) }
         zoomWorld(from: ZZ("notFromWork") ? CATransform3DIdentity : zoom(into: rect), to: CATransform3DIdentity, duration: Self.openingDuration)
-        for label in labels { Self.fade(label, to: 1, from: 0, duration: 0.22, delay: 0.32) }
+        if !ZZ("namesUnfaded") { Self.fade(names, [0, 0, 1], keyTimes: [0, 0.55, 0.95], duration: Self.openingDuration) }
         ring.isHidden = true
     }
 
@@ -231,7 +232,7 @@ final class SpacePlanView: NSView {
         ring.isHidden = true
         showOverlay(arriving, in: rect, opacities: [0, 0, 1], keyTimes: [0, 0.5, 0.9], duration: Self.diveDuration)
         zoomWorld(from: CATransform3DIdentity, to: zoom(into: rect), duration: Self.diveDuration)
-        for label in labels { Self.fade(label, to: 0, from: 1, duration: 0.16, delay: 0) }
+        Self.fade(names, [1, 0], keyTimes: [0, 0.3], duration: Self.diveDuration)
     }
 
     /// An opening at its end, at once: the world in place, the overlay
@@ -244,10 +245,8 @@ final class SpacePlanView: NSView {
             world.layer?.removeAnimation(forKey: "planZoom")
             world.layer?.sublayerTransform = CATransform3DIdentity
         }
-        for label in labels {
-            label.layer?.removeAnimation(forKey: "planFade")
-            label.alphaValue = 1
-        }
+        names.layer?.removeAnimation(forKey: "planFade")
+        names.alphaValue = 1
         showChoice()
     }
 
@@ -256,12 +255,7 @@ final class SpacePlanView: NSView {
         picture.show(in: rect)
         world.addSubview(picture)
         overlay = picture
-        picture.alphaValue = CGFloat(opacities.last ?? 1)
-        let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.values = opacities
-        fade.keyTimes = keyTimes
-        fade.duration = duration
-        picture.layer?.add(fade, forKey: "planFade")
+        Self.fade(picture, opacities, keyTimes: keyTimes, duration: duration)
     }
 
     private func zoomWorld(from start: CATransform3D, to end: CATransform3D, duration: CFTimeInterval) {
@@ -277,16 +271,13 @@ final class SpacePlanView: NSView {
         layer.add(zoom, forKey: "planZoom")
     }
 
-    private static func fade(_ view: NSView, to end: CGFloat, from start: CGFloat, duration: CFTimeInterval, delay: CFTimeInterval) {
-        view.alphaValue = end
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = start
-        fade.toValue = end
+    /// `view` through `opacities`, left at the last.
+    private static func fade(_ view: NSView, _ opacities: [Float], keyTimes: [NSNumber], duration: CFTimeInterval) {
+        view.alphaValue = CGFloat(opacities.last ?? 1)
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = opacities
+        fade.keyTimes = keyTimes
         fade.duration = duration
-        if delay > 0 {
-            fade.beginTime = CACurrentMediaTime() + delay
-            fade.fillMode = .backwards
-        }
         view.layer?.add(fade, forKey: "planFade")
     }
 }
