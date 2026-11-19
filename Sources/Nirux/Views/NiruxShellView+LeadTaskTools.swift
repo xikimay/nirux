@@ -321,16 +321,50 @@ extension NiruxShellView {
             self?.saveState()
         }
         guard let then else { return }
+        Self.waitForExit(processes, then: then)
+    }
+
+    /// `then` once `processes` have ended, and any process working in
+    /// `folder` (resolved), with the names of those still running
+    /// `exitTimeout` later.
+    static func waitForExit(
+        _ processes: [(process: ProcessInstance, name: String)], workingIn folder: String? = nil,
+        then: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Void
+    ) {
         let (instances, names) = (processes.map(\.process), processes.map(\.name))
-        Self.offMain({
+        offMain({
             let deadline = Date().addingTimeInterval(Self.exitTimeout)
             var running = Array(instances.indices)
             while true {
                 running = running.filter { ProcessInstance.running(pid: instances[$0].pid) == instances[$0] }
-                if running.isEmpty || Date() >= deadline { return Array(Set(running.map { names[$0] })).sorted() }
+                let inside = folder.map { Self.processNames(workingIn: $0) ?? ["(unreadable process list)"] } ?? []
+                if running.isEmpty && inside.isEmpty || Date() >= deadline {
+                    return Array(Set(running.map { names[$0] } + inside)).sorted()
+                }
                 Thread.sleep(forTimeInterval: 0.1)
             }
         }, then: then)
+    }
+
+    /// The processes whose working folder is `folder` (resolved) or inside
+    /// it, Nirux aside; nil when they can't be listed.
+    nonisolated static func processNames(workingIn folder: String) -> [String]? {
+        let estimate = proc_listallpids(nil, 0)
+        guard estimate > 0 else { return nil }
+        var pids = [pid_t](repeating: 0, count: Int(estimate) + 64)
+        let count = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard count > 0 else { return nil }
+        return pids.prefix(Int(count)).compactMap { pid in
+            var info = proc_vnodepathinfo()
+            let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+            guard pid > 0, pid != getpid(), proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+            let cwd = withUnsafePointer(to: &info.pvi_cdir.vip_path) { pointer in
+                pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            guard cwd == folder || cwd.hasPrefix(folder + "/") else { return nil }
+            var name = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
+            return proc_name(pid, &name, UInt32(name.count)) > 0 ? String(cString: name) : "pid \(pid)"
+        }
     }
 
     // MARK: move_task
@@ -526,27 +560,9 @@ extension NiruxShellView {
         let (sentAt, offset) = (Date(), TranscriptLastMessage.size(of: transcript.follower.path))
         guard let promptAt = pty.sendInterrupt() else { return answer("“\(title)”'s agent took no prompt: there is no turn to interrupt.", true) }
         confirmInterrupt(
-            Interrupt(
-                column: column, pty: pty, transcript: transcript.follower.path, offset: offset, sentAt: sentAt, promptAt: promptAt,
-                taskID: task.id, title: title
-            ),
-            answer: answer
+            SentInterrupt(column: column, pty: pty, transcript: transcript.follower.path, offset: offset, sentAt: sentAt, promptAt: promptAt),
+            taskID: task.id, title: title, answer: answer
         )
-    }
-
-    /// An Esc Nirux sent, waiting for Claude's transcript to show it.
-    private struct Interrupt {
-        weak var column: ColumnState?
-        /// The terminal the Esc went into: the column may restart its own.
-        weak var pty: PtySession?
-        let transcript: String
-        /// Its size when the Esc went.
-        let offset: UInt64
-        let sentAt: Date
-        /// The prompt whose turn it stops.
-        let promptAt: TimeInterval
-        let taskID: String
-        let title: String
     }
 
     /// The turn is over once the transcript shows the interrupt (see
@@ -554,41 +570,27 @@ extension NiruxShellView {
     /// waiting for it go in. Past `interruptReadsBeforeAnswer`, the Lead
     /// has its answer: a late interrupt still ends the turn, without a
     /// second one.
-    private func confirmInterrupt(_ interrupt: Interrupt, answer: @escaping LeadAnswer) {
-        let title = interrupt.title
-        followInterrupt(transcript: interrupt.transcript, offset: interrupt.offset, sentAt: interrupt.sentAt) { [weak self] shown, check in
+    private func confirmInterrupt(_ esc: SentInterrupt, taskID: String, title: String, answer: @escaping LeadAnswer) {
+        followInterrupt(esc) { progress, read in
             // Past it, the Lead had its answer.
-            let speaks = check <= Self.interruptReadsBeforeAnswer
-            guard let self, let column = interrupt.column else {
-                if speaks { answer("“\(title)” closed meanwhile.", true) }
-                return false
-            }
-            guard let pty = interrupt.pty, column.pty === pty else {
-                if speaks { answer("“\(title)”'s terminal restarted meanwhile: the Esc went to the one before. Call list_tasks.", true) }
-                return false
-            }
-            guard shown else {
-                if check == Self.interruptReadsBeforeAnswer {
-                    answer("Esc went to “\(title)”, but its conversation shows no interrupt yet: call list_tasks before telling it more.", true)
+            guard read <= Self.interruptReadsBeforeAnswer else { return }
+            switch progress {
+            case .columnClosed:
+                answer("“\(title)” closed meanwhile.", true)
+            case .terminalRestarted:
+                answer("“\(title)”'s terminal restarted meanwhile: the Esc went to the one before. Call list_tasks.", true)
+            case .notShownYet, .ignored:
+                answer("Esc went to “\(title)”, but its conversation shows no interrupt yet: call list_tasks before telling it more.", true)
+            case .superseded:
+                answer("Esc stopped “\(title)”'s turn, but a new prompt went in since: it works on that one now.", false)
+            case .interrupted:
+                let waiting = MissionStore.shared.pendingPromptDeliveries().contains { delivery in
+                    delivery.mission.childWorkspaceID == taskID && !Self.goesToParent(delivery.event)
                 }
-                return check < Self.interruptReads
+                answer("Interrupted “\(title)”'s turn. Claude Code puts a prompt it hadn't answered, and messages queued meanwhile, "
+                    + "back in its prompt box; this turn had called a tool and nothing was typed since, so the box is empty. "
+                    + (waiting ? "The message waiting for it goes in now." : "Tell it what to do instead."), false)
             }
-            // What its hooks said meanwhile: a dialog the Esc closed.
-            AgentHookCenter.shared.drain()
-            guard pty.noteInterrupted(promptAt: interrupt.promptAt) else {
-                if speaks { answer("Esc stopped “\(title)”'s turn, but a new prompt went in since: it works on that one now.", false) }
-                return false
-            }
-            let waiting = MissionStore.shared.pendingPromptDeliveries().contains { delivery in
-                delivery.mission.childWorkspaceID == interrupt.taskID && !Self.goesToParent(delivery.event)
-            }
-            self.typeMissionMessages()
-            self.updateSidebar()
-            guard speaks else { return false }
-            answer("Interrupted “\(title)”'s turn. Claude Code puts a prompt it hadn't answered, and messages queued meanwhile, "
-                + "back in its prompt box; this turn had called a tool and nothing was typed since, so the box is empty. "
-                + (waiting ? "The message waiting for it goes in now." : "Tell it what to do instead."), false)
-            return false
         }
     }
 

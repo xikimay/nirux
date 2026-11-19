@@ -148,7 +148,7 @@ final class AgentSessionResumeTests: XCTestCase {
             NiruxShellView.codexCommand(resume: .session("t1"), workingDirectory: "/repos/it's", mode: .default),
             "command codex resume 't1' -C '/repos/it'\\''s'"
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
         tracker.prepareResume(sessionID: "t1")
         let codex = ForegroundProcess(
             instance: ProcessInstance(pid: 10, startedAt: 1), name: "codex",
@@ -167,10 +167,10 @@ final class AgentSessionResumeTests: XCTestCase {
         let launched = ForegroundProcess(
             instance: ProcessInstance(pid: 10, startedAt: 1), name: "codex", arguments: ["codex", "-a", "never", prompt]
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
         func capture(_ thread: String, first: String, by process: ForegroundProcess) -> Bool {
             tracker.capture(
-                sessionID: thread, firstInputDigest: CodexSessionTracker.promptDigest(first),
+                sessionID: thread, firstInputDigest: CodexLaunch.promptDigest(first),
                 emitterBelongsToForegroundJob: true, foregroundProcess: process
             )
         }
@@ -196,16 +196,16 @@ final class AgentSessionResumeTests: XCTestCase {
         XCTAssertTrue(capture("b", first: "Hello", by: bare))
         XCTAssertNil(tracker.provenSessionID(for: bare))
         XCTAssertEqual(tracker.sessionID(for: bare), "b")
-        XCTAssertFalse(CodexSessionTracker.canProve(bare))
+        XCTAssertFalse(CodexLaunch.canProve(bare))
         let modeOnly = ForegroundProcess(
             instance: ProcessInstance(pid: 13, startedAt: 4), name: "codex", arguments: ["codex", "--sandbox", "read-only"]
         )
-        XCTAssertFalse(CodexSessionTracker.canProve(modeOnly), "an option's value is no prompt")
-        for arguments in [["codex", "resume"], ["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex"]] {
+        XCTAssertFalse(CodexLaunch.canProve(modeOnly), "an option's value is no prompt")
+        for arguments in [["codex", "resume"], ["node", "/usr/local/lib/node_modules/@openai/codex/bin/codex"], ["codex", "fork", "t1"]] {
             let process = ForegroundProcess(instance: ProcessInstance(pid: 14, startedAt: 5), name: "codex", arguments: arguments)
-            XCTAssertFalse(CodexSessionTracker.canProve(process), "the program is no prompt: \(arguments)")
+            XCTAssertFalse(CodexLaunch.canProve(process), "the program is no prompt: \(arguments)")
         }
-        XCTAssertTrue(CodexSessionTracker.canProve(launched) && CodexSessionTracker.canProve(resumed))
+        XCTAssertTrue(CodexLaunch.canProve(launched) && CodexLaunch.canProve(resumed))
     }
 
     /// `codex queue` runs with what runs the column's `codex`: its binary,
@@ -225,5 +225,7 @@ final class AgentSessionResumeTests: XCTestCase {
             CodexQueue.arguments(for: CodexQueue.Request(command: ["/usr/local/bin/node", "/x/codex.js"], thread: "t1", message: "- Fix A")),
             ["/x/codex.js", "queue", "--thread=t1", "--message=- Fix A"], "a message starting with \"-\" stays a value"
         )
+        let request = CodexQueue.Request(command: ["/opt/codex"], thread: "t1", message: "Go", codexHome: "/Users/me/work-codex")
+        XCTAssertEqual(CodexQueue.environment(for: request), ["CODEX_HOME": "/Users/me/work-codex"], "its shell's, which Nirux may not have")
     }
 }

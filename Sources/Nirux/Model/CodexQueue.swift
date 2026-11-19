@@ -14,6 +14,9 @@ enum CodexQueue {
         let command: [String]
         let thread: String
         let message: String
+        /// The `CODEX_HOME` that `codex` runs with, where it keeps its
+        /// threads and its queue: a shell may set one Nirux doesn't have.
+        var codexHome: String?
     }
 
     enum Outcome: Equatable, Sendable {
@@ -57,12 +60,18 @@ enum CodexQueue {
         request.command.dropFirst() + ["queue", "--thread=" + request.thread, "--message=" + request.message]
     }
 
+    /// What `codex queue` runs with over Nirux's environment.
+    nonisolated static func environment(for request: Request) -> [String: String] {
+        request.codexHome.map { ["CODEX_HOME": $0] } ?? [:]
+    }
+
     private nonisolated static func run(_ request: Request) -> Outcome {
         guard let executable = request.command.first else { return .refused("no codex to run") }
         guard let result = BoundedProcess.execute(
             executableURL: URL(fileURLWithPath: executable),
             arguments: arguments(for: request),
             currentDirectoryURL: FileManager.default.homeDirectoryForCurrentUser,
+            environment: .inherited(adding: environment(for: request)),
             timeout: timeout,
             captureStandardError: true
         ) else { return .refused("Nirux couldn't run \(executable)") }

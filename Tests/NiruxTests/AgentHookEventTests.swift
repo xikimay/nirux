@@ -4,6 +4,21 @@ import XCTest
 final class AgentHookEventTests: XCTestCase {
     private let env = ["NIRUX_AGENT_UUID": "uuid-1", "NIRUX_WORKSPACE_ID": "ws-1"]
 
+    /// Antigravity's hooks say which conversation, and where: never its
+    /// prompt.
+    func testAgyHooksSayOnlyWhichConversation() throws {
+        let payload: [String: Any] = [
+            "hookEventName": "SessionStart", "conversationId": "c1", "cwd": "/w",
+            "lastUserInput": "the user's prompt", "transcriptPath": "/t/transcript_full.jsonl"
+        ]
+        let event = try XCTUnwrap(AgentHookEvent(kind: .agy, payload: payload, env: ["NIRUX_AGENT_UUID": "u"], now: 1))
+        XCTAssertEqual(event.name, .sessionStart)
+        XCTAssertEqual(event.sessionID, "c1")
+        XCTAssertEqual(event.cwd, "/w")
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(event), as: UTF8.self).contains("the user's prompt"))
+        XCTAssertNil(AgentHookEvent(kind: .agy, payload: ["hookEventName": "Stop", "conversationId": "c2"], env: [:], now: 1))
+    }
+
     func testClaudePreToolUse() {
         let payload: [String: Any] = [
             "hook_event_name": "PreToolUse",
@@ -377,7 +392,7 @@ final class AgentHookEventTests: XCTestCase {
         )
         XCTAssertEqual(event?.name, .turnComplete)
         XCTAssertEqual(event?.sessionID, "thread-9")
-        XCTAssertEqual(event?.firstInputDigest, CodexSessionTracker.promptDigest("Start the task."), "its first message, never the text")
+        XCTAssertEqual(event?.firstInputDigest, CodexLaunch.promptDigest("Start the task."), "its first message, never the text")
         XCTAssertEqual(event?.detail, "Done.")
         XCTAssertEqual(event?.emitterProcess, emitter)
     }

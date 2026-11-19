@@ -4,17 +4,17 @@ import Foundation
 /// Binds an agent conversation ID to the exact process instance running it,
 /// so a persisted ID never outlives the process that proved it: a replaced
 /// or exited agent drops its binding instead of lending its ID to the next
-/// one. Shared core of the Codex and Claude trackers.
+/// one. Shared core of the Codex, Antigravity and Claude trackers.
 struct AgentSessionBinding {
     private struct Binding: Equatable {
         let sessionID: String
         let process: ProcessInstance
     }
 
-    /// Foreground process name of the agent (`codex`, `claude`).
+    /// Foreground process name of the agent (`codex`, `agy`, `claude`).
     let processName: String
     /// Argument preceding the session ID in a restore launch
-    /// (`codex resume <id>`, `claude --resume <id>`).
+    /// (`codex resume <id>`, `agy --conversation <id>`, `claude --resume <id>`).
     let resumeArgument: String
 
     private var binding: Binding?
@@ -85,21 +85,41 @@ struct AgentSessionBinding {
     }
 }
 
-/// Which Codex thread a column's `codex` runs. Its notify also reports
-/// the threads it runs out of sight, such as the one that titles a new
-/// conversation (seen on codex 0.167): a thread is proven once its first
-/// message is the prompt that `codex` was launched with, or once it is the
-/// one `codex resume <id>` named, and no other thread replaces it then.
-struct CodexSessionTracker {
-    private var session = AgentSessionBinding(processName: "codex", resumeArgument: "resume")
+/// Which session a column's foreground agent runs, bound from its hooks:
+/// Codex's thread, Antigravity's conversation.
+struct ForegroundSessionTracker {
+    private var session: AgentSessionBinding
+    /// agy: a process's conversation is the one it was launched on, else the
+    /// first it reports (its subagents report theirs from the same process,
+    /// with nothing to tell them apart), and it stays while another process
+    /// holds the terminal (Ctrl-Z).
+    private let keepsProcessSession: Bool
+    /// Codex: its notify also reports the threads it runs out of sight, such
+    /// as the one that titles a new conversation (seen on codex 0.167). A
+    /// thread is proven once its first message is the prompt that `codex`
+    /// was launched with, or once `codex resume <id>` named it: the first
+    /// proof stands, and no other thread replaces it.
+    private let provesThread: Bool
     /// The thread its launch prompt started, and that `codex`.
     private var launched: (sessionID: String, process: ProcessInstance)?
+
+    static var codex: Self { Self(processName: "codex", resumeArgument: "resume", provesThread: true) }
+    static var agy: Self {
+        Self(processName: AgentProgramStatus.agy, resumeArgument: "--conversation", keepsProcessSession: true)
+    }
+
+    init(processName: String, resumeArgument: String, keepsProcessSession: Bool = false, provesThread: Bool = false) {
+        session = AgentSessionBinding(processName: processName, resumeArgument: resumeArgument)
+        self.keepsProcessSession = keepsProcessSession
+        self.provesThread = provesThread
+    }
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
     }
 
-    /// `firstInputDigest`: `promptDigest` of the thread's first message.
+    /// `firstInputDigest`: `CodexLaunch.promptDigest` of the thread's first
+    /// message.
     @discardableResult
     mutating func capture(
         sessionID: String?,
@@ -112,29 +132,54 @@ struct CodexSessionTracker {
               emitterBelongsToForegroundJob else {
             return false
         }
-        // The first proof stands: a fork (/side) begins with the same message.
-        if launched?.process != foregroundProcess.instance, let firstInputDigest,
-           firstInputDigest == Self.launchPrompt(of: foregroundProcess).map(Self.promptDigest) {
-            launched = (sessionID, foregroundProcess.instance)
+        if provesThread {
+            // The first proof stands: a fork (/side) begins with the same message.
+            if launched?.process != foregroundProcess.instance, let firstInputDigest,
+               firstInputDigest == CodexLaunch.prompt(of: foregroundProcess).map(CodexLaunch.promptDigest) {
+                launched = (sessionID, foregroundProcess.instance)
+            }
+            if let proven = provenSessionID(for: foregroundProcess), proven != sessionID { return false }
         }
-        if let proven = provenSessionID(for: foregroundProcess), proven != sessionID { return false }
-        return session.bind(sessionID: sessionID, process: foregroundProcess.instance)
+        guard keepsProcessSession else { return session.bind(sessionID: sessionID, process: foregroundProcess.instance) }
+        guard session.sessionID(boundTo: foregroundProcess.instance) == nil else { return false }
+        let arguments = foregroundProcess.arguments
+        let launched = arguments.firstIndex(of: session.resumeArgument).flatMap { arguments[safe: $0 + 1] }
+        return session.bind(sessionID: launched ?? sessionID, process: foregroundProcess.instance)
     }
 
-    /// The thread `process` proved it runs, if it did.
+    /// The thread `process`, a `codex`, proved it runs, if it did.
     func provenSessionID(for process: ForegroundProcess) -> String? {
         if let launched, launched.process == process.instance { return launched.sessionID }
-        return Self.resumedSessionID(of: process)
+        return CodexLaunch.resumedThread(of: process)
     }
 
+    mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
+        if keepsProcessSession, foregroundProcess?.name != session.processName { return nil }
+        return session.sessionID(for: foregroundProcess)
+    }
+
+    /// Session bound to this process, if any.
+    func boundSessionID(for process: ProcessInstance) -> String? {
+        session.sessionID(boundTo: process)
+    }
+
+    @discardableResult
+    mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
+        if keepsProcessSession, foregroundProcess?.name != session.processName { return false }
+        return session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+    }
+}
+
+/// What a `codex` process's arguments say of the thread it runs.
+enum CodexLaunch {
     /// Whether `process` can prove a thread: it was launched with a prompt,
     /// or resumed one. A `codex` started without either never does.
     static func canProve(_ process: ForegroundProcess) -> Bool {
-        launchPrompt(of: process) != nil || resumedSessionID(of: process) != nil
+        prompt(of: process) != nil || resumedThread(of: process) != nil
     }
 
     /// The thread `codex resume <id>` named.
-    private static func resumedSessionID(of process: ForegroundProcess) -> String? {
+    static func resumedThread(of process: ForegroundProcess) -> String? {
         guard let index = process.arguments.firstIndex(of: "resume"), process.arguments.indices.contains(index + 1),
               !process.arguments[index + 1].hasPrefix("-") else { return nil }
         return process.arguments[index + 1]
@@ -142,34 +187,31 @@ struct CodexSessionTracker {
 
     /// The prompt `process` was launched with: its last argument, as
     /// Nirux's launch line ends, when it follows the program (`codex`, or a
-    /// runtime's script) and is no option nor an option's value. None in a
-    /// resume.
-    private static func launchPrompt(of process: ForegroundProcess) -> String? {
+    /// runtime's script), is no option nor an option's value, and no
+    /// subcommand (`resume`, `fork`…) comes first.
+    static func prompt(of process: ForegroundProcess) -> String? {
         let arguments = process.arguments
         let program = arguments.firstIndex { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == "codex" } ?? 0
-        guard !arguments.contains("resume"), arguments.count > program + 1, let last = arguments.last, !last.hasPrefix("-"),
+        guard arguments.count > program + 1, let last = arguments.last, !last.hasPrefix("-"),
               arguments.count - 2 == program || !AgentHookCenter.codexOptionsWithValue.contains(arguments[arguments.count - 2])
         else { return nil }
-        return last
+        var index = program + 1
+        while index < arguments.count - 1, arguments[index].hasPrefix("-") {
+            index += AgentHookCenter.codexOptionsWithValue.contains(arguments[index]) ? 2 : 1
+        }
+        return subcommands.contains(arguments[index]) ? nil : last
     }
+
+    /// Codex 0.167's subcommands (`codex --help`).
+    private static let subcommands: Set<String> = [
+        "agents", "exec", "e", "review", "login", "logout", "mcp", "plugin", "app-server", "remote-control", "app", "completion",
+        "update", "doctor", "sandbox", "debug", "apply", "a", "resume", "queue", "archive", "delete", "migrate-rollouts",
+        "migrate-nfs-db", "unarchive", "fork", "cloud", "exec-server", "features", "help"
+    ]
 
     /// SHA-256 of `prompt`, in hex: what an event keeps of a prompt.
     static func promptDigest(_ prompt: String) -> String {
         SHA256.hash(data: Data(prompt.utf8)).map { String(format: "%02x", $0) }.joined()
-    }
-
-    mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
-        session.sessionID(for: foregroundProcess)
-    }
-
-    /// Thread bound to this `codex` process, if any.
-    func boundSessionID(for process: ProcessInstance) -> String? {
-        session.sessionID(boundTo: process)
-    }
-
-    @discardableResult
-    mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
-        session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
     }
 }
 
@@ -421,7 +463,7 @@ extension ProcessInstance {
     static func hookEmitter(for kind: AgentHookEvent.Kind) -> ProcessInstance? {
         switch kind {
         case .codex: return running(pid: getppid())
-        case .claude: return firstNonShellAncestor(from: getppid())
+        case .claude, .agy: return firstNonShellAncestor(from: getppid())
         }
     }
 

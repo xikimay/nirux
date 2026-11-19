@@ -7,6 +7,9 @@ import Foundation
 struct AgentHookEvent: Codable, Equatable {
     enum Kind: String, Codable {
         case claude, codex
+        /// Antigravity's hooks.json, read only for the conversation a
+        /// column runs: its status comes from OSC 7501.
+        case agy
     }
 
     /// Normalized event names. The Claude hooks map 1:1 (PostToolUse and
@@ -128,7 +131,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// empty once none is: a review run in the background outlives the turn
     /// that started it. Nil from older receivers and on other events.
     var backgroundAgents: [String]?
-    /// On a Codex turn end, `CodexSessionTracker.promptDigest` of its
+    /// On a Codex turn end, `CodexLaunch.promptDigest` of its
     /// thread's first message, never the text: it proves the thread its
     /// launch prompt started. Nil from older receivers.
     var firstInputDigest: String?
@@ -264,11 +267,37 @@ struct AgentHookEvent: Codable, Equatable {
             guard let type = payload["type"] as? String, type == "agent-turn-complete" else { return nil }
             name = .turnComplete
             sessionID = payload["thread-id"] as? String
-            firstInputDigest = (payload["input-messages"] as? [String])?.first.map(CodexSessionTracker.promptDigest)
+            firstInputDigest = (payload["input-messages"] as? [String])?.first.map(CodexLaunch.promptDigest)
             cwd = payload["cwd"] as? String
             source = nil
             let message = payload["last-assistant-message"] as? String
             detail = message.map { String($0.prefix(500)) }
+            toolName = nil
+            toolSummary = nil
+            toolKey = nil
+            toolEnd = nil
+            toolFamily = nil
+            toolCommandKey = nil
+            toolUseID = nil
+            agentID = nil
+            notificationType = nil
+            errorKind = nil
+            promptID = nil
+            transcriptPath = nil
+            reviewPasses = nil
+            reviewHeader = nil
+            finalMessage = nil
+            stopHookActive = nil
+        case .agy:
+            // Which conversation, and where: never its prompt (lastUserInput).
+            // A subagent's SessionStart looks the same (probed on agy 1.5.12):
+            // the column keeps its process's first (ForegroundSessionTracker).
+            guard payload["hookEventName"] as? String == "SessionStart" else { return nil }
+            name = .sessionStart
+            sessionID = payload["conversationId"] as? String
+            cwd = payload["cwd"] as? String
+            source = nil
+            detail = nil
             toolName = nil
             toolSummary = nil
             toolKey = nil

@@ -214,6 +214,8 @@ struct AgentStatusMachine {
     /// says when a Mission message may go into its queue
     /// (`codexQueueRefusal`).
     private(set) var codexStatus: ReportedStatus?
+    /// When Codex last said it works, and which `codex`: a turn started.
+    private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
 
     /// What Antigravity reported, when, from which process, and whether its
     /// wait alerted.
@@ -222,10 +224,6 @@ struct AgentStatusMachine {
         let at: TimeInterval
         let process: ProcessInstance?
         var alerted = false
-        /// Codex's: a turn runs, waiting or not.
-        var turnRuns = false
-        /// Codex's: idle since a turn was stopped (an Esc), not ended.
-        var interrupted = false
     }
     /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
     /// a new session, an agent back in the foreground, or the user.
@@ -1476,17 +1474,8 @@ struct AgentStatusMachine {
     /// again (a redraw) keeps the time it first came.
     mutating func noteCodexStatus(_ status: AgentProgramStatus, from process: ProcessInstance?, now: TimeInterval) {
         guard status != codexStatus?.status || process != codexStatus?.process else { return }
-        let before = codexStatus?.process == process ? codexStatus : nil
-        var reported = ReportedStatus(status: status, at: now, process: process)
-        // Codex says idle once ready, after a key, and after an Esc stopped
-        // a turn: then its queue starts nothing until another turn ends.
-        switch status.state {
-        case .working: reported.turnRuns = true
-        case .blocked: reported.turnRuns = before?.turnRuns ?? false
-        case .idle: reported.interrupted = before.map { $0.turnRuns || $0.interrupted } ?? false
-        case .done, .error: break
-        }
-        codexStatus = reported
+        codexStatus = ReportedStatus(status: status, at: now, process: process)
+        if status.state == .working { codexWorked = (now, process) }
     }
 
     /// A reported status belongs to the process that sent it: an agent
@@ -1648,6 +1637,7 @@ struct AgentStatusMachine {
         state = .idle
         programStatus = nil
         codexStatus = nil
+        codexWorked = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false

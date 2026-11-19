@@ -8,32 +8,6 @@ import XCTest
 /// checks; move_task moves one among its siblings.
 @MainActor
 final class LeadTaskToolsFlowTests: XCTestCase {
-    /// A stub gh answering each branch's pull requests from
-    /// `<root>/prs/<branch, "/" as "-">.json`, and a Trash of the test's
-    /// own, returned.
-    private func stubCleanupTools(_ harness: UIFlowHarness) throws -> String {
-        let gh = harness.root + "/gh"
-        try """
-        #!/bin/sh
-        for arg in "$@"; do case "$arg" in --head=*) branch="${arg#--head=}";; esac; done
-        file="$(dirname "$0")/prs/$(printf '%s' "$branch" | tr '/' '-').json"
-        if [ -f "$file" ]; then cat "$file"; else echo '[]'; fi
-        """.write(toFile: gh, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh)
-        try FileManager.default.createDirectory(atPath: harness.root + "/prs", withIntermediateDirectories: true)
-        var tools = WorktreeCleanup.Tools(ghPath: gh, timeout: 30)
-        let trash = harness.root + "/Trash"
-        tools.trash = { url in
-            try FileManager.default.createDirectory(atPath: trash, withIntermediateDirectories: true)
-            let target = URL(fileURLWithPath: trash).appendingPathComponent(url.lastPathComponent)
-            try FileManager.default.moveItem(at: url, to: target)
-            return target
-        }
-        let stubbed = tools
-        harness.shell.worktreeCleanupTools = { stubbed }
-        return trash
-    }
-
     /// A `claude` stand-in that `command` starts in a new column of
     /// `workspace`, its session begun: its terminal, and its hooks.
     private func startAgent(
@@ -51,24 +25,6 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
         hook(.sessionStart)
         return (pty, hook)
-    }
-
-    /// Pushed to GitHub as gh sees it: a worktree of the harness's
-    /// repository on `branch` in `folder`, one commit ahead, with a merged
-    /// pull request holding its tip.
-    private func mergedWorktree(_ branch: String, in folder: String, number: Int, harness: UIFlowHarness) throws {
-        try UIFlowHarness.git(["worktree", "add", "-q", "-b", branch, folder], at: harness.repo)
-        try UIFlowHarness.git(
-            ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "work"], at: folder
-        )
-        try UIFlowHarness.git(["config", "branch.\(branch).pushRemote", "acme"], at: harness.repo)
-        let tip = try UIFlowHarness.git(["rev-parse", "HEAD"], at: folder).trimmingCharacters(in: .whitespacesAndNewlines)
-        let pullRequest: [String: Any] = [
-            "number": number, "state": "MERGED", "headRefOid": tip, "url": "https://github.com/acme/widgets/pull/\(number)",
-            "headRepositoryOwner": ["login": "acme"], "headRepository": ["name": "widgets"]
-        ]
-        try JSONSerialization.data(withJSONObject: [pullRequest])
-            .write(to: URL(fileURLWithPath: harness.root + "/prs/" + branch.replacingOccurrences(of: "/", with: "-") + ".json"))
     }
 
     /// close_task never closes the Lead, another space's workspace, a main
@@ -173,12 +129,12 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
-            _ = try stubCleanupTools(harness)
+            _ = try harness.stubCleanupTools()
             try UIFlowHarness.git(["remote", "add", "acme", "https://github.com/acme/widgets.git"], at: harness.repo)
             let merged = harness.root + "/repo.feat-merged"
             let base = harness.root + "/repo-base"
-            try mergedWorktree("feat/merged", in: merged, number: 7, harness: harness)
-            try mergedWorktree("feat/base", in: base, number: 8, harness: harness)
+            try harness.mergedWorktree("feat/merged", in: merged, number: 7)
+            try harness.mergedWorktree("feat/base", in: base, number: 8)
             for (title, cwd) in [("Merged work", merged), ("Base work", base), ("Flow work", harness.worktree)] {
                 shell.addWorkspace(title: title, cwd: cwd, profileID: lead.space)
             }
@@ -219,7 +175,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try harness.makeLead()
-            let trash = try stubCleanupTools(harness)
+            let trash = try harness.stubCleanupTools()
             for description in ["Compare two parsers", "Draft the notes", "Keep it busy", "Start a repo"] {
                 let started = try harness.callLeadTool(LeadTools.startTask, ["description": description, "repo": "none"], lead: lead)
                 XCTAssertFalse(started.isError, started.text)
@@ -758,6 +714,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             ), isUserFocused: false)
             harness.waitUntil("the second, then Enter") { task.agent.input.components(separatedBy: "\u{1B}[201~\n").count == 3 }
 
+
             // A key of the user's while it goes in: Enter would send it too.
             task.hook(.userPromptSubmit)
             task.hook(.stop)
@@ -765,6 +722,41 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.column.pty?.sendRaw("z")
             harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
             XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 3, "the third went in without Enter")
+        }
+    }
+
+    /// Claude Code's session record still shows a dialog when a long tell
+    /// is all in (it writes the record after the change, so it may lag the
+    /// hooks): it is read again, and Enter follows once it doesn't; a wait
+    /// that stays leaves the tell unsent.
+    func testEnterAfterALongTellWaitsOutARecordThatLags() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Reader", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            let message = (1...70).map { "Line \($0): read the file and add up the totals." }.joined(separator: "\n")
+            let url = ClaudeSessionRecord.url(pid: task.claude.pid, environment: ProcessInfo.processInfo.environment)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let changed = Date().timeIntervalSince1970 * 1000
+            @MainActor func write(_ status: String) throws {
+                try Data(#"{"status":"\#(status)","waitingFor":"permission prompt","statusUpdatedAt":\#(changed)}"#.utf8).write(to: url)
+            }
+            try write("waiting")
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("all of it") { task.agent.input.contains("\u{1B}[201~") }
+            // Past Enter's first look, within its rereads.
+            RunLoop.main.run(until: Date().addingTimeInterval(NiruxShellView.recordRereadDelay + 0.1))
+            try Data(#"{"status":"idle","statusUpdatedAt":\#(changed)}"#.utf8).write(to: url)
+            harness.waitUntil("then its Enter") { task.agent.input.hasSuffix("\u{1B}[201~\n") }
+
+            task.hook(.userPromptSubmit)
+            task.hook(.stop)
+            try write("waiting")
+            XCTAssertFalse(try harness.callLeadTool(LeadTools.tell, ["task": "Reader", "message": message], lead: lead).isError)
+            harness.waitUntil("its sender told") { harness.shell.pendingLeadNotices.contains { $0.text.contains("wasn't sent") } }
+            XCTAssertEqual(task.agent.input.components(separatedBy: "\u{1B}[201~\n").count, 2, "the second went in without Enter")
         }
     }
 
@@ -890,11 +882,78 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.hook(.preToolUse)
             task.column.pty?.sendRaw("y")
             XCTAssertTrue(try interrupt().text.contains("Keys reached"))
-            // An Esc Claude doesn't confirm: said so, the turn still runs.
+            task.hook(.stop)
+            // An Esc Claude doesn't confirm, past a tool's result: said so,
+            // the turn still runs. Past its reads, the turn waits on the model
+            // again: its silence can show.
+            harness.shell.interruptReads = NiruxShellView.interruptReadsBeforeAnswer + 1
             task.hook(.userPromptSubmit)
             task.hook(.preToolUse)
+            task.hook(.postToolUse)
             XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
             XCTAssertTrue(try interrupt().text.contains("Esc already went into this turn"), "a second Esc would open the rewind")
+            harness.waitUntil("the Esc read as ignored") { pty.agentAwaitsModel(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot())) }
+            // Its transcript ends on the tool's result: past the threshold,
+            // list_tasks says the turn went silent, without the row's advice
+            // to press Esc, which is the user's.
+            let handle = try XCTUnwrap(FileHandle(forWritingAtPath: transcript))
+            handle.seekToEndOfFile()
+            handle.write(Data((#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}"# + "\n").utf8))
+            try handle.close()
+            // The system notification needs an app bundle, which xctest isn't.
+            task.column.onAgentAttention = { _ in }
+            task.column.noteTranscriptGrowth(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()), now: Date().timeIntervalSince1970)
+            let later = pty.awakeClock() + AgentSilence.threshold(waitThreshold: harness.shell.stuckAgentWaitThreshold) + 60
+            pty.awakeClock = { later }
+            let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
+            let line = list.split(separator: "\n").first { $0.hasPrefix("- “Builder”") }.map(String.init) ?? ""
+            XCTAssertTrue(line.contains(" · claude silent for ") && !line.contains(" — "), list)
+        }
+    }
+
+    /// A turn stopped on an API error, or whose agent exited, reads so in
+    /// list_tasks, as on its row: neither idle, as once the user saw it, nor
+    /// needing the user for nothing said, nor no agent running.
+    func testListTasksSaysWhatStoppedATurn() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Builder", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let pty = try XCTUnwrap(task.column.pty)
+            let line = {
+                try harness.callLeadTool(LeadTools.listTasks, lead: lead).text.split(separator: "\n")
+                    .first { $0.hasPrefix("- “Builder”") }.map(String.init) ?? ""
+            }
+            for isUserFocused in [true, false] {
+                task.hook(.userPromptSubmit)
+                _ = pty.applyAgentHook(AgentHookEvent(
+                    kind: .claude, name: .stopFailure, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
+                    errorKind: "overloaded", timestamp: Date().timeIntervalSince1970
+                ), isUserFocused: isUserFocused)
+                let failed = try line()
+                XCTAssertTrue(failed.hasSuffix(" · claude stopped on an API error — overloaded"), "focused: \(isUserFocused), \(failed)")
+            }
+
+            // Mid-turn, its claude leaves the process table and the shell
+            // comes back in front, as the process table would show it.
+            task.hook(.userPromptSubmit)
+            let shellPID = try XCTUnwrap(pty.shellPID)
+            let now = Date().timeIntervalSince1970
+            let claude = ForegroundProcess(instance: ProcessInstance(pid: 99_997, startedAt: now - 60), name: "claude", arguments: ["claude"])
+            let shellEntry = ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: shellPID,
+                name: "zsh", startedAt: now - 600, arguments: ["zsh"]
+            )
+            let claudeEntry = ProcessSnapshot.Entry(
+                pid: 99_997, parentPID: shellPID, processGroupID: 99_997, terminalForegroundProcessGroupID: shellPID,
+                name: "claude", startedAt: now - 60, arguments: ["claude"]
+            )
+            let gone = ProcessSnapshot(entries: [shellEntry])
+            task.column.trackForegroundAgent(claude, snapshot: ProcessSnapshot(entries: [shellEntry, claudeEntry]), now: now)
+            task.column.trackForegroundAgent(pty.foregroundProcess(snapshot: gone), snapshot: gone, now: now)
+            let readings = harness.shell.agentReadings(of: task.workspace, snapshot: gone, now: now + AgentStatusMachine.exitConfirmationDelay)
+            XCTAssertEqual(readings.map(\.name), ["claude"])
+            XCTAssertEqual(readings.first?.failure, "exited mid-turn")
         }
     }
 
@@ -981,7 +1040,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             }
             @MainActor func thread(_ id: String, first: String, of task: (column: ColumnState, codex: ForegroundProcess, agent: AgentStandIn)) {
                 _ = task.column.captureCodexSession(
-                    sessionID: id, firstInputDigest: CodexSessionTracker.promptDigest(first), emitterProcess: task.codex.instance,
+                    sessionID: id, firstInputDigest: CodexLaunch.promptDigest(first), emitterProcess: task.codex.instance,
                     snapshot: ProcessSnapshot()
                 )
             }
@@ -1022,7 +1081,8 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             XCTAssertEqual(request.thread, "main")
             XCTAssertEqual(request.command, CodexQueue.command(of: task.codex))
             XCTAssertTrue(request.message.contains("Review this."), request.message)
-            harness.waitUntil("its sender told Codex hasn't started it") {
+            report(.done, in: task.column)
+            harness.waitUntil("its sender told Codex hasn't started it, a state that isn't work notwithstanding") {
                 shell.pendingLeadNotices.contains { $0.text.contains("Codex hasn't started it") }
             }
             XCTAssertEqual(task.agent.input, "", "nothing typed")
@@ -1072,6 +1132,20 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             harness.waitUntil("its codex") { barePty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "codex" }
             let refused = try harness.callLeadTool(LeadTools.tell, ["task": "Bare Codex", "message": "Rebase."], lead: lead)
             XCTAssertTrue(refused.isError && refused.text.contains("started without a prompt"), refused.text)
+            // One from the CLI is given up as Nirux takes it, its sender told.
+            let bareMission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: bareUUID, childAgentKind: "codex", branch: "feat/bare", reportsToLead: true
+            ), enabled: true))
+            guard case .accepted(let fromCLI?) = MissionStore.shared.process(MissionEvent(
+                id: UUID().uuidString, missionID: bareMission.id, childWorkspaceID: workspaceID, childAgentUUID: bareUUID,
+                parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID, kind: .instruction, message: "Rebase now.",
+                timestamp: Date().timeIntervalSince1970
+            ), enabled: true) else { return XCTFail("the CLI's tell is recorded") }
+            _ = shell.handleMissionEvent(fromCLI.mission, event: fromCLI.event)
+            XCTAssertNotNil(MissionStore.shared.missions.flatMap(\.events).first { $0.id == fromCLI.event.id }?.expiredAt)
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("“Bare Codex” won't be handed over") },
+                          "\(shell.pendingLeadNotices.map(\.text))")
         }
     }
 

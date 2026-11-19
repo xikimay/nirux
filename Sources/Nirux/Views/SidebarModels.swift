@@ -129,7 +129,8 @@ struct SidebarMissionQuestion: Hashable {
     enum HandOff: Hashable {
         case parentClosed
         case parentNotClaude
-        /// The parent's `claude` took no prompt since it started.
+        /// The parent's `claude` took no prompt since it started, and doesn't
+        /// say it sits at its prompt.
         case parentNotAtPrompt
         /// The parent's `claude` restarted after it took the question.
         case parentRestarted
@@ -150,8 +151,9 @@ struct SidebarMissionQuestion: Hashable {
         /// (a restored agent that hasn't resumed).
         case notClaude
         /// Its `claude`, whose hooks report, took no prompt since it started
-        /// (resumed at a relaunch, say), so Nirux types nothing into it: a
-        /// screen no hook reports may be up (see `isPromptFree`).
+        /// (resumed at a relaunch, say) and doesn't say it sits at its
+        /// prompt, so Nirux types nothing into it: a screen no hook reports
+        /// may be up (see `AgentStatusMachine.sitsAtFirstPrompt`).
         case notAtPrompt
         /// Its `claude` started after the question was typed into it: the
         /// one that took it is gone, and a question is typed once.
@@ -167,7 +169,8 @@ struct SidebarMissionQuestion: Hashable {
     let text: String
     let handOff: HandOff?
     /// Answered, the answer not typed into the child's prompt yet: a
-    /// `claude` restarted since takes it only after one prompt.
+    /// `claude` restarted since takes it once it took a prompt or says it
+    /// sits at its first one.
     /// `parentTitle` then names who answered ("you" for the user).
     var isAnswered = false
     /// When the child asked (epoch seconds): its place in ⌘J's queue and
@@ -205,8 +208,9 @@ struct SidebarMissionQuestion: Hashable {
         case .parentClosed: return "“\(parentTitle)” was closed, so the question comes to you."
         case .parentNotClaude: return "“\(parentTitle)” isn’t running Claude Code, so the question comes to you."
         case .parentNotAtPrompt:
-            return "“\(parentTitle)” hasn’t taken a prompt since it started, so the question comes to you. "
-                + "If you don’t answer, it gets the question once it has taken one."
+            return "“\(parentTitle)” hasn’t taken a prompt since it started and may show a screen of its own, so the question "
+                + "comes to you. If you don’t answer, it gets the question once Claude Code says it’s at its prompt, or after its "
+                + "first prompt."
         case .parentRestarted:
             return "“\(parentTitle)” restarted after it got the question, so the question comes to you."
         case .parentDidNotAnswer: return "“\(parentTitle)” ended its turn without answering, so the question comes to you."
@@ -396,6 +400,8 @@ struct WorkspaceInfo: Hashable {
     var turnStatusLine: String?
     /// The Lead's row: how many rules it proposed wait for the user.
     var ruleProposalCount = 0
+    /// The Lead's row: its space's last daily pass, for a day after it.
+    var dailyPassNote: String?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }

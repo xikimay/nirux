@@ -7,7 +7,7 @@ enum AgentStatus: Equatable, Hashable, Sendable {
     case idle, working, needsAttention
 }
 
-struct ProcessInstance: Codable, Equatable {
+struct ProcessInstance: Codable, Hashable {
     let pid: pid_t
     let startedAt: TimeInterval
 
@@ -285,12 +285,36 @@ final class ProcessSnapshot {
 
     /// Read up to maxArgs arguments from KERN_PROCARGS2
     static func arguments(of pid: pid_t, maxArgs: Int) -> [String] {
+        guard let (argc, strings) = argumentArea(of: pid) else { return [] }
+        return Array(CStrings(rest: strings).prefix(max(0, min(argc, maxArgs))).prefix { !$0.isEmpty })
+    }
+
+    /// The environment `pid` started with, from KERN_PROCARGS2: what it
+    /// changed since doesn't show. Empty when it can't be read, as for a
+    /// macOS binary read by one that isn't.
+    static func environment(of pid: pid_t) -> [String: String] {
+        argumentArea(of: pid).map { environment(argc: $0.argc, strings: $0.strings) } ?? [:]
+    }
+
+    /// The environment in KERN_PROCARGS2's strings, past `argc` arguments.
+    /// Past them, the empty strings an argv overwritten in place (Node's
+    /// `process.title`) leaves are skipped.
+    static func environment(argc: Int, strings: ArraySlice<UInt8>) -> [String: String] {
+        let entries = CStrings(rest: strings).dropFirst(max(0, argc)).drop { $0.isEmpty }.prefix { !$0.isEmpty }
+        return Dictionary(entries.compactMap { entry in
+            entry.firstIndex(of: "=").map { (String(entry[..<$0]), String(entry[entry.index(after: $0)...])) }
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// KERN_PROCARGS2 of `pid`: its argc, and the strings past its exec path,
+    /// its arguments then its environment; nil when it can't be read.
+    private static func argumentArea(of pid: pid_t) -> (argc: Int, strings: ArraySlice<UInt8>)? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size: Int = 0
-        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return nil }
         var buf = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return [] }
-        guard size > MemoryLayout<Int32>.size else { return [] }
+        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return nil }
+        guard size > MemoryLayout<Int32>.size else { return nil }
         let argc = buf.withUnsafeBufferPointer {
             $0.baseAddress!.withMemoryRebound(to: Int32.self, capacity: 1) { $0.pointee }
         }
@@ -298,18 +322,19 @@ final class ProcessSnapshot {
         var i = MemoryLayout<Int32>.size
         while i < size && buf[i] != 0 { i += 1 }
         while i < size && buf[i] == 0 { i += 1 }
-        // Read argv entries
-        var args: [String] = []
-        let limit = max(0, min(Int(argc), maxArgs))
-        for _ in 0..<limit {
-            guard i < size else { break }
-            var end = i
-            while end < size && buf[end] != 0 { end += 1 }
-            guard end > i else { break }
-            args.append(String(decoding: buf[i..<end], as: UTF8.self)) // swiftlint:disable:this optional_data_string_conversion
-            i = end + 1
+        return (Int(argc), buf[i..<size])
+    }
+
+    /// The NUL-terminated strings of a byte area, empty ones included, read
+    /// as they are asked for.
+    private struct CStrings: Sequence, IteratorProtocol {
+        var rest: ArraySlice<UInt8>
+
+        mutating func next() -> String? {
+            guard let end = rest.firstIndex(of: 0) else { return nil }
+            defer { rest = rest[(end + 1)...] }
+            return String(decoding: rest[..<end], as: UTF8.self) // swiftlint:disable:this optional_data_string_conversion
         }
-        return args
     }
 }
 
@@ -370,7 +395,7 @@ final class PtySession: @unchecked Sendable {
     /// Whether `status` says something new: the same again (a redraw) needs
     /// no look at the process table.
     func isNewProgramStatus(_ status: AgentProgramStatus) -> Bool {
-        (status.process == AgentProgramStatus.codex ? state.machine.codexStatus : state.machine.programStatus)?.status != status
+        state.machine.programStatus?.status != status
     }
 
     /// Called on the main queue when the output shows a local dev-server
@@ -949,15 +974,61 @@ final class PtySession: @unchecked Sendable {
     /// When the last hook event came, of any command (0: none).
     var lastAgentHookAt: TimeInterval { state.machine.lastEventAt }
 
-    /// See `AgentStatusMachine.promptFacts`.
-    func missionPromptFacts(now: TimeInterval) -> String {
-        state.machine.promptFacts(now: now)
+    /// See `AgentStatusMachine.promptFacts`, and what the session record
+    /// of the `claude` in front says.
+    /// See `AgentStatusMachine.promptFacts`, and what the session record
+    /// of the `claude` in front says (`record`: how to read it).
+    func missionPromptFacts(
+        now: TimeInterval, snapshot: ProcessSnapshot, record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
+    ) -> String {
+        let facts = foregroundProcess(snapshot: snapshot).flatMap { AgentHookCenter.isInteractiveClaude($0) ? $0.instance : nil }
+            .map { " record=" + record($0).facts(of: $0, now: now) }
+        return state.machine.promptFacts(now: now) + (facts ?? "")
     }
 
-    /// Why `acceptsMissionMessage` says no, nil when it says yes.
-    func missionPromptRefusal(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> AgentPromptRefusal? {
+    /// Why `acceptsMissionMessage` says no, nil when it says yes, at `now`.
+    /// `record`: how to read the session record of a `claude` with no
+    /// prompt yet (a check's own reading, between checks).
+    func missionPromptRefusal(
+        runningSince: TimeInterval, snapshot: ProcessSnapshot, now: TimeInterval = Date().timeIntervalSince1970,
+        record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
+    ) -> AgentPromptRefusal? {
         guard !hasExited else { return .noClaude }
-        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
+        return state.machine.promptRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince) {
+            record($0).showsIdlePrompt(of: $0, now: now)
+        }
+    }
+
+    /// Whether `foreground`, the column's `claude`, that took no prompt since
+    /// it started, sits at its empty prompt at `now` (see
+    /// `AgentStatusMachine.sitsAtFirstPrompt`; `record` as
+    /// `missionPromptRefusal` takes it).
+    func sitsAtFirstPrompt(
+        _ foreground: ForegroundProcess, now: TimeInterval,
+        record: (ProcessInstance) -> ClaudeSessionRecord.Reading = { sessionRecord(of: $0) }
+    ) -> Bool {
+        state.machine.sitsAtFirstPrompt(foreground.instance) { record($0).showsIdlePrompt(of: $0, now: now) }
+    }
+
+    /// Whether Enter may follow a paste whose keys went in at `typedAt`, into
+    /// the prompt of `process`: no key since, no dialog its hooks listed,
+    /// still in front. (Its session record is read apart: it may lag.)
+    func mayPressEnter(after typedAt: TimeInterval, for process: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
+        lastInputAt == typedAt && !dialogWaitsForKeys && foregroundProcess(snapshot: snapshot)?.instance == process
+    }
+
+    /// The session record of `process`, a `claude`, in the config folder
+    /// its own environment names, else Nirux's, which its terminal inherits
+    /// (macOS hides a system binary's); a relative one is the process's,
+    /// against its working directory.
+    static func sessionRecord(
+        of process: ProcessInstance, inherited: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ClaudeSessionRecord.Reading {
+        let own = ProcessSnapshot.environment(of: process.pid)
+        let url = ClaudeSessionRecord.url(pid: process.pid, environment: own.isEmpty ? inherited : own) {
+            cwd(ofExecedProcess: process.pid)
+        }
+        return ClaudeSessionRecord.read(at: url)
     }
 
     /// See `AgentStatusMachine.codexQueueRefusal`.
@@ -966,10 +1037,10 @@ final class PtySession: @unchecked Sendable {
         return state.machine.codexQueueRefusal(foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince)
     }
 
-    /// Whether `process`, the column's `codex`, reported a state after `time`.
-    func codexReported(since time: TimeInterval, by process: ProcessInstance) -> Bool {
-        guard let reported = state.machine.codexStatus else { return false }
-        return reported.process == process && reported.at > time
+    /// Whether `process`, the column's `codex`, started a turn after `time`.
+    func codexWorked(since time: TimeInterval, by process: ProcessInstance) -> Bool {
+        guard let worked = state.machine.codexWorked else { return false }
+        return worked.process == process && worked.at > time
     }
 
     /// See `AgentStatusMachine.codexFacts`.

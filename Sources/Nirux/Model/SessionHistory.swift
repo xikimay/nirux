@@ -74,6 +74,7 @@ enum SessionHistory {
         switch agent {
         case .claude: return "Claude"
         case .codex: return "Codex"
+        case .agy: return "Antigravity"
         }
     }
 
@@ -174,7 +175,7 @@ extension DeferredAgentLaunch.Agent {
     /// The session it will resume; nil for a fresh agent or the picker.
     var sessionID: String? {
         switch self {
-        case .claude(.session(let sessionID)?, _), .codex(.session(let sessionID), _):
+        case .claude(.session(let sessionID)?, _), .codex(.session(let sessionID), _), .agy(.session(let sessionID)):
             return sessionID
         default:
             return nil

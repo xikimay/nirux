@@ -756,7 +756,8 @@ extension MissionEventCLI {
             return 4
         }
         writeStandardError(
-            (codex ? "Not handed over yet: the child's Codex is working, or waits on a dialog. Nirux hands it over at its next turn end"
+            (codex ? "Not handed over yet: the child's Codex is working, waits on a dialog, or hasn't said which conversation it runs. "
+                + "Nirux hands it over at its next turn end"
                 : "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
                     + "Nirux types it at the child's next free prompt")
                 + ", for a day at most; past an hour, a line tells you "

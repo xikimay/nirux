@@ -210,7 +210,8 @@ extension NiruxShellView {
                       parentTitle: parentTitle,
                       statusLine: turnStatusEnabled ? workspace.statusLine : nil,
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
-                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
+                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
+                      dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil)
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -440,6 +441,14 @@ extension NiruxShellView {
         for appliedEvent in events {
             let event = appliedEvent.event
             if appliedEvent.claudeRestoreChanged { changed = true }
+            if event.kind == .agy {
+                if appliedEvent.resolution.column.captureAgySession(
+                    sessionID: event.sessionID, emitterProcess: event.emitterProcess, snapshot: snapshot
+                ) {
+                    changed = true
+                }
+                continue
+            }
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,
@@ -466,7 +475,7 @@ extension NiruxShellView {
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
         // Codex's turn end too: it may prove the thread its OSC `done` came before.
-        if events.contains(where: { [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
+        if events.contains(where: { $0.event.kind != .agy && [.stop, .stopFailure, .turnComplete].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
@@ -533,6 +542,15 @@ extension NiruxShellView {
         case .instruction:
             // A `tell` from the CLI: the conversation it is for.
             if event.childSessionID == nil { noteConversation(of: mission, forInstruction: event.id) }
+            // A Codex started without a prompt never proves its conversation.
+            if mission.childAgentName == "Codex",
+               missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true,
+               MissionStore.shared.noteInstructions(heldNotice: [], expired: [event.id], at: Date().timeIntervalSince1970) {
+                let sender = event.leadSender ?? NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID)
+                tellProposer(sender, "Your message to “\(MissionPromptText.quoted(workspace?.title ?? mission.branch))” won't be handed "
+                    + "over: its Codex was started without a prompt, so Nirux can't tell which of its conversations is the task's. "
+                    + "Give it to the user instead.")
+            }
         case .question:
             break
         }

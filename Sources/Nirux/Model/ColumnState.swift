@@ -61,7 +61,8 @@ final class ColumnState {
     /// restarts; survives shell restarts (same terminal spec).
     let agentUUID: String?
 
-    private var codexSessionTracker = CodexSessionTracker()
+    private var codexSessionTracker = ForegroundSessionTracker.codex
+    private var agySessionTracker = ForegroundSessionTracker.agy
     private var claudeSessionTracker = ClaudeSessionTracker()
     /// State this agent column was restored from — saved as-is while its
     /// launch command hasn't started the agent yet (see
@@ -425,7 +426,9 @@ final class ColumnState {
         }
         // Only the agent's own, in front: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
-            guard let self, let ptySession, ptySession.isNewProgramStatus(status),
+            // Codex says each state once (its own cache): a restarted one's
+            // first may equal the last of the one before.
+            guard let self, let ptySession, status.process == AgentProgramStatus.codex || ptySession.isNewProgramStatus(status),
                   let agent = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agent.name == status.process
             else { return }
             if status.process == AgentProgramStatus.codex {
@@ -570,17 +573,44 @@ final class ColumnState {
         emitterProcess: ProcessInstance?,
         snapshot: ProcessSnapshot
     ) -> Bool {
-        guard let pty else { return false }
-        let foregroundProcess = pty.foregroundProcess(snapshot: snapshot)
-        let emitterBelongsToForegroundJob = emitterProcess.map {
-            pty.isProcessInForegroundJob($0, snapshot: snapshot)
-        } ?? false
+        guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot) else { return false }
         return codexSessionTracker.capture(
-            sessionID: sessionID,
-            firstInputDigest: firstInputDigest,
-            emitterBelongsToForegroundJob: emitterBelongsToForegroundJob,
-            foregroundProcess: foregroundProcess
+            sessionID: sessionID, firstInputDigest: firstInputDigest, emitterBelongsToForegroundJob: place.inForegroundJob,
+            foregroundProcess: place.foreground
         )
+    }
+
+    /// Binds the conversation the column's `agy` reports in its hooks: its
+    /// own, not a nested agy's that its shell tool started in its job.
+    func captureAgySession(sessionID: String?, emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot) -> Bool {
+        guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot),
+              !AgentHookCenter.isHeadlessAgy(place.foreground) else { return false }
+        return agySessionTracker.capture(
+            sessionID: sessionID, emitterBelongsToForegroundJob: emitterProcess == place.foreground?.instance,
+            foregroundProcess: place.foreground
+        )
+    }
+
+    /// The Antigravity conversation this column's `agy` process proved it runs.
+    func boundAgySessionID(of process: ProcessInstance) -> String? {
+        agySessionTracker.boundSessionID(for: process)
+    }
+
+    /// The process in front, and whether a hook's emitter runs in its job.
+    private func hookEmitterPlace(
+        _ emitterProcess: ProcessInstance?, snapshot: ProcessSnapshot
+    ) -> (foreground: ForegroundProcess?, inForegroundJob: Bool)? {
+        guard let pty else { return nil }
+        let inForegroundJob = emitterProcess.map { pty.isProcessInForegroundJob($0, snapshot: snapshot) } ?? false
+        return (pty.foregroundProcess(snapshot: snapshot), inForegroundJob)
+    }
+
+    func prepareAgyResume(sessionID: String) {
+        agySessionTracker.prepareResume(sessionID: sessionID)
+    }
+
+    func persistedAgySessionID(foregroundProcess: ForegroundProcess?) -> String? {
+        agySessionTracker.sessionID(for: foregroundProcess)
     }
 
     func persistedCodexSessionID(foregroundProcess: ForegroundProcess?) -> String? {
@@ -603,15 +633,15 @@ final class ColumnState {
     }
 
     /// Whether this column's `codex` will never prove a thread: one started
-    /// without a prompt, and not resumed (`CodexSessionTracker.canProve`).
+    /// without a prompt, and not resumed (`CodexLaunch.canProve`).
     func runsUnprovableCodex(snapshot: ProcessSnapshot) -> Bool {
         guard let codex = pty?.foregroundProcess(snapshot: snapshot), codex.name == AgentProgramStatus.codex,
               !AgentHookCenter.isHeadlessCodex(codex) else { return false }
-        return provenCodexSessionID(of: codex) == nil && !CodexSessionTracker.canProve(codex)
+        return provenCodexSessionID(of: codex) == nil && !CodexLaunch.canProve(codex)
     }
 
     /// The thread `process`, this column's `codex`, started with its
-    /// launch prompt or resumed (see `CodexSessionTracker`): the one a
+    /// launch prompt or resumed (see `ForegroundSessionTracker`): the one a
     /// Mission message goes to.
     func provenCodexSessionID(of process: ForegroundProcess) -> String? {
         codexSessionTracker.provenSessionID(for: process)
@@ -716,14 +746,15 @@ final class ColumnState {
         claudeSessionTracker.restore(for: foregroundProcess)
     }
 
-    /// Drop Codex/Claude session bindings whose process was replaced, so
+    /// Drop Codex/Claude/agy session bindings whose process was replaced, so
     /// the next save cannot hand a dead session to its successor.
     func invalidateAgentSessionsIfProcessChanged(
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
         let codexChanged = codexSessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
         let claudeChanged = claudeSessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
-        return codexChanged || claudeChanged
+        let agyChanged = agySessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        return codexChanged || claudeChanged || agyChanged
     }
 
     // MARK: - Shell exit / restart

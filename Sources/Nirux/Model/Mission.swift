@@ -107,6 +107,8 @@ struct MissionEvent: Codable, Equatable {
     /// On a question: the parent (a space's Lead, `ask_user`) handed it to
     /// the user, for this reason. Its row turns amber at once.
     var handedToUserBecause: String?
+    /// When, epoch seconds; nil on one an older build handed over.
+    var handedToUserAt: TimeInterval?
     /// On an instruction: Nirux types it at the child's next free prompt
     /// until then (`MissionEventCLI.instructionLifetime` after it was sent).
     /// Nil on one an older build recorded, which had an hour.
@@ -470,6 +472,7 @@ final class MissionStore {
         else { return nil }
         var updated = missions
         updated[missionIndex].events[eventIndex].handedToUserBecause = why
+        updated[missionIndex].events[eventIndex].handedToUserAt = now
         updated[missionIndex].updatedAt = now
         return commit(updated) ? updated[missionIndex] : nil
     }

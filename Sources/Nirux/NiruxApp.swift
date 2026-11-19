@@ -205,6 +205,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         installAgentHooks(reportingTo: shellView)
         // The app's shell only: whether the user is away is the app's.
         shellView.wireCatchUp()
+        shellView.startDailyPassWatch()
         shellView.followSystemForSidebarStaleLog()
         // Message ids, kinds, reasons and counts: public.
         shellView.sideEffects.logMissionWait = { MissionWaitLog.logger.notice("\($0, privacy: .public)") }

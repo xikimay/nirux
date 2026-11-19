@@ -57,7 +57,9 @@ child's prompt.
   child held when Nirux recorded it (`MissionEvent.childSessionID`, read
   from the agent the status refresh last saw in front): a restart resuming
   it, as Nirux's relaunch does, still gets it, once that `claude` took a
-  prompt (a resumed one may show a dialog its hooks don't tell); one that
+  prompt (a resumed one may show a dialog its hooks don't tell) or its
+  session record says it sits idle at its prompt (`ClaudeSessionRecord`,
+  2026-11-19); one that
   hasn't said yet which it holds keeps it waiting. One recorded with no
   conversation (an older build's, or before any was confirmed) counts as
   for the same. Until
