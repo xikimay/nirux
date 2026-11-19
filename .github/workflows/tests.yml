@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of P4's second PR: its tests' mutants, then ten
+      # runs of SpaceCrossingTests.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.SpaceCrossingTests noRecede noFade notFromFront offMiddle liveShown notOnTime ungated stacked motionIgnored menuCrosses || status=1
+          scripts/repeat-class.sh NiruxTests.SpaceCrossingTests 10 3 NiruxTests.FrozenViewTests NiruxTests.WorkspaceSwitchTests || status=1
+          exit $status

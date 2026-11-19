@@ -13,19 +13,19 @@ extension NiruxShellView {
     /// `leaving`, what the viewport showed before the switch, crosses with
     /// the space chosen, laid out under it now.
     func crossSpaces(leaving: FrozenView, duration: CFTimeInterval = crossingDuration) {
-        endSpaceCrossing()
+        if !ZZ("stacked") { endSpaceCrossing() }
         viewport.layoutSubtreeIfNeeded()
         let arriving = FrozenView.freeze(viewport)
         let generation = spaceCrossingGeneration
         crossingPictures = [leaving] + (arriving.map { [$0] } ?? [])
         for picture in crossingPictures { viewport.addSubview(picture) }
-        verticalStrip.alphaValue = 0
-        Self.move(leaving, scale: (1, Self.recedeScale), opacity: (1, 0), curve: .easeIn, duration: duration)
+        verticalStrip.alphaValue = ZZ("liveShown") ? 1 : 0
+        Self.move(leaving, scale: (1, ZZ("noRecede") ? 1 : Self.recedeScale), opacity: (1, ZZ("noFade") ? 1 : 0), curve: .easeIn, duration: duration)
         if let arriving {
-            Self.move(arriving, scale: (Self.arrivalFromScale, 1), opacity: (0, 1), curve: .easeOut, duration: duration)
+            Self.move(arriving, scale: (ZZ("notFromFront") ? 1 : Self.arrivalFromScale, 1), opacity: (0, 1), curve: .easeOut, duration: duration)
         }
         ColumnState.afterCommit(duration) { [weak self] in
-            guard let self, spaceCrossingGeneration == generation else { return }
+            guard let self, !ZZ("notOnTime"), ZZ("ungated") || spaceCrossingGeneration == generation else { return }
             endSpaceCrossing()
         }
     }
@@ -63,8 +63,8 @@ extension NiruxShellView {
 
     /// `scale` about the layer's middle, wherever its anchor lies.
     static func scaledAboutMiddle(_ layer: CALayer, by scale: CGFloat) -> CATransform3D {
-        let dx = (0.5 - layer.anchorPoint.x) * layer.bounds.width
-        let dy = (0.5 - layer.anchorPoint.y) * layer.bounds.height
+        let dx = ZZ("offMiddle") ? 0 : (0.5 - layer.anchorPoint.x) * layer.bounds.width
+        let dy = ZZ("offMiddle") ? 0 : (0.5 - layer.anchorPoint.y) * layer.bounds.height
         return CATransform3DTranslate(CATransform3DScale(CATransform3DMakeTranslation(dx, dy, 0), scale, scale, 1), -dx, -dy, 0)
     }
 }

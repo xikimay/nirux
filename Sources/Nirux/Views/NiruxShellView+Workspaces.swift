@@ -382,7 +382,7 @@ extension NiruxShellView {
     }
 
     func selectProfile(_ profileID: String) {
-        activateProfile(profileID, crosses: false)
+        activateProfile(profileID, crosses: ZZ("menuCrosses"))
     }
 
     /// ⌥⌘1…⌥⌘9: the space at that place in the space picker, read off
@@ -402,8 +402,8 @@ extension NiruxShellView {
     private func activateProfile(_ profileID: String, crosses: Bool, profileAlreadySelected: Bool = false) {
         let previousProfileID = activeProfileID
         // A crossing on its way ends: what shows now is what leaves.
-        endSpaceCrossing()
-        let leaving = crosses && agentLightsMayMove ? FrozenView.freeze(viewport) : nil
+        if !ZZ("stacked") { endSpaceCrossing() }
+        let leaving = crosses && (ZZ("motionIgnored") || agentLightsMayMove) ? FrozenView.freeze(viewport) : nil
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
