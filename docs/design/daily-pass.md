@@ -67,15 +67,17 @@ What happened since the last pass, at most 40,000 characters (Claude Code saves 
 
 ## When (PR 2)
 
-- **Due:** once a day, at the first quiet moment after the space's hour (default 06:00, local time). A pass that read, a line typed, or a check that found nothing after the hour all count for the day. A minute's timer on the app's shell checks.
+- **Due:** once a day, at the first quiet moment after the space's hour (default 06:00, local time). A pass that read, a line typed, or a check that found nothing after the hour all count for the day, and none comes within 12 h of the last (an hour moved later, or a pass asked for just before it). A minute's timer on the app's shell checks.
 - **Quiet means all of these:**
-  - the Lead's prompt is free (the Mission typing gate);
+  - the Lead's prompt is free (the Mission typing gate), and its last turn didn't end on a question for the user (typing would clear it);
   - its last hook event was 30 min ago or more;
-  - no Mission message is waiting for it;
-  - the user has been away from Nirux for 10 min or more.
-- **Only if something happened.** Nirux reads the facts first (GitHub included), then asks whether it is still quiet before typing "[Nirux Mission] Daily pass: call daily_pass…". A day with nothing marks the pass checked. If the Lead never calls `daily_pass`, the next pass covers both days.
+  - nothing waits to be typed into it: a Mission message, a Lead notice, a rule decision;
+  - the user has been away from Nirux for 10 min or more, counted from the Mac's last wake at the earliest.
+
+  A resumed Lead takes no typed line until it took a prompt (#483); the resumed-delivery work lifts that.
+- **Only if something happened.** Nirux reads the facts from the last read (GitHub included), then asks again whether the pass is on, due and quiet before typing "[Nirux Mission] Daily pass: call daily_pass…". The pass is recorded before the line is typed; one that can't be recorded isn't typed, and checks wait 15 min. A day with nothing marks its window read. A gh that didn't answer (no network after a wake, a timeout, a 5xx) waits 15 min and tries again. If the Lead never calls `daily_pass`, the next pass covers both days; the Lead's call after a typed line is a new pass, not a second read.
 - **Settings:** Space Settings › Lead gets a "Daily pass" switch (on by default, the user's call), an hour menu and a "Last pass" line. They are kept in `defaults.json` (`leadDailyPass`, `leadDailyPassHour`); a file Nirux can't read turns the pass off.
-- **The note:** after each `daily_pass` call, the Lead row shows a grey line for 24 h, "Daily pass · 6 PRs, 1 flaky test, 2 rules proposed". It counts the pull requests merged, the flaky tests (learned or called so), the messages held, given up or crossed, and the rules proposed since the call. The Lead's reply in its terminal says why.
+- **The note:** after each `daily_pass` call, the Lead row shows a grey line for 24 h, "Daily pass · 6 PRs, 1 flaky test, 2 rules proposed". It counts the pull requests merged, the flaky tests (learned or called so), the messages held or given up, and the rules proposed since the call (a second read keeps the first read's time). The Lead's reply in its terminal says why.
 
 ## Cost
 

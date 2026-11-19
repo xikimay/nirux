@@ -87,7 +87,8 @@ enum DailyPass {
         }
         guard result.terminationStatus == 0 else {
             let message = WorktreeCleanup.firstLine(String(decoding: result.standardError, as: UTF8.self))
-            return .failure(ReadFailure(message: message ?? "gh exited with status \(result.terminationStatus)"))
+            let text = message ?? "gh exited with status \(result.terminationStatus)"
+            return .failure(ReadFailure(message: text, retryable: isPassing(text)))
         }
         return .success(result.standardOutput)
     }
@@ -98,6 +99,14 @@ enum DailyPass {
     /// How long before the window a run that is rerun in it may have
     /// started: `--created` reads a run's first attempt.
     static let rerunReach: TimeInterval = 2 * 86_400
+
+    /// What gh says when the network or GitHub may answer next time (no
+    /// network yet after a wake, a 5xx).
+    static func isPassing(_ message: String) -> Bool {
+        let lowered = message.lowercased()
+        return ["error connecting", "could not resolve", "connection refused", "connection reset", "network is unreachable",
+                "timeout", "timed out", "http 500", "http 502", "http 503", "http 504"].contains { lowered.contains($0) }
+    }
 
     static func mergedArguments(repository: String, since: TimeInterval) -> [String] {
         [
@@ -388,7 +397,7 @@ enum DailyPass {
         /// The Lead row's counts, read at `time`.
         func note(at time: TimeInterval) -> Note {
             let flaky = Set(flakyTests).union(triagedRuns.filter { $0.verdict == "flaky" }.flatMap(\.tests))
-            let messages = missions.filter { [.held, .givenUp, .crossed].contains($0.kind) }.count
+            let messages = missions.filter { [.held, .givenUp].contains($0.kind) }.count
             return Note(at: time, pullRequests: repositories.map(\.merged.count).reduce(0, +), flakyTests: flaky.count, messages: messages)
         }
     }
@@ -561,31 +570,43 @@ enum DailyPass {
     /// How long the Lead row shows a pass's note.
     static let noteLifetime: TimeInterval = 24 * 3600
 
-    /// When `hour` last struck at or before `now`, local time.
+    /// No pass this soon after the last: an hour moved later, or a pass the
+    /// user asked for just before the hour, doesn't bring a second.
+    static let minimumGap: TimeInterval = 12 * 3600
+
+    /// When `hour` last struck at or before `now`, local time (on a day
+    /// the clock skips it, the time it jumps to).
     static func lastStroke(of hour: Int, before now: TimeInterval, timeZone: TimeZone = .current) -> TimeInterval {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let date = Date(timeIntervalSince1970: now)
-        guard let today = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: date) else { return now }
-        let stroke = today <= date ? today : calendar.date(byAdding: .day, value: -1, to: today) ?? today
-        return stroke.timeIntervalSince1970
+        let stroke = { (day: Date) in calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day) }
+        guard let today = stroke(date) else { return now - 86_400 }
+        if today <= date { return today.timeIntervalSince1970 }
+        return calendar.date(byAdding: .day, value: -1, to: date).flatMap(stroke)?.timeIntervalSince1970 ?? now - 86_400
     }
 
     /// Due once `hour` struck since the last pass read, was typed, or found
-    /// nothing to read.
+    /// nothing to read, and `minimumGap` after it.
     static func isDue(_ state: DailyPassState, hour: Int, now: TimeInterval, timeZone: TimeZone = .current) -> Bool {
         let stroke = lastStroke(of: hour, before: now, timeZone: timeZone)
-        return [state.end, state.typedAt, state.checkedAt].allSatisfy { ($0 ?? -.infinity) < stroke }
+        let last = [state.end, state.typedAt, state.checkedAt].compactMap { $0 }.max() ?? -.infinity
+        return last < stroke && now - last >= minimumGap
     }
 
-    /// Never while the Lead works or the user is around: its prompt free,
-    /// its last hook event `leadIdle` ago, no Mission message waiting for
-    /// it, the user away `userAway`.
+    /// Never while the Lead works, waits on the user, or the user is around:
+    /// its prompt free with no question for the user, its last hook event
+    /// `leadIdle` ago, nothing waiting to be typed into it, the user away
+    /// `userAway` (since the Mac woke, at least).
     static func isQuiet(
         promptFree: Bool, lastHookAt: TimeInterval, messageWaiting: Bool, awaySince: TimeInterval?, now: TimeInterval
     ) -> Bool {
         promptFree && now - lastHookAt >= leadIdle && !messageWaiting && (awaySince.map { now - $0 >= userAway } ?? false)
     }
+
+    /// How long a check waits after GitHub didn't answer, or the pass
+    /// couldn't be recorded.
+    static let retryAfter: TimeInterval = 15 * 60
 
     /// What Nirux types into the Lead's prompt when a pass is due.
     static var prompt: String {
@@ -598,7 +619,7 @@ enum DailyPass {
         var at: TimeInterval
         var pullRequests: Int
         var flakyTests: Int
-        /// Held, given up or crossed.
+        /// Held or given up.
         var messages: Int
     }
 
@@ -609,7 +630,7 @@ enum DailyPass {
         }
         return [
             counted(note.pullRequests, "PR", "PRs"), counted(note.flakyTests, "flaky test", "flaky tests"),
-            counted(note.messages, "message held", "messages held"),
+            counted(note.messages, "message held or lost", "messages held or lost"),
             counted(rulesProposed, "rule proposed", "rules proposed") ?? "no rule proposed"
         ].compactMap { $0 }.joined(separator: ", ")
     }
@@ -671,15 +692,28 @@ struct DailyPassState: Codable, Equatable, Sendable {
 
     /// The window a call at `now` reads, and the state to save once it
     /// was read; nil for a call that reads the last window again, so calls
-    /// in a row don't keep stretching it.
-    func reading(now: TimeInterval) -> (window: DailyPass.Window, next: DailyPassState?) {
-        if let start, let end, now - end < Self.extendWithin {
+    /// in a row don't keep stretching it. Not after Nirux typed the daily
+    /// line since that read: that call is a new pass. `extending` false
+    /// reads from the last read only (the daily check's news).
+    func reading(now: TimeInterval, extending: Bool = true) -> (window: DailyPass.Window, next: DailyPassState?) {
+        if extending, let start, let end, now - end < Self.extendWithin, (typedAt ?? -.infinity) <= end {
             return (DailyPass.Window(start: max(start, now - Self.longestWindow), end: now), nil)
         }
         let window = DailyPass.Window(start: max(end ?? now - Self.firstWindow, now - Self.longestWindow), end: now)
         var next = self
         (next.start, next.end) = (window.start, window.end)
         return (window, next)
+    }
+
+    /// Once a call read `reading(now:)`'s window: marked read (unless
+    /// GitHub may answer next time), with its note, which keeps the time of
+    /// the pass a second read reads again: the rules proposed since count.
+    func afterReading(_ next: DailyPassState?, readsAgain: Bool, note: DailyPass.Note) -> DailyPassState {
+        var state = self
+        if let next, !readsAgain { (state.start, state.end) = (next.start, next.end) }
+        state.note = note
+        if next == nil, let earlier = self.note { state.note?.at = earlier.at }
+        return state
     }
 
     static func url(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {

@@ -35,28 +35,34 @@ extension NiruxShellView {
     /// its window read (unless GitHub may answer next time), and keeps the
     /// note the Lead's row shows.
     func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, answer: @escaping LeadAnswer) {
-        let state = DailyPassState.load(spaceID: space.id)
-        let (window, next) = state.reading(now: Date().timeIntervalSince1970)
+        let (window, next) = dailyPassState(inSpace: space.id).reading(now: Date().timeIntervalSince1970)
         gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
-            guard let facts else { return answer("This space keeps no daily pass.", true) }
-            var saved = facts.readsAgain ? state : next ?? state
-            saved.note = facts.note(at: window.end)
-            self?.saveDailyPassState(saved, spaceID: space.id)
+            guard let self, let facts else { return answer("This space keeps no daily pass.", true) }
+            // On what holds now: a check may have saved meanwhile.
+            let saved = self.dailyPassState(inSpace: space.id)
+                .afterReading(next, readsAgain: facts.readsAgain, note: facts.note(at: window.end))
+            self.saveDailyPassState(saved, spaceID: space.id)
             answer(DailyPass.digest(facts), false)
         }
     }
 
-    /// Writes a space's pass, unless the space was deleted meanwhile, and
-    /// shows its note.
-    func saveDailyPassState(_ state: DailyPassState, spaceID: String) {
-        guard profiles.contains(where: { $0.id == spaceID }) else { return }
+    /// Writes a space's pass and shows it, unless the space was deleted
+    /// meanwhile. One that can't be written stays as it was, and the
+    /// checks wait `DailyPass.retryAfter` before trying again.
+    @discardableResult
+    func saveDailyPassState(_ state: DailyPassState, spaceID: String, now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
+        guard profiles.contains(where: { $0.id == spaceID }) else { return false }
         do {
             try state.save(spaceID: spaceID)
         } catch {
-            NiruxDebugLog.log("Daily pass: couldn't record the pass, so the next one reads its window again: \(error)")
+            NiruxDebugLog.log("Daily pass: couldn't record the pass: \(error)")
+            dailyPassRetryAt[spaceID] = now + DailyPass.retryAfter
+            return false
         }
         dailyPassStates[spaceID] = state
         updateSidebar()
+        refreshSpaceSettingsLead()
+        return true
     }
 
     /// What happened in the space in the window, read off the main thread
@@ -100,11 +106,17 @@ extension NiruxShellView {
     typealias DailyPassQuietCheck = @MainActor (ColumnState) -> Bool
     typealias DailyPassSend = @MainActor (ColumnState, String) -> Void
 
-    /// Once a minute on the app's shell (`startDailyPassWatch`).
+    /// Once a minute on the app's shell; the user's absence counts from
+    /// the Mac's last wake.
     func startDailyPassWatch() {
         guard dailyPassTimer == nil else { return }
         dailyPassTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkDailyPasses() }
+        }
+        dailyPassWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dailyPassWokeAt = Date().timeIntervalSince1970 }
         }
     }
 
@@ -117,42 +129,67 @@ extension NiruxShellView {
     ) {
         let quiet = isQuiet ?? { [weak self] column in self?.dailyPassIsQuiet(column) == true }
         for lead in workspaces where lead.isLead && !lead.isClosing && !dailyPassChecks.contains(lead.profileID) {
-            guard let space = profiles.first(where: { $0.id == lead.profileID }),
-                  let defaults = SpaceDefaultsStore(spaceID: space.id)?.load().defaults, defaults.dailyPassIsOn
-            else { continue }
-            let state = DailyPassState.load(spaceID: space.id)
-            let agentUUID = leadMissionParent(inSpace: space.id)?.agentUUID
-            guard DailyPass.isDue(state, hour: defaults.dailyPassHour, now: now),
-                  let column = lead.columns.first(where: { $0.agentUUID != nil && $0.agentUUID == agentUUID }), quiet(column)
+            guard let space = profiles.first(where: { $0.id == lead.profileID }), dailyPassIsDue(inSpace: space.id, now: now),
+                  let column = dailyPassColumn(of: lead), quiet(column)
             else { continue }
             dailyPassChecks.insert(space.id)
-            gatherDailyPassFacts(in: space, lead: lead, window: state.reading(now: now).window) { [weak self] facts in
+            let window = dailyPassState(inSpace: space.id).reading(now: now, extending: false).window
+            gatherDailyPassFacts(in: space, lead: lead, window: window) { [weak self] facts in
                 guard let self else { return }
                 self.dailyPassChecks.remove(space.id)
-                guard let facts, !column.isClosing else { return }
-                var next = DailyPassState.load(spaceID: space.id)
-                if !facts.hasNews {
-                    next.checkedAt = now
+                // Read again: the user, a pass or the Lead's end may have come meanwhile.
+                guard let facts, self.dailyPassIsDue(inSpace: space.id, now: now),
+                      self.workspaces.contains(where: { $0 === lead && !$0.isClosing }), self.dailyPassColumn(of: lead) === column
+                else { return }
+                var next = self.dailyPassState(inSpace: space.id)
+                if facts.readsAgain && !facts.hasNews {
+                    self.dailyPassRetryAt[space.id] = now + DailyPass.retryAfter
+                } else if !facts.hasNews {
+                    // The window is read: the next pass starts there.
+                    (next.start, next.end, next.checkedAt) = (window.start, window.end, now)
+                    self.saveDailyPassState(next, spaceID: space.id, now: now)
                 } else if quiet(column) {
-                    if let send { send(column, DailyPass.prompt) } else { self.typeDailyPassLine(into: column) }
                     next.typedAt = now
-                } else {
-                    return
+                    // Never read yet: the next pass starts where this one did.
+                    if next.end == nil { (next.start, next.end) = (window.start, window.start) }
+                    // Recorded first: one that can't be would be typed again.
+                    guard self.saveDailyPassState(next, spaceID: space.id, now: now) else { return }
+                    if let send { send(column, DailyPass.prompt) } else { self.typeDailyPassLine(into: column) }
                 }
-                self.saveDailyPassState(next, spaceID: space.id)
             }
         }
     }
 
-    /// The Lead's prompt free, its last hook event `DailyPass.leadIdle`
-    /// ago, no Mission message waiting for it, the user away.
+    /// The space's pass is on and due, and not waiting to retry.
+    private func dailyPassIsDue(inSpace spaceID: String, now: TimeInterval) -> Bool {
+        guard let defaults = SpaceDefaultsStore(spaceID: spaceID)?.load().defaults, defaults.dailyPassIsOn,
+              (dailyPassRetryAt[spaceID] ?? 0) <= now
+        else { return false }
+        return DailyPass.isDue(dailyPassState(inSpace: spaceID), hour: defaults.dailyPassHour, now: now)
+    }
+
+    /// The column the Lead's Claude runs in.
+    private func dailyPassColumn(of lead: WorkspaceState) -> ColumnState? {
+        let agentUUID = leadMissionParent(inSpace: lead.profileID)?.agentUUID
+        return lead.columns.first { !$0.isClosing && $0.agentUUID != nil && $0.agentUUID == agentUUID }
+    }
+
+    /// The Lead's prompt free with no question for the user, its last hook
+    /// event `DailyPass.leadIdle` ago, nothing waiting to be typed into it
+    /// (a Mission message, a Lead notice, a rule decision), the user away
+    /// since the Mac woke, at least.
     func dailyPassIsQuiet(_ column: ColumnState) -> Bool {
-        guard let pty = column.pty else { return false }
+        guard let pty = column.pty, let lead = workspaces.first(where: { $0.columns.contains { $0 === column } }) else { return false }
         let now = Date().timeIntervalSince1970
+        let snapshot = ProcessSnapshot()
+        let free = pty.acceptsMissionMessage(runningSince: now, snapshot: snapshot)
+            && pty.agentQuestion(foreground: pty.foregroundProcess(snapshot: snapshot)) == nil
         let waiting = MissionStore.shared.pendingPromptDeliveries(now: now).contains { missionRecipient(of: $0) === column }
+            || pendingLeadNotices.contains { $0.workspaceID == lead.id }
+            || !ruleProposals(inSpace: lead.profileID).toTell.isEmpty
         return DailyPass.isQuiet(
-            promptFree: pty.acceptsMissionMessage(runningSince: now, snapshot: ProcessSnapshot()), lastHookAt: pty.lastAgentHookAt,
-            messageWaiting: waiting, awaySince: catchUpState.tracker.awaySince, now: now
+            promptFree: free, lastHookAt: pty.lastAgentHookAt, messageWaiting: waiting,
+            awaySince: catchUpState.tracker.awaySince.map { max($0, dailyPassWokeAt) }, now: now
         )
     }
 
@@ -182,7 +219,7 @@ extension NiruxShellView {
 
     /// A space's pass, read once, then kept by `saveDailyPassState` (the
     /// sidebar asks several times a second).
-    private func dailyPassState(inSpace spaceID: String) -> DailyPassState {
+    func dailyPassState(inSpace spaceID: String) -> DailyPassState {
         if let state = dailyPassStates[spaceID] { return state }
         let state = DailyPassState.load(spaceID: spaceID)
         dailyPassStates[spaceID] = state

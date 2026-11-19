@@ -70,6 +70,9 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(reports[0].problems, [])
         XCTAssertEqual(reports[1].problems, ["merged pull requests: gh didn’t answer", "workflow runs: gh didn’t answer"])
         XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false])
+        XCTAssertTrue(DailyPass.isPassing("error connecting to api.github.com"))
+        XCTAssertTrue(DailyPass.isPassing("HTTP 502: Bad Gateway (https://api.github.com/graphql)"))
+        XCTAssertFalse(DailyPass.isPassing("To get started with GitHub CLI, please run:  gh auth login"))
         XCTAssertEqual(reports[3].problems, ["only the \(DailyPass.mergedLimit) newest merged pull requests were read"])
     }
 
@@ -295,7 +298,21 @@ final class DailyPassTests: XCTestCase {
         let again = last.reading(now: now - 4 * hour)
         XCTAssertEqual(again.window, DailyPass.Window(start: now - 30 * hour, end: now - 4 * hour))
         XCTAssertNil(again.next)
+        XCTAssertEqual(last.reading(now: now - 4 * hour, extending: false).window.start, now - 5 * hour, "the daily check's news")
+        let typed = DailyPassState(start: now - 30 * hour, end: now - 5 * hour, typedAt: now - 4.5 * hour)
+        XCTAssertEqual(typed.reading(now: now - 4 * hour).window.start, now - 5 * hour, "a typed line makes the next call a new pass")
+        XCTAssertNotNil(typed.reading(now: now - 4 * hour).next)
         XCTAssertEqual(DailyPassState(start: 0, end: 1).reading(now: now).window.start, now - 7 * 24 * hour)
+
+        // Once read: marked read, unless GitHub may answer next time; a
+        // second read keeps its pass's time.
+        let note = DailyPass.Note(at: now, pullRequests: 2, flakyTests: 0, messages: 0)
+        let read = last.afterReading(last.reading(now: now).next, readsAgain: false, note: note)
+        XCTAssertEqual(read.end, now)
+        XCTAssertEqual(read.note, note)
+        XCTAssertEqual(last.afterReading(last.reading(now: now).next, readsAgain: true, note: note).end, now - 5 * hour)
+        let reread = read.afterReading(nil, readsAgain: false, note: DailyPass.Note(at: now + hour, pullRequests: 3, flakyTests: 0, messages: 0))
+        XCTAssertEqual(reread.note, DailyPass.Note(at: now, pullRequests: 3, flakyTests: 0, messages: 0))
 
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-pass-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: state) }
@@ -312,10 +329,16 @@ final class DailyPassTests: XCTestCase {
         XCTAssertEqual(DailyPass.lastStroke(of: 6, before: now, timeZone: utc), now - 2 * hour)
         XCTAssertEqual(DailyPass.lastStroke(of: 9, before: now, timeZone: utc), now - 23 * hour)
         XCTAssertTrue(DailyPass.isDue(DailyPassState(), hour: 6, now: now, timeZone: utc))
-        XCTAssertTrue(DailyPass.isDue(DailyPassState(end: now - 3 * hour, typedAt: now - 3 * hour), hour: 6, now: now, timeZone: utc))
+        XCTAssertTrue(DailyPass.isDue(DailyPassState(end: now - 13 * hour, typedAt: now - 13 * hour), hour: 6, now: now, timeZone: utc))
         XCTAssertFalse(DailyPass.isDue(DailyPassState(typedAt: now - hour), hour: 6, now: now, timeZone: utc))
         XCTAssertFalse(DailyPass.isDue(DailyPassState(checkedAt: now - hour), hour: 6, now: now, timeZone: utc))
         XCTAssertFalse(DailyPass.isDue(DailyPassState(end: now - hour), hour: 6, now: now, timeZone: utc), "the user asked for one")
+        XCTAssertFalse(DailyPass.isDue(DailyPassState(end: now - 3 * hour), hour: 6, now: now, timeZone: utc), "one just before the hour")
+        // The night Paris skips 02:00: yesterday's stroke is yesterday's 02:00.
+        let paris = TimeZone(identifier: "Europe/Paris")!
+        let iso = ISO8601DateFormatter()
+        let skipped = iso.date(from: "2027-03-28T00:30:00Z")!.timeIntervalSince1970
+        XCTAssertEqual(DailyPass.lastStroke(of: 2, before: skipped, timeZone: paris), iso.date(from: "2027-03-27T01:00:00Z")!.timeIntervalSince1970)
     }
 
     /// Never while the Lead works, a message waits for it, or the user is
@@ -332,8 +355,7 @@ final class DailyPassTests: XCTestCase {
     }
 
     /// The Lead row's counts: pull requests merged, flaky tests (learned or
-    /// called so), messages held, given up or crossed, and the rules
-    /// proposed since.
+    /// called so), messages held or given up, and the rules proposed since.
     func testTheNoteCountsTheDay() {
         var day = facts()
         day.flakyTests = ["A.testB"]
@@ -345,8 +367,8 @@ final class DailyPassTests: XCTestCase {
             DailyPass.MissionFact(kind: $0, message: "tell to x", sentAt: now, detail: "", excerpt: "")
         }
         let note = day.note(at: now)
-        XCTAssertEqual(note, DailyPass.Note(at: now, pullRequests: 1, flakyTests: 2, messages: 2))
-        XCTAssertEqual(DailyPass.noteCounts(note, rulesProposed: 1), "1 PR, 2 flaky tests, 2 messages held, 1 rule proposed")
+        XCTAssertEqual(note, DailyPass.Note(at: now, pullRequests: 1, flakyTests: 2, messages: 1))
+        XCTAssertEqual(DailyPass.noteCounts(note, rulesProposed: 1), "1 PR, 2 flaky tests, 1 message held or lost, 1 rule proposed")
         XCTAssertEqual(DailyPass.noteCounts(DailyPass.Note(at: now, pullRequests: 3, flakyTests: 0, messages: 0), rulesProposed: 0),
                        "3 PRs, no rule proposed")
     }

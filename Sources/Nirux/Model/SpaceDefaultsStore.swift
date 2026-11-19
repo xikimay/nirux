@@ -145,6 +145,8 @@ struct SpaceDefaultsStore: Sendable {
             && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
             defaults[keyPath: item.key] = item.safe
         }
+        // An hour it can't read: off, as a switch it can't read.
+        if top["leadDailyPassHour"].map({ !($0 is NSNull) }) == true, defaults.leadDailyPassHour == nil { defaults.leadDailyPass = false }
         if let version = top["schemaVersion"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
            version.doubleValue > Double(schemaVersion) {
             let newer = Int(exactly: version.doubleValue.rounded(.down)) ?? Int.max

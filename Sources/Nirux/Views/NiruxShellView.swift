@@ -165,7 +165,13 @@ final class NiruxShellView: NSView {
     /// The spaces whose due pass is being read (GitHub), so a minute's
     /// check doesn't start another.
     var dailyPassChecks: Set<String> = []
+    /// The spaces whose due pass waits, after GitHub didn't answer or a
+    /// pass couldn't be recorded, until then.
+    var dailyPassRetryAt: [String: TimeInterval] = [:]
+    /// When the Mac last woke: the user's absence counts from there.
+    var dailyPassWokeAt: TimeInterval = 0
     var dailyPassTimer: Timer?
+    var dailyPassWakeObserver: NSObjectProtocol?
     /// The sheet that adds a rule to a space's brief (LearnedRuleSheet).
     var learnedRuleSheet: LearnedRuleSheet?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).

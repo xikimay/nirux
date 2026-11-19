@@ -470,6 +470,7 @@ final class LeadToolsFlowTests: XCTestCase {
             check(at: now)
             XCTAssertEqual(box.sent, [], "nothing happened")
             XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).checkedAt)
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).end, "its window is read: the next pass starts there")
 
             shell.addWorkspace(title: "Fix", cwd: harness.worktree, profileID: lead.space)
             let fix = try XCTUnwrap(shell.workspaces.first { $0.title == "Fix" })
@@ -479,6 +480,17 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertFalse(try call(LeadTools.recordReview, ["task": "Fix", "findings": [finding]], lead: lead, in: harness).isError)
             check(at: now)
             XCTAssertEqual(box.sent, [], "checked for today")
+            // A pass it can't record isn't typed: it would come back.
+            let file = try XCTUnwrap(DailyPassState.url(spaceID: lead.space))
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            check(at: tomorrow)
+            XCTAssertEqual(box.sent, [], "not recorded, not typed")
+            let retry = try XCTUnwrap(shell.dailyPassRetryAt[lead.space])
+            check(at: tomorrow + 60)
+            XCTAssertEqual(shell.dailyPassRetryAt[lead.space], retry, "it waits before trying again")
+            try FileManager.default.removeItem(at: file)
+            shell.dailyPassRetryAt = [:]
             check(at: tomorrow)
             XCTAssertEqual(box.sent, [DailyPass.prompt])
             check(at: tomorrow)

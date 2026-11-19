@@ -182,6 +182,7 @@ final class SpaceDefaultsTests: XCTestCase {
         let odd = SpaceDefaultsStore.decode(Data(#"{"leadDailyPassHour": 24}"#.utf8))
         XCTAssertEqual(odd.status, .readOnly(.unknownSettings(["leadDailyPassHour"])))
         XCTAssertEqual(odd.defaults.dailyPassHour, DailyPass.defaultHour)
+        XCTAssertFalse(odd.defaults.dailyPassIsOn, "an hour it can't read: off")
         XCTAssertFalse(SpaceDefaultsStore.unreadDefaults.dailyPassIsOn)
     }
 
