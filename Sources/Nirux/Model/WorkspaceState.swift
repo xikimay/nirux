@@ -881,7 +881,10 @@ extension WorkspaceState {
             guard let handle else { return }
             self?.setColumnWidth(for: handle, fraction: ColumnWidth.half.fraction)
         }
+        handle.wantsLayer = true
         stripView.addSubview(handle)
+        // Over a card passing over its neighbours, as it takes their clicks.
+        handle.layer?.zPosition = 2
         resizeHandles.append(handle)
     }
 
@@ -1062,6 +1065,11 @@ extension WorkspaceState {
             // autoresizing would push intermediate sizes to Ghostty during a
             // window resize before this layout pass runs (garbled display).
             col.terminalView?.autoresizingMask = []
+            // A card passing in or out scales about the middle it had: one
+            // that changes size is in place at once.
+            if col.view.frame.size != NSSize(width: widths[index], height: innerHeight) {
+                col.view.layer?.removeAnimation(forKey: Self.cardPassKey)
+            }
             col.view.frame = NSRect(x: xOffset, y: inset, width: widths[index], height: innerHeight)
             col.light?.frame = col.view.frame
             shadow(for: col).frame = col.view.frame
@@ -1136,6 +1144,7 @@ extension WorkspaceState {
     }
 
     static let cardGlideKey = "cardGlide"
+    static let cardPassKey = "cardPass"
     static let glideDuration: CFTimeInterval = 0.36
 
     /// Where a card shows in the strip, a glide on its way included, and

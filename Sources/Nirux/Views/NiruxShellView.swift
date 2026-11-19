@@ -696,7 +696,6 @@ extension NiruxShellView {
     static let arrivalDuration: TimeInterval = 0.38
     static let closeScale: CGFloat = 0.93
     static let closeDuration: TimeInterval = 0.24
-    static let cardPassKey = "cardPass"
 
     /// `scale` about a card's middle: a view's layer turns about its corner.
     static func scaledAboutMiddle(_ size: NSSize, by scale: CGFloat) -> CGAffineTransform {
@@ -704,20 +703,56 @@ extension NiruxShellView {
             .scaledBy(x: scale, y: scale)
     }
 
-    /// A card passing in or out, from `from` of its size to `to` about
-    /// its middle, held there until removed; its layer stays whole. An
-    /// explicit animation: AppKit doesn't animate a view's layer inside an
-    /// animation group.
-    static func passCard(_ view: NSView, from: CGFloat, to: CGFloat, duration: CFTimeInterval, curve: CAMediaTimingFunction) {
+    /// A card passing in or out, its own until another pass takes it: from
+    /// `from` (nil: where it shows) to `scale` of its size about its
+    /// middle and to `alpha`, held until the pass ends, on time; then
+    /// `then`, unless another pass took the card meanwhile. Its layer's
+    /// transform stays whole. Explicit: AppKit doesn't animate a view's
+    /// layer inside an animation group.
+    func passCard(
+        _ column: ColumnState, from: (scale: CGFloat, alpha: CGFloat)? = nil, to scale: CGFloat, alpha: CGFloat,
+        duration: CFTimeInterval, curve: CAMediaTimingFunction, then: @escaping @MainActor () -> Void
+    ) {
+        let view = column.view
+        guard let layer = view.layer else { return then() }
+        column.passes += 1
+        let pass = column.passes
+        let shown = layer.presentation()
+        let start = from ?? (
+            (shown?.value(forKeyPath: "transform.scale.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 1,
+            CGFloat(shown?.opacity ?? Float(view.alphaValue))
+        )
         let size = view.frame.size
-        let pass = CABasicAnimation(keyPath: "transform")
-        pass.fromValue = CATransform3DMakeAffineTransform(scaledAboutMiddle(size, by: from))
-        pass.toValue = CATransform3DMakeAffineTransform(scaledAboutMiddle(size, by: to))
-        pass.duration = duration
-        pass.timingFunction = curve
-        pass.fillMode = .forwards
-        pass.isRemovedOnCompletion = false
-        view.layer?.add(pass, forKey: cardPassKey)
+        view.alphaValue = alpha
+        let change = { (keyPath: String, from: Any, to: Any) -> CABasicAnimation in
+            let change = CABasicAnimation(keyPath: keyPath)
+            change.fromValue = from
+            change.toValue = to
+            return change
+        }
+        let group = CAAnimationGroup()
+        group.animations = [
+            change("transform", CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: start.scale)),
+                   CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: scale))),
+            change("opacity", Float(start.alpha), Float(alpha))
+        ]
+        group.duration = duration
+        group.timingFunction = curve
+        group.fillMode = .forwards
+        group.isRemovedOnCompletion = false
+        layer.add(group, forKey: WorkspaceState.cardPassKey)
+        // On time once the change is committed (a busy turn delays its
+        // start), not on the animation's completion, which a window out of
+        // view may never report.
+        DispatchQueue.main.async {
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak column] in
+                MainActor.assumeIsolated {
+                    guard let column, column.passes == pass else { return }
+                    column.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
+                    then()
+                }
+            }
+        }
     }
 
     /// A column comes in at its place from the front, over its neighbours:
@@ -731,21 +766,13 @@ extension NiruxShellView {
         workspace.showShadows()
         applyAgentLights()
         column.view.layer?.zPosition = 1
-        column.view.alphaValue = 0
-        let curve = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
-        Self.passCard(column.view, from: Self.arrivalScale, to: 1, duration: Self.arrivalDuration, curve: curve)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = Self.arrivalDuration
-            ctx.timingFunction = curve
-            column.view.animator().alphaValue = 1
-        }
-        // On time, not on the animation's completion, which a window out of
-        // view may never report.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.arrivalDuration) { [weak self, weak column, weak workspace] in
+        passCard(
+            column, from: (Self.arrivalScale, 0), to: 1, alpha: 1, duration: Self.arrivalDuration,
+            curve: CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+        ) { [weak self, weak column, weak workspace] in
             guard let self, let column, let workspace else { return }
             column.isArriving = false
             column.view.layer?.zPosition = 0
-            column.view.layer?.removeAnimation(forKey: Self.cardPassKey)
             workspace.showShadows()
             self.applyAgentLights()
         }
