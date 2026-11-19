@@ -381,7 +381,6 @@ final class AgentLightShellTests: XCTestCase {
             XCTAssertEqual(workspace.focusedIndex, 1)
             XCTAssertEqual(strip.frame.minX, left, "the strip where the click found it")
 
-            shell.clickEnded()
             RunLoop.main.run(until: Date().addingTimeInterval(NSEvent.doubleClickInterval + 0.1))
             let middle = workspace.containerView.bounds.width / 2
             XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, middle, accuracy: 1)

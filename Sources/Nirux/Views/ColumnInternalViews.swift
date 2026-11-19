@@ -340,13 +340,15 @@ final class ColumnResizeHandle: NSView {
     /// Dragging → its start and the pointer's way since, in points
     /// (absolute-set semantics, so a wobbly mouse can't compound errors).
     var onDrag: ((Start, CGFloat) -> Void)?
-    /// The drag is over.
+    /// A drag that moved is over; a click on the edge leaves the strip to
+    /// the double-click that may follow.
     var onDragEnd: (() -> Void)?
     /// Double-click → reset to the default width.
     var onReset: (() -> Void)?
 
     private var dragStartX: CGFloat = 0
     private var dragStart: Start?
+    private var moved = false
     private let line = NSView()
 
     override init(frame: NSRect) {
@@ -376,17 +378,19 @@ final class ColumnResizeHandle: NSView {
             return
         }
         dragStartX = event.locationInWindow.x
+        moved = false
         dragStart = onDragStart?()
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let dragStart else { return }
+        moved = true
         onDrag?(dragStart, event.locationInWindow.x - dragStartX)
     }
 
     override func mouseUp(with event: NSEvent) {
         guard dragStart != nil else { return }
         dragStart = nil
-        onDragEnd?()
+        if moved { onDragEnd?() }
     }
 }

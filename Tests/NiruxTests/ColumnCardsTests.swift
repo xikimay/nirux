@@ -200,20 +200,56 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[2].view.frame.minX + strip.frame.minX, inset, accuracy: 1)
     }
 
-    /// A held camera stays where it is while the focus moves (a click, an
-    /// edge grabbed); let go, it goes where the strip wants it.
-    func testAHeldCameraStaysWhileTheFocusMoves() throws {
+    /// A camera held for a card (a click focused it, its edge grabbed)
+    /// stays where it is while that card has the focus; once the focus
+    /// moves on, or the hold is let go, it goes where the strip wants it.
+    func testAHeldCameraStaysWhileItsCardHasTheFocus() throws {
         let workspace = workspace(columns: 4)
         let strip = try strip(of: workspace)
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
-        workspace.holdCamera()
+        workspace.holdCamera(for: 1)
         workspace.focusedIndex = 1
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         XCTAssertEqual(strip.frame.minX, 0)
 
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[2].view.frame.midX + strip.frame.minX, 500, accuracy: 1, "a keyboard move")
+
+        workspace.focusedIndex = 1
         workspace.heldCamera = nil
         workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
         XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1)
+    }
+
+    /// A click on a neighbour's edge focuses that neighbour and leaves the
+    /// strip where it was until the double-click that may follow, which
+    /// then resets the edge the pointer is on.
+    func testAClickOnANeighboursEdgeWaitsForTheDoubleClick() throws {
+        let workspace = workspace(columns: 4, width: 0.4)
+        let strip = try strip(of: workspace)
+        workspace.onColumnFocusRequested = { [weak workspace] index in
+            workspace?.focusedIndex = index
+            workspace?.layoutAndScroll(viewportWidth: 1000, height: 600, animated: true)
+        }
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let left = strip.frame.minX
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[1]
+        func event(_ type: NSEvent.EventType, clicks: Int) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
+            )!
+        }
+        handle.mouseDown(with: event(.leftMouseDown, clicks: 1))
+        handle.mouseUp(with: event(.leftMouseUp, clicks: 1))
+        XCTAssertEqual(workspace.focusedIndex, 1)
+        XCTAssertEqual(strip.frame.minX, left, "the strip where the click found it")
+
+        handle.mouseDown(with: event(.leftMouseDown, clicks: 2))
+        XCTAssertEqual(workspace.columns[1].widthFraction, ColumnWidth.half.fraction)
+        XCTAssertEqual(strip.frame.minX, left)
     }
 
     /// Grabbing a neighbour's edge focuses it, the strip staying where it

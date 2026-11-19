@@ -461,10 +461,14 @@ the text stays flat and sharp.
   middle, its neighbours cut alike on both sides; it stops at the strip's
   ends, where the first or last card keeps its air against the edge. A
   card wider than the viewport shows from its left edge. While the pointer
-  works on the strip the camera holds (`WorkspaceState.heldCamera`), so
-  that what lies under it stays there: a click on a card focuses it where
-  it is and the card glides to the middle once the click is over (after
-  the double-click interval); a dragged edge holds it until let go.
+  works on a card the camera holds (`WorkspaceState.heldCamera`), so
+  that what lies under it stays there: a click focuses the card where it
+  is, and the card glides to the middle once the button is up and the
+  double-click interval has passed (scheduled from the mouse-down: a
+  button's or a menu's tracking takes the mouse-up from the app's
+  monitor); a dragged edge holds it until let go. The hold lasts only
+  while that card has the focus, so a key that moves the focus is
+  followed at once.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within

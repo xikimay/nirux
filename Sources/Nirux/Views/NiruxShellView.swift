@@ -1058,24 +1058,28 @@ extension NiruxShellView {
 
     /// The pointer went down in the window. The column a click landed on
     /// (`index`) takes the focus without moving the strip, so that the
-    /// click, and a double-click, land on what was under the pointer; a
-    /// strip still held from the last click stays held.
+    /// click, a double-click or a drag land on what was under the pointer;
+    /// the strip goes where it wants once the button is up and a
+    /// double-click had its chance.
     func clickBegan(onColumn index: Int?) {
-        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(releaseHeldCameras), object: nil)
-        guard let index, let workspace = activeWorkspace, workspace.columns.indices.contains(index),
-              workspace.focusedIndex != index else { return }
-        workspace.holdCamera()
-        focusColumnByIndex(index)
+        if let index, let workspace = activeWorkspace, workspace.columns.indices.contains(index),
+           workspace.focusedIndex != index {
+            workspace.holdCamera(for: index)
+            focusColumnByIndex(index)
+        }
+        scheduleCameraRelease()
     }
 
-    /// The pointer went up: a strip a click held goes where it wants once
-    /// a double-click had its chance.
-    func clickEnded() {
-        guard workspaces.contains(where: { $0.heldCamera != nil }) else { return }
+    /// From any run loop pass, even one a button's or a menu's tracking
+    /// held back: the local monitor never sees the mouse-up they take.
+    private func scheduleCameraRelease() {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(releaseHeldCameras), object: nil)
         perform(#selector(releaseHeldCameras), with: nil, afterDelay: NSEvent.doubleClickInterval)
     }
 
     @objc private func releaseHeldCameras() {
+        // A drag or a long press goes on.
+        guard NSEvent.pressedMouseButtons & 1 == 0 else { return scheduleCameraRelease() }
         let held = workspaces.filter { $0.heldCamera != nil }
         guard !held.isEmpty else { return }
         for workspace in held { workspace.heldCamera = nil }

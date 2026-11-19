@@ -6,12 +6,8 @@ import WebKit
 extension NiruxApp {
     /// Click on a column to focus it without changing layout.
     func setupClickToFocus() {
-        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let shell = self?.shell else { return event }
-            if event.type == .leftMouseUp {
-                shell.clickEnded()
-                return event
-            }
             // Before the click is handled, so a toast it shows stays.
             if event.window === self?.mainWindow {
                 shell.dismissToastOnInput()

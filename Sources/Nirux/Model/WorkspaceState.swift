@@ -37,11 +37,11 @@ final class WorkspaceState {
         }
     }
     private var lastCameraX: CGFloat = 0
-    /// Where the camera stays while the pointer works on the strip: a card
-    /// a click focused, until the click is over
-    /// (`NiruxShellView.clickBegan`), or an edge being dragged. nil:
+    /// Where the camera stays while the pointer works on a card: one a click
+    /// focused, until the click is over (`NiruxShellView.clickBegan`), or
+    /// one whose edge is dragged. Only while that card has the focus; nil:
     /// where the strip wants it.
-    var heldCamera: CGFloat?
+    var heldCamera: (x: CGFloat, column: UUID)?
     let cwd: String
     var title: String
     var titleIsManual: Bool = false
@@ -866,7 +866,7 @@ extension WorkspaceState {
                   self.columns.indices.contains(index) else { return nil }
             // Grabbing a column's edge focuses it, as a click would, the
             // strip held so that the edge stays under the pointer.
-            self.holdCamera()
+            self.holdCamera(for: index)
             self.onColumnFocusRequested?(index)
             return (self.columns[index].view.frame.width, self.stripView.frame.width, self.lastCameraX)
         }
@@ -874,7 +874,9 @@ extension WorkspaceState {
             guard let self, let handle else { return }
             let viewport = self.containerView.bounds.width
             let width = Self.draggedWidth(from: start, viewport: viewport, by: delta)
-            self.heldCamera = Self.dragCamera(from: start, viewport: viewport, width: width)
+            self.heldCamera = Self.dragCamera(from: start, viewport: viewport, width: width).flatMap { x in
+                self.columns[safe: self.focusedIndex].map { (x, $0.id) }
+            }
             self.setColumnWidth(for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1))
         }
         // Let go: the camera goes where the strip now wants it.
@@ -918,9 +920,9 @@ extension WorkspaceState {
     static let minWidthFraction: CGFloat = 0.15
     static let maxWidthFraction: CGFloat = 2.0
 
-    /// Holds the camera where it is (`heldCamera`).
-    func holdCamera() {
-        heldCamera = lastCameraX
+    /// Holds the camera where it is for the column at `index` (`heldCamera`).
+    func holdCamera(for index: Int) {
+        heldCamera = columns[safe: index].map { (lastCameraX, $0.id) }
     }
 
     private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat) {
@@ -1115,8 +1117,8 @@ extension WorkspaceState {
         // strip's ends. A card wider than the viewport shows from its left
         // edge, with its air.
         let cameraX: CGFloat
-        if let camera = heldCamera {
-            cameraX = camera
+        if let held = heldCamera, held.column == columns[safe: focusedIndex]?.id {
+            cameraX = held.x
         } else if totalWidth <= viewportWidth {
             cameraX = -floor((viewportWidth - totalWidth) / 2)
         } else if fitAll {
