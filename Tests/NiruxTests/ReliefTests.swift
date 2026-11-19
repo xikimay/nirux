@@ -70,7 +70,8 @@ final class ReliefTests: XCTestCase {
         XCTAssertEqual(try shownMidY(of: icon.iconView), rest + RailItemView.liftHeight, accuracy: 0.01, "up, on screen")
         XCTAssertEqual(shadowOpacity(of: icon), 1, "over its shadow")
         XCTAssertEqual(icon.layer?.masksToBounds, false, "which nothing cuts")
-        // A shadow fades by itself once it exists: away, then back.
+        // Once committed, a shadow fades by itself: away, then back.
+        CATransaction.flush()
         icon.mouseExited(with: Self.exit)
         XCTAssertEqual(shadow(of: icon)?.animationKeys(), [Relief.key], "one fade, not CA's own beside it")
         icon.mouseEntered(with: Self.enter)
