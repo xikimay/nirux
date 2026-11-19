@@ -13,26 +13,30 @@ extension NiruxShellView {
         let title = MissionPromptText.quoted(task.title)
         if leadMission(of: task, lead: leadID) == nil, let refusal = leadRefusal(for: task, title: title) { return answer(refusal, true) }
         guard ReviewFindings.lines.fileURL(spaceID: space.id) != nil else { return answer("This space can’t keep review findings.", true) }
-        guard case .success(let findings) = ReviewFindings.findings(arguments["findings"]) else {
-            return answer("findings must list 1 to \(ReviewFindings.maxFindings) findings, each {kind, text}.", true)
+        let findings: [ReviewFindings.Finding]
+        switch ReviewFindings.findings(arguments["findings"]) {
+        case .success(let read): findings = read
+        case .failure(let refusal): return answer(refusal.reason, true)
         }
-        let key = task.gitBranch ?? task.taskFolder ?? task.title
-        ReviewFindings.record(findings, task: key, pullRequest: task.prInfo?.number, spaceID: space.id) { outcome in
+        let review = ReviewFindings.Review(
+            findings: findings, workspace: task.id, task: task.gitBranch ?? task.taskFolder ?? task.title, pullRequest: task.prInfo?.number
+        )
+        ReviewFindings.record(review, spaceID: space.id) { outcome in
             switch outcome {
-            case .recorded(let entry, let kinds):
-                answer(ReviewFindings.answer(for: entry, title: title, kinds: kinds), false)
-            case .full:
-                answer("The space’s review log is full: nothing was recorded. It frees up as reviews pass 30 days.", true)
+            case .recorded(let entry, let kinds): answer(ReviewFindings.answer(for: entry, title: title, kinds: kinds), false)
+            case .notRecorded(let reason): answer("Nothing was recorded. " + reason, true)
             }
         }
     }
 
     /// Reads GitHub off the main thread, then answers the digest and marks
-    /// its window read.
+    /// its window read, unless GitHub may answer next time.
     func leadDailyPass(in space: WorkspaceProfile, lead: WorkspaceState, answer: @escaping LeadAnswer) {
         guard let briefURL = SpaceBrief.briefURL(spaceID: space.id) else { return answer("This space keeps no daily pass.", true) }
-        let window = DailyPassState.load(spaceID: space.id).window(now: Date().timeIntervalSince1970)
+        let (window, next) = DailyPassState.load(spaceID: space.id).reading(now: Date().timeIntervalSince1970)
+        // Its workspaces closed since, by the sessions they held, too.
         let members = Set(workspaces.filter { $0.profileID == space.id }.map(\.id))
+            .union(sessionLedger.sessions(inSpace: space.id).map(\.workspaceID))
         _ = MissionStore.shared.ensureLoaded()
         let missions = MissionStore.shared.missions.filter { mission in
             mission.parentWorkspaceID == lead.id || members.contains(mission.childWorkspaceID) || members.contains(mission.parentWorkspaceID)
@@ -46,24 +50,27 @@ extension NiruxShellView {
         )
         let folders = BoardSections.repositoryAnchors(space.anchors).compactMap(\.folder)
         let spaceID = space.id
-        Self.readDailyPassSources(folders: folders, spaceID: spaceID, since: window.start) { repositories, findings in
+        Self.readDailyPassSources(folders: folders, spaceID: spaceID, window: window) { [weak self] repositories, findings in
             var facts = base
             facts.findings = findings
             facts.repositories = repositories
             (facts.triagedRuns, facts.flakyTests) = DailyPass.ciFacts(ciStore, repositories: repositories.map(\.name), window: window)
-            do {
-                try DailyPassState(start: window.start, end: window.end).save(spaceID: spaceID)
-            } catch {
-                NiruxDebugLog.log("Daily pass: couldn't record the window read, so the next pass reads it again: \(error)")
+            // A space deleted meanwhile keeps no file.
+            if let next, !facts.readsAgain, self?.profiles.contains(where: { $0.id == spaceID }) == true {
+                do {
+                    try next.save(spaceID: spaceID)
+                } catch {
+                    NiruxDebugLog.log("Daily pass: couldn't record the window read, so the next pass reads it again: \(error)")
+                }
             }
             answer(DailyPass.digest(facts), false)
         }
     }
 
     /// The space's GitHub repositories (each repository's base remote) and
-    /// what GitHub says of them since `since`, and its recorded reviews.
+    /// what GitHub says of them in the window, and its recorded reviews.
     nonisolated private static func readDailyPassSources(
-        folders: [String], spaceID: String, since: TimeInterval,
+        folders: [String], spaceID: String, window: DailyPass.Window,
         completion: @escaping @MainActor @Sendable ([DailyPass.RepositoryReport], [ReviewFindings.Entry]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -73,7 +80,7 @@ extension NiruxShellView {
                       !names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { continue }
                 names.append(name)
             }
-            let reports = DailyPass.readGitHub(names, since: since, read: DailyPass.installedGitHub)
+            let reports = DailyPass.readGitHub(names, window: window, read: DailyPass.installedGitHub)
             let findings = ReviewFindings.lines.queue.sync {
                 ReviewFindings.lines.trim(spaceID: spaceID)
                 return ReviewFindings.lines.load(spaceID: spaceID)

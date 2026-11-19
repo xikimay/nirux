@@ -149,7 +149,9 @@ final class LazyRestoreTests: XCTestCase {
         let longAgo = Date().timeIntervalSince1970 - 40 * 86_400
         let space = WorkspaceProfile.defaultID
         LoopLog.lines.append(.init(time: longAgo, tool: "Bash", target: "swift build", mode: nil), spaceID: space, stateDirectory: state)
-        ReviewFindings.lines.append(.init(time: longAgo, task: "feat/x", round: 1, findings: []), spaceID: space, stateDirectory: state)
+        ReviewFindings.lines.append(
+            .init(time: longAgo, workspace: "W", task: "feat/x", round: 1, findings: []), spaceID: space, stateDirectory: state
+        )
         try withRestoredShell(layout()) { _, _ in
             LoopLog.lines.queue.sync {}
             ReviewFindings.lines.queue.sync {}

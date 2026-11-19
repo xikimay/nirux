@@ -20,18 +20,20 @@ enum ReviewFindings {
 
     struct Entry: Codable, Equatable, Sendable {
         var time: TimeInterval
-        /// Its branch, else its folder or title: what tells one task's
-        /// reviews from another's.
+        /// The task's workspace: what tells one task's reviews from
+        /// another's, whatever its branch or pull request become.
+        var workspace: String
+        /// Its branch, else its folder or title.
         var task: String
         var pullRequest: Int?
-        /// The Nth review recorded for this task and pull request.
+        /// The Nth review recorded for this task.
         var round: Int
         var findings: [Finding]
 
         /// How the daily pass names it: its pull request, else the task.
         var handle: String { pullRequest.map { "#\($0)" } ?? task }
 
-        enum CodingKeys: String, CodingKey { case time = "t", task, pullRequest = "pr", round, findings }
+        enum CodingKeys: String, CodingKey { case time = "t", workspace, task, pullRequest = "pr", round, findings }
     }
 
     // MARK: - A call's findings
@@ -87,7 +89,7 @@ enum ReviewFindings {
 
     /// A finding as a kind lists it.
     struct Sighting: Equatable, Sendable {
-        let task: String
+        let workspace: String
         let handle: String
         let round: Int
         let time: TimeInterval
@@ -102,10 +104,10 @@ enum ReviewFindings {
         /// The tasks it showed up in, by handle, each once, in order.
         var handles: [String] {
             var seen = Set<String>()
-            return sightings.filter { seen.insert($0.task).inserted }.map(\.handle)
+            return sightings.filter { seen.insert($0.workspace).inserted }.map(\.handle)
         }
 
-        var taskCount: Int { Set(sightings.map(\.task)).count }
+        var taskCount: Int { Set(sightings.map(\.workspace)).count }
     }
 
     /// Every kind of `entries`: the ones seen in the most tasks first, then
@@ -115,7 +117,7 @@ enum ReviewFindings {
         for entry in entries.sorted(by: { $0.time < $1.time }) {
             for finding in entry.findings {
                 sightings[finding.kind, default: []].append(Sighting(
-                    task: entry.task, handle: entry.handle, round: entry.round, time: entry.time, text: finding.text
+                    workspace: entry.workspace, handle: entry.handle, round: entry.round, time: entry.time, text: finding.text
                 ))
             }
         }
@@ -130,33 +132,46 @@ enum ReviewFindings {
         /// The entry written, and the space's kinds of the last 30 days, it
         /// included.
         case recorded(Entry, [Kind])
-        /// The file reached its size limit: nothing was written.
-        case full
+        /// Nothing was written, for this reason.
+        case notRecorded(String)
     }
 
-    /// Records a review of `task` on `lines`'s queue, as the Nth for that
-    /// task and pull request; `completion` hears it on the main actor.
+    /// The review of a task, as `record` takes it.
+    struct Review: Sendable {
+        let findings: [Finding]
+        let workspace: String
+        /// Its branch, else its folder or title.
+        let task: String
+        let pullRequest: Int?
+    }
+
+    /// Records a review on `lines`'s queue, as the next round of its task;
+    /// `completion` hears it on the main actor.
     static func record(
-        _ findings: [Finding], task: String, pullRequest: Int?, spaceID: String, now: TimeInterval = Date().timeIntervalSince1970,
+        _ review: Review, spaceID: String, now: TimeInterval = Date().timeIntervalSince1970,
         stateDirectory: URL = Persistence.stateDirectory, completion: @escaping @MainActor @Sendable (Outcome) -> Void
     ) {
         lines.queue.async {
-            let outcome = recordNow(findings, task: task, pullRequest: pullRequest, spaceID: spaceID, now: now, stateDirectory: stateDirectory)
+            let outcome = recordNow(review, spaceID: spaceID, now: now, stateDirectory: stateDirectory)
             DispatchQueue.main.async { @MainActor in completion(outcome) }
         }
     }
 
     /// `record`'s work, on the caller's thread. The trim leaves the last 30
     /// days only.
-    static func recordNow(
-        _ findings: [Finding], task: String, pullRequest: Int?, spaceID: String, now: TimeInterval, stateDirectory: URL
-    ) -> Outcome {
+    static func recordNow(_ review: Review, spaceID: String, now: TimeInterval, stateDirectory: URL) -> Outcome {
         lines.trim(spaceID: spaceID, now: now, stateDirectory: stateDirectory)
-        guard !lines.isFull(spaceID: spaceID, stateDirectory: stateDirectory) else { return .full }
+        guard !lines.isFull(spaceID: spaceID, stateDirectory: stateDirectory) else {
+            return .notRecorded("The space’s review log is full: it frees up as reviews pass 30 days.")
+        }
         let earlier = lines.load(spaceID: spaceID, stateDirectory: stateDirectory)
-        let round = earlier.filter { $0.task == task && $0.pullRequest == pullRequest }.count + 1
-        let entry = Entry(time: now, task: task, pullRequest: pullRequest, round: round, findings: findings)
-        lines.append(entry, spaceID: spaceID, stateDirectory: stateDirectory)
+        let entry = Entry(
+            time: now, workspace: review.workspace, task: review.task, pullRequest: review.pullRequest,
+            round: earlier.filter { $0.workspace == review.workspace }.count + 1, findings: review.findings
+        )
+        guard lines.append(entry, spaceID: spaceID, stateDirectory: stateDirectory) else {
+            return .notRecorded("Nirux couldn’t write the space’s review log.")
+        }
         return .recorded(entry, kinds(earlier + [entry]))
     }
 

@@ -33,10 +33,43 @@ final class DailyPassTests: XCTestCase {
         XCTAssertNil(DailyPass.mergedPullRequests(Data("{}".utf8)))
 
         let runs = Data("""
-            [{"databaseId": 1, "attempt": 1, "headBranch": "a", "conclusion": "success", "workflowName": "Tests"},
-             {"databaseId": 2, "attempt": 3, "headBranch": "feat/floors", "conclusion": "", "workflowName": "Tests"}]
+            [{"databaseId": 1, "attempt": 1, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"},
+             {"databaseId": 2, "attempt": 3, "headBranch": "feat/floors", "conclusion": "", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"}]
             """.utf8)
-        XCTAssertEqual(DailyPass.reruns(runs), [DailyPass.Rerun(id: 2, attempt: 3, branch: "feat/floors", workflow: "Tests", conclusion: "running")])
+        XCTAssertEqual(DailyPass.reruns(runs), [
+            DailyPass.Rerun(id: 2, attempt: 3, branch: "feat/floors", workflow: "Tests", conclusion: "running", startedAt: now - hour)
+        ])
+    }
+
+    /// Each repository read with its own calls, in the order given; what
+    /// merged or was rerun outside the window stays out (a run counts by
+    /// its last attempt's start); what gh couldn't answer is said, and read
+    /// again unless trying again can't help; a list at gh's limit says so.
+    func testEachRepositoryIsReadAndItsProblemsSaid() {
+        let pulls = Data("""
+            [{"number": 3, "title": "After", "headRefName": "c", "mergedAt": "2027-01-15T09:00:00Z"},
+             {"number": 2, "title": "In", "headRefName": "b", "mergedAt": "2027-01-15T07:00:00Z"},
+             {"number": 1, "title": "Before", "headRefName": "a", "mergedAt": "2027-01-13T07:00:00Z"}]
+            """.utf8)
+        let runs = Data("""
+            [{"databaseId": 7, "attempt": 2, "headBranch": "b", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-15T07:00:00Z"},
+             {"databaseId": 6, "attempt": 2, "headBranch": "a", "conclusion": "success", "workflowName": "Tests", "startedAt": "2027-01-14T07:00:00Z"}]
+            """.utf8)
+        let many = Data(("[" + (1...DailyPass.mergedLimit).map { "{\"number\": \($0), \"title\": \"t\", \"mergedAt\": \"2027-01-15T07:00:00Z\"}" }
+            .joined(separator: ",") + "]").utf8)
+        let reports = DailyPass.readGitHub(["acme/one", "acme/two", "acme/three", "acme/busy"], window: window) { arguments in
+            if arguments.contains("acme/two") { return .failure(DailyPass.ReadFailure(message: "HTTP 502")) }
+            if arguments.contains("acme/three") { return .failure(DailyPass.ReadFailure(message: "gh isn’t installed", retryable: false)) }
+            if arguments.contains("acme/busy") { return .success(arguments.first == "pr" ? many : Data("[]".utf8)) }
+            return .success(arguments.first == "pr" ? pulls : runs)
+        }
+        XCTAssertEqual(reports.map(\.name), ["acme/one", "acme/two", "acme/three", "acme/busy"])
+        XCTAssertEqual(reports[0].merged.map(\.number), [2])
+        XCTAssertEqual(reports[0].reruns.map(\.id), [7])
+        XCTAssertEqual(reports[0].problems, [])
+        XCTAssertEqual(reports[1].problems, ["merged pull requests: HTTP 502", "workflow runs: HTTP 502"])
+        XCTAssertEqual(reports.map(\.readsAgain), [false, true, false, false])
+        XCTAssertEqual(reports[3].problems, ["only the \(DailyPass.mergedLimit) newest merged pull requests were read"])
     }
 
     private func event(
@@ -73,6 +106,9 @@ final class DailyPassTests: XCTestCase {
         var result = event(.completed, "Done", at: now - 4 * hour)
         result.parentTypedAt = now - 4 * hour + 30
         let waiting = event(.instruction, "Still waiting", at: now - 2 * hour)
+        // Answered by its parent long after: Nirux types one for an hour only.
+        let late = event(.question, "Late?", at: now - 6 * hour, id: "q3")
+        let lateAnswer = event(.response, "Yes", at: now - 3 * hour, inReplyTo: "q3")
         var lateQuestion = event(.question, "Which base?", at: now - 9 * hour, id: "q1")
         lateQuestion.parentTypedAt = now - 6 * hour
         let newer = event(.question, "And the tests?", at: now - 8 * hour, id: "q2")
@@ -80,39 +116,51 @@ final class DailyPassTests: XCTestCase {
         answer.childConsumedAt = now - 7 * hour
 
         let facts = DailyPass.missionFacts(
-            [mission([lateTell, quickTell, lostTell, oldTell, crossingTell, result, waiting, lateQuestion, newer, answer])],
+            [mission([lateTell, quickTell, lostTell, oldTell, crossingTell, result, waiting, lateQuestion, newer, answer, late, lateAnswer])],
             window: window, timeZone: utc
         )
         let summary = facts.map { "\($0.kind.rawValue) \($0.message) \($0.excerpt): \($0.detail)" }
         XCTAssertEqual(summary, [
-            "given up tell to feat/x Lost: given up untyped after 1 d",
+            "given up tell to feat/x Lost: given up after 1 d",
             "held tell to feat/x Fix the layer: typed 3 h later",
             "held question from feat/x Which base?: typed into its parent 3 h later",
             "held question from feat/x And the tests?: not typed into its parent after 8 h",
             "crossed answer to feat/x main: typed at 01-15 01:00, after its newer question (01-15 00:00)",
+            "held question from feat/x Late?: answered 3 h later, never typed into its parent",
             "crossed tell to feat/x Also do Y: typed at 01-15 05:00, after its result (01-15 04:00)",
             "held tell to feat/x Still waiting: still untyped after 2 h"
         ])
     }
 
-    /// A question handed to the user, with their answer, and one they
-    /// answered in Nirux without being asked: their words are corrections.
+    /// A question handed to the user, with their answer (or the Lead's,
+    /// once it heard it), and one they answered in Nirux without being
+    /// asked: their words are corrections. A line that looks like a secret
+    /// is withheld.
     func testTheUsersAnswers() {
         var handed = event(.question, "Ship it?", at: now - 5 * hour, id: "q1")
         handed.handedToUserBecause = "a product call"
         handed.parentTypedAt = now - 5 * hour
-        var answer = event(.response, "Not yet:\nwait for the review.", at: now - 4 * hour, inReplyTo: "q1")
+        var answer = event(.response, "Not yet:\nwait for the review.\nAPI_TOKEN=abcd1234efgh5678", at: now - 4 * hour, inReplyTo: "q1")
         answer.answeredByUser = true
         var own = event(.question, "Which name?", at: now - 3 * hour, id: "q2")
         own.parentTypedAt = now - 3 * hour
         var ownAnswer = event(.response, "Call it Floors", at: now - 2 * hour, inReplyTo: "q2")
         ownAnswer.answeredByUser = true
+        var relayed = event(.question, "Which port?", at: now - 2 * hour, id: "q4")
+        relayed.handedToUserBecause = "a setting"
+        relayed.parentTypedAt = now - 2 * hour
+        let relayedAnswer = event(.response, "8080", at: now - 90 * 60, inReplyTo: "q4")
         var unanswered = event(.question, "Rename?", at: now - hour, id: "q3")
         unanswered.handedToUserBecause = "naming"
 
-        let facts = DailyPass.missionFacts([mission([handed, answer, own, ownAnswer, unanswered])], window: window, timeZone: utc)
-        XCTAssertEqual(facts.map(\.kind), [.handedToUser, .answeredByUser, .handedToUser])
-        XCTAssertEqual(facts.map(\.answer), ["Not yet: wait for the review.", "Call it Floors", nil])
+        let facts = DailyPass.missionFacts(
+            [mission([handed, answer, own, ownAnswer, relayed, relayedAnswer, unanswered])], window: window, timeZone: utc
+        )
+        XCTAssertEqual(facts.map(\.kind), [.handedToUser, .answeredByUser, .handedToUser, .handedToUser])
+        XCTAssertEqual(facts.map(\.answer), [
+            "Not yet: wait for the review. [withheld: it looks like a secret]", "Call it Floors", "8080", nil
+        ])
+        XCTAssertEqual(facts.map(\.answeredByUser), [true, true, false, false])
         XCTAssertEqual(facts.first?.detail, "why: a product call")
     }
 
@@ -155,18 +203,22 @@ final class DailyPassTests: XCTestCase {
                 number: 611, title: "Floors", branch: "feat/floors", mergedAt: now - hour, why: "The floors move.",
                 roundCommits: ["fix: review round 1"], rounds: 1
             )],
-            reruns: [DailyPass.Rerun(id: 44, attempt: 2, branch: "feat/floors", workflow: "Tests", conclusion: "success")]
+            reruns: [DailyPass.Rerun(id: 44, attempt: 2, branch: "feat/floors", workflow: "Tests", conclusion: "success", startedAt: now - hour)]
         )
         return DailyPass.Facts(
             spaceName: "Nirux", window: window,
             findings: [
-                ReviewFindings.Entry(time: now - 10 * 24 * hour, task: "feat/depth", pullRequest: 594, round: 1, findings: [layer]),
-                ReviewFindings.Entry(time: now - 20 * 24 * hour, task: "feat/old", pullRequest: 500, round: 1,
+                ReviewFindings.Entry(time: now - 10 * 24 * hour, workspace: "W1", task: "feat/depth", pullRequest: 594, round: 1, findings: [layer]),
+                ReviewFindings.Entry(time: now - 20 * 24 * hour, workspace: "W2", task: "feat/old", pullRequest: 500, round: 1,
                                      findings: [ReviewFindings.Finding(kind: "only-old", text: "x")]),
-                ReviewFindings.Entry(time: now - 2 * hour, task: "feat/floors", pullRequest: 611, round: 3, findings: [layer])
+                // Recorded before its pull request opened: it counts all the same.
+                ReviewFindings.Entry(time: now - 2 * hour, workspace: "W3", task: "feat/floors", pullRequest: nil, round: 3, findings: [layer])
             ],
             repositories: [report], triagedRuns: [], flakyTests: [], missions: [],
-            proposals: [proposal("Waiting rule."), proposal("Dismissed rule.", dismissedAt: now - 30 * 24 * hour)],
+            proposals: [
+                proposal("Waiting rule."), proposal("Dismissed rule.", dismissedAt: now - 30 * 24 * hour),
+                proposal("Dismissed long ago.", dismissedAt: now - 100 * 24 * hour)
+            ],
             briefRules: ["Tests wait on state. (learned 2026-11-11, #395)"]
         )
     }
@@ -174,11 +226,11 @@ final class DailyPassTests: XCTestCase {
     /// What to propose (the free slots under the pending limit), the kinds
     /// the window saw with where else they showed up, each pull request's
     /// rounds (its recorded reviews count), reruns, and the rules to avoid.
-    func testTheDigestSaysWhatToProposeAndCitesItsFacts() {
+    func testTheDigestSaysWhatToProposeAndCitesItsFacts() throws {
         let digest = DailyPass.digest(facts(), timeZone: utc)
         XCTAssertTrue(digest.hasPrefix("# Daily pass · Nirux · since 01-14 08:00"), digest)
         XCTAssertTrue(digest.contains("propose at most 2 with propose_rule (1 of 3 already wait for the user)"), digest)
-        let kind = "- backing-layer · 2 tasks: #594 round 1 “The layer was replaced”; #611 round 3 “The layer was replaced”"
+        let kind = "- backing-layer · 2 tasks: #594 round 1 “The layer was replaced”; feat/floors round 3 “The layer was replaced”"
         XCTAssertTrue(digest.contains(kind), digest)
         XCTAssertFalse(digest.contains("only-old"), digest)
         XCTAssertTrue(digest.contains("- #611 “Floors” · branch feat/floors · 3 review rounds · 1 rerun\n  Why: The floors move."), digest)
@@ -186,19 +238,31 @@ final class DailyPassTests: XCTestCase {
         XCTAssertTrue(digest.contains("## Rules waiting for the user\n- “Waiting rule.” (#1, #2)"), digest)
         XCTAssertTrue(digest.contains("## The brief's rules learned\n- Tests wait on state. (learned 2026-11-11, #395)"), digest)
         XCTAssertTrue(digest.contains("## Rules dismissed in the last 90 days\n- “Dismissed rule.”"), digest)
+        XCTAssertFalse(digest.contains("Dismissed long ago."), digest)
+        let rules = digest.range(of: "## The brief's rules learned")?.lowerBound
+        let pulls = digest.range(of: "## Pull requests merged")?.lowerBound
+        XCTAssertLessThan(try XCTUnwrap(rules), try XCTUnwrap(pulls), "a cut takes the end: the rules come first")
+        XCTAssertFalse(digest.contains("What GitHub didn’t say"), digest)
 
         var full = facts()
         full.proposals = (1...3).map { proposal("Rule \($0).") }
         XCTAssertTrue(DailyPass.digest(full, timeZone: utc).contains("Propose no rule now: 3 already wait for the user."))
     }
 
-    /// A day with nothing to read says so; a huge one is cut.
+    /// A day with nothing to read says so, unless GitHub couldn't say:
+    /// that window is read again; a huge day is cut.
     func testANothingDayAndAHugeOne() {
         var quiet = facts()
         quiet.findings = quiet.findings.filter { !window.contains($0.time) }
         quiet.repositories = []
         XCTAssertFalse(quiet.hasNews)
         XCTAssertTrue(DailyPass.digest(quiet, timeZone: utc).contains("Nothing happened since 01-14 08:00"))
+        var unread = quiet
+        unread.repositories = [DailyPass.RepositoryReport(name: "acme/one", problems: ["merged pull requests: HTTP 502"], readsAgain: true)]
+        XCTAssertTrue(unread.hasNews && unread.readsAgain)
+        XCTAssertTrue(DailyPass.digest(unread, timeZone: utc).contains(
+            "## What GitHub didn’t say\n- acme/one: merged pull requests: HTTP 502\nThe next pass reads this window again."
+        ))
         quiet.proposals.append(proposal("Added today.", addedAt: now - hour))
         XCTAssertTrue(quiet.hasNews, "a rule decided is news")
 
@@ -212,14 +276,19 @@ final class DailyPassTests: XCTestCase {
     }
 
     /// The first pass reads the last day; the next starts where it ended,
-    /// unless it comes within two hours (the same window, longer); never
-    /// more than a week. Saved 0600.
+    /// unless it comes within two hours: the same window, longer, saved
+    /// as it was, so calls in a row don't stretch it. Never more than a
+    /// week. Saved 0600.
     func testTheWindowStartsWhereTheLastPassEnded() throws {
-        XCTAssertEqual(DailyPassState().window(now: now), DailyPass.Window(start: now - 24 * hour, end: now))
+        let first = DailyPassState().reading(now: now)
+        XCTAssertEqual(first.window, DailyPass.Window(start: now - 24 * hour, end: now))
+        XCTAssertEqual(first.next, DailyPassState(start: now - 24 * hour, end: now))
         let last = DailyPassState(start: now - 30 * hour, end: now - 5 * hour)
-        XCTAssertEqual(last.window(now: now), DailyPass.Window(start: now - 5 * hour, end: now))
-        XCTAssertEqual(last.window(now: now - 4 * hour), DailyPass.Window(start: now - 30 * hour, end: now - 4 * hour))
-        XCTAssertEqual(DailyPassState(start: 0, end: 1).window(now: now).start, now - 7 * 24 * hour)
+        XCTAssertEqual(last.reading(now: now).window, DailyPass.Window(start: now - 5 * hour, end: now))
+        let again = last.reading(now: now - 4 * hour)
+        XCTAssertEqual(again.window, DailyPass.Window(start: now - 30 * hour, end: now - 4 * hour))
+        XCTAssertNil(again.next)
+        XCTAssertEqual(DailyPassState(start: 0, end: 1).reading(now: now).window.start, now - 7 * 24 * hour)
 
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-pass-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: state) }

@@ -188,9 +188,9 @@ enum LeadTools {
             definition(
                 recordReview, title: "Record a review's findings",
                 description: """
-                    Record what your review of a task found, once you send it: each finding with its kind, a short \
-                    class name you reuse whenever a finding is of the same class, in any task ("animation-end-deadline", \
-                    "test-waits-on-sleep"). Any task of this space. Nirux keeps them 30 days: the answer lists the kinds \
+                    Record what your review of a task found, once you send it: one call per review, with all its \
+                    findings, each with its kind, a short class name you reuse whenever a finding is of the same class, \
+                    in any task ("animation-end-deadline", "test-waits-on-sleep"). Any task of this space. Nirux keeps them 30 days: the answer lists the kinds \
                     the space uses, and says when one shows up in a second task, where propose_rule comes in. The daily \
                     pass reads them.
                     """,

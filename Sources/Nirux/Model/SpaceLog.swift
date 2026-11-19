@@ -49,20 +49,37 @@ struct SpaceLog<Entry: Codable & Sendable>: Sendable {
         return size >= maxFileBytes
     }
 
-    func append(_ entry: Entry, spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
+    /// Whether the line was written.
+    @discardableResult
+    func append(_ entry: Entry, spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> Bool {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
-              var line = try? JSONEncoder().encode(entry) else { return }
+              var line = try? JSONEncoder().encode(entry) else { return false }
         trim(spaceID: spaceID, now: time(entry), stateDirectory: stateDirectory)
-        guard !isFull(spaceID: spaceID, stateDirectory: stateDirectory) else { return }
+        guard !isFull(spaceID: spaceID, stateDirectory: stateDirectory) else { return false }
         line.append(UInt8(ascii: "\n"))
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let descriptor = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
             guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
             try FileHandle(fileDescriptor: descriptor, closeOnDealloc: true).write(contentsOf: line)
+            return true
         } catch {
             NiruxDebugLog.log("\(fileName): could not append to \(url.path): \(error)")
+            return false
         }
+    }
+
+    /// The file's first line, read in chunks up to the read limit; nil for
+    /// an empty or unreadable file.
+    private func firstLine(of url: URL) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        var head = Data()
+        while head.count < readLimit, let chunk = try? handle.read(upToCount: 4096), !chunk.isEmpty {
+            head.append(chunk)
+            if chunk.contains(UInt8(ascii: "\n")) { break }
+        }
+        return head.split(separator: UInt8(ascii: "\n"), maxSplits: 1).first.map { Data($0) }
     }
 
     /// The lines it can read, in the order they came.
@@ -83,10 +100,7 @@ struct SpaceLog<Entry: Codable & Sendable>: Sendable {
         guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
               let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               attributes[.type] as? FileAttributeType == .typeRegular,
-              let handle = try? FileHandle(forReadingFrom: url) else { return }
-        let head = (try? handle.read(upToCount: 4096)) ?? nil
-        try? handle.close()
-        guard let first = head?.split(separator: UInt8(ascii: "\n"), maxSplits: 1).first else { return }
+              let first = firstLine(of: url) else { return }
         let firstTime = (try? JSONDecoder().decode(Entry.self, from: first)).map(time) ?? -.infinity
         guard firstTime < now - Double(keptDays) * Self.day else { return }
         // Never over a file it couldn't read.

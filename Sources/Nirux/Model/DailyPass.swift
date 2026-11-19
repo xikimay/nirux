@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The daily pass (docs/design/daily-pass.md): what happened in a space
 /// since its last pass, which its Lead reads (`daily_pass`) to propose
@@ -53,6 +54,8 @@ enum DailyPass {
         var branch: String
         var workflow: String
         var conclusion: String
+        /// When its latest attempt started.
+        var startedAt: TimeInterval
     }
 
     /// What GitHub said of one of the space's repositories.
@@ -63,16 +66,21 @@ enum DailyPass {
         var reruns: [Rerun] = []
         /// Why part of it couldn't be read.
         var problems: [String] = []
+        /// A read failed that may work next time: the next pass reads the
+        /// window again.
+        var readsAgain = false
     }
 
     struct ReadFailure: Error, Equatable {
         let message: String
+        /// False when trying again won't help (no gh).
+        var retryable = true
     }
 
     typealias GitHubRead = @Sendable (_ arguments: [String]) -> Result<Data, ReadFailure>
 
     static let installedGitHub: GitHubRead = { arguments in
-        guard let ghPath = PRDetect.installedGHPath() else { return .failure(ReadFailure(message: "gh isn’t installed")) }
+        guard let ghPath = PRDetect.installedGHPath() else { return .failure(ReadFailure(message: "gh isn’t installed", retryable: false)) }
         guard let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: 30, maxStandardOutputBytes: 8_000_000) else {
             return .failure(ReadFailure(message: "gh didn’t answer within 30 s"))
         }
@@ -83,37 +91,58 @@ enum DailyPass {
         return .success(result.standardOutput)
     }
 
+    /// Past 49, gh's query (each commit's authors) passes GitHub's 500,000
+    /// nodes and is refused.
+    static let mergedLimit = 40
+    /// How long before the window a run that is rerun in it may have
+    /// started: `--created` reads a run's first attempt.
+    static let rerunReach: TimeInterval = 2 * 86_400
+
     static func mergedArguments(repository: String, since: TimeInterval) -> [String] {
         [
             "pr", "list", "--repo", repository, "--state", "merged", "--search", "merged:>=" + isoTime(since),
-            "--json", "number,title,headRefName,mergedAt,body,commits", "--limit", "100"
+            "--json", "number,title,headRefName,mergedAt,body,commits", "--limit", "\(mergedLimit)"
         ]
     }
 
     static func runArguments(repository: String, since: TimeInterval) -> [String] {
         [
-            "run", "list", "--repo", repository, "--created", ">=" + isoTime(since),
-            "--json", "databaseId,attempt,headBranch,conclusion,workflowName", "--limit", "500"
+            "run", "list", "--repo", repository, "--created", ">=" + isoTime(since - rerunReach),
+            "--json", "databaseId,attempt,headBranch,conclusion,workflowName,startedAt", "--limit", "1000"
         ]
     }
 
-    /// Each repository's merged pull requests and reruns since `since`;
-    /// never on the main thread.
-    static func readGitHub(_ repositories: [String], since: TimeInterval, read: GitHubRead) -> [RepositoryReport] {
-        repositories.map { name in
-            var report = RepositoryReport(name: name)
-            switch read(mergedArguments(repository: name, since: since)).map(mergedPullRequests) {
-            case .success(let merged?): report.merged = merged.filter { $0.mergedAt >= since }
-            case .success(nil): report.problems.append("its merged pull requests didn’t read as gh’s JSON")
-            case .failure(let failure): report.problems.append("merged pull requests: \(failure.message)")
-            }
-            switch read(runArguments(repository: name, since: since)).map(reruns) {
-            case .success(let reruns?): report.reruns = reruns
-            case .success(nil): report.problems.append("its workflow runs didn’t read as gh’s JSON")
-            case .failure(let failure): report.problems.append("workflow runs: \(failure.message)")
-            }
-            return report
+    /// Each repository's pull requests merged and runs rerun in the
+    /// window, the repositories read at once: the call's wait doesn't grow
+    /// with their number. Never on the main thread.
+    static func readGitHub(_ repositories: [String], window: Window, read: GitHubRead) -> [RepositoryReport] {
+        let reports = OSAllocatedUnfairLock(initialState: [Int: RepositoryReport]())
+        DispatchQueue.concurrentPerform(iterations: repositories.count) { index in
+            let report = readGitHub(repositories[index], window: window, read: read)
+            reports.withLock { $0[index] = report }
         }
+        return reports.withLock { found in repositories.indices.compactMap { found[$0] } }
+    }
+
+    private static func readGitHub(_ name: String, window: Window, read: GitHubRead) -> RepositoryReport {
+        var report = RepositoryReport(name: name)
+        func failed(_ what: String, _ failure: ReadFailure) {
+            report.problems.append("\(what): \(failure.message)")
+            report.readsAgain = report.readsAgain || failure.retryable
+        }
+        switch read(mergedArguments(repository: name, since: window.start)).map(mergedPullRequests) {
+        case .success(let merged?):
+            report.merged = merged.filter { window.contains($0.mergedAt) }
+            if merged.count >= mergedLimit { report.problems.append("only the \(mergedLimit) newest merged pull requests were read") }
+        case .success(nil): failed("merged pull requests", ReadFailure(message: "gh’s answer wasn’t its JSON"))
+        case .failure(let failure): failed("merged pull requests", failure)
+        }
+        switch read(runArguments(repository: name, since: window.start)).map(reruns) {
+        case .success(let reruns?): report.reruns = reruns.filter { window.contains($0.startedAt) }
+        case .success(nil): failed("workflow runs", ReadFailure(message: "gh’s answer wasn’t its JSON"))
+        case .failure(let failure): failed("workflow runs", failure)
+        }
+        return report
     }
 
     /// Nil when `data` isn't a JSON list; an entry missing its number,
@@ -138,12 +167,13 @@ enum DailyPass {
     static func reruns(_ data: Data) -> [Rerun]? {
         guard let list = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
         return list.compactMap { item -> Rerun? in
-            guard let json = item as? [String: Any], let id = json["databaseId"] as? Int, let attempt = json["attempt"] as? Int, attempt > 1
+            guard let json = item as? [String: Any], let id = json["databaseId"] as? Int, let attempt = json["attempt"] as? Int, attempt > 1,
+                  let startedAt = (json["startedAt"] as? String).flatMap(time(fromISO:))
             else { return nil }
             let conclusion = (json["conclusion"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "running"
             return Rerun(
                 id: id, attempt: attempt, branch: json["headBranch"] as? String ?? "", workflow: json["workflowName"] as? String ?? "",
-                conclusion: conclusion
+                conclusion: conclusion, startedAt: startedAt
             )
         }
     }
@@ -215,14 +245,18 @@ enum DailyPass {
         /// What happened to it, after its sending time.
         let detail: String
         let excerpt: String
-        /// The user's answer, for a question they answered.
+        /// The answer, for a question the user answered or that was
+        /// handed to them.
         var answer: String?
+        /// The user wrote `answer` in Nirux, rather than the parent.
+        var answeredByUser = false
     }
 
     /// The messages of `missions` that went wrong in the window: held
     /// (typed `heldAfter` or more after they were sent, or still waiting),
     /// given up, crossed (typed once the other side had moved on); and the
-    /// questions the user answered, handed to them or not.
+    /// questions handed to the user or answered by them. Lines that look
+    /// like a secret are withheld.
     static func missionFacts(_ missions: [Mission], window: Window, timeZone: TimeZone = .current) -> [MissionFact] {
         missions.flatMap { mission in
             mission.events.flatMap { event -> [MissionFact] in
@@ -244,8 +278,11 @@ enum DailyPass {
         let window: Window
         let timeZone: TimeZone
 
-        private func fact(_ kind: MissionFact.Kind, _ message: String, _ detail: String) -> MissionFact {
-            MissionFact(kind: kind, message: message, sentAt: event.timestamp, detail: detail, excerpt: quote(event.message))
+        private func fact(_ kind: MissionFact.Kind, _ message: String, _ detail: String, answer: MissionEvent? = nil) -> MissionFact {
+            var fact = MissionFact(kind: kind, message: message, sentAt: event.timestamp, detail: detail, excerpt: quote(event.message))
+            fact.answer = answer.map { quote($0.message, maxLength: maxAnswerLength) }
+            fact.answeredByUser = answer?.answeredByUser == true
+            return fact
         }
 
         private func at(_ time: TimeInterval) -> String {
@@ -257,8 +294,9 @@ enum DailyPass {
         func instructionFact() -> MissionFact? {
             let message = "tell to \(mission.branch)"
             if let expired = event.expiredAt {
+                // Its time ran out, or it went in only partly.
                 guard window.contains(expired) else { return nil }
-                return fact(.givenUp, message, "given up untyped after \(duration(expired - event.timestamp))")
+                return fact(.givenUp, message, "given up after \(duration(expired - event.timestamp))")
             }
             guard let typed = event.childConsumedAt else {
                 let waited = window.end - event.timestamp
@@ -284,21 +322,23 @@ enum DailyPass {
                 if window.contains(typed), typed - event.timestamp >= heldAfter {
                     facts.append(fact(.held, message, "typed into its parent \(duration(typed - event.timestamp)) later"))
                 }
-            } else if window.contains(event.timestamp), answer == nil, event.handedToUserBecause == nil,
-                      event.parentConsumedAt == nil, window.end - event.timestamp >= heldAfter {
-                facts.append(fact(.held, message, "not typed into its parent after \(duration(window.end - event.timestamp))"))
+            } else if event.handedToUserBecause == nil {
+                // Never typed: Nirux types one for an hour only.
+                if let answer, answer.answeredByUser != true {
+                    if window.contains(answer.timestamp), answer.timestamp - event.timestamp >= heldAfter {
+                        let waited = duration(answer.timestamp - event.timestamp)
+                        facts.append(fact(.held, message, "answered \(waited) later, never typed into its parent"))
+                    }
+                } else if answer == nil, event.parentConsumedAt == nil, window.contains(event.timestamp),
+                          window.end - event.timestamp >= heldAfter {
+                    facts.append(fact(.held, message, "not typed into its parent after \(duration(window.end - event.timestamp))"))
+                }
             }
             guard event.kind == .question else { return facts }
-            let byUser = answer?.answeredByUser == true ? answer : nil
-            let words = byUser.flatMap { AgentText.clean($0.message, maxLength: maxAnswerLength) }
             if let reason = event.handedToUserBecause, window.contains(answer?.timestamp ?? event.timestamp) {
-                var handed = fact(.handedToUser, message, "why: \(quote(reason))")
-                handed.answer = words
-                facts.append(handed)
-            } else if let byUser, window.contains(byUser.timestamp) {
-                var answered = fact(.answeredByUser, message, "the user answered it in Nirux")
-                answered.answer = words
-                facts.append(answered)
+                facts.append(fact(.handedToUser, message, "why: \(quote(reason))", answer: answer))
+            } else if let answer, answer.answeredByUser == true, window.contains(answer.timestamp) {
+                facts.append(fact(.answeredByUser, message, "the user answered it in Nirux", answer: answer))
             }
             return facts
         }
@@ -331,12 +371,16 @@ enum DailyPass {
         /// The brief's "Rules learned", as sessions read them now.
         var briefRules: [String]
 
-        /// Anything for the pass to read.
+        /// Anything for the pass to read, or something GitHub didn't say.
         var hasNews: Bool {
-            findings.contains { window.contains($0.time) } || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty }
+            findings.contains { window.contains($0.time) }
+                || repositories.contains { !$0.merged.isEmpty || !$0.reruns.isEmpty || !$0.problems.isEmpty }
                 || !triagedRuns.isEmpty || !flakyTests.isEmpty || !missions.isEmpty
                 || proposals.contains { window.contains($0.decidedAt) }
         }
+
+        /// GitHub may answer next time: the window isn't marked read.
+        var readsAgain: Bool { repositories.contains(where: \.readsAgain) }
     }
 
     /// What `daily_pass` answers: what to do, then the facts, cut past
@@ -348,13 +392,15 @@ enum DailyPass {
             return header + "\n\nNothing happened since \(since): no review recorded, no pull request merged, no CI failure, "
                 + "no Mission message held, no rule decided. Nothing to propose: say so in one line."
         }
+        // The rules before the facts: a cut takes the end.
         let sections = [
             instructions(facts),
+            gitHubSection(facts),
+            rulesSection(facts, timeZone: timeZone),
             findingsSection(facts, timeZone: timeZone),
             pullRequestsSection(facts),
             ciSection(facts, timeZone: timeZone),
-            missionsSection(facts, timeZone: timeZone),
-            rulesSection(facts, timeZone: timeZone)
+            missionsSection(facts, timeZone: timeZone)
         ].compactMap { $0 }
         let text = ([header] + sections).joined(separator: "\n\n")
         guard text.count > maxCharacters else { return text }
@@ -372,14 +418,23 @@ enum DailyPass {
         return """
             Look for the friction a rule in the brief would have prevented, and propose at most \(free) with propose_rule \
             (\(pending) of \(limit) already wait for the user), the strongest first:
-            - a finding kind seen in two tasks or more;
+            - a finding kind seen in two tasks or more, or kinds that name one class in other words;
             - a pull request that needed three review rounds or more, or whose round commits name a class another one's do;
             - a test flaky twice, a message held, given up or crossed, a question you had to hand to the user, the user's answers.
             A rule is an instruction every later task follows, in one or two lines. A bug in Nirux or a flaky test is a task \
             to start, not a rule. Cite this digest's handles (#PR, run, test, task) in evidence. Drop a candidate the brief's \
-            rules or the dismissed ones below already say, in other words too. Then tell the user in a few lines what you \
+            rules or the dismissed ones already say, in other words too. Then tell the user in a few lines what you \
             proposed and what you held back.
             """
+    }
+
+    private static func gitHubSection(_ facts: Facts) -> String? {
+        let lines = facts.repositories.flatMap { report in report.problems.map { "- \(report.name): \($0)" } }
+        guard !lines.isEmpty else { return nil }
+        let after = facts.readsAgain
+            ? "The next pass reads this window again. Read what you need with gh meanwhile."
+            : "Read what you need with gh."
+        return section("What GitHub didn’t say", lines + [after], total: lines.count + 1)
     }
 
     /// The kinds seen in the window, with where else they showed up in
@@ -396,13 +451,12 @@ enum DailyPass {
     }
 
     private static func pullRequestsSection(_ facts: Facts) -> String? {
-        let recordedRounds = Dictionary(
-            facts.findings.compactMap { entry in entry.pullRequest.map { ($0, entry.round) } }, uniquingKeysWith: max
-        )
+        // By branch: a task's reviews before its pull request count.
+        let recordedRounds = Dictionary(facts.findings.map { ($0.task, $0.round) }, uniquingKeysWith: max)
         let parts = facts.repositories.compactMap { report -> String? in
             guard !report.merged.isEmpty else { return nil }
             let lines = report.merged.prefix(maxItems).map { pull in
-                let rounds = max(pull.rounds, recordedRounds[pull.number] ?? 0)
+                let rounds = max(pull.rounds, recordedRounds[pull.branch] ?? 0)
                 let reruns = report.reruns.filter { $0.branch == pull.branch }.count
                 var line = "- #\(pull.number) “\(pull.title)” · branch \(pull.branch)"
                 line += rounds == 1 ? " · 1 review round" : " · \(rounds) review rounds"
@@ -432,7 +486,6 @@ enum DailyPass {
                 "- rerun: run \(rerun.id) · \(rerun.workflow) · branch \(rerun.branch)"
                     + (merged[rerun.branch].map { " (#\($0))" } ?? "") + " · attempt \(rerun.attempt), \(rerun.conclusion)"
             }
-            lines += report.problems.map { "- \(report.name) couldn’t be read from GitHub: \($0)" }
         }
         guard !lines.isEmpty else { return nil }
         return section("CI", Array(lines.prefix(maxItems)), total: lines.count)
@@ -444,7 +497,8 @@ enum DailyPass {
             let sent = clock(fact.sentAt, timeZone: timeZone)
             var line = "- \(fact.kind.rawValue) · \(fact.message), sent \(sent), \(fact.detail): “\(fact.excerpt)”"
             if fact.kind == .handedToUser || fact.kind == .answeredByUser {
-                line += fact.answer.map { "\n  The user answered: “\($0)”" } ?? "\n  Not answered yet."
+                let who = fact.answeredByUser ? "The user answered" : "Answered"
+                line += fact.answer.map { "\n  \(who): “\($0)”" } ?? "\n  Not answered yet."
             }
             return line
         }
@@ -468,7 +522,8 @@ enum DailyPass {
         if !facts.briefRules.isEmpty {
             parts.append(section("The brief's rules learned", facts.briefRules.prefix(maxItems * 2).map { "- \($0)" }, total: facts.briefRules.count))
         }
-        let dismissed = facts.proposals.filter { $0.dismissedAt != nil }
+        let since = facts.window.end - RuleProposalStore.dismissedLifetime
+        let dismissed = facts.proposals.filter { ($0.dismissedAt ?? -.infinity) >= since }
         if !dismissed.isEmpty {
             let lines = dismissed.prefix(maxItems).map { "- “\($0.rule)”" }
             parts.append(section("Rules dismissed in the last 90 days", lines, total: dismissed.count))
@@ -484,8 +539,10 @@ enum DailyPass {
 
     // MARK: - Text
 
-    static func quote(_ text: String) -> String {
-        AgentText.clean(MissionPromptText.quoted(text), maxLength: maxQuoteLength) ?? ""
+    /// `text` on one line, its lines that look like a secret withheld.
+    static func quote(_ text: String, maxLength: Int = maxQuoteLength) -> String {
+        let shown = TranscriptLastMessage.withholdingSecrets(text).text
+        return AgentText.clean(MissionPromptText.quoted(shown), maxLength: maxLength) ?? ""
     }
 
     /// `11-19 06:12`.
@@ -520,7 +577,8 @@ enum DailyPass {
 struct DailyPassState: Codable, Equatable, Sendable {
     static let fileName = "daily-pass.json"
     /// A call this soon after the last one reads its window again, longer:
-    /// the Lead asking again (after a compaction) sees the same facts.
+    /// the Lead asking again (after a compaction, or a call that timed out)
+    /// sees the same facts.
     static let extendWithin: TimeInterval = 2 * 3600
     static let firstWindow: TimeInterval = 24 * 3600
     static let longestWindow: TimeInterval = 7 * 24 * 3600
@@ -528,14 +586,15 @@ struct DailyPassState: Codable, Equatable, Sendable {
     var start: TimeInterval?
     var end: TimeInterval?
 
-    func window(now: TimeInterval) -> DailyPass.Window {
-        let from: TimeInterval
+    /// The window a call at `now` reads, and the state to save once it
+    /// was read; nil for a call that reads the last window again, so calls
+    /// in a row don't keep stretching it.
+    func reading(now: TimeInterval) -> (window: DailyPass.Window, next: DailyPassState?) {
         if let start, let end, now - end < Self.extendWithin {
-            from = start
-        } else {
-            from = end ?? now - Self.firstWindow
+            return (DailyPass.Window(start: max(start, now - Self.longestWindow), end: now), nil)
         }
-        return DailyPass.Window(start: max(from, now - Self.longestWindow), end: now)
+        let window = DailyPass.Window(start: max(end ?? now - Self.firstWindow, now - Self.longestWindow), end: now)
+        return (window, DailyPassState(start: window.start, end: window.end))
     }
 
     static func url(spaceID: String, stateDirectory: URL = Persistence.stateDirectory) -> URL? {
