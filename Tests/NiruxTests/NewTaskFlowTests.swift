@@ -600,10 +600,11 @@ final class NewTaskFlowTests: UIFlowTestCase {
             plain.addColumn(command: "printf '\(agyScreen)'; exec -a agy /bin/sleep 600", cwd: harness.repo)
             let agy = try XCTUnwrap(plain.columns.last?.pty)
             shell.relayout(animated: false)
-            UIFlowHarness.waitUntil("agy's trust question") {
-                _ = status(of: plain)
-                return agy.foregroundProcess(snapshot: ProcessSnapshot()).flatMap(agy.agentTrustPrompt(foreground:)) != nil
+            UIFlowHarness.waitUntil("agy's trust question on its row (\(status(of: plain) ?? "nil"))") {
+                status(of: plain) == "Needs you · Trust this folder?"
             }
+            agy.sendRaw("1")
+            harness.waitUntil("agy answered") { status(of: plain) != "Needs you · Trust this folder?" }
             pty.sendRaw("1")
             harness.waitUntil("answered") { status(of: task) != "Needs you · Trust this folder?" }
             XCTAssertNil(pty.agentTrustPrompt(foreground: claude))
