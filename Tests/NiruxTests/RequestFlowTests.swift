@@ -97,7 +97,10 @@ final class RequestFlowTests: XCTestCase {
 
             shell.openInbox()
             let inbox = try XCTUnwrap(shell.requestsState.inboxPanel?.panel)
-            XCTAssertTrue(try start(of: inbox, from: try XCTUnwrap(shell.commandBarToolbar?.bar.waitingButton)), "out of the badge")
+            // xctest shows no toolbar: the badge has no window, and the inbox
+            // fades in where it hangs (`testAPanelGrowsFromTheEdgeNearestItsControl`
+            // places a badge).
+            XCTAssertNotNil(inbox.contentView?.layer?.animation(forKey: PanelGrowth.key), "it comes in")
             XCTAssertFalse(inbox.hasShadow, "its shadow once whole")
             shell.closeInbox()
             XCTAssertFalse(shell.requestsState.isInboxOpen)
@@ -119,6 +122,14 @@ final class RequestFlowTests: XCTestCase {
             shell.closeInbox()
             XCTAssertFalse(inbox.isVisible, "at once")
         }
+    }
+
+    /// A panel grows from the point of its edge nearest its control: a badge
+    /// above it, its top edge; an icon at its left, its left edge.
+    func testAPanelGrowsFromTheEdgeNearestItsControl() {
+        let panel = NSRect(x: 100, y: 100, width: 400, height: 300)
+        XCTAssertEqual(PanelGrowth.origin(of: NSRect(x: 300, y: 410, width: 60, height: 22), in: panel), NSPoint(x: 230, y: 300))
+        XCTAssertEqual(PanelGrowth.origin(of: NSRect(x: 60, y: 200, width: 28, height: 28), in: panel), NSPoint(x: 0, y: 114))
     }
 
     /// Unfolded, the requests stay in the rows: ⌘J and the badge go
