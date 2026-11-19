@@ -46,7 +46,7 @@ extension NiruxShellView {
         let generation = underGlassGeneration
         passingUnderRail = workspace
         reachUnderRail(workspace)
-        ColumnState.afterCommit(duration) { [weak self] in
+        sideEffects.afterCommit(duration) { [weak self] in
             guard let self, underGlassGeneration == generation else { return }
             closeUnderRail(generation)
         }
@@ -98,7 +98,7 @@ extension NiruxShellView {
             edge.timingFunction = curve
             layer.add(edge, forKey: "underGlass." + key)
         }
-        ColumnState.afterCommit(Self.underGlassClose) { [weak self] in
+        sideEffects.afterCommit(Self.underGlassClose) { [weak self] in
             guard let self, underGlassGeneration == generation else { return }
             endUnderGlass()
         }

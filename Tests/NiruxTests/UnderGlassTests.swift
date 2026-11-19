@@ -14,6 +14,7 @@ final class UnderGlassTests: XCTestCase {
     func testTheColumnsPassUnderTheRailWhileTheyTravel() throws {
         try withShell { shell in
             let workspace = try floatingRail(in: shell)
+            let steps = TimedSteps(on: shell)
             let viewport = try XCTUnwrap(shell.viewport.layer)
             let container = try XCTUnwrap(workspace.containerView.layer)
             let sidebarAbove = try XCTUnwrap(shell.subviews.firstIndex(of: shell.sidebar))
@@ -35,15 +36,15 @@ final class UnderGlassTests: XCTestCase {
                 XCTAssertEqual(try onScreen(layer, in: shell).minX, column.view.convert(column.view.bounds, to: shell).minX, accuracy: 0.5, "where it lies")
             }
 
-            var swept = false
-            waitUntil("back at the rail's edge", timeout: 2) {
-                if viewport.bounds.minX == 0, !container.masksToBounds {
-                    swept = swept || viewport.animation(forKey: "underGlass.bounds") != nil
-                }
-                return viewport.bounds.minX == 0 && container.masksToBounds
-            }
-            XCTAssertTrue(swept, "the edge sweeps back while the cards are still unclipped")
+            XCTAssertEqual(steps.durations, [WorkspaceState.slideDuration], "it ends with the slide")
+            steps.runNext()
+            XCTAssertEqual(viewport.bounds.minX, 0, "the edge back at the rail's")
             XCTAssertEqual(try onScreen(viewport, in: shell).minX, viewFrame.minX, accuracy: 0.5)
+            XCTAssertNotNil(viewport.animation(forKey: "underGlass.bounds"), "it sweeps back")
+            XCTAssertFalse(container.masksToBounds, "the cards unclipped while it sweeps")
+            XCTAssertEqual(steps.durations, [NiruxShellView.underGlassClose])
+            steps.runNext()
+            XCTAssertTrue(container.masksToBounds, "then clipped again")
         }
     }
 
@@ -103,12 +104,15 @@ final class UnderGlassTests: XCTestCase {
             XCTAssertTrue(container.masksToBounds)
 
             _ = try floatingRail(in: shell)
+            let steps = TimedSteps(on: shell)
             shell.passUnderRail(workspace, for: 0.05)
             shell.passUnderRail(workspace, for: 1)
-            let due = Date().addingTimeInterval(0.4)
-            waitUntil("past the first pass's end", timeout: 2) { Date() >= due }
+            XCTAssertEqual(steps.durations, [0.05, 1])
+            steps.runNext()
             XCTAssertLessThan(viewport.bounds.minX, 0, "the first's end left the second alone")
             XCTAssertFalse(container.masksToBounds)
+            steps.runNext()
+            XCTAssertEqual(viewport.bounds.minX, 0, "its own end closes it")
         }
     }
 
