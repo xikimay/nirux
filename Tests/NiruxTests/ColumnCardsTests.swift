@@ -351,7 +351,7 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertTrue(handles.allSatisfy { ($0.layer?.zPosition ?? 0) > 1 }, "under the handles, which take its clicks")
             waitUntil("in, on time", timeout: 2) { !added.isArriving }
             XCTAssertEqual(added.view.layer?.zPosition, 0, "among them")
-            XCTAssertNil(added.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
+            XCTAssertNil(added.view.layer?.animation(forKey: ColumnState.passKey))
 
             shell.closeActiveColumn()
             let end = try scales(of: added)
@@ -407,25 +407,51 @@ final class ColumnCardsTests: XCTestCase {
             // comes, whenever the two were due.
             let card = try XCTUnwrap(workspace.columns.first)
             var ends: [String] = []
-            shell.passCard(card, to: 1, alpha: 1, duration: 0.02, curve: CAMediaTimingFunction(name: .linear)) { ends.append("first") }
-            shell.passCard(card, to: NiruxShellView.closeScale, alpha: 1, duration: 0.3, curve: CAMediaTimingFunction(name: .linear)) { ends.append("second") }
+            card.pass(to: 1, alpha: 1, duration: 0.02, curve: CAMediaTimingFunction(name: .linear)) { ends.append("first") }
+            card.pass(to: NiruxShellView.closeScale, alpha: 1, duration: 0.3, curve: CAMediaTimingFunction(name: .linear)) { ends.append("second") }
             waitUntil("the second's end", timeout: 2) { !ends.isEmpty }
             wait(0.05)
             XCTAssertEqual(ends, ["second"], "the first's end never came")
-            XCTAssertNil(card.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
+            XCTAssertNil(card.view.layer?.animation(forKey: ColumnState.passKey))
 
             shell.addColumn()
             let resized = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
-            XCTAssertNotNil(resized.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
+            XCTAssertNotNil(resized.view.layer?.animation(forKey: ColumnState.passKey))
             resized.widthFraction = 0.3
             shell.relayout(animated: false)
-            XCTAssertNil(resized.view.layer?.animation(forKey: WorkspaceState.cardPassKey), "resized: in place at once")
+            XCTAssertNil(resized.view.layer?.animation(forKey: ColumnState.passKey), "resized: in place at once")
+        }
+    }
+
+    /// A card closed while it glides keeps its glide under its recede: the
+    /// two compose on its layer, neither cancels the other.
+    func testAGlideAndAPassOnOneCardCompose() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            workspace.focusedIndex = 0
+            let pushed = workspace.columns[1]
+            shell.addColumn()
+            XCTAssertNotNil(pushed.view.layer?.animation(forKey: ColumnState.glideKey))
+            workspace.focusedIndex = try XCTUnwrap(workspace.columns.firstIndex { $0 === pushed })
+            shell.closeActiveColumn()
+            let start = Date().addingTimeInterval(0.03)
+            waitUntil("a moment", timeout: 2) { Date() >= start }
+            let layer = try XCTUnwrap(pushed.view.layer?.presentation())
+            let t = layer.transform, size = pushed.view.frame.size
+            let shownMiddle = pushed.view.frame.minX + size.width / 2 * t.m11 + size.height / 2 * t.m21 + t.m41
+            XCTAssertLessThan(shownMiddle, pushed.view.frame.midX - 1, "still on its way from where it was pushed")
+            XCTAssertLessThan(layer.opacity, 1, "receding")
         }
     }
 
     /// The scale a card's pass goes from and to.
     @MainActor private func scales(of column: ColumnState) throws -> (from: CGFloat, to: CGFloat) {
-        let pass = try XCTUnwrap(column.view.layer?.animation(forKey: WorkspaceState.cardPassKey) as? CAAnimationGroup)
+        let pass = try XCTUnwrap(column.view.layer?.animation(forKey: ColumnState.passKey) as? CAAnimationGroup)
         let move = try XCTUnwrap(pass.animations?.compactMap { $0 as? CABasicAnimation }.first { $0.keyPath == "transform" })
         let from = try XCTUnwrap(move.fromValue as? NSValue).caTransform3DValue
         let to = try XCTUnwrap(move.toValue as? NSValue).caTransform3DValue
@@ -442,7 +468,7 @@ final class ColumnCardsTests: XCTestCase {
             shell.animatesInterface = true
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             @MainActor func glide(of view: NSView?) -> CGFloat? {
-                ((view?.layer?.animation(forKey: WorkspaceState.cardGlideKey) as? CABasicAnimation)?.fromValue as? NSNumber).map { CGFloat($0.doubleValue) }
+                ((view?.layer?.animation(forKey: ColumnState.glideKey) as? CABasicAnimation)?.fromValue as? NSNumber).map { CGFloat($0.doubleValue) }
             }
             shell.addColumn()
             waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
