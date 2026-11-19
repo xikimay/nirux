@@ -11,6 +11,7 @@ extension NiruxShellView {
     private func abortColumnClose(_ column: ColumnState, in workspace: WorkspaceState) {
         column.isClosing = false
         column.view.alphaValue = 1
+        column.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
         workspace.showShadows()
         applyAgentLights()
     }
@@ -24,26 +25,27 @@ extension NiruxShellView {
         guard workspace.openColumns.count > 1 else { return requestCloseWorkspace(at: activeWSIndex) }
         guard confirmCloseColumn(closingColumn, in: workspace) else { return }
         closingColumn.isClosing = true
+        // It takes a card still arriving: behind its neighbours again.
+        closingColumn.isArriving = false
+        closingColumn.view.layer?.zPosition = 0
         // Its light leaves with it.
         applyAgentLights()
-        let closingView = closingColumn.view
         workspace.showShadows()
 
-        // Animate out, then remove
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            closingView.animator().alphaValue = 0
-            closingView.layer?.setAffineTransform(Self.scaledAboutMiddle(closingView.frame.size, by: Self.cardInOutScale))
-        }, completionHandler: {
-            DispatchQueue.main.async { [weak self] in self?.finishColumnClose(closingColumn, in: workspace) }
-        })
+        // It recedes and fades from where it shows, then goes; with Reduce
+        // motion it only fades.
+        passCard(
+            closingColumn, to: agentLightsMayMove ? Self.closeScale : 1, alpha: 0, duration: Self.closeDuration,
+            curve: CAMediaTimingFunction(controlPoints: 0.4, 0, 0.6, 1)
+        ) { [weak self] in
+            self?.finishColumnClose(closingColumn, in: workspace)
+        }
     }
 
     /// The exit animation of `closingColumn` is over: it goes, unless
     /// nothing is left to remove after all.
     func finishColumnClose(_ closingColumn: ColumnState, in workspace: WorkspaceState) {
-        closingColumn.view.layer?.setAffineTransform(.identity)
+        closingColumn.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
         // By identity: the index can shift during the animation.
         guard workspace.columns.count > 1,
               let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn })

@@ -690,9 +690,12 @@ extension NiruxShellView {
         focusActiveTerminal(in: window)
     }
 
-    /// How small a card comes in from, and leaves to.
-    static let cardInOutScale: CGFloat = 0.92
-    static let arrivalDuration: TimeInterval = 0.25
+    /// A card comes in from the front, a little larger, and leaves
+    /// receding (study P8).
+    static let arrivalScale: CGFloat = 1.05
+    static let arrivalDuration: TimeInterval = 0.38
+    static let closeScale: CGFloat = 0.93
+    static let closeDuration: TimeInterval = 0.24
 
     /// `scale` about a card's middle: a view's layer turns about its corner.
     static func scaledAboutMiddle(_ size: NSSize, by scale: CGFloat) -> CGAffineTransform {
@@ -700,29 +703,76 @@ extension NiruxShellView {
             .scaledBy(x: scale, y: scale)
     }
 
-    /// A column comes in at its place, from a little smaller and
-    /// transparent; its shadow and its light come once it is in. Nothing
-    /// moves while the interface may not, nor before the column is laid out
-    /// (a viewport with no size yet).
+    /// A card passing in or out, its own until another pass takes it: from
+    /// `from` (nil: where it shows) to `scale` of its size about its
+    /// middle and to `alpha`, held until the pass ends, on time; then
+    /// `then`, unless another pass took the card meanwhile. Its layer's
+    /// transform stays whole. Explicit: AppKit doesn't animate a view's
+    /// layer inside an animation group.
+    func passCard(
+        _ column: ColumnState, from: (scale: CGFloat, alpha: CGFloat)? = nil, to scale: CGFloat, alpha: CGFloat,
+        duration: CFTimeInterval, curve: CAMediaTimingFunction, then: @escaping @MainActor () -> Void
+    ) {
+        let view = column.view
+        guard let layer = view.layer else { return then() }
+        column.passes += 1
+        let pass = column.passes
+        let shown = layer.presentation()
+        let start = from ?? (
+            (shown?.value(forKeyPath: "transform.scale.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 1,
+            CGFloat(shown?.opacity ?? Float(view.alphaValue))
+        )
+        let size = view.frame.size
+        view.alphaValue = alpha
+        let change = { (keyPath: String, from: Any, to: Any) -> CABasicAnimation in
+            let change = CABasicAnimation(keyPath: keyPath)
+            change.fromValue = from
+            change.toValue = to
+            return change
+        }
+        let group = CAAnimationGroup()
+        group.animations = [
+            change("transform", CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: start.scale)),
+                   CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: scale))),
+            change("opacity", Float(start.alpha), Float(alpha))
+        ]
+        group.duration = duration
+        group.timingFunction = curve
+        group.fillMode = .forwards
+        group.isRemovedOnCompletion = false
+        layer.add(group, forKey: WorkspaceState.cardPassKey)
+        // On time once the change is committed (a busy turn delays its
+        // start), not on the animation's completion, which a window out of
+        // view may never report.
+        DispatchQueue.main.async {
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak column] in
+                MainActor.assumeIsolated {
+                    guard let column, column.passes == pass else { return }
+                    column.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
+                    then()
+                }
+            }
+        }
+    }
+
+    /// A column comes in at its place from the front, over its neighbours:
+    /// a little larger and transparent. Its shadow and its light come once
+    /// it is in. Nothing moves while the interface may not, nor before the
+    /// column is laid out (a viewport with no size yet).
     func arrive(_ column: ColumnState, in workspace: WorkspaceState) {
         let size = column.view.frame.size
         guard agentLightsMayMove, size.width > 0, size.height > 0 else { return }
         column.isArriving = true
         workspace.showShadows()
         applyAgentLights()
-        column.view.alphaValue = 0
-        column.view.layer?.setAffineTransform(Self.scaledAboutMiddle(size, by: Self.cardInOutScale))
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = Self.arrivalDuration
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            column.view.animator().alphaValue = 1
-            column.view.layer?.setAffineTransform(.identity)
-        }
-        // On time, not on the animation's completion, which a window out of
-        // view may never report.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.arrivalDuration) { [weak self, weak column, weak workspace] in
+        column.view.layer?.zPosition = 1
+        passCard(
+            column, from: (Self.arrivalScale, 0), to: 1, alpha: 1, duration: Self.arrivalDuration,
+            curve: CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+        ) { [weak self, weak column, weak workspace] in
             guard let self, let column, let workspace else { return }
             column.isArriving = false
+            column.view.layer?.zPosition = 0
             workspace.showShadows()
             self.applyAgentLights()
         }

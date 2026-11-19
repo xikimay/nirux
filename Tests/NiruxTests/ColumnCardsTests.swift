@@ -328,6 +328,150 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// A new card comes in from the front, over its neighbours, then lies
+    /// among them; a closed one recedes as it fades, and goes on time. With
+    /// Reduce motion a closed one only fades.
+    func testACardComesFromTheFrontAndRecedes() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func scales(of column: ColumnState) throws -> (from: CGFloat, to: CGFloat) {
+                try self.scales(of: column)
+            }
+
+            shell.addColumn()
+            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            let start = try scales(of: added)
+            XCTAssertEqual(start.from, NiruxShellView.arrivalScale, "from the front")
+            XCTAssertEqual(start.to, 1)
+            XCTAssertEqual(added.view.layer?.zPosition, 1, "over its neighbours")
+            let handles = try strip(of: workspace).subviews.compactMap { $0 as? ColumnResizeHandle }
+            XCTAssertTrue(handles.allSatisfy { ($0.layer?.zPosition ?? 0) > 1 }, "under the handles, which take its clicks")
+            waitUntil("in, on time", timeout: 2) { !added.isArriving }
+            XCTAssertEqual(added.view.layer?.zPosition, 0, "among them")
+            XCTAssertNil(added.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
+
+            shell.closeActiveColumn()
+            let end = try scales(of: added)
+            XCTAssertEqual(end.from, 1, accuracy: 0.001)
+            XCTAssertEqual(end.to, NiruxShellView.closeScale, "it recedes")
+            XCTAssertEqual(added.view.alphaValue, 0, "as it fades")
+            waitUntil("gone, on time", timeout: 2) { !workspace.columns.contains { $0 === added } }
+
+            shell.addColumn()
+            let still = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            waitUntil("in", timeout: 2) { !still.isArriving }
+            shell.sideEffects.reducesMotion = { true }
+            shell.closeActiveColumn()
+            XCTAssertEqual(try scales(of: still).to, 1, "Reduce motion: no recede")
+            XCTAssertEqual(still.view.alphaValue, 0)
+            waitUntil("gone", timeout: 2) { !workspace.columns.contains { $0 === still } }
+        }
+    }
+
+    /// ⌘W while a card arrives: it recedes from where it shows, and the
+    /// arrival's end leaves its recede alone until it goes. A card that
+    /// changes size mid-way is in place at once.
+    func testACardClosedWhileArrivingRecedesFromWhereItShows() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func wait(_ seconds: TimeInterval) {
+                let end = Date().addingTimeInterval(seconds)
+                waitUntil("\(seconds) s", timeout: seconds + 2) { Date() >= end }
+            }
+
+            shell.addColumn()
+            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            wait(NiruxShellView.arrivalDuration / 2)
+            shell.closeActiveColumn()
+            let recede = try self.scales(of: added)
+            XCTAssertGreaterThan(recede.from, 1, "from where it shows, still nearer")
+            XCTAssertEqual(recede.to, NiruxShellView.closeScale)
+            XCTAssertFalse(added.isArriving)
+            XCTAssertEqual(added.view.layer?.zPosition, 0, "behind its neighbours again")
+            // Past the arrival's end, until it goes, the recede stays.
+            var kept = true
+            waitUntil("gone", timeout: 2) {
+                guard workspace.columns.contains(where: { $0 === added }) else { return true }
+                if (try? self.scales(of: added).to) != NiruxShellView.closeScale { kept = false }
+                return false
+            }
+            XCTAssertTrue(kept, "the arrival's end left its recede alone")
+
+            // One pass takes a card from another: the first's end never
+            // comes, whenever the two were due.
+            let card = try XCTUnwrap(workspace.columns.first)
+            var ends: [String] = []
+            shell.passCard(card, to: 1, alpha: 1, duration: 0.02, curve: CAMediaTimingFunction(name: .linear)) { ends.append("first") }
+            shell.passCard(card, to: NiruxShellView.closeScale, alpha: 1, duration: 0.3, curve: CAMediaTimingFunction(name: .linear)) { ends.append("second") }
+            waitUntil("the second's end", timeout: 2) { !ends.isEmpty }
+            wait(0.05)
+            XCTAssertEqual(ends, ["second"], "the first's end never came")
+            XCTAssertNil(card.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
+
+            shell.addColumn()
+            let resized = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            XCTAssertNotNil(resized.view.layer?.animation(forKey: WorkspaceState.cardPassKey))
+            resized.widthFraction = 0.3
+            shell.relayout(animated: false)
+            XCTAssertNil(resized.view.layer?.animation(forKey: WorkspaceState.cardPassKey), "resized: in place at once")
+        }
+    }
+
+    /// The scale a card's pass goes from and to.
+    @MainActor private func scales(of column: ColumnState) throws -> (from: CGFloat, to: CGFloat) {
+        let pass = try XCTUnwrap(column.view.layer?.animation(forKey: WorkspaceState.cardPassKey) as? CAAnimationGroup)
+        let move = try XCTUnwrap(pass.animations?.compactMap { $0 as? CABasicAnimation }.first { $0.keyPath == "transform" })
+        let from = try XCTUnwrap(move.fromValue as? NSValue).caTransform3DValue
+        let to = try XCTUnwrap(move.toValue as? NSValue).caTransform3DValue
+        return (from.m11, to.m11)
+    }
+
+    /// A card a new one comes before glides aside from where it showed, its
+    /// shadow with it, and back once the new one went. With Reduce motion
+    /// it is simply there.
+    func testANeighbourGlidesAsideAndBack() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func glide(of view: NSView?) -> CGFloat? {
+                ((view?.layer?.animation(forKey: WorkspaceState.cardGlideKey) as? CABasicAnimation)?.fromValue as? NSNumber).map { CGFloat($0.doubleValue) }
+            }
+            shell.addColumn()
+            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            workspace.focusedIndex = 0
+            let neighbour = workspace.columns[1]
+            let before = neighbour.view.frame.minX
+
+            shell.addColumn()
+            let pushed = before - neighbour.view.frame.minX
+            XCTAssertLessThan(pushed, 0, "pushed aside")
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.view)), pushed, accuracy: 1, "from where it showed")
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.shadow)), pushed, accuracy: 1, "its shadow with it")
+            let added = workspace.columns[1]
+            XCTAssertNil(glide(of: added.view), "the new card comes from the front instead")
+            waitUntil("in", timeout: 2) { !added.isArriving }
+
+            shell.closeActiveColumn()
+            waitUntil("gone", timeout: 2) { !workspace.columns.contains { $0 === added } }
+            XCTAssertEqual(neighbour.view.frame.minX, before, accuracy: 1)
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.view)), -pushed, accuracy: 1, "back")
+
+            neighbour.view.layer?.removeAllAnimations()
+            shell.sideEffects.reducesMotion = { true }
+            workspace.focusedIndex = 0
+            shell.addColumn()
+            XCTAssertNil(glide(of: neighbour.view), "Reduce motion: there at once")
+        }
+    }
+
     /// A double-click resets the width and leaves no drag behind it.
     func testADoubleClickOnAHandleLeavesNoDragBehind() {
         let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))
