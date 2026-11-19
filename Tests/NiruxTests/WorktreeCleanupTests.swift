@@ -735,11 +735,17 @@ final class WorktreeCleanupTests: XCTestCase {
         try write("finder\n", to: ".claude/.DS_Store", in: worktree)
         try write("# handover\n", to: ":scratch/agent/.claude-handover.md", in: worktree)
         try write("notes\n", to: ":scratch/notes.log", in: worktree)
+        // One entry for a folder of ignored files, as git gives it, unless build output is in it.
+        try write("a\n", to: ":scratch/logs/a.log", in: worktree)
+        try write("b\n", to: ":scratch/logs/b.log", in: worktree)
+        try write("c\n", to: ":scratch/cache/c.log", in: worktree)
+        try write("finder\n", to: ":scratch/cache/.DS_Store", in: worktree)
         let plan = try readyPlan(agentFolders: [worktree + "/:scratch/agent"])
         XCTAssertEqual(plan.worktree.leftovers, [
-            ".claude/settings.local.json", ".claude/signing.key", ":scratch/agent/.claude-handover.md", ":scratch/notes.log"
+            ".claude/settings.local.json", ".claude/signing.key", ":scratch/agent/.claude-handover.md",
+            ":scratch/cache/c.log", ":scratch/logs/", ":scratch/notes.log"
         ])
-        XCTAssertEqual(plan.worktree.buildOutput, [".claude/.DS_Store"])
+        XCTAssertEqual(plan.worktree.buildOutput, [".claude/.DS_Store", ":scratch/cache/.DS_Store"])
 
         XCTAssertEqual(
             WorktreeCleanup.execute(plan, tools: tools),
@@ -747,6 +753,18 @@ final class WorktreeCleanupTests: XCTestCase {
         )
         XCTAssertEqual(try String(contentsOfFile: trashed(".claude/signing.key"), encoding: .utf8), "key\n")
         XCTAssertEqual(try String(contentsOfFile: trashed(":scratch/notes.log"), encoding: .utf8), "notes\n")
+        XCTAssertEqual(try String(contentsOfFile: trashed(":scratch/logs/b.log"), encoding: .utf8), "b\n")
+    }
+
+    /// More build output than a command line takes still gets checked.
+    func testThousandsOfBuildOutputEntriesAreChecked() throws {
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write(".DS_Store\n", to: "info/exclude", in: root + "/widgets/.git")
+        try write("{}\n", to: ".claude/settings.local.json", in: worktree)
+        for index in 0..<4_100 { try write("", to: ".claude/f\(index)/.DS_Store", in: worktree) }
+        let plan = try readyPlan()
+        XCTAssertEqual(plan.worktree.buildOutput.count, 4_100)
+        XCTAssertEqual(plan.worktree.leftovers, [".claude/settings.local.json"])
     }
 
     func testFolderOfIgnoredFilesUnderABuildNameGoesToTheTrash() throws {
@@ -1081,11 +1099,11 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
             .confirmationLines(for: ready)
         XCTAssertEqual(lines, [
             "Pull request #12 is merged. This:",
+            "• closes the workspaces “x”, “x tests” and waits for their programs to end",
             "• deletes the folder /tmp/widgets.feat-x",
             "• deletes the local branch feat/x",
             "• moves to the Trash, in “widgets.feat-x leftovers”: .claude-handover.md, .env, a/, b/, c/, d/, e/, f/, g/, h/",
             "• deletes its build output: .build/",
-            "• closes the workspaces “x”, “x tests”",
             "Claude is idle — closing the workspaces ends its session.",
             "The remote branch is not touched."
         ])

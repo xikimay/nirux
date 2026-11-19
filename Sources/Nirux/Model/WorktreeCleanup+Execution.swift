@@ -62,7 +62,14 @@ extension WorktreeCleanup {
 
         // git deletes the ignored files it finds: one written since the
         // re-read, even under a name the confirmation listed, would be lost.
-        guard case .worktree(let cleared) = reread(plan, tools: tools) else {
+        let cleared: Worktree
+        switch reread(plan, tools: tools) {
+        case .worktree(let read): cleared = read
+        case .folderMissing:
+            let trashNote = trashed.map { " Its leftovers are in the Trash, in “\($0.folder.lastPathComponent)”." } ?? ""
+            return .failed("\(plan.worktree.path) was deleted during the clean-up, not by Nirux. The branch \(plan.branch) was kept."
+                + trashNote)
+        case .unavailable:
             return putBackAfterFailure(
                 "\(plan.worktree.path) can no longer be read. Nothing was deleted.",
                 worktree: current, restore: restore, trashed: trashed, tools: tools
