@@ -49,7 +49,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             // Three workspaces in the space; the first one on screen.
             for title in ["second", "third"] { shell.addWorkspace(title: title, cwd: folder) }
             shell.switchToWorkspace(0)
-            shell.endWorkspaceSlide()
+            shell.endWorkspaceSwitch()
             shell.workspaceNameCard.hide(animated: false)
             clock.advance(by: 5)
             try body(shell, clock, folder)
@@ -89,7 +89,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.switchToWorkspace(away)
             XCTAssertEqual(shell.activeProfileID, elsewhere.id)
             XCTAssertTrue(shell.workspaces.allSatisfy { self.floor(of: $0) == nil })
-            XCTAssertFalse(shell.workspaceSwitch.isSliding)
+            XCTAssertFalse(shell.workspaceSwitch.isSwitching)
         }
     }
 
@@ -102,7 +102,11 @@ final class WorkspaceSwitchTests: XCTestCase {
         try withShell { shell, clock, _ in
             // What the terminals are told, column by column.
             var drawing: [ObjectIdentifier: Bool] = [:]
-            shell.sideEffects.setSurfaceVisible = { column, visible in drawing[ObjectIdentifier(column)] = visible }
+            var turnedOff: [ObjectIdentifier] = []
+            shell.sideEffects.setSurfaceVisible = { column, visible in
+                drawing[ObjectIdentifier(column)] = visible
+                if !visible { turnedOff.append(ObjectIdentifier(column)) }
+            }
             let draws = { (workspace: WorkspaceState) in
                 workspace.columns.allSatisfy { drawing[ObjectIdentifier($0)] == true }
             }
@@ -128,10 +132,13 @@ final class WorkspaceSwitchTests: XCTestCase {
             XCTAssertTrue(draws(first), "its terminals are told to go on drawing")
             XCTAssertTrue(draws(second))
 
-            // Half-way, another press: the first floors end at once.
+            // Half-way, another press: the first floors end at once, and the
+            // second workspace, drawn all along, never goes off between.
             clock.advance(by: NiruxShellView.workspaceSwitchDuration / 2)
+            turnedOff = []
             shell.focusWorkspace(.down)
             let third = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertFalse(second.columns.contains { turnedOff.contains(ObjectIdentifier($0)) }, "no surface off and on again")
             XCTAssertNil(self.floor(of: first))
             XCTAssertNil(self.shade(of: first))
             XCTAssertEqual(first.containerView.layer?.affineTransform(), .identity)
@@ -141,9 +148,9 @@ final class WorkspaceSwitchTests: XCTestCase {
 
             // The first switch's end doesn't cut the second one short.
             clock.advance(by: NiruxShellView.workspaceSwitchDuration / 2 + 0.01)
-            XCTAssertTrue(shell.workspaceSwitch.isSliding)
+            XCTAssertTrue(shell.workspaceSwitch.isSwitching)
             clock.advance(by: NiruxShellView.workspaceSwitchDuration)
-            XCTAssertFalse(shell.workspaceSwitch.isSliding)
+            XCTAssertFalse(shell.workspaceSwitch.isSwitching)
             for workspace in [second, third] {
                 XCTAssertNil(self.floor(of: workspace))
                 XCTAssertEqual(workspace.containerView.layer?.affineTransform(), .identity)
@@ -155,6 +162,39 @@ final class WorkspaceSwitchTests: XCTestCase {
             XCTAssertFalse(draws(first), "and told to rest")
             XCTAssertFalse(draws(second))
             XCTAssertTrue(draws(third))
+        }
+    }
+
+    /// Floors end at once when the workspace they bring is no longer on
+    /// screen, or the one beneath was hidden (moved to another space): no
+    /// floor stays out of place until their time is up.
+    func testFloorsEndWhenAWorkspaceTheyHoldGoes() throws {
+        try withShell { shell, _, _ in
+            let elsewhere = shell.workspaceStore.createProfile(named: "elsewhere", select: false)
+            let all = shell.workspaces
+            let atRest = { (workspace: WorkspaceState) -> Bool in
+                let layer = workspace.containerView.layer
+                return self.floor(of: workspace) == nil && self.shade(of: workspace) == nil && layer?.affineTransform() == .identity
+                    && layer?.zPosition == 0 && layer?.backgroundColor == nil
+            }
+            shell.focusWorkspace(.down)
+            XCTAssertNotNil(self.floor(of: all[1]))
+            shell.moveWorkspaceToSpace(workspaceID: all[1].id, profileID: elsewhere.id)
+            XCTAssertFalse(shell.activeWorkspace === all[1])
+            XCTAssertFalse(shell.workspaceSwitch.isSwitching, "the workspace they bring went")
+            XCTAssertTrue(atRest(all[0]))
+            XCTAssertTrue(atRest(all[1]))
+
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === all[0] }))
+            shell.endWorkspaceSwitch()
+            shell.focusWorkspace(.down)
+            XCTAssertTrue(shell.activeWorkspace === all[2])
+            XCTAssertNotNil(self.floor(of: all[2]))
+            shell.moveWorkspaceToSpace(workspaceID: all[0].id, profileID: elsewhere.id)
+            XCTAssertTrue(shell.activeWorkspace === all[2])
+            XCTAssertFalse(shell.workspaceSwitch.isSwitching, "the one beneath was hidden")
+            XCTAssertTrue(atRest(all[0]))
+            XCTAssertTrue(atRest(all[2]))
         }
     }
 
@@ -325,7 +365,7 @@ final class WorkspaceSwitchTests: XCTestCase {
             shell.addWorkspace(title: "background", cwd: folder, activate: false)
             XCTAssertNotEqual(shell.verticalStrip.frame.origin.y, oldY, "the strip moved")
             XCTAssertNotNil(self.floor(of: second), "the floors go on")
-            XCTAssertTrue(shell.workspaceSwitch.isSliding)
+            XCTAssertTrue(shell.workspaceSwitch.isSwitching)
             XCTAssertEqual(
                 first.containerView.layer?.affineTransform().ty,
                 second.containerView.frame.minY - first.containerView.frame.minY, "still under the second"

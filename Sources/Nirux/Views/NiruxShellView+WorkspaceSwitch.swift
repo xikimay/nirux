@@ -3,11 +3,11 @@ import AppKit
 /// What the shell keeps of a workspace switch while it plays.
 @MainActor
 final class WorkspaceSwitchState {
-    /// The workspaces whose terminals stay drawn until the slide ends: the
-    /// ones the slide shows on its way, so none goes blank while seen.
+    /// The workspace a switch leaves, its terminals drawn until the switch
+    /// ends: it shows under the one chosen.
     var keepsDrawn: Set<String> = []
-    /// A slide plays.
-    var isSliding = false
+    /// A switch plays.
+    var isSwitching = false
     /// A ⌘↑ ⌘↓ is being handled: its relayout keeps the card, whose words
     /// are about to change.
     var isAnnouncing = false
@@ -17,15 +17,14 @@ final class WorkspaceSwitchState {
     /// Takes the card away at the user's first key, click or scroll once
     /// the view stopped, while the card shows.
     var inputMonitor: Any?
-    /// The workspace the strip showed when it last settled or started a
-    /// slide.
+    /// The workspace on screen at the last layout: the one a switch leaves.
     var shownWorkspaceID: String?
     /// The floors a switch shows while it plays (`playFloors`): the
     /// workspace it leaves and the one it lands on.
     var floors: (leaving: String, arriving: String)?
-    /// Tells a pending end of slide, or of the card, whether it still
+    /// Tells a pending end of a switch, or of the card, whether it still
     /// applies.
-    var slideGeneration = 0
+    var switchGeneration = 0
     var cardGeneration = 0
     /// Runs the delays; tests pass a clock they advance by hand.
     var schedule: MainActorSchedule = mainQueueSchedule
@@ -53,33 +52,40 @@ extension NiruxShellView {
     /// How long the card stays once the switch is over.
     static let workspaceCardHold: CFTimeInterval = 0.6
 
-    /// The workspace on screen before a relayout, and its place in the
-    /// strip then (see `slideWorkspaceStrip`).
-    func workspaceOnScreenBeforeLayout() -> (workspace: WorkspaceState, y: CGFloat)? {
-        guard let id = workspaceSwitch.shownWorkspaceID,
-              let workspace = workspaces.first(where: { $0.id == id && !$0.containerView.isHidden })
-        else { return nil }
-        return (workspace, workspace.containerView.frame.origin.y)
+    /// The workspace on screen before a relayout (see
+    /// `playWorkspaceSwitch`).
+    func workspaceOnScreenBeforeLayout() -> WorkspaceState? {
+        guard let id = workspaceSwitch.shownWorkspaceID else { return nil }
+        return workspaces.first { $0.id == id && !$0.containerView.isHidden }
     }
 
     /// After a relayout, the strip at its new place: the workspace chosen
     /// comes on screen as a floor (`playFloors`), when the interface may
-    /// move. `leaving` is the workspace that was on screen and its place in
-    /// the strip then. A relayout that keeps the same workspace on screen
-    /// lets floors that play go on.
-    func slideWorkspaceStrip(from oldY: CGFloat, leaving: (workspace: WorkspaceState, y: CGFloat)?, animated: Bool) {
+    /// move. `leaving` is the workspace that was on screen. A relayout that
+    /// keeps the same workspace on screen lets floors that play go on.
+    func playWorkspaceSwitch(leaving: WorkspaceState?, animated: Bool) {
         let state = workspaceSwitch
         state.shownWorkspaceID = activeWorkspace?.id
         let sameSpace = state.shownSpaceID == nil || state.shownSpaceID == activeProfileID
         state.shownSpaceID = activeProfileID
-        guard let arriving = activeWorkspace, let left = leaving?.workspace, left !== arriving else {
-            // The strip may have moved under it: the floor beneath follows.
-            placeFloorUnderneath()
-            return
-        }
-        endWorkspaceSlide()
-        guard animated, sameSpace, agentLightsMayMove, !left.containerView.isHidden else { return }
-        playFloors(from: left, to: arriving)
+        guard let arriving = activeWorkspace, let leaving, leaving !== arriving else { return keepFloors() }
+        // Floors that play end here; what stays drawn passes to the next
+        // ones with no sync between, which would turn their surfaces off and
+        // on.
+        removeFloors()
+        guard animated, sameSpace, agentLightsMayMove, !leaving.containerView.isHidden else { return endWorkspaceSwitch() }
+        playFloors(from: leaving, to: arriving)
+    }
+
+    /// After a relayout that keeps the workspace on screen: floors that play
+    /// go on, the one beneath under it; unless the workspace they bring is
+    /// no longer on screen, or the one beneath was hidden (moved, archived).
+    private func keepFloors() {
+        guard let floors = workspaceSwitch.floors else { return }
+        guard floors.arriving == activeWorkspace?.id,
+              workspaces.contains(where: { $0.id == floors.leaving && !$0.containerView.isHidden })
+        else { return endWorkspaceSwitch() }
+        placeFloorUnderneath()
     }
 
     /// The floors of a switch from `leaving` to `arriving`, both in the
@@ -95,7 +101,7 @@ extension NiruxShellView {
         let (top, bottom) = down ? (arrivingLayer, leavingLayer) : (leavingLayer, arrivingLayer)
         state.floors = (leaving.id, arriving.id)
         state.keepsDrawn = [leaving.id]
-        state.isSliding = true
+        state.isSwitching = true
         top.zPosition = 1
         top.backgroundColor = Theme.Color.canvas.cgColor
         placeFloorUnderneath()
@@ -118,13 +124,13 @@ extension NiruxShellView {
             arrivingLayer.add(Self.floorMove(from: recede, to: 0, curve: rest), forKey: Self.floorsKey)
             shade.add(Self.floorShade(from: Self.floorsShade, to: 0, curve: rest), forKey: Self.floorsKey)
         }
-        state.slideGeneration += 1
-        let generation = state.slideGeneration
+        state.switchGeneration += 1
+        let generation = state.switchGeneration
         // Not on the animation's completion, which a window out of view may
         // never report.
         state.schedule(Self.workspaceSwitchDuration) { [weak self] in
-            guard let self, self.workspaceSwitch.slideGeneration == generation else { return }
-            self.endWorkspaceSlide()
+            guard let self, self.workspaceSwitch.switchGeneration == generation else { return }
+            self.endWorkspaceSwitch()
         }
     }
 
@@ -154,7 +160,8 @@ extension NiruxShellView {
     }
 
     /// The floor a switch leaves, laid where the one chosen is while it
-    /// plays; again after a relayout that moves the strip meanwhile.
+    /// plays, its shade over the whole floor beneath; again after a relayout
+    /// that moves the strip or resizes the viewport meanwhile.
     private func placeFloorUnderneath() {
         guard let floors = workspaceSwitch.floors,
               let leaving = workspaces.first(where: { $0.id == floors.leaving }),
@@ -162,28 +169,35 @@ extension NiruxShellView {
         else { return }
         let offset = arriving.containerView.frame.minY - leaving.containerView.frame.minY
         leaving.containerView.layer?.setAffineTransform(CGAffineTransform(translationX: 0, y: offset))
+        for layer in [leaving, arriving].compactMap({ $0.containerView.layer }) {
+            for shade in layer.sublayers ?? [] where shade.name == Self.floorsShadeName { shade.frame = layer.bounds }
+        }
     }
 
     /// The switch is over: the floors back in the strip, and only the
     /// workspace on screen draws its terminals.
-    func endWorkspaceSlide() {
+    func endWorkspaceSwitch() {
         let state = workspaceSwitch
-        state.slideGeneration += 1
-        state.isSliding = false
-        if let floors = state.floors {
-            state.floors = nil
-            for workspace in workspaces where [floors.leaving, floors.arriving].contains(workspace.id) {
-                guard let layer = workspace.containerView.layer else { continue }
-                layer.removeAnimation(forKey: Self.floorsKey)
-                layer.setAffineTransform(.identity)
-                layer.zPosition = 0
-                layer.backgroundColor = nil
-                layer.sublayers?.filter { $0.name == Self.floorsShadeName }.forEach { $0.removeFromSuperlayer() }
-            }
-        }
+        state.switchGeneration += 1
+        state.isSwitching = false
+        removeFloors()
         guard !state.keepsDrawn.isEmpty else { return }
         state.keepsDrawn = []
         syncTerminalOcclusion()
+    }
+
+    /// The floors back in the strip: no move, no offset, no plate, no shade.
+    private func removeFloors() {
+        guard let floors = workspaceSwitch.floors else { return }
+        workspaceSwitch.floors = nil
+        for workspace in workspaces where [floors.leaving, floors.arriving].contains(workspace.id) {
+            guard let layer = workspace.containerView.layer else { continue }
+            layer.removeAnimation(forKey: Self.floorsKey)
+            layer.setAffineTransform(.identity)
+            layer.zPosition = 0
+            layer.backgroundColor = nil
+            layer.sublayers?.filter { $0.name == Self.floorsShadeName }.forEach { $0.removeFromSuperlayer() }
+        }
     }
 
     /// Whether the terminals of `workspace` draw: the workspace on screen,
@@ -229,7 +243,7 @@ extension NiruxShellView {
     /// stopped, the user reads or works there, and the card goes. During
     /// the slide (another ⌘↓) it stays.
     func workspaceCardSawInput() {
-        guard workspaceNameCard.isShown, !workspaceSwitch.isSliding else { return }
+        guard workspaceNameCard.isShown, !workspaceSwitch.isSwitching else { return }
         hideWorkspaceCard(animated: agentLightsMayMove)
     }
 

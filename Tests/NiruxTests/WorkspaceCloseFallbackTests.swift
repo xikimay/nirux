@@ -209,7 +209,7 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
             shell.switchToWorkspace(index(of: workspace("a", in: shell), in: shell))
             home.raiseNotification(.waiting)
 
-            shell.endWorkspaceSlide()  // selecting a played its floors
+            shell.endWorkspaceSwitch()  // selecting a played its floors
 
             // side keeps only the parked x: the main space's home takes over,
             // its badge cleared as when switching to it, and shown at once,

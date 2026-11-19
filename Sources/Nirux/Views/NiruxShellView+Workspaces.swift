@@ -674,20 +674,19 @@ extension NiruxShellView {
         let rowH = layout.rowH
         let animated = layout.animated
 
-        let oldY = verticalStrip.frame.origin.y
         let leaving = workspaceOnScreenBeforeLayout()
         applyWorkspaceFrames(layout)
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
         resizeTerminalsOffScreen(to: NSSize(width: viewportW, height: rowH))
-        // Animated path: a vertical slide over the direct frame change.
-        slideWorkspaceStrip(from: oldY, leaving: leaving, animated: animated)
+        // The workspace chosen comes on screen as a floor, when it changed.
+        playWorkspaceSwitch(leaving: leaving, animated: animated)
 
         // The focus moving within the workspace that was on screen lifts
         // its cards over a moment; one arriving or leaving changes at once,
-        // under its slide.
-        let lifting = agentLightsMayMove ? leaving?.workspace : nil
+        // under its floors.
+        let lifting = agentLightsMayMove ? leaving : nil
         for workspace in workspaces {
             applyCardEdges(workspace, animated: workspace === lifting && workspace === activeWorkspace)
         }
