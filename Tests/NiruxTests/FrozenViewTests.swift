@@ -75,14 +75,17 @@ final class FrozenViewTests: XCTestCase {
         window.contentView = view
         window.orderFront(nil)
         defer { window.close() }
-        let card = CALayer()
-        card.frame = CGRect(x: 10, y: 10, width: 50, height: 50)
-        try XCTUnwrap(view.layer).addSublayer(card)
+        // A view laid out anew, as a space is when chosen: AppKit moves its
+        // layer without an animation, so what shows lags until the commit.
+        let card = NSView(frame: NSRect(x: 10, y: 10, width: 50, height: 50))
+        card.wantsLayer = true
+        view.addSubview(card)
+        view.layoutSubtreeIfNeeded()
         CATransaction.flush()
-        card.frame = CGRect(x: 100, y: 20, width: 80, height: 60)
-        card.isHidden = false
+        card.frame = NSRect(x: 100, y: 20, width: 80, height: 60)
         let frozen = try XCTUnwrap(FrozenView.freeze(view))
-        XCTAssertEqual(frozen.content.sublayers?.first?.frame, card.frame, "as last set")
+        XCTAssertEqual(frozen.content.sublayers?.first?.frame, card.layer?.frame, "as last set")
+        XCTAssertEqual(card.layer?.frame, card.frame)
     }
 
     /// Where the GPU can't copy a surface, the CPU's copy is the same; past
