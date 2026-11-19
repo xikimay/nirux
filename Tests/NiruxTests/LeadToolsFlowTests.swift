@@ -234,6 +234,91 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// The resumed Lead's Claude Code says in its session record that it
+    /// sits idle at its prompt: a task's question goes in at the next check,
+    /// no prompt needed, and never comes to the user. Until then the log
+    /// says once that the record is missing, and nothing goes into a screen
+    /// of its own.
+    func testATasksQuestionGoesIntoAResumedLeadOnceItsRecordSaysItsPromptIsUp() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let resumed = AgentStandIn()
+            defer { resumed.remove() }
+            let agentUUID = UUID().uuidString
+            lead.workspace.addColumn(command: resumed.command(), agentUUID: agentUUID, cwd: harness.repo)
+            let pty = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == agentUUID }?.pty)
+            harness.waitUntil("its claude") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
+            let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
+            _ = pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: .sessionStart, agentUUID: agentUUID, sessionID: "lead", emitterProcess: claude,
+                source: "resume", timestamp: Date().timeIntervalSince1970
+            ), isUserFocused: false)
+            let workspaceID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: UUID().uuidString, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                initialAgentUUID: mission.childAgentUUID, missionID: mission.id, reportsToLead: true
+            )
+            let column = try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID }?.columns.first)
+            let question = try ask("Keep the old date= parameter?", from: mission)
+            var lines: [String] = []
+            shell.sideEffects.logMissionWait = { lines.append($0) }
+            @MainActor func check(after delay: TimeInterval = 0) {
+                shell.missionWaits.checkedAt = nil
+                shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + delay)
+            }
+            @MainActor func typedAt() -> TimeInterval? {
+                MissionStore.shared.missions.first { $0.id == mission.id }?.events.first { $0.id == question.id }?.parentTypedAt
+            }
+            // In the harness's home, as Nirux's environment names it: macOS
+            // hides the stand-in's own.
+            let url = ClaudeSessionRecord.url(pid: claude.pid, environment: ProcessInfo.processInfo.environment)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // As its REPL writes it: once it started.
+            @MainActor func write(_ status: String, waitingFor: String? = nil) throws {
+                var fields = #""status":"\#(status)","statusUpdatedAt":\#(claude.startedAt * 1000)"#
+                if let waitingFor { fields += #","waitingFor":"\#(waitingFor)""# }
+                try Data("{\(fields)}".utf8).write(to: url)
+                try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: claude.startedAt)], ofItemAtPath: url.path)
+            }
+            let missing = "claude session record missing agent=\(agentUUID.prefix(8)) "
+            check()
+            XCTAssertFalse(lines.contains { $0.hasPrefix(missing) }, "Claude Code writes it once it registered")
+            check(after: NiruxShellView.missionWaitLogAge)
+            check(after: NiruxShellView.missionWaitLogAge + 5)
+            XCTAssertEqual(lines.filter { $0.hasPrefix(missing) }.count, 1, lines.joined(separator: "\n"))
+            try write("waiting", waitingFor: "dialog open")
+            check()
+            shell.typeMissionMessages()
+            XCTAssertNil(typedAt(), "a screen of its own is up")
+
+            try write("idle")
+            harness.waitUntil("its record settled") {
+                pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: ProcessSnapshot()) == nil
+            }
+            @MainActor func handOff(at now: TimeInterval) -> SidebarMissionQuestion.HandOff? {
+                shell.missionQuestions(
+                    foreground: { $0.pty?.foregroundProcess(snapshot: ProcessSnapshot()) }, now: now
+                )[ObjectIdentifier(column)]?.handOff
+            }
+            check()
+            XCTAssertNil(shell.missionWaits.tries[question.id], "typed at once; tries count at the overdue ones' pace")
+            // Between checks, the sidebar reads the record the check read.
+            try write("waiting", waitingFor: "dialog open")
+            let now = Date().timeIntervalSince1970
+            XCTAssertNil(handOff(at: now))
+            XCTAssertNil(handOff(at: now + NiruxShellView.missionParentGrace), "it can take the question")
+            try write("idle")
+            harness.waitUntil("the question in its prompt") { resumed.input.contains("Keep the old date= parameter?") }
+            XCTAssertNotNil(typedAt())
+        }
+    }
+
     /// Clicks the question row on `task`'s card, as the user does: the
     /// popover it opens.
     private func openReply(
@@ -436,6 +521,83 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(day.text.contains("- test-waits-on-sleep · 2 tasks: "), day.text)
             let read = try XCTUnwrap(DailyPassState.load(spaceID: lead.space).end)
             XCTAssertEqual(read, Date().timeIntervalSince1970, accuracy: 60)
+        }
+    }
+
+    /// The daily pass, on after 06:00 unless Space Settings › Lead says:
+    /// once its hour struck and the Lead is quiet, a day with nothing marks
+    /// it checked; a day with a recorded review types the daily line into
+    /// the Lead's terminal, once. After the Lead reads its day, its row and
+    /// Space Settings say what the pass read.
+    func testTheDailyLineReachesAQuietLeadOnceItsHourStruck() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let column = try XCTUnwrap(lead.workspace.columns.first { $0.agentUUID == lead.agentUUID })
+            final class Box: @unchecked Sendable {
+                var quiet = false
+                var sent: [String] = []
+            }
+            let box = Box()
+            let now = Date().timeIntervalSince1970
+            let tomorrow = now + 86_400
+            @MainActor func check(at time: TimeInterval) {
+                shell.checkDailyPasses(now: time, isQuiet: { _ in box.quiet }, send: { target, text in
+                    XCTAssertTrue(target === column, "the Lead's agent")
+                    box.sent.append(text)
+                })
+                harness.waitUntil("the pass's read") { shell.dailyPassChecks.isEmpty }
+            }
+
+            check(at: now)
+            XCTAssertNil(DailyPassState.load(spaceID: lead.space).checkedAt, "never while the Lead or the user is busy")
+            box.quiet = true
+            check(at: now)
+            XCTAssertEqual(box.sent, [], "nothing happened")
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).checkedAt)
+            XCTAssertNotNil(DailyPassState.load(spaceID: lead.space).end, "its window is read: the next pass starts there")
+
+            shell.addWorkspace(title: "Fix", cwd: harness.worktree, profileID: lead.space)
+            let fix = try XCTUnwrap(shell.workspaces.first { $0.title == "Fix" })
+            shell.refreshGitContextNow(for: fix)
+            harness.waitUntil("its branch") { fix.gitBranch == harness.worktreeBranch }
+            let finding = ["kind": "test-waits-on-sleep", "text": "testFix sleeps"]
+            XCTAssertFalse(try call(LeadTools.recordReview, ["task": "Fix", "findings": [finding]], lead: lead, in: harness).isError)
+            check(at: now)
+            XCTAssertEqual(box.sent, [], "checked for today")
+            // A pass it can't record isn't typed: it would come back.
+            let file = try XCTUnwrap(DailyPassState.url(spaceID: lead.space))
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            check(at: tomorrow)
+            XCTAssertEqual(box.sent, [], "not recorded, not typed")
+            let retry = try XCTUnwrap(shell.dailyPassRetryAt[lead.space])
+            check(at: tomorrow + 60)
+            XCTAssertEqual(shell.dailyPassRetryAt[lead.space], retry, "it waits before trying again")
+            try FileManager.default.removeItem(at: file)
+            shell.dailyPassRetryAt = [:]
+            check(at: tomorrow)
+            XCTAssertEqual(box.sent, [DailyPass.prompt])
+            check(at: tomorrow)
+            XCTAssertEqual(box.sent.count, 1, "once a day")
+
+            XCTAssertFalse(try call(LeadTools.dailyPass, lead: lead, in: harness).isError)
+            shell.updateSidebar()
+            let note = shell.sidebar.lastInfos.first(where: \.isLead)?.dailyPassNote
+            XCTAssertEqual(note, "Daily pass · no rule proposed")
+            shell.showSpaceSettings(profileID: lead.space, tab: .lead)
+            let pane = try XCTUnwrap(shell.spaceSettings).lead
+            XCTAssertTrue(pane.lastPassLabel.stringValue.hasPrefix("Last pass: "), pane.lastPassLabel.stringValue)
+            pane.dailyPassHourPopup.selectItem(at: 9)
+            pane.dailyPassHourPopup.sendAction(pane.dailyPassHourPopup.action, to: pane.dailyPassHourPopup.target)
+            XCTAssertEqual(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.leadDailyPassHour, 9)
+            pane.dailyPassSwitch.state = .off
+            pane.dailyPassSwitch.sendAction(pane.dailyPassSwitch.action, to: pane.dailyPassSwitch.target)
+            XCTAssertEqual(SpaceDefaultsStore(spaceID: lead.space)?.load().defaults.leadDailyPass, false)
+            XCTAssertFalse(pane.dailyPassHourPopup.isEnabled)
+            XCTAssertFalse(try call(LeadTools.recordReview, ["task": "Fix", "findings": [finding]], lead: lead, in: harness).isError)
+            check(at: tomorrow + 86_400)
+            XCTAssertEqual(box.sent.count, 1, "off, though something happened")
         }
     }
 

@@ -80,6 +80,8 @@ enum LaunchArguments {
     static func mode(of args: [String]) -> Mode? {
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--statusline" { return .statusLine }
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--mcp" { return .toolsServer }
+        // Antigravity's Stop hook (AgentHookInstaller.agyHookCommand).
+        if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--agy" { return .hook(.agy, payload: nil) }
         if let workspaceID = SetupFailureSignal.workspaceID(in: args) { return .setupFailure(workspaceID: workspaceID) }
         if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
             return .hook(kind, payload: args.count > 3 ? args.last : nil)

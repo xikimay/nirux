@@ -8,22 +8,24 @@ Nirux shows what each agent is doing, tells you when one needs you, and brings a
 | --- | --- | --- |
 | Claude Code | yes (`Cmd+N`, `Open Claude Code`) | exact, from hooks |
 | Codex | yes (`Cmd+N`, `Open Codex`) | the end of a turn is exact; "working" is estimated from terminal output |
+| Antigravity (`agy`) | yes (`Cmd+N`, `Open Antigravity`) | exact, from what it reports (OSC 7501): working, waiting for you and why, done |
 | Gemini CLI, OpenCode | no, start them in a terminal | estimated from terminal output |
 
-Settings › Agents sets the permission and sandbox mode Claude Code and Codex start with. For Claude Code, **Claude Code default** passes no flag, so a session follows `permissions.defaultMode` in your Claude Code settings, else starts in Auto where auto mode is available; **Manual** asks before edits and commands.
+Settings › Agents sets the permission and sandbox mode Claude Code and Codex start with. For Claude Code, **Claude Code default** passes no flag, so a session follows `permissions.defaultMode` in your Claude Code settings, else starts in Auto where auto mode is available; **Manual** asks before edits and commands. Antigravity starts with its own mode, model and settings, and without the space's brief: Nirux passes no flag. Nirux terminals set `AGY_CLI_OSC7501=on`, so that agy reports its state; an agy that doesn't is followed from its output.
 
 ## Status hooks
 
-Claude Code can run a command when a turn (one prompt and the work that follows) starts, stops or asks for permission, and Codex when a turn completes. Nirux adds itself as one such command. At every launch, the installed app writes to two files:
+Claude Code can run a command when a turn (one prompt and the work that follows) starts, stops or asks for permission, and Codex when a turn completes. Nirux adds itself as one such command. At every launch, the installed app writes to these files:
 
 - `~/.claude/settings.json` gains `hooks` entries that run `Nirux --hook claude` on session start, prompt submit, tool use, permission request, notification, subagent stop, stop and session end. When every `claude` a Nirux terminal could run is recent enough, two more: a turn that ends on an API error (2.1.78 or later) and a tool call auto mode refused (2.1.89 or later). Your own hooks are kept.
 - `~/.codex/config.toml` gains a `notify` entry that runs `Nirux --hook codex` when a turn completes. If you already have a `notify`, Nirux leaves the file alone.
+- `~/.gemini/config/hooks.json`, once Antigravity has run on the Mac (`~/.gemini/antigravity-cli` exists when Nirux launches), gains a hook named `nirux` that runs `Nirux --hook claude --agy` when an Antigravity session starts (also written when Nirux starts an agy) (`"enabled": false` in that hook turns it off). It only tells Nirux which conversation each column runs, so that it can resume it. Your own hooks in that file are kept.
 
-Both files are global, so every Claude Code and Codex session on the Mac runs these entries. Each entry first tests `NIRUX_AGENT_UUID`, a variable only Nirux terminals set, and does nothing anywhere else. Symlinked config files are updated in place and the link is kept.
+These files are global, so every Claude Code, Codex and Antigravity session on the Mac runs these entries. Each entry first tests `NIRUX_AGENT_UUID`, a variable only Nirux terminals set, and does nothing anywhere else. Symlinked config files are updated in place and the link is kept.
 
 A Claude Code session started before the hooks were installed gets estimated status until it restarts.
 
-To keep Nirux from writing the hooks, launch it with `NIRUX_SKIP_HOOK_INSTALL=1` in its environment. To remove them, quit Nirux, then delete the hook entries that contain `--hook claude` from the first file and the `notify` line that contains `--hook codex` from the second. A launch without that variable adds them back.
+To keep Nirux from writing the hooks, launch it with `NIRUX_SKIP_HOOK_INSTALL=1` in its environment. To remove them, quit Nirux, then delete the hook entries that contain `--hook claude` from the first file, the `notify` line that contains `--hook codex` from the second, and the `nirux` hook from the third. A launch without that variable adds them back.
 
 ## What you see
 
@@ -53,7 +55,7 @@ While Nirux is in the background, it also sends a macOS notification (a click fo
 
 ## After a restart
 
-Nirux saves each agent column's session: the launch mode and the Claude Code session ID or Codex thread ID. After a restart, each column resumes its own conversation by that ID (`claude --resume <id>`, `codex resume <id>`) in the folder it ran in. A Claude Code session that was never prompted restarts fresh. When the ID is missing or ambiguous, the agent's own resume picker opens.
+Nirux saves each agent column's session: the launch mode and the Claude Code session ID, Codex thread ID or Antigravity conversation ID. After a restart, each column resumes its own conversation by that ID (`claude --resume <id>`, `codex resume <id>`, `agy --conversation <id>`) in the folder it ran in. A Claude Code session that was never prompted restarts fresh. When the ID is missing or ambiguous, the agent's own resume picker opens; Antigravity, which has no such flag, starts fresh, and `/resume` in it lists its conversations.
 
 Agents resume on demand, so that moving through workspaces doesn't start them all. A restored column reads `Not resumed yet — click or focus to resume`, with the session's title and its last status, and its row reads `Paused · Resume`. The agent starts once the column has stayed a moment in the workspace on screen, or when you click **Resume**. `Resume All Agents` (command palette, Agent menu) starts every one left. To start them all at launch instead, choose **All at once** for **Settings › General › Resume agents on launch**.
 

@@ -22,14 +22,15 @@ final class OnboardingChecklistTests: XCTestCase {
     }
 
     private func checklist(
-        claude: Bool = true, codex: Bool = false,
+        claude: Bool = true, codex: Bool = false, agy: Bool = false,
         skills: AgentSkillsStatus = .installed,
         hooksClaude: Bool = true, hooksCodex: Bool = true, installsHooks: Bool = true
     ) -> OnboardingChecklist {
         OnboardingChecklist(
             agents: AgentCLIAvailability(
                 claudePath: claude ? "/opt/homebrew/bin/claude" : nil,
-                codexPath: codex ? "/opt/homebrew/bin/codex" : nil
+                codexPath: codex ? "/opt/homebrew/bin/codex" : nil,
+                agyPath: agy ? "/Users/me/.local/bin/agy" : nil
             ),
             skills: skills,
             hooks: AgentHooksStatus(claude: hooksClaude, codex: hooksCodex, installsHooks: installsHooks)
@@ -168,6 +169,9 @@ final class OnboardingChecklistTests: XCTestCase {
         XCTAssertEqual(checklist(claude: true, codex: false).agentRow.title, "Claude Code found")
         XCTAssertEqual(checklist(claude: false, codex: true).agentRow.title, "Codex found")
         XCTAssertEqual(checklist(claude: true, codex: true).agentRow.title, "Claude Code and Codex found")
+        let agyOnly = checklist(claude: false, agy: true)
+        XCTAssertEqual(agyOnly.agentRow.title, "Antigravity found")
+        XCTAssertTrue(agyOnly.isComplete, "agy starts tasks too")
         // Where it was found, since the lookup can't run shell startup files.
         XCTAssertTrue(checklist(claude: true).agentRow.detail?.hasPrefix("At /opt/homebrew/bin/claude.") == true)
         XCTAssertTrue(checklist(claude: false, codex: true).agentRow.detail?.hasPrefix("At /opt/homebrew/bin/codex.") == true)

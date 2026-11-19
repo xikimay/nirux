@@ -14,8 +14,9 @@ enum OnboardingChecklistState: String, Codable, Sendable {
 struct AgentCLIAvailability: Hashable, Sendable {
     var claudePath: String?
     var codexPath: String?
+    var agyPath: String?
 
-    var anyFound: Bool { claudePath != nil || codexPath != nil }
+    var anyFound: Bool { claudePath != nil || codexPath != nil || agyPath != nil }
 }
 
 /// The bundled agent skills compared with the copies on disk.
