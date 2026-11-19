@@ -22,6 +22,9 @@ struct AgentProgramStatus: Equatable, Sendable {
     static let process = "agy"
     /// Every launch says `blocked:kind=auth` for a moment while it signs in.
     static let signInGrace: TimeInterval = 5
+    /// agy's spinner never stops this long while it works: past it, a
+    /// reported `working` was ended by a status Nirux missed.
+    static let workingSilence: TimeInterval = 60
 
     static let prefix = "\u{1b}]7501;"
 
@@ -59,31 +62,57 @@ struct AgentProgramStatus: Equatable, Sendable {
     }
 
     /// Reads them out of terminal output, which comes in chunks: a sequence
-    /// a chunk cuts waits for the next one.
+    /// a chunk cuts waits for the next one. One longer than `maxCarry` is
+    /// read without the rest of its `msg`, the last field agy sends.
     struct Scanner: Sendable {
+        /// The cut sequence's payload so far, or the start of the prefix a
+        /// chunk ended on.
         private var carry = ""
-        /// A cut sequence longer than this is dropped.
+        private var inPayload = false
         static let maxCarry = 4096
 
         /// Whether a cut sequence waits for the next chunk.
-        var isWaiting: Bool { !carry.isEmpty }
+        var isWaiting: Bool { inPayload || !carry.isEmpty }
 
         mutating func statuses(in chunk: String) -> [AgentProgramStatus] {
-            var text = carry + chunk
-            carry = ""
             var found: [AgentProgramStatus] = []
+            var text = Substring(chunk)
+            if inPayload {
+                guard let end = text.firstIndex(where: Self.isTerminator) else {
+                    keep(text)
+                    return found
+                }
+                keep(text[..<end])
+                if let status = AgentProgramStatus.parse(Substring(carry)) { found.append(status) }
+                (carry, inPayload) = ("", false)
+                text = text[end...]
+            } else if !carry.isEmpty {
+                text = Substring(carry + text)
+                carry = ""
+            }
             while let start = text.range(of: AgentProgramStatus.prefix) {
                 let payload = text[start.upperBound...]
-                guard let end = payload.firstIndex(where: { $0 == "\u{07}" || $0 == "\u{1b}" }) else {
-                    if text.distance(from: start.lowerBound, to: text.endIndex) <= Self.maxCarry {
-                        carry = String(text[start.lowerBound...])
-                    }
-                    break
+                guard let end = payload.firstIndex(where: Self.isTerminator) else {
+                    inPayload = true
+                    keep(payload)
+                    return found
                 }
                 if let status = AgentProgramStatus.parse(payload[..<end]) { found.append(status) }
-                text = String(payload[end...])
+                text = payload[end...]
+            }
+            // A chunk that ends on the prefix's start.
+            if let escape = text.lastIndex(of: "\u{1b}"), AgentProgramStatus.prefix.hasPrefix(text[escape...]) {
+                carry = String(text[escape...])
             }
             return found
+        }
+
+        private mutating func keep(_ payload: Substring) {
+            carry += payload.prefix(max(0, Self.maxCarry - carry.count))
+        }
+
+        private static func isTerminator(_ character: Character) -> Bool {
+            character == "\u{07}" || character == "\u{1b}"
         }
     }
 }

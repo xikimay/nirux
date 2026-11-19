@@ -617,8 +617,9 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             let question = Data("Which color do you prefer?".utf8).base64EncodedString()
-            let sequence = "\\033]7501;state=blocked:kind=question:app=antigravity:msg=\(question)\\007"
-            workspace.addColumn(command: "printf '\(sequence)'; exec -a agy /bin/sleep 600", cwd: harness.repo)
+            // Said by agy itself, in front: Nirux takes no other's.
+            let script = "sleep 1; printf '\\033]7501;state=blocked:kind=question:app=antigravity:msg=\(question)\\007'; sleep 600"
+            workspace.addColumn(command: "exec -a agy /bin/sh -c \"\(script)\"", cwd: harness.repo)
             let column = try XCTUnwrap(workspace.columns.last)
             // Never the system's notification center in a test process.
             var alerts: [AgentAttentionReason?] = []

@@ -7,9 +7,9 @@ enum ReviewSendRefusal: Equatable, Sendable {
     /// Nothing that takes a prompt runs there.
     case noAgent
     /// An agent that doesn't say when it waits at its prompt (Codex's
-    /// notify hook reports turn ends only; Gemini CLI, OpenCode and
-    /// Antigravity report nothing): an open question would take the comments
-    /// as its answer.
+    /// notify hook reports turn ends only; Gemini CLI and OpenCode report
+    /// nothing; Antigravity reports its state, which Nirux doesn't trust for
+    /// typing yet): an open question would take the comments as its answer.
     case notClaude(String)
     /// A Claude that took no prompt since it started, or hasn't reported
     /// since it came back from Ctrl-Z: a dialog it shows before any hook

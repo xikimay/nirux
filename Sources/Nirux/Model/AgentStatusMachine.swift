@@ -1439,14 +1439,26 @@ struct AgentStatusMachine {
     }
 
     /// Takes in what Antigravity reported: the reason to alert with when it
-    /// starts waiting on the user, or its turn ends or fails.
-    mutating func noteProgramStatus(_ status: AgentProgramStatus, now: Date) -> AgentAttentionReason? {
-        let previous = programStatus?.status
+    /// starts waiting on the user, or its turn ends or fails, out of the
+    /// user's sight. The same status again (a redraw) changes nothing.
+    mutating func noteProgramStatus(_ status: AgentProgramStatus, isUserFocused: Bool, now: Date) -> AgentAttentionReason? {
+        guard status != programStatus?.status else { return nil }
         programStatus = (status, now.timeIntervalSince1970)
-        _ = reportedState(isUserFocused: false, now: now.timeIntervalSince1970)
-        guard status != previous, state == .needsAttention, status.state != .working, status.state != .idle,
+        _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
+        guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
               status.kind != "auth" else { return nil }
         return lastAttentionReason
+    }
+
+    /// What Antigravity in front reported it waits on, past the moment every
+    /// launch signs in.
+    func reportedWait(foreground: ForegroundProcess?, now: TimeInterval) -> AgentWait? {
+        guard foreground?.name == AgentProgramStatus.process, let reported = programStatus,
+              reported.status.state == .blocked,
+              reported.status.kind != "auth" || now - reported.at >= AgentProgramStatus.signInGrace,
+              let reason = reported.status.attentionReason
+        else { return nil }
+        return AgentWait(reason: reason, since: reported.at)
     }
 
     /// The state Antigravity reported since it came to the front: it says
@@ -1455,8 +1467,10 @@ struct AgentStatusMachine {
         guard let reported = programStatus else { return nil }
         let (status, at) = reported
         switch status.state {
+        case .working where now - max(at, lastReadAt) > AgentProgramStatus.workingSilence:
+            return nil
         case .working:
-            if state != .working { turnStartedAt = at }
+            if turnStartedAt == nil { turnStartedAt = at }
             state = .working
             lastAttentionReason = nil
         case .blocked where status.kind == "auth" && now - at < AgentProgramStatus.signInGrace:
@@ -1568,6 +1582,7 @@ struct AgentStatusMachine {
     /// New shell in the same terminal (start/restart) — everything resets.
     mutating func reset() {
         state = .idle
+        programStatus = nil
         quietTurnEnd = nil
         askedQuestion = nil
         hookWorking = false
