@@ -781,7 +781,7 @@ extension NiruxShellView {
         let from = workspace.focusedIndex
         workspace.moveColumn(dir)
         relayout(animated: true)
-        if agentLightsMayMove, workspace.focusedIndex != from,
+        if agentLightsMayMove || ZZ("liftStill"), workspace.focusedIndex != from,
            let moved = workspace.columns[safe: workspace.focusedIndex], let passed = workspace.columns[safe: from] {
             lift(moved, over: passed)
         }
@@ -799,19 +799,19 @@ extension NiruxShellView {
     func lift(_ moved: ColumnState, over passed: ColumnState) {
         let duration = WorkspaceState.glideDuration
         let curve = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.3, 1)
-        let raised = [moved.view, moved.light, moved.shadow].compactMap { $0?.layer }
+        let raised = (ZZ("shadowUnder") ? [moved.view, moved.light] : [moved.view, moved.light, moved.shadow]).compactMap { $0?.layer }
         moved.lifts += 1
         for layer in raised {
-            layer.zPosition = 1
+            if !ZZ("notOverIt") { layer.zPosition = 1 }
             let rise = CAKeyframeAnimation(keyPath: "transform.translation.y")
             rise.values = [0, Self.liftHeight, 0] as [CGFloat]
             rise.isAdditive = true
             rise.duration = duration
             rise.timingFunction = curve
-            layer.add(rise, forKey: Self.liftKey)
+            if !ZZ("noRise") { layer.add(rise, forKey: Self.liftKey) }
         }
         let shade = CALayer()
-        if let under = passed.view.layer {
+        if let under = passed.view.layer, !ZZ("noDim") {
             shade.frame = under.bounds
             shade.backgroundColor = Theme.Color.base.cgColor
             shade.opacity = 0
@@ -824,10 +824,10 @@ extension NiruxShellView {
         // On time, not on the animations' completion, which a window out of
         // view may never report.
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak moved] in
-            shade.removeFromSuperlayer()
+            if !ZZ("shadeLeft") { shade.removeFromSuperlayer() }
             guard let moved else { return }
             moved.lifts -= 1
-            if moved.lifts == 0 { raised.forEach { $0.zPosition = 0 } }
+            if moved.lifts == 0, !ZZ("staysLifted") { raised.forEach { $0.zPosition = 0 } }
         }
     }
 
