@@ -105,10 +105,15 @@ extension AgentStatusMachine {
     ) -> AgentPromptRefusal? {
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
-        guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else {
+        let startedAt = foreground.instance.startedAt
+        guard let lastPromptAt = prompt(since: startedAt) else {
             if sitsAtFirstPrompt(foreground.instance, seenByUser: seenByUser, showsIdlePrompt: showsIdlePrompt) { return nil }
-            // Typed since it started: not a screen of its own.
-            return lastDraftInputAt >= foreground.instance.startedAt + 1 ? .draft : .noPromptYet
+            // Typed since it started, when its hooks would have said a prompt
+            // went in: not a screen of its own, unless the user's word passed
+            // those keys.
+            let typed = reportsHooks(since: startedAt) && lastDraftInputAt >= startedAt + 1
+                && !keysLeftNoText(since: foreground.instance, seenByUser: seenByUser)
+            return typed ? .draft : .noPromptYet
         }
         if hookWorking || turnStartedAt != nil { return .working }
         if !pendingDialogs.isEmpty { return .dialog }
@@ -123,22 +128,39 @@ extension AgentStatusMachine {
     /// none reports, before its REPL mounts (trust, MCP servers) and after
     /// (a resume's offer to resume from a summary, a quota warning, a newer
     /// model, a startup offer), where typed text and Enter would pick an
-    /// option. So: nothing at work or listed, no key or recalled prompt
-    /// since the terminal started (keys typed before a REPL mounts are
-    /// seeded into its prompt, those typed while its shell still loads too;
+    /// option. So: its hooks report (without them, no prompt would ever say
+    /// that a message typed went in), nothing at work or listed, no key or
+    /// recalled prompt since the terminal started (keys typed before a REPL
+    /// mounts are seeded into its prompt, those typed while its shell still
+    /// loads too;
     /// others open its agents or transcript views; one started by hand
     /// waits for its first prompt), and, read last, its REPL's own word
     /// (`showsIdlePrompt`, from `ClaudeSessionRecord`). `seenByUser`: the
-    /// user, who saw its screen, says it sits at its prompt: keys that leave
-    /// no text don't count, nor an Enter last (it answered a screen of its
-    /// own, a prompt would have followed one at the box).
+    /// user, who saw its screen, says it sits at its prompt (see
+    /// `keysLeftNoText`).
     func sitsAtFirstPrompt(
         _ process: ProcessInstance, seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool
     ) -> Bool {
-        let leftNoText = lastInputAt == 0 && lastDraftInputAt == 0
-            || seenByUser && (lastDraftInputAt == 0 || lastDraftKind == "enter")
-        return !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
-            && leftNoText && showsIdlePrompt(process)
+        reportsHooks(since: process.startedAt)
+            && !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
+            && keysLeftNoText(since: process, seenByUser: seenByUser) && showsIdlePrompt(process)
+    }
+
+    /// Whether no key may have left text in the prompt of `process`: none
+    /// since the terminal started, or, on the user's word, none since it
+    /// started (keys before launched it, or the user sees them) but an Enter
+    /// last, which answered a screen of its own (one at the box would have
+    /// sent a prompt). Its start is known to the second.
+    private func keysLeftNoText(since process: ProcessInstance, seenByUser: Bool) -> Bool {
+        lastInputAt == 0 && lastDraftInputAt == 0
+            || seenByUser && (lastDraftInputAt < process.startedAt + 1 || lastDraftKind == "enter")
+    }
+
+    /// Whether Nirux's hooks reported from the `claude` started at
+    /// `startedAt`: an event stamped since (events of an earlier one, queued
+    /// while Nirux was closed, carry their own time).
+    func reportsHooks(since startedAt: TimeInterval) -> Bool {
+        hookKind == "claude" && lastEventAt >= startedAt
     }
 
     /// What `promptRefusal` reads, for the log: ages in seconds and names,

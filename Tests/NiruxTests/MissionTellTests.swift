@@ -411,6 +411,16 @@ final class MissionTellTests: XCTestCase {
         func refusal(_ machine: AgentStatusMachine, idle: Bool = true) -> AgentPromptRefusal? {
             machine.promptRefusal(foreground: claude(resumed), runningSince: t0 + 100) { $0 == resumed && idle }
         }
+        // Without Nirux's hooks from it, nothing would say a message went in:
+        // never, and keys say nothing of a draft.
+        var hookless = AgentStatusMachine()
+        XCTAssertEqual(refusal(hookless), .noPromptYet)
+        hookless.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8), keys: Data("x".utf8))
+        XCTAssertEqual(refusal(hookless), .noPromptYet, "not held by a draft")
+        var earlier = AgentStatusMachine()
+        _ = earlier.apply(hook(.sessionStart, at: 5), isUserFocused: false)
+        XCTAssertEqual(refusal(earlier), .noPromptYet, "an earlier claude's hooks")
+
         var machine = AgentStatusMachine()
         _ = machine.apply(hook(.sessionStart, at: 7, source: "resume"), isUserFocused: false)
         XCTAssertEqual(refusal(machine, idle: false), .noPromptYet)
@@ -458,9 +468,9 @@ final class MissionTellTests: XCTestCase {
         XCTAssertNil(seen(answered))
         XCTAssertNil(seen(scrolled))
         XCTAssertEqual(seen(typed), .draft, "text in its prompt")
-        XCTAssertEqual(seen(early), .noPromptYet, "text seeded into its prompt")
+        XCTAssertNil(seen(early), "keys before it started, Nirux's launch line too: what they left, the user sees")
         XCTAssertEqual(seen(recalled), .draft, "an old prompt in its box")
-        XCTAssertEqual(seen(answered, idle: false), .draft, "its record says a screen of its own is up")
+        XCTAssertEqual(seen(answered, idle: false), .noPromptYet, "its record says a screen of its own is up")
         XCTAssertEqual(seen(asking), .noPromptYet)
         XCTAssertEqual(seen(working), .noPromptYet)
     }

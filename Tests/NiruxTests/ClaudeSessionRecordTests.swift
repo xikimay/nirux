@@ -73,6 +73,8 @@ final class ClaudeSessionRecordTests: XCTestCase {
         let config = try folder()
         let url = ClaudeSessionRecord.url(pid: 42, environment: ["HOME": "/Users/a", "CLAUDE_CONFIG_DIR": config.path])
         XCTAssertEqual(url.path, config.appendingPathComponent("sessions/42.json").path)
+        XCTAssertEqual(ClaudeSessionRecord.url(pid: 42, environment: ["CLAUDE_CONFIG_DIR": "work/.claude"]) { "/repo" }.path,
+                       "/repo/work/.claude/sessions/42.json", "a relative one, against the process's working directory")
         XCTAssertEqual(ClaudeSessionRecord.read(at: url), .missing)
         XCTAssertEqual(ClaudeSessionRecord.Reading.missing.facts(of: process, now: 0), "missing")
         try Data(#"{"pid":42,"#.utf8).write(to: url)
@@ -92,6 +94,12 @@ final class ClaudeSessionRecordTests: XCTestCase {
 
         let waiting = ClaudeSessionRecord.Reading.found(record("waiting", waitingFor: "dialog open"))
         XCTAssertEqual(waiting.facts(of: process, now: 1_013), "waiting(dialog_open)/3s")
+        // What the log says: missing, unreadable twice in a row, no status of its own.
+        XCTAssertTrue(ClaudeSessionRecord.Reading.missing.isIssue(for: process, unreadableBefore: false))
+        XCTAssertFalse(ClaudeSessionRecord.Reading.unreadable.isIssue(for: process, unreadableBefore: false), "it may land mid-write")
+        XCTAssertTrue(ClaudeSessionRecord.Reading.unreadable.isIssue(for: process, unreadableBefore: true))
+        XCTAssertTrue(ClaudeSessionRecord.Reading.found(record(nil, changedAt: nil)).isIssue(for: process, unreadableBefore: false))
+        XCTAssertFalse(waiting.isIssue(for: process, unreadableBefore: false))
         XCTAssertEqual(ClaudeSessionRecord.Reading.found(record("idle", changedAt: 990)).facts(of: process, now: 1_013), "stale")
     }
 
@@ -103,6 +111,9 @@ final class ClaudeSessionRecordTests: XCTestCase {
             .joined(separator: "\0") + "\0"
         let environment = ProcessSnapshot.environment(argc: 4, strings: ArraySlice(Array(area.utf8)))
         XCTAssertEqual(environment, ["CLAUDE_CONFIG_DIR": "/tmp/c", "HOME": "/tmp/a=b"])
+        // Its argv overwritten in place (Node's process.title): a title, then NULs.
+        let retitled = (["claude"] + Array(repeating: "", count: 12) + ["HOME=/tmp/h", ""]).joined(separator: "\0") + "\0"
+        XCTAssertEqual(ProcessSnapshot.environment(argc: 4, strings: ArraySlice(Array(retitled.utf8))), ["HOME": "/tmp/h"])
         XCTAssertNotNil(ProcessSnapshot.environment(of: getpid())["PATH"], "this process's, from the kernel")
         XCTAssertEqual(ProcessSnapshot.environment(of: -1), [:])
     }
@@ -131,22 +142,31 @@ final class ClaudeSessionRecordTests: XCTestCase {
         pty.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command()], cwd: config.path)
         try await waitUntil("claude in front", timeout: 3) { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "claude" }
         let claude = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot())).instance
-        func refusal() -> AgentPromptRefusal? {
-            pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
+        func refusal(at now: TimeInterval = Date().timeIntervalSince1970) -> AgentPromptRefusal? {
+            pty.missionPromptRefusal(runningSince: now, snapshot: ProcessSnapshot(), now: now)
+        }
+        func seen(at now: TimeInterval) -> AgentPromptRefusal? {
+            pty.missionPromptRefusal(runningSince: now, snapshot: ProcessSnapshot(), seenByUser: true, now: now)
         }
         XCTAssertEqual(refusal(), .noPromptYet, "no record")
-        func seen() -> AgentPromptRefusal? {
-            pty.missionPromptRefusal(runningSince: Date().timeIntervalSince1970, snapshot: ProcessSnapshot(), seenByUser: true)
-        }
-        try await waitUntil("the user's word, once it ran for a while", timeout: ClaudeSessionRecord.settleTime + 5) { seen() == nil }
         // As its REPL writes it: once it started.
-        try writeRecord(pid: claude.pid, in: config, "waiting", waitingFor: "dialog open", changedAt: claude.startedAt)
-        XCTAssertEqual(refusal(), .noPromptYet, "a resume's dialog")
-        XCTAssertEqual(seen(), .noPromptYet, "its record says a screen of its own is up, whatever the user saw")
-        XCTAssertFalse(pty.mayPressEnter(after: pty.lastInputAt, for: claude, snapshot: ProcessSnapshot()))
+        let record = config.appendingPathComponent("sessions/\(claude.pid).json")
         try writeRecord(pid: claude.pid, in: config, "idle", changedAt: claude.startedAt)
-        try await waitUntil("its record settled", timeout: ClaudeSessionRecord.settleTime + 5) { refusal() == nil }
-        XCTAssertTrue(pty.mayPressEnter(after: pty.lastInputAt, for: claude, snapshot: ProcessSnapshot()))
-        XCTAssertTrue(pty.missionPromptFacts(now: Date().timeIntervalSince1970, snapshot: ProcessSnapshot()).contains(" record=idle/"))
+        let settled = claude.startedAt + ClaudeSessionRecord.settleTime
+        XCTAssertEqual(refusal(at: settled), .noPromptYet, "without Nirux's hooks from it")
+        _ = pty.applyAgentHook(AgentHookEvent(
+            kind: .claude, name: .sessionStart, sessionID: "s", emitterProcess: claude, source: "resume", timestamp: claude.startedAt
+        ), isUserFocused: false)
+        // The user's word stands in for a missing record, once it ran a while.
+        try FileManager.default.removeItem(at: record)
+        XCTAssertEqual(seen(at: claude.startedAt + 1), .noPromptYet, "its REPL may not be up yet")
+        XCTAssertNil(seen(at: settled), "the user saw its prompt")
+        try writeRecord(pid: claude.pid, in: config, "waiting", waitingFor: "dialog open", changedAt: claude.startedAt)
+        XCTAssertEqual(refusal(at: settled), .noPromptYet, "a resume's dialog")
+        XCTAssertEqual(seen(at: settled), .noPromptYet, "its record says a screen of its own is up, whatever the user saw")
+        try writeRecord(pid: claude.pid, in: config, "idle", changedAt: claude.startedAt)
+        XCTAssertEqual(refusal(at: settled - 0.1), .noPromptYet, "not settled at that time")
+        XCTAssertNil(refusal(at: settled))
+        XCTAssertTrue(pty.missionPromptFacts(now: settled, snapshot: ProcessSnapshot()).contains(" record=idle/"))
     }
 }

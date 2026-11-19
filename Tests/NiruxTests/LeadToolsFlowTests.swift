@@ -306,10 +306,14 @@ final class LeadToolsFlowTests: XCTestCase {
                     foreground: { $0.pty?.foregroundProcess(snapshot: ProcessSnapshot()) }, now: now
                 )[ObjectIdentifier(column)]?.handOff
             }
+            check()
+            XCTAssertNil(shell.missionWaits.tries[question.id], "typed at once; tries count at the overdue ones' pace")
+            // Between checks, the sidebar reads the record the check read.
+            try write("waiting", waitingFor: "dialog open")
             let now = Date().timeIntervalSince1970
             XCTAssertNil(handOff(at: now))
             XCTAssertNil(handOff(at: now + NiruxShellView.missionParentGrace), "it can take the question")
-            check()
+            try write("idle")
             harness.waitUntil("the question in its prompt") { resumed.input.contains("Keep the old date= parameter?") }
             XCTAssertNotNil(typedAt())
         }
@@ -348,6 +352,17 @@ final class LeadToolsFlowTests: XCTestCase {
 
         func typeItNow(_ since: TimeInterval) {
             shell.typeWaitingMessagesNow(workspaceIndex: workspaceIndex, columnIndex: columnIndex, since: since)
+        }
+
+        /// The row once it offers Type it now, and a click now would type:
+        /// `waiting` checks past a stall, on a clock ahead of the click's.
+        func offer(_ harness: UIFlowHarness) throws -> SidebarWaitingMessages {
+            harness.waitUntil("the offer") {
+                let now = Date().timeIntervalSince1970
+                return pty.missionPromptRefusal(runningSince: now, snapshot: ProcessSnapshot(), seenByUser: true, now: now) == nil
+                    && (try? waiting().offersTypeNow) == true
+            }
+            return try waiting()
         }
 
         func queueNotice(_ text: String) {
@@ -398,10 +413,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let lead = try resumedLead(harness, standIn: standIn)
             let first = try ask("Keep the old date= parameter?", from: lead.mission)
             let second = try ask("Export as CSV or TSV?", from: lead.mission)
-            // Its REPL not up for long: no offer yet.
-            XCTAssertFalse(try lead.waiting().offersTypeNow)
-            harness.waitUntil("the offer") { (try? lead.waiting().offersTypeNow) == true }
-            let held = try lead.waiting()
+            let held = try lead.offer(harness)
             XCTAssertEqual(held.heldBy, lead.claude)
 
             // A screen of its own up: no offer, and the row it left types nothing.
@@ -435,13 +447,7 @@ final class LeadToolsFlowTests: XCTestCase {
             lead.typeItNow(offered.since)
             harness.waitUntil("the question in its prompt") { standIn.input.contains("Keep the old date= parameter?") }
             XCTAssertNil(lead.typedAt(second), "one on the user's word")
-            // What it typed may still sit in its prompt: no more offer.
             lead.queueNotice("[Nirux] A notice.")
-            XCTAssertFalse(try lead.waiting().offersTypeNow)
-            lead.shell.missionWaits.shown[lead.column.id] = offered
-            lead.typeItNow(offered.since)
-            XCTAssertNil(lead.typedAt(second))
-            XCTAssertEqual(lead.shell.pendingLeadNotices.count, 1)
 
             // Its turns: the notice, then the last question.
             lead.turn()
@@ -464,8 +470,7 @@ final class LeadToolsFlowTests: XCTestCase {
             let question = try ask("Keep the old date= parameter?", from: lead.mission)
             let long = "[Nirux] A notice. " + String(repeating: "x", count: PtySession.inputQueueBytes)
             for text in [long, "[Nirux] Another notice."] { lead.queueNotice(text) }
-            harness.waitUntil("the offer") { (try? lead.waiting().offersTypeNow) == true }
-            let offered = try lead.waiting()
+            let offered = try lead.offer(harness)
             lead.shell.switchToWorkspace(lead.workspaceIndex)
             lead.typeItNow(offered.since)
             // Its line mode turns the Enter into a newline.

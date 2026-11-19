@@ -119,7 +119,9 @@ extension NiruxShellView {
                     parentState = Self.missionParent(
                         foreground: process, typedAt: question.parentTypedAt,
                         finishedTurnAfterTyping: pty.finishedTurn(afterTypingAt:),
-                        tookPrompt: { process in pty.agentTookPrompt(since: process).map { $0 || pty.sitsAtFirstPrompt(process) } }
+                        tookPrompt: { process in
+                            pty.agentTookPrompt(since: process).map { $0 || pty.sitsAtFirstPrompt(process, now: now, record: sessionRecord(of:)) }
+                        }
                     )
                 } else {
                     parentState = .notClaude

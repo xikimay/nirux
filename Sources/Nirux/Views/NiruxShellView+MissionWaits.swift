@@ -95,9 +95,16 @@ struct MissionWaitState {
     /// Mission messages Nirux is typing (a long paste, then Enter), or typed
     /// without being able to record it: none is typed or given up twice.
     var typing: Set<String> = []
-    /// "<pid> <start>" of each `claude` whose session record the log said it
-    /// couldn't find or read: once per process.
-    var recordIssuesLogged: Set<String> = []
+    /// Each `claude` whose session record the log said it couldn't find,
+    /// read or see a status in: once per process, while it runs.
+    var recordIssuesLogged: Set<ProcessInstance> = []
+    /// Each `claude` whose record the last check couldn't read: said only
+    /// at the second read in a row (one may land mid-write).
+    var unreadableRecords: Set<ProcessInstance> = []
+    /// Session records read since the last check, by process: what the
+    /// sidebar's refreshes read between checks, a read taking a sysctl and a
+    /// file (`NiruxShellView.sessionRecord(of:)`).
+    var recordReadings: [ProcessInstance: ClaudeSessionRecord.Reading] = [:]
     /// The `claude`, by column, Nirux typed into before its first prompt:
     /// what it typed may still sit in its prompt (an Enter that didn't send
     /// it), so nothing more goes in on the user's word (`mayTypeOnSight`).
@@ -175,7 +182,8 @@ extension NiruxShellView {
                 continue
             }
             let since = runningSince(of: event, in: column, snapshot: snapshot, now: now)
-            let refusal = column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot) ?? .noClaude
+            let refusal = column.pty?.missionPromptRefusal(runningSince: since, snapshot: snapshot, now: now, record: sessionRecord(of:))
+                ?? .noClaude
             let holder = {
                 mission.childAgentKind != NiruxApp.WorkspaceAgent.claude.rawValue ? "its agent hasn't collected it"
                     : !mission.isCarried(handoffsEnabled: handoffsEnabled) ? "Mission handoffs are off"
@@ -222,6 +230,7 @@ extension NiruxShellView {
         guard !snapshot.isEmpty else { return }
         if let checkedAt = missionWaits.checkedAt, (0..<Self.missionWaitCheckInterval).contains(now - checkedAt) { return }
         missionWaits.checkedAt = now
+        missionWaits.recordReadings = [:]
         sweepWaitingInstructions(now: now, snapshot: snapshot, store: store)
         missionWaits.typedAt = missionWaits.typedAt.filter { now - $0.value < Self.typedTextGrace }
         var waiting: [UUID: (column: ColumnState, messages: [WaitingMessage])] = [:]
@@ -261,7 +270,9 @@ extension NiruxShellView {
             if let name = foreground?.name, name != "claude", AgentStatusMachine.isRecognizedAgentProcess(name) { continue }
             let atFirstPrompt = foreground.map { pty?.agentTookPrompt(since: $0) == false } ?? false
             let refused = entry.messages.compactMap { message -> (message: WaitingMessage, refusal: AgentPromptRefusal?)? in
-                let refusal = pty.map { $0.missionPromptRefusal(runningSince: message.runningSince, snapshot: snapshot) } ?? .noClaude
+                let refusal = pty.map {
+                    $0.missionPromptRefusal(runningSince: message.runningSince, snapshot: snapshot, now: now, record: sessionRecord(of:))
+                } ?? .noClaude
                 guard refusal != .draft || missionWaits.typedAt[id] == nil else { return nil }
                 return (message, refusal)
             }
@@ -271,9 +282,13 @@ extension NiruxShellView {
             let overdue = refused.filter { message, refusal in
                 now - message.sentAt >= (refusal == nil || refusal == .draft ? Self.missionWaitLogAge : Self.missionMessageStallAge)
             }
-            let free = (atFirstPrompt ? refused : overdue)
-                .filter { $0.refusal == nil && missionWaits.tries[$0.message.id, default: 0] < Self.missionTypingTries }.map(\.message.id)
-            if atFirstPrompt { firstPrompts += free } else { retries += free }
+            func free(_ messages: [(message: WaitingMessage, refusal: AgentPromptRefusal?)]) -> [String] {
+                messages.filter { $0.refusal == nil && missionWaits.tries[$0.message.id, default: 0] < Self.missionTypingTries }
+                    .map(\.message.id)
+            }
+            // Tries are counted at the overdue ones' pace.
+            retries += free(overdue)
+            if atFirstPrompt { firstPrompts += free(refused) }
             if let foreground, refused.contains(where: { $0.refusal == .noPromptYet }) {
                 logSessionRecordIssue(of: foreground.instance, agentUUID: entry.column.agentUUID, now: now)
             }
@@ -285,7 +300,7 @@ extension NiruxShellView {
                     "untyped mission message id=\(message.id.prefix(8)) kind=\(message.kind) "
                         + "agent=\(entry.column.agentUUID?.prefix(8) ?? "-") waited=\(waited)s reason=\(reason) messages=\(refused.count) "
                         + "fg=\(foreground.map { "\($0.name)/\(Int(max(now - $0.instance.startedAt, 0)))s" } ?? "-") "
-                        + (pty?.missionPromptFacts(now: now, snapshot: snapshot) ?? "")
+                        + (pty?.missionPromptFacts(now: now, snapshot: snapshot, record: sessionRecord(of:)) ?? "")
                 )
             }
             let typable = refused.filter {
@@ -296,7 +311,9 @@ extension NiruxShellView {
             else { continue }
             let offersTypeNow = atFirstPrompt && oldest.refusal != nil
                 && missionWaits.mayTypeOnSight(into: entry.column, process: foreground?.instance)
-                && pty?.missionPromptRefusal(runningSince: oldest.message.runningSince, snapshot: snapshot, seenByUser: true) == nil
+                && pty?.missionPromptRefusal(
+                    runningSince: oldest.message.runningSince, snapshot: snapshot, seenByUser: true, now: now, record: sessionRecord(of:)
+                ) == nil
             shown[id] = SidebarWaitingMessages(
                 count: typable.count, since: oldest.message.sentAt, refusal: oldest.refusal,
                 untypable: oldest.refusal == nil && missionWaits.tries[oldest.message.id, default: 0] >= Self.missionTypingTries,
@@ -307,18 +324,30 @@ extension NiruxShellView {
         missionWaits.logged = missionWaits.logged.filter { pending.contains(String($0.prefix { $0 != " " })) }
         missionWaits.tries = missionWaits.tries.filter { pending.contains($0.key) }
         missionWaits.shown = shown
+        missionWaits.recordIssuesLogged = missionWaits.recordIssuesLogged.filter(snapshot.contains)
+        missionWaits.unreadableRecords = missionWaits.unreadableRecords.filter(snapshot.contains)
         let retryDue = !retries.isEmpty && now - missionWaits.lastRetryAt >= Self.stuckWatchInterval
-        if retryDue || !firstPrompts.isEmpty {
-            if retryDue { missionWaits.lastRetryAt = now }
-            for retry in (retryDue ? retries : []) + firstPrompts { missionWaits.tries[retry, default: 0] += 1 }
-            DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
+        if retryDue {
+            missionWaits.lastRetryAt = now
+            for retry in retries { missionWaits.tries[retry, default: 0] += 1 }
         }
+        if retryDue || !firstPrompts.isEmpty { DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() } }
+    }
+
+    /// The session record of `process` as the last check read it, read now
+    /// if it didn't (`MissionWaitState.recordReadings`).
+    func sessionRecord(of process: ProcessInstance) -> ClaudeSessionRecord.Reading {
+        if let reading = missionWaits.recordReadings[process] { return reading }
+        let reading = PtySession.sessionRecord(of: process)
+        missionWaits.recordReadings[process] = reading
+        return reading
     }
 
     /// "Type it now" clicked on a row whose messages wait for a `claude` with
     /// no prompt since it started (`SidebarWaitingMessages.offersTypeNow`):
-    /// the user says it sits at its prompt. Its terminal not on screen, the
-    /// click shows it first, for them to look. Then one message goes in, as
+    /// the user says it sits at its prompt. Its terminal not on screen (another
+    /// workspace, or scrolled out of view), the click shows it first, for
+    /// them to look. Then one message goes in, as
     /// the row showed (`since`, its oldest's; the same `claude`), and as
     /// `ClaudeSessionRecord.Reading.allowsTypingOnSight` allows; the rest
     /// follow its turn.
@@ -330,9 +359,8 @@ extension NiruxShellView {
               let waiting = missionWaits.shown[column.id], waiting.offersTypeNow, waiting.since == since,
               waiting.heldBy == pty.foregroundProcess(snapshot: snapshot)?.instance
         else { return showToast("Those messages changed: see the row again") }
-        guard activeWSIndex == workspaceIndex else {
-            switchToWorkspace(workspaceIndex)
-            goToColumn(columnIndex)
+        guard activeWSIndex == workspaceIndex, workspaces[workspaceIndex].showsColumn(at: columnIndex) else {
+            switchToWorkspace(workspaceIndex, column: columnIndex)
             return showToast("Check that its prompt is empty, then Type it now again")
         }
         let typedBefore = missionWaits.typedAt[column.id]
@@ -349,15 +377,18 @@ extension NiruxShellView {
     }
 
     /// Writes to the log, once per process, that the session record of
-    /// `process`, a `claude` messages wait on, can't be found or read past
-    /// `missionWaitLogAge` (Claude Code writes it once it registered): it
-    /// may have moved it, and they wait for its first prompt.
+    /// `process`, a `claude` messages wait on, is missing, unreadable at two
+    /// reads in a row, or without a status of its own, past
+    /// `missionWaitLogAge` (Claude Code writes it once it registered, the
+    /// status once its REPL is up): it may have moved it, and they wait for
+    /// its first prompt.
     private func logSessionRecordIssue(of process: ProcessInstance, agentUUID: String?, now: TimeInterval) {
-        guard now - process.startedAt >= Self.missionWaitLogAge else { return }
-        let reading = PtySession.sessionRecord(of: process)
-        guard reading == .missing || reading == .unreadable,
-              missionWaits.recordIssuesLogged.insert("\(process.pid) \(process.startedAt)").inserted
-        else { return }
+        guard now - process.startedAt >= Self.missionWaitLogAge, !missionWaits.recordIssuesLogged.contains(process) else { return }
+        let reading = sessionRecord(of: process)
+        let issue = reading.isIssue(for: process, unreadableBefore: missionWaits.unreadableRecords.contains(process))
+        if reading == .unreadable { missionWaits.unreadableRecords.insert(process) } else { missionWaits.unreadableRecords.remove(process) }
+        guard issue else { return }
+        missionWaits.recordIssuesLogged.insert(process)
         sideEffects.logMissionWait(
             "claude session record \(reading.facts(of: process, now: now)) agent=\(agentUUID?.prefix(8) ?? "-") "
                 + "fg=claude/\(Int(max(now - process.startedAt, 0)))s: messages wait for its first prompt"

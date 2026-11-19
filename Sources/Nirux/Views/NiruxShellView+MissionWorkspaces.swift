@@ -403,22 +403,34 @@ extension NiruxShellView {
 
     /// Enter after a long paste typed at `typedAt`, if nothing since makes
     /// it someone else's prompt. An empty process snapshot is read again.
+    /// A session record that shows its `claude` waiting on a screen is
+    /// read again this many times, `recordRereadDelay` apart, before Enter
+    /// is given up: Claude Code writes it after the change, so it may still
+    /// show a dialog the hooks saw close.
+    nonisolated static let recordRereads = 4
+    nonisolated static let recordRereadDelay: TimeInterval = 0.5
+
     private func pressEnter(
         after typedAt: TimeInterval, into pty: PtySession, for process: ProcessInstance?, tries: Int = 3,
-        done: @escaping @MainActor @Sendable (TypedMessage) -> Void
+        rereads: Int = recordRereads, done: @escaping @MainActor @Sendable (TypedMessage) -> Void
     ) {
         guard workspaces.contains(where: { !$0.isClosing && $0.columns.contains { $0.pty === pty } }) else { return done(.left) }
         let snapshot = ProcessSnapshot()
-        if snapshot.isEmpty, tries > 1 {
-            return DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        func again(after delay: TimeInterval, tries: Int, rereads: Int) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return done(.inPrompt(why: "Nirux is closing")) }
-                self.pressEnter(after: typedAt, into: pty, for: process, tries: tries - 1, done: done)
+                self.pressEnter(after: typedAt, into: pty, for: process, tries: tries, rereads: rereads, done: done)
             }
         }
+        if snapshot.isEmpty, tries > 1 { return again(after: 0.5, tries: tries - 1, rereads: rereads) }
         guard !snapshot.isEmpty else { return done(.inPrompt(why: "Nirux couldn't read the running processes")) }
         // The paste's own keys are the last: anything since is someone's.
         guard pty.mayPressEnter(after: typedAt, for: process, snapshot: snapshot)
         else { return done(.inPrompt(why: "someone typed meanwhile or a dialog opened")) }
+        if let process, PtySession.sessionRecord(of: process).showsWait(of: process) {
+            guard rereads > 0 else { return done(.inPrompt(why: "Claude Code shows a screen of its own")) }
+            return again(after: Self.recordRereadDelay, tries: tries, rereads: rereads - 1)
+        }
         pty.sendRaw("\r")
         done(.sent)
     }
