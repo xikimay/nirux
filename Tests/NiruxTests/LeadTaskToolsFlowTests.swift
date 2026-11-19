@@ -890,11 +890,17 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             task.hook(.preToolUse)
             task.column.pty?.sendRaw("y")
             XCTAssertTrue(try interrupt().text.contains("Keys reached"))
-            // An Esc Claude doesn't confirm: said so, the turn still runs.
+            task.hook(.stop)
+            // An Esc Claude doesn't confirm, past a tool's result: said so,
+            // the turn still runs. Past its reads, the turn waits on the model
+            // again: its silence can show.
+            harness.shell.interruptReads = NiruxShellView.interruptReadsBeforeAnswer + 1
             task.hook(.userPromptSubmit)
             task.hook(.preToolUse)
+            task.hook(.postToolUse)
             XCTAssertTrue(try interrupt().text.contains("shows no interrupt"))
             XCTAssertTrue(try interrupt().text.contains("Esc already went into this turn"), "a second Esc would open the rewind")
+            harness.waitUntil("the Esc read as ignored") { pty.agentAwaitsModel(foreground: pty.foregroundProcess(snapshot: ProcessSnapshot())) }
         }
     }
 
