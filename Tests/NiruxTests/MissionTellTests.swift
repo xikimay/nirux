@@ -502,7 +502,7 @@ final class MissionTellTests: XCTestCase {
         _ = started.apply(hook(.userPromptSubmit, at: 7), isUserFocused: false)
         _ = started.apply(hook(.stop, at: 8), isUserFocused: false)
         XCTAssertEqual(refusal(started), .draft)
-        XCTAssertNil(refusal(launched("claude --resume 1234\n", source: "resume", by: ProcessInstance(pid: 7, startedAt: t0))))
+        XCTAssertNil(refusal(launched("claude --resume 1234\n", source: "resume", by: ProcessInstance(pid: 7, startedAt: t0 + 0.01))))
 
         var resumed = idleMachine()
         press("/resume\r", at: 10, into: &resumed)

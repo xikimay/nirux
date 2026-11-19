@@ -501,10 +501,11 @@ struct AgentStatusMachine {
     /// The Enter that sent the prompt `event` submits, if it was typed at
     /// the box: one that reached it since the box last emptied, at most
     /// `promptHookDelay` before the prompt's hook ran. Claude runs it as the
-    /// box sends, queued mid-turn or not; an older Enter sent nothing (a line
-    /// added after a backslash, a picker's choice). A message Claude takes in
-    /// by itself (a peer's, a task notification, a wakeup) follows no key,
-    /// and its `source` says so where Claude Code sends one.
+    /// box sends, mid-turn too. An older Enter sent nothing (a line added
+    /// after a backslash, a picker's choice), or a prompt Claude held back
+    /// (while it compacts): its keys stay a draft, the safe side. A message
+    /// Claude takes in by itself (a peer's, a task notification, a wakeup)
+    /// follows no key, and its `source` says so where Claude Code sends one.
     private func enterThatSent(_ event: AgentHookEvent) -> TimeInterval? {
         guard event.source == nil || event.source == "user", lastSubmitKeyAt > (boxEmptiedAt ?? 0),
               (0..<Self.promptHookDelay).contains(event.timestamp - lastSubmitKeyAt)
@@ -515,11 +516,10 @@ struct AgentStatusMachine {
     static let promptHookDelay: TimeInterval = 5
 
     /// The process that started this conversation took no key since it
-    /// started (`startedAt` counts whole seconds): what was typed went to
-    /// the shell that launched it. Without its process (an older receiver),
-    /// a startup's.
+    /// started: what was typed went to the shell that launched it. Without
+    /// its process (an older receiver), a startup's.
     private func startedEmpty(_ event: AgentHookEvent) -> Bool {
-        event.emitterProcess.map { lastInputAt < $0.startedAt + 1 } ?? (event.source == "startup")
+        event.emitterProcess.map { lastInputAt < $0.startedAt } ?? (event.source == "startup")
     }
 
     private mutating func startConversation(
