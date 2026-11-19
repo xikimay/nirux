@@ -332,9 +332,9 @@ final class ShellExitedOverlay: NSView {
 /// bounds), positioned over the inter-column boundary by layoutAndScroll.
 /// The owner turns the pointer's way into a width.
 final class ColumnResizeHandle: NSView {
-    /// What a drag starts from: its column's width, the strip's, and where
-    /// the camera was.
-    typealias Start = (width: CGFloat, strip: CGFloat, camera: CGFloat)
+    /// What a drag starts from: the columns' widths, the strip's, where the
+    /// camera was, the focused column, and whether it lay in the middle.
+    typealias Start = (widths: [CGFloat], strip: CGFloat, camera: CGFloat, focus: Int, centred: Bool)
     /// Drag start → where it starts from; nil: no drag.
     var onDragStart: (() -> Start?)?
     /// Dragging → its start and the pointer's way since, in points

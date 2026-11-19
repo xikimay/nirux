@@ -471,6 +471,16 @@ the text stays flat and sharp.
   is followed at once, and stays within the strip. A press on an edge
   drags it only past 3 points; a dragged edge holds the camera until let
   go, through a focus moved meanwhile.
+- **Resizing from the centre** (same study, R3): only the focused card's
+  two edges show a handle (its left one is its neighbour's). Centred
+  between two neighbours (the camera centres it, or it is the middle of
+  cards that fit), the card grows on both sides from either edge, the
+  edge under the pointer, up to the viewport's width; they pay alike, so
+  nothing glides once let go, and one that runs out leaves the other to
+  pay. Otherwise the neighbour across the edge pays; the strip's last edge
+  grows the card alone, as before. A double-click sets the card back to
+  half by the same share. Only the columns whose width changes take a new
+  fraction, and a focus moved during a drag ends it.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within
