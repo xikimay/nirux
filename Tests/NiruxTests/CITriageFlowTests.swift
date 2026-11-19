@@ -241,6 +241,7 @@ final class CITriageFlowTests: XCTestCase {
             XCTAssertNil(workspace.ciFlakyReason)
             XCTAssertEqual(try rowText(of: workspace, in: shell), "#52 · checks failed")
             XCTAssertEqual(shell.ciTriageCenter.store.record(of: widgetsRun)?.verdict, "real", "the store keeps the rerun's")
+            XCTAssertEqual(shell.ciTriageCenter.store.record(of: widgetsRun)?.pullRequest, 52, "the daily pass names its pull request")
 
             // A check that is no run of this repository can't be read: no
             // verdict, and nothing asked.

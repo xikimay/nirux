@@ -15,8 +15,8 @@ extension NiruxShellView {
             canChange: loaded?.isWritable ?? false,
             problem: loaded?.problem,
             periodDays: shown.periodDays,
-            recap: LoopRecap.groups(LoopLog.load(spaceID: space.id), since: since),
-            logFull: LoopLog.isFull(spaceID: space.id),
+            recap: LoopRecap.groups(LoopLog.lines.load(spaceID: space.id), since: since),
+            logFull: LoopLog.lines.isFull(spaceID: space.id),
             added: defaults.addedLines
         )
     }
