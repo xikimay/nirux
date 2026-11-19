@@ -26,8 +26,10 @@ extension NiruxShellView {
         guard confirmCloseColumn(closingColumn, in: workspace) else { return }
         closingColumn.isClosing = true
         // It takes a card still arriving: behind its neighbours again.
-        closingColumn.isArriving = false
-        closingColumn.view.layer?.zPosition = 0
+        if !ZZ("arrivingKept") {
+            closingColumn.isArriving = false
+            closingColumn.view.layer?.zPosition = 0
+        }
         // Its light leaves with it.
         applyAgentLights()
         workspace.showShadows()

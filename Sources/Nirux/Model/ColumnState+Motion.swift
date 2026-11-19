@@ -28,7 +28,7 @@ extension ColumnState {
         passes += 1
         let pass = passes
         let shown = layer.presentation()
-        let start = from ?? (
+        let start = from ?? (ZZ("closeFromWhole") ? (CGFloat(1), CGFloat(1)) : nil) ?? (
             (shown?.value(forKeyPath: "transform.scale.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 1,
             CGFloat(shown?.opacity ?? Float(view.alphaValue))
         )
@@ -37,7 +37,7 @@ extension ColumnState {
         let scaling = CABasicAnimation(keyPath: "transform")
         scaling.fromValue = CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: start.scale))
         scaling.toValue = CATransform3DMakeAffineTransform(Self.scaledAboutMiddle(size, by: scale))
-        scaling.isAdditive = true
+        scaling.isAdditive = !ZZ("passReplaces")
         let fading = CABasicAnimation(keyPath: "opacity")
         fading.fromValue = Float(start.alpha)
         fading.toValue = Float(alpha)
@@ -54,7 +54,7 @@ extension ColumnState {
         DispatchQueue.main.async {
             DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
                 MainActor.assumeIsolated {
-                    guard let self, self.passes == pass else { return }
+                    guard let self, self.passes == pass || ZZ("ungatedPass") else { return }
                     self.view.layer?.removeAnimation(forKey: Self.passKey)
                     then()
                 }

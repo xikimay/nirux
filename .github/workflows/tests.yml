@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of #618's review round 1 (the card owns its
+      # motion): its tests' mutants, then ten runs of ColumnCardsTests.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.ColumnCardsTests passReplaces ungatedPass closeFromWhole arrivingKept noResizeEnd handlesUnder || status=1
+          scripts/repeat-class.sh NiruxTests.ColumnCardsTests 10 3 NiruxTests.TaskBirthTests NiruxTests.AgentLightTests NiruxTests.WorkspaceCloseFallbackTests || status=1
+          exit $status
