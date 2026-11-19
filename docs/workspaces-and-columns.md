@@ -41,7 +41,7 @@ Terminals are drawn by Ghostty's engine and follow the appearance settings of yo
 
 ### Editor
 
-The editor opens files in tabs, with a file tree, a search across the workspace, the list of git changes and a diff view for each file (`Shift+Cmd+D`). It warns before overwriting a file that changed on disk. `Option+Cmd+Return` sends the selection to the agent's terminal.
+The editor opens files in tabs, with a file tree, a search across the workspace, the list of git changes and a diff view for each file (`Shift+Cmd+D`). `Cmd+S` never writes over a file that changed on disk: the editor says so, and Compare, Take Disk or Keep Mine settles it. Closing a tab, the column, the workspace or Nirux with unsaved changes asks to save them first. `Option+Cmd+Return` sends the selection to the agent's terminal.
 
 ### Browser
 

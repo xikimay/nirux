@@ -879,8 +879,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     /// Re-read the active file from disk and push its content to Monaco.
     /// Used when an external change races a clean buffer.
-    private func reloadFromDisk(path: String) {
-        guard let (content, encoding, diskMtime) = readFileContent(at: path, interactive: false) else { return }
+    @discardableResult
+    private func reloadFromDisk(path: String) -> Bool {
+        guard let (content, encoding, diskMtime) = readFileContent(at: path, interactive: false) else { return false }
 
         mtimeByPath[path] = diskMtime
         encodingByPath[path] = encoding
@@ -896,6 +897,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             "type": "openFile", "path": path, "content": content,
             "activate": path == activePath, "focus": false
         ])
+        return true
     }
 
     /// Shared tail of every navigation payload — one place to add the next
@@ -945,7 +947,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// edits wait for the user's choice, nothing saved meanwhile.
     /// `diskMtime`: the version Keep Mine may replace.
     private func adoptDiskChange(of path: String, diskMtime: Date) {
-        guard dirtyByPath[path] ?? false else { return reloadFromDisk(path: path) }
+        guard dirtyByPath[path] ?? false else {
+            reloadFromDisk(path: path)
+            return
+        }
         mtimeByPath[path] = diskMtime
         diskModifiedWhileDirty.insert(path)
         refreshTabBar()
@@ -959,8 +964,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         return now
     }
 
+    /// Through a symlink, the file it names: an agent edits AGENTS.md under
+    /// a CLAUDE.md link.
     private func mtime(of path: String) -> Date? {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let attrs = try? FileManager.default.attributesOfItem(atPath: (path as NSString).resolvingSymlinksInPath)
         return attrs?[.modificationDate] as? Date
     }
 
@@ -986,10 +993,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private func handleSave(body: [String: Any]) {
         guard let path = body["path"] as? String,
               openPaths.contains(path),
-              let content = body["content"] as? String
-        else { return }
-
-        guard write(content, to: path) else {
+              let content = body["content"] as? String,
+              write(content, to: path)
+        else {
             if let requestID = body["requestID"] as? Int { saveRequests[requestID]?.allWritten = false }
             return
         }
@@ -1028,7 +1034,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return false
         }
 
-        let url = URL(fileURLWithPath: path)
+        // Through a symlink, into the file it names: an atomic write would
+        // replace the link.
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         do {
             try data.write(to: url, options: .atomic)
         } catch {
@@ -1102,7 +1110,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
         if isComparingWithDisk(path) { return exitDiff() }
         guard let disk = readFileContent(at: path, interactive: false) else {
-            return showToast("Couldn’t read “\((path as NSString).lastPathComponent)” on disk", tone: .error)
+            // The button turned itself on.
+            refreshTabBar()
+            return showDiskReadFailure(path: path)
         }
         // Keep Mine replaces the version shown.
         if let diskMtime = disk.mtime { mtimeByPath[path] = diskMtime }
@@ -1117,7 +1127,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private func takeDiskVersion() {
         guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
         if isComparingWithDisk(path) { exitDiff() }
-        reloadFromDisk(path: path)
+        if !reloadFromDisk(path: path) { showDiskReadFailure(path: path) }
+    }
+
+    private func showDiskReadFailure(path: String) {
+        showToast("Couldn’t read “\((path as NSString).lastPathComponent)” on disk", tone: .error)
     }
 
     /// Keep Mine: the buffer replaces the version of the file the user was
@@ -1187,6 +1201,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 refreshTabBar()
                 if path == activePath { onDirtyChanged?() }
             }
+            // Its edits undone, a conflict has nothing left to keep.
+            if !dirty, diskModifiedWhileDirty.contains(path) { reloadFromDisk(path: path) }
         case "save":
             handleSave(body: body)
         case "savedAll":

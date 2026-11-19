@@ -304,14 +304,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         true
     }
 
-    /// A running merge queue asks first; the queue stops before its next
-    /// command, and a call already sent is waited for.
+    /// Unsaved changes and a running merge queue ask first, an update's
+    /// relaunch too (see `terminateReply`).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let shell else { return .terminateNow }
-        // Changes typed in Space Settings or an editor ask first (an
-        // update's relaunch too).
-        guard shell.spaceSettingsAllowQuit(), shell.editorsAllowQuit() else { return .terminateCancel }
-        return shell.mergeQueueTerminateReply { quit in
+        return shell.terminateReply { quit in
             NSApp.reply(toApplicationShouldTerminate: quit)
         }
     }

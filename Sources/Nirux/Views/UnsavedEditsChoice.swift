@@ -8,7 +8,14 @@ enum UnsavedEditsChoice {
     /// The question about `paths`: Save on Return, Cancel on Escape.
     @MainActor
     static func alert(for paths: [String]) -> NSAlert {
-        let names = paths.map { ($0 as NSString).lastPathComponent }
+        var names = paths.map { ($0 as NSString).lastPathComponent }
+        // Files of the same name: their folders tell them apart.
+        if Set(names).count < names.count {
+            names = paths.map { path in
+                let folder = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent
+                return "\(folder)/\((path as NSString).lastPathComponent)"
+            }
+        }
         let alert = NSAlert()
         if names.count == 1 {
             alert.messageText = "Save the changes to “\(names[0])”?"

@@ -44,15 +44,13 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             try setBuffer("agent\nmine\n", in: webView)
             harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
             try write("agent 2\n", to: notes)
-            pressCommandS(in: webView)
+            pressCommandSRefused(in: webView, harness: harness)
             let banner = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: EditorConflictBanner.self))
-            harness.waitUntil("the conflict") { !banner.isHidden }
+            XCTAssertFalse(banner.isHidden)
             XCTAssertEqual(try read(notes), "agent 2\n", "⌘S wrote over the change made on disk")
             XCTAssertEqual(harness.shell.toast?.message, "Not saved: “notes.txt” changed on disk")
             // Again, the conflict on screen.
-            let toasts = harness.shell.toastGeneration
-            pressCommandS(in: webView)
-            harness.waitUntil("the refusal") { harness.shell.toastGeneration > toasts }
+            pressCommandSRefused(in: webView, harness: harness)
             XCTAssertEqual(try read(notes), "agent 2\n", "⌘S wrote over the conflict on screen")
 
             try click("Compare", in: banner)
@@ -71,14 +69,40 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             try setBuffer("agent\nmine again\n", in: webView)
             harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
             try write("agent 3\n", to: notes, dated: Date(timeIntervalSinceNow: -3600))
-            pressCommandS(in: webView)
-            harness.waitUntil("the conflict") { !banner.isHidden }
+            pressCommandSRefused(in: webView, harness: harness)
+            XCTAssertFalse(banner.isHidden)
             XCTAssertEqual(try read(notes), "agent 3\n", "⌘S wrote over an older-dated change")
-            try click("Take Disk", in: banner)
+            // Its edits undone, nothing is left to keep: the disk's version
+            // comes in.
+            try setBuffer("agent\nmine\n", in: webView)
             waitForBuffer("agent 3\n", in: webView)
+            XCTAssertTrue(banner.isHidden)
+            XCTAssertEqual(editor.unsavedPaths, [])
+
+            try setBuffer("agent 3\nmine\n", in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [notes] }
+            try write("agent 4\n", to: notes)
+            pressCommandSRefused(in: webView, harness: harness)
+            try click("Take Disk", in: banner)
+            waitForBuffer("agent 4\n", in: webView)
             harness.waitUntil("the buffer clean") { editor.unsavedPaths.isEmpty }
             XCTAssertTrue(banner.isHidden)
-            XCTAssertEqual(try read(notes), "agent 3\n")
+            XCTAssertEqual(try read(notes), "agent 4\n")
+
+            // Through a symlink, the file it names is checked and written.
+            let agents = harness.repo + "/AGENTS.md"
+            let claude = harness.repo + "/CLAUDE.md"
+            try write("rules\n", to: agents)
+            try FileManager.default.createSymbolicLink(atPath: claude, withDestinationPath: "AGENTS.md")
+            _ = try openEditor(claude, in: harness)
+            try setBuffer("rules\nmine\n", in: webView)
+            harness.waitUntil("the edit") { editor.unsavedPaths == [claude] }
+            try write("rules, by an agent\n", to: agents)
+            pressCommandSRefused(in: webView, harness: harness)
+            XCTAssertEqual(try read(agents), "rules, by an agent\n", "⌘S wrote over the change made through the link")
+            try click("Keep Mine", in: banner)
+            harness.waitUntil("mine written") { (try? read(agents)) == "rules\nmine\n" && editor.unsavedPaths.isEmpty }
+            XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: claude), "AGENTS.md", "the link was replaced")
         }
     }
 
@@ -157,20 +181,23 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
                 try setBuffer("quit\n", in: quitWebView)
                 harness.waitUntil("the edit") { quitEditor.unsavedPaths == [quit] }
                 let app = try XCTUnwrap(NSApp.delegate as? NiruxApp)
-                var quitRequests = 0
-                shell.sideEffects.requestQuit = { quitRequests += 1 }
                 harness.alertResponses = [.alertSecondButtonReturn]
                 XCTAssertEqual(app.applicationShouldTerminate(NSApp), .terminateCancel)
+                XCTAssertEqual(harness.alerts.count, asked + 9)
                 XCTAssertEqual(harness.alerts.last, "Save the changes to “quit.txt”?")
+                var replies: [Bool] = []
                 harness.alertResponses = [.alertThirdButtonReturn]
-                XCTAssertEqual(app.applicationShouldTerminate(NSApp), .terminateNow, "Don't Save")
+                XCTAssertEqual(shell.terminateReply { replies.append($0) }, .terminateNow, "Don't Save")
                 // The window's close button quits: it stays meanwhile.
+                var quitRequests = 0
+                shell.sideEffects.requestQuit = { quitRequests += 1 }
                 XCTAssertFalse(shell.mainWindowShouldClose())
                 XCTAssertEqual(quitRequests, 1)
                 harness.alertResponses = [.alertFirstButtonReturn]
-                XCTAssertEqual(app.applicationShouldTerminate(NSApp), .terminateCancel)
-                harness.waitUntil("saved, then quitting") { quitRequests == 2 }
+                XCTAssertEqual(shell.terminateReply { replies.append($0) }, .terminateLater)
+                harness.waitUntil("saved, then quitting") { replies == [true] }
                 XCTAssertEqual(try read(quit), "quit\n")
+                XCTAssertEqual(harness.alerts.count, asked + 11, "asked once each")
             }
         }
     }
@@ -239,6 +266,15 @@ final class EditorUnsavedEditsFlowTests: XCTestCase {
             meanwhile()
             return $0 == "yes"
         }
+    }
+
+    /// ⌘S, refused: the toast says why.
+    private func pressCommandSRefused(
+        in webView: WKWebView, harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let toasts = harness.shell.toastGeneration
+        pressCommandS(in: webView, file: file, line: line)
+        harness.waitUntil("the refusal", file: file, line: line) { harness.shell.toastGeneration > toasts }
     }
 
     /// ⌘S in Monaco: the key interceptor hands it to the page (no menu
