@@ -51,56 +51,28 @@ final class FrozenView: NSView {
         return unsafeBitCast(contents as AnyObject, to: IOSurfaceRef.self)
     }
 
+    /// What a clone takes from its layer: where it lies, how it shows.
+    private static let layerKeys = [
+        "bounds", "anchorPoint", "position", "transform", "sublayerTransform", "zPosition", "opacity", "geometryFlipped",
+        "opaque", "backgroundColor", "cornerRadius", "cornerCurve", "maskedCorners", "masksToBounds", "borderWidth",
+        "borderColor", "shadowOpacity", "shadowRadius", "shadowOffset", "shadowColor", "shadowPath", "contentsScale",
+        "contentsGravity", "contentsRect", "contentsCenter"
+    ]
+    private static let shapeKeys = ["path", "fillColor", "fillRule", "strokeColor", "lineWidth"]
+    private static let gradientKeys = ["colors", "locations", "startPoint", "endPoint", "type"]
+
     /// `layer` and what it holds in sight, each sharing its contents, a
     /// surface's copy in `images` in place of the surface.
     static func clone(_ layer: CALayer, root: CALayer, images: [ObjectIdentifier: IOSurfaceRef]) -> CALayer? {
         guard !isOutOfSight(layer, root: root) else { return nil }
-        let copy: CALayer
-        if let shape = layer as? CAShapeLayer {
-            let made = CAShapeLayer()
-            made.path = shape.path
-            made.fillColor = shape.fillColor
-            made.fillRule = shape.fillRule
-            made.strokeColor = shape.strokeColor
-            made.lineWidth = shape.lineWidth
-            copy = made
-        } else if let gradient = layer as? CAGradientLayer {
-            let made = CAGradientLayer()
-            made.colors = gradient.colors
-            made.locations = gradient.locations
-            made.startPoint = gradient.startPoint
-            made.endPoint = gradient.endPoint
-            made.type = gradient.type
-            copy = made
-        } else {
-            copy = CALayer()
+        let copy: CALayer, keys: [String]
+        switch layer {
+        case is CAShapeLayer: (copy, keys) = (CAShapeLayer(), layerKeys + shapeKeys)
+        case is CAGradientLayer: (copy, keys) = (CAGradientLayer(), layerKeys + gradientKeys)
+        default: (copy, keys) = (CALayer(), layerKeys)
         }
-        copy.bounds = layer.bounds
-        copy.anchorPoint = layer.anchorPoint
-        copy.position = layer.position
-        copy.transform = layer.transform
-        copy.sublayerTransform = layer.sublayerTransform
-        copy.zPosition = layer.zPosition
-        copy.opacity = layer.opacity
-        copy.isGeometryFlipped = layer.isGeometryFlipped
-        copy.isOpaque = layer.isOpaque
-        copy.backgroundColor = layer.backgroundColor
-        copy.cornerRadius = layer.cornerRadius
-        copy.cornerCurve = layer.cornerCurve
-        copy.maskedCorners = layer.maskedCorners
-        copy.masksToBounds = layer.masksToBounds
-        copy.borderWidth = layer.borderWidth
-        copy.borderColor = layer.borderColor
-        copy.shadowOpacity = layer.shadowOpacity
-        copy.shadowRadius = layer.shadowRadius
-        copy.shadowOffset = layer.shadowOffset
-        copy.shadowColor = layer.shadowColor
-        copy.shadowPath = layer.shadowPath
+        for key in keys { copy.setValue(layer.value(forKey: key), forKey: key) }
         copy.contents = images[ObjectIdentifier(layer)] ?? layer.contents
-        copy.contentsScale = layer.contentsScale
-        copy.contentsGravity = layer.contentsGravity
-        copy.contentsRect = layer.contentsRect
-        copy.contentsCenter = layer.contentsCenter
         if let mask = layer.mask { copy.mask = clone(mask, root: mask, images: images) }
         copy.sublayers = layer.sublayers?.compactMap { clone($0, root: root, images: images) }
         return copy
