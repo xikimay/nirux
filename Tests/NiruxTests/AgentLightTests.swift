@@ -480,6 +480,8 @@ final class AgentLightShellTests: XCTestCase {
             shell.addWorkspace(title: "second", cwd: folder)
             let second = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertFalse(first === second)
+            // Its column comes in first, and lights up once in.
+            waitUntil("its column in", timeout: 2) { second.columns.first?.isArriving == false }
             let light = {
                 shell.updateAgentLights(infos: [
                     self.info(first, index: 0, in: shell, statuses: [.working]),

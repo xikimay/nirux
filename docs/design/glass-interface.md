@@ -448,6 +448,15 @@ the text stays flat and sharp.
   blending behind the window ignores any clip.
 - **Widths:** a width fraction spans the viewport less its edges' air plus
   one gap, so two halves fill the viewport whatever the number of columns.
+- **In the middle** (the user's choice, 2026-11-18): cards that don't fill
+  the viewport lie centred, a first terminal at its own width included,
+  and a new one comes in there, as any new column does (a fade from 92 %).
+  The camera does it, so a second column makes the strip glide aside from
+  where it shows, and closing it brings the other back to the middle. A
+  dragged edge stays under the pointer: a centred card widens on both
+  sides; past filling the viewport, or on a strip that started wider, the
+  camera holds where the drag found it and goes where the strip wants it
+  once let go. With Reduce motion the card is simply there.
 - **Edge:** a hairline (`Theme.Color.line`) around each card; the focused
   one keeps its accent edge.
 - **Shadow:** `Theme.Elevation.Level.column`, short enough to stay within

@@ -34,7 +34,7 @@ extension NiruxShellView {
             ctx.duration = 0.2
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             closingView.animator().alphaValue = 0
-            closingView.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
+            closingView.layer?.setAffineTransform(Self.scaledAboutMiddle(closingView.frame.size, by: Self.cardInOutScale))
         }, completionHandler: {
             DispatchQueue.main.async { [weak self] in self?.finishColumnClose(closingColumn, in: workspace) }
         })
@@ -56,13 +56,8 @@ extension NiruxShellView {
         // instead.
         let landsOnNeighbour = workspace.columns[safe: workspace.focusedIndex] === closingColumn
         workspace.closeColumn(at: closingIndex)
-        relayout(animated: false)
-        // Animate remaining columns sliding into place
-        workspace.layoutAndScroll(
-            viewportWidth: viewport.frame.width,
-            height: workspace.containerView.frame.height,
-            animated: true
-        )
+        // The others glide into place, a lone one back to the middle.
+        relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window, editorTakesKeyboard: landsOnNeighbour && activeWorkspace === workspace)
     }
@@ -139,12 +134,8 @@ extension NiruxShellView {
               let currentIndex = workspace.columns.firstIndex(where: { $0 === column })
         else { return }
         workspace.closeColumn(at: currentIndex)
-        relayout(animated: false)
-        workspace.layoutAndScroll(
-            viewportWidth: viewport.frame.width,
-            height: workspace.containerView.frame.height,
-            animated: true
-        )
+        // The others glide into place, a lone one back to the middle.
+        relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window)
         saveState()

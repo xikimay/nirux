@@ -11,19 +11,19 @@ struct TaskSheetPicture {
 
 /// On Start, once the worktree is ready: the sheet's picture folds toward
 /// the sidebar, the task's row opens there with a spring, and the agent's
-/// column slides in from the right, as fast as a workspace shows today.
+/// column comes in, in the middle of the window, as a new column does.
 /// Until then the sheet stays up: a start that fails shows its error
 /// there. Nothing of this plays while the interface may not move
 /// (`agentLightsMayMove`): the sheet closes and the workspace shows as
 /// before.
 extension NiruxShellView {
     static let taskBirthGhostName = "nirux.taskBirth.ghost"
-    static let taskBirthSlideKey = "taskBirthSlide"
     static let taskBirthBackdropKey = "taskBirthBackdrop"
     /// When the row opens, after the fold began: as the picture reaches it.
     static let taskBirthRowDelay: CFTimeInterval = 0.2
-    /// The column's way in: a workspace switch's time (`wsSlide`).
-    static let taskBirthSlideDuration: CFTimeInterval = 0.3
+    /// How long what was on screen takes to fade away under the new
+    /// workspace: a workspace switch's time (`wsSlide`).
+    static let taskBirthFadeDuration: CFTimeInterval = 0.3
 
     /// Before the sheet closes on a task that starts: its picture, for the
     /// fold. None for a sheet the user closed meanwhile.
@@ -83,30 +83,19 @@ extension NiruxShellView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak ghost] in ghost?.removeFromSuperlayer() }
     }
 
-    /// The new workspace's column slides in from the right, over a picture
-    /// of what was on screen that fades away under it: a new task shows
-    /// one column, and nothing stale may stay beside it. The container
-    /// moves, as column scrolling does: the terminal's own layer is never
-    /// transformed.
-    func slideInNewWorkspace(_ workspace: WorkspaceState, over snapshot: NSView) {
-        let curve = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+    /// What was on screen, as a picture under the new workspace, fades
+    /// away while its column comes in (`arrive`): a new task shows one
+    /// column, and nothing stale may stay beside it.
+    func fadeAwayUnderNewWorkspace(_ snapshot: NSView) {
         viewport.addSubview(snapshot, positioned: .below, relativeTo: verticalStrip)
         // Gone unless its fade runs: a dropped animation leaves nothing.
         snapshot.alphaValue = 0
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 1
         fade.toValue = 0
-        fade.duration = Self.taskBirthSlideDuration
-        fade.timingFunction = curve
+        fade.duration = Self.taskBirthFadeDuration
+        fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
         snapshot.layer?.add(fade, forKey: Self.taskBirthBackdropKey)
-        if let container = workspace.containerView.layer {
-            let slide = CABasicAnimation(keyPath: "transform.translation.x")
-            slide.fromValue = viewport.bounds.width
-            slide.toValue = 0
-            slide.duration = Self.taskBirthSlideDuration
-            slide.timingFunction = curve
-            container.add(slide, forKey: Self.taskBirthSlideKey)
-        }
         // Not on an animation's completion, which a window out of view may
         // never report.
         // Long after: the fade starts when this turn of the run loop ends,
