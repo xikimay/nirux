@@ -96,11 +96,10 @@ extension NiruxShellView {
         fade.duration = Self.taskBirthFadeDuration
         fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
         snapshot.layer?.add(fade, forKey: Self.taskBirthBackdropKey)
-        // Not on an animation's completion, which a window out of view may
-        // never report.
-        // Long after: the fade starts when this turn of the run loop ends,
-        // which may take a while (the birth's rebuilds, saving the state).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak snapshot] in
+        // Gone as the fade ends, from once this turn is committed (the
+        // birth's rebuilds and saving the state may hold it), not on the
+        // animation's completion, which a window out of view may never report.
+        sideEffects.afterCommit(Self.taskBirthFadeDuration) { [weak snapshot] in
             snapshot?.removeFromSuperview()
         }
     }
