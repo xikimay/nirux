@@ -480,6 +480,14 @@ the text stays flat and sharp.
   shade. 0.44 s, translations only, so no text scales; N1's name card
   stays. A switch while one plays ends it at once; Reduce motion, another
   space, or a workspace on screen that left the list show it at once.
+- **Frozen pictures (study P4, first part):** a slide over the viewport
+  (⌥⌘← ⌥⌘→, a new workspace) moves a picture of what it showed, frozen in
+  about 6 ms (`FrozenView`): a clone of its layers, each sharing its
+  contents, without what is hidden or clipped out of sight, each
+  terminal's last image copied on the GPU (Ghostty draws over the one it
+  shows). Drawing the viewport again took about 90 ms in a large window
+  and left the terminals blank. A column drawn in another process (an
+  editor, a browser) shows its card, empty. The pictures go on time.
 - **From the source (study P7):** the inbox comes out of the bar's badge
   and goes back into it, a request's callout out of its rail icon: from
   60 % of their size about the point of their edge nearest it, 0.32 s in
