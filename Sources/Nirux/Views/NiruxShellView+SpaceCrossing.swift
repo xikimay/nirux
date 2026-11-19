@@ -38,8 +38,9 @@ extension NiruxShellView {
         verticalStrip.alphaValue = 1
     }
 
-    /// From the first values to the second, about the picture's middle; it
-    /// rests on the second. Its frozen layers move, not the view's own.
+    /// From the first values to the second, about the picture's middle (its
+    /// content's anchor); it rests on the second. Its frozen layers move,
+    /// not the view's own.
     private static func move(
         _ picture: FrozenView, scale: (CGFloat, CGFloat), opacity: (Float, Float),
         curve: CAMediaTimingFunctionName, duration: CFTimeInterval
@@ -47,11 +48,11 @@ extension NiruxShellView {
         let layer = picture.content
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer.transform = scaledAboutMiddle(layer, by: scale.1)
+        layer.transform = CATransform3DMakeScale(scale.1, scale.1, 1)
         layer.opacity = opacity.1
         CATransaction.commit()
         let size = CABasicAnimation(keyPath: "transform")
-        size.fromValue = NSValue(caTransform3D: scaledAboutMiddle(layer, by: scale.0))
+        size.fromValue = NSValue(caTransform3D: CATransform3DMakeScale(scale.0, scale.0, 1))
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = opacity.0
         let group = CAAnimationGroup()
@@ -59,12 +60,5 @@ extension NiruxShellView {
         group.duration = duration
         group.timingFunction = CAMediaTimingFunction(name: curve)
         layer.add(group, forKey: "crossing")
-    }
-
-    /// `scale` about the layer's middle, wherever its anchor lies.
-    static func scaledAboutMiddle(_ layer: CALayer, by scale: CGFloat) -> CATransform3D {
-        let dx = (0.5 - layer.anchorPoint.x) * layer.bounds.width
-        let dy = (0.5 - layer.anchorPoint.y) * layer.bounds.height
-        return CATransform3DTranslate(CATransform3DScale(CATransform3DMakeTranslation(dx, dy, 0), scale, scale, 1), -dx, -dy, 0)
     }
 }
