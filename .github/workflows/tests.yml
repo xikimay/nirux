@@ -59,6 +59,6 @@ jobs:
       - name: Flake gate
         run: |
           status=0
-          scripts/mutants-class.sh NiruxTests.SpacePlanTests wrongOrder notChosen liveShown stillDraws noFocus returnIgnored escapeGoes clickMissed staleKept sizeIgnored || status=1
+          scripts/mutants-class.sh NiruxTests.SpacePlanTests wrongOrder notChosen liveShown stillDraws noFocus returnIgnored escapeGoes clickMissed staleKept sizeIgnored noDrawOnce || status=1
           scripts/repeat-class.sh NiruxTests.SpacePlanTests 10 3 NiruxTests.SpaceCrossingTests NiruxTests.WorkspaceSwitchTests || status=1
           exit $status

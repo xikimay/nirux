@@ -205,8 +205,8 @@ extension NiruxShellView {
     func drawsTerminals(of workspace: WorkspaceState, isActive: Bool) -> Bool {
         // Under the space's plan, nothing draws: it shows frozen pictures,
         // taken once every workspace it lists drew.
-        planDrawing.contains(workspace.id)
-            || (spacePlan == nil && (isActive || workspaceSwitch.keepsDrawn.contains(workspace.id)))
+        (planDrawing.contains(workspace.id) && !ZZ("noDrawOnce"))
+            || ((spacePlan == nil || ZZ("stillDraws")) && (isActive || workspaceSwitch.keepsDrawn.contains(workspace.id)))
     }
 
     /// The user moved to the workspace above or below (⌘↑ ⌘↓, see
