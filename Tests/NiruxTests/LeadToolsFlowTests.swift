@@ -471,6 +471,55 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// record_review keeps each review of any task of the space (one the
+    /// user started too) as its next round, and refuses a workspace that
+    /// isn't a task; daily_pass then lists the findings by kind, and the
+    /// window it read is where the next pass starts.
+    func testTheLeadRecordsReviewsAndReadsItsDay() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let workspaceID = UUID().uuidString
+            let agentUUID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                initialAgentUUID: agentUUID, missionID: mission.id, reportsToLead: true
+            )
+            shell.addWorkspace(title: "The user's fix", cwd: harness.worktree, profileID: lead.space)
+            shell.addWorkspace(title: "A shell", cwd: harness.repo, profileID: lead.space)
+            let export = try XCTUnwrap(shell.workspaces.first { $0.title == "Export CSV" })
+            let usersFix = try XCTUnwrap(shell.workspaces.first { $0.title == "The user's fix" })
+            shell.refreshGitContextNow(for: export)
+            shell.refreshGitContextNow(for: usersFix)
+            harness.waitUntil("the tasks' branches") { export.gitBranch != nil && usersFix.gitBranch == harness.worktreeBranch }
+            let sleep = ["kind": "Test waits on sleep", "text": "testExport sleeps 2 s"]
+            @MainActor func record(_ task: String) throws -> (text: String, isError: Bool) {
+                try call(LeadTools.recordReview, ["task": task, "findings": [sleep]], lead: lead, in: harness)
+            }
+
+            let first = try record("Export CSV")
+            XCTAssertTrue(first.text.hasPrefix("Recorded round 1 of “Export CSV”: 1 finding."), first.text)
+            XCTAssertTrue(try record("Export CSV").text.hasPrefix("Recorded round 2 of “Export CSV”"))
+            let users = try record("The user's fix")
+            XCTAssertFalse(users.isError, users.text)
+            XCTAssertTrue(users.text.contains("Seen in another task too: test-waits-on-sleep"), users.text)
+            let plain = try record("A shell")
+            XCTAssertTrue(plain.isError)
+            XCTAssertTrue(plain.text.contains("isn't a task"), plain.text)
+
+            let day = try call(LeadTools.dailyPass, lead: lead, in: harness)
+            XCTAssertFalse(day.isError, day.text)
+            XCTAssertTrue(day.text.contains("- test-waits-on-sleep · 2 tasks: "), day.text)
+            let read = try XCTUnwrap(DailyPassState.load(spaceID: lead.space).end)
+            XCTAssertEqual(read, Date().timeIntervalSince1970, accuracy: 60)
+        }
+    }
+
     /// ⌘N in a space with a Lead offers "Report to the Lead", checked: the
     /// task then reports to it. Unchecked, it reports to nobody; a space
     /// without a Lead doesn't offer it.

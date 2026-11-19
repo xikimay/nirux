@@ -100,6 +100,15 @@ enum LearnedRules {
         return (match.text, splitLearned(match.text).day)
     }
 
+    /// The rules under the brief's "## Rules learned", as sessions read
+    /// them (comments and code blocks out), each on one line.
+    static func learnedRules(in briefText: String) -> [String] {
+        let parsed = lines(of: briefText)
+        guard let start = parsed.firstIndex(where: \.isRulesHeading) else { return [] }
+        let section = parsed[(start + 1)..<sectionEnd(after: start, in: parsed)].filter { !$0.inFence }.map(\.live)
+        return ProjectMemory.rules(in: section.joined(separator: "\n")).compactMap { AgentText.clean($0.text, maxLength: 600) }
+    }
+
     /// What sessions get of a brief, in characters.
     static func characterCount(of briefText: String) -> Int {
         SpaceBrief.body(of: briefText)?.count ?? 0
