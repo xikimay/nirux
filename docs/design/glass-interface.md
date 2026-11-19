@@ -482,9 +482,12 @@ the text stays flat and sharp.
   space, or a workspace on screen that left the list show it at once.
 - **The crossing (study P4):** ⌥⌘← ⌥⌘→ pass through depth. The space left
   recedes to 92 % as it fades; the one chosen comes from 106 % and lands,
-  0.56 s, both frozen pictures, the live views hidden under them until it
-  lands, so no live terminal scales. A switch while one plays ends it at
-  once; Reduce motion, or a pick from the menu, shows the space at once.
+  0.56 s, both frozen pictures, every live view hidden under them until it
+  lands, so no live terminal scales. The space chosen is frozen 0.05 s in,
+  once its terminals (resting while hidden) drew. A switch while one plays
+  ends it at once, and so does a move or another workspace on screen (⌘N,
+  a close, a ⌘P jump); Reduce motion, or a pick from the menu, shows the
+  space at once.
 - **The plan (study P5, first part):** ⌥⌘↑ (Space › Space Overview)
   shows the space as a plan over the viewport: a row per workspace, in the
   order they're listed, every column of it frozen at the plan's scale

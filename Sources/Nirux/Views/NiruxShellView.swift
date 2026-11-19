@@ -27,9 +27,13 @@ final class NiruxShellView: NSView {
     /// its pictures over the viewport (NiruxShellView+SpaceCrossing).
     var spaceCrossingGeneration = 0
     var crossingPictures: [FrozenView] = []
-    /// The space as a plan, while it shows (NiruxShellView+SpacePlan), and
-    /// a count so that a motion's end acts only on its own.
+    /// The workspace a crossing brings on screen.
+    var crossingWorkspaceID: String?
+    /// The space as a plan, while it shows (NiruxShellView+SpacePlan); the
+    /// workspaces drawing once before it shows; a count so that a step or a
+    /// motion's end acts only on its own.
     var spacePlan: SpacePlanView?
+    var planDrawing: Set<String> = []
     var spacePlanGeneration = 0
     /// How far the fingers moved in this pinch (NiruxShellView+SpacePlan).
     var pinchTotal: CGFloat = 0
@@ -480,6 +484,7 @@ final class NiruxShellView: NSView {
     // MARK: - Layout
 
     func relayout(animated: Bool) {
+        endSpaceCrossingIfStale(animated: animated)
         // A pass under the rail goes on through a layout; a travel the
         // layout starts begins another.
         restUnderGlass()

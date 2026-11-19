@@ -64,7 +64,7 @@ final class FrozenView: NSView {
     /// earlier picture still sliding away (a picture of it would copy its
     /// copies again, doubling them at each switch).
     private static func isOutOfSight(_ layer: CALayer, root: CALayer) -> Bool {
-        let shown = layer.presentation() ?? layer
+        let shown = shown(layer)
         return layer.delegate is FrozenView || shown.isHidden || shown.opacity == 0
             || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
     }
@@ -74,6 +74,13 @@ final class FrozenView: NSView {
             if let surface = surface(of: sublayer) { surfaces.append((sublayer, surface)) }
             collectSurfaces(in: sublayer, root: root, into: &surfaces)
         }
+    }
+
+    /// What `layer` shows: its presentation while an animation runs on it
+    /// (a glide, an arrival), else its model, which holds a change made in
+    /// this turn that the presentation doesn't show yet.
+    private static func shown(_ layer: CALayer) -> CALayer {
+        (layer.animationKeys()?.isEmpty == false ? layer.presentation() : nil) ?? layer
     }
 
     static func surface(of layer: CALayer) -> IOSurfaceRef? {
@@ -95,10 +102,10 @@ final class FrozenView: NSView {
     private static let gradientKeys = ["colors", "locations", "startPoint", "endPoint", "type"]
 
     /// `layer` and what it holds in sight, as they show (mid-way through a
-    /// glide or an arrival), each sharing its contents. A surface's copy in
-    /// `images` takes the surface's place, its pixels at its own scale, on
-    /// the canvas where the surface isn't opaque: a frost under it isn't
-    /// copied.
+    /// glide or an arrival, else as last set), each sharing its contents. A
+    /// surface's copy in `images` takes the surface's place, its pixels at
+    /// its own scale, on the canvas where the surface isn't opaque: a frost
+    /// under it isn't copied.
     static func clone(_ layer: CALayer, root: CALayer, images: [ObjectIdentifier: SurfaceCopies.Copy]) -> CALayer? {
         guard !isOutOfSight(layer, root: root) else { return nil }
         let copy: CALayer, keys: [String]
@@ -107,7 +114,7 @@ final class FrozenView: NSView {
         case is CAGradientLayer: (copy, keys) = (CAGradientLayer(), layerKeys + gradientKeys)
         default: (copy, keys) = (CALayer(), layerKeys)
         }
-        let shown = layer.presentation() ?? layer
+        let shown = shown(layer)
         for key in keys { copy.setValue(shown.value(forKey: key), forKey: key) }
         copy.contents = layer.contents
         if let image = images[ObjectIdentifier(layer)] {

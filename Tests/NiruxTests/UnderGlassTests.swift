@@ -29,6 +29,7 @@ final class UnderGlassTests: XCTestCase {
             XCTAssertEqual(viewport.frame.maxX, viewFrame.maxX, accuracy: 0.5)
             XCTAssertEqual(shell.verticalStrip.convert(NSPoint.zero, to: shell).x, stripOrigin.x, accuracy: 0.5, "what it holds where it lay")
             XCTAssertFalse(workspace.containerView.clipsToBounds, "the cards unclipped")
+            XCTAssertEqual(shell.viewportRestFrame, viewFrame, "what centres on it stays put")
 
             XCTAssertEqual(steps.durations, [WorkspaceState.slideDuration], "it ends with the slide")
             steps.runNext()
