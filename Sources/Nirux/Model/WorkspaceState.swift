@@ -884,7 +884,7 @@ extension WorkspaceState {
         handle.wantsLayer = true
         stripView.addSubview(handle)
         // Over a card passing over its neighbours, as it takes their clicks.
-        handle.layer?.zPosition = 2
+        if !ZZ("handlesUnder") { handle.layer?.zPosition = 2 }
         resizeHandles.append(handle)
     }
 
@@ -1067,7 +1067,7 @@ extension WorkspaceState {
             col.terminalView?.autoresizingMask = []
             // A card passing in or out scales about the middle it had: one
             // that changes size is in place at once.
-            if col.view.frame.size != NSSize(width: widths[index], height: innerHeight) {
+            if col.view.frame.size != NSSize(width: widths[index], height: innerHeight), !ZZ("noResizeEnd") {
                 col.view.layer?.removeAnimation(forKey: Self.cardPassKey)
             }
             col.view.frame = NSRect(x: xOffset, y: inset, width: widths[index], height: innerHeight)

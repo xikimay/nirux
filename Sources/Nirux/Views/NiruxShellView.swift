@@ -718,7 +718,7 @@ extension NiruxShellView {
         column.passes += 1
         let pass = column.passes
         let shown = layer.presentation()
-        let start = from ?? (
+        let start = from ?? (ZZ("closeFromWhole") ? (CGFloat(1), CGFloat(1)) : nil) ?? (
             (shown?.value(forKeyPath: "transform.scale.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 1,
             CGFloat(shown?.opacity ?? Float(view.alphaValue))
         )
@@ -747,7 +747,7 @@ extension NiruxShellView {
         DispatchQueue.main.async {
             DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak column] in
                 MainActor.assumeIsolated {
-                    guard let column, column.passes == pass else { return }
+                    guard let column, column.passes == pass || ZZ("ungatedPass") else { return }
                     column.view.layer?.removeAnimation(forKey: WorkspaceState.cardPassKey)
                     then()
                 }
