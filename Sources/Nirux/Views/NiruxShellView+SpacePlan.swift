@@ -29,7 +29,10 @@ extension NiruxShellView {
         let generation = spacePlanGeneration
         sideEffects.afterCommit(Self.arrivalDelay) { [weak self] in
             guard let self, spacePlanGeneration == generation else { return }
+            let drew = planDrawing
             endPlanDrawing()
+            // Another space, or a workspace added or closed meanwhile: not all drew.
+            guard drew == Set(visibleWorkspaceIndices.map { workspaces[$0].id }) else { return }
             showSpacePlan()
         }
     }
