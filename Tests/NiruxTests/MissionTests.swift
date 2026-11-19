@@ -99,27 +99,34 @@ final class MissionTests: XCTestCase {
 
     /// A Lead's tells to a task that doesn't report to it go through a
     /// one-way Mission, with handoffs off, typed under a line saying so; the
-    /// task's questions and result never do.
+    /// task's questions and result never do. Typed, a tell gives the task's
+    /// own Mission work again, as its parent's would: its result goes there.
     func testALeadsOneWayMissionCarriesItsTellsOnly() throws {
         let store = MissionStore(fileURL: try makeDirectory().appendingPathComponent("missions.json"))
-        var tells = request()
+        XCTAssertNotNil(store.create(request(), enabled: true, now: 9))
+        guard case .accepted = store.process(event(kind: .completed), enabled: true) else { return XCTFail("its own result") }
+        let oneWayID = "88888888-8888-4888-8888-888888888888"
+        var tells = request(id: oneWayID, parentWorkspaceID: "99999999-9999-4999-8999-999999999999")
         tells.oneWay = true
         XCTAssertNotNil(store.create(tells, enabled: false, now: 10))
         for kind in [MissionEvent.Kind.question, .completed] {
-            guard case .rejected = store.process(event(kind: kind), enabled: false) else { return XCTFail("\(kind) reached the Lead") }
+            let refused = event(id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", missionID: oneWayID, kind: kind)
+            guard case .rejected = store.process(refused, enabled: false) else { return XCTFail("\(kind) reached the Lead") }
         }
         let instruction = MissionEvent(
-            id: "77777777-7777-4777-8777-777777777777", missionID: missionID,
+            id: "77777777-7777-4777-8777-777777777777", missionID: oneWayID,
             childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
-            parentWorkspaceID: parentWorkspaceID, parentAgentUUID: parentAgentUUID,
+            parentWorkspaceID: "99999999-9999-4999-8999-999999999999", parentAgentUUID: parentAgentUUID,
             kind: .instruction, message: "Review of #597: guard the race.", timestamp: 20
         )
         guard case .accepted = store.process(instruction, enabled: false) else { return XCTFail("the Lead's tell") }
-        let delivery = try XCTUnwrap(store.pendingPromptDeliveries(now: 30).first)
+        let delivery = try XCTUnwrap(store.pendingPromptDeliveries(now: 30).first { $0.event.kind == .instruction })
         XCTAssertEqual(
             MissionPromptText.text(for: delivery, childTitle: "By hand", parentTitle: "Lead"),
             MissionPromptText.oneWayHeader + "\nReview of #597: guard the race."
         )
+        XCTAssertTrue(store.markTyped(delivery, at: 30))
+        XCTAssertEqual(store.missions.map(\.status), [.active, .active])
     }
 
     func testMissionCreationIsDisabledByDefaultAndRejectsMalformedIdentifiers() throws {

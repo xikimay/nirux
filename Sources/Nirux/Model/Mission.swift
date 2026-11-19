@@ -30,7 +30,8 @@ struct Mission: Codable, Equatable {
     var reportsToTask: Bool?
     /// The parent is a space's Lead telling a task of its space that
     /// doesn't report to it: the Mission carries the Lead's instructions
-    /// only, never the task's questions or result. Nil means no.
+    /// only, never the task's questions or result, and code counting a
+    /// parent's Missions or a child's leaves it out. Nil means no.
     var oneWay: Bool?
 
     /// Carried whatever the Mission handoffs setting: a Lead's task, a
@@ -469,7 +470,8 @@ final class MissionStore {
     }
 
     /// The instruction is in the child's prompt: the child has work again,
-    /// so its Mission is active, even after `completed`.
+    /// so its Mission is active, even after `completed`; for a Lead's
+    /// one-way tell, the child's own Mission too, which its result goes to.
     @discardableResult
     func markInstructionTyped(
         eventID: String, at timestamp: TimeInterval = Date().timeIntervalSince1970
@@ -480,8 +482,17 @@ final class MissionStore {
             }) else { continue }
             var updated = missions
             updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
-            updated[missionIndex].status = .active
-            updated[missionIndex].updatedAt = timestamp
+            let mission = missions[missionIndex]
+            let reopened = mission.oneWay == true
+                ? missions.indices.filter { index in
+                    missions[index].oneWay != true && missions[index].childWorkspaceID == mission.childWorkspaceID
+                        && missions[index].childAgentUUID == mission.childAgentUUID
+                }.max { missions[$0].createdAt < missions[$1].createdAt }
+                : nil
+            for index in [missionIndex, reopened].compactMap({ $0 }) {
+                updated[index].status = .active
+                updated[index].updatedAt = timestamp
+            }
             return commit(updated)
         }
         return false

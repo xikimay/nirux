@@ -268,22 +268,27 @@ New flow, built on the guarded typing `tell` already uses
     its focused terminal's, which another may share). `reply` reaches only the
     tasks the Lead started that are still in its space; a question typed into
     the Lead names it. `tell` reaches any task of the space but the Lead,
-    sub-tasks and the user's tasks included, named among them all: the Lead
-    reviews and merges their pull requests, and a review relayed through a
-    parent waits on that parent's turn. A task that doesn't report to the
-    Lead gets it through a one-way Mission (`Mission.oneWay`, one per Lead
-    terminal and task agent, made at the first tell), to the agent its own
-    Mission names, else a Claude Code in front in one of its columns (or to
-    resume there): queued and
-    typed as any tell, held and given-up lines to the Lead included, under
-    "[Nirux Mission] From the space's Lead (one-way: your questions and result
-    still go to whoever started this task):", so not as a slash command. The
-    answer says who gets the task's questions and result: the terminal its
-    own Mission reports to while open, else the user. The one-way Mission never
-    takes a question or a result (`MissionStore.process` refuses them), and
-    counts nowhere as the Lead's: `list_tasks` still says "not yours", and
-    `reply`, `ask_user`, `interrupt_task`, the CLI's `receive` and `tell`
-    and the sidebar's question rows leave it out.
+    sub-tasks and the user's tasks included: the Lead reviews and merges
+    their pull requests, and a review relayed through a parent waits on that
+    parent's turn. A name is read among the Lead's own tasks first, then
+    among all the space's (as `read_task`). A task that doesn't report to
+    the Lead gets it through a one-way Mission (`Mission.oneWay`, one per
+    Lead terminal and task agent, made at the first tell), to the agent its
+    own Mission names (refused if that one isn't Claude Code), else a Claude
+    Code in front in one of its columns (not `claude -p`) or waiting to
+    resume there: queued and typed as any tell, held and given-up lines to
+    the Lead included, under "[Nirux Mission] From the space's Lead (one-way:
+    your questions and result still go to whoever started this task):". So a
+    slash command is refused, and so is a workspace that isn't a task
+    (`isTask`) or that a link from outside Nirux opened. Typed, it reopens
+    the task's own Mission too, as a parent's tell does, so a finished
+    sub-task's next result reaches its parent. The answer says who gets the
+    task's questions and result: the terminal its own Mission reports to
+    while open, else the user. The one-way Mission never takes a question or
+    a result (`MissionStore.process` refuses them), and counts nowhere as
+    the Lead's: `list_tasks` still says "not yours", and `reply`,
+    `ask_user`, `interrupt_task`, the CLI's `receive` and `tell` and the
+    sidebar's question rows leave it out.
   - `ask_user(task, why)`: hands the question the task waits on to the user
     (amber row at once, the popover saying why). The answer is typed into the
     task, and a line into the Lead ("[Nirux Mission] The user answered …").
@@ -299,9 +304,9 @@ New flow, built on the guarded typing `tell` already uses
     blocker. A field the user changed stays theirs (the tool says so) until
     they clear it; one they didn't touch stays the Lead's, even one it
     changed while the panel was open. A pull request seen merged clears what
-    the Lead wrote (nothing tells it). Any task of the space, as `tell`; a
-    title two tasks share is refused: the branch says which. `list_tasks`
-    shows both for every task, and who wrote them.
+    the Lead wrote (nothing tells it). Any task of the space, named as for
+    `tell`; a name that settles nothing is refused: the branch says which.
+    `list_tasks` shows both for every task, and who wrote them.
   - `propose_rule(rule, evidence)`: a rule for the space brief, once the Lead
     sends tasks the same kind of finding a second time (see "Learned rules"
     below). Nothing reaches the brief without the user.
