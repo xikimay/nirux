@@ -129,6 +129,9 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(MissionStore.shared.markTyped(MissionStore.AcceptedEvent(mission: current, event: typed)))
             XCTAssertTrue(shell.answerMissionQuestion(typed.id, text: "en-US"))
             XCTAssertEqual(shell.pendingLeadNotices.last?.text, "[Nirux Mission] The user answered “Add a date filter”: en-US")
+            let typedAt = MissionStore.shared.missions.flatMap(\.events).first { $0.id == typed.id }?.parentTypedAt
+            XCTAssertNotNil(typedAt)
+            XCTAssertEqual(shell.pendingLeadNotices.last?.forClaudeStartedBy, typedAt, "for the claude it was typed into")
 
             XCTAssertFalse(try call(LeadTools.tell, ["task": "Add a date filter", "message": "/code-review"], lead: lead, in: harness).isError)
             let instructions = MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }

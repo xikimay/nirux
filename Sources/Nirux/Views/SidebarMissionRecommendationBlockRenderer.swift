@@ -25,7 +25,7 @@ struct SidebarMissionRecommendationBlockRenderer {
             .font: Metrics.questionFont, .foregroundColor: Theme.Color.textTertiary,
         ])
         text.append(SidebarColumnChip.spacer(6))
-        text.append(NSAttributedString(string: AgentText.withoutMarks(question.recommendation ?? ""), attributes: [
+        text.append(NSAttributedString(string: question.recommendation ?? "", attributes: [
             .font: Metrics.questionFont, .foregroundColor: Theme.Color.textPrimary,
         ]))
         return text

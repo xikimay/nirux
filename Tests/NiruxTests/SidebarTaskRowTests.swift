@@ -433,6 +433,19 @@ final class SidebarTaskRowTests: XCTestCase {
         }
         XCTAssertEqual(row(question).cardActions, [.missionRecommendation(columnIndex: 1, question)])
         XCTAssertEqual(answers(question), [true, false], "Accept at the right edge, then Reply…")
+        var marked = question
+        marked.recommendation = "Use **ISO** `8601`"
+        let shown = SidebarWorkspaceCardRenderer(workspace: row(marked), sidebarWidth: 260, yOffset: 500).render().views
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(shown.contains { $0.hasSuffix("Use **ISO** `8601`") }, "what Accept sends, as it is: \(shown)")
+        var asked = column(1)
+        asked.missionQuestion = question
+        let turn = SidebarTurnQuestion(text: "Which format?", turnEndedAt: 1, isYesNo: false, columnID: UUID())
+        asked.turnQuestion = turn
+        XCTAssertEqual(
+            workspace([asked]).cardActions, [.missionRecommendation(columnIndex: 1, question), .turnQuestion(columnIndex: 1, turn)],
+            "the recommendation before a turn's question block asking it again"
+        )
         var access = question
         access.kind = .access
         XCTAssertEqual(answers(access), [false], "accepting gives no access")

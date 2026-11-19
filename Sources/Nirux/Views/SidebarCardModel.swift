@@ -226,17 +226,19 @@ extension WorkspaceInfo {
             if case let .silent(_, since, true)? = column.stuck {
                 actions.append(.interrupt(columnIndex: column.index, since: since))
             }
-            if let question = column.turnQuestion {
-                actions.append(.turnQuestion(columnIndex: column.index, question))
-            }
-            if let dialog = column.dialog {
-                actions.append(.dialog(columnIndex: column.index, dialog))
-            }
+            // A Mission question and what it recommends come before a
+            // turn's question block, which may ask it again.
             if let question = column.missionQuestion, column.index != questionShown {
                 actions.append(.missionQuestion(columnIndex: column.index, question))
             }
             if let question = column.missionQuestion, question.handOff != nil, !question.isAnswered, question.recommendation != nil {
                 actions.append(.missionRecommendation(columnIndex: column.index, question))
+            }
+            if let question = column.turnQuestion {
+                actions.append(.turnQuestion(columnIndex: column.index, question))
+            }
+            if let dialog = column.dialog {
+                actions.append(.dialog(columnIndex: column.index, dialog))
             }
             if let waiting = column.waitingMessages {
                 actions.append(.waitingMessages(columnIndex: column.index, waiting))

@@ -184,7 +184,7 @@ extension NiruxShellView {
                 workspace.raiseNotification(.waiting)
                 workspace.onMetadataChanged?()
                 if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
-                let body = [question.text, question.recommendationLine].compactMap { $0 }.joined(separator: "\n")
+                let body = [question.recommendationLine, question.text].compactMap { $0 }.joined(separator: "\n")
                 sideEffects.notifyMissionQuestion(workspace.id, workspace.title, columnIndex, body)
             }
         }
@@ -248,8 +248,9 @@ extension NiruxShellView {
         popover.appearance = Theme.appearance
         controller.popover = popover
         // The sidebar rebuilds its rows; the document view under them stays.
-        // A button a rebuild took away: the pointer.
-        if let anchor, anchor.window != nil {
+        // A row's button a rebuild took away (nil): the pointer, in the rows.
+        if let anchor {
+            guard anchor.window != nil else { return NSSound.beep() }
             let host = anchor.superview ?? anchor
             popover.show(relativeTo: host === anchor ? anchor.bounds : anchor.frame, of: host, preferredEdge: .maxX)
         } else if let pointer = sidebar.anchorAtPointer() {
@@ -322,7 +323,8 @@ extension NiruxShellView {
             return false
         }
         // The parent that handed it over or has it in its prompt, a Lead or a
-        // task's agent, hears the answer too.
+        // task's agent, hears the answer too: the `claude` that saw it, not
+        // one started since.
         if let question = response.mission.events.first(where: { $0.id == questionID }),
            question.handedToUserBecause != nil || question.parentTypedAt != nil {
             let childTitle = workspaces.first { $0.id == response.mission.childWorkspaceID }?.title ?? response.mission.branch
@@ -330,7 +332,8 @@ extension NiruxShellView {
                 workspaceID: response.mission.parentWorkspaceID, agentUUID: response.mission.parentAgentUUID,
                 text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: \(reply)"
                     + (accepted ? " (its recommendation)" : ""),
-                queuedAt: Date().timeIntervalSince1970
+                queuedAt: Date().timeIntervalSince1970,
+                forClaudeStartedBy: question.parentTypedAt ?? Date().timeIntervalSince1970
             ))
         }
         // Before the sidebar refresh, which would read it as answered by

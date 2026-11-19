@@ -657,6 +657,17 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertNil(needs.acceptButton)
     }
 
+    /// A user's answer goes to the parent's `claude` that saw the question,
+    /// never to one started since, which knows nothing of it.
+    func testANoticeGoesOnlyToTheClaudeThatSawItsQuestion() {
+        let notice = LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100, forClaudeStartedBy: 50)
+        XCTAssertTrue(notice.isFor(claudeStartedAt: 40))
+        XCTAssertTrue(notice.isFor(claudeStartedAt: 50))
+        XCTAssertFalse(notice.isFor(claudeStartedAt: 60), "started since: it never saw the question")
+        XCTAssertTrue(notice.isFor(claudeStartedAt: nil), "not known: the prompt's own checks decide")
+        XCTAssertTrue(LeadNotice(workspaceID: "w", agentUUID: "a", text: "t", queuedAt: 100).isFor(claudeStartedAt: 60))
+    }
+
     /// ⌘↩ in the answer field sends what it holds; Return makes a new line.
     func testCommandReturnSendsTheAnswer() throws {
         var sent: [String] = []
