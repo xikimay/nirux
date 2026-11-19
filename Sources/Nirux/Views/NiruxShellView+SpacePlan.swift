@@ -3,10 +3,33 @@ import AppKit
 /// Depth study P5: ⌥⌘↑ shows the space as a plan (`SpacePlanView`) over the
 /// viewport, the live views hidden and their terminals resting under it.
 extension NiruxShellView {
+    /// The plan shows once every listed workspace drew: their terminals rest
+    /// while off screen, or never drew since launch. Asked again meanwhile,
+    /// it doesn't.
     func toggleSpacePlan() {
         if spacePlan != nil { return closeSpacePlan(going: nil) }
-        guard let onScreen = activeWorkspace else { return }
+        if !planDrawing.isEmpty { return endPlanDrawing() }
+        guard activeWorkspace != nil else { return }
         endSpaceCrossing()
+        planDrawing = Set(visibleWorkspaceIndices.map { workspaces[$0].id })
+        syncTerminalOcclusion()
+        spacePlanGeneration += 1
+        let generation = spacePlanGeneration
+        sideEffects.afterCommit(Self.arrivalDelay) { [weak self] in
+            guard let self, spacePlanGeneration == generation else { return }
+            endPlanDrawing()
+            showSpacePlan()
+        }
+    }
+
+    private func endPlanDrawing() {
+        spacePlanGeneration += 1
+        planDrawing = []
+        syncTerminalOcclusion()
+    }
+
+    private func showSpacePlan() {
+        guard let onScreen = activeWorkspace else { return }
         let plan = SpacePlanView(
             frame: viewport.bounds, spaceID: activeProfileID, workspaces: visibleWorkspaceIndices.map { workspaces[$0] },
             labels: planLabels(), onScreen: onScreen
