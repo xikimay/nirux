@@ -141,7 +141,7 @@ extension NiruxShellView {
             missionParentWatch[question.id] = watch
             result[ObjectIdentifier(column)] = SidebarMissionQuestion(
                 questionID: question.id, parentTitle: parentTitle, text: question.message, handOff: handOff,
-                askedAt: question.timestamp
+                askedAt: question.timestamp, kind: question.questionKind, recommendation: question.recommendation
             )
         }
         return result
@@ -184,7 +184,8 @@ extension NiruxShellView {
                 workspace.raiseNotification(.waiting)
                 workspace.onMetadataChanged?()
                 if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
-                sideEffects.notifyMissionQuestion(workspace.id, workspace.title, columnIndex, question.text)
+                let body = [question.text, question.recommendationLine].compactMap { $0 }.joined(separator: "\n")
+                sideEffects.notifyMissionQuestion(workspace.id, workspace.title, columnIndex, body)
             }
         }
         for (questionID, workspaceID) in missionQuestionsHandedToUser where handedOff[questionID] == nil {
@@ -217,7 +218,7 @@ extension NiruxShellView {
     /// field, anchored to the row. `questionID`, from the inbox or the
     /// callout: the question the card showed, which another may have
     /// replaced in the column meanwhile.
-    func showMissionReplyPopover(workspaceIndex: Int, columnIndex: Int, anchor: NSView, questionID: String? = nil) {
+    func showMissionReplyPopover(workspaceIndex: Int, columnIndex: Int, anchor: NSView?, questionID: String? = nil) {
         let snapshot = ProcessSnapshot()
         guard let workspace = workspaces[safe: workspaceIndex],
               let column = workspace.columns[safe: columnIndex],
@@ -232,6 +233,9 @@ extension NiruxShellView {
             onSend: { [weak self] text in
                 self?.answerMissionQuestion(question.questionID, text: text) ?? false
             },
+            onAccept: question.acceptableRecommendation == nil ? nil : { [weak self] in
+                self?.acceptMissionRecommendation(question.questionID) ?? false
+            },
             onOpenTask: { [weak self, weak workspace] in
                 guard let self, let workspace else { return }
                 self.closeMissionReply()
@@ -244,8 +248,15 @@ extension NiruxShellView {
         popover.appearance = Theme.appearance
         controller.popover = popover
         // The sidebar rebuilds its rows; the document view under them stays.
-        let host = anchor.superview ?? anchor
-        popover.show(relativeTo: host === anchor ? anchor.bounds : anchor.frame, of: host, preferredEdge: .maxX)
+        // A button a rebuild took away: the pointer.
+        if let anchor, anchor.window != nil {
+            let host = anchor.superview ?? anchor
+            popover.show(relativeTo: host === anchor ? anchor.bounds : anchor.frame, of: host, preferredEdge: .maxX)
+        } else if let pointer = sidebar.anchorAtPointer() {
+            popover.show(relativeTo: pointer.rect, of: pointer.view, preferredEdge: .maxX)
+        } else {
+            return NSSound.beep()
+        }
         missionReplyPopover = popover
         missionReplyQuestionID = question.questionID
         controller.focusReplyField()
@@ -266,6 +277,26 @@ extension NiruxShellView {
                 : "Answers hold at most \(MissionEventCLI.maxScalars) Unicode scalars: an emoji or an accent can take several")
             return false
         }
+        return sendUserAnswer(reply, to: questionID, accepted: false)
+    }
+
+    /// Accept, in the popover or on the row: the question's recommendation
+    /// goes to the child as the user's answer.
+    func acceptMissionRecommendation(_ questionID: String) -> Bool {
+        guard let question = MissionStore.shared.missions.lazy.flatMap(\.events)
+            .first(where: { $0.id == questionID && $0.kind == .question })
+        else {
+            showToast("That question was already answered, or its Mission ended", tone: .error)
+            return false
+        }
+        guard let recommendation = question.acceptableRecommendation else {
+            showToast("That question has no recommendation to accept", tone: .error)
+            return false
+        }
+        return sendUserAnswer(recommendation, to: questionID, accepted: true)
+    }
+
+    private func sendUserAnswer(_ reply: String, to questionID: String, accepted: Bool) -> Bool {
         let store = MissionStore.shared
         let enabled = Self.currentMissionHandoffsEnabled()
         // A Lead's task, or a sub-task a task's agent started with its
@@ -276,7 +307,7 @@ extension NiruxShellView {
             showToast("Mission handoffs are off in Settings")
             return false
         }
-        guard let accepted = store.respond(to: questionID, message: reply, enabled: enabled) else {
+        guard let response = store.respond(to: questionID, message: reply, acceptingRecommendation: accepted, enabled: enabled) else {
             let stillWaiting = store.response(to: questionID) == nil && store.missions.contains { mission in
                 mission.status == .active && mission.events.contains { $0.id == questionID && $0.kind == .question }
             }
@@ -290,21 +321,24 @@ extension NiruxShellView {
             updateSidebar()
             return false
         }
-        // The parent that handed it over, a Lead or a task's agent, hears the
-        // answer too.
-        if let question = accepted.mission.events.first(where: { $0.id == questionID }), question.handedToUserBecause != nil {
-            let childTitle = workspaces.first { $0.id == accepted.mission.childWorkspaceID }?.title ?? accepted.mission.branch
+        // The parent that handed it over or has it in its prompt, a Lead or a
+        // task's agent, hears the answer too: the child's own words quoted,
+        // so they can't pass for a line of Nirux's.
+        if let question = response.mission.events.first(where: { $0.id == questionID }),
+           question.handedToUserBecause != nil || question.parentTypedAt != nil {
+            let childTitle = workspaces.first { $0.id == response.mission.childWorkspaceID }?.title ?? response.mission.branch
             pendingLeadNotices.append(LeadNotice(
-                workspaceID: accepted.mission.parentWorkspaceID, agentUUID: accepted.mission.parentAgentUUID,
-                text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: \(reply)",
+                workspaceID: response.mission.parentWorkspaceID, agentUUID: response.mission.parentAgentUUID,
+                text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: "
+                    + (accepted ? "\(MissionPromptText.quoted(reply)) (its recommendation)" : reply),
                 queuedAt: Date().timeIntervalSince1970
             ))
         }
         // Before the sidebar refresh, which would read it as answered by
         // someone else.
         closeMissionReply()
-        if handleMissionEvent(accepted.mission, event: accepted.event) {
-            store.markDelivered(eventID: accepted.event.id)
+        if handleMissionEvent(response.mission, event: response.event) {
+            store.markDelivered(eventID: response.event.id)
         }
         typeLeadNotices()
         return true

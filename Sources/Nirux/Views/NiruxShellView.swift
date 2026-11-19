@@ -381,6 +381,16 @@ final class NiruxShellView: NSView {
         sidebar.onTurnAnswer = { [weak self] question, answer, button in
             self?.answerFromCard(answer, to: question, button: button)
         }
+        sidebar.onMissionAnswer = { [weak self] click, button in
+            guard let self else { return }
+            if click.accepts {
+                _ = self.acceptMissionRecommendation(click.questionID)
+            } else {
+                self.showMissionReplyPopover(
+                    workspaceIndex: click.workspaceIndex, columnIndex: click.columnIndex, anchor: button, questionID: click.questionID
+                )
+            }
+        }
         sidebar.onQuestionDismissed = { [weak self] columnID, askedAt in
             self?.dismissTurnQuestion(columnID: columnID, askedAt: askedAt)
         }

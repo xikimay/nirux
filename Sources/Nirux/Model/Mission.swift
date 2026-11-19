@@ -151,11 +151,16 @@ struct MissionEvent: Codable, Equatable {
         }
     }
 
-    /// The recommendation a reply may send as the answer: an access
+    /// The recommendation a reply may send as the answer.
+    var acceptableRecommendation: String? {
+        Self.acceptable(recommendation, of: questionKind)
+    }
+
+    /// `recommendation` if a reply may send it as the answer: an access
     /// question's says what is needed, which accepting doesn't give, and a
     /// kind this build doesn't know may be like it.
-    var acceptableRecommendation: String? {
-        guard let kind = questionKind else { return recommendation }
+    static func acceptable(_ recommendation: String?, of kind: QuestionKind?) -> String? {
+        guard let kind else { return recommendation }
         return [.decision, .specMismatch].contains(kind) ? recommendation : nil
     }
 
@@ -481,16 +486,19 @@ final class MissionStore {
     /// Trusted UI response path: the user answers instead of the parent. It
     /// uses the same validation and persistence as a parent-agent CLI
     /// response, then returns the accepted event for the caller to act on.
+    /// `acceptingRecommendation`: `message` is the question's recommendation,
+    /// accepted (Accept).
     func respond(
         to questionID: String,
         message: String,
+        acceptingRecommendation: Bool = false,
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> AcceptedEvent? {
         guard let mission = missions.first(where: { candidate in
             candidate.events.contains(where: { $0.id == questionID && $0.kind == .question })
         }) else { return nil }
-        let response = MissionEvent(
+        var response = MissionEvent(
             id: UUID().uuidString,
             missionID: mission.id,
             childWorkspaceID: mission.childWorkspaceID,
@@ -502,6 +510,7 @@ final class MissionStore {
             inReplyTo: questionID,
             timestamp: now
         )
+        response.acceptedRecommendation = acceptingRecommendation ? true : nil
         guard case let .accepted(accepted) = process(response, enabled: enabled, fromUser: true) else { return nil }
         return accepted
     }

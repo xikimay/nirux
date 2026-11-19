@@ -166,6 +166,7 @@ enum SidebarExpandedMetrics {
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
         case .interrupt: return buttonHeight
         case .turnQuestion(_, let question): return turnQuestionBlockHeight(for: question, width: width)
+        case .missionRecommendation(_, let question): return SidebarMissionRecommendationBlockRenderer.height(of: question, width: width)
         case .dialog(_, let dialog): return dialogBlockHeight(for: dialog, width: width)
         case .next(let text):
             return SidebarWrappedText.height(

@@ -72,8 +72,9 @@ enum TaskTools {
                 LeadTools.askUser, title: "Hand a sub-task's question to the user",
                 description: """
                     Hand the question one of your sub-tasks waits on to the user, when neither the code nor the \
-                    user's words settle it: its row turns amber and shows your reason. Their answer goes to the \
-                    sub-task, and a line comes to you.
+                    user's words settle it: its row turns amber and shows your reason, and the sub-task's \
+                    recommendation, if it gave one, which the user can accept (for access, what it needs, with \
+                    nothing to accept). Their answer goes to the sub-task, and a line comes to you.
                     """,
                 properties: [
                     "task": ["type": "string", "description": subtaskDescription],

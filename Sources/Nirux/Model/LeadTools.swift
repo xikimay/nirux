@@ -131,8 +131,9 @@ enum LeadTools {
                 askUser, title: "Hand a task's question to the user",
                 description: """
                     Hand the question a task is waiting on to the user, when neither the brief, the code nor the \
-                    conversation settles it: its row turns amber and shows your reason. Their answer goes to the \
-                    task, and a line comes to you.
+                    conversation settles it: its row turns amber and shows your reason, and the task's \
+                    recommendation, if it gave one, which the user can accept (for access, what it needs, with \
+                    nothing to accept). Their answer goes to the task, and a line comes to you.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],

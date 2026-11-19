@@ -547,6 +547,40 @@ final class MissionDeliveryTests: XCTestCase {
 
     // MARK: - Popover
 
+    /// The popover says what blocks the child and what it recommends, and
+    /// Accept sends it; an access question's box says what it needs, with no
+    /// Accept.
+    func testThePopoverOffersTheRecommendation() throws {
+        func texts(_ view: NSView) -> [String] {
+            ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts)
+        }
+        var decision = question(.handedOver(why: "Yours."))
+        decision.kind = .decision
+        decision.recommendation = "ISO 8601"
+        var accepted = 0
+        let controller = MissionReplyViewController(
+            childTitle: "Date filter API", question: decision, onSend: { _ in true }, onAccept: { accepted += 1; return true }, onOpenTask: {}
+        )
+        XCTAssertTrue(Set(texts(controller.view)).isSuperset(of: ["DECISION", "Recommended", "ISO 8601"]), "\(texts(controller.view))")
+        let accept = try XCTUnwrap(controller.acceptButton)
+        controller.replyView?.string = "Not quite: ISO 8601 with milliseconds"
+        controller.textDidChange(Notification(name: NSText.didChangeNotification))
+        XCTAssertFalse(accept.isEnabled, "Accept would throw the typed answer away")
+        controller.replyView?.string = " "
+        controller.textDidChange(Notification(name: NSText.didChangeNotification))
+        accept.performClick(nil)
+        XCTAssertEqual(accepted, 1)
+        XCTAssertFalse(accept.isEnabled, "once")
+
+        var access = decision
+        access.kind = .access
+        let needs = MissionReplyViewController(
+            childTitle: "Date filter API", question: access, onSend: { _ in true }, onAccept: nil, onOpenTask: {}
+        )
+        XCTAssertTrue(Set(texts(needs.view)).isSuperset(of: ["ACCESS", "Needed", "ISO 8601"]), "\(texts(needs.view))")
+        XCTAssertNil(needs.acceptButton)
+    }
+
     /// ⌘↩ in the answer field sends what it holds; Return makes a new line.
     func testCommandReturnSendsTheAnswer() throws {
         var sent: [String] = []

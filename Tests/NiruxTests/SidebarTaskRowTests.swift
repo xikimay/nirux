@@ -413,6 +413,60 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(workspace([child]).cardActions, [], "the status line shows it")
     }
 
+    /// A question that waits on the user shows what its child recommends,
+    /// with Reply… and Accept; an access question's says what it needs, with
+    /// Reply… alone. One its parent may still answer shows none on the row.
+    func testAMissionRecommendationWaitsWithItsQuestion() {
+        let question = SidebarMissionQuestion(
+            questionID: "q", parentTitle: "Lead", text: "Which format?", handOff: .handedOver(why: "Yours."),
+            kind: .decision, recommendation: "ISO 8601"
+        )
+        func row(_ question: SidebarMissionQuestion) -> WorkspaceInfo {
+            var child = column(1)
+            child.missionQuestion = question
+            return workspace([child])
+        }
+        func answers(_ question: SidebarMissionQuestion) -> [Bool] {
+            SidebarWorkspaceCardRenderer(workspace: row(question), sidebarWidth: 260, yOffset: 500).render().hitAreas.compactMap {
+                if case let .missionAnswer(_, 1, "q", accepts) = $0.region { accepts } else { nil }
+            }
+        }
+        XCTAssertEqual(row(question).cardActions, [.missionRecommendation(columnIndex: 1, question)])
+        XCTAssertEqual(answers(question), [true, false], "Accept at the right edge, then Reply…")
+        var access = question
+        access.kind = .access
+        XCTAssertEqual(answers(access), [false], "accepting gives no access")
+        var long = question
+        long.recommendation = String(repeating: "Backfill from the archive, then drop it. ", count: 7)
+        XCTAssertEqual(answers(long), [false], "Accept sends what the row shows whole only; the popover has the rest")
+        let asking = SidebarMissionQuestion(
+            questionID: "q", parentTitle: "Lead", text: "Which format?", handOff: nil, kind: .decision, recommendation: "ISO 8601"
+        )
+        XCTAssertEqual(row(asking).cardActions, [], "the Lead may still answer")
+    }
+
+    /// Reply… and Accept act like Allow / Deny: one click, pressed and
+    /// released on the same button of the same question, armed.
+    func testOnlyASingleClickReleasedOnTheSameMissionAnswerActs() {
+        let accept = SidebarHitRegion.missionAnswer(workspaceIndex: 2, columnIndex: 1, questionID: "q", accepts: true)
+        let moved = SidebarHitRegion.missionAnswer(workspaceIndex: 0, columnIndex: 3, questionID: "q", accepts: true)
+        func click(
+            _ released: SidebarHitRegion?, clicks: Int = 1, armedAtPress: Bool = true, armedAtRelease: Bool = true
+        ) -> SidebarMissionAnswerClick? {
+            SidebarView.missionAnswerClick(
+                pressed: accept, released: released, clickCount: clicks, armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            )
+        }
+        XCTAssertEqual(click(moved), SidebarMissionAnswerClick(workspaceIndex: 0, columnIndex: 3, questionID: "q", accepts: true))
+        XCTAssertEqual(SidebarView.armedButtonKey(for: accept), SidebarView.armedButtonKey(for: moved), "the same button wherever it is")
+        XCTAssertNil(click(.missionAnswer(workspaceIndex: 2, columnIndex: 1, questionID: "q", accepts: false)), "slid onto Reply…")
+        XCTAssertNil(click(.missionAnswer(workspaceIndex: 2, columnIndex: 1, questionID: "r", accepts: true)), "another question")
+        XCTAssertNil(click(.actionBlock(workspaceIndex: 2)))
+        XCTAssertNil(click(accept, clicks: 2))
+        XCTAssertNil(click(accept, armedAtPress: false))
+        XCTAssertNil(click(accept, armedAtRelease: false))
+    }
+
     /// A click on a row that waits on the user brings up the asking column,
     /// whose chip only shows once the row is selected; another row, or the
     /// selected one, keeps the workspace's focused column.
