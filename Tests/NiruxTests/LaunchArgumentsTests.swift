@@ -15,6 +15,7 @@ final class LaunchArgumentsTests: XCTestCase {
     func testTheCommandLineModesComeFirst() {
         XCTAssertEqual(decision("--hook", "claude", "--statusline"), .mode(.statusLine))
         XCTAssertEqual(decision("--hook", "claude", "--mcp"), .mode(.toolsServer))
+        XCTAssertEqual(decision("--hook", "claude", "--agy"), .mode(.hook(.agy, payload: nil)))
         XCTAssertEqual(decision("--hook", "codex", SetupFailureSignal.flag, workspaceID), .mode(.setupFailure(workspaceID: workspaceID)))
         XCTAssertEqual(decision("--hook", "claude"), .mode(.hook(.claude, payload: nil)))
         XCTAssertEqual(decision("--hook", "codex", "{}"), .mode(.hook(.codex, payload: "{}")))

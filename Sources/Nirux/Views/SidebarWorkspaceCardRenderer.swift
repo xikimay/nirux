@@ -755,6 +755,17 @@ final class SidebarWorkspaceCardRenderer {
                 frame: label.frame.insetBy(dx: -2, dy: -2),
                 region: .link(url: SidebarView.ruleProposalsActionURL(spaceID: workspace.profileID), label: label)
             ))
+        case .dailyPass(let note):
+            let label = NSTextField.sidebarLine(NSAttributedString(string: note, attributes: [
+                .font: Theme.Font.caption, .foregroundColor: Theme.Color.textSecondary
+            ]))
+            label.toolTip = "What the Lead's daily pass read of the space's day. Its reply in its terminal says what it proposes, "
+                + "and why."
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
         case let .waitingMessages(columnIndex, waiting):
             let label = wrappedActionLine(Self.waitingText(waiting), maxLines: Metrics.waitingMessagesMaxLines, top: top)
             label.toolTip = waiting.tooltip

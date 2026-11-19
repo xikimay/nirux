@@ -644,6 +644,40 @@ final class NewTaskFlowTests: UIFlowTestCase {
         }
     }
 
+    /// agy's Stop binds its column to the conversation, which the state file
+    /// keeps for the restore; it never drives the column's status.
+    func testAgyStartBindsTheConversationARestoreResumes() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            // Two commands: sh would replace itself with a lone one.
+            workspace.addColumn(command: "exec -a agy /bin/sh -c 'sleep 600; :'", cwd: harness.repo)
+            let column = try XCTUnwrap(workspace.columns.last)
+            shell.relayout(animated: false)
+            let pty = try XCTUnwrap(column.pty)
+            UIFlowHarness.waitUntil("agy in front") { pty.foregroundProcess(snapshot: ProcessSnapshot())?.name == "agy" }
+            let agy = try XCTUnwrap(pty.foregroundProcess(snapshot: ProcessSnapshot()))
+            let conversation = "92baa9b8-92d8-452f-8577-f4b883d357d1"
+            let event = try XCTUnwrap(AgentHookEvent(
+                kind: .agy, payload: ["hookEventName": "SessionStart", "conversationId": conversation, "cwd": harness.repo],
+                env: ["NIRUX_AGENT_UUID": try XCTUnwrap(column.agentUUID)], now: Date().timeIntervalSince1970,
+                emitterProcess: agy.instance
+            ))
+            AgentHookCenter.shared.resolver = { [weak shell] in shell?.resolveAgentColumn(uuid: $0) }
+            defer { AgentHookCenter.shared.resolver = nil }
+            let applied = try XCTUnwrap(AgentHookCenter.shared.dispatch(event))
+            XCTAssertNil(pty.agentHookKind, "no hook drives agy's status")
+            shell.applyAgentHookEvents([applied])
+            let saved = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == workspace.id }?.columns.last)
+            XCTAssertEqual(saved.columnType, .agy)
+            XCTAssertEqual(saved.agySessionID, conversation)
+            shell.saveState()
+            shell.restoreState()
+            let restored = try XCTUnwrap(shell.workspaces.first { $0.id == workspace.id }?.columns.last)
+            XCTAssertEqual(restored.deferredAgent?.agent, .agy(resume: .session(conversation)))
+        }
+    }
+
     /// Existing Branch… lists the selected repository's worktrees, its main
     /// checkout too, then its branches without one, local then origin's. It
     /// goes back to the worktree the active workspace is in, and makes one

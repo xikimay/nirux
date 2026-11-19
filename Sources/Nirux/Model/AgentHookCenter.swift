@@ -256,6 +256,8 @@ final class AgentHookCenter {
                     && isFromOwnClaude
             case .codex:
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
+            case .agy:
+                break
             }
         }
         if event.name == .permissionRequest, event.approvalRequestID != nil,
@@ -271,7 +273,8 @@ final class AgentHookCenter {
             event.approvalDeadline = nil
             event.approvalText = nil
         }
-        if let resolution { _ = apply(event, to: resolution) }
+        // Antigravity's hooks only bind its conversation: OSC 7501 drives its status.
+        if let resolution, event.kind != .agy { _ = apply(event, to: resolution) }
         return resolution.map {
             AppliedEvent(
                 event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,
@@ -534,6 +537,20 @@ final class AgentHookCenter {
         guard let process, process.name == "claude" else { return false }
         return process.hasFlag("-p") || process.hasFlag("--print")
     }
+
+    /// An `agy` that holds no conversation to resume: a one-shot `-p` run, or
+    /// one of its subcommands (agy 1.5's `agy help`).
+    nonisolated static func isHeadlessAgy(_ process: ForegroundProcess?) -> Bool {
+        guard let process, process.name == AgentProgramStatus.process else { return false }
+        let arguments = process.arguments.dropFirst()
+        return arguments.contains { ["-p", "--print", "--prompt"].contains($0) }
+            || arguments.first.map(agySubcommands.contains) ?? false
+    }
+
+    nonisolated static let agySubcommands: Set<String> = [
+        "acp", "agent", "agents", "changelog", "help", "install", "mcp", "mic-serve", "models",
+        "plugin", "plugins", "remote-control", "update"
+    ]
 
     /// `codex exec` (alias `e`): a run, not a conversation to come back to.
     /// The subcommand follows Codex's global options, and `codex` itself may
