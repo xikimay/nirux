@@ -147,9 +147,12 @@ final class PRFeedbackTests: XCTestCase {
         let result = try feedback(reviews: [
             review("alice", at: "2026-10-01T11:00:00Z"),
             review("bob", state: "PENDING", at: "2026-10-01T11:00:00Z"),
-            review("carol", state: "APPROVED", body: "", at: "2026-10-01T11:00:00Z")
+            review("carol", state: "APPROVED", body: "", at: "2026-10-01T11:00:00Z"),
+            review("dave", state: "APPROVED", body: "LGTM", at: "2026-10-01T11:30:00Z")
         ])
-        XCTAssertEqual(result.items.map(\.author), ["alice"])
+        XCTAssertEqual(result.items.map(\.author), ["dave", "alice"])
+        // The automatic follow-up leaves approvals out (PRFollowUp).
+        XCTAssertEqual(result.items.map(\.isApproval), [true, false])
     }
 
     func testExcerptIsTheFirstNonEmptyLine() throws {

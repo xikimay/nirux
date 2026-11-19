@@ -6,21 +6,24 @@ import Foundation
 struct PRFollowUpStore: Codable, Equatable {
     var pullRequests: [String: PRFollowUp.Entry] = [:]
 
-    /// An entry nothing changed for this long goes: its pull request merged
-    /// or closed while no workspace followed it.
+    /// An entry nothing changed for this long goes at the next change,
+    /// unless it holds a stop: its pull request merged or closed while no
+    /// workspace followed it. One read merged or closed goes at once (the
+    /// shell's part).
     static let lifetime: TimeInterval = 30 * 24 * 60 * 60
 
-    /// Changes the entry of `url`, stamped `now` when that changed
-    /// anything; returns whether it did.
+    /// Changes the entry of `url` (a new one follows from `now`), stamped
+    /// `now` when that changed anything; returns whether it did, and so
+    /// whether to save.
     @discardableResult
     mutating func update(_ url: String, now: TimeInterval, _ change: (inout PRFollowUp.Entry) -> Void) -> Bool {
-        var entry = pullRequests[url] ?? PRFollowUp.Entry()
-        let before = entry
+        let before = pullRequests[url]
+        var entry = before ?? PRFollowUp.Entry(since: now)
         change(&entry)
         guard entry != before else { return false }
         entry.updatedAt = now
         pullRequests[url] = entry
-        pullRequests = pullRequests.filter { now - $0.value.updatedAt < Self.lifetime }
+        pullRequests = pullRequests.filter { $0.value.stop != nil || now - $0.value.updatedAt < Self.lifetime }
         return true
     }
 
@@ -40,5 +43,32 @@ struct PRFollowUpStore: Codable, Equatable {
         } catch {
             NiruxDebugLog.log("PRFollowUpStore: could not save \(url.path): \(error)")
         }
+    }
+
+    /// One entry another build wrote differently is dropped, not the file:
+    /// the others keep their rounds.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        pullRequests = values.lenient(.pullRequests, [String: LenientValue<PRFollowUp.Entry>]()).compactMapValues(\.value)
+    }
+
+    init() {}
+}
+
+
+/// A value decoded if it can be: one another build wrote differently
+/// takes a default rather than failing the whole file.
+struct LenientValue<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
+    }
+}
+
+extension KeyedDecodingContainer {
+    /// The value at `key`, or `fallback` when it is missing or unreadable.
+    func lenient<Value: Decodable>(_ key: Key, _ fallback: Value) -> Value {
+        ((try? decodeIfPresent(LenientValue<Value>.self, forKey: key)) ?? nil)?.value ?? fallback
     }
 }

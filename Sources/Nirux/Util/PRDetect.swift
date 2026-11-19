@@ -132,7 +132,7 @@ enum PRDetect {
             "number", "state", "headRefOid", "headRepositoryOwner",
             "headRepository", "isDraft", "statusCheckRollup",
             "reviewDecision", "mergeable", "url", "additions",
-            "deletions", "changedFiles", "baseRefName"
+            "deletions", "changedFiles", "baseRefName", "autoMergeRequest"
         ].joined(separator: ",")
         let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: cliContext.executablePath),
@@ -199,7 +199,8 @@ enum PRDetect {
             deletions: candidate["deletions"] as? Int,
             changedFiles: candidate["changedFiles"] as? Int,
             headRefOid: (candidate["headRefOid"] as? String)?.lowercased(),
-            baseRefName: candidate["baseRefName"] as? String
+            baseRefName: candidate["baseRefName"] as? String,
+            autoMerges: candidate["autoMergeRequest"] is [String: Any]
         )
     }
 

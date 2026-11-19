@@ -346,6 +346,8 @@ struct PRInfo: Hashable, Sendable {
     /// Lowercased.
     var headRefOid: String?
     var baseRefName: String?
+    /// GitHub merges it once its checks pass.
+    var autoMerges = false
 
     var failedCheckUrl: String? {
         checks.lazy.filter { $0.result == .failure }.compactMap(\.url).first

@@ -16,6 +16,10 @@ struct PRFeedback: Hashable, Sendable {
         let excerpt: String
         let url: String
         let createdAt: Date
+        /// A review that approves.
+        var isApproval = false
+
+        var isThread: Bool { location != "comment" }
     }
 
     /// Newest first.
@@ -134,7 +138,8 @@ enum PRFeedbackReader {
             isOutdated: isOutdated,
             excerpt: String(excerpt(of: node).prefix(80)),
             url: url,
-            createdAt: createdAt
+            createdAt: createdAt,
+            isApproval: node["state"] as? String == "APPROVED"
         )
     }
 

@@ -293,7 +293,8 @@ extension ProjectBoard {
             }
         }
         return Check(
-            name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url
+            name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url,
+            conclusion: result == .pending || conclusion.isEmpty ? nil : conclusion
         )
     }
 
