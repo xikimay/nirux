@@ -145,6 +145,8 @@ struct SpaceDefaultsStore: Sendable {
             && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
             defaults[keyPath: item.key] = item.safe
         }
+        // An hour it can't read: off, as a switch it can't read.
+        if top["leadDailyPassHour"].map({ !($0 is NSNull) }) == true, defaults.leadDailyPassHour == nil { defaults.leadDailyPass = false }
         if let version = top["schemaVersion"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(),
            version.doubleValue > Double(schemaVersion) {
             let newer = Int(exactly: version.doubleValue.rounded(.down)) ?? Int.max
@@ -172,6 +174,7 @@ struct SpaceDefaultsStore: Sendable {
             && top[item.name.rawValue].map({ !($0 is NSNull) }) == true {
             unknown.insert(item.name.rawValue)
         }
+        if top["leadDailyPassHour"].map({ !($0 is NSNull) }) == true, decoded.leadDailyPassHour == nil { unknown.insert("leadDailyPassHour") }
         for key in [SpaceDefaults.CodingKeys.claudeAllow, .claudeEnvironment] {
             if let value = top[key.rawValue], !(value is NSNull), !(value is [String]) { unknown.insert(key.rawValue) }
         }

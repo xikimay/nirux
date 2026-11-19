@@ -6,7 +6,7 @@ import AppKit
 @MainActor
 final class FilePickerPanel: NSObject {
     private var panel: NSPanel?
-    private var searchField: NSTextField?
+    private(set) var searchField: NSTextField?
     private var scrollView: NSScrollView?
     private var tableView: NSTableView?
 
@@ -44,9 +44,11 @@ final class FilePickerPanel: NSObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let files = WorkspaceFileScanner.scan(cwd: cwd)
             DispatchQueue.main.async {
-                guard let self else { return }
+                // Shown since for another folder: not its files.
+                guard let self, self.workspaceCwd == cwd else { return }
                 self.allFiles = files
-                self.filter(query: "")
+                // What was typed while it scanned.
+                self.filter(query: self.searchField?.stringValue ?? "")
             }
         }
 

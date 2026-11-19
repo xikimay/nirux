@@ -343,7 +343,7 @@ extension NiruxShellView {
         if let branch = task.gitBranch { line += " · branch \(MissionPromptText.quoted(branch))" }
         if let folder = task.taskFolder {
             line += " · no repository · folder \(MissionPromptText.quoted(folder))"
-        } else if let repository = leadRepositoryName(of: task, in: space) {
+        } else if let repository = repositoryAnchor(of: task, in: space)?.name {
             line += " · \(repository)"
         }
         if task.isInactive { line += " · inactive" }
@@ -376,51 +376,93 @@ extension NiruxShellView {
         return "\n  \(source): “\(status)”"
     }
 
-    /// The space's repository a task works in, by name: its folder is the
-    /// main checkout, in it, or one of the worktrees Nirux places beside it
-    /// (`<checkout>.<branch>`, see `GitWorktree.create`). No git: a guess.
-    private func leadRepositoryName(of task: WorkspaceState, in space: WorkspaceProfile) -> String? {
+    /// The space's anchor a task works in: its folder is the main
+    /// checkout, in it, or one of the worktrees Nirux places beside it
+    /// (`<checkout>.<branch>`, see `GitWorktree.create`); the deepest when
+    /// anchors nest. No git: a guess.
+    func repositoryAnchor(of task: WorkspaceState, in space: WorkspaceProfile) -> SpaceAnchor? {
         let folder = URL(fileURLWithPath: task.cwd).standardizedFileURL.path
-        return space.anchors.first { anchor in
-            guard let anchorFolder = anchor.folder.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) else { return false }
-            return folder == anchorFolder || folder.hasPrefix(anchorFolder + "/") || folder.hasPrefix(anchorFolder + ".")
-        }?.name
+        let matches = space.anchors.compactMap { anchor -> (SpaceAnchor, String)? in
+            guard let anchorFolder = anchor.folder.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }),
+                  folder == anchorFolder || folder.hasPrefix(anchorFolder + "/") || folder.hasPrefix(anchorFolder + ".")
+            else { return nil }
+            return (anchor, anchorFolder)
+        }
+        return matches.max { $0.1.count < $1.1.count }?.0
     }
 
-    /// What its agents do: working, needs the user (and for what), idle.
+    /// What its agents do: needs the user (and for what), stuck as its row
+    /// says in red, working, idle.
     private func leadAgentState(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> String {
         let agents = agentReadings(of: workspace, snapshot: snapshot)
         guard let first = agents.first else { return "no agent running" }
         if let waiting = agents.first(where: \.needsUser) {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
         }
+        if let failed = agents.first(where: { $0.failure != nil }), let failure = failed.failure {
+            return "\(failed.name) \(failure)"
+        }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
+        if let quiet = agents.first(where: \.isQuiet) { return "\(quiet.name) is quiet (it may be waiting on you in its terminal)" }
         return "\(first.name) idle"
     }
 
-    /// An agent in front of one of a workspace's columns, as list_tasks
-    /// tells the Lead about it.
+    /// A row drawn red, in the Lead's words: a silent turn without the
+    /// row's advice, an Esc in its terminal, which is the user's.
+    private static func leadFailure(_ stuck: SidebarStuckState) -> String? {
+        guard stuck.isFailure else { return nil }
+        if case .silent = stuck { return stuck.headline }
+        return stuck.headline + (stuck.detail.map { " — \($0)" } ?? "")
+    }
+
+    /// An agent in front of one of a workspace's columns, or the one that
+    /// exited mid-turn there, as list_tasks tells the Lead about it.
     struct AgentReading {
         let name: String
         let status: AgentStatus
         /// What it waits on the user for, in a few words.
         let dialog: String?
+        /// What broke, when its row is red (see `leadFailure`): the turn
+        /// stopped on an API error, went silent, or its agent exited mid-turn.
+        let failure: String?
+        /// Stopped without saying why: an agent without hooks may be waiting
+        /// on the user in its terminal, or done.
+        var isQuiet = false
 
-        var needsUser: Bool { status == .needsAttention || dialog != nil }
+        /// A failure needs the user too, but says what broke instead.
+        var needsUser: Bool { dialog != nil || (status == .needsAttention && failure == nil) }
     }
 
-    /// The Claude and Codex agents in front of `workspace`'s columns.
-    func agentReadings(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [AgentReading] {
+    /// The agents in front of `workspace`'s columns, and those that exited
+    /// mid-turn.
+    func agentReadings(
+        of workspace: WorkspaceState, snapshot: ProcessSnapshot, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> [AgentReading] {
         workspace.columns.compactMap { column in
-            guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
-                  ["claude", "codex"].contains(foreground.name) else { return nil }
+            guard let pty = column.pty else { return nil }
+            let foreground = pty.foregroundProcess(snapshot: snapshot)
+            let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
+            let failure = stuck.flatMap(Self.leadFailure)
+            // The agent that died, not the shell that took its place in front.
+            if let name = stuck?.agentName { return AgentReading(name: name, status: .idle, dialog: nil, failure: failure) }
+            guard let foreground, AgentStatusMachine.isRecognizedAgentProcess(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
-            // A turn end found done (or still being read) asks nothing.
-            let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
-            return AgentReading(name: foreground.name, status: status, dialog: dialog)
+                // What agy reported it waits on (OSC 7501); a failure is
+                // `failure`'s.
+                ?? pty.agentBlockedWait(now: now, waitThreshold: nil, foreground: foreground)
+                    .flatMap { $0.reason.isFailure ? nil : $0.reason.shortLabel }
+            // A turn end found done (or still being read), or one an agent
+            // without hooks reported, asks nothing. One that stopped without
+            // saying why is quiet: maybe waiting in its terminal (the row
+            // keeps its amber).
+            let quiet = AgentStatusMachine.activityOnlyAgentProcesses.contains(foreground.name)
+                && pty.cachedAgentState == .needsAttention && pty.agentAttentionReason == nil
+            let finished = pty.agentAttentionReason == .turnFinished
+            let status = pty.isQuietTurnEnd || quiet || finished ? AgentStatus.idle : pty.cachedAgentState
+            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: failure, isQuiet: quiet)
         }
     }
 

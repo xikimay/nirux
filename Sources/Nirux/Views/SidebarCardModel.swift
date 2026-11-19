@@ -249,6 +249,9 @@ extension WorkspaceInfo {
         if isLead, ruleProposalCount > 0 {
             actions.append(.ruleProposals(count: ruleProposalCount))
         }
+        if isLead, let dailyPassNote {
+            actions.append(.dailyPass(dailyPassNote))
+        }
         // The status line says "Merged · Clean up" unless an agent's state
         // comes first: then a line of its own keeps it.
         if let mergedCleanup, let prInfo, summary.mark != .merged || isLead {
@@ -289,6 +292,8 @@ enum SidebarCardAction: Hashable {
     /// The Lead's row: rules it proposed for the brief wait for the user;
     /// a click shows the oldest.
     case ruleProposals(count: Int)
+    /// The Lead's row: what its last daily pass read, for a day.
+    case dailyPass(String)
     /// Mission messages that wait too long for an agent's prompt: a click
     /// shows its column.
     case waitingMessages(columnIndex: Int, SidebarWaitingMessages)
@@ -297,7 +302,7 @@ enum SidebarCardAction: Hashable {
     /// proposed rule waits on nothing: it stays as quiet.
     var isQuiet: Bool {
         switch self {
-        case .next, .reviewBadges, .ruleProposals: return true
+        case .next, .reviewBadges, .ruleProposals, .dailyPass: return true
         case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .interrupt, .cleanup, .turnQuestion, .dialog, .waitingMessages: return false
         }

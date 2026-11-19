@@ -126,6 +126,18 @@ final class ProjectMemoryFlowTests: XCTestCase {
             XCTAssertNil(panel.addSheet)
             XCTAssertEqual(panel.selectedEntry?.title, "Ship small")
             XCTAssertTrue(FileManager.default.fileExists(atPath: memory + "/ship-small.md"))
+
+            // An add that fails brings the item back in its sheet, as typed.
+            try XCTUnwrap(panel.addButton).performClick(nil)
+            let failing = try XCTUnwrap(panel.addSheet)
+            failing.titleField.stringValue = "Unwritten fact"
+            failing.textView.string = "Facts can fail."
+            failing.update()
+            let typed = failing.item
+            failing.add()
+            harness.waitUntil("the item back in its sheet") { panel.addSheet?.item == typed }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: memory + "/unwritten-fact.md"))
+            panel.addSheet?.cancel()
         }
     }
 }

@@ -50,6 +50,7 @@ extension AgentStatusMachine {
             if let trust = visibleTrustPrompt(foreground: foreground) {
                 return AgentWait(reason: AgentTrustPrompt.reason, since: trust.seenAt)
             }
+            if let reported = reportedWait(foreground: foreground, now: now) { return reported }
             return visibleQuestion(foreground: foreground).map {
                 AgentWait(reason: .askedInReply($0.text), since: $0.since, isRead: $0.isSeen)
             }

@@ -115,7 +115,11 @@ final class MenuBarFlowTests: XCTestCase {
 
             bar.run(["Agent", "New Claude Code"])
             bar.run(["Agent", "New Codex"])
-            XCTAssertEqual(harness.agentLaunches.map { $0.split(separator: " ").prefix(2).joined(separator: " ") }, ["command claude", "command codex"])
+            bar.run(["Agent", "New Antigravity"])
+            XCTAssertEqual(
+                harness.agentLaunches.map { $0.split(separator: " ").prefix(2).joined(separator: " ") },
+                ["command claude", "command codex", "command agy"]
+            )
 
             shell.branchReviewReader = BranchReviewPageTests.reader
             bar.run(["Agent", "Review Branch"])

@@ -148,7 +148,7 @@ final class AgentSessionResumeTests: XCTestCase {
             NiruxShellView.codexCommand(resume: .session("t1"), workingDirectory: "/repos/it's", mode: .default),
             "command codex resume 't1' -C '/repos/it'\\''s'"
         )
-        var tracker = CodexSessionTracker()
+        var tracker = ForegroundSessionTracker.codex
         tracker.prepareResume(sessionID: "t1")
         let codex = ForegroundProcess(
             instance: ProcessInstance(pid: 10, startedAt: 1), name: "codex",
