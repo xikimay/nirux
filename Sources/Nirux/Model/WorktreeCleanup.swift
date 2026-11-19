@@ -1,7 +1,7 @@
 import Foundation
 
 /// Removes a linked git worktree whose pull request is merged: its folder
-/// and its local branch (Nirux then closes the workspaces open in it). It
+/// and its local branch (Nirux closes the workspaces open in it first). It
 /// never merges, pushes or fetches, and never touches the remote branch.
 /// Every check is required:
 /// - GitHub reports the branch's pull request MERGED. Its state decides,
@@ -447,7 +447,28 @@ enum WorktreeCleanup {
         files.untrackedDisposable.sort()
         files.modifiedDisposable.sort()
         files.deletedDisposable.sort()
-        files.ignoredEntries = ignored.stdout.split(separator: "\0").map(String.init).sorted()
+        var ignoredEntries = ignored.stdout.split(separator: "\0").map(String.init)
+        // git doesn't look into an untracked folder holding a file it shows
+        // (local settings, a handover), and lists it as one entry once that
+        // file is gone: below the topmost untracked folder that may hold
+        // one, ignored files are listed as their patterns match them.
+        let roots = Set(([".claude"] + startFolders.flatMap { [$0, $0 + "/.claude"] }).compactMap { folder in
+            untrackedRoot(of: folder, in: path, tools: tools)
+        }).sorted()
+        if !roots.isEmpty {
+            let matching = git(
+                ["--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--"]
+                    + roots.map { $0 + "/" },
+                in: path, tools: tools
+            )
+            guard matching.status == 0 else {
+                return .failure(ReadFailure(message: firstLine(matching.stderr) ?? "git couldn't list the files of \(path)."))
+            }
+            let isInside = { (entry: String) in roots.contains { entry.hasPrefix($0 + "/") } }
+            ignoredEntries = ignoredEntries.filter { !isInside($0) }
+                + statusEntries(matching.stdout).filter { $0.code == "!!" && isInside($0.path) }.map(\.path)
+        }
+        files.ignoredEntries = ignoredEntries.sorted()
         let named = files.ignoredEntries.filter(isRegenerable)
         if !named.isEmpty {
             // Exit 1: none of them is ignored by a pattern of its own. (-z
@@ -464,6 +485,20 @@ enum WorktreeCleanup {
             return lstat(path + "/" + relative, &info) == 0
         }
         return .success(files)
+    }
+
+    /// The topmost folder on the way to `folder`, relative to `worktree`,
+    /// that HEAD doesn't hold; nil when HEAD holds them all, or one of them
+    /// isn't a folder.
+    private static func untrackedRoot(of folder: String, in worktree: String, tools: Tools) -> String? {
+        let components = folder.split(separator: "/")
+        for end in components.indices {
+            let prefix = components[...end].joined(separator: "/")
+            let type = (try? FileManager.default.attributesOfItem(atPath: worktree + "/" + prefix))?[.type] as? FileAttributeType
+            guard type == .typeDirectory else { return nil }
+            if git(["cat-file", "-e", "HEAD:" + prefix], in: worktree, tools: tools).status != 0 { return prefix }
+        }
+        return nil
     }
 
     struct StatusEntry: Equatable {

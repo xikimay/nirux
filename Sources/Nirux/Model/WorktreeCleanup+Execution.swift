@@ -19,21 +19,16 @@ extension WorktreeCleanup {
     /// worktree is read again first: an agent may have committed or written
     /// files since the check, and anything new stops it. The leftovers go
     /// to the Trash, git writes the committed version of the tracked
-    /// disposable files back, then `git worktree remove` runs without
-    /// `--force`, so git checks the folder once more itself. Stops at the
-    /// first failure. Once the branch is deleted, so is its Branch Review
-    /// file; a kept branch keeps it.
+    /// disposable files back, and the folder is read once more: only the
+    /// commit's files and build output may be left in it. Then `git
+    /// worktree remove` runs without `--force`, so git checks the folder
+    /// once more itself. Stops at the first failure. Once the branch is
+    /// deleted, so is its Branch Review file; a kept branch keeps it.
     static func execute(_ plan: Plan, tools: Tools = .installed) -> Execution {
-        let agentFolders = plan.worktree.startFolders.map { plan.worktree.path + "/" + $0 }
-        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, agentFolders: agentFolders, tools: tools) else {
-            return .failed("\(plan.worktree.path) can no longer be read. Nothing was deleted.")
-        }
-        let changed = changesSinceCheck(plan, current: current)
-        guard changed.isEmpty else {
-            return .failed(
-                (["The worktree changed since it was checked. Nothing was deleted."] + changed)
-                    .joined(separator: "\n")
-            )
+        let current: Worktree
+        switch recheck(plan, tools: tools) {
+        case .success(let read): current = read
+        case .failure(let changed): return .failed(changed.message)
         }
 
         let trashed: TrashedLeftovers?
@@ -63,6 +58,22 @@ extension WorktreeCleanup {
                 FileStamp(URL(fileURLWithPath: current.path).appendingPathComponent(path)).map { (path, $0) }
             })
             restore.wroteAll = true
+        }
+
+        // git deletes the ignored files it finds: one written since the
+        // re-read, even under a name the confirmation listed, would be lost.
+        guard case .worktree(let cleared) = reread(plan, tools: tools) else {
+            return putBackAfterFailure(
+                "\(plan.worktree.path) can no longer be read. Nothing was deleted.",
+                worktree: current, restore: restore, trashed: trashed, tools: tools
+            )
+        }
+        let late = changesSinceCheck(plan, current: cleared, leftovers: [])
+        guard late.isEmpty else {
+            return putBackAfterFailure(
+                (["The worktree changed during the clean-up. Nothing was deleted."] + late).joined(separator: "\n"),
+                worktree: current, restore: restore, trashed: trashed, tools: tools
+            )
         }
 
         let removal = git(["worktree", "remove", current.path], in: current.mainCheckout, tools: tools, timeout: tools.writeTimeout)
@@ -102,8 +113,28 @@ extension WorktreeCleanup {
         return cleaned(forcedBranchDelete: true)
     }
 
-    /// What differs from the checked `plan`, as reasons to stop.
-    static func changesSinceCheck(_ plan: Plan, current: Worktree) -> [String] {
+    /// The worktree read again, or why `plan` no longer holds: an agent
+    /// may have committed or written files since the check.
+    static func recheck(_ plan: Plan, tools: Tools = .installed) -> Result<Worktree, ReadFailure> {
+        guard case .worktree(let current) = reread(plan, tools: tools) else {
+            return .failure(ReadFailure(message: "\(plan.worktree.path) can no longer be read. Nothing was deleted."))
+        }
+        let changed = changesSinceCheck(plan, current: current, leftovers: plan.worktree.leftovers)
+        guard changed.isEmpty else {
+            return .failure(ReadFailure(
+                message: (["The worktree changed since it was checked. Nothing was deleted."] + changed).joined(separator: "\n")
+            ))
+        }
+        return .success(current)
+    }
+
+    private static func reread(_ plan: Plan, tools: Tools) -> WorktreeRead {
+        readWorktree(at: plan.worktree.path, agentFolders: plan.worktree.startFolders.map { plan.worktree.path + "/" + $0 }, tools: tools)
+    }
+
+    /// What differs from the checked `plan`, as reasons to stop: any
+    /// leftover but `leftovers` is new.
+    static func changesSinceCheck(_ plan: Plan, current: Worktree, leftovers: [String]) -> [String] {
         var changed = localProblems(current)
         if current.branch != plan.branch || current.tip != plan.tip {
             changed.append("\(plan.branch) moved since it was checked.")
@@ -112,10 +143,10 @@ extension WorktreeCleanup {
             changed.append("Its main checkout is no longer \(plan.worktree.mainCheckout).")
         }
         // New build output (a Finder .DS_Store, say) is deleted like the rest.
-        let confirmed = Set(plan.worktree.leftovers)
-        let appeared = current.leftovers.filter { !confirmed.contains($0) }
+        let expected = Set(leftovers)
+        let appeared = current.leftovers.filter { !expected.contains($0) }
         if !appeared.isEmpty {
-            changed.append("New files to move to the Trash: \(appeared.joined(separator: ", ")).")
+            changed.append("Files written since the check: \(appeared.joined(separator: ", ")).")
         }
         return changed
     }
@@ -306,9 +337,11 @@ extension WorktreeCleanup {
     }
 
     /// Moves the leftovers back into the worktree; returns those that
-    /// couldn't be. The emptied folder is deleted.
+    /// couldn't be. The emptied folder is deleted. A worktree gone
+    /// meanwhile isn't made again.
     static func putBack(_ trashed: TrashedLeftovers, into worktree: String) -> [String] {
         let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: worktree) else { return trashed.relativePaths }
         let root = URL(fileURLWithPath: worktree, isDirectory: true)
         var stuck: [String] = []
         for relative in trashed.relativePaths {

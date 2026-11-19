@@ -248,7 +248,7 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
             XCTAssertTrue(savedClosedWorkspace(), "parking saves the state")
             shell.switchToWorkspace(index(of: workspace("a", in: shell), in: shell))
 
-            shell.closeWorkspacesAfterCleanup(of: shell.worktreeCleanupCandidate(path: worktree))
+            shell.closeWorkspaces(of: shell.worktreeCleanupCandidate(path: worktree))
             // w, closing too, never takes over (it would hand over to its
             // own space's y): a's own space's parked x does, its section
             // left folded.

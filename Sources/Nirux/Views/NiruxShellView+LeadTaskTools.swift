@@ -141,7 +141,7 @@ extension NiruxShellView {
         }
     }
 
-    private static func stillRunning(_ names: [String]) -> String {
+    static func stillRunning(_ names: [String]) -> String {
         "Its processes (\(names.joined(separator: ", "))) still ran \(Int(exitTimeout)) s after it closed."
     }
 
@@ -321,8 +321,17 @@ extension NiruxShellView {
             self?.saveState()
         }
         guard let then else { return }
+        Self.waitForExit(processes, then: then)
+    }
+
+    /// `then` once `processes` have ended, with the names of those still
+    /// running `exitTimeout` later.
+    static func waitForExit(
+        _ processes: [(process: ProcessInstance, name: String)],
+        then: @escaping @MainActor @Sendable (_ stillRunning: [String]) -> Void
+    ) {
         let (instances, names) = (processes.map(\.process), processes.map(\.name))
-        Self.offMain({
+        offMain({
             let deadline = Date().addingTimeInterval(Self.exitTimeout)
             var running = Array(instances.indices)
             while true {
