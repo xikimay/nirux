@@ -76,7 +76,7 @@ extension NiruxShellView {
     /// cards unclipped. The sidebar lies over it and keeps its clicks.
     private func reachUnderRail(_ workspace: WorkspaceState) {
         reachViewport(by: viewport.frame.minX - sidebar.frame.minX)
-        workspace.containerView.clipsToBounds = false
+        if !ZZ("clipsKept") { workspace.containerView.clipsToBounds = false }
     }
 
     /// The work's edge sweeps back to the rail's, its content still; then
@@ -119,6 +119,6 @@ extension NiruxShellView {
         guard distance != 0 else { return }
         let frame = viewport.frame
         viewport.frame = NSRect(x: frame.minX - distance, y: frame.minY, width: frame.width + distance, height: frame.height)
-        viewport.setBoundsOrigin(NSPoint(x: viewport.bounds.minX - distance, y: viewport.bounds.minY))
+        if !ZZ("contentMoves") { viewport.setBoundsOrigin(NSPoint(x: viewport.bounds.minX - distance, y: viewport.bounds.minY)) }
     }
 }

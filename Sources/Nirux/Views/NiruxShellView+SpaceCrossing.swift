@@ -63,8 +63,8 @@ extension NiruxShellView {
 
     /// `scale` about the layer's middle, wherever its anchor lies.
     static func scaledAboutMiddle(_ layer: CALayer, by scale: CGFloat) -> CATransform3D {
-        let dx = ZZ("offMiddle") ? 0 : (0.5 - layer.anchorPoint.x) * layer.bounds.width
-        let dy = ZZ("offMiddle") ? 0 : (0.5 - layer.anchorPoint.y) * layer.bounds.height
+        let dx = (0.5 - layer.anchorPoint.x) * layer.bounds.width
+        let dy = (0.5 - layer.anchorPoint.y) * layer.bounds.height
         return CATransform3DTranslate(CATransform3DScale(CATransform3DMakeTranslation(dx, dy, 0), scale, scale, 1), -dx, -dy, 0)
     }
 }

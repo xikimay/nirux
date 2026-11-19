@@ -50,7 +50,7 @@ final class FrozenView: NSView {
     /// copies again, doubling them at each switch).
     private static func isOutOfSight(_ layer: CALayer, root: CALayer) -> Bool {
         let shown = layer.presentation() ?? layer
-        return layer.delegate is FrozenView || shown.isHidden || shown.opacity == 0
+        return (layer.delegate is FrozenView && !ZZ("pictureOfPicture")) || shown.isHidden || shown.opacity == 0
             || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
     }
 
