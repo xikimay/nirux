@@ -68,7 +68,7 @@ extension NiruxShellView {
     /// NiruxShellView+SpaceRouting). `relayout` passes the frames it is
     /// moving them to.
     func layoutToast(_ frames: ChromeFrames? = nil) {
-        let viewportFrame = frames?.viewport ?? viewport.frame
+        let viewportFrame = frames?.viewport ?? viewportRestFrame
         var bottom = max(
             frames?.statusBar.maxY ?? (statusBar.isHidden ? 0 : statusBar.frame.maxY),
             frames?.indicator.maxY ?? columnIndicator.frame.maxY

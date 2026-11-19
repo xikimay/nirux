@@ -11,16 +11,41 @@ extension NiruxShellView {
     func pinched(by magnification: CGFloat, began: Bool) {
         if began { pinchTotal = 0 }
         pinchTotal += magnification
-        guard spacePlan == nil, pinchTotal <= -Self.pinchThreshold else { return }
+        guard spacePlan == nil, planDrawing.isEmpty, pinchTotal <= -Self.pinchThreshold else { return }
         toggleSpacePlan()
     }
 
-    /// The plan shows, receding from the work while the interface may move;
+    /// The plan shows once every listed workspace drew (their terminals rest
+    /// while off screen, or never drew since launch), receding from the work
+    /// while the interface may move. Asked again meanwhile, it doesn't;
     /// showing, it goes back.
     func toggleSpacePlan() {
         if spacePlan != nil { return closeSpacePlan(going: nil) }
-        guard let onScreen = activeWorkspace else { return }
+        if !planDrawing.isEmpty { return endPlanDrawing() }
+        guard activeWorkspace != nil else { return }
         endSpaceCrossing()
+        planDrawing = Set(visibleWorkspaceIndices.map { workspaces[$0].id })
+        syncTerminalOcclusion()
+        spacePlanGeneration += 1
+        let generation = spacePlanGeneration
+        sideEffects.afterCommit(Self.arrivalDelay) { [weak self] in
+            guard let self, spacePlanGeneration == generation else { return }
+            let drew = planDrawing
+            endPlanDrawing()
+            // Another space, or a workspace added or closed meanwhile: not all drew.
+            guard drew == Set(visibleWorkspaceIndices.map { workspaces[$0].id }) else { return }
+            showSpacePlan()
+        }
+    }
+
+    private func endPlanDrawing() {
+        spacePlanGeneration += 1
+        planDrawing = []
+        syncTerminalOcclusion()
+    }
+
+    private func showSpacePlan() {
+        guard let onScreen = activeWorkspace else { return }
         // What the work shows, at its size: the opening starts sharp.
         let shown = ZZ("motionIgnored") || agentLightsMayMove ? FrozenView.freeze(viewport) : nil
         let plan = SpacePlanView(
