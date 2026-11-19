@@ -78,21 +78,31 @@ final class UnderGlassTests: XCTestCase {
         }
     }
 
-    /// A layout ends a pass at once, and a pass's end acts only on its own:
-    /// one that took its place stays until its own end.
-    func testALayoutEndsAPassAndOnlyItsOwnEndClosesIt() throws {
+    /// A pass goes on through a layout while the rail floats, and ends at
+    /// once when it no longer does; a pass's end acts only on its own: one
+    /// that took its place stays until its own end.
+    func testAPassGoesOnThroughALayoutAndOnlyItsOwnEndClosesIt() throws {
         try withShell { shell in
             let workspace = try floatingRail(in: shell)
             let viewport = try XCTUnwrap(shell.viewport.layer)
             let container = try XCTUnwrap(workspace.containerView.layer)
 
             shell.passUnderRail(workspace, for: 1)
-            XCTAssertLessThan(viewport.bounds.minX, 0)
+            let reached = try onScreen(viewport, in: shell)
+            XCTAssertEqual(reached.minX, shell.sidebar.frame.minX, accuracy: 0.5)
             shell.relayout(animated: false)
-            XCTAssertEqual(viewport.bounds.minX, 0, "a layout ends it at once")
+            XCTAssertEqual(try onScreen(viewport, in: shell), reached, "a layout keeps it")
+            XCTAssertEqual(viewport.bounds.minX, shell.sidebar.frame.minX - shell.viewport.frame.minX, accuracy: 0.5, "what it holds where it lay")
+            XCTAssertFalse(container.masksToBounds)
+
+            shell.isSidebarExpanded = true
+            shell.sidebar.isExpanded = true
+            shell.relayout(animated: false)
+            XCTAssertEqual(viewport.bounds.minX, 0, "unfolded, it ends at once")
             XCTAssertEqual(try onScreen(viewport, in: shell).minX, shell.viewport.frame.minX, accuracy: 0.5)
             XCTAssertTrue(container.masksToBounds)
 
+            _ = try floatingRail(in: shell)
             shell.passUnderRail(workspace, for: 0.05)
             shell.passUnderRail(workspace, for: 1)
             let due = Date().addingTimeInterval(0.4)
@@ -120,6 +130,12 @@ final class UnderGlassTests: XCTestCase {
         for column in workspace.columns { column.widthFraction = 0.5 }
         workspace.focusedIndex = 0
         shell.relayout(animated: false)
+        let root = try XCTUnwrap(shell.layer)
+        waitUntil("the columns' layers in the shell's tree", timeout: 5) {
+            workspace.columns.allSatisfy { column in
+                sequence(first: column.view.layer, next: { $0?.superlayer }).contains { $0 === root }
+            }
+        }
         return workspace
     }
 
