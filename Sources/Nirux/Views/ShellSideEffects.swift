@@ -76,6 +76,10 @@ struct ShellSideEffects {
     /// asks (Reduce transparency, Increase contrast; CI's runners do).
     var drawnTransparency: @MainActor (InterfaceTransparency) -> InterfaceTransparency = { $0.effectiveNow() }
 
+    /// macOS draws its glass (26 and later), which refracts what passes
+    /// under it. CI's macOS 15 draws none.
+    var drawsGlass: @MainActor () -> Bool = { GlassView.systemHasGlass }
+
     /// Nirux is the app in front. Tests set it: an xctest never is.
     var appIsActive: @MainActor () -> Bool = { NSApp.isActive }
 

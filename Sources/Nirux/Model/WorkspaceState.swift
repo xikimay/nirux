@@ -36,7 +36,7 @@ final class WorkspaceState {
             onFocusedColumnChanged?()
         }
     }
-    private var lastCameraX: CGFloat = 0
+    private(set) var lastCameraX: CGFloat = 0
     /// Where the camera stays while the pointer works on a card; nil: where
     /// the strip wants it.
     var heldCamera: CameraHold?
@@ -814,7 +814,8 @@ extension WorkspaceState {
         missionID: String?,
         missionHandoffsEnabled: Bool,
         executablePath: String?,
-        launchID: String
+        launchID: String,
+        inherited: [String: String] = ProcessInfo.processInfo.environment
     ) -> [String: String] {
         var environment = [
             "NIRUX_PROFILE_ID": profileID,
@@ -829,6 +830,10 @@ extension WorkspaceState {
             // Nor is a copy's opt-in to the real state (see RealStateGuard).
             "NIRUX_ALLOW_REAL_STATE": ""
         ]
+        // Antigravity then says what it does and why it waits
+        // (AgentProgramStatus): Nirux doesn't answer its query. A user's own
+        // setting stays.
+        if inherited["AGY_CLI_OSC7501"] == nil { environment["AGY_CLI_OSC7501"] = "on" }
         if missionHandoffsEnabled {
             environment["NIRUX_MISSION_HANDOFFS"] = "1"
             if let executablePath {
@@ -1168,6 +1173,8 @@ extension WorkspaceState {
     static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
     private static let slideKey = "colSlide"
+    /// The strip's slide to a card.
+    static let slideDuration: CFTimeInterval = 0.3
 
     /// What a width fraction of 1 spans, its gap included: the viewport
     /// less the air at its edges, plus one gap. Two halves then fill the
@@ -1275,7 +1282,7 @@ extension WorkspaceState {
             let anim = CABasicAnimation(keyPath: "transform.translation.x")
             anim.fromValue = shownX - stripX
             anim.toValue = 0
-            anim.duration = 0.3
+            anim.duration = Self.slideDuration
             anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             anim.isRemovedOnCompletion = true
             layer.add(anim, forKey: Self.slideKey)

@@ -124,6 +124,22 @@ extension NiruxShellView {
         return parts.joined(separator: " ")
     }
 
+    /// Build an `agy …` shell command: Antigravity CLI with its own mode,
+    /// model and settings. A restore resumes the exact conversation, or
+    /// starts a fresh one (agy has no picker flag; `/resume` is in it).
+    /// `handoverPrompt` is its first prompt (`-i`), as in the worktree
+    /// handover flow.
+    static func agyCommand(resume: AgentResumeTarget? = nil, handoverPrompt: String? = nil) -> String {
+        var parts = ["command", "agy"]
+        if case .session(let sessionID)? = resume {
+            parts.append(contentsOf: ["--conversation", Self.shellQuotedArgument(sessionID)])
+        }
+        if let prompt = handoverPrompt {
+            parts.append(contentsOf: ["-i", Self.shellQuotedArgument(prompt)])
+        }
+        return parts.joined(separator: " ")
+    }
+
     static func currentCodexLaunchMode() -> CodexLaunchMode {
         Persistence.load()?.settings?.codexLaunchMode ?? .default
     }
@@ -176,33 +192,36 @@ extension NiruxShellView {
 
     func openClaudeCode() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.claudeCommand(
+        launchInNewColumn(Self.claudeCommand(
             mode: Self.claudeLaunchMode(for: workspace),
             briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile,
             settingsFile: claudeSpaceSettingsFile(for: workspace)
-        )
-        workspace.addColumn()
-        relayout(animated: false)
-        updateSidebar()
-        if let col = workspace.columns[safe: workspace.focusedIndex] {
-            sideEffects.launchAgent(col, cmd)
-        }
-        focusActiveTerminal(in: window)
+        ), in: workspace)
     }
 
     func openCodex() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.codexCommand(
+        launchInNewColumn(Self.codexCommand(
             mode: Self.codexLaunchMode(for: workspace),
             briefFile: Self.codexBriefFile(
                 from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
             )
-        )
+        ), in: workspace)
+    }
+
+    func openAgy() {
+        guard let workspace = activeWorkspace else { return }
+        AgentHookInstaller.installAgyHooksIfInstalling()
+        launchInNewColumn(Self.agyCommand(), in: workspace)
+    }
+
+    /// Runs `command` in a new terminal column of `workspace`, focused.
+    private func launchInNewColumn(_ command: String, in workspace: WorkspaceState) {
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()
         if let col = workspace.columns[safe: workspace.focusedIndex] {
-            sideEffects.launchAgent(col, cmd)
+            sideEffects.launchAgent(col, command)
         }
         focusActiveTerminal(in: window)
     }
@@ -303,7 +322,7 @@ extension NiruxShellView {
            needs this branch's commits that aren't on origin yet — add `&from=head` to the URL in
            step 4: the new branch then starts from the current checkout's HEAD.
         3. **Write a session handover** so the new workspace inherits context. First create the
-           file with `mktemp`, using the current agent name (`claude` or `codex`); it prints the
+           file with `mktemp`, using the current agent name (`claude`, `codex` or `agy`); it prints the
            path. `mktemp` creates the file privately under a random name, so nothing else can
            redirect the write:
            ```bash
@@ -327,7 +346,7 @@ extension NiruxShellView {
            without asking. Nirux only accepts a handover that sits directly in `/tmp` with the
            `nirux-handover-` prefix and belongs to the user; anything else is ignored.
         4. **Open the worktree in Nirux** — Nirux handles git worktree creation, moves the handover
-           file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
+           file into the worktree as `.claude-handover.md`, `.codex-handover.md` or `.agy-handover.md`, and launches
            the same agent. Nirux terminals expose `NIRUX_WORKSPACE_ID`, `NIRUX_AGENT_UUID` and
            `NIRUX_PROFILE_ID`; always send them, so the new workspace opens in this workspace's
            space even if the user has focused a different one, and lists under this workspace
@@ -350,7 +369,7 @@ extension NiruxShellView {
              fi
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
+        &agent=<claude-codex-or-agy>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}"
            ```
            For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
            the handover file into the worktree on launch; no manual cleanup is needed.

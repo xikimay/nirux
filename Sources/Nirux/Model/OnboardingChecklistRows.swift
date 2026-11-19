@@ -68,6 +68,13 @@ extension OnboardingChecklist {
                 controls: []
             )
         case (nil, nil):
+            if let path = agents.agyPath {
+                return OnboardingChecklistRow(
+                    mark: .done, title: "Antigravity found",
+                    detail: "At \(path.abbreviatedPath(maxComponents: 8)). Start it from ⌘P → Open Antigravity.",
+                    controls: []
+                )
+            }
             return OnboardingChecklistRow(
                 mark: .todo, title: "Install Claude Code or Codex",
                 detail: "Nirux didn't find claude or codex in the usual places. Install one (click to copy), "

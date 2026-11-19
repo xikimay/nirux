@@ -12,7 +12,7 @@ The question comes to you instead when:
 
 - the parent's workspace was closed;
 - the parent's terminal doesn't run Claude Code;
-- the parent's Claude Code hasn't taken a prompt since it started, as after Nirux relaunches and resumes it: until then it may show a startup or resume screen that Nirux can't see, so Nirux doesn't type into it. If you don't answer, Nirux types the question into it after its next turn, within an hour of the question;
+- the parent's Claude Code hasn't taken a prompt since it started, as after Nirux relaunches and resumes it, and doesn't say it sits at its prompt (see below): until then it may show a startup or resume screen that Nirux can't see, so Nirux doesn't type into it. If you don't answer, Nirux types the question into it once it says so, or after its next turn, within an hour of the question;
 - the parent's Claude Code restarted after it got the question;
 - the parent read the question and ended its turn without answering;
 - nobody answered within the time set by **Settings › Agents › Flag a dialog waiting after** (10 minutes by default; an hour when it is set to Never).
@@ -25,6 +25,8 @@ Click the line, grey or amber, to read the whole question and answer it in a pop
 
 Nirux types a message only when the agent's `claude` is in front, its turn is over, no dialog is open and nothing has been typed at the prompt. The keys a dialog takes don't count: a question dialog's until it sends its answers, Esc or Ctrl-C; a permission or plan dialog's until Enter, a number, Esc or Ctrl-C answers it. Known limits: a number typed in an option's text after Tab (an amendment) reads as its answer, and so does an Esc that only leaves that text: what follows counts until the next prompt. Nor do the keys that only move the view or the cursor: Page Up and Down, Ctrl+Home and Ctrl+End, Home, and Left with a modifier (Left alone opens Claude Code's agents view from an empty prompt, so it still counts). Nor does Enter while a turn runs, when an empty prompt queues nothing; at an idle prompt it counts, since it may run text Nirux never saw. Otherwise the message waits for the end of that agent's next turn.
 
+A `claude` that hasn't taken a prompt since it started, as after Nirux relaunches and resumes it, may show screens no hook reports: an offer to resume from a summary, a quota warning, a newer model. Nirux types into it only once Claude Code's own session record (`sessions/<pid>.json` in `~/.claude`, or in `CLAUDE_CONFIG_DIR`) has said for 3 seconds that it sits idle at its prompt with nothing waiting, its hooks report, and no key reached its terminal since the terminal started: a Claude Code you start by hand, or one you answered a screen of, waits for its first prompt. Without that record (another Claude Code version), the message waits for its first prompt too, and the system log says the record is missing. Before Enter after a long message, Nirux reads the record again, and leaves the message in the prompt if it still shows a screen of its own two seconds later.
+
 When a message has waited three minutes for an agent that isn't working, the agent's row says so and why, a Lead's too: `2 messages waiting since 22:21 · held by a draft until its next prompt`. Its tooltip says more, and a click shows the agent's column. Sending the agent a prompt usually lets them in. Nirux writes the reason to the system log, with what it read it from: within half a minute for keys at the prompt or a prompt that looks free, after three minutes for anything else (for a turn at work, only once no hook came for three minutes):
 
 ```
@@ -34,9 +36,9 @@ log show --predicate 'subsystem == "com.xikimay.nirux" AND category == "missions
 ## Limits
 
 - A Mission ends only when the child reports that it is done, not when its turn stops.
-- More work sent by the parent waits for the child's next free prompt, a day at most, and reaches the `claude` that was running when it was sent, or one that resumed that conversation since (after Nirux relaunches, say) once it took a prompt. If it isn't typed within an hour, the parent hears what holds it; if Nirux gives it up (a day passed, the task closed, or its `claude` restarted on another conversation), the parent hears that too. An answer has no limit and is typed whenever the child's prompt is free.
+- More work sent by the parent waits for the child's next free prompt, a day at most, and reaches the `claude` that was running when it was sent, or one that resumed that conversation since (after Nirux relaunches, say) once it took a prompt or says it sits at its prompt. If it isn't typed within an hour, the parent hears what holds it; if Nirux gives it up (a day passed, the task closed, or its `claude` restarted on another conversation), the parent hears that too. An answer has no limit and is typed whenever the child's prompt is free.
 - The parent can send more work after the child reported its result, which makes the Mission active again.
-- A Codex child can ask and report, but can't be sent work: Codex reports no dialogs, so Nirux can't know that its prompt is free. A Codex child waits for each answer in its terminal, and a Codex parent polls for its child's messages.
+- A Codex or Antigravity child can ask and report, but can't be sent work: neither reports its dialogs, so Nirux can't know that its prompt is free. Such a child waits for each answer in its terminal, and a Codex parent polls for its child's messages.
 - A worktree opened without a Mission keeps the plain handover file. The child reads it and works alone.
 - A sub-task an agent starts with the `nirux-worktree` skill gets a Mission only while Mission handoffs is on, even under a Lead's task. Otherwise it works alone. One started with `start_task` always has one.
 

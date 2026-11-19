@@ -506,6 +506,14 @@ the text stays flat and sharp.
   shade. 0.44 s, translations only, so no text scales; N1's name card
   stays. A switch while one plays ends it at once; Reduce motion, another
   space, or a workspace on screen that left the list show it at once.
+- **Frozen pictures (study P4, first part):** a slide over the viewport
+  (⌥⌘← ⌥⌘→, a new workspace) moves a picture of what it showed, frozen in
+  about 6 ms (`FrozenView`): a clone of its layers, each sharing its
+  contents, without what is hidden or clipped out of sight, each
+  terminal's last image copied on the GPU (Ghostty draws over the one it
+  shows). Drawing the viewport again took about 90 ms in a large window
+  and left the terminals blank. A column drawn in another process (an
+  editor, a browser) shows its card, empty. The pictures go on time.
 - **From the source (study P7):** the inbox comes out of the bar's badge
   and goes back into it, a request's callout out of its rail icon: from
   60 % of their size about the point of their edge nearest it, 0.32 s in
@@ -536,6 +544,18 @@ the text stays flat and sharp.
   `transform` at each new frame, and the rail's birth springs use it.
   While the interface may move only; turned off, it is flat at once.
   Tooltips stay the system's, which already float with a shadow.
+- **Under the glass (study P6):** folded, the rail is an island of glass
+  over the work. While the columns travel to a card (the strip's 0.3 s
+  slide, the workspace on screen the same, the sidebar's width too: not a
+  switch, a fold or an unfold) they pass under it: the viewport's layer reaches under the
+  sidebar, what it holds where it lay, and the workspace on screen leaves
+  its cards unclipped; then the work's edge sweeps back to the rail's over
+  0.22 s. A pass goes on through a layout while the rail floats. At rest
+  nothing lies under the glass, and no line marks the rail's edge (the
+  divider fades with the fold); a pass ends where the rail stops floating. Only the
+  layer reaches: the view, its frame and its clicks stay. Only in macOS's own glass (26 and
+  later, which refracts what passes under it; the rim of 14 and 15 would
+  show the cards plainly), above Opaque, while the interface may move.
 
 ## Plan
 
