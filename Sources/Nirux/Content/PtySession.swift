@@ -1044,8 +1044,8 @@ final class PtySession: @unchecked Sendable {
 
     /// Whether `process`, the column's `codex`, started a turn after `time`.
     func codexWorked(since time: TimeInterval, by process: ProcessInstance) -> Bool {
-        guard let worked = state.machine.codexWorked else { return false }
-        return worked.process == process && worked.at > time
+        guard let worked = state.machine.codexWorked, worked.at > time else { return false }
+        return worked.process.map { $0 == process } ?? (process.startedAt <= worked.at)
     }
 
     /// See `AgentStatusMachine.codexFacts`.

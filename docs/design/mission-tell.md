@@ -140,19 +140,25 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
 
 - **Which thread.** Codex's notify also reports threads it runs out of
   sight: one titles each new conversation, seen right after the first turn.
-  `CodexSessionTracker` counts a thread as the column's once its first
+  `ForegroundSessionTracker` counts a thread as the column's once its only
   message is the prompt that `codex` was launched with (the notify carries a
-  digest, never the text), or once `codex resume <id>` named it; no other
-  thread replaces it then, which also keeps a relaunch from resuming the
-  title's thread. The first proof stands: a fork (/side) begins with the
-  same message. A `codex` launched without a prompt proves none, so a tell
-  to it is refused. One that started another conversation with /new keeps
+  digest, never the text), or once `codex resume <id>` named it. A fork
+  (`/side`, a forked sub-agent) holds the forked messages too, so it never
+  proves itself, even when its turn ends first. With a launch prompt, no
+  thread binds before the proof; once proven, no other replaces it, which
+  also keeps a relaunch from resuming the title's thread. A `codex`
+  launched without a prompt proves none: a tell to it is refused, or given
+  up at the next check once it turns out to be one (it was restoring, or an
+  editor was in front). One that started another conversation with /new keeps
   getting messages on the first, and a relaunch resumes the first: the
   title's thread, which came up after every first turn, made following the
   last thread worse.
 - **When.** Codex sends OSC 7501 like agy (`app=codex`): Nirux hands a message
   over only while the `codex` it was sent to (or one resuming its thread)
-  last said `done` or `idle` (`codexQueueRefusal`). After an Esc Codex says
+  last said `done` or `idle` (`codexQueueRefusal`). Codex says each state
+  once, so its status stays while a Ctrl-G editor or a ^Z shell is in front,
+  and one read on an empty process table is kept for the `codex` in front
+  then; the process is checked where the status is read. After an Esc Codex says
   `idle` too, and its queue starts nothing until another turn ends: the
   message waits there, and the notice below says so. Nirux doesn't hold it
   itself, since a resume replays turns as `working` then `idle` without an
@@ -167,7 +173,8 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
   value. If Codex then reports nothing for 20 s, the sender and the user
   hear that it hasn't started it, and not to send it again. A refusal (an
   older Codex, a thread it doesn't know) leaves it waiting; after three
-  tries its row says Codex didn't take it. No answer within 30 s gives it up
+  refusals (the stall watch's retries ask again, but don't count) its row
+  says Codex didn't take it. The text is sanitized as typed text is. No answer within 30 s gives it up
   untold to Codex again, its sender told: Codex may hold it.
 - It goes as text: a slash command doesn't run in Codex.
 - A Codex child's `ask` still waits for its answer.

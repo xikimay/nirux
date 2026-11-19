@@ -426,17 +426,11 @@ final class ColumnState {
         }
         // Only the agent's own, in front: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
-            // Codex says each state once (its own cache): a restarted one's
-            // first may equal the last of the one before.
-            guard let self, let ptySession, status.process == AgentProgramStatus.codex || ptySession.isNewProgramStatus(status),
-                  let agent = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agent.name == status.process
+            guard let self, let ptySession else { return }
+            guard status.process != AgentProgramStatus.codex else { return noteCodexStatus(status, in: ptySession) }
+            guard ptySession.isNewProgramStatus(status),
+                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.name == status.process
             else { return }
-            if status.process == AgentProgramStatus.codex {
-                ptySession.noteCodexStatus(status, from: agent.instance)
-                if [.done, .idle].contains(status.state) { onCodexTurnOver?() }
-                return
-            }
-            let agy = agent
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
             if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
                 onAgentAttention?(reason)
@@ -569,13 +563,13 @@ final class ColumnState {
 
     func captureCodexSession(
         sessionID: String?,
-        firstInputDigest: String? = nil,
+        soleInputDigest: String? = nil,
         emitterProcess: ProcessInstance?,
         snapshot: ProcessSnapshot
     ) -> Bool {
         guard let place = hookEmitterPlace(emitterProcess, snapshot: snapshot) else { return false }
         return codexSessionTracker.capture(
-            sessionID: sessionID, firstInputDigest: firstInputDigest, emitterBelongsToForegroundJob: place.inForegroundJob,
+            sessionID: sessionID, soleInputDigest: soleInputDigest, emitterBelongsToForegroundJob: place.inForegroundJob,
             foregroundProcess: place.foreground
         )
     }
@@ -620,6 +614,18 @@ final class ColumnState {
     /// The Codex thread this column's `codex` process proved it runs.
     func boundCodexSessionID(of process: ProcessInstance) -> String? {
         codexSessionTracker.boundSessionID(for: process)
+    }
+
+    /// Codex says each state once (its own cache): every one is kept, a
+    /// restarted codex's first too, which may equal the last of the one
+    /// before. One read on an empty process table belongs to the codex in
+    /// front then, which is checked where it is read.
+    private func noteCodexStatus(_ status: AgentProgramStatus, in pty: PtySession) {
+        let snapshot = ProcessSnapshot()
+        let front = pty.foregroundProcess(snapshot: snapshot)
+        guard snapshot.isEmpty || front?.name == status.process else { return }
+        pty.noteCodexStatus(status, from: snapshot.isEmpty ? nil : front?.instance)
+        if [.done, .idle].contains(status.state) { onCodexTurnOver?() }
     }
 
     /// Why a Mission message can't go into the queue of this column's Codex

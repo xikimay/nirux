@@ -406,8 +406,20 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(refusal(since: claudeProcess.startedAt - 1), .restarted, "a codex started after the tell")
         report(.idle)
         XCTAssertNil(refusal(), "a key after its turn's end: its queue takes the message all the same")
+        // Codex says each state once: a Ctrl-G editor or a ^Z shell in front keeps it.
+        let editor = ProcessInstance(pid: 11, startedAt: t0 + 60)
+        _ = machine.tick(fgName: "vim", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 60))
+        machine.keepProgramStatus(of: editor)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 61))
+        machine.keepProgramStatus(of: claudeProcess)
+        XCTAssertNil(refusal(), "its idle stays")
         report(.done, from: ProcessInstance(pid: 9, startedAt: t0))
         XCTAssertEqual(refusal(), .noPromptYet, "another codex's word")
+        // Read on an empty process table: the codex in front then's.
+        machine.noteCodexStatus(AgentProgramStatus(state: .done, kind: nil, message: nil, process: "codex"), from: nil, now: t0 + 70)
+        XCTAssertNil(refusal(), "one already running")
+        XCTAssertEqual(refusal(ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: t0 + 80), name: "codex", arguments: ["codex"])),
+                       .noPromptYet, "not one started since")
     }
 
     func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {

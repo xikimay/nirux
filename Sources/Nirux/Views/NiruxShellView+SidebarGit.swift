@@ -452,7 +452,7 @@ extension NiruxShellView {
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,
-                   firstInputDigest: event.firstInputDigest,
+                   soleInputDigest: event.soleInputDigest,
                    emitterProcess: event.emitterProcess,
                    snapshot: snapshot
                ) {
@@ -542,15 +542,6 @@ extension NiruxShellView {
         case .instruction:
             // A `tell` from the CLI: the conversation it is for.
             if event.childSessionID == nil { noteConversation(of: mission, forInstruction: event.id) }
-            // A Codex started without a prompt never proves its conversation.
-            if mission.childAgentName == "Codex",
-               missionEnd(mission, parent: false)?.column?.runsUnprovableCodex(snapshot: ProcessSnapshot()) == true,
-               MissionStore.shared.noteInstructions(heldNotice: [], expired: [event.id], at: Date().timeIntervalSince1970) {
-                let sender = event.leadSender ?? NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID)
-                tellProposer(sender, "Your message to “\(MissionPromptText.quoted(workspace?.title ?? mission.branch))” won't be handed "
-                    + "over: its Codex was started without a prompt, so Nirux can't tell which of its conversations is the task's. "
-                    + "Give it to the user instead.")
-            }
         case .question:
             break
         }

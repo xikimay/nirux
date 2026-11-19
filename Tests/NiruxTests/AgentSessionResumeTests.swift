@@ -168,19 +168,23 @@ final class AgentSessionResumeTests: XCTestCase {
             instance: ProcessInstance(pid: 10, startedAt: 1), name: "codex", arguments: ["codex", "-a", "never", prompt]
         )
         var tracker = ForegroundSessionTracker.codex
-        func capture(_ thread: String, first: String, by process: ForegroundProcess) -> Bool {
+        /// `sole`: the thread holds that message alone (a fork holds the
+        /// forked ones too).
+        func capture(_ thread: String, first: String, sole: Bool = true, by process: ForegroundProcess) -> Bool {
             tracker.capture(
-                sessionID: thread, firstInputDigest: CodexLaunch.promptDigest(first),
+                sessionID: thread, soleInputDigest: sole ? CodexLaunch.promptDigest(first) : nil,
                 emitterBelongsToForegroundJob: true, foregroundProcess: process
             )
         }
         let title = "Generate a concise, single-line task title.\n\nUser prompt:\n" + prompt
-        XCTAssertTrue(capture("title", first: title, by: launched), "the title's turn may end first")
+        XCTAssertFalse(capture("title", first: title, by: launched), "the title's turn may end first: nothing binds before the proof")
+        XCTAssertFalse(capture("fork", first: prompt, sole: false, by: launched), "a /side fork or a forked sub-agent may too")
         XCTAssertNil(tracker.provenSessionID(for: launched))
+        XCTAssertNil(tracker.sessionID(for: launched))
         XCTAssertTrue(capture("main", first: prompt, by: launched))
         XCTAssertEqual(tracker.provenSessionID(for: launched), "main")
         XCTAssertFalse(capture("title-2", first: title, by: launched))
-        XCTAssertFalse(capture("side", first: prompt, by: launched), "a fork (/side) begins with the same message: the first proof stands")
+        XCTAssertFalse(capture("side", first: prompt, by: launched), "the first proof stands")
         XCTAssertEqual(tracker.provenSessionID(for: launched), "main")
         XCTAssertEqual(tracker.sessionID(for: launched), "main", "what a relaunch resumes")
 
@@ -189,6 +193,7 @@ final class AgentSessionResumeTests: XCTestCase {
         )
         XCTAssertEqual(tracker.provenSessionID(for: resumed), "main")
         XCTAssertFalse(capture("subagent", first: "Explore the code.", by: resumed))
+        XCTAssertFalse(capture("fork", first: prompt, sole: false, by: resumed))
         XCTAssertTrue(capture("main", first: prompt, by: resumed))
 
         let bare = ForegroundProcess(instance: ProcessInstance(pid: 12, startedAt: 3), name: "codex", arguments: ["codex"])

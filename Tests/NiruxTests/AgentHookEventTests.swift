@@ -392,7 +392,11 @@ final class AgentHookEventTests: XCTestCase {
         )
         XCTAssertEqual(event?.name, .turnComplete)
         XCTAssertEqual(event?.sessionID, "thread-9")
-        XCTAssertEqual(event?.firstInputDigest, CodexLaunch.promptDigest("Start the task."), "its first message, never the text")
+        XCTAssertNil(event?.soleInputDigest, "a later turn or a fork holds more than one message")
+        var first = payload
+        first["input-messages"] = ["Start the task."]
+        XCTAssertEqual(AgentHookEvent(kind: .codex, payload: first, env: env, now: 5)?.soleInputDigest,
+                       CodexLaunch.promptDigest("Start the task."), "its only message, never the text")
         XCTAssertEqual(event?.detail, "Done.")
         XCTAssertEqual(event?.emitterProcess, emitter)
     }

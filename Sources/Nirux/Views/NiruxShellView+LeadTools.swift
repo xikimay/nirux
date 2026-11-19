@@ -654,11 +654,12 @@ extension NiruxShellView {
                 + "\(answerer(of: workspace, reachedThrough: mission, handoffsEnabled: handoffsEnabled))."
             : ""
         let sent = agent == "Codex"
-            ? (missionWaits.typing.contains(instruction.id)
+            ? (typed ? "Nirux handed it to “\(workspace.title)”’s Codex, which starts it as a prompt."
+                : missionWaits.typing.contains(instruction.id)
                 ? "Nirux is handing it to “\(workspace.title)”’s Codex, which starts it as a prompt; a line tells you if Codex "
                     + "doesn't start it."
                 : "Nirux hands it to “\(workspace.title)”’s Codex once its turn is over, a day at most; past an hour, "
-                    + "a line tells you what holds it. Codex takes it as text: a slash command doesn't run there.")
+                    + "a line tells you what holds it.") + " Codex takes it as text: a slash command doesn't run there."
             : typed ? "Nirux typed it into “\(workspace.title)”’s prompt."
             : missionWaits.typing.contains(instruction.id)
             ? "Nirux is typing it into “\(workspace.title)”’s prompt as its agent reads it; a line tells you if it doesn't all go in."

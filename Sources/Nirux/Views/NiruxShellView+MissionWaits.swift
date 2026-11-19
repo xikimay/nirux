@@ -206,7 +206,10 @@ extension NiruxShellView {
             }
             // Restarted, `runningSince` says, on another conversation once it confirmed one.
             let other = conversation(of: column, foreground: column.pty?.foregroundProcess(snapshot: snapshot)) != nil
-            if refusal == .restarted, other, let agent {
+            if agent == "Codex", column.runsUnprovableCodex(snapshot: snapshot) {
+                givenUp.append((delivery, "\(yours) won't be handed over: its Codex was started without a prompt, so Nirux can't "
+                    + "tell which of its conversations is the task's. Give it to the user instead."))
+            } else if refusal == .restarted, other, let agent {
                 givenUp.append((delivery, "\(yours) won't be typed: its \(agent) restarted on another conversation, and Nirux "
                     + "types a message only into the conversation it was sent to. Send it again if it still applies."))
             } else if now >= event.instructionDeadline {
@@ -276,6 +279,7 @@ extension NiruxShellView {
         }
         var shown: [UUID: SidebarWaitingMessages] = [:]
         var retries: [String] = []
+        var asksCodex = false
         // Freed by its REPL's word, with no turn end to type them at: at once.
         var firstPrompts: [String] = []
         for (id, entry) in waiting {
@@ -306,8 +310,10 @@ extension NiruxShellView {
                         && missionWaits.tries[$0.message.id, default: 0] < Self.missionTypingTries
                 }.map(\.message.id)
             }
-            // Tries are counted at the overdue ones' pace.
-            retries += free(overdue)
+            // Tries are counted at the overdue ones' pace; a Codex message's
+            // only when Codex refuses it (`queueForCodex`): a retry just asks.
+            retries += free(overdue.filter { !$0.message.toCodex })
+            asksCodex = asksCodex || !free(overdue.filter(\.message.toCodex)).isEmpty
             if atFirstPrompt { firstPrompts += free(refused) }
             if let foreground, refused.contains(where: { $0.refusal == .noPromptYet && !$0.message.toCodex }) {
                 logSessionRecordIssue(of: foreground.instance, agentUUID: entry.column.agentUUID, now: now)
@@ -348,7 +354,7 @@ extension NiruxShellView {
         missionWaits.shown = shown
         missionWaits.recordIssuesLogged = missionWaits.recordIssuesLogged.filter(snapshot.contains)
         missionWaits.unreadableRecords = missionWaits.unreadableRecords.filter(snapshot.contains)
-        let retryDue = !retries.isEmpty && now - missionWaits.lastRetryAt >= Self.stuckWatchInterval
+        let retryDue = (!retries.isEmpty || asksCodex) && now - missionWaits.lastRetryAt >= Self.stuckWatchInterval
         if retryDue {
             missionWaits.lastRetryAt = now
             for retry in retries { missionWaits.tries[retry, default: 0] += 1 }

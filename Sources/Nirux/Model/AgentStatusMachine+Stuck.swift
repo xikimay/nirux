@@ -176,7 +176,7 @@ extension AgentStatusMachine {
         guard let foreground, foreground.name == AgentProgramStatus.codex, !AgentHookCenter.isHeadlessCodex(foreground)
         else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
-        guard let reported = codexStatus, reported.process == foreground.instance else { return .noPromptYet }
+        guard let reported = codexStatus, reported.isFrom(foreground.instance) else { return .noPromptYet }
         switch reported.status.state {
         case .done, .idle: return nil
         case .working: return .working

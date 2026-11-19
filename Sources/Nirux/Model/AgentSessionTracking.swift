@@ -96,9 +96,11 @@ struct ForegroundSessionTracker {
     private let keepsProcessSession: Bool
     /// Codex: its notify also reports the threads it runs out of sight, such
     /// as the one that titles a new conversation (seen on codex 0.167). A
-    /// thread is proven once its first message is the prompt that `codex`
-    /// was launched with, or once `codex resume <id>` named it: the first
-    /// proof stands, and no other thread replaces it.
+    /// thread is proven once its only message is the prompt that `codex`
+    /// was launched with (a fork, `/side` or a forked sub-agent, holds the
+    /// forked ones too), or once `codex resume <id>` named it: the first
+    /// proof stands, no other thread replaces it, and with a launch prompt
+    /// none binds before it.
     private let provesThread: Bool
     /// The thread its launch prompt started, and that `codex`.
     private var launched: (sessionID: String, process: ProcessInstance)?
@@ -118,12 +120,12 @@ struct ForegroundSessionTracker {
         session.prepareResume(sessionID: sessionID)
     }
 
-    /// `firstInputDigest`: `CodexLaunch.promptDigest` of the thread's first
-    /// message.
+    /// `soleInputDigest`: `CodexLaunch.promptDigest` of the thread's message,
+    /// when it holds one.
     @discardableResult
     mutating func capture(
         sessionID: String?,
-        firstInputDigest: String? = nil,
+        soleInputDigest: String? = nil,
         emitterBelongsToForegroundJob: Bool,
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
@@ -133,12 +135,12 @@ struct ForegroundSessionTracker {
             return false
         }
         if provesThread {
-            // The first proof stands: a fork (/side) begins with the same message.
-            if launched?.process != foregroundProcess.instance, let firstInputDigest,
-               firstInputDigest == CodexLaunch.prompt(of: foregroundProcess).map(CodexLaunch.promptDigest) {
+            let prompt = CodexLaunch.prompt(of: foregroundProcess)
+            if launched?.process != foregroundProcess.instance, let soleInputDigest, soleInputDigest == prompt.map(CodexLaunch.promptDigest) {
                 launched = (sessionID, foregroundProcess.instance)
             }
-            if let proven = provenSessionID(for: foregroundProcess), proven != sessionID { return false }
+            // The title's thread may end its turn first.
+            guard provenSessionID(for: foregroundProcess).map({ $0 == sessionID }) ?? (prompt == nil) else { return false }
         }
         guard keepsProcessSession else { return session.bind(sessionID: sessionID, process: foregroundProcess.instance) }
         guard session.sessionID(boundTo: foregroundProcess.instance) == nil else { return false }

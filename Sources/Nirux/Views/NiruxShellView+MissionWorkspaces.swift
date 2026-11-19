@@ -364,6 +364,7 @@ extension NiruxShellView {
               let codex = pty.foregroundProcess(snapshot: snapshot), let thread = column.provenCodexSessionID(of: codex),
               let command = CodexQueue.command(of: codex),
               let text = MissionPromptText.text(for: delivery, childTitle: childTitle, parentTitle: parentTitle)
+                  .flatMap(TypedPromptSanitizer.sanitize)
         else { return }
         missionWaits.typing.insert(id)
         missionWaits.codexQueuing.insert(column.id)

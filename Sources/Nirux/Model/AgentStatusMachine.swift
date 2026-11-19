@@ -214,9 +214,9 @@ struct AgentStatusMachine {
     /// Antigravity's last word on its state (OSC 7501) and when it came,
     /// until another process comes to the front.
     private(set) var programStatus: ReportedStatus?
-    /// Codex's, kept the same way. Its hooks drive its status: this one only
-    /// says when a Mission message may go into its queue
-    /// (`codexQueueRefusal`).
+    /// Codex's, while the shell runs (`keepProgramStatus`). Its hooks drive
+    /// its status: this one only says when a Mission message may go into its
+    /// queue (`codexQueueRefusal`).
     private(set) var codexStatus: ReportedStatus?
     /// When Codex last said it works, and which `codex`: a turn started.
     private(set) var codexWorked: (at: TimeInterval, process: ProcessInstance?)?
@@ -228,6 +228,12 @@ struct AgentStatusMachine {
         let at: TimeInterval
         let process: ProcessInstance?
         var alerted = false
+
+        /// Whether `process` sent it. One read on an empty process table
+        /// came from the agent in front then: one already running.
+        func isFrom(_ process: ProcessInstance) -> Bool {
+            self.process.map { $0 == process } ?? (process.startedAt <= at)
+        }
     }
     /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
     /// a new session, an agent back in the foreground, or the user.
@@ -1472,7 +1478,6 @@ struct AgentStatusMachine {
         // Antigravity's status goes with it; one can come before the
         // heartbeat sees it in front.
         if fgName != AgentProgramStatus.agy { programStatus = nil }
-        if fgName != AgentProgramStatus.codex { codexStatus = nil }
     }
 
     /// Takes in what Antigravity's process `process` reported: the reason to
@@ -1499,11 +1504,12 @@ struct AgentStatusMachine {
         if status.state == .working { codexWorked = (now, process) }
     }
 
-    /// A reported status belongs to the process that sent it: an agent
-    /// started again begins with none.
+    /// Antigravity's status belongs to the process that sent it: an agy
+    /// started again begins with none. Codex's stays (it says each state
+    /// once): a Ctrl-G editor or a ^Z shell in front doesn't end it, and
+    /// its process is checked where it is read (`ReportedStatus.isFrom`).
     mutating func keepProgramStatus(of process: ProcessInstance?) {
         if let reported = programStatus, reported.process != process { programStatus = nil }
-        if let reported = codexStatus, reported.process != process { codexStatus = nil }
     }
 
     /// A sign-in wait that outlasted every launch's moment of it, said once

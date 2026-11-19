@@ -1040,7 +1040,7 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             }
             @MainActor func thread(_ id: String, first: String, of task: (column: ColumnState, codex: ForegroundProcess, agent: AgentStandIn)) {
                 _ = task.column.captureCodexSession(
-                    sessionID: id, firstInputDigest: CodexLaunch.promptDigest(first), emitterProcess: task.codex.instance,
+                    sessionID: id, soleInputDigest: CodexLaunch.promptDigest(first), emitterProcess: task.codex.instance,
                     snapshot: ProcessSnapshot()
                 )
             }
@@ -1049,9 +1049,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             let bare = AgentStandIn()
             defer { bare.remove() }
             defer { task.agent.remove() }
-            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": "Review this."], lead: lead)
+            let told = try harness.callLeadTool(LeadTools.tell, ["task": "Codex task", "message": "Review this.\u{1B}[31m"], lead: lead)
             XCTAssertFalse(told.isError, told.text)
-            XCTAssertTrue(told.text.contains("once its turn is over"), told.text)
+            XCTAssertTrue(told.text.contains("once its turn is over") && told.text.contains("a slash command doesn't run there"), told.text)
             let instruction = { MissionStore.shared.missions.flatMap(\.events).first { $0.kind == .instruction && $0.childAgentUUID == task.column.agentUUID } }
             report(.done, in: task.column)
             thread("title", first: "Generate a concise title.\n\nUser prompt:\n" + prompt, of: task)
@@ -1074,13 +1074,17 @@ final class LeadTaskToolsFlowTests: XCTestCase {
             report(.done, in: task.column)
             harness.waitUntil("handed to Codex") { !queue.requests.isEmpty }
             XCTAssertNil(try XCTUnwrap(instruction()).childConsumedAt, "refused: it waits")
+            let refusals = try shell.missionWaits.tries[XCTUnwrap(instruction()).id]
+            shell.missionWaits.checkedAt = nil
+            shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + NiruxShellView.missionMessageStallAge + 1)
+            XCTAssertEqual(try shell.missionWaits.tries[XCTUnwrap(instruction()).id], refusals, "only Codex's refusals count")
             queue.outcome = .queued
             report(.idle, in: task.column)
             harness.waitUntil("Codex took it") { instruction()?.childConsumedAt != nil }
             let request = try XCTUnwrap(queue.requests.last)
             XCTAssertEqual(request.thread, "main")
             XCTAssertEqual(request.command, CodexQueue.command(of: task.codex))
-            XCTAssertTrue(request.message.contains("Review this."), request.message)
+            XCTAssertTrue(request.message.contains("Review this.") && !request.message.contains("\u{1B}"), request.message)
             report(.done, in: task.column)
             harness.waitUntil("its sender told Codex hasn't started it, a state that isn't work notwithstanding") {
                 shell.pendingLeadNotices.contains { $0.text.contains("Codex hasn't started it") }
@@ -1142,9 +1146,9 @@ final class LeadTaskToolsFlowTests: XCTestCase {
                 parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID, kind: .instruction, message: "Rebase now.",
                 timestamp: Date().timeIntervalSince1970
             ), enabled: true) else { return XCTFail("the CLI's tell is recorded") }
-            _ = shell.handleMissionEvent(fromCLI.mission, event: fromCLI.event)
+            shell.sweepWaitingInstructions(now: Date().timeIntervalSince1970, snapshot: ProcessSnapshot())
             XCTAssertNotNil(MissionStore.shared.missions.flatMap(\.events).first { $0.id == fromCLI.event.id }?.expiredAt)
-            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("“Bare Codex” won't be handed over") },
+            XCTAssertTrue(shell.pendingLeadNotices.contains { $0.text.contains("won't be handed over: its Codex was started without a prompt") },
                           "\(shell.pendingLeadNotices.map(\.text))")
         }
     }
