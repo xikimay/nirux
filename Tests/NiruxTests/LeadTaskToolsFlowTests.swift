@@ -904,6 +904,28 @@ final class LeadTaskToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A turn stopped on an API error reads so in list_tasks, as on its
+    /// row: neither idle, as once the user saw it, nor needing the user for
+    /// nothing said.
+    func testListTasksSaysATurnStoppedOnAnAPIError() throws {
+        try UIFlowHarness.run { harness in
+            let lead = try harness.makeLead()
+            let task = try reportingTask("Builder", lead: lead, harness: harness)
+            defer { task.agent.remove() }
+            let pty = try XCTUnwrap(task.column.pty)
+            for isUserFocused in [true, false] {
+                task.hook(.userPromptSubmit)
+                _ = pty.applyAgentHook(AgentHookEvent(
+                    kind: .claude, name: .stopFailure, agentUUID: task.column.agentUUID, sessionID: "task", emitterProcess: task.claude,
+                    errorKind: "overloaded", timestamp: Date().timeIntervalSince1970
+                ), isUserFocused: isUserFocused)
+                let list = try harness.callLeadTool(LeadTools.listTasks, lead: lead).text
+                let line = list.split(separator: "\n").first { $0.hasPrefix("- “Builder”") }.map(String.init) ?? ""
+                XCTAssertTrue(line.hasSuffix(" · claude stopped on an API error — overloaded"), "focused: \(isUserFocused), \(list)")
+            }
+        }
+    }
+
     /// A tell waits for its task's next free prompt, a day at most: past an
     /// hour its sender hears once what holds it, and why it was given up.
     func testAWaitingTellTellsItsSenderWhatHoldsIt() throws {

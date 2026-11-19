@@ -387,12 +387,16 @@ extension NiruxShellView {
         }?.name
     }
 
-    /// What its agents do: working, needs the user (and for what), idle.
+    /// What its agents do: needs the user (and for what), stuck as its row
+    /// says in red, working, idle.
     private func leadAgentState(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> String {
         let agents = agentReadings(of: workspace, snapshot: snapshot)
         guard let first = agents.first else { return "no agent running" }
         if let waiting = agents.first(where: \.needsUser) {
             return "\(waiting.name) needs the user" + (waiting.dialog.map { ": \($0)" } ?? "")
+        }
+        if let failed = agents.first(where: { $0.failure != nil }), let failure = failed.failure {
+            return "\(failed.name) \(failure.headline)" + (failure.detail.map { " — \($0)" } ?? "")
         }
         if let working = agents.first(where: { $0.status == AgentStatus.working }) { return "\(working.name) working" }
         return "\(first.name) idle"
@@ -405,13 +409,18 @@ extension NiruxShellView {
         let status: AgentStatus
         /// What it waits on the user for, in a few words.
         let dialog: String?
+        /// Its row's stuck state, when drawn in red: the turn stopped on an
+        /// API error, or went silent.
+        let failure: SidebarStuckState?
 
-        var needsUser: Bool { status == .needsAttention || dialog != nil }
+        /// A failure needs the user too, but says what broke instead.
+        var needsUser: Bool { dialog != nil || (status == .needsAttention && failure == nil) }
     }
 
     /// The Claude and Codex agents in front of `workspace`'s columns.
     func agentReadings(of workspace: WorkspaceState, snapshot: ProcessSnapshot) -> [AgentReading] {
-        workspace.columns.compactMap { column in
+        let now = Date().timeIntervalSince1970
+        return workspace.columns.compactMap { column in
             guard let pty = column.pty, let foreground = pty.foregroundProcess(snapshot: snapshot),
                   ["claude", "codex"].contains(foreground.name) else { return nil }
             // A question its last turn ended on waits on the user too.
@@ -420,7 +429,8 @@ extension NiruxShellView {
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
             // A turn end found done (or still being read) asks nothing.
             let status = pty.isQuietTurnEnd ? AgentStatus.idle : pty.cachedAgentState
-            return AgentReading(name: foreground.name, status: status, dialog: dialog)
+            let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
+            return AgentReading(name: foreground.name, status: status, dialog: dialog, failure: stuck?.isFailure == true ? stuck : nil)
         }
     }
 
