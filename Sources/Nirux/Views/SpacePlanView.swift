@@ -32,6 +32,8 @@ final class SpacePlanView: NSView {
     /// The scale every row's picture is drawn at.
     private(set) var scale: CGFloat = 1
     private let ring = CALayer()
+    /// How far the fingers moved in this pinch.
+    private var pinchTotal: CGFloat = 0
     /// Where to go: a workspace and its column; nil goes back.
     var onClose: (_ target: (workspaceID: String, column: Int)?) -> Void = { _ in }
 
@@ -91,13 +93,29 @@ final class SpacePlanView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
+        guard let card = card(at: convert(event.locationInWindow, from: nil)) else { return }
+        chosen = card
+        goToChoice()
+    }
+
+    override func magnify(with event: NSEvent) {
+        pinched(by: event.magnification, began: event.phase.contains(.began), at: convert(event.locationInWindow, from: nil))
+    }
+
+    /// Fingers opening go to the card under them, else to the chosen one.
+    func pinched(by magnification: CGFloat, began: Bool, at point: NSPoint) {
+        if began { pinchTotal = 0 }
+        pinchTotal += magnification
+        guard pinchTotal >= NiruxShellView.pinchThreshold else { return }
+        if let card = card(at: point) { chosen = card }
+        goToChoice()
+    }
+
+    private func card(at point: NSPoint) -> (row: Int, column: Int)? {
         for (rowIndex, row) in rows.enumerated() {
-            if let column = row.cards.firstIndex(where: { $0.contains(point) }) {
-                chosen = (rowIndex, column)
-                return goToChoice()
-            }
+            if let column = row.cards.firstIndex(where: { $0.contains(point) }) { return (rowIndex, column) }
         }
+        return nil
     }
 
     /// Along the chosen row, as far as its ends.

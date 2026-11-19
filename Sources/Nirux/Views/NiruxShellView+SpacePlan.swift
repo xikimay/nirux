@@ -3,6 +3,18 @@ import AppKit
 /// Depth study P5: ⌥⌘↑ shows the space as a plan (`SpacePlanView`) over the
 /// viewport, the live views hidden and their terminals resting under it.
 extension NiruxShellView {
+    /// How far fingers close (or open) before the plan shows (or goes to a
+    /// card): a quarter of their span.
+    static let pinchThreshold: CGFloat = 0.25
+
+    /// Fingers closing on the work show the plan.
+    func pinched(by magnification: CGFloat, began: Bool) {
+        if began { pinchTotal = 0 }
+        pinchTotal += magnification
+        guard spacePlan == nil, pinchTotal <= -Self.pinchThreshold else { return }
+        toggleSpacePlan()
+    }
+
     func toggleSpacePlan() {
         if spacePlan != nil { return closeSpacePlan(going: nil) }
         guard let onScreen = activeWorkspace else { return }

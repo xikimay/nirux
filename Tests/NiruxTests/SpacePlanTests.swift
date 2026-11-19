@@ -122,6 +122,34 @@ final class SpacePlanTests: XCTestCase {
         }
     }
 
+    /// Fingers closing on the work past a quarter of their span, within one
+    /// pinch, show the plan; opening them in it goes to the card under them,
+    /// else to the chosen one.
+    func testAPinchShowsThePlanAndAnotherGoesToTheCardUnderIt() throws {
+        try withWorkspaces { shell, workspaces in
+            shell.pinched(by: -0.2, began: true)
+            shell.pinched(by: -0.1, began: true)
+            XCTAssertNil(shell.spacePlan, "not that far within one pinch")
+            shell.pinched(by: -0.2, began: false)
+            let plan = try XCTUnwrap(shell.spacePlan, "past a quarter")
+
+            plan.pinched(by: 0.1, began: true, at: .zero)
+            XCTAssertNotNil(shell.spacePlan, "not that far")
+            let card = try XCTUnwrap(plan.rows.last?.cards.first)
+            plan.pinched(by: 0.2, began: false, at: NSPoint(x: card.midX, y: card.midY))
+            XCTAssertNil(shell.spacePlan)
+            XCTAssertIdentical(shell.activeWorkspace, workspaces.last, "the card under the fingers")
+
+            shell.pinched(by: -0.3, began: true)
+            let again = try XCTUnwrap(shell.spacePlan)
+            again.keyDown(with: try Self.key(126))
+            let chosen = again.rows[again.chosen.row].workspaceID
+            XCTAssertNotEqual(chosen, workspaces.last?.id)
+            again.pinched(by: 0.3, began: true, at: .zero)
+            XCTAssertEqual(shell.activeWorkspace?.id, chosen, "away from any card, the chosen one")
+        }
+    }
+
     // MARK: - Helpers
 
     private static func key(_ code: UInt16) throws -> NSEvent {

@@ -493,7 +493,10 @@ the text stays flat and sharp.
   wears a ring; the arrows move it, Return or a click goes there at once,
   Escape or ⌥⌘↑ goes back. Under it the live views hide and no terminal
   draws; a user's move, another space or workspace, or a new size closes
-  it. The pinch and the transitions come next.
+  it. A pinch does the same: fingers closing on the work past a quarter of
+  their span, within one pinch, show the plan, and opening them in it goes
+  to the card under them, else to the chosen one; a column that zooms
+  itself (a page) keeps its own pinch. The transitions come next.
 - **Frozen pictures (study P4):** a crossing, or a new workspace's slide,
   moves pictures of what the viewport showed, frozen in
   about 6 ms (`FrozenView`): a clone of its layers, each sharing its

@@ -29,6 +29,8 @@ final class NiruxShellView: NSView {
     var crossingPictures: [FrozenView] = []
     /// The space as a plan, while it shows (NiruxShellView+SpacePlan).
     var spacePlan: SpacePlanView?
+    /// How far the fingers moved in this pinch (NiruxShellView+SpacePlan).
+    var pinchTotal: CGFloat = 0
     /// The size of the workspace on screen, as `relayout` lays it out.
     var workspaceViewportSize: NSSize {
         let statusH = statusBar.hasContent ? StatusBarView.height : 0
@@ -619,6 +621,11 @@ final class NiruxShellView: NSView {
                 self.redrawAllTerminals()
             }
         }
+    }
+
+    /// A pinch the views under the fingers leave (a terminal does).
+    override func magnify(with event: NSEvent) {
+        pinched(by: event.magnification, began: event.phase.contains(.began))
     }
 
     override func viewDidMoveToWindow() {
