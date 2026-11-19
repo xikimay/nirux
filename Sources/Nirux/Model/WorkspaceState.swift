@@ -963,7 +963,23 @@ extension WorkspaceState {
         case .left, .right: [(near, pull)]
         case .none: [(focus, Self.draggedWidth(start.widths[focus], strip: start.strip, viewport: viewport, by: delta) - start.widths[focus])]
         }
-        let widths = Self.resized(start.widths, focus: focus, taking: asks, share: share, viewport: viewport)
+        var widths = Self.resized(start.widths, focus: focus, taking: asks, share: share, viewport: viewport)
+        // Near a third, a half or two thirds of the viewport, it lands there,
+        // with a tick of the trackpad.
+        let stops = [1.0 / 3, 1.0 / 2, 2.0 / 3].map { Self.width($0, in: viewport) }
+        if let stop = stops.first(where: { abs($0 - widths[focus]) <= Self.snapDistance }) {
+            let gap = stop - width
+            let snapped: [(column: Int, points: CGFloat)] = switch share {
+            case .both: [(near, ceil(gap / 2)), (far, floor(gap / 2))]
+            case .left, .right: [(near, gap)]
+            case .none: [(focus, gap)]
+            }
+            let landed = Self.resized(start.widths, focus: focus, taking: snapped, share: share, viewport: viewport)
+            if landed[focus] == stop { widths = landed }
+        }
+        if stops.contains(widths[focus]), widths[focus] != columns[focus].view.frame.width {
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
         let camera = share == .none
             ? Self.dragCamera(width: start.widths[focus], strip: start.strip, camera: start.camera, viewport: viewport, to: widths[focus])
             : start.camera
@@ -1013,6 +1029,8 @@ extension WorkspaceState {
     }
 
     static let minWidthFraction: CGFloat = 0.15
+    /// How near a stop (a third, a half, two thirds) a dragged card lands on it.
+    static let snapDistance: CGFloat = 10
     static let maxWidthFraction: CGFloat = 2.0
 
     /// Holds the camera where it is for the column at `index` (`heldCamera`).
