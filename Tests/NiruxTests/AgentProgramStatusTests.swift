@@ -55,11 +55,14 @@ final class AgentProgramStatusTests: XCTestCase {
     }
 
     func testNiruxTerminalsAskAgyForIt() {
-        let environment = WorkspaceState.makeTerminalEnvironment(
-            profileID: "p", workspaceID: "w", agentUUID: "a", missionID: nil,
-            missionHandoffsEnabled: false, executablePath: nil, launchID: "l"
-        )
-        XCTAssertEqual(environment["AGY_CLI_OSC7501"], "on")
+        func environment(inheriting inherited: [String: String]) -> [String: String] {
+            WorkspaceState.makeTerminalEnvironment(
+                profileID: "p", workspaceID: "w", agentUUID: "a", missionID: nil,
+                missionHandoffsEnabled: false, executablePath: nil, launchID: "l", inherited: inherited
+            )
+        }
+        XCTAssertEqual(environment(inheriting: [:])["AGY_CLI_OSC7501"], "on")
+        XCTAssertNil(environment(inheriting: ["AGY_CLI_OSC7501": "off"])["AGY_CLI_OSC7501"], "the user's own stays")
     }
 
     // MARK: - Status
@@ -130,6 +133,35 @@ final class AgentProgramStatusTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 2), .idle)
         XCTAssertEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 6), .needsAttention)
         XCTAssertEqual(machine.attentionReason, .message("Sign in required"))
+    }
+
+    /// A wait answered in its terminal goes: what agy does next comes as a
+    /// new status, or shows in its output.
+    func testAnAnsweredWaitGoes() {
+        var machine = AgentStatusMachine()
+        _ = machine.tick(fgName: "agy", isUserFocused: false, now: t0)
+        _ = machine.noteProgramStatus(status(.blocked, kind: "permission", "Trust this folder?"), isUserFocused: false, now: t0 + 1)
+        machine.noteKeystroke(now: t0 + 2, keys: Data("\r".utf8))
+        XCTAssertNotEqual(machine.tick(fgName: "agy", isUserFocused: false, now: t0 + 3), .needsAttention)
+        let agy = ForegroundProcess(instance: ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970), name: "agy", arguments: [])
+        XCTAssertNil(machine.blockedWait(now: t0.timeIntervalSince1970 + 3, foreground: agy))
+    }
+
+    /// A sign-in that outlasts every launch's moment of it alerts once; a
+    /// status is its process's, so an agy started again begins with none.
+    func testALastingSignInAlertsOnceAndAStatusIsItsProcesss() {
+        var machine = AgentStatusMachine()
+        let first = ProcessInstance(pid: 42, startedAt: t0.timeIntervalSince1970)
+        _ = machine.tick(fgName: "agy", isUserFocused: false, now: t0)
+        let signIn = status(.blocked, kind: "auth", "Sign in required")
+        XCTAssertNil(machine.noteProgramStatus(signIn, from: first, isUserFocused: false, now: t0))
+        XCTAssertNil(machine.takeLateSignInAlert(isUserFocused: false, now: t0.timeIntervalSince1970 + 2))
+        XCTAssertEqual(machine.takeLateSignInAlert(isUserFocused: false, now: t0.timeIntervalSince1970 + 6), .message("Sign in required"))
+        XCTAssertNil(machine.takeLateSignInAlert(isUserFocused: false, now: t0.timeIntervalSince1970 + 7), "once")
+        machine.keepProgramStatus(of: first)
+        XCTAssertNotNil(machine.programStatus)
+        machine.keepProgramStatus(of: ProcessInstance(pid: 43, startedAt: t0.timeIntervalSince1970 + 8))
+        XCTAssertNil(machine.programStatus)
     }
 
     /// The trust question comes as agy starts, before the heartbeat sees it

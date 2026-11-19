@@ -44,6 +44,9 @@ extension NiruxShellView {
                     processTableRead: processTableRead,
                     claudeFiredHooks: foregroundProcess.map { col.claudeHooksFired(by: $0.instance) } ?? false
                 ) ?? .idle
+                if let reason = col.pty?.takeLateSignInAlert(isUserFocused: isUserFocused && appIsActive) {
+                    col.notifyAgentAttention(reason: reason)
+                }
                 return sidebarColumnInfo(
                     col, at: colIndex, isUserFocused: isUserFocused, agentStatus: agentStatus, foregroundProcess: foregroundProcess,
                     approvalHold: approvalHolds[ObjectIdentifier(col)], missionQuestion: missionQuestions[ObjectIdentifier(col)],

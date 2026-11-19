@@ -209,7 +209,16 @@ struct AgentStatusMachine {
     private(set) var turnFailure: AgentTurnFailure?
     /// Antigravity's last word on its state (OSC 7501) and when it came,
     /// until another process comes to the front.
-    private(set) var programStatus: (status: AgentProgramStatus, at: TimeInterval)?
+    private(set) var programStatus: ReportedStatus?
+
+    /// What Antigravity reported, when, from which process, and whether its
+    /// wait alerted.
+    struct ReportedStatus: Equatable {
+        let status: AgentProgramStatus
+        let at: TimeInterval
+        let process: ProcessInstance?
+        var alerted = false
+    }
     /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
     /// a new session, an agent back in the foreground, or the user.
     private(set) var midTurnExit: AgentMidTurnExit?
@@ -1438,23 +1447,44 @@ struct AgentStatusMachine {
         if fgName != AgentProgramStatus.process { programStatus = nil }
     }
 
-    /// Takes in what Antigravity reported: the reason to alert with when it
-    /// starts waiting on the user, or its turn ends or fails, out of the
-    /// user's sight. The same status again (a redraw) changes nothing.
-    mutating func noteProgramStatus(_ status: AgentProgramStatus, isUserFocused: Bool, now: Date) -> AgentAttentionReason? {
-        guard status != programStatus?.status else { return nil }
-        programStatus = (status, now.timeIntervalSince1970)
+    /// Takes in what Antigravity's process `process` reported: the reason to
+    /// alert with when it starts waiting on the user, or its turn ends or
+    /// fails, out of the user's sight. The same status again (a redraw)
+    /// changes nothing.
+    mutating func noteProgramStatus(
+        _ status: AgentProgramStatus, from process: ProcessInstance? = nil, isUserFocused: Bool, now: Date
+    ) -> AgentAttentionReason? {
+        guard status != programStatus?.status || process != programStatus?.process else { return nil }
+        programStatus = ReportedStatus(status: status, at: now.timeIntervalSince1970, process: process)
         _ = reportedState(isUserFocused: isUserFocused, now: now.timeIntervalSince1970)
         guard !isUserFocused, state == .needsAttention, status.state != .working, status.state != .idle,
               status.kind != "auth" else { return nil }
+        programStatus?.alerted = true
         return lastAttentionReason
     }
 
+    /// Antigravity's status belongs to the process that sent it: an agy
+    /// started again begins with none.
+    mutating func keepProgramStatus(of process: ProcessInstance?) {
+        if let reported = programStatus, reported.process != process { programStatus = nil }
+    }
+
+    /// A sign-in wait that outlasted every launch's moment of it, said once
+    /// out of the user's sight: `noteProgramStatus` held its alert back.
+    mutating func takeLateSignInAlert(isUserFocused: Bool, now: TimeInterval) -> AgentAttentionReason? {
+        guard let reported = programStatus, !reported.alerted, reported.status.state == .blocked,
+              reported.status.kind == "auth", now - reported.at >= AgentProgramStatus.signInGrace,
+              lastInputAt <= reported.at
+        else { return nil }
+        programStatus?.alerted = true
+        return isUserFocused ? nil : reported.status.attentionReason
+    }
+
     /// What Antigravity in front reported it waits on, or failed on, past
-    /// the moment every launch signs in.
+    /// the moment every launch signs in, and until the user answers it.
     func reportedWait(foreground: ForegroundProcess?, now: TimeInterval) -> AgentWait? {
         guard foreground?.name == AgentProgramStatus.process, let reported = programStatus,
-              [.blocked, .error].contains(reported.status.state),
+              [.blocked, .error].contains(reported.status.state), lastInputAt <= reported.at,
               reported.status.kind != "auth" || now - reported.at >= AgentProgramStatus.signInGrace,
               let reason = reported.status.attentionReason
         else { return nil }
@@ -1465,7 +1495,7 @@ struct AgentStatusMachine {
     /// when it waits on the user, which its output can't.
     private mutating func reportedState(isUserFocused: Bool, now: TimeInterval) -> AgentStatus? {
         guard let reported = programStatus else { return nil }
-        let (status, at) = reported
+        let (status, at) = (reported.status, reported.at)
         switch status.state {
         case .working where now - max(at, lastReadAt) > AgentProgramStatus.workingSilence:
             // Its next `working` is a new turn's.
@@ -1475,6 +1505,11 @@ struct AgentStatusMachine {
             if turnStartedAt == nil { turnStartedAt = at }
             state = .working
             lastAttentionReason = nil
+        case .blocked where lastInputAt > at:
+            // Answered in its terminal: what it does next comes as a new
+            // status, or shows in its output.
+            programStatus = nil
+            return nil
         case .blocked where status.kind == "auth" && now - at < AgentProgramStatus.signInGrace:
             break
         case .blocked:

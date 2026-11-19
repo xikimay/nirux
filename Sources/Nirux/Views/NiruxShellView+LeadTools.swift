@@ -420,13 +420,17 @@ extension NiruxShellView {
             let dialog: String? = (pty.agentVisibleDialog(foreground: foreground)?.reason
                 ?? pty.agentAskedQuestion(foreground: foreground))?.shortLabel
                 ?? pty.agentTrustPrompt(foreground: foreground).map { _ in "whether to trust its folder (in its terminal)" }
-            // A turn end found done (or still being read) asks nothing. An
-            // agent without hooks that stopped without saying why (agy says
-            // why through OSC 7501) is quiet: maybe waiting in its terminal
-            // (the row keeps its amber).
+                // What agy reported it waits on (OSC 7501).
+                ?? pty.agentBlockedWait(now: Date().timeIntervalSince1970, waitThreshold: nil, foreground: foreground)?
+                    .reason.shortLabel
+            // A turn end found done (or still being read), or one an agent
+            // without hooks reported, asks nothing. One that stopped without
+            // saying why is quiet: maybe waiting in its terminal (the row
+            // keeps its amber).
             let quiet = AgentStatusMachine.activityOnlyAgentProcesses.contains(foreground.name)
                 && pty.cachedAgentState == .needsAttention && pty.agentAttentionReason == nil
-            let status = pty.isQuietTurnEnd || quiet ? AgentStatus.idle : pty.cachedAgentState
+            let finished = pty.agentAttentionReason == .turnFinished
+            let status = pty.isQuietTurnEnd || quiet || finished ? AgentStatus.idle : pty.cachedAgentState
             return AgentReading(name: foreground.name, status: status, dialog: dialog, isQuiet: quiet)
         }
     }
