@@ -161,6 +161,9 @@ enum Theme {
             /// The focused column, a level higher: darker, softer and further
             /// below, still within the air.
             static let focusedColumn = Level(opacity: 0.5, radius: 3, drop: 2)
+            /// A control lifted under the pointer (`Relief`): short enough
+            /// to stay within the rail's and the bar's edges.
+            static let control = Level(opacity: 0.45, radius: 2, drop: 2)
         }
 
         /// Gives `layer` the shadow of `level` along the rounded rectangle

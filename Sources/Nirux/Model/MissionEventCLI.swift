@@ -26,9 +26,9 @@ enum MissionEventCLI {
     }
 
     /// The most of a message Nirux types whole, in scalars: what it types
-    /// holds `TypedPromptSanitizer.maxCharacters`, an answer's header
-    /// included. Emoji and combining marks take several.
-    static let maxScalars = TypedPromptSanitizer.maxCharacters - MissionPromptText.answerHeaderScalars
+    /// holds `TypedPromptSanitizer.maxCharacters`, a header included.
+    /// Emoji and combining marks take several.
+    static let maxScalars = TypedPromptSanitizer.maxCharacters - MissionPromptText.headerScalars
 
     /// Why `message`, trimmed, can't be sent within `limit` characters; nil
     /// when it can.
@@ -391,8 +391,9 @@ enum MissionEventCLI {
             if !ledger.hasRead, !ledger.isMissing { return unreadableLedger(missionsURL) }
             // A parent that never had a Mission keeps waiting: Nirux records
             // one only after creating its worktree, which can take a while.
+            // A Lead's tells to a task not its own keep nothing waiting.
             let missions = ledger.missions.filter {
-                $0.parentWorkspaceID == context.workspaceID && $0.parentAgentUUID == context.agentUUID
+                $0.parentWorkspaceID == context.workspaceID && $0.parentAgentUUID == context.agentUUID && $0.oneWay != true
             }
             // A `tell` Nirux may still type reopens its Mission.
             let receivedAt = now()
@@ -712,6 +713,7 @@ extension MissionEventCLI {
             $0.parentWorkspaceID == context.workspaceID
                 && $0.parentAgentUUID == context.agentUUID
                 && $0.branch == branch
+                && $0.oneWay != true
         }).max(by: { $0.createdAt < $1.createdAt }) else {
             writeStandardError("No Mission on branch \(branch) was started from this terminal.")
             return 4

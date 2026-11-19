@@ -96,7 +96,7 @@ extension AgentStatusMachine {
 
     /// Why `isPromptFree` says no, nil when it says yes.
     func promptRefusal(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> AgentPromptRefusal? {
-        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground) else { return .noClaude }
+        guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         guard let lastPromptAt = prompt(since: foreground.instance.startedAt) else { return .noPromptYet }
         if hookWorking || turnStartedAt != nil { return .working }

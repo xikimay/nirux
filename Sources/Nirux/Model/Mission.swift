@@ -28,10 +28,15 @@ struct Mission: Codable, Equatable {
     /// tools (`start_task`, see TaskTools): the Mission works with Mission
     /// handoffs off too. Nil means no.
     var reportsToTask: Bool?
+    /// The parent is a space's Lead telling a task of its space that
+    /// doesn't report to it: the Mission carries the Lead's instructions
+    /// only, never the task's questions or result, and code counting a
+    /// parent's Missions or a child's leaves it out. Nil means no.
+    var oneWay: Bool?
 
-    /// Carried whatever the Mission handoffs setting: a Lead's task, or a
-    /// sub-task a task's agent started with its tools.
-    var isAlwaysCarried: Bool { reportsToLead == true || reportsToTask == true }
+    /// Carried whatever the Mission handoffs setting: a Lead's task, a
+    /// sub-task a task's agent started with its tools, or a Lead's tells.
+    var isAlwaysCarried: Bool { reportsToLead == true || reportsToTask == true || oneWay == true }
 
     /// Whether Nirux carries this Mission's messages, given the Mission
     /// handoffs setting.
@@ -105,6 +110,10 @@ struct MissionEvent: Codable, Equatable {
     /// On an instruction Nirux gave up untyped (its time ran out, or its
     /// child can't take it any more): when, its sender told.
     var expiredAt: TimeInterval?
+    /// On an instruction: the space's Lead that sent it on this Mission,
+    /// whose parent is another agent. Its held and given-up lines go to
+    /// the Lead, and Nirux types it under a line saying it's the Lead's.
+    var leadSender: NewTask.MissionParent?
 
     /// Until when Nirux may type this instruction.
     var instructionDeadline: TimeInterval {
@@ -160,6 +169,8 @@ struct MissionCreationRequest {
     var reportsToLead = false
     /// The parent is a task's agent and its tools (see `Mission.reportsToTask`).
     var reportsToTask = false
+    /// A Lead's tells to a task that doesn't report to it (see `Mission.oneWay`).
+    var oneWay = false
 }
 
 /// Durable mission state. Writes are immediate because this store is also
@@ -221,7 +232,7 @@ final class MissionStore {
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> Mission? {
-        guard enabled || request.reportsToLead || request.reportsToTask,
+        guard enabled || request.reportsToLead || request.reportsToTask || request.oneWay,
               ensureLoaded(),
               Self.isIdentifier(request.id),
               Self.isIdentifier(request.parentWorkspaceID),
@@ -246,7 +257,8 @@ final class MissionStore {
             updatedAt: now,
             events: [],
             reportsToLead: request.reportsToLead ? true : nil,
-            reportsToTask: request.reportsToTask ? true : nil
+            reportsToTask: request.reportsToTask ? true : nil,
+            oneWay: request.oneWay ? true : nil
         )
         var updated = missions
         updated.append(mission)
@@ -276,8 +288,9 @@ final class MissionStore {
     // This single transition keeps validation and its in-memory mutation
     // adjacent so persistence commits exactly one candidate Mission ledger.
     /// `fromUser` is the trusted UI path (`respond`): only it may mark a
-    /// response as the user's.
-    func process(_ incoming: MissionEvent, enabled: Bool, fromUser: Bool = false) -> ProcessingResult {
+    /// response as the user's; `lead`, the app's (a Lead's `tell`): only it
+    /// may mark an instruction as a Lead's.
+    func process(_ incoming: MissionEvent, enabled: Bool, fromUser: Bool = false, lead: NewTask.MissionParent? = nil) -> ProcessingResult {
         guard ensureLoaded() else { return .persistenceFailed }
         guard incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
@@ -312,6 +325,7 @@ final class MissionStore {
         switch incoming.kind {
         case .question, .completed:
             guard missions[index].status == .active,
+                  missions[index].oneWay != true,
                   incoming.parentWorkspaceID == nil,
                   incoming.parentAgentUUID == nil,
                   incoming.inReplyTo == nil
@@ -358,7 +372,10 @@ final class MissionStore {
                 && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
-        if event.kind == .instruction { event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime }
+        if event.kind == .instruction {
+            event.typableUntil = event.timestamp + MissionEventCLI.instructionLifetime
+            event.leadSender = lead
+        }
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
         if event.kind == .completed {

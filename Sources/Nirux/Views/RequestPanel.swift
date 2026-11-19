@@ -10,7 +10,9 @@ import AppKit
 final class RequestPanel {
     private final class Panel: NSPanel {
         var onPerformClose: (() -> Void)?
-        override var canBecomeKey: Bool { true }
+        /// Not while it goes: the keyboard is back behind it then.
+        var takesKeyboard = true
+        override var canBecomeKey: Bool { takesKeyboard }
         override var canBecomeMain: Bool { false }
         /// ⌘W while it has the keyboard closes it, not the window behind.
         override func performClose(_ sender: Any?) { onPerformClose?() }
@@ -55,6 +57,14 @@ final class RequestPanel {
     /// shortcut closes it, then goes to the menu, so that what the shortcut
     /// moves (a workspace, a column, the find bar) gets the keyboard.
     var keepsShortcut: ((NSEvent) -> Bool)?
+    /// The control it comes out of and goes back into, in screen
+    /// coordinates (the bar's badge, the rail's icon); nil: it fades.
+    var source: () -> NSRect? = { nil }
+    /// Whether it may move (`PanelGrowth`); else it shows and goes at once.
+    var animates: () -> Bool = { false }
+    /// Tells a pending end of its growth (`later`) whether it still
+    /// applies: not once it showed or closed again.
+    private var generation = 0
     /// When a click it let through (`keepsOpen`) last came: the window
     /// behind takes the keyboard on that mouse-down, which must not close
     /// it before the click acts (the badge, the callout's own icon).
@@ -81,6 +91,9 @@ final class RequestPanel {
         // behind AppKit's back, it would come back stale.
         panel.hidesOnDeactivate = false
         panel.appearance = Theme.appearance
+        // It comes out of its control and goes back (`PanelGrowth`) on
+        // this layer.
+        content.wantsLayer = true
         panel.contentView = content
         (panel as? Panel)?.onPerformClose = { [weak self] in self?.close() }
     }
@@ -95,14 +108,24 @@ final class RequestPanel {
     /// Shows it at `frame` (screen coordinates) over `window`, `responder`
     /// taking the keyboard.
     func show(frame: NSRect, over window: NSWindow, responder: NSView) {
+        generation += 1
+        panel.ignoresMouseEvents = false
+        (panel as? Panel)?.takesKeyboard = true
+        panel.contentView?.layer?.removeAnimation(forKey: PanelGrowth.key)
         panel.setFrame(frame, display: true)
+        // Its start before it orders in, so that it never shows whole first.
+        if animates() {
+            PanelGrowth.grow(panel, from: source())
+            later(PanelGrowth.openDuration) { $0.becomeWhole() }
+        } else {
+            becomeWhole()
+        }
         if panel.parent !== window {
             panel.parent?.removeChildWindow(panel)
             window.addChildWindow(panel, ordered: .above)
         }
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(responder)
-        invalidateShadowWhenDrawn()
         self.responder = responder
         isOpen = true
         if keyObservers.isEmpty { observeKey() }
@@ -167,10 +190,46 @@ final class RequestPanel {
         keyObservers = []
         guard isOpen else { return }
         isOpen = false
+        generation += 1
         let hadKeyboard = hasKeyboard(panel)
+        if animates() {
+            // Back into its control. Nothing in it takes a click or a key
+            // meanwhile: the keyboard goes back behind it at once, as when
+            // it orders out.
+            panel.ignoresMouseEvents = true
+            (panel as? Panel)?.takesKeyboard = false
+            if hadKeyboard { panel.parent?.makeKey() }
+            PanelGrowth.shrink(panel, into: source())
+            later(PanelGrowth.closeDuration) { $0.orderOut() }
+        } else {
+            orderOut()
+        }
+        onClose?(closing, hadKeyboard)
+    }
+
+    /// Whole: opaque, its shadow following its glass.
+    private func becomeWhole() {
+        PanelGrowth.fade(panel, to: 1)
+        panel.hasShadow = true
+        invalidateShadowWhenDrawn()
+    }
+
+    /// `step` after `delay`, on time rather than on an animation's
+    /// completion, which a window out of view may never report; unless it
+    /// shows or closes again first.
+    private func later(_ delay: CFTimeInterval, _ step: @escaping @MainActor (RequestPanel) -> Void) {
+        let generation = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == generation else { return }
+                step(self)
+            }
+        }
+    }
+
+    private func orderOut() {
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
-        onClose?(closing, hadKeyboard)
     }
 
     /// It lost the keyboard to another window (Settings, the window behind

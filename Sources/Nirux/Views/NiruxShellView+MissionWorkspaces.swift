@@ -303,7 +303,8 @@ extension NiruxShellView {
             let byUser = delivery.event.answeredByUser == true
             // Its sender hears what stayed in the prompt: an agent, about its own message.
             let sender = toChild && !byUser
-                ? NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID) : nil
+                ? delivery.event.leadSender ?? NewTask.MissionParent(workspaceID: mission.parentWorkspaceID, agentUUID: mission.parentAgentUUID)
+                : nil
             let recipientTitle = MissionPromptText.quoted((toChild ? childWorkspace : parentWorkspace)?.title ?? mission.branch)
             missionWaits.typing.insert(delivery.event.id)
             typeMissionPrompt(paste, into: pty, keepingInFront: pty.foregroundProcess(snapshot: snapshot)?.instance) { [weak self] typed in

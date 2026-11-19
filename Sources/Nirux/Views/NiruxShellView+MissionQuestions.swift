@@ -87,7 +87,8 @@ extension NiruxShellView {
         var waiting = Set<String>()
         defer { missionParentWatch = missionParentWatch.filter { waiting.contains($0.key) } }
         let store = MissionStore.shared
-        for mission in store.missions where mission.status == .active {
+        // A Lead's one-way Mission names the Lead, whom the child doesn't ask.
+        for mission in store.missions where mission.status == .active && mission.oneWay != true {
             guard let (workspace, childColumn) = missionEnd(mission, parent: false), workspace.carriesMissions,
                   let column = childColumn, result[ObjectIdentifier(column)] == nil
             else { continue }
@@ -156,7 +157,7 @@ extension NiruxShellView {
         finishedTurnAfterTyping: (TimeInterval) -> Bool, tookPrompt: (ForegroundProcess) -> Bool?
     ) -> SidebarMissionQuestion.Parent {
         guard let foreground else { return .claude }
-        guard foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground) else { return .notClaude }
+        guard AgentHookCenter.isInteractiveClaude(foreground) else { return .notClaude }
         if let typedAt {
             if foreground.instance.startedAt > typedAt { return .restartedSinceTyped }
             return finishedTurnAfterTyping(typedAt) ? .stoppedWithoutAnswer : .claude

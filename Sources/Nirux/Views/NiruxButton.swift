@@ -30,6 +30,17 @@ final class NiruxButton: NSButton {
     let size: Size
 
     private var isHovered = false { didSet { if isHovered != oldValue { applyLook() } } }
+    /// Under the pointer, `view` (what it covers, the bar's segment) rises
+    /// `height` points over a short shadow (`Relief`); pressed, it lies
+    /// flat again. Nil: nothing rises, at once.
+    var relief: (height: CGFloat, view: NSView)? {
+        didSet {
+            if relief == nil, let old = oldValue?.view, let layer = old.layer {
+                Relief.show(.resting, on: layer, shape: old.convert(bounds, from: self), radius: bounds.height / 2, animated: false)
+            }
+            applyLook()
+        }
+    }
     /// While the cell highlights: during a press with the pointer on the
     /// button, and while its action runs.
     fileprivate var isPressed = false { didSet { if isPressed != oldValue { applyLook() } } }
@@ -208,6 +219,13 @@ final class NiruxButton: NSButton {
         defer { isApplyingLook = false }
         let look = Self.look(kind, hovered: isHovered, pressed: isPressed, enabled: isEnabled)
         layer?.backgroundColor = look.fill.cgColor
+        if let relief, let host = relief.view.layer {
+            let lifted = isEnabled && isHovered && !isPressed
+            Relief.show(
+                lifted ? .lifted(height: relief.height) : .resting, on: host,
+                shape: relief.view.convert(bounds, from: self), radius: bounds.height / 2, animated: window != nil
+            )
+        }
         layer?.borderColor = look.border?.cgColor
         layer?.borderWidth = look.border == nil ? 0 : 1
         guard look.text != titleColor else { return }

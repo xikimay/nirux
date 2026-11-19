@@ -31,7 +31,8 @@ enum LeadTools {
 
     /// How a tool names one of the Lead's tasks.
     static let taskDescription = "The task's branch (its folder, as list_tasks shows it, or the folder's name, "
-        + "for a task without a repository), or its title."
+        + "for a task without a repository), or its title. A name several tasks answer goes to the one of yours, "
+        + "if only one is; otherwise it is refused."
 
     /// A next step or blocker: one line on the task's row.
     static let maxContextLength = 200
@@ -88,7 +89,10 @@ enum LeadTools {
                 tell, title: "Tell a task",
                 description: """
                     Type a message into a task's prompt once its agent's turn is over (a follow-up, an answer it \
-                    didn't ask for, a slash command). Claude Code tasks only.
+                    didn't ask for, a slash command). Any task of this space: one that doesn't report to you (a \
+                    sub-task, a task the user started) gets it under a line saying it comes from you (so no \
+                    slash command); its questions and result still go to whoever started it. Claude Code tasks \
+                    only.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],
@@ -133,9 +137,9 @@ enum LeadTools {
             definition(
                 setTaskContext, title: "Set a task's next step and blocker",
                 description: """
-                    Keep a task's next step and blocker current: the user reads them on its row in the sidebar. \
-                    Pass only what changed; an empty string clears one. A field the user wrote by hand stays \
-                    theirs: Nirux says so, and leaves it.
+                    Keep a task's next step and blocker current, any task of this space: the user reads them on \
+                    its row in the sidebar. Pass only what changed; an empty string clears one. A field the user \
+                    wrote by hand stays theirs: Nirux says so, and leaves it.
                     """,
                 properties: [
                     "task": ["type": "string", "description": taskDescription],

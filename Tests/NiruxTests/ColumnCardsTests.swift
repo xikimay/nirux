@@ -328,6 +328,289 @@ final class ColumnCardsTests: XCTestCase {
         }
     }
 
+    /// A new card comes in from the front, over its neighbours, then lies
+    /// among them; a closed one recedes as it fades, and goes on time. With
+    /// Reduce motion a closed one only fades.
+    func testACardComesFromTheFrontAndRecedes() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func scales(of column: ColumnState) throws -> (from: CGFloat, to: CGFloat) {
+                try self.scales(of: column)
+            }
+
+            shell.addColumn()
+            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            let start = try scales(of: added)
+            XCTAssertEqual(start.from, NiruxShellView.arrivalScale, "from the front")
+            XCTAssertEqual(start.to, 1)
+            XCTAssertEqual(added.view.layer?.zPosition, 1, "over its neighbours")
+            let handles = try strip(of: workspace).subviews.compactMap { $0 as? ColumnResizeHandle }
+            XCTAssertTrue(handles.allSatisfy { ($0.layer?.zPosition ?? 0) > 1 }, "under the handles, which take its clicks")
+            waitUntil("in, on time", timeout: 2) { !added.isArriving }
+            XCTAssertEqual(added.view.layer?.zPosition, 0, "among them")
+            XCTAssertNil(added.view.layer?.animation(forKey: ColumnState.passKey))
+
+            shell.closeActiveColumn()
+            let end = try scales(of: added)
+            XCTAssertEqual(end.from, 1, accuracy: 0.001)
+            XCTAssertEqual(end.to, NiruxShellView.closeScale, "it recedes")
+            XCTAssertEqual(added.view.alphaValue, 0, "as it fades")
+            waitUntil("gone, on time", timeout: 2) { !workspace.columns.contains { $0 === added } }
+
+            shell.addColumn()
+            let still = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            waitUntil("in", timeout: 2) { !still.isArriving }
+            shell.sideEffects.reducesMotion = { true }
+            shell.closeActiveColumn()
+            XCTAssertEqual(try scales(of: still).to, 1, "Reduce motion: no recede")
+            XCTAssertEqual(still.view.alphaValue, 0)
+            waitUntil("gone", timeout: 2) { !workspace.columns.contains { $0 === still } }
+        }
+    }
+
+    /// ⌘W while a card arrives: it recedes from where it shows, and the
+    /// arrival's end leaves its recede alone until it goes. A card that
+    /// changes size mid-way is in place at once.
+    func testACardClosedWhileArrivingRecedesFromWhereItShows() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func wait(_ seconds: TimeInterval) {
+                let end = Date().addingTimeInterval(seconds)
+                waitUntil("\(seconds) s", timeout: seconds + 2) { Date() >= end }
+            }
+
+            shell.addColumn()
+            let added = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            wait(NiruxShellView.arrivalDuration / 2)
+            shell.closeActiveColumn()
+            let recede = try self.scales(of: added)
+            XCTAssertGreaterThan(recede.from, 1, "from where it shows, still nearer")
+            XCTAssertEqual(recede.to, NiruxShellView.closeScale)
+            XCTAssertFalse(added.isArriving)
+            XCTAssertEqual(added.view.layer?.zPosition, 0, "behind its neighbours again")
+            // Past the arrival's end, until it goes, the recede stays.
+            var kept = true
+            waitUntil("gone", timeout: 2) {
+                guard workspace.columns.contains(where: { $0 === added }) else { return true }
+                if (try? self.scales(of: added).to) != NiruxShellView.closeScale { kept = false }
+                return false
+            }
+            XCTAssertTrue(kept, "the arrival's end left its recede alone")
+
+            // One pass takes a card from another: the first's end never
+            // comes, whenever the two were due.
+            let card = try XCTUnwrap(workspace.columns.first)
+            var ends: [String] = []
+            card.pass(to: 1, alpha: 1, duration: 0.02, curve: CAMediaTimingFunction(name: .linear)) { ends.append("first") }
+            card.pass(to: NiruxShellView.closeScale, alpha: 1, duration: 0.3, curve: CAMediaTimingFunction(name: .linear)) { ends.append("second") }
+            waitUntil("the second's end", timeout: 2) { !ends.isEmpty }
+            wait(0.05)
+            XCTAssertEqual(ends, ["second"], "the first's end never came")
+            XCTAssertNil(card.view.layer?.animation(forKey: ColumnState.passKey))
+
+            shell.addColumn()
+            let resized = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            XCTAssertNotNil(resized.view.layer?.animation(forKey: ColumnState.passKey))
+            resized.widthFraction = 0.3
+            shell.relayout(animated: false)
+            XCTAssertNil(resized.view.layer?.animation(forKey: ColumnState.passKey), "resized: in place at once")
+        }
+    }
+
+    /// A card closed while it glides keeps its glide under its recede: the
+    /// two compose on its layer, neither cancels the other.
+    func testAGlideAndAPassOnOneCardCompose() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            workspace.focusedIndex = 0
+            let pushed = workspace.columns[1]
+            shell.addColumn()
+            XCTAssertNotNil(pushed.view.layer?.animation(forKey: ColumnState.glideKey))
+            workspace.focusedIndex = try XCTUnwrap(workspace.columns.firstIndex { $0 === pushed })
+            shell.closeActiveColumn()
+            XCTAssertNotNil(pushed.view.layer?.animation(forKey: ColumnState.glideKey), "its glide goes on")
+            let pass = try XCTUnwrap(pushed.view.layer?.animation(forKey: ColumnState.passKey) as? CAAnimationGroup)
+            let scaling = try XCTUnwrap(pass.animations?.compactMap { $0 as? CABasicAnimation }.first { $0.keyPath == "transform" })
+            XCTAssertTrue(scaling.isAdditive, "the recede adds to the glide rather than replacing it")
+        }
+    }
+
+    /// The scale a card's pass goes from and to.
+    @MainActor private func scales(of column: ColumnState) throws -> (from: CGFloat, to: CGFloat) {
+        let pass = try XCTUnwrap(column.view.layer?.animation(forKey: ColumnState.passKey) as? CAAnimationGroup)
+        let move = try XCTUnwrap(pass.animations?.compactMap { $0 as? CABasicAnimation }.first { $0.keyPath == "transform" })
+        let from = try XCTUnwrap(move.fromValue as? NSValue).caTransform3DValue
+        let to = try XCTUnwrap(move.toValue as? NSValue).caTransform3DValue
+        return (from.m11, to.m11)
+    }
+
+    /// A card a new one comes before glides aside from where it showed, its
+    /// shadow with it, and back once the new one went. With Reduce motion
+    /// it is simply there.
+    func testANeighbourGlidesAsideAndBack() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func glide(of view: NSView?) -> CGFloat? {
+                ((view?.layer?.animation(forKey: ColumnState.glideKey) as? CABasicAnimation)?.fromValue as? NSNumber).map { CGFloat($0.doubleValue) }
+            }
+            shell.addColumn()
+            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            workspace.focusedIndex = 0
+            let neighbour = workspace.columns[1]
+            let before = neighbour.view.frame.minX
+
+            shell.addColumn()
+            let pushed = before - neighbour.view.frame.minX
+            XCTAssertLessThan(pushed, 0, "pushed aside")
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.view)), pushed, accuracy: 1, "from where it showed")
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.shadow)), pushed, accuracy: 1, "its shadow with it")
+            let added = workspace.columns[1]
+            XCTAssertNil(glide(of: added.view), "the new card comes from the front instead")
+            waitUntil("in", timeout: 2) { !added.isArriving }
+
+            shell.closeActiveColumn()
+            waitUntil("gone", timeout: 2) { !workspace.columns.contains { $0 === added } }
+            XCTAssertEqual(neighbour.view.frame.minX, before, accuracy: 1)
+            XCTAssertEqual(try XCTUnwrap(glide(of: neighbour.view)), -pushed, accuracy: 1, "back")
+
+            neighbour.view.layer?.removeAllAnimations()
+            shell.sideEffects.reducesMotion = { true }
+            workspace.focusedIndex = 0
+            shell.addColumn()
+            XCTAssertNil(glide(of: neighbour.view), "Reduce motion: there at once")
+        }
+    }
+
+    /// A moved card passes over the one it swaps with: it rises on its way,
+    /// its shadow over the other, which dims under it a moment; then both
+    /// lie flat again. With Reduce motion it simply moves.
+    func testAMovedCardPassesOverItsNeighbour() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            waitUntil("in and flat", timeout: 2) {
+                workspace.columns.allSatisfy { !$0.isArriving && $0.view.layer?.zPosition == 0 }
+            }
+            workspace.focusedIndex = 0
+            let moved = workspace.columns[0], passed = workspace.columns[1]
+
+            shell.moveColumn(.right)
+            XCTAssertTrue(workspace.columns[1] === moved)
+            let rise = try XCTUnwrap(moved.view.layer?.animation(forKey: ColumnState.liftKey) as? CAKeyframeAnimation)
+            XCTAssertEqual(rise.values as? [CGFloat], [0, ColumnState.liftHeight, 0], "it rises on its way")
+            XCTAssertEqual(moved.view.layer?.zPosition, 1, "over the other")
+            XCTAssertEqual(moved.shadow?.layer?.zPosition, 1, "its shadow over the other")
+            XCTAssertNotNil(moved.shadow?.layer?.animation(forKey: ColumnState.liftKey))
+            let shade = try XCTUnwrap(passed.passShadeView, "the other dims under it")
+            XCTAssertNotNil(shade.layer?.animation(forKey: ColumnState.liftKey))
+            XCTAssertTrue(passed.view.subviews.last === shade, "over its content")
+            XCTAssertEqual(passed.view.layer?.zPosition, 0)
+
+            waitUntil("flat again", timeout: 2) { moved.view.layer?.zPosition == 0 }
+            XCTAssertEqual(moved.shadow?.layer?.zPosition, 0)
+            waitUntil("its shade gone", timeout: 2) { passed.passShadeView == nil }
+            XCTAssertNil(shade.superview)
+            XCTAssertEqual(moved.lifts, 0)
+
+            shell.sideEffects.reducesMotion = { true }
+            shell.moveColumn(.left)
+            XCTAssertTrue(workspace.columns[0] === moved)
+            XCTAssertEqual(moved.view.layer?.zPosition, 0, "Reduce motion: it simply moves")
+            XCTAssertNil(passed.passShadeView)
+        }
+    }
+
+    /// A held ⇧⌘→: each step lifts the card on from the height it shows,
+    /// and a card passed twice dims under one shade, its size even when it
+    /// changes, gone with the last pass.
+    func testARepeatedMoveLiftsOnAndShadesOnce() throws {
+        try withShell { shell in
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            shell.addColumn()
+            waitUntil("in", timeout: 2) { !workspace.columns.contains(where: \.isArriving) }
+            workspace.focusedIndex = 0
+            let moved = workspace.columns[0], twice = workspace.columns[2]
+
+            shell.moveColumn(.right)
+            waitUntil("on its way up", timeout: 2) { (moved.view.layer?.presentation()?.transform.m42 ?? 0) > 1 }
+            shell.moveColumn(.right)
+            let rise = try XCTUnwrap(moved.view.layer?.animation(forKey: ColumnState.liftKey) as? CAKeyframeAnimation)
+            XCTAssertGreaterThan(try XCTUnwrap((rise.values as? [CGFloat])?.first), 0.5, "on from the height it shows")
+
+            shell.moveColumn(.left)
+            XCTAssertEqual(twice.view.subviews.filter { $0 is PassShadeView }.count, 1, "passed twice, one shade")
+            twice.widthFraction = 0.3
+            shell.relayout(animated: false)
+            XCTAssertEqual(try XCTUnwrap(twice.passShadeView).frame, twice.view.bounds, "its size")
+            waitUntil("its shade gone", timeout: 2) { twice.passShadeView == nil }
+            XCTAssertFalse(twice.view.subviews.contains { $0 is PassShadeView })
+        }
+    }
+
+    /// A card's depth follows its state alone: over its neighbours while it
+    /// arrives or a move lifts it, an arrival ending mid-lift included;
+    /// never while it goes, and a going card takes no lift.
+    func testACardsDepthFollowsItsState() throws {
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addColumn()
+            let card = workspace.columns[0], other = workspace.columns[1]
+            let depths = { card.cardLayers.map(\.zPosition) }
+            XCTAssertEqual(card.cardLayers.count, card.light == nil ? 2 : 3)
+            card.isArriving = true
+            card.lifts = 1
+            card.updateDepth()
+            XCTAssertEqual(Set(depths()), [1])
+            card.isArriving = false
+            card.updateDepth()
+            XCTAssertEqual(Set(depths()), [1], "its arrival over, still lifted")
+            card.isClosing = true
+            card.updateDepth()
+            XCTAssertEqual(Set(depths()), [0], "going")
+            card.lift(over: other)
+            XCTAssertEqual(card.lifts, 1, "a going card takes no lift")
+            XCTAssertNil(other.passShadeView)
+            card.lifts = 0
+            card.isClosing = false
+            card.updateDepth()
+            XCTAssertEqual(Set(depths()), [0])
+        }
+    }
+
+    /// Where a card shows reads its glide alone, not its pass's scale about
+    /// the middle.
+    func testWhereACardShowsLeavesItsPassOut() throws {
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let card = try XCTUnwrap(workspace.columns.first)
+            card.pass(from: (0.5, 1), to: 0.5, alpha: 1, duration: 5, curve: CAMediaTimingFunction(name: .linear)) {}
+            waitUntil("held at half its size", timeout: 2) { (card.view.layer?.presentation()?.transform.m11 ?? 1) < 0.6 }
+            XCTAssertEqual(card.shownPlace.x, card.view.frame.minX, accuracy: 0.5)
+            card.view.layer?.removeAnimation(forKey: ColumnState.passKey)
+        }
+    }
+
     /// A double-click resets the width and leaves no drag behind it.
     func testADoubleClickOnAHandleLeavesNoDragBehind() {
         let handle = ColumnResizeHandle(frame: NSRect(x: 0, y: 0, width: 9, height: 100))

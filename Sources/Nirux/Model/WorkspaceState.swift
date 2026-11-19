@@ -881,7 +881,10 @@ extension WorkspaceState {
             guard let handle else { return }
             self?.setColumnWidth(for: handle, fraction: ColumnWidth.half.fraction)
         }
+        handle.wantsLayer = true
         stripView.addSubview(handle)
+        // Over a card passing over its neighbours, as it takes their clicks.
+        handle.layer?.zPosition = 2
         resizeHandles.append(handle)
     }
 
@@ -1036,12 +1039,14 @@ extension WorkspaceState {
     }
 
     /// `camera`: where it stays (a resize drag); nil: where the strip wants it.
+    /// `glides`: a card a neighbour pushed or let go glides to its place.
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
-        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil
+        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil, glides: Bool = false
     ) {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
+        let shown = glides ? columns.map(\.shownPlace) : []
 
         let gap = Self.columnGap, inset = Self.columnInset
         let innerHeight = max(0, height - inset * 2)
@@ -1060,10 +1065,18 @@ extension WorkspaceState {
             // autoresizing would push intermediate sizes to Ghostty during a
             // window resize before this layout pass runs (garbled display).
             col.terminalView?.autoresizingMask = []
+            // A card passing in or out scales about the middle it had: one
+            // that changes size is in place at once.
+            if col.view.frame.size != NSSize(width: widths[index], height: innerHeight) {
+                col.view.layer?.removeAnimation(forKey: ColumnState.passKey)
+            }
             col.view.frame = NSRect(x: xOffset, y: inset, width: widths[index], height: innerHeight)
             col.light?.frame = col.view.frame
             shadow(for: col).frame = col.view.frame
             col.layoutWithHeader(width: widths[index], height: innerHeight, resizeTerminal: !skipTerminalResize)
+            if let was = shown[safe: index], was.width == widths[index], !col.isArriving, abs(was.x - xOffset) > 0.5 {
+                col.glide(by: was.x - xOffset)
+            }
             // Its content clipped to its corners; its border (the focus) is
             // the shell's.
             col.view.layer?.masksToBounds = true

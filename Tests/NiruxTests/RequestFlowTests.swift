@@ -74,6 +74,110 @@ final class RequestFlowTests: XCTestCase {
         }
     }
 
+    /// While the interface may move, the inbox comes out of the bar's badge
+    /// and goes back into it, and a callout out of its rail icon, fading as
+    /// a window. Whole on time: opaque, with its window's shadow. Going, it
+    /// takes no click and no key. Shown again while it goes, it stays; its
+    /// last growth's ends no longer apply. With Reduce motion, it shows
+    /// whole and goes at once.
+    func testPanelsComeOutOfTheirControlAndGoBack() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let (_, there) = try self.prepare(harness)
+            self.fold(shell)
+            shell.sideEffects.reducesMotion = { false }
+            shell.agentLights.isDisplayAsleep = false
+            shell.animatesInterface = true
+            shell.updateSidebar()
+            @MainActor func start(of panel: NSPanel, from control: NSView) throws -> Bool {
+                let grow = try XCTUnwrap(panel.contentView?.layer?.animation(forKey: PanelGrowth.key) as? CABasicAnimation)
+                let source = try XCTUnwrap(NiruxShellView.screenRect(of: control))
+                let expected = CommandPalette.unfoldStart(from: PanelGrowth.origin(of: source, in: panel.frame), scale: PanelGrowth.scale)
+                return CATransform3DEqualToTransform(try XCTUnwrap(grow.fromValue as? NSValue).caTransform3DValue, CATransform3DMakeAffineTransform(expected))
+            }
+            @MainActor func wait(_ seconds: TimeInterval) {
+                let end = Date().addingTimeInterval(seconds)
+                harness.waitUntil("\(seconds) s") { Date() >= end }
+            }
+
+            // xctest shows no toolbar: the badge has no window, and the inbox
+            // fades in where it hangs (`testAPanelGrowsFromTheEdgeNearestItsControl`
+            // places a badge).
+            shell.openInbox()
+            let inbox = try XCTUnwrap(shell.requestsState.inboxPanel?.panel)
+            XCTAssertEqual(inbox.alphaValue, 0, "it fades in")
+            XCTAssertFalse(inbox.hasShadow, "its shadow once whole")
+            harness.waitUntil("whole") { inbox.alphaValue == 1 && inbox.hasShadow }
+
+            shell.closeInbox()
+            XCTAssertFalse(shell.requestsState.isInboxOpen)
+            XCTAssertTrue(inbox.isVisible, "going back into the badge")
+            XCTAssertTrue(inbox.ignoresMouseEvents)
+            XCTAssertFalse(inbox.canBecomeKey, "the keyboard back behind it at once")
+            XCTAssertFalse(inbox.isKeyWindow)
+            shell.openInbox()
+            XCTAssertTrue(inbox.canBecomeKey)
+            wait(PanelGrowth.openDuration + 0.1)
+            XCTAssertTrue(inbox.isVisible, "shown again while it went, it stays")
+            XCTAssertTrue(inbox.alphaValue == 1 && inbox.hasShadow)
+
+            // Its growth's end, due while it goes, waits for nothing.
+            shell.closeInbox()
+            shell.openInbox()
+            shell.closeInbox()
+            wait(PanelGrowth.openDuration + 0.1)
+            XCTAssertFalse(inbox.isVisible)
+            XCTAssertFalse(inbox.hasShadow, "no shadow came while it went")
+
+            let rail = shell.sidebar.iconRail
+            let icon = try XCTUnwrap(rail.itemViews[there.id])
+            rail.onRequest?(there.id, icon)
+            let callout = try XCTUnwrap(shell.requestsState.calloutPanel?.panel)
+            XCTAssertTrue(try start(of: callout, from: icon), "out of its icon")
+            shell.closeCallout()
+            harness.waitUntil("the callout gone") { !callout.isVisible }
+
+            // Going, then shown with Reduce motion: whole at once, and it
+            // stays.
+            shell.openInbox()
+            shell.closeInbox()
+            shell.sideEffects.reducesMotion = { true }
+            shell.openInbox()
+            XCTAssertNil(inbox.contentView?.layer?.animation(forKey: PanelGrowth.key))
+            XCTAssertTrue(inbox.alphaValue == 1 && inbox.hasShadow, "its shadow at once")
+            wait(PanelGrowth.closeDuration + 0.1)
+            XCTAssertTrue(inbox.isVisible)
+            shell.closeInbox()
+            XCTAssertFalse(inbox.isVisible, "at once")
+        }
+    }
+
+    /// An icon scrolled out of the rail is no source: the callout fades
+    /// rather than going back into nothing.
+    func testAControlOutOfSightIsNoSource() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let (_, there) = try self.prepare(harness)
+            self.fold(shell)
+            shell.updateSidebar()
+            let icon = try XCTUnwrap(shell.sidebar.iconRail.itemViews[there.id])
+            harness.waitUntil("its icon laid out in the rail") { NiruxShellView.screenRect(of: icon) != nil }
+            let list = try XCTUnwrap(icon.superview)
+            let out = NSView(frame: NSRect(x: 0, y: list.bounds.maxY + 400, width: 20, height: 20))
+            list.addSubview(out)
+            XCTAssertNotNil(out.rectOnScreen)
+            XCTAssertNil(NiruxShellView.screenRect(of: out))
+        }
+    }
+
+    /// A panel grows from the point of its edge nearest its control: a badge
+    /// above it, its top edge; an icon at its left, its left edge.
+    func testAPanelGrowsFromTheEdgeNearestItsControl() {
+        let panel = NSRect(x: 100, y: 100, width: 400, height: 300)
+        XCTAssertEqual(PanelGrowth.origin(of: NSRect(x: 300, y: 410, width: 60, height: 22), in: panel), NSPoint(x: 230, y: 300))
+        XCTAssertEqual(PanelGrowth.origin(of: NSRect(x: 60, y: 200, width: 28, height: 28), in: panel), NSPoint(x: 0, y: 114))
+    }
+
     /// Unfolded, the requests stay in the rows: ⌘J and the badge go
     /// straight to the task.
     func testUnfoldedJGoesStraightToTheTask() throws {

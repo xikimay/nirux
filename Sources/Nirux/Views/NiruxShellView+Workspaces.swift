@@ -676,8 +676,11 @@ extension NiruxShellView {
 
         let leaving = workspaceOnScreenBeforeLayout()
         applyWorkspaceFrames(layout)
+        // Only the workspace on screen glides its cards.
+        let glides = animated && agentLightsMayMove
         for index in visibleWorkspaceIndices {
-            workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
+            let workspace = workspaces[index]
+            workspace.layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated, glides: glides && workspace === activeWorkspace)
         }
         resizeTerminalsOffScreen(to: NSSize(width: viewportW, height: rowH))
         // The workspace chosen comes on screen as a floor, when it changed.

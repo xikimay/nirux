@@ -450,7 +450,7 @@ the text stays flat and sharp.
   one gap, so two halves fill the viewport whatever the number of columns.
 - **In the middle** (the user's choice, 2026-11-18): cards that don't fill
   the viewport lie centred, a first terminal at its own width included,
-  and a new one comes in there, as any new column does (a fade from 92 %).
+  and a new one comes in there, as any new column does (from the front).
   The camera does it, so a second column makes the strip glide aside from
   where it shows, and closing it brings the other back to the middle. A
   dragged edge stays under the pointer: a centred card widens on both
@@ -480,6 +480,36 @@ the text stays flat and sharp.
   shade. 0.44 s, translations only, so no text scales; N1's name card
   stays. A switch while one plays ends it at once; Reduce motion, another
   space, or a workspace on screen that left the list show it at once.
+- **From the source (study P7):** the inbox comes out of the bar's badge
+  and goes back into it, a request's callout out of its rail icon: from
+  60 % of their size about the point of their edge nearest it, 0.32 s in
+  with a slight overshoot, 0.24 s out (`PanelGrowth`, as the palette
+  already unfolds from the bar). The window's shadow comes once the panel
+  is whole; going, it takes no click. Only the panel moves; Reduce motion
+  shows and closes it at once.
+- **Front and back (study P8):** a new column comes in from the front,
+  over its neighbours as they glide aside: from 105 % of its size and
+  transparent, 0.38 s. A closed one recedes to 93 % as it fades, 0.24 s,
+  then the others glide back. A card a neighbour pushed or let go glides
+  to its place from where it showed (0.36 s), its light and shadow with
+  it; only in the workspace on screen. The card owns its motion
+  (`ColumnState+Motion`): every move of its layer is additive, so a glide,
+  an arrival and a close on one card compose, and a pass owns the card
+  until another takes it. A moved one (⇧⌘→) passes over the card it
+  swaps with: it rises 10 pt on its way, its shadow falling on the other,
+  which dims under it a moment. Explicit animations on the card's layer
+  (AppKit doesn't animate a view's layer in an animation group), ends on
+  time; with Reduce motion a new card is simply there and a closed one
+  only fades.
+- **In relief (study P9):** under the pointer a rail icon rises 1.5 pt and
+  a command bar segment 1 pt, whole, over a short shadow
+  (`Theme.Elevation.Level.control`, within the rail's and the bar's
+  edges) cast only outside their shape; pressed, a rail icon sinks to
+  93 % and a segment lies flat again (`Relief`). It moves what a
+  container holds (`sublayerTransform`): AppKit resets a view's layer
+  `transform` at each new frame, and the rail's birth springs use it.
+  While the interface may move only; turned off, it is flat at once.
+  Tooltips stay the system's, which already float with a shadow.
 
 ## Plan
 

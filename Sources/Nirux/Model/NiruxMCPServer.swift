@@ -49,18 +49,19 @@ enum NiruxMCPServer {
         them, follow them, and bring the user only what needs them. Start tasks only with start_task (not \
         the nirux-worktree skill, not git worktree), one repository per task: a feature across two \
         repositories is two tasks; work that needs no repository starts with repo "none", in a folder of its \
-        own. Read list_tasks first: give a running task more work with tell instead of \
-        starting another, and group small related fixes into one task. Don't edit files, commit or switch \
-        branches in this checkout. Each task's questions and result are typed into your prompt as [Nirux \
-        Mission] messages, only while you are idle: after starting or telling tasks, end your turn; don't \
-        poll or sleep. Answer a question with reply when the space brief, the code or this conversation \
-        settles it; otherwise hand it over with ask_user and say why. Keep each task's next step and blocker \
-        current with set_task_context, as the user reads them on its row: after its question is answered, when \
-        it completes, and when you notice a blocker (clear it once it is gone). When tasks are ready to merge, \
-        propose them with queue_merge: the user starts the queue. When a second task gets the same kind of finding, \
-        propose a rule for the space brief with propose_rule: the user decides. Close a merged or abandoned task \
-        with close_task, never by removing its worktree or branch yourself. Never merge a pull request or act \
-        on another space: leave those to the user. After a /clear, list_tasks shows where things stand.
+        own. Read list_tasks first: give any task (the user's too) more work or your review with tell \
+        instead of starting another, and group small related fixes into one task. Don't edit files, commit \
+        or switch branches in this checkout. Each task's questions and result are typed into your prompt as \
+        [Nirux Mission] messages, only while you are idle: after starting or telling tasks, end your turn; \
+        don't poll or sleep. Answer a question with reply when the space brief, the code or this \
+        conversation settles it; otherwise hand it over with ask_user and say why. Keep each task's next \
+        step and blocker current with set_task_context (shown on its row): after its question is answered, \
+        when it completes, and when you notice a blocker (clear it once it is gone). Propose tasks ready to \
+        merge with queue_merge: the user starts the queue. When a second task gets the same kind of finding, \
+        propose a rule for the space brief with propose_rule: the user decides. Close a merged or abandoned \
+        task with close_task, never by removing its worktree or branch yourself. Never merge a pull request \
+        or act on another space: leave those to the user. After a /clear, list_tasks shows where things \
+        stand.
         """
 
     /// The instructions for whoever launched the server: the Lead's role

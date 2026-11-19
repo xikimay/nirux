@@ -120,6 +120,7 @@ extension NiruxShellView {
         }
         columnIndicator.pulses = moves
         sidebar.animates = moves
+        commandBarToolbar?.bar.lifts = moves
     }
 
     /// A Claude turn end got its verdict (see `AgentHookCenter`): a Mission
