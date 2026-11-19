@@ -510,6 +510,16 @@ the text stays flat and sharp.
   `transform` at each new frame, and the rail's birth springs use it.
   While the interface may move only; turned off, it is flat at once.
   Tooltips stay the system's, which already float with a shadow.
+- **Under the glass (study P6):** folded, the rail is an island of glass
+  over the work. While the columns travel to a card (the strip's 0.3 s
+  slide) they pass under it: the viewport's layer reaches under the
+  sidebar, what it holds where it lay, and the workspace on screen leaves
+  its cards unclipped; then the work's edge sweeps back to the rail's over
+  0.22 s, and a layout ends it at once. At rest nothing lies under the
+  glass, and no line marks the rail's edge. Only the layer reaches: the
+  view, its frame and its clicks stay. Only in macOS's own glass (26 and
+  later, which refracts what passes under it; the rim of 14 and 15 would
+  show the cards plainly), above Opaque, while the interface may move.
 
 ## Plan
 
