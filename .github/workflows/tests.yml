@@ -54,5 +54,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      - name: Run tests
-        run: scripts/run-tests.sh
+      # DO NOT MERGE: the gate of P4's first PR: its tests' mutants, then ten
+      # runs of FrozenViewTests.
+      - name: Flake gate
+        run: |
+          status=0
+          scripts/mutants-class.sh NiruxTests.FrozenViewTests sharedLost noCopy hiddenKept clippedKept overflowPruned shapeLost clicksTaken cpuWrong drawnAgain newDrawn neverRemoved || status=1
+          scripts/repeat-class.sh NiruxTests.FrozenViewTests 10 3 NiruxTests.WorkspaceSwitchTests NiruxTests.ColumnCardsTests || status=1
+          exit $status

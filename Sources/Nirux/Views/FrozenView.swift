@@ -18,7 +18,7 @@ final class FrozenView: NSView {
         let copies = SurfaceCopies.copies(of: surfaces.map(\.surface))
         var images: [ObjectIdentifier: IOSurfaceRef] = [:]
         for (found, copy) in zip(surfaces, copies) {
-            if let copy { images[ObjectIdentifier(found.layer)] = copy }
+            if let copy, !ZZ("noCopy") { images[ObjectIdentifier(found.layer)] = copy }
         }
         let frozen = CALayer()
         frozen.bounds = root.bounds
@@ -31,12 +31,14 @@ final class FrozenView: NSView {
         return host
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? { ZZ("clicksTaken") ? super.hitTest(point) : nil }
 
     /// Out of sight: hidden, or clipping to bounds that lie outside the
     /// root's (what it holds can't show either).
     private static func isOutOfSight(_ layer: CALayer, root: CALayer) -> Bool {
-        layer.isHidden || (layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
+        (layer.isHidden && !ZZ("hiddenKept"))
+            || (!ZZ("clippedKept") && layer.masksToBounds && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
+            || (ZZ("overflowPruned") && !layer.convert(layer.bounds, to: root).intersects(root.bounds))
     }
 
     private static func collectSurfaces(in layer: CALayer, root: CALayer, into surfaces: inout [(layer: CALayer, surface: IOSurfaceRef)]) {
@@ -56,7 +58,7 @@ final class FrozenView: NSView {
     static func clone(_ layer: CALayer, root: CALayer, images: [ObjectIdentifier: IOSurfaceRef]) -> CALayer? {
         guard !isOutOfSight(layer, root: root) else { return nil }
         let copy: CALayer
-        if let shape = layer as? CAShapeLayer {
+        if !ZZ("shapeLost"), let shape = layer as? CAShapeLayer {
             let made = CAShapeLayer()
             made.path = shape.path
             made.fillColor = shape.fillColor
@@ -96,7 +98,7 @@ final class FrozenView: NSView {
         copy.shadowOffset = layer.shadowOffset
         copy.shadowColor = layer.shadowColor
         copy.shadowPath = layer.shadowPath
-        copy.contents = images[ObjectIdentifier(layer)] ?? layer.contents
+        copy.contents = images[ObjectIdentifier(layer)] ?? (ZZ("sharedLost") ? nil : layer.contents)
         copy.contentsScale = layer.contentsScale
         copy.contentsGravity = layer.contentsGravity
         copy.contentsRect = layer.contentsRect
@@ -174,7 +176,7 @@ enum SurfaceCopies {
         defer { IOSurfaceUnlock(source, .readOnly, nil) }
         guard IOSurfaceLock(copy, [], nil) == kIOReturnSuccess else { return nil }
         defer { IOSurfaceUnlock(copy, [], nil) }
-        memcpy(IOSurfaceGetBaseAddress(copy), IOSurfaceGetBaseAddress(source), min(IOSurfaceGetAllocSize(source), IOSurfaceGetAllocSize(copy)))
+        if !ZZ("cpuWrong") { memcpy(IOSurfaceGetBaseAddress(copy), IOSurfaceGetBaseAddress(source), min(IOSurfaceGetAllocSize(source), IOSurfaceGetAllocSize(copy))) }
         return copy
     }
 }

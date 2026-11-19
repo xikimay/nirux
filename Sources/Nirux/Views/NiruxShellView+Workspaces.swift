@@ -33,7 +33,7 @@ extension NiruxShellView {
     ) {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
-        let snapshot = activate ? FrozenView.freeze(viewport) : nil
+        let snapshot = activate && !ZZ("newDrawn") ? FrozenView.freeze(viewport) : nil
 
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         // A space with anchors opens a plain workspace in its default
@@ -409,7 +409,7 @@ extension NiruxShellView {
 
     private func activateProfile(_ profileID: String, slideOutDirection: CGFloat?, profileAlreadySelected: Bool = false) {
         let previousProfileID = activeProfileID
-        let snapshot = slideOutDirection.flatMap { _ in FrozenView.freeze(viewport) }
+        let snapshot = slideOutDirection.flatMap { _ in ZZ("drawnAgain") ? nil : FrozenView.freeze(viewport) }
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
@@ -432,7 +432,7 @@ extension NiruxShellView {
             snapshot.animator().alphaValue = 0
         }
         // On time: a window out of view may never report the end.
-        ColumnState.afterCommit(0.22) { snapshot.removeFromSuperview() }
+        if !ZZ("neverRemoved") { ColumnState.afterCommit(0.22) { snapshot.removeFromSuperview() } }
     }
 
     func handleWorkspaceSidebarAction(_ action: WorkspaceSidebarAction, workspaceIndex: Int) {
