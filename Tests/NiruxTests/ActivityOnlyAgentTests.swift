@@ -1,8 +1,8 @@
 import XCTest
 @testable import Nirux
 
-/// Gemini CLI, OpenCode and Antigravity: recognized by process name, with
-/// no hooks.
+/// Gemini CLI, OpenCode and Antigravity: recognized by process name, their
+/// status read from their output.
 final class ActivityOnlyAgentTests: XCTestCase {
     private let isAgent: (String) -> Bool = { CodingAgent(rawValue: $0) != nil }
     private var machine = AgentStatusMachine()

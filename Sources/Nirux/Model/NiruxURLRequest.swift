@@ -236,10 +236,10 @@ struct NiruxURLRequest: Equatable, Sendable {
         let gitNote = "Nirux runs git in this folder: a repository you don’t trust can run code that way."
         func agentLine(_ agent: CodingAgent?) -> String {
             guard let agent else { return "Agent: none (plain shell)" }
-            let mode = switch agent {
-            case .claude: claudeMode.displayName
-            case .codex: codexMode.displayName
-            case .agy, .gemini, .opencode: "its own permission settings (Nirux sets none)"
+            let mode = switch AgentLaunch(agent, resume: nil, claudeMode: claudeMode, codexMode: codexMode) {
+            case .claude(_, let mode)?: mode.displayName
+            case .codex(_, let mode)?: mode.displayName
+            case .agy?, nil: "its own permission settings (Nirux sets none)"
             }
             return "Agent: \(agent.productName) — \(mode)"
         }
