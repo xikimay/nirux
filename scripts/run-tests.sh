@@ -17,13 +17,14 @@ set -euo pipefail
 # class that hangs fails with its log instead of the job at its timeout.
 if [[ "${1:-}" == --class ]]; then
     class="$2"
+    filter="${class%%#*}"
     log="$NIRUX_TESTS_WORK/$class.log"
     start=$SECONDS
     status=0
     perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
         $ENV{DYLD_LIBRARY_PATH} = $ENV{NIRUX_TESTS_LIBRARY_PATH};
         alarm shift; exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' \
-        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$class" "$NIRUX_TESTS_BUNDLE" \
+        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$filter" "$NIRUX_TESTS_BUNDLE" \
         > "$log" 2>&1 || status=$?
     # 128 + SIGALRM.
     if [[ $status -eq 142 ]]; then
@@ -63,6 +64,10 @@ if [[ $expected -eq 0 ]]; then
     exit 1
 fi
 sed -E 's#/.*##' "$work/list" | sort -u > "$work/classes"
+# Flake gate (DO NOT MERGE): repeats, shuffled among the other classes.
+for n in 2 3 4 5 6 7 8 9 10; do echo "NiruxTests.WorktreeCleanupFlowTests#$n" >> "$work/classes"; done
+for n in 2 3; do echo "NiruxTests.LeadTaskToolsFlowTests#$n" >> "$work/classes"; done
+awk 'BEGIN{srand()}{print rand()"\t"$0}' "$work/classes" | sort -n | cut -f2- > "$work/shuffled" && mv "$work/shuffled" "$work/classes"
 echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $workers at a time"
 
 # What `swift test` sets for xctest on macOS.
@@ -112,7 +117,7 @@ if [[ -s "$work/failed" ]]; then
     grep -h ': error: ' "$work"/*.log 2>/dev/null || true
     status=1
 fi
-if [[ $executed -ne $expected ]]; then
+if [[ $executed -lt $expected ]]; then
     echo "::error::$executed tests ran out of $expected listed"
     status=1
 fi
