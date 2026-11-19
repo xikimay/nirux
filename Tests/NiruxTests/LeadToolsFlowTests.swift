@@ -268,9 +268,9 @@ final class LeadToolsFlowTests: XCTestCase {
             let question = try ask("Keep the old date= parameter?", from: mission)
             var lines: [String] = []
             shell.sideEffects.logMissionWait = { lines.append($0) }
-            @MainActor func check() {
+            @MainActor func check(after delay: TimeInterval = 0) {
                 shell.missionWaits.checkedAt = nil
-                shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970)
+                shell.checkMissionWaits(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970 + delay)
             }
             @MainActor func typedAt() -> TimeInterval? {
                 MissionStore.shared.missions.first { $0.id == mission.id }?.events.first { $0.id == question.id }?.parentTypedAt
@@ -286,10 +286,12 @@ final class LeadToolsFlowTests: XCTestCase {
                 try Data("{\(fields)}".utf8).write(to: url)
                 try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: claude.startedAt)], ofItemAtPath: url.path)
             }
+            let missing = "claude session record missing agent=\(agentUUID.prefix(8)) "
             check()
-            check()
-            XCTAssertEqual(lines.filter { $0.hasPrefix("claude session record missing agent=\(agentUUID.prefix(8)) ") }.count, 1,
-                           lines.joined(separator: "\n"))
+            XCTAssertFalse(lines.contains { $0.hasPrefix(missing) }, "Claude Code writes it once it registered")
+            check(after: NiruxShellView.missionWaitLogAge)
+            check(after: NiruxShellView.missionWaitLogAge + 5)
+            XCTAssertEqual(lines.filter { $0.hasPrefix(missing) }.count, 1, lines.joined(separator: "\n"))
             try write("waiting", waitingFor: "dialog open")
             check()
             shell.typeMissionMessages()

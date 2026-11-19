@@ -282,9 +282,11 @@ extension NiruxShellView {
     }
 
     /// Writes to the log, once per process, that the session record of
-    /// `process`, a `claude` messages wait on, can't be found or read: Claude
-    /// Code may have moved it, and they wait for its first prompt.
+    /// `process`, a `claude` messages wait on, can't be found or read past
+    /// `missionWaitLogAge` (Claude Code writes it once it registered): it
+    /// may have moved it, and they wait for its first prompt.
     private func logSessionRecordIssue(of process: ProcessInstance, agentUUID: String?, now: TimeInterval) {
+        guard now - process.startedAt >= Self.missionWaitLogAge else { return }
         let reading = PtySession.sessionRecord(of: process)
         guard reading == .missing || reading == .unreadable,
               missionWaits.recordIssuesLogged.insert("\(process.pid) \(process.startedAt)").inserted

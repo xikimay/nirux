@@ -78,6 +78,9 @@ final class ClaudeSessionRecordTests: XCTestCase {
         try FileManager.default.removeItem(at: url)
         XCTAssertEqual(mkfifo(url.path, 0o600), 0)
         XCTAssertEqual(ClaudeSessionRecord.read(at: url), .unreadable, "a FIFO, read without waiting for a writer")
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createSymbolicLink(atPath: url.path, withDestinationPath: "/dev/zero")
+        XCTAssertEqual(ClaudeSessionRecord.read(at: url), .unreadable, "a device that never ends")
 
         let waiting = ClaudeSessionRecord.Reading.found(record("waiting", waitingFor: "dialog open"))
         XCTAssertEqual(waiting.facts(of: process, now: 1_013), "waiting(dialog_open)/3s")

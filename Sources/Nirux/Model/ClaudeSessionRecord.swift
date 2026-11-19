@@ -59,15 +59,16 @@ struct ClaudeSessionRecord: Equatable, Sendable {
             .appendingPathComponent("\(pid).json")
     }
 
-    /// Reads one of Claude Code's size at most, and opens it without waiting
-    /// (a FIFO would wait for a writer): the main thread reads it, from a
-    /// folder the agent names.
+    /// Reads Claude Code's size at most, and opens without waiting (a FIFO
+    /// would wait for a writer, a device never end): the main thread reads
+    /// it, from a folder the agent names.
     static func read(at url: URL) -> Reading {
         let descriptor = open(url.path, O_RDONLY | O_NONBLOCK)
         guard descriptor >= 0 else { return errno == ENOENT ? .missing : .unreadable }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         var info = stat()
-        guard fstat(descriptor, &info) == 0, info.st_size <= maxBytes, let data = try? handle.readToEnd() else { return .unreadable }
+        guard fstat(descriptor, &info) == 0, let data = try? handle.read(upToCount: maxBytes + 1), data.count <= maxBytes
+        else { return .unreadable }
         let writtenAt = TimeInterval(info.st_mtimespec.tv_sec) + TimeInterval(info.st_mtimespec.tv_nsec) / 1e9
         return ClaudeSessionRecord(json: data, writtenAt: writtenAt).map(Reading.found) ?? .unreadable
     }
