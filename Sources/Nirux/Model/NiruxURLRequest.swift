@@ -238,7 +238,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             switch agent {
             case .claude: return "Agent: Claude Code — \(claudeMode.displayName)"
             case .codex: return "Agent: Codex — \(codexMode.displayName)"
-            case .agy: return "Agent: Antigravity"
+            case .agy: return "Agent: Antigravity — its own permission settings (Nirux sets none)"
             case nil: return "Agent: none (plain shell)"
             }
         }
