@@ -301,6 +301,8 @@ final class ProjectMemoryPanel: NSObject {
     /// what the files hold now showing once it is cancelled; an item that
     /// was being added comes back in its sheet.
     func writeFailed(_ message: String, model: Model? = nil, selecting isWanted: (ProjectMemory.Entry) -> Bool = { _ in false }) {
+        // Taken first: showing the files read again forgets it.
+        let unadded = pendingAdd
         if editing != nil {
             isWriting = false
             freshModel = model
@@ -318,9 +320,9 @@ final class ProjectMemoryPanel: NSObject {
             ])
         }
         updateButtons()
-        if let item = pendingAdd {
+        if let unadded {
             pendingAdd = nil
-            showAddSheet(filledWith: item)
+            showAddSheet(filledWith: unadded)
         }
     }
 

@@ -400,6 +400,8 @@ struct WorkspaceInfo: Hashable {
     var turnStatusLine: String?
     /// The Lead's row: how many rules it proposed wait for the user.
     var ruleProposalCount = 0
+    /// The Lead's row: its space's last daily pass, for a day after it.
+    var dailyPassNote: String?
     var isNested: Bool { parentTitle != nil }
     /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
     var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
@@ -479,6 +481,9 @@ enum SidebarHitRegion {
     case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
     /// Interrupt under a column whose turn went silent.
     case agentInterrupt(workspaceIndex: Int, columnIndex: Int, since: TimeInterval)
+    /// Type it now on the row of Mission messages waiting for a `claude`
+    /// with no prompt yet, since the oldest was sent.
+    case missionTypeNow(workspaceIndex: Int, columnIndex: Int, since: TimeInterval)
     /// Resume on the row of a restored agent that hasn't resumed yet.
     case deferredAgentResume(workspaceIndex: Int, columnIndex: Int, columnID: UUID)
     /// Yes, No or Reply… under the question a Claude turn ended on.
@@ -557,6 +562,12 @@ enum SidebarHoverTarget: Hashable {
     /// the same place arms again.
     static func interruptButtonKey(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) -> String {
         "interrupt|\(workspaceIndex)|\(columnIndex)|\(since)"
+    }
+
+    /// Key of a Type it now button's view, as Interrupt's: other messages at
+    /// the same place arm again.
+    static func typeNowButtonKey(workspaceIndex: Int, columnIndex: Int, since: TimeInterval) -> String {
+        "type-now|\(workspaceIndex)|\(columnIndex)|\(since)"
     }
 
     /// Key of a Yes / No / Reply… button, among the approval buttons: its

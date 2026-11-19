@@ -89,27 +89,31 @@ extension AgentStatusMachine {
     /// by Nirux that Claude has not submitted yet), and no turn end waiting
     /// for its verdict (`awaitsAnyVerdict`). One that took no prompt since
     /// it started also needs its REPL to say it sits idle at its prompt
-    /// (`showsIdlePrompt`, see `sitsAtFirstPrompt`).
+    /// (`showsIdlePrompt`, see `sitsAtFirstPrompt`), or the user who saw it
+    /// to say so (`seenByUser`).
     func isPromptFree(
         foreground: ForegroundProcess?, runningSince time: TimeInterval,
-        showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+        seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
     ) -> Bool {
-        promptRefusal(foreground: foreground, runningSince: time, showsIdlePrompt: showsIdlePrompt) == nil
+        promptRefusal(foreground: foreground, runningSince: time, seenByUser: seenByUser, showsIdlePrompt: showsIdlePrompt) == nil
     }
 
     /// Why `isPromptFree` says no, nil when it says yes.
     func promptRefusal(
         foreground: ForegroundProcess?, runningSince time: TimeInterval,
-        showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
+        seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool = { _ in false }
     ) -> AgentPromptRefusal? {
         guard let foreground, AgentHookCenter.isInteractiveClaude(foreground) else { return .noClaude }
         guard foreground.instance.startedAt <= time else { return .restarted }
         let startedAt = foreground.instance.startedAt
         guard let lastPromptAt = prompt(since: startedAt) else {
-            if sitsAtFirstPrompt(foreground.instance, showsIdlePrompt: showsIdlePrompt) { return nil }
-            // Typed since it started: not a screen of its own, when its hooks
-            // would have said a prompt went in.
-            return reportsHooks(since: startedAt) && lastDraftInputAt >= startedAt + 1 ? .draft : .noPromptYet
+            if sitsAtFirstPrompt(foreground.instance, seenByUser: seenByUser, showsIdlePrompt: showsIdlePrompt) { return nil }
+            // Typed since it started, when its hooks would have said a prompt
+            // went in: not a screen of its own, unless the user's word passed
+            // those keys.
+            let typed = reportsHooks(since: startedAt) && lastDraftInputAt >= startedAt + 1
+                && !keysLeftNoText(since: foreground.instance, seenByUser: seenByUser)
+            return typed ? .draft : .noPromptYet
         }
         if hookWorking || turnStartedAt != nil { return .working }
         if !pendingDialogs.isEmpty { return .dialog }
@@ -126,16 +130,30 @@ extension AgentStatusMachine {
     /// model, a startup offer), where typed text and Enter would pick an
     /// option. So: its hooks report (without them, no prompt would ever say
     /// that a message typed went in), nothing at work or listed, no key or
-    /// recalled prompt
-    /// since the terminal started (keys typed before a REPL mounts are
-    /// seeded into its prompt, those typed while its shell still loads too;
+    /// recalled prompt since the terminal started (keys typed before a REPL
+    /// mounts are seeded into its prompt, those typed while its shell still
+    /// loads too;
     /// others open its agents or transcript views; one started by hand
     /// waits for its first prompt), and, read last, its REPL's own word
-    /// (`showsIdlePrompt`, from `ClaudeSessionRecord`).
-    func sitsAtFirstPrompt(_ process: ProcessInstance, showsIdlePrompt: (ProcessInstance) -> Bool) -> Bool {
+    /// (`showsIdlePrompt`, from `ClaudeSessionRecord`). `seenByUser`: the
+    /// user, who saw its screen, says it sits at its prompt (see
+    /// `keysLeftNoText`).
+    func sitsAtFirstPrompt(
+        _ process: ProcessInstance, seenByUser: Bool = false, showsIdlePrompt: (ProcessInstance) -> Bool
+    ) -> Bool {
         reportsHooks(since: process.startedAt)
             && !hookWorking && turnStartedAt == nil && pendingDialogs.isEmpty && turnFailure == nil && !awaitsAnyVerdict
-            && lastInputAt == 0 && lastDraftInputAt == 0 && showsIdlePrompt(process)
+            && keysLeftNoText(since: process, seenByUser: seenByUser) && showsIdlePrompt(process)
+    }
+
+    /// Whether no key may have left text in the prompt of `process`: none
+    /// since the terminal started, or, on the user's word, none that may
+    /// leave text since it started (`lastTextInputAt`; keys before launched
+    /// it, or the user sees them): an Enter or a move answers a screen of its
+    /// own, but may also accept an `@file` completion after text. Its start is
+    /// known to the second.
+    private func keysLeftNoText(since process: ProcessInstance, seenByUser: Bool) -> Bool {
+        lastInputAt == 0 && lastDraftInputAt == 0 || seenByUser && lastTextInputAt < process.startedAt + 1
     }
 
     /// Whether Nirux's hooks reported from the `claude` started at

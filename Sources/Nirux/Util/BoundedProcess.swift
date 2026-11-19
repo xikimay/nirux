@@ -17,6 +17,7 @@ enum BoundedProcess {
         arguments: [String],
         currentDirectoryURL: URL,
         environment: [String: String] = [:],
+        standardInput: Data? = nil,
         timeout: TimeInterval = 30,
         captureStandardError: Bool = false,
         maxStandardOutputBytes: Int? = nil
@@ -26,6 +27,7 @@ enum BoundedProcess {
             arguments: arguments,
             currentDirectoryURL: currentDirectoryURL,
             environment: .inherited(adding: environment),
+            standardInput: standardInput,
             timeout: timeout,
             captureStandardError: captureStandardError,
             maxStandardOutputBytes: maxStandardOutputBytes

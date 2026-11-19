@@ -63,6 +63,12 @@ struct ShellSideEffects {
         try await CookieImporter.importCookies(from: source, into: WebViewColumn.sharedDataStore)
     }
 
+    /// Seconds since the last left mouse-up, even one a button's or a menu's
+    /// tracking took from the app.
+    var secondsSinceMouseUp: @MainActor () -> TimeInterval = {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseUp)
+    }
+
     /// macOS's "Reduce motion" (System Settings › Accessibility › Display).
     var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
@@ -210,6 +216,13 @@ struct ShellSideEffects {
         RunLoop.main.perform(inModes: [.default, .modalPanel]) {
             MainActor.assumeIsolated { NSApp.terminate(nil) }
         }
+    }
+
+    /// Brings Nirux to the front for a question it may ask while hidden.
+    /// Tests leave the app where it is.
+    var comeToFront: @MainActor () -> Void = {
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Asks whether to stop the running merge queues and quit, `confirm`

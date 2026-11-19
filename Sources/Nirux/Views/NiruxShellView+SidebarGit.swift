@@ -210,7 +210,8 @@ extension NiruxShellView {
                       parentTitle: parentTitle,
                       statusLine: turnStatusEnabled ? workspace.statusLine : nil,
                       turnStatusLine: turnStatusEnabled ? workspace.turnStatusLine : nil,
-                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0)
+                      ruleProposalCount: workspace.isLead ? pendingRuleProposals(inSpace: workspace.profileID).count : 0,
+                      dailyPassNote: workspace.isLead ? dailyPassNote(inSpace: workspace.profileID) : nil)
     }
 
     /// Every column's foreground process, shown or not, and what follows
@@ -440,6 +441,14 @@ extension NiruxShellView {
         for appliedEvent in events {
             let event = appliedEvent.event
             if appliedEvent.claudeRestoreChanged { changed = true }
+            if event.kind == .agy {
+                if appliedEvent.resolution.column.captureAgySession(
+                    sessionID: event.sessionID, emitterProcess: event.emitterProcess, snapshot: snapshot
+                ) {
+                    changed = true
+                }
+                continue
+            }
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,
@@ -464,7 +473,7 @@ extension NiruxShellView {
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission
         // agent's prompt for a message waiting to be typed.
-        if events.contains(where: { [.stop, .stopFailure].contains($0.event.name) }) {
+        if events.contains(where: { $0.event.kind != .agy && [.stop, .stopFailure].contains($0.event.name) }) {
             DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
@@ -552,10 +561,6 @@ extension NiruxShellView {
             guard let self, let workspace else { return }
             self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
-        }
-        workspace.onColumnFocusRequested = { [weak self, weak workspace] index in
-            guard let self, workspace === self.activeWorkspace else { return }
-            self.focusColumnByIndex(index)
         }
         workspace.onColumnsLaidOut = { [weak self, weak workspace] in
             guard let self, let workspace, workspace === self.activeWorkspace else { return }

@@ -33,17 +33,7 @@ extension NiruxShellView {
     ) {
         // In the background (a task its Lead started): no selection, no
         // focus, no slide; the user stays where they type.
-        let snapshot: NSImageView? = !activate ? nil : {
-            guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
-            viewport.cacheDisplay(in: viewport.bounds, to: rep)
-            let imageView = NSImageView(frame: viewport.bounds)
-            let img = NSImage(size: viewport.bounds.size)
-            img.addRepresentation(rep)
-            imageView.image = img
-            imageView.imageScaling = .scaleNone
-            imageView.wantsLayer = true
-            return imageView
-        }()
+        let snapshot = activate ? FrozenView.freeze(viewport) : nil
 
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         // A space with anchors opens a plain workspace in its default
@@ -92,14 +82,13 @@ extension NiruxShellView {
             fadeAwayUnderNewWorkspace(snapshot)
         } else if let snapshot {
             viewport.addSubview(snapshot)
-            NSAnimationContext.runAnimationGroup({ ctx in
+            NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.3
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 snapshot.animator().alphaValue = 0
                 snapshot.animator().frame.origin.y += self.viewport.bounds.height * 0.5
-            }, completionHandler: {
-                DispatchQueue.main.async { snapshot.removeFromSuperview() }
-            })
+            }
+            ColumnState.afterCommit(0.3) { snapshot.removeFromSuperview() }
         }
     }
 
@@ -304,6 +293,7 @@ extension NiruxShellView {
                 handoverPrompt: handoverPrompt
             )
         case .agy:
+            AgentHookInstaller.installAgyHooksIfInstalling()
             cmd = NiruxShellView.agyCommand(handoverPrompt: handoverPrompt)
         }
 
@@ -425,7 +415,7 @@ extension NiruxShellView {
 
     private func activateProfile(_ profileID: String, slideOutDirection: CGFloat?, profileAlreadySelected: Bool = false) {
         let previousProfileID = activeProfileID
-        let snapshot = slideOutDirection.flatMap { _ in viewportSnapshot() }
+        let snapshot = slideOutDirection.flatMap { _ in FrozenView.freeze(viewport) }
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
@@ -439,29 +429,16 @@ extension NiruxShellView {
         }
     }
 
-    private func viewportSnapshot() -> NSImageView? {
-        guard viewport.bounds.width > 0, viewport.bounds.height > 0,
-              let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
-        viewport.cacheDisplay(in: viewport.bounds, to: rep)
-        let image = NSImage(size: viewport.bounds.size)
-        image.addRepresentation(rep)
-        let imageView = NSImageView(frame: viewport.bounds)
-        imageView.image = image
-        imageView.imageScaling = .scaleNone
-        imageView.wantsLayer = true
-        return imageView
-    }
-
-    private func animateSpaceSnapshot(_ snapshot: NSImageView, slideOutDirection: CGFloat) {
+    private func animateSpaceSnapshot(_ snapshot: NSView, slideOutDirection: CGFloat) {
         viewport.addSubview(snapshot)
-        NSAnimationContext.runAnimationGroup({ ctx in
+        NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.22
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             snapshot.animator().frame.origin.x += slideOutDirection * viewport.bounds.width * 0.35
             snapshot.animator().alphaValue = 0
-        }, completionHandler: {
-            DispatchQueue.main.async { snapshot.removeFromSuperview() }
-        })
+        }
+        // On time: a window out of view may never report the end.
+        ColumnState.afterCommit(0.22) { snapshot.removeFromSuperview() }
     }
 
     func handleWorkspaceSidebarAction(_ action: WorkspaceSidebarAction, workspaceIndex: Int) {
