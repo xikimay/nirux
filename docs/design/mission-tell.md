@@ -152,11 +152,13 @@ nothing into Codex (`CodexQueue`, `queueForCodex`).
   last thread worse.
 - **When.** Codex sends OSC 7501 like agy (`app=codex`): Nirux hands a message
   over only while the `codex` it was sent to (or one resuming its thread)
-  last said `done` or `idle` (`codexQueueRefusal`), but not `idle` after a
-  turn that ran: that is an Esc, after which Codex's queue starts nothing
-  until another turn ends. It would wait for an idle thread anyway; waiting
-  here keeps the day's lifetime, the held notice and the give-up as they are
-  for Claude Code. One message per Codex is handed at a time, so its queue
+  last said `done` or `idle` (`codexQueueRefusal`). After an Esc Codex says
+  `idle` too, and its queue starts nothing until another turn ends: the
+  message waits there, and the notice below says so. Nirux doesn't hold it
+  itself, since a resume replays turns as `working` then `idle` without an
+  Esc. Codex would wait for an idle thread anyway; waiting here keeps the
+  day's lifetime, the held notice and the give-up as they are for Claude
+  Code. One message per Codex is handed at a time, so its queue
   keeps their order. Codex's status on its row still comes from its notify
   and its output.
 - **Typed** once `codex queue` exits 0, run with what runs that `codex`
