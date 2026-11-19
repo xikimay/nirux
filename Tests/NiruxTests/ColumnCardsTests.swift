@@ -3,8 +3,8 @@ import XCTest
 @testable import Nirux
 
 /// Columns rest on the window as cards (depth study P1): air between and
-/// around them, rounded corners, a shadow under each, and the camera keeps
-/// the focused card's air in view.
+/// around them, rounded corners, a shadow under each, and the camera brings
+/// the focused card to the middle, its air in view at the strip's ends.
 @MainActor
 final class ColumnCardsTests: XCTestCase {
     private let inset = WorkspaceState.columnInset
@@ -180,6 +180,132 @@ final class ColumnCardsTests: XCTestCase {
         XCTAssertEqual(workspace.columns[0].view.frame.minX, inset, "the left edge's air in view")
     }
 
+    /// Past the viewport, the camera brings the focused card to its middle,
+    /// and stops at the strip's ends; one wider than the viewport shows
+    /// from its left edge.
+    func testTheCameraBringsTheFocusedCardToTheMiddle() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1)
+
+        workspace.columns[3].widthFraction = 0.2
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[3].view.frame.maxX + inset + strip.frame.minX, 1000, accuracy: 1, "the last card's air against the edge")
+
+        workspace.columns[2].widthFraction = 1.5
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[2].view.frame.minX + strip.frame.minX, inset, accuracy: 1)
+    }
+
+    /// A camera held for a card (a click focused it, its edge grabbed)
+    /// stays where it is while that card has the focus; once the focus
+    /// moves on, or the hold is let go, it goes where the strip wants it.
+    func testAHeldCameraStaysWhileItsCardHasTheFocus() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        workspace.holdCamera(for: 1)
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(strip.frame.minX, 0)
+
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[2].view.frame.midX + strip.frame.minX, 500, accuracy: 1, "a keyboard move")
+
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1, "and back")
+    }
+
+    /// A click's hold stays within the strip, should the strip shrink
+    /// meanwhile; a drag's holds through a focus moved mid-drag, until let
+    /// go.
+    func testAHoldStaysWithinTheStripAndADragsThroughAFocusMove() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        workspace.focusedIndex = 3
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        workspace.holdCamera(for: 3)
+        workspace.columns[0].widthFraction = 0.2
+        workspace.columns[1].widthFraction = 0.2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(workspace.columns[3].view.frame.maxX + inset + strip.frame.minX, 1000, accuracy: 1, "no empty space past the end")
+        workspace.heldCamera = nil
+        workspace.columns[0].widthFraction = 0.5
+        workspace.columns[1].widthFraction = 0.5
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[3]
+        let start = try XCTUnwrap(handle.onDragStart?())
+        handle.onDrag?(start, -40)
+        let held = strip.frame.minX
+        workspace.focusedIndex = 1
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        XCTAssertEqual(strip.frame.minX, held, "a focus moved mid-drag")
+        handle.onDragEnd?()
+        XCTAssertEqual(workspace.columns[1].view.frame.midX + strip.frame.minX, 500, accuracy: 1)
+    }
+
+    /// A click on a neighbour's edge focuses that neighbour and leaves the
+    /// strip where it was until the double-click that may follow, which
+    /// then resets the edge the pointer is on.
+    func testAClickOnANeighboursEdgeWaitsForTheDoubleClick() throws {
+        let workspace = workspace(columns: 4, width: 0.4)
+        let strip = try strip(of: workspace)
+        workspace.onColumnFocusRequested = { [weak workspace] index in
+            workspace?.focusedIndex = index
+            workspace?.layoutAndScroll(viewportWidth: 1000, height: 600, animated: true)
+        }
+        workspace.focusedIndex = 2
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let left = strip.frame.minX
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[1]
+        func event(_ type: NSEvent.EventType, clicks: Int, x: CGFloat = 0) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type, location: NSPoint(x: x, y: 0), modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
+            )!
+        }
+        handle.mouseDown(with: event(.leftMouseDown, clicks: 1))
+        handle.mouseDragged(with: event(.leftMouseDragged, clicks: 1, x: 1))
+        handle.mouseUp(with: event(.leftMouseUp, clicks: 1))
+        XCTAssertEqual(workspace.focusedIndex, 1)
+        XCTAssertEqual(strip.frame.minX, left, "the strip where the click found it")
+
+        handle.mouseDown(with: event(.leftMouseDown, clicks: 2))
+        XCTAssertEqual(workspace.columns[1].widthFraction, ColumnWidth.half.fraction)
+        XCTAssertEqual(strip.frame.minX, left)
+    }
+
+    /// Grabbing a neighbour's edge focuses it, the strip staying where it
+    /// is: the edge stays under the pointer, and the card comes to the
+    /// middle once let go.
+    func testGrabbingANeighboursEdgeLeavesTheStripWhereItIs() throws {
+        let workspace = workspace(columns: 4)
+        let strip = try strip(of: workspace)
+        // As the shell does.
+        workspace.onColumnFocusRequested = { [weak workspace] index in
+            workspace?.focusedIndex = index
+            workspace?.layoutAndScroll(viewportWidth: 1000, height: 600, animated: true)
+        }
+        workspace.layoutAndScroll(viewportWidth: 1000, height: 600, animated: false)
+        let handle = strip.subviews.compactMap { $0 as? ColumnResizeHandle }[1]
+        let card = workspace.columns[1].view
+        let edge = card.frame.maxX + strip.frame.minX
+        let start = try XCTUnwrap(handle.onDragStart?())
+        XCTAssertEqual(workspace.focusedIndex, 1)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX, edge, accuracy: 1, "the edge where it was grabbed")
+        handle.onDrag?(start, 40)
+        XCTAssertEqual(card.frame.maxX + strip.frame.minX - edge, 40, accuracy: 1)
+
+        handle.onDragEnd?()
+        XCTAssertEqual(card.frame.midX + strip.frame.minX, 500, accuracy: 1)
+    }
+
     /// Each column's shadow follows it, under every column of the strip, so
     /// that it falls only on the air; it goes with its column.
     func testEachColumnsShadowLiesUnderEveryColumn() throws {
@@ -274,6 +400,30 @@ final class ColumnCardsTests: XCTestCase {
             XCTAssertTrue(shell.window?.firstResponder === workspace.columns[0].terminalView, "the keyboard")
             handle.onDrag?(start, -30)
             XCTAssertEqual(layers.map(\.borderWidth), [EdgeGlowView.focusRingWidth, 1])
+        }
+    }
+
+    /// A click during a slide stops the strip where it shows, so that what
+    /// lies under the pointer stays there.
+    func testAClickDuringASlideStopsTheStripWhereItShows() throws {
+        try withShell { shell in
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            for _ in 0..<3 { workspace.addColumn() }
+            for column in workspace.columns { column.widthFraction = 0.5 }
+            workspace.focusedIndex = 0
+            shell.relayout(animated: false)
+            let strip = try strip(of: workspace), start = strip.frame.minX
+            workspace.focusedIndex = 1
+            shell.relayout(animated: true)
+            let target = strip.frame.minX
+            func shown() -> CGFloat {
+                strip.frame.minX + CGFloat((strip.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber)?.doubleValue ?? 0)
+            }
+            waitUntil("on its way", timeout: 2) { abs(shown() - start) > 20 && abs(shown() - target) > 20 }
+            let midway = shown()
+            workspace.holdCamera(for: 1)
+            XCTAssertEqual(strip.frame.minX, midway, accuracy: 3)
+            XCTAssertNil(strip.layer?.animation(forKey: "colSlide"))
         }
     }
 

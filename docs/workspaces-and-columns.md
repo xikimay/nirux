@@ -29,7 +29,7 @@ In a row's `⋯` menu:
 
 ## Columns
 
-A workspace's columns sit side by side. `Cmd+T` adds a terminal, `Cmd+B` a browser, and `Open Editor` in the command palette an editor. Drag the divider between two columns to resize them (a double-click resets it to half), or press `Cmd+E` to step through preset widths.
+A workspace's columns sit side by side. `Cmd+T` adds a terminal, `Cmd+B` a browser, and `Open Editor` in the command palette an editor. Drag the divider between two columns to resize them (a double-click resets it to half), or press `Cmd+E` to step through preset widths. When the columns don't fit in the window, the one you work in comes to the middle; at either end of the row, the row stops at the window's edge.
 
 ### Terminals
 

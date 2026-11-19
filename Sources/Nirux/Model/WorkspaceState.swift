@@ -37,6 +37,9 @@ final class WorkspaceState {
         }
     }
     private(set) var lastCameraX: CGFloat = 0
+    /// Where the camera stays while the pointer works on a card; nil: where
+    /// the strip wants it.
+    var heldCamera: CameraHold?
     let cwd: String
     var title: String
     var titleIsManual: Bool = false
@@ -864,22 +867,26 @@ extension WorkspaceState {
             guard let self, let handle,
                   let index = self.resizeHandles.firstIndex(of: handle),
                   self.columns.indices.contains(index) else { return nil }
-            // Grabbing a column's edge focuses it, as a click would.
+            // Grabbing a column's edge focuses it, as a click would, the
+            // strip held so that the edge stays under the pointer.
+            self.holdCamera(for: index)
             self.onColumnFocusRequested?(index)
             return (self.columns[index].view.frame.width, self.stripView.frame.width, self.lastCameraX)
         }
         handle.onDrag = { [weak self, weak handle] start, delta in
-            guard let self, let handle else { return }
+            guard let self, let handle, let index = self.resizeHandles.firstIndex(of: handle),
+                  self.columns.indices.contains(index) else { return }
             let viewport = self.containerView.bounds.width
             let width = Self.draggedWidth(from: start, viewport: viewport, by: delta)
-            self.setColumnWidth(
-                for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1),
-                camera: Self.dragCamera(from: start, viewport: viewport, width: width)
-            )
+            self.heldCamera = Self.dragCamera(from: start, viewport: viewport, width: width).map {
+                CameraHold(x: $0, column: self.columns[index].id, isDrag: true)
+            }
+            self.setColumnWidth(for: handle, fraction: (width + Self.columnGap) / max(Self.span(viewport), 1))
         }
         // Let go: the camera goes where the strip now wants it.
         handle.onDragEnd = { [weak self] in
             guard let self else { return }
+            self.heldCamera = nil
             self.layoutAndScroll(viewportWidth: self.containerView.bounds.width, height: self.containerView.bounds.height, animated: true)
         }
         handle.onReset = { [weak self, weak handle] in
@@ -917,8 +924,33 @@ extension WorkspaceState {
     static let minWidthFraction: CGFloat = 0.15
     static let maxWidthFraction: CGFloat = 2.0
 
-    /// `camera`: where it stays (a drag), nil: where the strip wants it.
-    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat, camera: CGFloat? = nil) {
+    /// Where the camera stays while the pointer works on a card. A click's
+    /// (`NiruxShellView.clickBegan`) lasts until the click is over, while
+    /// its card has the focus, within the strip; a dragged edge's lasts
+    /// until let go, past the strip's ends too, so that its last edge
+    /// dragged in stays under the pointer.
+    struct CameraHold {
+        var x: CGFloat
+        var column: UUID
+        var isDrag = false
+    }
+
+    /// Holds the camera where the strip shows for the column at `index`: a
+    /// slide on its way stops there.
+    func holdCamera(for index: Int) {
+        stripView.frame.origin.x = shownStripX
+        stripView.layer?.removeAnimation(forKey: Self.slideKey)
+        lastCameraX = -stripView.frame.origin.x
+        heldCamera = columns[safe: index].map { CameraHold(x: lastCameraX, column: $0.id) }
+    }
+
+    /// Where the strip shows: its place, plus a slide's offset on its way.
+    private var shownStripX: CGFloat {
+        let offset = stripView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber
+        return stripView.frame.origin.x + (offset.map { CGFloat($0.doubleValue) } ?? 0)
+    }
+
+    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat) {
         guard let index = resizeHandles.firstIndex(of: handle), columns.indices.contains(index) else { return }
         let clamped = min(Self.maxWidthFraction, max(Self.minWidthFraction, fraction))
         guard clamped != columns[index].widthFraction else { return }
@@ -926,8 +958,7 @@ extension WorkspaceState {
         layoutAndScroll(
             viewportWidth: containerView.bounds.width,
             height: containerView.bounds.height,
-            animated: false,
-            camera: camera
+            animated: false
         )
     }
 
@@ -1024,6 +1055,7 @@ extension WorkspaceState {
     static let columnGap = Theme.Space.sm
     static let columnInset = Theme.Space.sm
     private static let resizeHandleWidth: CGFloat = 9
+    private static let slideKey = "colSlide"
     /// The strip's slide to a card.
     static let slideDuration: CFTimeInterval = 0.3
 
@@ -1045,11 +1077,10 @@ extension WorkspaceState {
         NSSize(width: Self.width(column.widthFraction, in: viewportWidth), height: max(0, height - Self.columnInset * 2))
     }
 
-    /// `camera`: where it stays (a resize drag); nil: where the strip wants it.
     /// `glides`: a card a neighbour pushed or let go glides to its place.
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
-        fitAll: Bool = false, skipTerminalResize: Bool = false, camera: CGFloat? = nil, glides: Bool = false
+        fitAll: Bool = false, skipTerminalResize: Bool = false, glides: Bool = false
     ) {
         defer { onColumnsLaidOut?() }
         guard !columns.isEmpty else { return }
@@ -1110,24 +1141,24 @@ extension WorkspaceState {
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
         // 3. Camera: a strip narrower than the viewport lies in its middle;
-        // a wider one scrolls to keep the focused card in view, with its air.
+        // a wider one brings the focused card to the middle, stopping at the
+        // strip's ends. A card wider than the viewport shows from its left
+        // edge, with its air.
         let cameraX: CGFloat
-        if let camera {
-            cameraX = camera
+        // A click's hold is over once its card has lost the focus.
+        if let held = heldCamera, !held.isDrag, held.column != columns[safe: focusedIndex]?.id { heldCamera = nil }
+        if let held = heldCamera, held.isDrag {
+            cameraX = held.x
+        } else if let held = heldCamera, totalWidth > viewportWidth {
+            cameraX = max(0, min(held.x, totalWidth - viewportWidth))
         } else if totalWidth <= viewportWidth {
             cameraX = -floor((viewportWidth - totalWidth) / 2)
         } else if fitAll {
             cameraX = 0
         } else {
-            let left = widths[..<focusedIndex].reduce(0) { $0 + $1 + gap }
-            let right = left + widths[focusedIndex] + inset * 2
-
-            var camera = lastCameraX
-            if left < camera {
-                camera = left
-            } else if right > camera + viewportWidth {
-                camera = right - viewportWidth
-            }
+            let left = widths[..<focusedIndex].reduce(inset) { $0 + $1 + gap }
+            let width = widths[focusedIndex]
+            let camera = width + inset * 2 > viewportWidth ? left - inset : floor(left + width / 2 - viewportWidth / 2)
             cameraX = max(0, min(camera, totalWidth - viewportWidth))
         }
 
@@ -1136,17 +1167,17 @@ extension WorkspaceState {
         // 4. Apply
         let stripX = -cameraX
         let oldX = stripView.frame.origin.x
+        // From where it shows: a slide on its way goes on from there.
+        let shownX = shownStripX
         stripView.frame.origin.x = stripX
         if animated, let layer = stripView.layer, oldX != stripX {
-            // From where it shows: a slide on its way goes on from there.
-            let shown = oldX + ((layer.presentation()?.value(forKeyPath: "transform.translation.x") as? NSNumber).map { CGFloat($0.doubleValue) } ?? 0)
             let anim = CABasicAnimation(keyPath: "transform.translation.x")
-            anim.fromValue = shown - stripX
+            anim.fromValue = shownX - stripX
             anim.toValue = 0
             anim.duration = Self.slideDuration
             anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
             anim.isRemovedOnCompletion = true
-            layer.add(anim, forKey: "colSlide")
+            layer.add(anim, forKey: Self.slideKey)
         }
     }
 
