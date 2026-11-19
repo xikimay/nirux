@@ -423,10 +423,10 @@ final class ColumnState {
         // Only agy's own: any program can print the sequence.
         ptySession.onProgramStatus = { [weak self, weak ptySession] status in
             guard let self, let ptySession, ptySession.isNewProgramStatus(status),
-                  ptySession.foregroundProcess(snapshot: ProcessSnapshot())?.name == AgentProgramStatus.process
+                  let agy = ptySession.foregroundProcess(snapshot: ProcessSnapshot()), agy.name == AgentProgramStatus.process
             else { return }
             let isUserFocused = agentUUID.flatMap { AgentHookCenter.shared.resolver?($0) }?.isUserFocused ?? false
-            if let reason = ptySession.applyProgramStatus(status, isUserFocused: isUserFocused) {
+            if let reason = ptySession.applyProgramStatus(status, from: agy.instance, isUserFocused: isUserFocused) {
                 onAgentAttention?(reason)
             }
         }
