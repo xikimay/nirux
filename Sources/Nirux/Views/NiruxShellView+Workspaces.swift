@@ -290,6 +290,7 @@ extension NiruxShellView {
                 handoverPrompt: handoverPrompt
             )
         case .agy:
+            AgentHookInstaller.installAgyHooksIfInstalling()
             cmd = NiruxShellView.agyCommand(handoverPrompt: handoverPrompt)
         }
 
