@@ -60,9 +60,9 @@ final class FrozenViewTests: XCTestCase {
 
         let copy = try XCTUnwrap(FrozenView.surface(of: layers[2]))
         XCTAssertFalse(copy === surface, "a surface shows a copy")
-        XCTAssertEqual(Self.bytes(of: copy), Self.bytes(of: surface))
+        XCTAssertTrue(Self.pixels(of: copy) == Self.pixels(of: surface), "the same pixels")
         Self.fill(surface, with: 0x11)
-        XCTAssertEqual(Self.bytes(of: copy).first, 0x5A, "what draws into the surface after leaves the copy as it was")
+        XCTAssertTrue(Self.pixels(of: copy).allSatisfy { $0 == 0x5A }, "what draws into the surface after leaves the copy as it was")
     }
 
     /// Where the GPU can't copy a surface, the CPU's copy is the same.
@@ -70,7 +70,7 @@ final class FrozenViewTests: XCTestCase {
         let surface = try XCTUnwrap(Self.surface(filledWith: 0x33))
         let blank = try XCTUnwrap(SurfaceCopies.blank(like: surface))
         let copy = try XCTUnwrap(SurfaceCopies.cpuCopy(surface, into: blank))
-        XCTAssertEqual(Self.bytes(of: copy), Self.bytes(of: surface))
+        XCTAssertTrue(Self.pixels(of: copy) == Self.pixels(of: surface), "the same pixels")
     }
 
     /// A new workspace and ⌥⌘→ lay what the viewport showed, frozen, over
@@ -122,11 +122,14 @@ final class FrozenViewTests: XCTestCase {
         IOSurfaceUnlock(surface, [], nil)
     }
 
-    private static func bytes(of surface: IOSurfaceRef) -> [UInt8] {
+    /// Each row's pixels, without the padding a row may end with (a copy
+    /// on the GPU leaves it as it was).
+    private static func pixels(of surface: IOSurfaceRef) -> [UInt8] {
         IOSurfaceLock(surface, .readOnly, nil)
         defer { IOSurfaceUnlock(surface, .readOnly, nil) }
-        let count = IOSurfaceGetBytesPerRow(surface) * IOSurfaceGetHeight(surface)
-        return Array(UnsafeBufferPointer(start: IOSurfaceGetBaseAddress(surface).assumingMemoryBound(to: UInt8.self), count: count))
+        let base = IOSurfaceGetBaseAddress(surface).assumingMemoryBound(to: UInt8.self)
+        let row = IOSurfaceGetBytesPerRow(surface), width = IOSurfaceGetWidth(surface) * IOSurfaceGetBytesPerElement(surface)
+        return (0..<IOSurfaceGetHeight(surface)).flatMap { line in Array(UnsafeBufferPointer(start: base + line * row, count: width)) }
     }
 
     private func withShell(_ body: (NiruxShellView) throws -> Void) throws {
